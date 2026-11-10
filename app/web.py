@@ -846,8 +846,8 @@ def _book_quote_provenance(
     return out
 
 
-def _parse_note(path: Path) -> dict[str, Any] | None:
-    """Parse a research note markdown file into {title, tickers, date, body_md}."""
+def _parse_note(path: Path, *, strict: bool = False) -> dict[str, Any] | None:
+    """Parse a note; strict readers propagate evidence read/decode/stat failures."""
     try:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines()
@@ -886,6 +886,8 @@ def _parse_note(path: Path) -> dict[str, Any] | None:
             "_sort_key": sort_key,
         }
     except Exception:
+        if strict:
+            raise
         return None
 
 
@@ -2023,11 +2025,24 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     try:
         from brain import posture as _posture
         return JSONResponse(_posture.posture(book))
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"book": book, "available": False, "posture_label": "—",
-                             "posture_label_zh": "—", "posture_tone": "muted", "sub_strategy": None,
-                             "favored": [], "avoided": [], "driver": None, "detail": None,
-                             "cash_pct": None, "invested_pct": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("posture read failed for %s: %s", book, type(exc).__name__)
+        return JSONResponse({
+            "book": book,
+            "available": False,
+            "read_status": "unavailable",
+            "posture_label": "—",
+            "posture_label_zh": "—",
+            "posture_tone": "muted",
+            "sub_strategy": None,
+            "favored": [],
+            "avoided": [],
+            "driver": None,
+            "detail": None,
+            "cash_pct": None,
+            "invested_pct": None,
+            "error": "posture_unavailable",
+        })
 
 
 @router.get("/api/market_view")
@@ -2039,25 +2054,45 @@ def api_market_view() -> JSONResponse:
     Read-only: reassesses freshness on a copy of data/market_view/latest.json. Publication
     clocks and historical evidence stay unchanged; expired inferences become unavailable.
     This is a display consumer, not a producer or sizing path. Degrades to ``available:false``
-    stub when the artifact is absent/unreadable (the organ built-but-not-running protects nothing
-    but breaks nothing) rather than raising."""
+    response when no publication exists. Read, parse or projection failures return an
+    unavailable response; they never masquerade as an artifact that has not been built."""
     path = _data() / "market_view" / "latest.json"
     freshness_headers = {"Cache-Control": "no-store"}
     try:
-        if not path.exists():
-            return JSONResponse(
-                {"available": False, "note": "market_view artifact not built yet "
-                 "(brain.market_view.build has not run)"},
-                status_code=404, headers=_NOCACHE)
-        view = json.loads(path.read_text())
+        try:
+            raw = path.read_text()
+        except FileNotFoundError as missing:
+            # Only observed absence below a real directory is "not built".
+            # Dangling links and paths that appeared after the failed read stay unavailable.
+            import stat
+
+            candidate = path
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        raise missing
+                    candidate = candidate.parent
+                    continue
+                if candidate != path and stat.S_ISDIR(info.st_mode):
+                    return JSONResponse(
+                        {"available": False, "note": "market_view artifact not built yet "
+                         "(brain.market_view.build has not run)"},
+                        status_code=404, headers=_NOCACHE)
+                raise missing
+        view = json.loads(raw)
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
         from brain import market_view
         view = market_view.serving_view(view)
         return JSONResponse(view, headers=freshness_headers)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("market view read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "market_view_unavailable", "note": "market view unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/agenda")
@@ -2074,16 +2109,19 @@ def api_agenda() -> JSONResponse:
     weekly CIO job writes it) rather than raising."""
     try:
         from brain import improvement_agenda
-        agenda = improvement_agenda.latest()
+        agenda = improvement_agenda.latest(strict=True)
         if not agenda:
             return JSONResponse(
                 {"available": False, "note": "no agenda built yet "
                  "(brain.improvement_agenda.write runs in the weekly CIO job)"},
                 status_code=404, headers=_NOCACHE)
         return JSONResponse(agenda, headers=_NOCACHE)
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
+    except Exception as exc:  # noqa: BLE001 — preserve unavailable truth
+        _log.warning("agenda read failed: %s", type(exc).__name__)
         return JSONResponse(
-            {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)
+            {"available": False, "read_status": "unavailable",
+             "error": "agenda_unavailable", "note": "agenda unavailable"},
+            status_code=500, headers=_NOCACHE)
 
 
 @router.get("/api/etf/outcomes")
@@ -2111,21 +2149,46 @@ def api_overnight_tape() -> JSONResponse:
     dashboard can't see. Polled by the dashboard's Overnight Tape panel; cached ~5 min server-side."""
     try:
         from data_layer import overnight
-        return JSONResponse(overnight.tape())
+        return JSONResponse(overnight.tape(strict=True))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"groups": {}, "risk": {"state": "calm", "reasons": ["unavailable"]},
-                             "live": False, "error": str(exc)})
+        _log.warning("overnight tape read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "overnight_status": "unavailable",
+            "groups": None,
+            "risk": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+        })
 
 
 @router.get("/api/research")
 def api_research() -> JSONResponse:
-    notes_dir = _data() / "research" / "notes"
-    if not notes_dir.exists():
-        return JSONResponse([])
     try:
+        notes_dir = _data() / "research" / "notes"
+        try:
+            paths = list(notes_dir.iterdir())
+        except FileNotFoundError:
+            # Missing evidence is empty only below an observed real directory.
+            # Dangling links, changed paths and other scan failures stay failed.
+            import stat
+
+            ancestor = notes_dir
+            while True:
+                try:
+                    mode = ancestor.lstat().st_mode
+                except FileNotFoundError:
+                    if ancestor == ancestor.parent:
+                        raise
+                    ancestor = ancestor.parent
+                    continue
+                if ancestor == notes_dir or not stat.S_ISDIR(mode):
+                    raise
+                return JSONResponse([])
         parsed: list[dict[str, Any]] = []
-        for p in notes_dir.glob("*.md"):
-            note = _parse_note(p)
+        for p in paths:
+            if not p.name.endswith(".md"):
+                continue
+            note = _parse_note(p, strict=True)
             if note:
                 parsed.append(note)
         # sort newest first
@@ -2149,8 +2212,13 @@ def api_research() -> JSONResponse:
             note["body_md_zh"] = _cached_zh(note.get("body_md") or "")
             out.append(note)
         return JSONResponse(out)
-    except Exception:
-        return JSONResponse([])
+    except Exception as exc:
+        _log.warning("research feed read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "research_status": "unavailable",
+            "error": "research_feed_unavailable",
+            "notes": None,
+        }, status_code=500)
 
 
 @router.get("/api/research_papers")
@@ -2164,62 +2232,67 @@ def api_research_papers() -> JSONResponse:
     """
     try:
         from brain import research_paper
-        papers = research_paper.load_papers()
+        papers = research_paper.load_papers(strict=True)
+
+        # join with the latest book: ticker -> (research_block, action, trade_time, weight)
+        gate: dict[str, dict] = {}
+        try:
+            book = json.loads((_data() / "portfolio" / "latest.json").read_text())
+            for pos in book.get("positions", []):
+                rb = pos.get("research")
+                if rb and pos.get("sleeve") == "conviction":
+                    gate[(pos.get("ticker") or "").upper()] = {
+                        "block": rb, "action": "buy_confirmed",
+                        "trade_time": pos.get("opened_at"), "weight": pos.get("weight"),
+                    }
+            for held in book.get("research_held", []):
+                t = (held.get("ticker") or "").upper()
+                gate.setdefault(t, {"block": held, "action": "research_held",
+                                    "trade_time": None, "weight": 0.0})
+        except Exception:
+            pass
+
+        out: list[dict[str, Any]] = []
+        for p in papers:
+            t = (p.get("ticker") or "").upper()
+            g = gate.get(t, {})
+            rb = g.get("block") or {}
+            summary = p.get("summary") or ""
+            out.append({
+                "id": p.get("id"),
+                "ticker": t,
+                "asof": p.get("asof"),
+                "reviewed_at": p.get("generated_at"),
+                "trade_time": g.get("trade_time"),
+                "action": g.get("action", "evaluated"),
+                "mode": p.get("mode"),
+                # prefer the live book's gate result; fall back to the gate the paper stamped on
+                # itself at review time (so a reviewed-but-not-traded name still shows its scores)
+                "engine_score": rb.get("engine_score", p.get("engine_score")),
+                "research_score": p.get("research_score"),
+                "combined": rb.get("combined", p.get("combined")),
+                "confirmed": rb.get("confirmed", p.get("confirmed")),
+                "viability": p.get("viability"),
+                "recommend": p.get("recommend"),
+                "confidence": p.get("confidence"),
+                "fair_value": p.get("fair_value"),
+                "price_at_review": p.get("price_at_review"),
+                "price_assessment": p.get("price_assessment"),
+                "weight": g.get("weight"),
+                "summary": summary,
+                "summary_zh": _cached_zh(summary) if summary else None,
+                "report_md": p.get("report_md"),
+                "report_md_zh": _cached_zh(p.get("report_md") or "") if p.get("report_md") else None,
+                "key_risks": p.get("key_risks") or [],
+            })
+        return JSONResponse({"papers": out})
     except Exception as exc:
-        return JSONResponse({"papers": [], "error": str(exc)})
-
-    # join with the latest book: ticker -> (research_block, action, trade_time, weight)
-    gate: dict[str, dict] = {}
-    try:
-        book = json.loads((_data() / "portfolio" / "latest.json").read_text())
-        for pos in book.get("positions", []):
-            rb = pos.get("research")
-            if rb and pos.get("sleeve") == "conviction":
-                gate[(pos.get("ticker") or "").upper()] = {
-                    "block": rb, "action": "buy_confirmed",
-                    "trade_time": pos.get("opened_at"), "weight": pos.get("weight"),
-                }
-        for held in book.get("research_held", []):
-            t = (held.get("ticker") or "").upper()
-            gate.setdefault(t, {"block": held, "action": "research_held",
-                                "trade_time": None, "weight": 0.0})
-    except Exception:
-        pass
-
-    out: list[dict[str, Any]] = []
-    for p in papers:
-        t = (p.get("ticker") or "").upper()
-        g = gate.get(t, {})
-        rb = g.get("block") or {}
-        summary = p.get("summary") or ""
-        out.append({
-            "id": p.get("id"),
-            "ticker": t,
-            "asof": p.get("asof"),
-            "reviewed_at": p.get("generated_at"),
-            "trade_time": g.get("trade_time"),
-            "action": g.get("action", "evaluated"),
-            "mode": p.get("mode"),
-            # prefer the live book's gate result; fall back to the gate the paper stamped on
-            # itself at review time (so a reviewed-but-not-traded name still shows its scores)
-            "engine_score": rb.get("engine_score", p.get("engine_score")),
-            "research_score": p.get("research_score"),
-            "combined": rb.get("combined", p.get("combined")),
-            "confirmed": rb.get("confirmed", p.get("confirmed")),
-            "viability": p.get("viability"),
-            "recommend": p.get("recommend"),
-            "confidence": p.get("confidence"),
-            "fair_value": p.get("fair_value"),
-            "price_at_review": p.get("price_at_review"),
-            "price_assessment": p.get("price_assessment"),
-            "weight": g.get("weight"),
-            "summary": summary,
-            "summary_zh": _cached_zh(summary) if summary else None,
-            "report_md": p.get("report_md"),
-            "report_md_zh": _cached_zh(p.get("report_md") or "") if p.get("report_md") else None,
-            "key_risks": p.get("key_risks") or [],
-        })
-    return JSONResponse({"papers": out})
+        _log.warning("research papers read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "paper_status": "unavailable",
+            "error": "research_papers_unavailable",
+            "papers": None,
+        }, status_code=500)
 
 
 @router.get("/api/outcome_ledger")
@@ -3367,27 +3440,61 @@ _QUAD_ZH = {
 
 @router.get("/api/activity")
 def api_activity() -> JSONResponse:
-    """Reverse-chronological activity timeline (cap 60).
+    """Reverse-chronological Brain Log activity, preserving partial-source read truth.
 
-    Assembles events from:
-      - positions_ledger history entries  (kind "trade")
-      - decisions[] in latest.json        (kind "decision")
-      - research note files               (kind "research")
-      - runs table via latest.json as_of  (kind "run")
-
-    Each event also carries title_zh / detail_zh so the Brain Log renders in
-    Chinese when zh is toggled (see the localisation maps above).
+    A completely successful read keeps the legacy JSON-list contract. If one or more source
+    families fail, return a typed envelope so the dashboard can distinguish partial/unavailable
+    evidence from a genuinely empty timeline. A failed family contributes no half-read rows.
     """
     events: list[dict] = []
+    failed_sources: list[str] = []
+
+    def read_source(path: Path, *, directory: bool = False):
+        """Read first; only genuine absence below a real directory is empty."""
+        import stat
+
+        try:
+            return list(path.iterdir()) if directory else path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            ancestor = path
+            while True:
+                try:
+                    mode = ancestor.lstat().st_mode
+                except FileNotFoundError:
+                    if ancestor == ancestor.parent:
+                        raise
+                    ancestor = ancestor.parent
+                    continue
+                if ancestor == path or not stat.S_ISDIR(mode):
+                    raise
+                return None
+
+    def timestamp(value) -> str:
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise ValueError("invalid activity timestamp")
+        return value
+
+    def commit_source(rows: list[dict]) -> None:
+        fields = ("ts", "kind", "title", "detail", "title_zh", "detail_zh")
+        if any(not isinstance(row[field], str) for row in rows for field in fields):
+            raise ValueError("invalid activity event")
+        events.extend(rows)
 
     # --- trades from ledger history ---
     try:
+        source_events: list[dict] = []
         ledger_path = _data() / "portfolio" / "positions_ledger.json"
-        if ledger_path.exists():
-            ledger = json.loads(ledger_path.read_text())
+        ledger_raw = read_source(ledger_path)
+        if ledger_raw is not None:
+            ledger = json.loads(ledger_raw)
             for key, entry in ledger.items():
-                for h in entry.get("history", []):
-                    ts = h.get("ts") or ""
+                history = entry.get("history", [])
+                if not isinstance(history, list):
+                    raise ValueError("invalid activity history")
+                for h in history:
+                    ts = timestamp(h.get("ts"))
                     ev = h.get("event", "")
                     ticker = entry.get("ticker", key.split(":")[-1])
                     weight = h.get("weight")
@@ -3396,72 +3503,71 @@ def api_activity() -> JSONResponse:
                     still_open = entry.get("still_open")
                     verb_zh = _TRADE_VERB_ZH.get(ev.lower(), ev.upper())
                     sleeve_zh = _SLEEVE_ZH.get(sleeve.lower(), sleeve)
-                    events.append({
+                    source_events.append({
                         "ts": ts,
                         "kind": "trade",
                         "title": f"{ev.upper()} {ticker}{w_str}",
                         "title_zh": f"{verb_zh} {ticker}{w_str}",
-                        "detail": (
-                            f"{sleeve} sleeve | "
-                            f"{'open' if still_open else 'closed'}"
-                        ),
-                        "detail_zh": (
-                            f"{sleeve_zh}组合 | "
-                            f"{'持有中' if still_open else '已平仓'}"
-                        ),
+                        "detail": f"{sleeve} sleeve | {'open' if still_open else 'closed'}",
+                        "detail_zh": f"{sleeve_zh}组合 | {'持有中' if still_open else '已平仓'}",
                     })
-    except Exception:
-        pass
+        commit_source(source_events)
+    except Exception as exc:  # noqa: BLE001 - one source may fail without erasing the others
+        _log.warning("activity trades read failed: %s", type(exc).__name__)
+        failed_sources.append("trades")
 
-    # --- decisions from latest.json ---
+    # --- decisions + top-level run event from latest.json ---
     try:
+        source_events = []
         portfolio_path = _data() / "portfolio" / "latest.json"
-        if portfolio_path.exists():
-            portfolio = json.loads(portfolio_path.read_text())
-            asof = portfolio.get("as_of", "")
-            for d in portfolio.get("decisions", []):
+        portfolio_raw = read_source(portfolio_path)
+        if portfolio_raw is not None:
+            portfolio = json.loads(portfolio_raw)
+            asof = timestamp(portfolio.get("as_of"))
+            decisions = portfolio.get("decisions", [])
+            if not isinstance(decisions, list):
+                raise ValueError("invalid activity decisions")
+            for d in decisions:
                 lean = d.get("lean", "watch")
                 subject = d.get("subject", "?")
                 thesis = d.get("thesis") or ""
                 lean_zh = _DECISION_LEAN_ZH.get(lean.lower(), lean.upper())
                 thesis_zh = _cached_zh(thesis) or thesis
-                events.append({
-                    "ts": d.get("logged_at") or asof or "",
+                source_events.append({
+                    "ts": timestamp(d.get("logged_at")) or asof,
                     "kind": "decision",
                     "title": f"Decision: {lean.upper()} {subject}",
                     "title_zh": f"决策：{lean_zh} {subject}",
                     "detail": thesis[:200],
                     "detail_zh": thesis_zh[:200],
                 })
-            # top-level run event
             if asof:
-                regime = (portfolio.get("regime") or {})
+                regime = portfolio.get("regime") or {}
                 quad = regime.get("quad_name") or regime.get("quad")
                 quad_zh = _QUAD_ZH.get(quad, quad)
                 gross_pct = portfolio.get("gross", 0) * 100
                 cash_pct = portfolio.get("cash", 0) * 100
-                events.append({
+                source_events.append({
                     "ts": asof,
                     "kind": "run",
                     "title": f"Book rebuilt — {asof}",
                     "title_zh": f"组合重建 — {asof}",
-                    "detail": (
-                        f"Quad: {quad} | "
-                        f"gross={gross_pct:.1f}% cash={cash_pct:.1f}%"
-                    ),
-                    "detail_zh": (
-                        f"象限：{quad_zh} | "
-                        f"总敞口={gross_pct:.1f}% 现金={cash_pct:.1f}%"
-                    ),
+                    "detail": f"Quad: {quad} | gross={gross_pct:.1f}% cash={cash_pct:.1f}%",
+                    "detail_zh": f"象限：{quad_zh} | 总敞口={gross_pct:.1f}% 现金={cash_pct:.1f}%",
                 })
-    except Exception:
-        pass
+        commit_source(source_events)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("activity decisions read failed: %s", type(exc).__name__)
+        failed_sources.append("decisions")
 
     # --- research notes (deduped on title+body, newest kept) ---
     try:
+        source_events = []
         notes_dir = _data() / "research" / "notes"
-        if notes_dir.exists():
-            parsed = [n for n in (_parse_note(p) for p in notes_dir.glob("*.md"))
+        note_paths = read_source(notes_dir, directory=True)
+        if note_paths is not None:
+            parsed = [n for n in (_parse_note(p, strict=True) for p in note_paths
+                                  if p.name.endswith(".md"))
                       if n and n.get("date")]
             parsed.sort(key=lambda n: n["_sort_key"], reverse=True)
             seen: set[tuple[str, str]] = set()
@@ -3470,39 +3576,45 @@ def api_activity() -> JSONResponse:
                 if key in seen:
                     continue
                 seen.add(key)
-                tickers_str = (", ".join(note["tickers"]) if note.get("tickers") else "")
+                tickers_str = ", ".join(note["tickers"]) if note.get("tickers") else ""
                 title = note["title"]
                 body_md = note.get("body_md") or ""
                 title_zh = _cached_zh(title) or title
                 body_zh = _cached_zh(body_md) or body_md
-                events.append({
+                source_events.append({
                     "ts": note["date"],
                     "kind": "research",
                     "title": title,
                     "title_zh": title_zh,
-                    "detail": (
-                        (f"Tickers: {tickers_str} | " if tickers_str else "")
-                        + body_md[:160]
-                    ),
-                    "detail_zh": (
-                        (f"标的：{tickers_str} | " if tickers_str else "")
-                        + body_zh[:160]
-                    ),
+                    "detail": (f"Tickers: {tickers_str} | " if tickers_str else "") + body_md[:160],
+                    "detail_zh": (f"标的：{tickers_str} | " if tickers_str else "") + body_zh[:160],
                 })
-    except Exception:
-        pass
+        commit_source(source_events)
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("activity research read failed: %s", type(exc).__name__)
+        failed_sources.append("research")
 
-    # flag actions logged today so the Brain Log can highlight + tag them "new".
-    # Wall-clock date is the trading-day source of truth here (matches the data's as_of).
     today_iso = date.today().isoformat()
-    for e in events:
-        e["today"] = (e.get("ts") or "")[:10] == today_iso
+    for event in events:
+        event["today"] = (event.get("ts") or "")[:10] == today_iso
+    events.sort(key=lambda event: event.get("ts") or "", reverse=True)
+    bounded = events[:60]
 
-    # sort newest first, cap at 60
-    events.sort(key=lambda e: e.get("ts") or "", reverse=True)
-    return JSONResponse(events[:60])
-
-
+    if len(failed_sources) == 3:
+        return JSONResponse({
+            "activity_status": "unavailable",
+            "events": None,
+            "failed_sources": failed_sources,
+            "error": "activity_unavailable",
+        })
+    if failed_sources:
+        return JSONResponse({
+            "activity_status": "partial",
+            "events": bounded,
+            "failed_sources": failed_sources,
+        })
+    # Preserve the original successful contract for existing readers.
+    return JSONResponse(bounded)
 
 
 @router.get("/api/runs")
@@ -3538,8 +3650,9 @@ def api_runlog(run_id: str | None = None) -> JSONResponse:
     try:
         from brain import runlog
         return JSONResponse(runlog.read_run(run_id or None))
-    except Exception as exc:
-        return JSONResponse({"run_id": run_id, "steps": [], "error": str(exc)}, status_code=500)
+    except Exception:
+        _log.exception("runlog read failed")
+        return JSONResponse({"run_id": run_id, "steps": [], "error": "runlog unavailable"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -3977,18 +4090,29 @@ def api_desk_experiments() -> JSONResponse:
 
     Returns {as_of, total, open, matured, judged, cancelled, matured_items: [...],
              open_tristate: [...], all_items: [...]}.
-    Never 500s — degrades to an empty registry on any failure."""
+    Read one registry snapshot without a maturity write. Read/projection failures
+    return an explicit unavailable payload; genuine absence remains a zero state."""
     try:
         from brain import experiment_registry
-        s = experiment_registry.summary()
-        all_items = experiment_registry.load()
+        all_items = experiment_registry.load(strict=True)
+        s = experiment_registry.summary(experiments=all_items)
         s["all_items"] = all_items
         return JSONResponse(s)
     except Exception as exc:  # noqa: BLE001 — additive; never break the desk
-        return JSONResponse({"as_of": None, "total": 0, "open": 0, "matured": 0,
-                             "judged": 0, "cancelled": 0, "matured_items": [], "all_items": [],
-                             "open_tristate": [],
-                             "note": f"Experiment registry unavailable: {exc}"})
+        _log.warning("experiment registry read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "read_status": "unavailable",
+            "as_of": None,
+            "total": None,
+            "open": None,
+            "matured": None,
+            "judged": None,
+            "cancelled": None,
+            "matured_items": None,
+            "all_items": None,
+            "open_tristate": None,
+            "error": "experiment_registry_unavailable",
+        })
 
 
 @router.get("/api/scheduler")

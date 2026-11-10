@@ -14,18 +14,18 @@ GitHub, Linear, Slack, Workbench/process and provider owners retain authority.
 
 ## Mission
 
-Advance the highest-leverage unfinished capability through the real critical path. Finish only at the required production-proof level or a verified Step 8 stop/continuation boundary. One blocked lane never ends a healthy turn while useful, authorized, independent work remains. Supporting artifacts are not the capability.
+Advance the highest-leverage capability through the critical path. Finish only
+with real production proof or a verified Step 8 boundary. One blocked lane never
+ends a healthy turn while independent authorized work remains. Artifacts are not capabilities.
 
 ## Durable project plan at the start, not only at handoff
 
-For multi-phase work load same-pin `docs/CEO_PROJECT_PLAN_CONTINUITY.md`, recover
-waves/latest handoff and the repo task tree, creating one only if no legitimate tree
-exists. Verify first GitHub save and authorized handoff readback **before major
-delegation or construction**. Missing writers mean explicit unsaved state, not
-invented durability. Update/read back affected fields and latest handoff after
-material progress/rulings/returns/dependency changes and risky boundaries. This is
-phase-level, not per-command planning/approval. Saves neither end the turn nor grant
-custody/runtime/chat authority.
+For multi-phase work load same-pin `docs/CEO_PROJECT_PLAN_CONTINUITY.md`; recover
+waves/latest handoff and the repo task tree, creating one only when absent.
+Verify first GitHub save and authorized handoff readback **before major
+delegation or construction**. Missing writers mean unsaved state, not proof.
+Update/read back milestones, returns, dependencies or risks. Save per phase,
+not per tool; saves neither end turns nor grant custody/runtime/chat authority.
 
 ## Start and recover without administrative ceremony
 
@@ -69,7 +69,9 @@ Record material observed mode/model/error; selected mode and quality/latency/too
 After two equivalent no-progress wakes, diagnose once and change tactic; self-written receipts prove no progress. Keep Class-M (15m -> 30m -> 60m; default 60m) under `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` for long/unattended dependencies, not short checks. Name human-only controls once. Preserve original owners, roots, grants, effects and aggregate attention's lifetime; blocked children do not end it. Notify only material deltas. Queued/skipped/stale checks are not success; CI green authorizes no merge/deployment.
 <!-- /mastermind-ci-observation-liveness-v1 -->
 
-**Problem-solve before escalating.** Use checkpoint/minimum source, inspect exact failure and perform lawful bounded repair or change lane. Two unchanged failures require new evidence/hypothesis. Ask only precise reserved human controls; keep action/evidence/resolver/return facts in the existing checkpoint, not a new ledger.
+**Problem-solve before escalating.** Inspect exact failure; make bounded repair or
+change lane. Two unchanged failures require new evidence/hypothesis. Ask only
+reserved human controls; save action/evidence/resolver/return in current checkpoint.
 
 **Stop-at-blocker falsifier.** Before ending identify the next concrete executable action and owner. A local candidate/report/request/CI observation does not exhaust the commission. A pre-effect *technical* refusal permits requalification of the same original operation only on relevant recovery evidence; advance genuinely independent authorized work meanwhile. An explicit permission/safety denial ends retries; an uncertain effect remains frozen on its original carrier. Do not route around either via another branch/provider/writer. All-lanes claims require Step 6 negative-capability evidence for each useful lane, not another form or status cycle.
 
@@ -98,6 +100,10 @@ Do not bounce mature Sol Pro to Extra High and back merely for tools. A genuine 
 ## Step 2 — Execute one observable capability step
 
 Execute the next material action in the phase, however many necessary tool operations it takes. Seek a working user/machine capability, removed blocker, real-path proof, genuinely closed authority/review/release gate, lawful durable START, or resolved uncertainty unlocking the next action. Use its canonical tool/owner and preserve INDEX admission, source custody and one-carrier reconciliation. Do not fragment useful depth merely to shorten a turn.
+
+**Reuse-first implementation.** For substantial components apply same-pin
+`docs/REUSE_FIRST_ENGINEERING.md`: check incumbents/OSS and adapt first; protect
+unique quant science, security and real consumer proof. No new survey/gate.
 
 ## Step 2A — Decide execution ownership before routine labor
 

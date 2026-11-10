@@ -918,6 +918,23 @@ def _normalise_constraints(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
     result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
+    if "native_memory" in raw:
+        # Public correlation on the existing Job, never source/dispatch authority.
+        # The protected Memory owner independently requires current Runtime,
+        # genuine Control peer and Linux recipient/source admission.
+        from common.native_memory_intent_contract import normalize_memory_runtime_intent
+        try:
+            result["native_memory"] = normalize_memory_runtime_intent(raw["native_memory"])
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            raise StateConflict("native Memory intent constraint is invalid") from None
+    if "native_memory_evaluation" in raw:
+        from common.memory_evaluation_contract import evaluation_intent
+        try:
+            if "native_memory" not in result:
+                raise ValueError()
+            result["native_memory_evaluation"] = evaluation_intent(raw["native_memory_evaluation"])
+        except (ValueError, TypeError):
+            raise StateConflict("native Memory evaluation constraint is invalid") from None
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):

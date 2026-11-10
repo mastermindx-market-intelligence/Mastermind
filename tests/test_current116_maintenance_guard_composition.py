@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import ast
-import base64
 import hashlib
 import json
 from pathlib import Path
 import shutil
-import zlib
 
 import pytest
 
@@ -24,28 +22,26 @@ def sha(raw):
 
 @pytest.fixture(scope="module")
 def current_source(tmp_path_factory):
-    stage = tmp_path_factory.mktemp("actual-source116")
-    fixture = json.loads((ROOT / "tests/fixtures/provider-plan-auto-predecessor.json").read_text())
-    predecessor = json.loads((compose.HERE / "profile.json").read_text())
-    assert fixture["files"] == predecessor["base_files"]
-    base = stage / "predecessor"
-    for relative, spec in fixture["sources"].items():
-        raw = ((ROOT / spec["source"]).read_bytes() if "source" in spec else
-               zlib.decompress(base64.b64decode(spec["zlib_base64"], validate=True)))
-        assert sha(raw) == fixture["files"][relative]
-        path = base / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(raw)
-    (base / "RELEASE.json").write_text(json.dumps({
-        "digest": predecessor["base_selection"]["generation"], "files": fixture["files"]}))
-    current = stage / "current116"
-    result = compose.compose(base, current)
-    assert result["publication_performed"] is False
+    from provider_plan_fixed_parent import materialize_fixed_parent
+    stage = tmp_path_factory.mktemp("sealed-sequence39")
+    sequence37 = materialize_fixed_parent(stage / "sequence37")
+    sequence38 = stage / "sequence38"
+    compose.compose(sequence37, sequence38)
+    placement = json.loads((compose.HERE / "remote_placement/profile.json").read_text())
+    files38 = json.loads((sequence38 / "FILES.json").read_text())
+    assert files38 == placement["base_files"]
+    # Test-only source descriptor after complete independent code-hash checks.
+    # It grants no installed selection, runtime permission or paid admission.
+    (sequence38 / "RELEASE.json").write_text(json.dumps({
+        "digest": placement["base_selection"]["generation"], "files": files38}))
+    current = stage / "sequence39"
+    compose.compose(sequence38, current, profile_name="current116-remote-placement")
     profile = json.loads((compose.HERE / "maintenance_guard/profile.json").read_text())
-    assert json.loads((current / "FILES.json").read_text()) == profile["base_files"]
-    # Explicit inert source descriptor; not an installed/selected generation receipt.
+    files39 = json.loads((current / "FILES.json").read_text())
+    assert files39 == placement["files"] == profile["base_files"]
+    assert len(files39) == 116
     (current / "RELEASE.json").write_text(json.dumps({
-        "digest": profile["base_selection"]["generation"], "files": profile["base_files"]}))
+        "digest": profile["base_selection"]["generation"], "files": files39}))
     return current
 
 
@@ -68,15 +64,17 @@ def without_guards(raw):
     return dump(tree), added
 
 
-def test_actual116_composition_preserves_every_incumbent_definition_and113_payloads(base, tmp_path):
+def test_actual116_composition_preserves_every_incumbent_definition_and114_payloads(base, tmp_path):
     target = tmp_path / "guarded"
     result = compose.compose(base, target, profile_name=PROFILE)
     profile = json.loads((compose.HERE / "maintenance_guard/profile.json").read_text())
     before, after = profile["base_files"], profile["files"]
     assert len(before) == len(after) == 116
-    assert {p for p in before if before[p] != after[p]} == {"ext/lease_broker.py", "ext/pick.py", "ext/remote_sub_exec.py"}
+    assert {p for p in before if before[p] != after[p]} == {"ext/lease_broker.py", "ext/remote_sub_exec.py"}
     for name, expected in after.items():
         assert sha((target / name).read_bytes()) == expected
+        if name not in profile["patches"]:
+            assert (target / name).read_bytes() == (base / name).read_bytes()
     old_ast, old_guards = without_guards((base / "ext/lease_broker.py").read_bytes())
     new_ast, new_guards = without_guards((target / "ext/lease_broker.py").read_bytes())
     assert not old_guards and set(new_guards) == GUARDS
@@ -93,10 +91,7 @@ def test_actual116_composition_preserves_every_incumbent_definition_and113_paylo
     assert set(provenance["guard_method_ast_sha256"]) == GUARDS
     compile((target / "ext/lease_broker.py").read_bytes(), "source-only-guarded-broker", "exec")
     old_pick, new_pick = ast.parse((base / "ext/pick.py").read_bytes()), ast.parse((target / "ext/pick.py").read_bytes())
-    changed = "_eligible_host_routes"
-    old_body = [n for n in old_pick.body if not (isinstance(n, ast.FunctionDef) and n.name == changed)]
-    new_body = [n for n in new_pick.body if not (isinstance(n, ast.FunctionDef) and n.name == changed)]
-    assert [dump(n) for n in old_body] == [dump(n) for n in new_body]
+    assert dump(old_pick) == dump(new_pick)
     compile((target / "ext/pick.py").read_bytes(), "source-only-fixed-picker", "exec")
     assert result["publication_performed"] is result["selection_performed"] is False
     assert not (target / "ext/broker").exists()
@@ -111,7 +106,7 @@ def test_unregistered_profile_refused_before_output(base, tmp_path, name):
     assert not target.exists()
 
 
-@pytest.mark.parametrize("mutation", ["generation", "foreign_files", "changed_payload", "symlink_payload"])
+@pytest.mark.parametrize("mutation", ["generation", "foreign_files", "changed_payload", "symlink_payload", "changed_new_provider"])
 def test_wrong_cohort_or_nonregular_source_refused_before_output(base, tmp_path, mutation):
     descriptor = base / "RELEASE.json"
     value = json.loads(descriptor.read_text())
@@ -120,8 +115,8 @@ def test_wrong_cohort_or_nonregular_source_refused_before_output(base, tmp_path,
     elif mutation == "foreign_files":
         value["files"].pop("ext/pick.py")
     else:
-        file = base / "ext/lease_broker.py"
-        if mutation == "changed_payload":
+        file = base / ("ext/experiential_bridge.py" if mutation == "changed_new_provider" else "ext/lease_broker.py")
+        if mutation in {"changed_payload", "changed_new_provider"}:
             file.write_bytes(file.read_bytes() + b"\n# changed\n")
         else:
             regular = tmp_path / "broker-source"
@@ -134,7 +129,7 @@ def test_wrong_cohort_or_nonregular_source_refused_before_output(base, tmp_path,
     assert not target.exists()
 
 
-@pytest.mark.parametrize("patch_name", ["maintenance_guard/lease_broker.py.patch", "patches/pick_remote_plan_modes.forward.patch", "maintenance_guard/remote_sub_exec.py.patch"])
+@pytest.mark.parametrize("patch_name", ["maintenance_guard/lease_broker.py.patch", "maintenance_guard/remote_sub_exec.py.patch"])
 def test_changed_patch_refused_before_output(base, tmp_path, monkeypatch, patch_name):
     source = tmp_path / "source"
     shutil.copytree(compose.HERE / "maintenance_guard", source / "maintenance_guard")
@@ -172,3 +167,18 @@ def test_actual_combined_picker_retains_remote_eligibility_without_local_plan_au
     for mode in ("byteplus", "experiential"):
         assert fixed["_format_pick_host"]("extract", host="auto", required_modes=[mode]) == \
             "NONE reason=no eligible remote mode satisfying required_modes"
+
+
+@pytest.mark.parametrize("previous", [
+    "9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4",
+    "296e522f5f236d764aa4ad1b9fa677d7eea32e6bdfe2fc97c0755c06a857908f",
+])
+def test_old_selected_parent_cannot_be_substituted(base, tmp_path, previous):
+    descriptor = base / "RELEASE.json"
+    value = json.loads(descriptor.read_text())
+    value["digest"] = previous
+    descriptor.write_text(json.dumps(value))
+    target = tmp_path / "old-parent-refused"
+    with pytest.raises(ValueError, match="selected native base changed"):
+        compose.compose(base, target, profile_name=PROFILE)
+    assert not target.exists()

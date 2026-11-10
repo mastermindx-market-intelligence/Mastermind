@@ -12,40 +12,108 @@ No runtime authority is added.
 REVIEWED_PATH = "control_plane/executive_service.py"
 REVIEWED_CONTAINER = "ExecutiveControlService"
 REVIEWED_LITERAL_COUNT = 6
-REVIEWED_ANCHORS = {
-    "_bind_company_consultation_server": {
-        "node_type": "AsyncFunctionDef",
-        "ast_sha256": "01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236",
-        "sites": (
-            (("body", 7, "body", 2, "value", "keywords", 0, "value"), "int", 456, "0o710"),
-            (("body", 7, "body", 5, "body", 1, "value", "args", 0), "int", 456, "0o710"),
-            (("body", 7, "body", 6, "test", "values", 1, "comparators", 0), "int", 456, "0o710"),
-        ),
-    },
-    # Exact catalog/native-status composition. These are only the second
-    # operands of workspace_error("access_denied", 403) and
-    # workspace_error("source_unavailable", 503), never UIDs or grants.
-    # The complete ingress-method AST binds its admission, source selection
-    # and release-time permission checks; a change to any of them invalidates
-    # all three status sites without changing the historical Company record.
-    "_handle_ceo_ingress_connection": {
-        "node_type": "AsyncFunctionDef",
-        # Existing section-sign/em-dash prose needs an exact full-source pin
-        # in addition to the method AST; all three literal lines are ASCII.
-        # Selected-child App-peer admission changes the enclosing ingress AST.
-        # The original Fabric reply operands and Company listener remain unchanged.
-        "source_sha256": "f9c371d3eca6ab1f3572c66d8eea38e663defb06192e77070ff76f2a56283b06",
-        "ast_sha256": "27fcfd5595d71bd938b68546b28427e5ed9297099e71d93942c1d1abe6c164f6",
-        "sites": (
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "body", 4, "body", 0, "value", "args", 1), "int", 403, "403"),
-            (("body", 3, "body", 57, "body", 3, "orelse", 0, "body", 2,
-              "orelse", 0, "handlers", 0, "body", 0, "value", "args", 1), "int", 503, "503"),
-        ),
-    },
-}
+REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFunctionDef',
+                                       'ast_sha256': '01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236',
+                                       'sites': ((('body',
+                                                   7,
+                                                   'body',
+                                                   2,
+                                                   'value',
+                                                   'keywords',
+                                                   0,
+                                                   'value'),
+                                                  'int',
+                                                  456,
+                                                  '0o710'),
+                                                 (('body',
+                                                   7,
+                                                   'body',
+                                                   5,
+                                                   'body',
+                                                   1,
+                                                   'value',
+                                                   'args',
+                                                   0),
+                                                  'int',
+                                                  456,
+                                                  '0o710'),
+                                                 (('body',
+                                                   7,
+                                                   'body',
+                                                   6,
+                                                   'test',
+                                                   'values',
+                                                   1,
+                                                   'comparators',
+                                                   0),
+                                                  'int',
+                                                  456,
+                                                  '0o710'))},
+ '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
+                                    'source_sha256': '49dcf5cf386c57dd7cea1d7751c31ce81c1a63b539f481d497a3633bb85304aa',
+                                    'ast_sha256': '24bd3a8dfa93a071609cd4a5c187a65463de8207139243372874cc707b13bd95',
+                                    'sites': ((('body',
+                                                3,
+                                                'body',
+                                                58,
+                                                'body',
+                                                3,
+                                                'orelse',
+                                                0,
+                                                'body',
+                                                2,
+                                                'body',
+                                                0,
+                                                'value',
+                                                'args',
+                                                1),
+                                               'int',
+                                               403,
+                                               '403'),
+                                              (('body',
+                                                3,
+                                                'body',
+                                                58,
+                                                'body',
+                                                3,
+                                                'orelse',
+                                                0,
+                                                'body',
+                                                2,
+                                                'orelse',
+                                                0,
+                                                'body',
+                                                4,
+                                                'body',
+                                                0,
+                                                'value',
+                                                'args',
+                                                1),
+                                               'int',
+                                               403,
+                                               '403'),
+                                              (('body',
+                                                3,
+                                                'body',
+                                                58,
+                                                'body',
+                                                3,
+                                                'orelse',
+                                                0,
+                                                'body',
+                                                2,
+                                                'orelse',
+                                                0,
+                                                'handlers',
+                                                0,
+                                                'body',
+                                                0,
+                                                'value',
+                                                'args',
+                                                1),
+                                               'int',
+                                               503,
+                                               '503'))}}
 
 # BYOK fixed READ changes the full ingress AST, with existing App/Runtime fences.
 # The same three original Fabric HTTP operands are retained at mapped exact sites.
@@ -75,16 +143,19 @@ REVIEWED_ANCHORS = {
 # Company method plus each original Fabric operand/path against protected
 # source. Only whole-source/enclosing-method pins change; no new literal site
 # or scanner exemption is added. This is source review, not host acceptance.
+# H5 joins protected779fc3be: exact Company listener and Fabric response subtree
+# remain AST-identical; only the composed full-source and ingress pins change.
 
+# H6 joins current552 and H5 at exact source. The complete original Fabric
+# response subtree and Company listener AST are unchanged; only enclosing
+# source/method identity and mapped positions are requalified.
 # Discovery correction extends the original authenticated App-peer branch.
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
 
-# V5 ProjectKnowledge keeps the same App-peer context owner and validates each
-# v3/v4/v5 result with its matching contract. Parent compared the accepted
-# 1890f608 source to this postimage: the complete Company listener AST, all six
-# original Constant tokens and all AST paths/columns are identical. Only the
-# whole-source and enclosing ingress-method digests change; no new literal site
-# or runtime authority is admitted. In-process protocol proof is not socket or
-# installed-service acceptance.
+# PR-duty composition of protected 62db688 with the v5 knowledge candidate:
+# parent self-reviewed the exact context-branch delta. The complete Company
+# listener and original Fabric branch, three HTTP operands, values, spellings
+# and paths remain unchanged; only whole-source/enclosing-ingress hashes change.
+# This is source-drift qualification, not runtime activation or formal approval.

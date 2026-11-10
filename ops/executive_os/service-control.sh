@@ -23,7 +23,7 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|prepare-mcp-selected-child|plan-control-component|apply-control-component|reconcile-control-component|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|prepare-mcp-selected-child|plan-control-component|apply-control-component|reconcile-control-component|resume-control-component|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
   /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent; a successor also requires --expected-predecessor-receipt-sha256 <64 lowercase hex> with the existing grant digest" >&2
@@ -32,6 +32,7 @@ usage() {
   /bin/echo "plan-mcp-component and apply-mcp-component optionally accept the PAIRED --selected-child-target-input <absolute canonical path> and --selected-child-target-sha256 <64 lowercase hex>; both or neither" >&2
   /bin/echo "prepare-mcp-selected-child requires --expected-sha <40 lowercase hex characters> --work-ref <work reference> --root-job-id <job id> and one or more --child-job-id <job id>; no destination, output path, account, label, port or resource value is accepted" >&2
   /bin/echo "plan-control-component and reconcile-control-component require --expected-sha <40 lowercase hex>; apply-control-component additionally requires --plan-sha256 <64 lowercase hex>" >&2
+  /bin/echo "resume-control-component requires --expected-sha <sealed recovery release> --target-sha <original target> --transaction-id <original transaction> --plan-sha256 <original plan>" >&2
   /bin/echo "plan-control-component and apply-control-component optionally accept the PAIRED --hermes-role-metadata-read-input <absolute canonical path> and --hermes-role-metadata-read-sha256 <64 lowercase hex>; both or neither" >&2
   exit 64
 }
@@ -570,7 +571,7 @@ dispatch_os_gateway() {
 MCP_COMPONENT_ARGV=()
 mcp_component_args() {
   local verb="$1" flag value seen="" sha="" plan="" public=0 helper_verb
-  local child_input="" child_sha=""
+  local child_input="" child_sha="" canary_input="" canary_sha=""
   shift
   while [ "$#" -gt 0 ]; do
     flag="$1"
@@ -587,7 +588,7 @@ mcp_component_args() {
         ;;
       --expected-sha) ;;
       --plan-sha256) [ "$verb" = "apply-mcp-component" ] || return 1 ;;
-      --selected-child-target-input|--selected-child-target-sha256)
+      --selected-child-target-input|--selected-child-target-sha256|--chris-dot-canary-input|--chris-dot-canary-sha256)
         [ "$verb" = "plan-mcp-component" ] || [ "$verb" = "apply-mcp-component" ] || return 1
         ;;
       *) return 1 ;;
@@ -609,6 +610,14 @@ mcp_component_args() {
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         child_sha="$value"
         ;;
+      --chris-dot-canary-input)
+        valid_component_input_path "$value" || return 1
+        canary_input="$value"
+        ;;
+      --chris-dot-canary-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        canary_sha="$value"
+        ;;
       *)
         [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
         plan="$value"
@@ -621,6 +630,11 @@ mcp_component_args() {
   if [ -n "$child_input" ] || [ -n "$child_sha" ]; then
     [ -n "$child_input" ] || return 1
     [ -n "$child_sha" ] || return 1
+  fi
+  # The root-sealed Chris account input and its byte digest are one
+  # selection; no model, caller or helper can supply identity fields in argv.
+  if [ -n "$canary_input" ] || [ -n "$canary_sha" ]; then
+    [ -n "$canary_input" ] && [ -n "$canary_sha" ] || return 1
   fi
   case "$verb" in
     plan-mcp-component) helper_verb="plan" ;;
@@ -636,6 +650,10 @@ mcp_component_args() {
   if [ -n "$child_input" ]; then
     MCP_COMPONENT_ARGV+=(--selected-child-target-input "$child_input")
     MCP_COMPONENT_ARGV+=(--selected-child-target-sha256 "$child_sha")
+  fi
+  if [ -n "$canary_input" ]; then
+    MCP_COMPONENT_ARGV+=(--chris-dot-canary-input "$canary_input")
+    MCP_COMPONENT_ARGV+=(--chris-dot-canary-sha256 "$canary_sha")
   fi
   GATEWAY_EXPECTED_SHA="$sha"
   return 0
@@ -1003,7 +1021,7 @@ case "$1" in
   prepare-mcp-selected-child)
     [ "$#" -ge 3 ] || usage
     ;;
-  plan-control-component|apply-control-component|reconcile-control-component)
+  plan-control-component|apply-control-component|reconcile-control-component|resume-control-component)
     [ "$#" -ge 3 ] || usage
     ;;
   *) [ "$#" -eq 1 ] || usage ;;
@@ -1038,6 +1056,23 @@ case "$1" in
   prepare-mcp-selected-child)
     require_root
     dispatch_preparation "$@"
+    ;;
+  resume-control-component)
+    [ "$#" -eq 9 ] && [ "$2" = "--expected-sha" ] \
+      && [ "$4" = "--target-sha" ] && [ "$6" = "--transaction-id" ] \
+      && [ "$8" = "--plan-sha256" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$7" =~ ^autonomy-[0-9a-f]{12}$ ]] && [[ "$9" =~ ^[0-9a-f]{64}$ ]] || usage
+    require_root
+    recovery_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$recovery_dir/service-control.sh" ]] \
+      && [[ "$SCRIPT_DIR" == "$recovery_dir" ]] \
+      && [[ "$SCRIPT_PATH" == "$recovery_dir/service-control.sh" ]] || exit 65
+    [[ -f "$SCRIPT_PATH" && ! -L "$SCRIPT_PATH" ]] \
+      && [[ -f "$recovery_dir/autonomy_control.py" && ! -L "$recovery_dir/autonomy_control.py" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$recovery_dir/autonomy_control.py" \
+      resume-control-component --expected-sha "$5" --recovery-sha "$3" \
+      --transaction-id "$7" --plan-sha256 "$9"
     ;;
   plan-control-component|apply-control-component|reconcile-control-component)
     require_root

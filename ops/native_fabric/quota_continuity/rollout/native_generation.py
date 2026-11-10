@@ -45,8 +45,16 @@ GO_REQUIRED = frozenset({GO_ENTRY, GO_HANDLER,
     "ext/paid_pyyaml_provenance.json"})
 
 
+GLM_HTTP_REQUIRED = frozenset({"ext/glm_application_adapter.py", "ext/application_http_realms.v2.json"})
+
+
 def _entrypoints_for(files):
     """Old releases retain their exact descriptor and content identity."""
+    glm_present = set(files) & GLM_HTTP_REQUIRED
+    if glm_present and (glm_present != GLM_HTTP_REQUIRED or
+                        not HTTP_REQUIRED.issubset(files) or
+                        not GO_REQUIRED.issubset(files) or "ext/glm_keys.py" not in files):
+        raise ValueError("incomplete native GLM application HTTP closure")
     http_present = HTTP_REQUIRED & set(files)
     if http_present and (http_present != HTTP_REQUIRED or not GO_REQUIRED.issubset(files)
                          or "ext/bailian_keys.py" not in files):
@@ -136,7 +144,7 @@ def file_name(relative):
     if relative == "ext/host_pull_launchd.plist.template":
         return
     # One source-sealed HTTP realm projection; no general JSON admission.
-    if relative == "ext/application_http_realms.v1.json":
+    if relative in {"ext/application_http_realms.v1.json", "ext/application_http_realms.v2.json"}:
         return
     parts = relative.split("/") if isinstance(relative, str) else []
     if (len(parts) != 2 or parts[0] != "ext" or not NAME.fullmatch(parts[1])

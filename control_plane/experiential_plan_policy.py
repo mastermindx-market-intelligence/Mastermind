@@ -1,7 +1,8 @@
 """Request policy for the existing Experiential gateway.
 
 This is a stateless guard, not a scheduler or a second budget ledger. The
-provider's :free contract owns daily free-allowance enforcement. The provider
+provider owns daily included-allowance enforcement. A promotional :free grant
+is not a paid-plan entitlement. The provider
 owns its prepaid wallet and subscription allowance. Configured plan entitlements
 are distinct from authenticated observations of current remaining funds.
 """
@@ -15,15 +16,15 @@ import time
 
 PLAN_MODES = frozenset({"legacy", "free_only", "free_and_uncensored"})
 FREE_CHAT_MODELS = (
-    "deepseek-v4.1-flash:free",
-    "deepseek-v4.1-flash-1017:free",
-    "gpt-6-luna:free",
-    "clef:free",
-    "clef-flash:free",
+    "deepseek-v4.1-flash",
+    "deepseek-v4.1-flash-1017",
+    "gpt-6-luna",
+    "clef",
+    "clef-flash",
 )
 FREE_NATIVE_MODELS = {
-    "jev-latest:free": "systemone",
-    "gpt-6-luna-decisions:free": "decisions",
+    "jev-latest": "systemone",
+    "gpt-6-luna-decisions": "decisions",
 }
 PAID_UNCENSORED_MODELS = (
     "deepseek-v4.1-flash-uncensored",
@@ -42,7 +43,7 @@ def plan_policy_digest(mode: str) -> str:
     """Bind an admitted Attempt to the exact deployed request policy."""
     if type(mode) is not str or mode not in PLAN_MODES:
         raise ValueError("unsupported Experiential plan policy")
-    spec = {"version": 2, "mode": mode, "gateway_policy": "single_attempt_no_fallback", "free_chat": FREE_CHAT_MODELS,
+    spec = {"version": 3, "included_funding": "max_plan_provider_stop_required", "mode": mode, "gateway_policy": "single_attempt_no_fallback", "free_chat": FREE_CHAT_MODELS,
             "free_native": FREE_NATIVE_MODELS, "paid": PAID_UNCENSORED_MODELS,
             "overrides": sorted(ROUTING_OVERRIDES)}
     return hashlib.sha256(json.dumps(spec, sort_keys=True,
@@ -116,9 +117,51 @@ def validate_plan_request(mode: str, endpoint: str, body: bytes) -> str | None:
         if endpoint not in CHAT_ENDPOINTS:
             raise PlanRequestRefused("PLAN_MODEL_PROTOCOL_MISMATCH")
         return "paid_uncensored"
-    # In particular, a plain promotional slug may spill to wallet charges;
+    # Promotional :free grants are not enrolled by a Max-plan declaration.
     # glm-5.3-uncensored is the old full model, not the selected Flash model.
     raise PlanRequestRefused("PLAN_MODEL_NOT_ALLOWED")
+
+
+def require_included_funding(observation, *, organization_sha256, now=None):
+    """Require account-specific provider enforcement, never a local opt-in.
+
+    The documented public account API currently reports wallet/catalog data,
+    not Max entitlement or the effective continuation setting. Its production
+    reader therefore supplies no included-funding evidence and fails closed.
+    A future provider-account reader must bind all of these facts; neither
+    request JSON, environment flags nor declared allowances can satisfy them.
+    This is a pure admission predicate, not a balance counter or setting writer.
+    """
+    current = time.time() if now is None else now
+    if type(observation) is not dict:
+        raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_UNVERIFIED")
+    expected = {
+        "schema": "mastermind.experiential_included_funding/v1",
+        "source": "authenticated_provider_account",
+        "organization_sha256": organization_sha256,
+        "plan_tier": "max",
+        "plan_active": True,
+        "daily_credits": 7000,
+        "continue_on_credits": False,
+        "provider_enforces_included_stop": True,
+        "paid_uncensored_remains_available": True,
+    }
+    for key, wanted in expected.items():
+        value = observation.get(key)
+        if type(value) is not type(wanted) or value != wanted:
+            raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_UNVERIFIED")
+    seen = observation.get("observed_at_unix")
+    if (type(seen) not in (int, float) or not math.isfinite(seen)
+            or type(current) not in (int, float) or not math.isfinite(current)
+            or not 0 <= current - seen <= MAX_OBSERVATION_AGE_SECONDS):
+        raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_STALE")
+    included = observation.get("included_models")
+    if (type(included) is not list or any(type(v) is not str for v in included)
+            or len(included) != len(set(included))
+            or set(included) != set(FREE_CHAT_MODELS) | set(FREE_NATIVE_MODELS)):
+        raise PlanRequestRefused("PLAN_INCLUDED_MODELS_UNVERIFIED")
+    return {"funding_contract": "max_included", "paid_overflow": False,
+            "observed_at_unix": seen}
 
 
 PLAN_ACCOUNT_SCHEMA = "mastermind.experiential_plan_account/v1"
@@ -215,12 +258,16 @@ def admit_plan_account(*, model, account, registration, observation, now=None):
             or not 0 <= current - observed <= MAX_OBSERVATION_AGE_SECONDS):
         raise PlanRequestRefused("PLAN_ACCOUNT_OBSERVATION_STALE")
     select_plan_model(lane, observation.get("available_models"), model)
+    funding = {}
+    if lane == "free":
+        funding = require_included_funding(observation.get("included_funding"),
+                                            organization_sha256=org, now=current)
     balance = observation.get("wallet_balance_usd")
     if type(balance) not in (int, float) or not math.isfinite(balance):
         raise PlanRequestRefused("PLAN_WALLET_OBSERVATION_INVALID")
     if lane == "paid_uncensored" and balance <= 0:
         raise PlanRequestRefused("PLAN_PREPAID_WALLET_EXHAUSTED")
-    return {"account": expected_account, "plan_lane": lane, "endpoint": endpoint,
+    return {**funding, "account": expected_account, "plan_lane": lane, "endpoint": endpoint,
             "plan_policy": mode, "policy_digest": plan_policy_digest(mode),
             "quota_owner": "provider", "free_credits_remaining": None,
             "monthly_allowance_remaining_usd": None,

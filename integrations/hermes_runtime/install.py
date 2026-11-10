@@ -10,7 +10,9 @@ from collections.abc import Callable
 from contextlib import ExitStack
 import os
 from pathlib import Path
+import re
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -71,6 +73,100 @@ def fetch_pinned_upstream(dest: Path) -> None:
         raise
 
 
+def _qualification_preimage(state: Path, profile: RuntimeProfile, *, installing: bool = False) -> tuple:
+    """Recognize only this role's private, credential-free qualification records.
+
+    Their contents identify retained evidence; even a PASS report grants no
+    installation, native-session, provider or enrollment authority.
+    """
+    from .isolation_probe import SYNTHETIC_MARKER
+    from .profile import load_profile_bytes
+
+    def facts(info):
+        return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+                info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+    def private_dir(info):
+        return (stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700
+                and info.st_uid == os.geteuid() and info.st_gid == os.getegid())
+
+    try:
+        with ExitStack() as held:
+            root_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            held.callback(os.close, root_fd)
+            root_info = os.fstat(root_fd)
+            expected = {"qualification", "releases", "next-release"} if installing else {"qualification"}
+            if (not private_dir(root_info) or facts(root_info) != facts(state.lstat())
+                    or set(os.listdir(root_fd)) != expected):
+                raise ValueError("state shape")
+            directory_fd = os.open("qualification", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                   dir_fd=root_fd)
+            held.callback(os.close, directory_fd)
+            directory_info = os.fstat(directory_fd)
+            if not private_dir(directory_info):
+                raise ValueError("qualification directory custody")
+            names = sorted(os.listdir(directory_fd))
+            if not 3 <= len(names) <= 128:
+                raise ValueError("qualification file count")
+            records, profiles, reports = [], 0, 0
+            for name in names:
+                is_profile = re.fullmatch(r"profile-[A-Za-z0-9_-]{1,128}\.yaml", name) is not None
+                is_report = re.fullmatch(r"report-[A-Za-z0-9_-]{1,128}\.json", name) is not None
+                if name != "synthetic.txt" and not is_profile and not is_report:
+                    raise ValueError("foreign qualification member")
+                before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if (not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o600
+                        or before.st_uid != root_info.st_uid or before.st_gid != root_info.st_gid
+                        or before.st_nlink != 1 or not 0 < before.st_size <= 1024 * 1024):
+                    raise ValueError("qualification file custody")
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+                try:
+                    if facts(before) != facts(os.fstat(fd)):
+                        raise ValueError("qualification file changed")
+                    with os.fdopen(fd, "rb", closefd=False) as stream:
+                        data = stream.read(1024 * 1024 + 1)
+                    if (len(data) != before.st_size or facts(before) != facts(os.fstat(fd))
+                            or facts(before) != facts(os.stat(name, dir_fd=directory_fd,
+                                                             follow_symlinks=False))):
+                        raise ValueError("qualification file changed")
+                finally:
+                    os.close(fd)
+                if name == "synthetic.txt":
+                    if data != SYNTHETIC_MARKER:
+                        raise ValueError("synthetic marker")
+                elif is_profile:
+                    retained = load_profile_bytes(data, source_path=state / "qualification" / name)
+                    if (retained.role != profile.role or retained.state_dir != profile.state_dir
+                            or retained.secrets_file != profile.secrets_file):
+                        raise ValueError("qualification profile identity")
+                    profiles += 1
+                else:
+                    report = json.loads(data)
+                    qid = report.get("qualification_id") if isinstance(report, dict) else None
+                    if (not isinstance(qid, str)
+                            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", qid) is None
+                            or qid not in name or report.get("role") != profile.role
+                            or report.get("schema") != "mastermind.hermes_role_isolation_qualification.v2"):
+                        raise ValueError("qualification report identity")
+                    reports += 1
+                records.append((name, facts(before), hashlib_sha256(data)))
+            if (not profiles or not reports or "synthetic.txt" not in names
+                    or sorted(os.listdir(directory_fd)) != names
+                    or facts(directory_info) != facts(os.fstat(directory_fd))
+                    or facts(directory_info) != facts(os.stat("qualification", dir_fd=root_fd,
+                                                              follow_symlinks=False))
+                    or set(os.listdir(root_fd)) != expected
+                    or facts(root_info) != facts(os.fstat(root_fd))
+                    or facts(root_info) != facts(state.lstat())):
+                raise ValueError("qualification changed")
+            # The installer creates siblings, so root directory times/size change.
+            root_identity = (root_info.st_dev, root_info.st_ino, root_info.st_uid,
+                             root_info.st_gid, root_info.st_mode)
+            return (root_identity, facts(directory_info), tuple(records))
+    except (OSError, ValueError, RecursionError, RuntimeRefusal):
+        raise RuntimeRefusal("INSTALL_REFUSED_UNOWNED_STATE") from None
+
+
 def install(
     *,
     profile_path: Path,
@@ -94,6 +190,10 @@ def install(
             native = _hermes_native_gateway(native_installation, role=profile.role)
         except (ReleaseManifestError, TypeError, ValueError):
             raise RuntimeRefusal("NATIVE_INSTALLATION_REQUIRED") from None
+        if native.get("evaluation_inputs") is not None and (
+                native.get("primary_application") is not None
+                or profile.model_provider == "mastermind-fabric"):
+            raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
         if (fetch or upstream_source is None
                 or upstream_source.resolve() != Path(native["vendor_root"])):
             raise RuntimeRefusal("NATIVE_VENDOR_SELECTION_MISMATCH")
@@ -106,17 +206,19 @@ def install(
     assert_outside_repository(unit_dir, label="SYSTEMD_USER_DIR")
     bin_path = (repo_root() / "integrations/hermes_runtime/native/hermes"
                 if native is not None else _hermes_bin(hermes_bin))
+    qualification_preimage = None
     if state_dir.exists():
         if state_dir.is_symlink() or not state_dir.is_dir():
             raise RuntimeRefusal("STATE_DIR_SYMLINK_REFUSED")
         if not (state_dir / "install-manifest.json").is_file():
-            raise RuntimeRefusal("INSTALL_REFUSED_UNOWNED_STATE")
+            qualification_preimage = _qualification_preimage(state_dir, profile)
     else:
         state_dir.mkdir(mode=0o700)
         os.chmod(state_dir, 0o700)
     release_id = _allocate_release(state_dir)
     release = state_dir / "releases" / release_id
     release.mkdir(mode=0o700)
+    allocated_counter = (state_dir / "next-release").lstat()
     previous = os.readlink(state_dir / "current") if (state_dir / "current").is_symlink() else None
     source_lifetime = ExitStack()
     derivation = None
@@ -149,6 +251,13 @@ def install(
                        native_installation=native, native_derivation=derivation)
         if derivation_check is not None:
             derivation_check()
+        if qualification_preimage is not None:
+            try:
+                unchanged = _qualification_preimage(state_dir, profile, installing=True)
+            except RuntimeRefusal:
+                raise RuntimeRefusal("QUALIFICATION_STATE_CHANGED") from None
+            if unchanged != qualification_preimage:
+                raise RuntimeRefusal("QUALIFICATION_STATE_CHANGED")
         _switch_current(state_dir, release_id)
         unit = _install_unit(profile, unit_dir, python_executable or sys.executable)
         _write_manifest(profile, unit_dir, unit)
@@ -157,7 +266,16 @@ def install(
         _restore_current(state_dir, previous)
         releases = state_dir / "releases"
         if previous is None and releases.is_dir() and not any(releases.iterdir()):
-            shutil.rmtree(state_dir, ignore_errors=True)
+            if qualification_preimage is None:
+                shutil.rmtree(state_dir, ignore_errors=True)
+            else:
+                # Never remove pre-existing qualification evidence on failure.
+                # Remove only this first attempt's unchanged counter and empty directory.
+                releases.rmdir()
+                counter = state_dir / "next-release"
+                if (counter.lstat() == allocated_counter
+                        and counter.read_bytes() == f"{int(release_id) + 1}\n".encode("ascii")):
+                    counter.unlink()
         raise
     finally:
         source_lifetime.close()
@@ -229,9 +347,16 @@ def _qualify_native_rollback(current: Path, previous: Path) -> None:
     previous_receipt = json.loads((previous / "install-receipt.json").read_text(encoding="utf-8"))
     if "native_gateway" not in current_receipt and "native_gateway" not in previous_receipt:
         return
+    # A matching launcher/adapter alone cannot admit an older configuration
+    # generation (including its consumer plugin and MCP grants). Restore a
+    # different held source/configuration recipe through the existing release
+    # owner, not by moving only the role-state symlink.
     fields = ("native_gateway", "native_vendor_derivation", "native_launcher_sha256",
-              "native_adapter_sha256", "profile_sha256")
-    if (any(current_receipt.get(key) != previous_receipt.get(key) for key in fields)
+              "native_adapter_sha256", "profile_sha256", "hermes_config_sha256")
+    config_digest = current_receipt.get("hermes_config_sha256")
+    if (not isinstance(config_digest, str) or len(config_digest) != 64
+            or any(character not in "0123456789abcdef" for character in config_digest)
+            or any(current_receipt.get(key) != previous_receipt.get(key) for key in fields)
             or (current / "bin/hermes").resolve(strict=True)
                != (previous / "bin/hermes").resolve(strict=True)):
         raise RuntimeRefusal("NATIVE_ROLLBACK_REQUIRES_MATCHING_RELEASE_RECIPE")
@@ -324,13 +449,24 @@ def _write_release(
     *, native_installation: dict | None = None,
     native_derivation: dict | None = None,
 ) -> None:
+    consumer = (native_installation or {}).get("executive_consumer")
+    evaluation_inputs = (native_installation or {}).get("evaluation_inputs")
+    primary = (native_installation or {}).get("primary_application")
+    if evaluation_inputs is not None and (primary is not None or profile.model_provider == "mastermind-fabric"):
+        raise RuntimeRefusal("NATIVE_EVAL_INPUTS_UNQUALIFIED")
     home = release / "hermes-home"
     role_dir = home / "profiles" / profile.role
     role_dir.mkdir(parents=True, mode=0o700)
-    consumer = (native_installation or {}).get("executive_consumer")
+    if primary is not None:
+        from integrations.hermes_application_fabric.publication import expected_native_config as application_config
+        expected_config = application_config(profile, primary, consumer)
+        if hermes_config_renderer is not None and hermes_config_renderer(profile) != expected_config:
+            raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
+        hermes_config_renderer = lambda profile: expected_config
     if native_installation is not None and hermes_config_renderer is None:
         from integrations.hermes_harness.native_byok import expected_native_config
-        hermes_config_renderer = lambda profile: expected_native_config(profile, consumer)
+        hermes_config_renderer = lambda profile: expected_native_config(
+            profile, consumer, evaluation_inputs=evaluation_inputs)
     config = (
         hermes_config_renderer(profile)
         if hermes_config_renderer is not None
@@ -340,7 +476,12 @@ def _write_release(
         raise RuntimeRefusal("NATIVE_CONFIG_INVALID")
     if native_installation is not None:
         from integrations.hermes_harness.native_byok import expected_native_config
-        if config != expected_native_config(profile, consumer):
+        expected = (
+            application_config(profile, primary, consumer)
+            if primary is not None
+            else expected_native_config(profile, consumer, evaluation_inputs=evaluation_inputs)
+        )
+        if config != expected:
             raise RuntimeRefusal("NATIVE_GATEWAY_CONFIG_MISMATCH")
     _atomic_write(role_dir / "config.yaml", config.encode("utf-8"), 0o600)
     plugin_digest = None
@@ -505,3 +646,4 @@ def _json(payload: dict) -> bytes:
 def hashlib_sha256(data: bytes) -> str:
     import hashlib
     return hashlib.sha256(data).hexdigest()
+

@@ -779,15 +779,15 @@ const experientialPreview={state:'PREVIEW_ONLY',reserved:false,selection_recheck
   strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'experiential',
   model:'glm-5.3-uncensored',host:'ubuntu1',mode:'experiential'};
 
-test('experiential pool accepts only the exact uncensored slug with explicit retention opt-in',async()=>{
+test('experiential preserves exact legacy model and requires complete explicit consents',async()=>{
  assert.deepEqual(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.pool.enum,
-  ['grok','glm','minimax','bailian','cursor','ocfree','go','experiential']);
+  ['grok','glm','minimax','bailian','cursor','ocfree','go','byteplus','experiential']);
  for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
    assert.equal(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties[consent].type,'boolean');
  const e=engine(),f=facade(e);
  const noModel={...experientialPinned};delete noModel.model;
  const variant=change=>({...experientialPinned,...change});
- for(const args of [noModel,variant({model:'auto'}),variant({model:'glm-5.3-flash-uncensored'}),
+ for(const args of [variant({model:'auto'}),variant({model:'deepseek-v4.1-flash:free'}),
    variant({model:'GLM-5.3-Uncensored'}),variant({model:'glm-5.3'}),variant({retention_opt_in:false}),
    variant({retention_opt_in:'yes'}),variant({sensitive_data_opt_in:false}),
    variant({sensitive_data_opt_in:'yes'}),variant({code_exposure_opt_in:false}),
@@ -798,7 +798,7 @@ test('experiential pool accepts only the exact uncensored slug with explicit ret
    const out=unwrap(await f.call('fabric_request',args));
    assert.equal(out.error,'INVALID_ARGUMENT');assert.equal(out.retry_allowed,false);
  }
- // No opt-in flags may be supplied for AUTO or another provider.
+ // Partial consents without a response-only AUTO declaration remain invalid.
  for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
    assert.equal(unwrap(await f.call('fabric_request',{...packet,[field]:true})).error,'INVALID_ARGUMENT');
  const missingDisclosure={...experientialPinned};delete missingDisclosure.sensitive_data_opt_in;
@@ -1024,5 +1024,123 @@ test('fresh backend generations cannot redispatch an original run with orphan ev
    assert.equal(e.calls.length,1);
    assert.match(e.calls[0].arguments.command,/'status'/);
    assert.doesNotMatch(e.calls[0].arguments.command,/'request'/);
+ }
+});
+
+const nativeScope={home:'/fixture/hermes-home',source:'/fixture/hermes-source',python:'/fixture/python',
+ revision:'f'.repeat(40),packageSha256:'a'.repeat(64)};
+const nativeOrigin={schema:'mastermind.hermes_native_origin.v1',kind:'hermes_attended_session',
+ profile_id:'default',origin_session_id:'native-origin',session_id:'native-session',
+ generation:'a'.repeat(64),turn_id:'turn',tool_call_id:'call',task_key:'task',
+ tool_action:'submit',arguments_digest:'b'.repeat(64),lease_holder_digest:'c'.repeat(64),
+ enrollment_generation:'d'.repeat(64)};
+
+test('native channel cannot omit origin to regain operator request or read authority',async()=>{
+ const e=engine();
+ const f=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope});
+ for(const [name,args] of [['fabric_request',packet],['fabric_status',id],['fabric_result',id]]){
+  assert.equal(unwrap(await f.call(name,args)).error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ }
+ assert.equal(e.calls.length,0);
+});
+
+test('native channel rejects operator lifecycle actions before engine access',async()=>{
+ const e=engine();
+ const f=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope});
+ const out=unwrap(await f.call('fabric_wait',{...id,native_origin:nativeOrigin,timeout_seconds:1}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(e.calls.length,0);
+});
+
+test('ordinary operator facade cannot treat supplied native metadata as enrollment',async()=>{
+ const e=engine();
+ const out=unwrap(await facade(e).call('fabric_request',{...packet,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(e.calls.length,0);
+});
+
+test('native channel requires a complete absolute host-selected configuration',()=>{
+ const e=engine();
+ for(const hermesNative of [{home:'/fixture/home'}, {...nativeScope,python:'python3'},
+   {...nativeScope,extra:'unrecognized'}, {...nativeScope,home:'/fixture/\0bad'}]){
+  assert.throws(()=>api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative}),TypeError);
+ }
+ assert.equal(e.calls.length,0);
+});
+
+test('ordinary capabilities explicitly report native origin disabled',async()=>{
+ const e=engine([captured('request status result accept')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.deepEqual(out.hermes_native_origin,{schema:'mastermind.hermes_native_enrollment.v1',enabled:false});
+});
+
+async function nativePackageFixture(t) {
+ const fs=await import('node:fs');
+ const os=await import('node:os');
+ const path=await import('node:path');
+ const child=await import('node:child_process');
+ const home=fs.mkdtempSync(path.join(os.tmpdir(),'mmx-native-release-'));
+ t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ const root=path.join(home,'plugins','mastermind-fabric-worker');
+ fs.mkdirSync(root,{recursive:true});
+ const source=new URL('../hermes_attended_fabric/',import.meta.url);
+ const names=fs.readdirSync(source).filter(n=>n.endsWith('.py') || n==='plugin.yaml').sort();
+ for(const name of names)fs.copyFileSync(new URL(name,source),path.join(root,name));
+ const fingerprint=()=>digest(JSON.stringify(names.map(name=>[
+   name,digest(fs.readFileSync(path.join(root,name)))])));
+ const record=path.join(home,'plugins','.install-metadata.json');
+ const revision='f'.repeat(40);
+ const metadata={'mastermind-fabric-worker':{
+   source:'https://github.com/mastermindx-market-intelligence/Mastermind.git#integrations/hermes_attended_fabric',
+   revision,pinned:true}};
+ fs.writeFileSync(record,JSON.stringify(metadata));
+ const config={home,source:home,python:process.execPath,revision,packageSha256:fingerprint()};
+ const marker=path.join(home,'checker-ran');
+ const helper=path.join(root,'enrollment_check.py');
+ // Positive control: if invoked, this bounded fixture visibly runs. It does
+ // not call a provider, native runtime, or the Fabric command engine.
+ fs.writeFileSync(helper,"require('node:fs').writeFileSync("+JSON.stringify(marker)+",'executed');");
+ const control=child.spawnSync(process.execPath,[helper],{encoding:'utf8'});
+ assert.equal(control.status,0,control.stderr);
+ assert.equal(fs.readFileSync(marker,'utf8'),'executed');
+ fs.unlinkSync(marker);
+ return {fs,record,metadata,config,marker,fingerprint};
+}
+
+test('native backend refuses changed helper bytes before executing installed code',async t=>{
+ const f=await nativePackageFixture(t),e=engine();
+ const facade=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:f.config});
+ const out=unwrap(await facade.call('fabric_status',{...id,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(f.fs.existsSync(f.marker),false);
+ assert.equal(e.calls.length,0);
+});
+
+test('native backend requires the selected native installer revision before helper execution',async t=>{
+ const f=await nativePackageFixture(t),e=engine();
+ f.config.packageSha256=f.fingerprint();
+ f.metadata['mastermind-fabric-worker'].revision='e'.repeat(40);
+ f.fs.writeFileSync(f.record,JSON.stringify(f.metadata));
+ const facade=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:f.config});
+ const out=unwrap(await facade.call('fabric_status',{...id,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(f.fs.existsSync(f.marker),false);
+ assert.equal(e.calls.length,0);
+});
+
+test('native enrollment refuses inherited operator or canonical paid identity without clearing it',()=>{
+ for(const [name,value] of [['FABRIC_OPERATOR_CHILD_ID','some-existing-child'],
+   ['POOL_OPERATOR_CHILD_BUDGET','1'],['FABRIC_CANONICAL_PAID_MODE','sealed-model-only-v1']]){
+  const original=process.env[name];
+  try{
+   process.env[name]=value;
+   const e=engine();
+   assert.throws(()=>api.createFabricFacade(e,{
+     adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope}),/ordinary worker context/);
+   assert.equal(process.env[name],value);
+   assert.equal(e.calls.length,0);
+  }finally{
+   if(original===undefined)delete process.env[name];else process.env[name]=original;
+  }
  }
 });

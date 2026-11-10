@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -206,6 +207,24 @@ def rewrite_receipt(out, mod, mutate):
     return receipt
 
 
+def test_root_artifact_qualifies_under_restrictive_installer_umask(bundle, source, tmp_path):
+    # Production install.sh uses umask 077. The prepared root-owned package
+    # must still be mode 0755 and pass the exact incumbent artifact qualifier.
+    mod, _assets, sha, tree = bundle
+    output = tmp_path / "restricted-umask-root"
+    prior = os.umask(0o077)
+    try:
+        mod.prepare(source_repo=source[0], expected_sha=sha,
+                    web_client_id="test-public-client-id",
+                    output=output, build_user="test",
+                    node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"))
+    finally:
+        os.umask(prior)
+    assert output.stat().st_mode & 0o777 == 0o755
+    assert mod.qualify(output, expected_sha=sha, tree_sha=tree,
+                       source_repo=source[0]).digest
+
+
 @pytest.mark.parametrize("bundle", [False, "private_entry"], indirect=True)
 def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundle, tmp_path):
     mod, out, sha, tree = bundle
@@ -244,8 +263,7 @@ def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, 
     assert len(rows) == expected_count
     if expected_count == 12:
         assert rows[PRIVATE_ENTRY] == {"path": PRIVATE_ENTRY, "byte_count": len(PRIVATE_ENTRY_BYTES),
-                                      "sha256": hashlib.sha256(PRIVATE_ENTRY_BYTES).hexdigest(),
-                                      "mime": "image/jpeg"}
+            "sha256": hashlib.sha256(PRIVATE_ENTRY_BYTES).hexdigest(), "mime": "image/jpeg"}
     checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
     stage = tmp_path / "notice-stage"
     stage.mkdir()
@@ -263,8 +281,8 @@ def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, 
 
 
 @pytest.mark.parametrize("bundle", [True, "private_entry"], indirect=True)
-def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
-    pytest.importorskip("mcp", reason="real HTTP loading belongs to the optional MCP network test environment")
+def test_licensed_assets_load_and_serve_with_actual_mcp_sdk(bundle, monkeypatch):
+    import mcp  # Required real HTTP proof; missing dependency is not a passing skip.
     _, out, _, _ = bundle
     from ops.executive_os import executive_mcp_entry as entry
     # Only sealed host ownership is replaced for the temporary fixture. The
@@ -639,7 +657,9 @@ def test_installer_optional_preflight_refuses_before_service_stop(bundle, tmp_pa
     variables = {"PYTHON_BINARY": str(wrapper), "SCRIPT_DIR": str(root / "ops/executive_os"),
                  "SOURCE_REPO": str(out.parent / "source"), "EXPECTED_SHA": "a" * 40 if choice == "wrong_source" else sha,
                  "TREE_SHA": tree, "OS_WEB_ASSETS": "" if choice == "absent" else str(out),
-                 "RELEASE_ROOT": str(release), "CONTROL_AEAD_BUNDLE": ""}
+                 "RELEASE_ROOT": str(release), "CONTROL_AEAD_BUNDLE": "",
+                 "HERMES_ATTENDED_SOURCE": "", "HERMES_ATTENDED_CONFIGURATION": "",
+                 "HERMES_ATTENDED_CONFIGURATION_SHA256": ""}
     script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in variables.items())
     script += "\n" + block + f"\nprintf stopped > {shlex.quote(str(effects))}\n"
     result = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True)

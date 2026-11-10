@@ -33,13 +33,8 @@ def source_stage(tmp_path_factory):
         assert fixture["schema"] == "mastermind.provider_plan_test_predecessor.v1"
         assert fixture["files"] == profile["base_files"]
         base = target/"base"
-        for relative, spec in fixture["sources"].items():
-            raw = ((ROOT/spec["source"]).read_bytes() if "source" in spec
-                   else zlib.decompress(base64.b64decode(spec["zlib_base64"], validate=True)))
-            assert hashlib.sha256(raw).hexdigest() == fixture["files"][relative]
-            path = base/relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+        from tests.provider_plan_current116_fixture import materialize_predecessor
+        materialize_predecessor(base, fixture)
         (base/"RELEASE.json").write_text(json.dumps({
             "digest":profile["base_selection"]["generation"], "files":profile["base_files"]}))
         built=target/"composed"
@@ -112,9 +107,19 @@ def runtime(source_stage,tmp_path,monkeypatch):
             "/api/v1/credits":{"data":{"total_credits":200,"total_usage":168}},
             "/v1/models":{"data":[{"id":m} for m in policy.PLAN_MODELS]},
         }
+        included_evidence = [True]  # fixture-only; production readback is absent
         def context():
-            return owner._observed_context(exp_provider,read=replies.__getitem__,
+            value = owner._observed_context(exp_provider,read=replies.__getitem__,
                 token="fixture-proxy-token-32-characters",base="http://127.0.0.1:8311")
+            if included_evidence[0]:
+                value["quota_readback"]["included_funding"] = {
+                    "schema":"mastermind.experiential_included_funding/v1",
+                    "source":"authenticated_provider_account","organization_sha256":org_sha,
+                    "plan_tier":"max","plan_active":True,"daily_credits":7000,
+                    "continue_on_credits":False,"provider_enforces_included_stop":True,
+                    "paid_uncensored_remains_available":True,"observed_at_unix":time.time(),
+                    "included_models":list(policy.FREE_CHAT_MODELS)+list(policy.FREE_NATIVE_MODELS)}
+            return value
         adapter=bridge.HostAdapter(pin,transport,SimpleNamespace(host_owned_context=context),stage)
         monkeypatch.setattr(bridge,"resolve_host_adapter",lambda *_:adapter)
         real_occupancy_reader = lane.read_lane_occupancy
@@ -144,7 +149,7 @@ def runtime(source_stage,tmp_path,monkeypatch):
         yield SimpleNamespace(task=task,pick=pick,bp=bp,worker=worker,broker=br,bridge=bridge,
             policy=policy,replies=replies,accounts=accounts,stage=stage,physical=physical,
             sent=sent,returncode=returncode,fallback=fallback,request=request,adapter=adapter,
-            lane=lane,real_occupancy_reader=real_occupancy_reader)
+            lane=lane,real_occupancy_reader=real_occupancy_reader,included_evidence=included_evidence)
     finally:
         for name in names:
             if before[name] is None:sys.modules.pop(name,None)
@@ -173,11 +178,11 @@ def test_consented_response_selects_only_free_chat_and_preserves_facts(runtime):
     assert r.request(**free_options())==0
     launch=receipt(r,".request-launch.json");request=receipt(r,".request.json")
     assert launch["route"]["POOL"]=="experiential"
-    assert launch["route"]["MODEL"]=="deepseek-v4.1-flash:free"
+    assert launch["route"]["MODEL"]=="deepseek-v4.1-flash"
     assert launch["selection_mode"]=="AUTO"
     assert request["provider_plan_context"]["response_only"] is True
     argv,env=r.sent[0]
-    assert argv[6].endswith(":free")
+    assert argv[6] in r.policy.FREE_CHAT_MODELS and ":" not in argv[6]
     assert env["EXPERIENTIAL_STRICT_MANUAL_PIN"]=="1"
     packet=r.stage/"state/remote_sub/auto-fixture.request.packet"
     assert r.worker.original_request("experiential",argv[6],argv[5],str(packet),env)[0]=="auto-fixture"
@@ -254,7 +259,7 @@ def test_possible_send_failure_has_one_dispatch_and_no_replay_or_paid_fallback(r
     assert r.request(**free_options())==75
     with pytest.raises(r.task.FabricTaskError,match="REQUEST_RUN_ALREADY_EXISTS"):
         r.request(**free_options())
-    assert len(r.sent)==1 and r.sent[0][0][6]=="deepseek-v4.1-flash:free"
+    assert len(r.sent)==1 and r.sent[0][0][6]=="deepseek-v4.1-flash"
 
 def test_mutated_auto_consent_facts_refuse_at_original_send_binding(runtime):
     r=runtime
@@ -307,3 +312,11 @@ def test_published_shared_active_binding_uses_real_read_only_occupancy(runtime,m
         with pytest.raises(r.task.FabricTaskError,match="NONE"):
             r.request()
         assert not r.sent
+
+
+def test_unverified_max_funding_excludes_included_auto(runtime):
+    r = runtime
+    r.included_evidence[0] = False
+    assert r.request(**free_options()) == 0
+    assert receipt(r, ".request-launch.json")["route"]["POOL"] == "byteplus"
+    assert all(item[0][6] not in r.policy.FREE_CHAT_MODELS for item in r.sent)

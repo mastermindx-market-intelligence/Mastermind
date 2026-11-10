@@ -3701,3 +3701,178 @@ def test_recovery_keeps_sealed_legacy_v3_policy_for_prior_secretary(
     ccu.reconcile(host, target_sha=TARGET_SHA)
     assert host._component_binding_candidate_bytes == original
     assert host.binding_publications == publications
+
+
+# A real update can stop after bootout because macOS leaves an attested
+# per-user distnoted agent. Recovery must continue THAT intent, never replay it.
+def _stop_before_component_publication(host, monkeypatch):
+    plan = ccu.plan(host, target_sha=TARGET_SHA)
+    check = host._recheck_component_quiescence
+    def interrupted(_transaction):
+        raise Crash("stopped before publication")
+    monkeypatch.setattr(host, "_recheck_component_quiescence", interrupted)
+    with pytest.raises(Crash):
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan["plan_sha256"])
+    monkeypatch.setattr(host, "_recheck_component_quiescence", check)
+    monkeypatch.setattr(host, "_component_recovery_origin", lambda sha: None)
+    assert host.manifest["phase"] == "CONTROL_BOOTOUT_RECORDED"
+    assert host.labels[CONTROL] is False
+    return dict(target_sha=TARGET_SHA, recovery_sha="9" * 40,
+                transaction_id=host.manifest["transaction_id"],
+                plan_sha256=plan["plan_sha256"])
+
+
+def test_resume_stopped_component_uses_original_plan_without_second_bootout(
+        host, publisher, monkeypatch):
+    args = _stop_before_component_publication(host, monkeypatch)
+    original_id = args["transaction_id"]
+    result = ac.resume_stopped_control_component_update(host, **args)
+    assert result["outcome"] == "RESUMED"
+    assert result["transaction_id"] == original_id
+    assert sum("bootout" in cmd for cmd in host.commands) == 1
+    assert sum("bootstrap" in cmd for cmd in host.commands) == 1
+    assert not any("enable" in cmd for cmd in host.commands)
+    assert host.labels == {CONTROL: True, WORKER: False}
+    assert host.disabled == {CONTROL: False, WORKER: True}
+    assert json.loads(host.files.read(CONTROL_CONFIG))["proof_base_sha"] == TARGET_SHA
+    assert host.files.read(WORKER_CONFIG) == host.worker_raw
+    assert publisher == [original_id]
+    before = (list(host.commands), list(host.files.writes))
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ac.resume_stopped_control_component_update(host, **args)
+    assert before == (host.commands, host.files.writes)
+
+
+@pytest.mark.parametrize("drift", [
+    "transaction", "plan", "target", "phase", "binding", "control_running",
+    "worker_running", "worker_enabled", "control_disabled", "target_seal",
+    "archive", "control_config", "worker_config", "control_plist", "worker_plist",
+    "authority", "ceo_receipt", "component_receipt",
+])
+def test_resume_stopped_component_refuses_drift_without_effect(
+        host, publisher, monkeypatch, drift):
+    args = _stop_before_component_publication(host, monkeypatch)
+    if drift == "transaction":
+        args["transaction_id"] = "autonomy-ffffffffffff"
+    elif drift == "plan":
+        args["plan_sha256"] = "f" * 64
+    elif drift == "target":
+        args["target_sha"] = "f" * 40
+    elif drift == "phase":
+        host.manifest["phase"] = "CONTROL_BOOTSTRAP_RECORDED"
+    elif drift == "binding":
+        host.manifest["component_binding"] = {}
+    elif drift == "control_running":
+        host.labels[CONTROL] = True
+    elif drift == "worker_running":
+        host.labels[WORKER] = True
+    elif drift == "worker_enabled":
+        host.disabled[WORKER] = False
+    elif drift == "control_disabled":
+        host.disabled[CONTROL] = True
+    elif drift == "target_seal":
+        host.release_seals[TARGET_SHA] = "f" * 64
+    elif drift == "archive":
+        host.files.data[os.fspath(ac.AUTONOMY_TRANSACTION / "prior-control.json")] += b" "
+    else:
+        path = {
+            "control_config": CONTROL_CONFIG, "worker_config": WORKER_CONFIG,
+            "control_plist": CONTROL_PLIST, "worker_plist": WORKER_PLIST,
+            "authority": AUTONOMY_RECEIPT, "ceo_receipt": ac.CEO_SUBMIT_RECEIPT,
+            "component_receipt": ac.CONTROL_COMPONENT_RECEIPT,
+        }[drift]
+        host.files.data[os.fspath(path)] = host.files.data.get(os.fspath(path), b"") + b" "
+    before = (list(host.commands), list(host.files.writes), dict(host.files.data))
+    with pytest.raises((ac.TransactionEffectUnknown, ac.ComponentUpdateRefused)):
+        ac.resume_stopped_control_component_update(host, **args)
+    assert before == (host.commands, host.files.writes, host.files.data)
+    assert publisher == []
+
+
+def test_resume_rejects_unsealed_recovery_code_before_claim(host, monkeypatch):
+    claimed = []
+    monkeypatch.setattr(host, "_claim_transaction_owner", lambda: claimed.append(True))
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ac.resume_stopped_control_component_update(
+            host, target_sha=TARGET_SHA, recovery_sha="9" * 40,
+            transaction_id="autonomy-123456789abc", plan_sha256="f" * 64)
+    assert caught.value.code == "control_component_recovery_origin_invalid"
+    assert claimed == [] and host.commands == [] and host.files.writes == []
+
+
+def test_resume_parser_requires_original_identity():
+    parser = ac._parser()
+    args = parser.parse_args([
+        "resume-control-component", "--expected-sha", TARGET_SHA,
+        "--recovery-sha", "9" * 40, "--transaction-id", "autonomy-123456789abc",
+        "--plan-sha256", "f" * 64])
+    assert args.expected_sha == TARGET_SHA
+    with pytest.raises(SystemExit):
+        parser.parse_args(["resume-control-component", "--expected-sha", TARGET_SHA])
+
+
+def _ambient_component_fixture(monkeypatch, *, classification="attested"):
+    from types import SimpleNamespace
+    from control_plane import executive_ambient_process as ambient
+    from control_plane import executive_worker_broker as broker
+
+    monkeypatch.setattr(ac.pwd, "getpwnam", lambda name: SimpleNamespace(
+        pw_uid=450 if name == ac.CONTROL_USER else 451))
+    monkeypatch.setattr(ac.provider_worker_slots, "get_slot", lambda name: SimpleNamespace(
+        worker_uid=451, worker_user="_component_worker"))
+    pids = {450: (101,), 451: (102,)}
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: pids[uid])
+    identities = {}
+    for uid, rows in pids.items():
+        identities[uid] = ambient.AmbientProcessIdentity(
+            pid=rows[0], uid=uid, launchd_domain=f"user/{uid}",
+            launchd_label="com.apple.distnoted.xpc.agent",
+            launchd_reported_pid=rows[0],
+            plist_path="/System/Library/LaunchAgents/com.apple.distnoted.xpc.agent.plist",
+            program_path="/usr/sbin/distnoted", executable_path="/usr/sbin/distnoted",
+            executable_device=1, executable_inode=2,
+            codesign_identifier="com.apple.distnoted", codesign_verified=True)
+    class Classifier:
+        def classify(self, *, worker_uid):
+            return ambient.AmbientClassification(
+                classification, (identities[worker_uid],)
+                if classification == "attested" else ())
+    monkeypatch.setattr(ambient, "DarwinDistnotedClassifier", Classifier)
+    return pids, identities
+
+
+def test_source_component_accepts_only_attested_ambient_control_and_worker(monkeypatch):
+    _ambient_component_fixture(monkeypatch)
+    ac.ProductionControlComponentHost().require_service_uids_quiescent()
+    # The execution/arming owner retains the original stricter Control gate.
+    with pytest.raises(ac.ArmAdmissionError) as caught:
+        ac.ProductionArmHost().require_service_uids_quiescent()
+    assert caught.value.code == "service_uid_process_live"
+
+
+@pytest.mark.parametrize("failure", ["unattested", "extra_control", "extra_worker",
+                                    "unsigned", "wrong_uid", "wrong_launchd_pid",
+                                    "changed_pid"])
+def test_source_component_ambient_census_fails_closed(monkeypatch, failure):
+    import dataclasses
+    from control_plane import executive_worker_broker as broker
+    pids, identities = _ambient_component_fixture(
+        monkeypatch, classification="failed_closed" if failure == "unattested" else "attested")
+    if failure == "extra_control":
+        pids[450] = (101, 103)
+    elif failure == "extra_worker":
+        pids[451] = (102, 103)
+    elif failure == "unsigned":
+        identities[450] = dataclasses.replace(identities[450], codesign_verified=False)
+    elif failure == "wrong_uid":
+        identities[450] = dataclasses.replace(identities[450], uid=999)
+    elif failure == "wrong_launchd_pid":
+        identities[450] = dataclasses.replace(identities[450], launchd_reported_pid=999)
+    elif failure == "changed_pid":
+        calls = []
+        def changing(uid):
+            calls.append(uid)
+            return pids[uid] if len(calls) == 1 else (999,)
+        monkeypatch.setattr(broker, "_ps_pids_for_uid", changing)
+    with pytest.raises(ac.ArmAdmissionError):
+        ac.ProductionControlComponentHost().require_service_uids_quiescent()

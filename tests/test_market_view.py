@@ -25,6 +25,7 @@ _trading_days_since so intent (not a pinned live state) is asserted.  No account
 """
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from pathlib import Path
@@ -46,6 +47,24 @@ import build_fixtures as FIX               # noqa: E402
 # ---------------------------------------------------------------------------
 # helpers — write a frozen regime + cycles payload into tmp and patch the readers
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def _market_view_doctrine_snapshot():
+    """Read the real config once; these frozen-view cases do not test YAML reloads."""
+    return RF._doctrine()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_market_view_doctrine(monkeypatch, _market_view_doctrine_snapshot):
+    """Give every real reader a fresh config value without repeating YAML parsing.
+
+    Each call still gets its own mutable tree, matching the production loader's
+    isolation. Individual cases can override this fixture through monkeypatch.
+    """
+    monkeypatch.setattr(
+        RF, "_doctrine", lambda: copy.deepcopy(_market_view_doctrine_snapshot)
+    )
+
 
 def _patch_regime(monkeypatch, tmp_path, regime: dict, cycles: dict | None = None,
                   *, age: int = 0) -> None:

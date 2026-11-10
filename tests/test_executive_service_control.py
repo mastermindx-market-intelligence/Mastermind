@@ -1807,9 +1807,13 @@ def _component_run(tmp_path, verb, extra_args, *, controller_from_release=True,
             assert source not in text
         script.write_text(text)
         expected_dir.mkdir(parents=True, exist_ok=True)
+        if controller_from_release:
+            (expected_dir / "service-control.sh").write_text(text, encoding="utf-8")
         helper = expected_dir / "mcp_component_update.py"
         if helper_kind == "file":
             helper.write_text("# disposable component updater\n", encoding="utf-8")
+            (expected_dir / "autonomy_control.py").write_text(
+                "# disposable Control owner\n", encoding="utf-8")
         elif helper_kind == "symlink":
             target = tmp_path / "elsewhere-updater.py"
             target.write_text("# a different file\n", encoding="utf-8")
@@ -1946,3 +1950,33 @@ def test_component_verbs_return_the_updater_status_unchanged(tmp_path, helper_ex
         helper_exit=helper_exit)
     assert argv is not None
     assert code == helper_exit
+
+
+def test_control_resume_wrapper_binds_recovery_release_and_original_identity(tmp_path):
+    original_target = "a" * 40
+    txn = "autonomy-123456789abc"
+    args = ("--expected-sha", COMPONENT_SHA, "--target-sha", original_target,
+            "--transaction-id", txn, "--plan-sha256", COMPONENT_PLAN)
+    result, argv, expected_dir = _component_run(
+        tmp_path, "resume-control-component", args)
+    code, out, err, calls, remaining, *_ = result
+    assert code == 0, (out, err)
+    assert argv == ["-I", "-S", "-B", str(expected_dir / "autonomy_control.py"),
+                    "resume-control-component", "--expected-sha", original_target,
+                    "--recovery-sha", COMPONENT_SHA,
+                    "--transaction-id", txn, "--plan-sha256", COMPONENT_PLAN]
+    assert not calls and not remaining
+
+
+@pytest.mark.parametrize("extra", [
+    (), ("--expected-sha", COMPONENT_SHA),
+    ("--expected-sha", COMPONENT_SHA, "--target-sha", "a" * 40,
+     "--transaction-id", "wrong", "--plan-sha256", COMPONENT_PLAN),
+    ("--expected-sha", COMPONENT_SHA, "--target-sha", "a" * 40,
+     "--transaction-id", "autonomy-123456789abc", "--plan-sha256", COMPONENT_PLAN,
+     "--unknown", "value"),
+])
+def test_control_resume_wrapper_rejects_incomplete_or_unbound_argv(tmp_path, extra):
+    result, argv, _ = _component_run(tmp_path, "resume-control-component", extra)
+    code, _, _, calls, remaining, *_ = result
+    assert code == 64 and argv is None and not calls and not remaining

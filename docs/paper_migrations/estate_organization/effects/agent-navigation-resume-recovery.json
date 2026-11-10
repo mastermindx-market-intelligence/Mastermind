@@ -1,0 +1,431 @@
+{
+  "schema": "paper.estate.recovered_guides.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "observed_at": "2026-11-09T12:25:19.437Z",
+  "source_head": "4209364c360a5fd40e6b5e8d484c50bb02da2790",
+  "carrier": "Mastermind Paper",
+  "finding": "Three complete local guides and one empty planned guide page were present beyond the saved 20-guide checkpoint; no prior mutations replayed.",
+  "guides": [
+    {
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "page_id": "p-1-0",
+      "artboards": [
+        {
+          "id": "5E9-0",
+          "name": "00A · START HERE · Intelligence Hub Workspace Index",
+          "childCount": 12,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        }
+      ],
+      "text_nodes": [
+        {
+          "id": "8MT-0",
+          "name": "READ_NEXT 1 | LEARN",
+          "text": "01 · LEARN — Scope and market destinations\nFILE_ID: 01M2VWK62FA5S4VVF6G7SBPE5J · PAGE_ID: p-1-0 · BOARD_IDS: 5E9-0\nhttps://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-1-0"
+        },
+        {
+          "id": "8MV-0",
+          "name": "READ_NEXT 2 | CONTRACT",
+          "text": "02 · CONTRACT — Inspect R4 contracts\nFILE_ID: 01M2VWK62FA5S4VVF6G7SBPE5J · PAGE_ID: p-2-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-2-0"
+        },
+        {
+          "id": "8MX-0",
+          "name": "READ_NEXT 3 | BUILD_READ",
+          "text": "03 · BUILD_READ — Inspect clarity and build-source evidence\nFILE_ID: 01M2VWK62FA5S4VVF6G7SBPE5J · PAGE_ID: p-C-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-C-0"
+        },
+        {
+          "id": "8MZ-0",
+          "name": "READ_NEXT 4 | DESKTOP",
+          "text": "04 · DESKTOP — Select actual desktop product boards\nFILE_ID: 01M2VWK62FA5S4VVF6G7SBPE5J · PAGE_ID: p-3-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-3-0"
+        },
+        {
+          "id": "8N1-0",
+          "name": "READ_NEXT 5 | MOBILE",
+          "text": "05 · MOBILE — Select actual mobile product boards\nFILE_ID: 01M2VWK62FA5S4VVF6G7SBPE5J · PAGE_ID: p-4-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M2VWK62FA5S4VVF6G7SBPE5J/p-4-0"
+        },
+        {
+          "id": "8N3-0",
+          "name": "SOURCE_QUALIFICATION",
+          "text": "SOURCE_QUALIFICATION\nUS Buy-Board and China Stocks Board are distinct market destinations. AXON 157-0 remains a held empty destination; the represented AP-0 action is Evidence unavailable. Do not derive a working evidence link or replacement screen from that shell. Source-only imports, canaries and held transfer pages are outside ordinary product extraction."
+        },
+        {
+          "id": "8N5-0",
+          "name": "READING_RULES | source",
+          "text": "USE · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.\nREADING PROTOCOL · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0\nCURRENT ORGANIZATION CHECKPOINT · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0\nDATED SCOPE SNAPSHOT · baf6737 · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json\nOBSERVED · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing."
+        },
+        {
+          "id": "5EB-0",
+          "name": "INTELLIGENCE HUB · R…",
+          "text": "INTELLIGENCE HUB · R4 WORKSPACE"
+        },
+        {
+          "id": "5EC-0",
+          "name": "Find the journey.\nVe…",
+          "text": "Find the journey.\nVerify the evidence."
+        },
+        {
+          "id": "5ED-0",
+          "name": "Start: p-2-0 · 00 Pr…",
+          "text": "Start: p-2-0 · 00 Product brief → 01 Build map. Find product journeys and build references below; historical Alt Data remains source only (p-8-0)."
+        },
+        {
+          "id": "5EO-0",
+          "name": "00",
+          "text": "00"
+        },
+        {
+          "id": "5ES-0",
+          "name": "Four core R4 contrac…",
+          "text": "Four core R4 contracts, plus provisional research-list returns, score-meaning references and the archived build log."
+        },
+        {
+          "id": "5ET-0",
+          "name": "AUTHORITY + REFERENC…",
+          "text": "AUTHORITY + REFERENCES"
+        },
+        {
+          "id": "5EW-0",
+          "name": "01",
+          "text": "01"
+        },
+        {
+          "id": "5F0-0",
+          "name": "US and China command…",
+          "text": "US and China commands, compare, memory, coverage/alert draft and proposed research-order help. Status stays on each board."
+        },
+        {
+          "id": "5F1-0",
+          "name": "6 BOARDS · MIXED STA…",
+          "text": "6 BOARDS · MIXED STATUS"
+        },
+        {
+          "id": "5F4-0",
+          "name": "02",
+          "text": "02"
+        },
+        {
+          "id": "5F8-0",
+          "name": "EN/ZH command, evide…",
+          "text": "EN/ZH command, evidence, filing and light/dark counterparts aligned by journey."
+        },
+        {
+          "id": "5F9-0",
+          "name": "13 BOARDS",
+          "text": "13 BOARDS"
+        },
+        {
+          "id": "5FC-0",
+          "name": "03",
+          "text": "03"
+        },
+        {
+          "id": "5FG-0",
+          "name": "Research list/search…",
+          "text": "Research list/search, risk and source recovery, plus four provisional evidence/filing returns tied to a research-list origin."
+        },
+        {
+          "id": "5FH-0",
+          "name": "17 + 4 PROVISIONAL",
+          "text": "17 + 4 PROVISIONAL"
+        },
+        {
+          "id": "5FK-0",
+          "name": "04",
+          "text": "04"
+        },
+        {
+          "id": "5FO-0",
+          "name": "First-load and reten…",
+          "text": "First-load and retention states, combined filters, light/dark EN, and the complete light-ZH sequence."
+        },
+        {
+          "id": "5FP-0",
+          "name": "23 BOARDS",
+          "text": "23 BOARDS"
+        },
+        {
+          "id": "85E-0",
+          "name": "BUILD",
+          "text": "BUILD"
+        },
+        {
+          "id": "85I-0",
+          "name": "Preserved methods, s…",
+          "text": "Preserved methods, score meanings, alert limits and return contracts. Read alongside the R4 source bindings; this page adds no runtime owner."
+        },
+        {
+          "id": "85J-0",
+          "name": "BUILD REFERENCE",
+          "text": "BUILD REFERENCE"
+        },
+        {
+          "id": "85L-0",
+          "name": "ARCHIVE",
+          "text": "ARCHIVE"
+        },
+        {
+          "id": "85P-0",
+          "name": "Original US Command …",
+          "text": "Original US Command geometry. The current customer-layout reference is on p-3-0 at 7FJ-0; current contracts retain their authority."
+        },
+        {
+          "id": "85Q-0",
+          "name": "ARCHIVE",
+          "text": "ARCHIVE"
+        },
+        {
+          "id": "5FS-0",
+          "name": "99",
+          "text": "99"
+        },
+        {
+          "id": "5FW-0",
+          "name": "AXON evidence detail…",
+          "text": "AXON evidence detail 43 is an empty held shell—not a build route. Icon QA 76–78 remain fenced; source states were not copied."
+        },
+        {
+          "id": "5FX-0",
+          "name": "DO NOT BUILD",
+          "text": "DO NOT BUILD"
+        },
+        {
+          "id": "5G0-0",
+          "name": "Location map only. E…",
+          "text": "Location map only. Existing R4 contracts and supersession labels remain authoritative. The source master and preservation/archive material stay untouched."
+        },
+        {
+          "id": "5G1-0",
+          "name": "Transfer state: 62 c…",
+          "text": "Transfer state: 62 complete · 1 held shell · 3 source-only Icon-QA states"
+        },
+        {
+          "id": "8MP-0",
+          "name": "INTERNAL AGENT GUIDE…",
+          "text": "INTERNAL AGENT GUIDE · NOT PRODUCT UI"
+        },
+        {
+          "id": "8MQ-0",
+          "name": "Intelligence Hub · R…",
+          "text": "Intelligence Hub · R4 Workspace"
+        },
+        {
+          "id": "8MR-0",
+          "name": "FILE_ID: 01M2VWK62FA…",
+          "text": "FILE_ID: 01M2VWK62FA5S4VVF6G7SBPE5J\nPAGE_ID: p-1-0\nFILE_ROLES: working_design\nGUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no"
+        },
+        {
+          "id": "5EH-0",
+          "name": "62 source boards rec…",
+          "text": "62 source boards reconstructed"
+        },
+        {
+          "id": "5EJ-0",
+          "name": "83 tokens preserved",
+          "text": "83 tokens preserved"
+        },
+        {
+          "id": "5EL-0",
+          "name": "4 held source states",
+          "text": "4 held source states"
+        },
+        {
+          "id": "5EQ-0",
+          "name": "Contracts + Navigati…",
+          "text": "Contracts + Navigation"
+        },
+        {
+          "id": "5ER-0",
+          "name": "p-2-0 · start at boa…",
+          "text": "p-2-0 · start at board 00"
+        },
+        {
+          "id": "5EY-0",
+          "name": "Desktop Commands + E…",
+          "text": "Desktop Commands + Evidence"
+        },
+        {
+          "id": "5EZ-0",
+          "name": "Page 01",
+          "text": "Page 01"
+        },
+        {
+          "id": "5F6-0",
+          "name": "Mobile Commands + Ev…",
+          "text": "Mobile Commands + Evidence"
+        },
+        {
+          "id": "5F7-0",
+          "name": "Page 02",
+          "text": "Page 02"
+        },
+        {
+          "id": "5FE-0",
+          "name": "Research + Risk Stat…",
+          "text": "Research + Risk States"
+        },
+        {
+          "id": "5FF-0",
+          "name": "Page 03",
+          "text": "Page 03"
+        },
+        {
+          "id": "5FM-0",
+          "name": "Loading, Filters + L…",
+          "text": "Loading, Filters + Locale Coverage"
+        },
+        {
+          "id": "5FN-0",
+          "name": "Page 04",
+          "text": "Page 04"
+        },
+        {
+          "id": "85G-0",
+          "name": "Clarity preservation",
+          "text": "Clarity preservation"
+        },
+        {
+          "id": "85H-0",
+          "name": "p-C-0 · board 7FE-0",
+          "text": "p-C-0 · board 7FE-0"
+        },
+        {
+          "id": "85N-0",
+          "name": "Original product geo…",
+          "text": "Original product geometry"
+        },
+        {
+          "id": "85O-0",
+          "name": "p-B-0 · board 86-0",
+          "text": "p-B-0 · board 86-0"
+        },
+        {
+          "id": "5FU-0",
+          "name": "Transfer QA + Held",
+          "text": "Transfer QA + Held"
+        },
+        {
+          "id": "5FV-0",
+          "name": "Page 99 · not build …",
+          "text": "Page 99 · not build authority"
+        }
+      ],
+      "disposition": "PRESERVE_READBACK_VERIFIED"
+    },
+    {
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "page_id": "p-2-0",
+      "artboards": [
+        {
+          "id": "I6-0",
+          "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+          "childCount": 5,
+          "width": 1440,
+          "height": null,
+          "worldX": null,
+          "worldY": null
+        }
+      ],
+      "text_nodes": [
+        {
+          "id": "IC-0",
+          "name": "READ_NEXT 1 | LEARN",
+          "text": "01 · LEARN — Existing scope entry; inspect its named product/contract boards\nFILE_ID: 01M6Y2QK8TQZRN8T4BHG10CJXT · PAGE_ID: p-1-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
+        },
+        {
+          "id": "IE-0",
+          "name": "READ_NEXT 2 | SOURCE_SELECTION",
+          "text": "02 · SOURCE_SELECTION — Read applicable family source; no current build selection is inferred here\nFILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0"
+        },
+        {
+          "id": "IG-0",
+          "name": "SOURCE_QUALIFICATION",
+          "text": "SOURCE_QUALIFICATION\nPreserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility."
+        },
+        {
+          "id": "II-0",
+          "name": "READING_RULES | source",
+          "text": "USE · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.\nREADING PROTOCOL · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0\nCURRENT ORGANIZATION CHECKPOINT · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0\nDATED SCOPE SNAPSHOT · baf6737 · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json\nOBSERVED · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing."
+        },
+        {
+          "id": "I8-0",
+          "name": "INTERNAL AGENT GUIDE…",
+          "text": "INTERNAL AGENT GUIDE · NOT PRODUCT UI"
+        },
+        {
+          "id": "I9-0",
+          "name": "Intraday Flow · R1 D…",
+          "text": "Intraday Flow · R1 Draft"
+        },
+        {
+          "id": "IA-0",
+          "name": "FILE_ID: 01M6Y2QK8TQ…",
+          "text": "FILE_ID: 01M6Y2QK8TQZRN8T4BHG10CJXT\nPAGE_ID: p-2-0\nFILE_ROLES: proposal\nGUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no"
+        }
+      ],
+      "disposition": "PRESERVE_READBACK_VERIFIED"
+    },
+    {
+      "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "page_id": "p-9-0",
+      "artboards": [
+        {
+          "id": "4RX-0",
+          "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+          "childCount": 5,
+          "width": 1440,
+          "height": null,
+          "worldX": null,
+          "worldY": null
+        }
+      ],
+      "text_nodes": [
+        {
+          "id": "4S3-0",
+          "name": "READ_NEXT 1 | LEARN",
+          "text": "01 · LEARN — Existing scope entry; inspect its named product/contract boards\nFILE_ID: 01M6Y3CRMC345RTB3ZDP3XSYRP · PAGE_ID: p-1-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-1-0"
+        },
+        {
+          "id": "4S5-0",
+          "name": "READ_NEXT 2 | BUILD_READ",
+          "text": "02 · BUILD_READ — Inspect session-evidence interaction and build contract\nFILE_ID: 01M6Y3CRMC345RTB3ZDP3XSYRP · PAGE_ID: p-2-0 · BOARD: inspect the requested page result\nhttps://app.paper.design/file/01M6Y3CRMC345RTB3ZDP3XSYRP/p-2-0"
+        },
+        {
+          "id": "4S7-0",
+          "name": "SOURCE_QUALIFICATION",
+          "text": "SOURCE_QUALIFICATION\nPreserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility."
+        },
+        {
+          "id": "4S9-0",
+          "name": "READING_RULES | source",
+          "text": "USE · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.\nREADING PROTOCOL · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0\nCURRENT ORGANIZATION CHECKPOINT · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0\nDATED SCOPE SNAPSHOT · baf6737 · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json\nOBSERVED · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing."
+        },
+        {
+          "id": "4RZ-0",
+          "name": "INTERNAL AGENT GUIDE…",
+          "text": "INTERNAL AGENT GUIDE · NOT PRODUCT UI"
+        },
+        {
+          "id": "4S0-0",
+          "name": "Market Breadth · Com…",
+          "text": "Market Breadth · Command Center R1"
+        },
+        {
+          "id": "4S1-0",
+          "name": "FILE_ID: 01M6Y3CRMC3…",
+          "text": "FILE_ID: 01M6Y3CRMC345RTB3ZDP3XSYRP\nPAGE_ID: p-9-0\nFILE_ROLES: retained_reference\nGUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no"
+        }
+      ],
+      "disposition": "PRESERVE_READBACK_VERIFIED"
+    },
+    {
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "page_id": "p-9-0",
+      "artboards": [],
+      "text_nodes": [],
+      "disposition": "PRESERVE_EMPTY_PAGE_COMPLETE_MISSING_CONTENT_AFTER_FRESH_READ"
+    }
+  ]
+}

@@ -45,8 +45,44 @@ def _execution_provenance() -> dict:
     return dict(_INFERENCE_PROVENANCE.get() or {"source": "claude_cli"})
 
 
+_JSON_TRANSPORT_LIMIT_BYTES = 8_000
+_JSON_TRANSPORT_ERRORS = {
+    "too_large": '{"error":"MCP_RESPONSE_TOO_LARGE"}',
+    "not_json": '{"error":"MCP_RESPONSE_NOT_JSON"}',
+}
+
+
+# These fields qualify the evidence or a modifying outcome. Compaction must keep
+# their complete values; an explicit transport error is safer than losing a fence.
+_JSON_TRANSPORT_QUALIFICATION_KEYS = frozenset({
+    "evidence_grade", "missing_reason", "fallback",
+    "read_status", "failed_sources", "degraded_sources", "error", "note",
+    "intake_note", "salience_note", "regime_status", "overnight_status",
+    "live", "status", "portfolio_id", "active", "lifecycle",
+    "data_degraded", "stockdata_present", "n_scored", "thin_evidence",
+    "gate_status", "passed", "size_authority", "vetoes", "reason",
+    "write_status", "proposal_queued", "paper_saved",
+})
+
+
 def _ok(text: str) -> dict:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _json_transport_error(kind: str) -> dict:
+    return {
+        "content": [{"type": "text", "text": _JSON_TRANSPORT_ERRORS[kind]}],
+        "is_error": True,
+    }
+
+
+def _serialize_json_transport(value):
+    """Serialize strict JSON and return its UTF-8 transport status."""
+    try:
+        payload = json.dumps(value, default=str, ensure_ascii=False, allow_nan=False)
+        return payload, "ok" if len(payload.encode("utf-8")) <= _JSON_TRANSPORT_LIMIT_BYTES else "too_large"
+    except Exception:
+        return None, "not_json"
 
 
 def _compact_json_value(
@@ -61,7 +97,8 @@ def _compact_json_value(
         return "<nested context omitted>"
     if isinstance(value, dict):
         return {
-            str(k): _compact_json_value(
+            str(k): v if k in _JSON_TRANSPORT_QUALIFICATION_KEYS or k in _FRESHNESS_KEYS
+            else _compact_json_value(
                 v,
                 list_limit=list_limit,
                 str_limit=str_limit,
@@ -92,36 +129,66 @@ def _compact_json_value(
 
 
 def _json(obj) -> dict:
-    """Return a valid JSON tool result under the 8k transport budget.
-
-    The old implementation sliced serialized bytes, which emitted malformed JSON.  Progressive
-    structural compaction keeps top-level keys and the highest-ranked list rows instead.
-    """
-    payload = json.dumps(obj, default=str, ensure_ascii=False)
-    if len(payload) <= 8000:
-        return _ok(payload)
-    for list_limit, str_limit in ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72)):
-        compact = _compact_json_value(
-            obj,
-            list_limit=list_limit,
-            str_limit=str_limit,
-        )
-        if isinstance(compact, dict):
-            compact["_transport_truncated"] = True
-        payload = json.dumps(compact, default=str, ensure_ascii=False)
-        if len(payload) <= 8000:
+    """Return strict, UTF-8-bounded JSON or a fixed transport error result."""
+    try:
+        # Validate the complete original value before compaction can omit a bad row.
+        payload, status = _serialize_json_transport(obj)
+        if status == "ok":
             return _ok(payload)
-    # Extremely wide objects still return valid JSON with their top-level scalar contract, plus
-    # the small freshness blocks: a read must never reach the model without its clocks.
-    fallback = {
-        str(k): v
-        for k, v in (obj.items() if isinstance(obj, dict) else [])
-        if v is None or isinstance(v, (bool, int, float, str))
-        or (k in _FRESHNESS_KEYS and isinstance(v, dict))
-    }
-    fallback["_transport_truncated"] = True
-    fallback["_note"] = "Nested payload exceeded the MCP transport budget."
-    return _ok(json.dumps(fallback, default=str, ensure_ascii=False))
+        if status == "not_json":
+            return _json_transport_error("not_json")
+        if not isinstance(obj, dict):
+            return _json_transport_error("too_large")
+        limits = ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72))
+        for list_limit, str_limit in limits:
+            compact = _compact_json_value(
+                obj, list_limit=list_limit, str_limit=str_limit,
+            )
+            compact["_transport_truncated"] = True
+            payload, status = _serialize_json_transport(compact)
+            if status == "ok":
+                return _ok(payload)
+            if status == "not_json":
+                return _json_transport_error("not_json")
+
+        # Preserve the current scalar fallback: wide nested evidence is omitted as
+        # a whole, while its original clocks, health and outcome fences remain.
+        required = _JSON_TRANSPORT_QUALIFICATION_KEYS.union(_FRESHNESS_KEYS)
+        fallback = {
+            str(k): v for k, v in obj.items()
+            if v is None or isinstance(v, (bool, int, float, str)) or k in required
+        }
+        if not fallback:
+            return _json_transport_error("too_large")
+        metadata = {
+            "_transport_truncated": True,
+            "_note": "Nested payload exceeded the MCP transport budget.",
+        }
+        payload, status = _serialize_json_transport({**fallback, **metadata})
+        if status == "ok":
+            return _ok(payload)
+        if status == "not_json":
+            return _json_transport_error("not_json")
+
+        # A wide scalar mapping may also exceed the cap. Retain a ranked prefix
+        # plus every qualifier, even when those qualifiers occur after the prefix.
+        for list_limit, str_limit in limits:
+            compact = {
+                k: v if k in required else _compact_json_value(
+                    v, list_limit=list_limit, str_limit=str_limit,
+                )
+                for index, (k, v) in enumerate(fallback.items())
+                if index < list_limit or k in required
+            }
+            compact.update(metadata)
+            payload, status = _serialize_json_transport(compact)
+            if status == "ok":
+                return _ok(payload)
+            if status == "not_json":
+                return _json_transport_error("not_json")
+        return _json_transport_error("too_large")
+    except Exception:
+        return _json_transport_error("not_json")
 
 
 def _mapping_field_checked(mapping, key):
@@ -193,7 +260,7 @@ def _read_json(p: Path):
 # producer retained a previous build's feed), `retained_from_previous_build`, `generated_utc`.
 # An absent clock is null — never inferred from the file's mtime or from today's date.
 _FRESHNESS_BASIS = "vendored_macro_file"
-_FRESHNESS_KEYS = ("freshness", "alt_freshness")
+_FRESHNESS_KEYS = ("freshness", "alt_freshness", "news_freshness")
 
 
 def _ticker_record_checked(mapping, ticker):
@@ -282,6 +349,21 @@ def _freshness(doc, rel) -> dict:
             "generated_utc": _clock("generated_utc"),
             "basis": _FRESHNESS_BASIS,
             "source_file": rel}
+
+
+def _news_freshness(doc) -> dict:
+    """News-input provenance carried by the unified producer, not its build clock."""
+    doc = doc if isinstance(doc, dict) else {}
+
+    def text(key):
+        value = doc.get(key)
+        return value if isinstance(value, str) and value.strip() else None
+
+    retained = doc.get("retained_from_previous_build")
+    return {"source_asof": text("source_asof"),
+            "source_asof_basis": text("source_asof_basis"),
+            "retained_from_previous_build": retained if isinstance(retained, bool) else None,
+            "retained_reason": text("retained_reason")}
 
 
 def _pick(d, keys):
@@ -446,9 +528,16 @@ async def get_regime(args):
 async def get_overnight_tape(args):
     try:
         from data_layer import overnight
-        return _json(overnight.tape())
-    except Exception as e:  # noqa: BLE001
-        return _json({"error": repr(e)[:200], "note": "overnight tape unavailable"})
+        return _json(overnight.tape(strict=True))
+    except Exception:  # noqa: BLE001
+        return _json({
+            "overnight_status": "unavailable",
+            "risk": None,
+            "groups": None,
+            "live": False,
+            "error": "overnight_tape_unavailable",
+            "note": "overnight tape unavailable",
+        })
 
 
 @tool("get_themes", "Narrative baskets with recent relative performance (the theme universe).",
@@ -854,6 +943,7 @@ async def get_intelligence(args):
                 "ticker": t, **rec,
                 "note": "News flow (what the tape says) + alt-data signal (what smart money does), side by side. Context-only — the divergence between them is the read; never sizes alone.",
                 "freshness": _freshness(unified_store, urel), "evidence_grade": "vendored_snapshot",
+                "news_freshness": _news_freshness(unified_store.get("news_freshness")),
             }
             if unified_failed:
                 payload["read_status"] = "partial"
@@ -1933,12 +2023,37 @@ class InferenceToolError(ValueError):
     """Bounded protocol refusal before any registered handler executes."""
 
 
+# The Fabric inference view is DERIVED, lazy and read-only: the incumbent bot
+# roster plus the cognition owner's existing read objects under the cognition
+# owner's own namespace. It is a view of existing handlers, not a second
+# roster and not a new authority: the legacy bot server, _ALL and TOOL_NAMES
+# keep exactly their incumbent 25-tool authority, and no cognition object is
+# relabelled as mcp__bot__.
+def _inference_tool_view() -> dict:
+    """Return the derived fully-qualified-name -> existing handler object view.
+
+    The cognition import is deliberately lazy. brain.cognition_mcp imports
+    brain.autonomous_mcp, which imports brain.bot_mcp; a module-level import
+    here would close that cycle and break both owners. The first call happens
+    after this module has finished executing.
+    """
+    from brain import cognition_mcp
+
+    reads = cognition_mcp._READ_TOOLS
+    view = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    for tool in reads:
+        view[f"mcp__{cognition_mcp.SERVER_NAME}__{tool.name}"] = tool
+    if len(view) != len(_ALL) + len(reads):
+        raise InferenceToolError("fabric_tool_roster_invalid")
+    return view
+
+
 def inference_tool_catalog() -> list[dict]:
     """Describe exactly the incumbent registered roster, without SDK-only tools."""
     from jsonschema import Draft202012Validator
 
     catalog = []
-    for tool in _ALL:
+    for name, tool in _inference_tool_view().items():
         schema = copy.deepcopy(tool.input_schema)
         if schema == {}:
             schema = {"type": "object", "properties": {}}
@@ -1949,7 +2064,7 @@ def inference_tool_catalog() -> list[dict]:
         # smuggled through JSON Schema's permissive extra-property default.
         schema["additionalProperties"] = False
         Draft202012Validator.check_schema(schema)
-        catalog.append({"name": f"mcp__{SERVER_NAME}__{tool.name}",
+        catalog.append({"name": name,
                         "description": tool.description, "input_schema": schema})
     if len({row["name"] for row in catalog}) != len(catalog):
         raise InferenceToolError("fabric_tool_roster_invalid")
@@ -2001,7 +2116,7 @@ async def invoke_inference_tool(call: dict, *, provenance: dict) -> dict:
     if (set(provenance) != {"provider", "model", "turn_id"}
             or any(not isinstance(value, str) or not value for value in provenance.values())):
         raise InferenceToolError("fabric_tool_provenance_invalid")
-    tools = {f"mcp__{SERVER_NAME}__{tool.name}": tool for tool in _ALL}
+    tools = _inference_tool_view()
     token = _INFERENCE_PROVENANCE.set({"source": "fabric_application", **provenance})
     try:
         return await tools[call["name"]].handler(copy.deepcopy(call["input"]))

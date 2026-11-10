@@ -1,0 +1,35 @@
+{
+  "schema": "mastermind.hermes_h4_evidence_identity_review.v1",
+  "guard_blob": "eddee669f9d504310819d16f2f6984226120675f",
+  "mask_blob": "33e5a6c60b7a352a53b1f6a8ed425f174182b6cd",
+  "original_source": "7118a1374bac0c70a695989bfccc1a84d54026b3",
+  "receipt_bytes_unchanged": true,
+  "guard_implementation_unchanged": true,
+  "runtime_authority": false,
+  "results": [
+    {
+      "path": "review_evidence/hermes_h4/profile-mapping-20261107.json",
+      "sha256": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+      "unreviewed_findings": 3,
+      "reviewed_findings": 0,
+      "drift_findings": {
+        "changed_identity": 3,
+        "unrelated_byte_drift": 3,
+        "new_identity": 4
+      },
+      "renamed_findings": 3
+    },
+    {
+      "path": "review_evidence/hermes_h4/native-preimage-qualification-20261107.json",
+      "sha256": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+      "unreviewed_findings": 12,
+      "reviewed_findings": 0,
+      "drift_findings": {
+        "changed_identity": 12,
+        "unrelated_byte_drift": 12,
+        "new_identity": 13
+      },
+      "renamed_findings": 12
+    }
+  ]
+}

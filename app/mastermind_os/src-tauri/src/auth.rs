@@ -8,6 +8,7 @@ mod draft_continuity;
 mod transport_diagnostics;
 use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};
 pub mod native_draft_identity;
+pub mod authorization_continuation;
 #[cfg(test)]
 mod draft_recovery_tests;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -22,6 +23,8 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 pub mod instruction_admission;
+pub mod primary_account;
+pub mod work_authorization;
 pub mod project_access;
 use url::Url;
 
@@ -94,12 +97,20 @@ struct Token {
     // Derived from the exact validated Executive grant; stays in the native owner.
     executive_send: bool,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignInIntent {
+    LegacyFull,
+    PrimaryAccount,
+}
+
 struct Pending {
     state: String,
     verifier: String,
     resource: Resource,
     expires: Instant,
     generation: u64,
+    continuation: Option<authorization_continuation::ContentContinuation>,
+    intent: SignInIntent,
 }
 struct Inner {
     draft_continuity: draft_continuity::DraftContinuity,
@@ -118,6 +129,7 @@ struct Inner {
     content: Option<Token>,
     reason: Option<&'static str>,
     restoring: bool,
+    content_timeout: Option<authorization_continuation::ContentTimeout>,
 }
 impl Inner {
     fn new(client: Option<&str>) -> Self {
@@ -144,6 +156,7 @@ impl Inner {
             content: None,
             reason: None,
             restoring: false,
+            content_timeout: None,
         }
     }
     fn token(&self, resource: Resource) -> Option<&Token> {
@@ -258,8 +271,16 @@ impl Inner {
         self.acquisition = None;
         self.content = None;
         self.reason = None;
+        self.content_timeout = None;
     }
+    #[cfg(test)]
     fn transaction(&mut self, resource: Resource) -> Result<String> {
+        self.transaction_for(resource, SignInIntent::LegacyFull)
+    }
+    fn transaction_for(&mut self, resource: Resource, intent: SignInIntent) -> Result<String> {
+        if intent == SignInIntent::PrimaryAccount && resource == Resource::Executive {
+            return Err("PRIMARY_AUTH_SCOPE_REFUSED".into());
+        }
         if resource == Resource::Executive {
             if self.executive_resource.is_none() { return Err("EXECUTIVE_UNCONFIGURED".into()); }
             self.clear_executive();
@@ -281,15 +302,20 @@ impl Inner {
             resource,
             expires: Instant::now() + TRANSACTION_TTL,
             generation: self.generation,
+            continuation: None,
+            intent,
         });
         Ok(url)
     }
     fn initial_sign_in_transaction(&mut self) -> Result<String> {
+        self.initial_sign_in_transaction_for(SignInIntent::LegacyFull)
+    }
+    fn initial_sign_in_transaction_for(&mut self, intent: SignInIntent) -> Result<String> {
         // Request a fresh login UI on explicit Sign in so an unrelated browser
         // SSO session can be changed. This hint is not identity
         // proof; the normal trusted issuer and resource checks still apply.
         // Only this initial handoff requests it. Chained grants keep SSO.
-        let url = self.transaction(Resource::Acquisition)?;
+        let url = self.transaction_for(Resource::Acquisition, intent)?;
         Ok(format!("{url}&prompt=login"))
     }
     fn expire_transaction(&mut self, generation: u64, expires: Instant, now: Instant) -> bool {
@@ -303,11 +329,13 @@ impl Inner {
         }
         let Some(pending) = self.pending.take() else { return false; };
         self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+        self.remember_content_timeout(&pending);
         true
     }
     fn consume(&mut self, callback: &str) -> Result<(Pending, String, String)> {
         // Malformed or unrelated callbacks cannot cancel another transaction.
         let (state, code, error) = parse_callback(callback)?;
+        if error && self.observe_timed_out_refusal(&state) { return Err("AUTHORIZATION_REFUSED".into()); }
         let pending = self.pending.as_ref().ok_or("AUTH_CALLBACK_UNEXPECTED")?;
         if state != pending.state {
             return Err("AUTH_STATE_MISMATCH".into());
@@ -315,13 +343,18 @@ impl Inner {
         let pending = self.pending.take().ok_or("AUTH_CALLBACK_UNEXPECTED")?;
         if pending.expires <= Instant::now() || pending.generation != self.generation {
             self.fail_transaction(pending.resource, "AUTH_TRANSACTION_EXPIRED");
+            if !error { self.remember_content_timeout(&pending); }
             return Err("AUTH_TRANSACTION_EXPIRED".into());
         }
         if error {
             self.fail_transaction(pending.resource, "AUTHORIZATION_REFUSED");
             return Err("AUTHORIZATION_REFUSED".into());
         }
+        if pending.intent == SignInIntent::PrimaryAccount && pending.resource == Resource::Executive {
+            return Err("PRIMARY_AUTH_SCOPE_REFUSED".into());
+        }
         self.exchanging = true;
+        self.continuation_exchange_guard(&pending)?;
         if pending.resource == Resource::Executive { self.executive_reason = ExecutiveReason::Exchanging; }
         Ok((
             pending,
@@ -334,25 +367,34 @@ impl Inner {
     }
     fn finish_exchange(
         &mut self,
-        generation: u64,
-        resource: Resource,
+        pending: &Pending,
         token: Result<Token>,
     ) -> Option<String> {
-        if self.generation != generation || !self.exchanging {
+        let resource = pending.resource;
+        if self.generation != pending.generation || !self.exchanging {
             return None;
         }
         self.exchanging = false;
+        if pending.intent == SignInIntent::PrimaryAccount && pending.expires <= Instant::now() {
+            self.reason = Some("AUTH_TRANSACTION_EXPIRED");
+            return None;
+        }
+        if pending.intent == SignInIntent::PrimaryAccount && resource == Resource::Executive {
+            return None;
+        }
         match token {
             Ok(token) if resource == Resource::Acquisition => {
                 self.acquisition = Some(token);
                 self.draft_continuity.unqualified();
                 self.reason = None;
-                self.transaction(Resource::Content).ok()
+                self.transaction_for(Resource::Content, pending.intent).ok()
             }
             Ok(token) if resource == Resource::Content => {
                 self.content = Some(token);
                 self.reason = None;
-                if self.executive_resource.is_some() { self.transaction(Resource::Executive).ok() } else { None }
+                if pending.intent == SignInIntent::LegacyFull && self.executive_resource.is_some() {
+                    self.transaction_for(Resource::Executive, pending.intent).ok()
+                } else { None }
             }
             Ok(token) => {
                 if self.executive_resource.is_some() && self.advance_executive() {
@@ -490,6 +532,13 @@ fn open_transaction(app: &AppHandle, url: String, generation: u64) -> Result<()>
         let mut inner = state.lock()?;
         // Serialize browser handoff with logout and replacement transactions.
         if inner.generation != generation || inner.pending.is_none() {
+            return Err("AUTHENTICATION_CHANGED".into());
+        }
+        if !inner.continuation_handoff_current() {
+            let resource = inner.pending.take().ok_or("AUTHENTICATION_CHANGED")?.resource;
+            inner.fail_transaction(resource, "AUTHENTICATION_CHANGED");
+            drop(inner);
+            emit(app);
             return Err("AUTHENTICATION_CHANGED".into());
         }
         if app.opener().open_url(url, None::<&str>).is_err() {
@@ -672,6 +721,19 @@ pub async fn callback(app: AppHandle, raw: String) {
         }
     };
     let (pending, code, client) = transaction;
+    // A continuation cannot exchange a fresh code against an expired or
+    // replaced retained Acquisition grant. Rejoin again immediately before
+    // constructing the request, after consume's own continuation fence.
+    if pending.continuation.is_some() && state.lock()
+        .and_then(|mut inner| inner.continuation_exchange_guard(&pending)).is_err() {
+        emit(&app);
+        return;
+    }
+    if pending.intent == SignInIntent::PrimaryAccount && state.lock()
+        .and_then(|mut inner| inner.primary_exchange_current(&pending, &client)).is_err() {
+        emit(&app);
+        return;
+    }
     let response = state
         .http
         .post(format!("{ISSUER}oauth/token"))
@@ -686,14 +748,20 @@ pub async fn callback(app: AppHandle, raw: String) {
         .await;
     let token = match response {
         Ok(r) => bounded_json(r, 32768).await.and_then(|v| {
+            if pending.intent == SignInIntent::PrimaryAccount {
+                state.lock()?.primary_exchange_current(&pending, &client)?;
+            }
             let access = parse_token(v.clone(), pending.resource)?;
-            if pending.resource.persistent() {
+            if pending.continuation.is_none() && pending.resource.persistent() {
                 let refresh = v.get("refresh_token").and_then(Value::as_str)
                     .filter(|s| crate::native_refresh::valid_refresh(s))
                     .ok_or("REFRESH_TOKEN_NOT_ISSUED")?;
                 let _keychain = state.keychain_lock.lock()
                     .map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
-                let inner = state.lock()?;
+                let mut inner = state.lock()?;
+                if pending.intent == SignInIntent::PrimaryAccount {
+                    inner.primary_exchange_current(&pending, &client)?;
+                }
                 if inner.generation != pending.generation || !inner.exchanging {
                     return Err("AUTHENTICATION_CHANGED".into());
                 }
@@ -703,12 +771,16 @@ pub async fn callback(app: AppHandle, raw: String) {
         }),
         Err(_) => Err("TOKEN_EXCHANGE_FAILED".into()),
     };
+    if let Some(witness) = pending.continuation.as_ref() {
+        authorization_continuation::finish_callback(&app, &pending, witness, token).await;
+        return;
+    }
     let expiry = token.as_ref().ok().map(|token| (token.expires, token.wall_expires));
     let mut inner = match state.lock() {
         Ok(i) => i,
         Err(_) => return,
     };
-    let next = inner.finish_exchange(pending.generation, pending.resource, token);
+    let next = inner.finish_exchange(&pending, token);
     drop(inner);
     emit(&app);
     if let Some((expires, wall_expires)) = expiry {
@@ -2269,6 +2341,38 @@ impl RetainedActivitySelection {
         Ok(())
     }
 }
+const MODEL_CONFIGURATION_PATH: &str = "/workspace/resources/models/current";
+const MODEL_CONFIGURATION_SCHEMA: &str = "mastermind.workspace_model_configuration.v1";
+const MODEL_CONFIGURATION_CAP: usize = 278_528;
+
+/// Fixed read of configured routing through the existing Workspace identity.
+/// No caller URL, policy path, model activation, credentials or mutation.
+#[tauri::command]
+pub async fn read_model_configuration(app: AppHandle) -> Result<Value> {
+    let url = Url::parse(&format!("{ORIGIN}{MODEL_CONFIGURATION_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, MODEL_CONFIGURATION_CAP).await
+            .and_then(|value| typed_unavailable(value, MODEL_CONFIGURATION_SCHEMA, false))
+    } else {
+        bounded_json(response, MODEL_CONFIGURATION_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(MODEL_CONFIGURATION_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
 const RESOURCE_CAPACITY_PATH: &str = "/workspace/resources/capacity/current";
 const RESOURCE_CAPACITY_SCHEMA: &str = "mastermind.workspace_resource_capacity_result.v1";
 const RESOURCE_CAPACITY_CAP: usize = 16_384;
@@ -3159,7 +3263,7 @@ mod tests {
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         let next = i
-            .finish_exchange(p.generation, p.resource, Ok(token("acquisition")))
+            .finish_exchange(&p, Ok(token("acquisition")))
             .unwrap();
         assert!(next.contains("mastermind.workspace.content.read"));
         assert!(i.status().acquisition);
@@ -3167,7 +3271,7 @@ mod tests {
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         assert!(i
-            .finish_exchange(p.generation, p.resource, Ok(token("content")))
+            .finish_exchange(&p, Ok(token("content")))
             .is_none());
         assert_eq!(i.token(Resource::Acquisition).unwrap().value, "acquisition");
         assert_eq!(i.token(Resource::Content).unwrap().value, "content");
@@ -3185,7 +3289,7 @@ mod tests {
             let state = pending.state.clone();
             let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
             assert_eq!(pending.resource, resource);
-            i.finish_exchange(pending.generation, resource, Ok(token("grant")));
+            i.finish_exchange(&pending, Ok(token("grant")));
         }
         let generation = i.generation;
         let executive_generation = i.executive_generation;
@@ -3211,7 +3315,7 @@ mod tests {
         assert!(!i.expire_transaction(pending.generation, pending.expires, pending.expires));
         assert!(i.exchanging);
         assert!(i.reason.is_none());
-        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_some());
+        assert!(i.finish_exchange(&pending, Ok(token("grant"))).is_some());
         assert!(i.status().acquisition);
     }
 
@@ -3273,7 +3377,7 @@ mod tests {
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         i.invalidate();
         assert!(i
-            .finish_exchange(p.generation, p.resource, Ok(token("late")))
+            .finish_exchange(&p, Ok(token("late")))
             .is_none());
         assert!(!i.status().acquisition);
         assert!(i.pending.is_none());
@@ -3286,7 +3390,7 @@ mod tests {
         i.transaction(Resource::Content).unwrap();
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
-        i.finish_exchange(p.generation, p.resource, Err("failure".into()));
+        i.finish_exchange(&p, Err("failure".into()));
         assert!(i.status().acquisition);
         assert!(!i.status().content);
         assert_eq!(i.status().status, "error");
@@ -3369,7 +3473,7 @@ mod tests {
             let state = i.pending.as_ref().unwrap().state.clone();
             let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
             assert_eq!(pending.resource, completed);
-            let raw = i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).unwrap();
+            let raw = i.finish_exchange(&pending, Ok(token("grant"))).unwrap();
             let url = Url::parse(&raw).unwrap();
             let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
             assert!(!pairs.contains_key("prompt"));
@@ -3383,7 +3487,7 @@ mod tests {
         }
         let state = i.pending.as_ref().unwrap().state.clone();
         let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
-        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_none());
+        assert!(i.finish_exchange(&pending, Ok(token("grant"))).is_none());
         assert!(i.token(Resource::Executive).is_some());
     }
     #[test]
@@ -3597,7 +3701,7 @@ mod tests {
         assert_eq!(pending.resource, resource);
         let raw = callback_url(&pending.state);
         let (p, _, _) = i.consume(&raw).unwrap();
-        i.finish_exchange(p.generation, p.resource, Ok(token("fixture-private-token")))
+        i.finish_exchange(&p, Ok(token("fixture-private-token")))
     }
     fn at_executive_pending() -> Inner {
         let mut i = executive_inner();
@@ -3697,7 +3801,7 @@ mod tests {
                 assert!(i.consume(&format!("{CALLBACK}?state={state}&error=access_denied")).is_err());
             } else {
                 let (p, _, _) = i.consume(&callback_url(&state)).unwrap();
-                assert!(i.finish_exchange(p.generation, p.resource, Err("fixture".into())).is_none());
+                assert!(i.finish_exchange(&p, Err("fixture".into())).is_none());
             }
             assert!(i.token(Resource::Acquisition).is_some());
             assert!(i.token(Resource::Content).is_some());
@@ -3717,7 +3821,7 @@ mod tests {
             i.invalidate();
             assert!(i.executive_generation > old);
             if let Some(p) = consumed {
-                assert!(i.finish_exchange(p.generation, p.resource, Ok(token("late"))).is_none());
+                assert!(i.finish_exchange(&p, Ok(token("late"))).is_none());
             } else { assert!(i.consume(&callback_url(&state)).is_err()); }
             assert!(!i.executive_status().available);
             assert_eq!(i.status().status, "signed_out");
@@ -3798,8 +3902,7 @@ mod tests {
     fn install_native_executive_token(inner: &mut Inner, scope: &str) {
         let pending_state = inner.pending.as_ref().unwrap().state.clone();
         let (pending, _, _) = inner.consume(&callback_url(&pending_state)).unwrap();
-        inner.finish_exchange(pending.generation, pending.resource,
-            Ok(parsed_native_executive_token(scope)));
+        inner.finish_exchange(&pending, Ok(parsed_native_executive_token(scope)));
     }
 
     fn native_executive_state(scope: &str) -> NativeAuth {

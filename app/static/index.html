@@ -678,6 +678,12 @@ body.page-mm td.l { text-align: left; }
 /* ────────────────────────────────────────────────────────────────────────────
    RESEARCH FEED
    ──────────────────────────────────────────────────────────────────────────── */
+.mm-research-loading { display:grid; gap:10px; padding:22px 16px; min-height:110px; }
+.mm-research-loading span { display:block; height:10px; width:90%; border-radius:4px; background:var(--panel2); border:1px solid var(--line); }
+.mm-research-loading span:first-child { width:45%; }
+.mm-research-loading span:last-child { width:70%; }
+.mm-research-unavailable { padding:20px 16px; color:var(--muted); line-height:1.6; }
+.mm-research-unavailable p { margin:0 0 12px; }
 .mm-research-card {
   background: var(--panel2);
   border: 1px solid var(--line);
@@ -2990,7 +2996,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
   </div>
   <div class="panel span6 mm-collapsible" id="research">
     <h2 class="mm-coll-h2" onclick="toggleCollapse('research')"><span class="mm-coll-chev">&#9654;</span><span class="l-en">Research Feed</span><span class="l-zh">研究动态</span></h2>
-    <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading research…</span><span class="l-zh">加载研究中…</span></div>
+    <div class="mm-research-loading" aria-hidden="true"><span></span><span></span><span></span></div>
   </div>
 </div>
 
@@ -3081,7 +3087,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
         <span class="l-zh">每一笔买入都必须通过研究台。在建仓之前，机器人会撰写完整的整体研究报告&mdash;&mdash;论点、估值、基本面、收入结构、已确认与待定催化剂，以及重新测算的前瞻盈利&mdash;&mdash;再将其消化为研究评分。该评分与引擎买入分合成<strong>信念指数</strong>；只有指数足够高才确认交易，并据此决定仓位大小。点击<em>查看论文</em>查看每个决策背后的完整报告。</span>
       </div>
       <div id="rp-host">
-        <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading research…</span><span class="l-zh">加载研究中…</span></div>
+        <div class="mm-research-loading" aria-hidden="true"><span></span><span></span><span></span></div>
       </div>
     </div>
   </div>
@@ -3440,6 +3446,9 @@ var I18N = {
   // Research feed
   'research.title':       { en: 'Research Feed', zh: '研究动态' },
   'research.loading':     { en: 'Loading research…', zh: '加载研究中…' },
+  'research.unavailable': { en: 'Research feed is unavailable. The notes could not be read.', zh: '研究动态暂不可用，无法读取研究笔记。' },
+  'rp.unavailable':       { en: 'Research papers are unavailable. The saved reports could not be read.', zh: '研究论文暂不可用，无法读取已保存的报告。' },
+  'research.retry':       { en: 'Retry', zh: '重试' },
   'research.empty':       { en: 'No research notes yet — notes appear here after runs.', zh: '暂无研究笔记 — 运行后将显示。' },
   'research.show_more':   { en: 'Show more ↓', zh: '展开 ↓' },
   'research.show_less':   { en: 'Show less ↑', zh: '收起 ↑' },
@@ -3926,6 +3935,48 @@ var fmtTsShort = function(s) {
 
 // ── state ────────────────────────────────────────────────────────────────────
 var _book = null, _trades = null, _activity = [], _research = [];
+var _researchStatus = 'loading', _researchLoad = null;
+var _activityStatus = 'loading', _activityFailedSources = [];
+function _activityUnavailable() {
+  return { activity_status: 'unavailable', error: 'activity_unavailable', events: null, failed_sources: [] };
+}
+function _activityFetch() {
+  return fetch('/api/activity')
+    .then(function(r) { return r.ok ? r.json() : _activityUnavailable(); })
+    .catch(function() { return _activityUnavailable(); });
+}
+function _validActivityEvents(rows) {
+  return Array.isArray(rows) && rows.every(function(row) {
+    return row && typeof row === 'object' && !Array.isArray(row) &&
+      ['ts', 'kind', 'title', 'detail'].every(function(key) { return typeof row[key] === 'string'; }) &&
+      ['trade', 'decision', 'research', 'run'].indexOf(row.kind) >= 0 &&
+      ['title_zh', 'detail_zh'].every(function(key) { return row[key] === undefined || typeof row[key] === 'string'; }) &&
+      (row.today === undefined || typeof row.today === 'boolean');
+  });
+}
+function _applyActivityFeed(data) {
+  if (_validActivityEvents(data)) {
+    _activity = data; _activityStatus = 'available'; _activityFailedSources = []; return;
+  }
+  var sources = data && data.failed_sources;
+  var knownSources = Array.isArray(sources) && sources.every(function(source) {
+    return ['trades', 'decisions', 'research'].indexOf(source) >= 0;
+  }) && sources.every(function(source, index) { return sources.indexOf(source) === index; });
+  if (data && data.activity_status === 'partial' && _validActivityEvents(data.events) &&
+      knownSources && sources.length > 0 && sources.length < 3 &&
+      data.events.every(function(row) {
+        var family = {trade: 'trades', decision: 'decisions', run: 'decisions', research: 'research'}[row.kind];
+        return sources.indexOf(family) < 0;
+      })) {
+    _activity = data.events; _activityStatus = 'partial'; _activityFailedSources = sources; return;
+  }
+  _activity = []; _activityStatus = 'unavailable';
+  _activityFailedSources = knownSources ? sources : [];
+}
+window.retryBrainActivity = function() {
+  _activityStatus = 'loading'; renderBrainLog();
+  return _activityFetch().then(function(data) { _applyActivityFeed(data); renderBrainLog(); });
+};
 var _shadowBooks = null;          // parallel forward shadow-book leaderboard (/api/shadow_books)
 var _predictions = null;          // universe-wide prediction log coverage + cross-sectional scorecard
 var _engineBacktest = null;       // historical engine-backtest verdict (/api/engine_backtest)
@@ -3977,7 +4028,7 @@ var _risk = null;                 // portfolio safety scorecard (/api/risk) — 
 var _papers = [];                 // research papers (the Research page rows)
 var PAPERS_RENDER_CHUNK = 60, _papersVisible = PAPERS_RENDER_CHUNK;
 var _researchRevision = 0, _researchRenderedKey = '';
-var _papersErr = null;            // server-side error from /api/research_papers, surfaced in the empty state
+var _papersStatus = 'loading';    // a completed failed read remains eligible for retry
 var _openPaperId = null;          // id of the paper currently shown in the thesis modal (for PDF export)
 var _calib = null;                // outcome ledger (the Calibration sub-page)
 var _researchSub = 'theses';      // 'theses' | 'calibration'
@@ -5515,52 +5566,119 @@ window.tradesPage = function(d) {
 // ── BRAIN LOG ─────────────────────────────────────────────────────────────────
 function renderBrainLog() {
   var el = E('brainlog');
+  if (_activityStatus === 'loading') {
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading activity…</span><span class="l-zh">正在加载动态…</span></div>';
+    applyColl('brainlog'); return;
+  }
+  if (_activityStatus === 'unavailable') {
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Brain Log unavailable — activity evidence could not be read.</span>' +
+      '<span class="l-zh">脑波日志暂不可用 — 无法读取动态证据。</span>' +
+      '<div style="margin-top:8px"><button class="mm-pager-btn" type="button" onclick="retryBrainActivity()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></div></div>';
+    applyColl('brainlog'); return;
+  }
+
+  var partial = '';
+  if (_activityStatus === 'partial') {
+    var sources = _activityFailedSources.join(', ');
+    partial = '<div class="mm-cal-building" style="margin-bottom:10px"><span class="ic">!</span><span class="tx">' +
+      '<span class="l-en"><strong>Partial activity</strong> — unavailable sources: ' + esc(sources || 'unknown') + '.</span>' +
+      '<span class="l-zh"><strong>动态不完整</strong> — 暂不可用来源：' + esc(sources || 'unknown') + '。</span>' +
+      ' <button class="mm-pager-btn" type="button" onclick="retryBrainActivity()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button></span></div>';
+  }
   if (!_activity.length) {
-    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('brain.empty') + '</div>';
-    applyColl('brainlog');
-    return;
+    var emptyCopy = _activityStatus === 'partial'
+      ? '<span class="l-en">No events were available from the readable activity sources.</span><span class="l-zh">当前可读取的动态来源没有可显示事件。</span>'
+      : t('brain.empty');
+    el.innerHTML = collH2('brainlog', 'Brain Log', '脑波日志') + partial + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + emptyCopy + '</div>';
+    applyColl('brainlog'); return;
   }
 
   var pages = Math.max(1, Math.ceil(_activity.length / BRAIN_PAGE_SIZE));
-  _brainPage = Math.max(0, Math.min(pages - 1, _brainPage));   // clamp (data may have shrunk on reload)
+  _brainPage = Math.max(0, Math.min(pages - 1, _brainPage));
   var start = _brainPage * BRAIN_PAGE_SIZE;
   var pageItems = _activity.slice(start, start + BRAIN_PAGE_SIZE);
   var ICONS = { trade: '↕', decision: '◉', research: '◎', run: '▷' };
   var KIND_ZH = { trade: '交易', decision: '决策', research: '研究', run: '运行' };
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
-  var html = collH2('brainlog', 'Brain Log', '脑波日志') + '<div class="mm-timeline">';
+  var html = collH2('brainlog', 'Brain Log', '脑波日志') + partial + '<div class="mm-timeline">';
   pageItems.forEach(function(e, i) {
     var kind = e.kind || 'run';
     var isLast = i === pageItems.length - 1;
-    // zh title/detail come from /api/activity (deterministic labels + cached free-text);
-    // fall back to English when a _zh field is absent so nothing ever renders blank
     var title = (isZh && e.title_zh) ? e.title_zh : (e.title || '—');
     var detail = (isZh && e.detail_zh) ? e.detail_zh : (e.detail || '');
     var kindLabel = (isZh && KIND_ZH[kind]) ? KIND_ZH[kind] : kind;
-    // actions logged today (e.today, set server-side) get a "NEW" tag + a highlighted row
+    var timestamp = fmtTsShort(e.ts);
+    if (e.ts && isNaN(new Date(e.ts))) timestamp = esc(timestamp);
     var newBadge = e.today ? '<span class="mm-new-badge">' + (isZh ? '新' : 'NEW') + '</span>' : '';
     html += '<div class="mm-tl-item' + (e.today ? ' mm-tl-today' : '') + '">' +
-      '<div class="mm-tl-ts">' + fmtTsShort(e.ts) + '</div>' +
-      '<div class="mm-tl-node">' +
-        '<div class="mm-tl-dot k-' + kind + '"></div>' +
-        (isLast ? '' : '<div class="mm-tl-line"></div>') +
-      '</div>' +
-      '<div class="mm-tl-content">' +
-        '<div><span class="mm-kind-chip mm-kind-' + kind + '">' + (ICONS[kind]||'·') + ' ' + kindLabel + '</span>' + newBadge + '</div>' +
+      '<div class="mm-tl-ts">' + timestamp + '</div>' +
+      '<div class="mm-tl-node"><div class="mm-tl-dot k-' + kind + '"></div>' +
+        (isLast ? '' : '<div class="mm-tl-line"></div>') + '</div>' +
+      '<div class="mm-tl-content"><div><span class="mm-kind-chip mm-kind-' + kind + '">' +
+        (ICONS[kind]||'·') + ' ' + kindLabel + '</span>' + newBadge + '</div>' +
         '<div class="mm-tl-title">' + esc(title) + '</div>' +
         (detail ? '<div class="mm-tl-detail">' + esc(detail.slice(0,200)) + (detail.length > 200 ? '…' : '') + '</div>' : '') +
-      '</div>' +
-    '</div>';
+      '</div></div>';
   });
-  html += '</div>';
-  html += _pager(_brainPage, pages, 'brainPage');
+  html += '</div>' + _pager(_brainPage, pages, 'brainPage');
   el.innerHTML = html;
   applyColl('brainlog');
 }
 
 // ── RESEARCH FEED ─────────────────────────────────────────────────────────────
+function _researchUnavailable() {
+  return { research_status: 'unavailable', error: 'research_feed_unavailable', notes: null };
+}
+function _researchFetch() {
+  if (_researchLoad) return _researchLoad;
+  _researchLoad = Promise.resolve().then(function() { return fetch('/api/research'); })
+    .then(function(r) { return r.ok ? r.json() : _researchUnavailable(); })
+    .catch(function() { return _researchUnavailable(); });
+  _researchLoad.then(function() { _researchLoad = null; });
+  return _researchLoad;
+}
+function _validResearchNotes(rows) {
+  return Array.isArray(rows) && rows.every(function(row) {
+    return row && typeof row === 'object' && !Array.isArray(row) &&
+      typeof row.title === 'string' && typeof row.body_md === 'string' &&
+      Array.isArray(row.tickers) && row.tickers.every(function(ticker) { return typeof ticker === 'string'; }) &&
+      ['date', 'title_zh', 'body_md_zh'].every(function(key) { return row[key] == null || typeof row[key] === 'string'; });
+  });
+}
+function _applyResearchFeed(data) {
+  var valid = _validResearchNotes(data);
+  _research = valid ? data : [];
+  _researchStatus = valid ? 'available' : 'unavailable';
+}
+function _researchLoading() {
+  return '<div class="mm-research-loading" role="status" aria-busy="true" aria-label="' +
+    esc(t('research.loading')) + '"><span></span><span></span><span></span></div>';
+}
+function _researchReadFailure(papers) {
+  return '<div class="mm-research-unavailable" role="status"><p>' +
+    esc(t(papers ? 'rp.unavailable' : 'research.unavailable')) + '</p>' +
+    '<button class="mm-scope-retry" type="button" onclick="' +
+    (papers ? 'retryResearchPapers()' : 'retryResearchFeed()') + '">' +
+    esc(t('research.retry')) + '</button></div>';
+}
+window.retryResearchFeed = function() {
+  _researchStatus = 'loading'; renderResearch();
+  return _researchFetch().then(function(data) {
+    _applyResearchFeed(data); renderResearch(); return _research;
+  });
+};
+
 function renderResearch() {
   var el = E('research');
+  if (!el) return;
+  if (_researchStatus === 'loading' || _researchStatus === 'unavailable') {
+    el.innerHTML = collH2('research', 'Research Feed', '研究动态') +
+      (_researchStatus === 'loading' ? _researchLoading() : _researchReadFailure(false));
+    applyColl('research');
+    return;
+  }
   if (!_research.length) {
     el.innerHTML = collH2('research', 'Research Feed', '研究动态') + '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('research.empty') + '</div>';
     applyColl('research');
@@ -5585,7 +5703,7 @@ function renderResearch() {
     html += '<div class="mm-research-card">' +
       '<div class="mm-research-title">' + esc(title) + '</div>' +
       '<div class="mm-research-meta">' +
-        '<span>' + (n.date ? n.date.slice(0,10) : '—') + '</span>' +
+        '<span>' + (n.date ? esc(n.date.slice(0,10)) : '—') + '</span>' +
         (chips ? chips : '') +
       '</div>';
     if (collapse) {
@@ -5617,7 +5735,7 @@ window.toggleResearch = function(id, btn) {
 function _viabClass(v) { return ['compelling','fair','rich','avoid'].indexOf(v) >= 0 ? v : 'fair'; }
 function _viabLabel(v) {
   var k = { compelling: 'rp.viab_compelling', fair: 'rp.viab_fair', rich: 'rp.viab_rich', avoid: 'rp.viab_avoid' }[v];
-  return k ? t(k) : (v || '—');
+  return k ? t(k) : esc(v || '—');
 }
 function _actionMeta(a) {
   if (a === 'buy_confirmed') return { cls: 'confirmed', label: t('rp.act_confirmed') };
@@ -5634,14 +5752,16 @@ function renderResearchPapers() {
     _researchRevision,
     _papersVisible,
     document.documentElement.getAttribute('data-lang') || 'en',
-    _papersErr || '',
+    _papersStatus,
   ].join('|');
   if (_researchRenderedKey === renderKey) return;
   _researchRenderedKey = renderKey;
+  if (_papersStatus === 'loading' || _papersStatus === 'unavailable') {
+    host.innerHTML = _papersStatus === 'loading' ? _researchLoading() : _researchReadFailure(true);
+    return;
+  }
   if (!_papers.length) {
-    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('rp.empty')
-      + (_papersErr ? '<div style="margin-top:8px;font-size:11.5px;color:var(--down)">' + esc(String(_papersErr)) + '</div>' : '')
-      + '</div>';
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('rp.empty') + '</div>';
     return;
   }
   var shownPapers = _papers.slice(0, _papersVisible);
@@ -5669,7 +5789,7 @@ function renderResearchPapers() {
       '<td><span class="mm-rp-score">' + _scoreCell(p.research_score) + '</span></td>' +
       '<td><span class="mm-rp-ci ' + _ciClass(ci) + '">' + _scoreCell(ci) + '</span></td>' +
       '<td class="l"><span class="mm-viab ' + _viabClass(p.viability) + '">' + _viabLabel(p.viability) + '</span></td>' +
-      '<td><button class="mm-rp-view" type="button" onclick="openThesis(\'' + esc(p.id) + '\')">' + t('rp.view') + ' →</button></td>' +
+      '<td><button class="mm-rp-view" type="button" data-paper-id="' + esc(p.id) + '" onclick="openThesis(this.getAttribute(\'data-paper-id\'))">' + t('rp.view') + ' →</button></td>' +
     '</tr>';
   });
   html += '</tbody></table></div>';
@@ -5700,21 +5820,48 @@ function _ensureRuns() {
   return _runsLoad;
 }
 
+function _researchPapersUnavailable() {
+  return { paper_status: 'unavailable', error: 'research_papers_unavailable', papers: null };
+}
+function _validResearchPapers(data) {
+  return data && typeof data === 'object' && !Array.isArray(data) &&
+    data.error == null && (data.paper_status == null || data.paper_status === 'available') &&
+    Array.isArray(data.papers) && data.papers.every(function(paper) {
+      return paper && typeof paper === 'object' && !Array.isArray(paper) &&
+        ['id', 'ticker'].every(function(key) { return typeof paper[key] === 'string' && paper[key].trim().length > 0; }) &&
+        ['asof', 'reviewed_at', 'trade_time', 'action', 'mode', 'viability',
+         'summary', 'summary_zh', 'report_md', 'report_md_zh'].every(function(key) {
+          return paper[key] == null || typeof paper[key] === 'string';
+        }) &&
+        ['engine_score', 'research_score', 'combined', 'fair_value'].every(function(key) {
+          return paper[key] == null || (typeof paper[key] === 'number' && Number.isFinite(paper[key]));
+        });
+    });
+}
 function _ensureResearchPapers() {
   if (_papersLoaded) { renderResearchPapers(); return Promise.resolve(_papers); }
   if (_papersLoad) return _papersLoad;
-  _papersLoad = fetch('/api/research_papers').then(function(r) {
-      return r.ok ? r.json() : { papers: [], error: 'research papers unavailable' };
-    }).catch(function(e) { return { papers: [], error: String(e || 'fetch failed') }; })
+  _papersStatus = 'loading'; _researchRenderedKey = '';
+  if (_currentView === 'research') _safeRender('researchPapers', renderResearchPapers);
+  _papersLoad = Promise.resolve().then(function() { return fetch('/api/research_papers'); })
+    .then(function(r) { return r.ok ? r.json() : _researchPapersUnavailable(); })
+    .catch(function() { return _researchPapersUnavailable(); })
     .then(function(data) {
-      data = data || {};
-      _papers = data.papers || []; _papersErr = data.error || null;
-      _papersLoaded = true; _papersLoad = null; _researchRevision += 1; _researchRenderedKey = '';
+      var valid = _validResearchPapers(data);
+      _papers = valid ? data.papers : [];
+      _papersStatus = valid ? 'available' : 'unavailable';
+      _papersLoaded = !!valid; _papersLoad = null; _researchRevision += 1; _researchRenderedKey = '';
+      if (!valid) { _openPaperId = null; closeThesis(); }
       if (_currentView === 'research') _safeRender('researchPapers', renderResearchPapers);
       return _papers;
     });
   return _papersLoad;
 }
+window.retryResearchPapers = function() {
+  if (_papersLoad) return _papersLoad;
+  _papersLoaded = false;
+  return _ensureResearchPapers();
+};
 
 function _ensureCalibration() {
   if (_calibLoaded) { renderCalibrationPage(); return Promise.resolve(_calib); }
@@ -8444,8 +8591,18 @@ window.addEventListener('resize', function() {
 // ── STRATEGY POSTURE: per-book strategy-label chip + hover playbook ────────────
 // The glance-able layer on top of the Brain's free-form rationale. Pure presentation —
 // the label / favored / avoided / driver are computed server-side by /api/posture.
+function _postureUnavailable() {
+  return { available: false, read_status: 'unavailable', posture_label: '—', posture_label_zh: '—', posture_tone: 'muted' };
+}
+
 function _postureChipHTML(p) {
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (p && p.read_status === 'unavailable') {
+    return '<div class="mm-posture tone-muted">' +
+      '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
+      '<div class="mm-posture-head"><span class="mm-posture-label">' + (isZh ? '姿态暂不可用' : 'Posture unavailable') + '</span></div>' +
+      '<span class="mm-posture-sub">' + (isZh ? '最近一次读取未完成。' : 'The latest read did not complete.') + '</span></div>';
+  }
   if (!p || !p.available || !p.posture_label || p.posture_label === '—') {
     return '<div class="mm-posture tone-muted">' +
       '<span class="mm-posture-eyebrow"><span class="l-en">Strategy posture</span><span class="l-zh">策略姿态</span></span>' +
@@ -8476,9 +8633,13 @@ function _postureChipHTML(p) {
 function loadDeskPosture() {
   var host = E('desk-posture'); if (!host) return;
   fetch('/api/posture?book=flagship')
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ host.innerHTML = d ? ('<div class="mm-posture-wrap">' + _postureChipHTML(d) + '</div>') : ''; })
-    .catch(function(){ host.innerHTML = ''; });
+    .then(function(r){ return r.ok ? r.json() : _postureUnavailable(); })
+    .then(function(d){
+      var payload = d && typeof d === 'object' && !Array.isArray(d) && typeof d.available === 'boolean'
+        ? d : _postureUnavailable();
+      host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(payload) + '</div>';
+    })
+    .catch(function(){ host.innerHTML = '<div class="mm-posture-wrap">' + _postureChipHTML(_postureUnavailable()) + '</div>'; });
 }
 
 function renderDecisions() {
@@ -9777,8 +9938,8 @@ function _hydrateShared() {
   if (_sharedLoad) return _sharedLoad;
   _sharedLoad = loadPortfolios().then(function() {
     return Promise.allSettled([
-      fetch('/api/activity').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
-      fetch('/api/research').then(function(r)  { return r.ok ? r.json() : [];   }).catch(function() { return []; }),
+      _activityFetch(),
+      _researchFetch(),
       _learningFetch('/api/shadow_books', 'shadow_books'),
       _learningFetch('/api/predictions', 'predictions'),
       _learningFetch('/api/engine_backtest', 'engine_backtest'),
@@ -9791,8 +9952,8 @@ function _hydrateShared() {
     var actRes = s[0], researchRes = s[1], shadowRes = s[2], predRes = s[3],
         ebtRes = s[4], fzRes = s[5], fundRes = s[6],
         studentRes = s[7], distillRes = s[8];
-    _activity    = (actRes.status    === 'fulfilled' ? actRes.value     : null) || [];
-    _research    = (researchRes.status === 'fulfilled' ? researchRes.value : null) || [];
+    _applyActivityFeed(actRes.status === 'fulfilled' ? actRes.value : _activityUnavailable());
+    _applyResearchFeed(researchRes.status === 'fulfilled' ? researchRes.value : _researchUnavailable());
     _shadowBooks    = shadowRes.status === 'fulfilled' ? shadowRes.value : null;
     _predictions    = predRes.status   === 'fulfilled' ? predRes.value   : null;
     _engineBacktest = ebtRes.status    === 'fulfilled' ? ebtRes.value    : null;

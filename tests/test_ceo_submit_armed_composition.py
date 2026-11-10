@@ -1604,11 +1604,16 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # no additional event loop or execution call is admitted.
     # The optional sealed observation owner composes with those protected reads;
     # only this final full-file fingerprint changes, never the wrapper AST.
+    # The attended configuration adds one optional digest and its strict
+    # validation. The installed event-loop anchor remains byte-for-byte the
+    # same AST; retain every path, membership and mutation refusal below.
+    # The reviewed pure Memory-validator extraction also preserves that
+    # anchor and the imports; only the full-source fingerprint changes.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '32dce8877ceb47a7d96dd017fc922e0e740b569b38089c2c820d9edd7b0e82c1'):
+            'dd09c1cfa20f75beee02dd9102356032bcfe6bdf813d55ab72451f1470fb35e1'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -3530,3 +3535,60 @@ def test_d8_web_observation_real_committed_git_collector(tmp_path, monkeypatch, 
     test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
         tmp_path, monkeypatch, _WEB_OBSERVATION_PATH, source, identity,
     )
+
+
+def test_d8_glm_claim_lifetime_only_masks_the_exact_reviewed_token():
+    import difflib
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    path = "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py"
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"
+    )
+    predecessor = (ROOT / "ops/native_fabric/quota_continuity/rollout/"
+                   "preimages/glm_application_core_5c3d/go_lease_capability.py").read_text()
+    assert hashlib.sha256(predecessor.encode()).hexdigest() == (
+        "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940"
+    )
+
+    def introduced_diff(postimage, source_path=path):
+        return f"diff --git a/{source_path} b/{source_path}\n" + "".join(
+            difflib.unified_diff(predecessor.splitlines(keepends=True),
+                                 postimage.splitlines(keepends=True),
+                                 fromfile="a/" + source_path,
+                                 tofile="b/" + source_path, n=0))
+
+    spans = reviewed_literal_spans(path, source)
+    assert spans == ((326, 113, 116, "int"),)
+    line = source.splitlines()[325]
+    assert line[113:116] == "900"
+    diff = introduced_diff(source)
+    exact_findings = _scan_added_identity_diff(diff, source_postimages={path: source})
+    assert exact_findings == []
+    missing_findings = _scan_added_identity_diff(diff)
+    assert "900" in missing_findings
+
+    foreign = path.removesuffix(".py") + "_unreviewed.py"
+    foreign_findings = _scan_added_identity_diff(
+        introduced_diff(source, foreign), source_postimages={foreign: source})
+    assert "900" in foreign_findings
+
+    changed = source.replace(line, line[:113] + "901" + line[116:], 1)
+    changed_spans = reviewed_literal_spans(path, changed)
+    assert changed_spans == ()
+    changed_findings = _scan_added_identity_diff(
+        introduced_diff(changed), source_postimages={path: changed})
+    assert "901" in changed_findings
+
+    drifted = source + "\n# unrelated source drift\n"
+    drifted_spans = reviewed_literal_spans(path, drifted)
+    assert drifted_spans == ()
+    drifted_findings = _scan_added_identity_diff(
+        introduced_diff(drifted), source_postimages={path: drifted})
+    assert "900" in drifted_findings
+
+    peer_source = source + "peer_uid = 900\n"
+    peer_findings = _scan_added_identity_diff(
+        introduced_diff(peer_source), source_postimages={path: peer_source})
+    assert "900" in peer_findings

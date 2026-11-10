@@ -355,7 +355,7 @@ def test_only_exact_network_owner_deadline_sites_are_qualified():
 def test_prospective_fixture_data_assembles_with_unchanged_real_compilers(materialized_proposal, tmp_path, monkeypatch):
     from tests import test_paid_provider_entry_linux as actual
     monkeypatch.setattr(actual, 'ROOT', materialized_proposal)
-    actual.test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_path, monkeypatch)
+    actual.test_compiled_fixture_data_assembles_against_real_wire_and_compilers(tmp_path, monkeypatch, current_core=False)
 
 
 def test_prior_reservation_survives_but_later_start_stays_held(modules, tmp_path, monkeypatch):
