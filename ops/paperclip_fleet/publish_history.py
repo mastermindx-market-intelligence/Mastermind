@@ -79,6 +79,75 @@ def verify_no_execution(issue: dict) -> dict:
     return {"wakeRequestCount": 0, "executionRunId": issue.get("executionRunId"), "checkoutRunId": issue.get("checkoutRunId")}
 
 
+def complete_archive(output: Path) -> dict:
+    """Close only the verified archive; reconcile a lost response on the same issue."""
+    receipts = output / "publication"
+    publication = receipts / "verified-publication.json"
+    if not publication.exists():
+        raise RuntimeError("History publication has not completed")
+    history = json.loads(publication.read_text())
+    issue_id = history["issueId"]
+    attachments = [json.loads(path.read_text()) for path in receipts.glob("hermes-*.verified.json")]
+    if len(attachments) != history["attachments"]:
+        raise RuntimeError("History attachment receipts are incomplete")
+    documents = list(history["documents"])
+    supplement = output / "asset-supplement"
+    if supplement.exists():
+        asset_receipt = supplement / "publication/verified-publication.json"
+        if not asset_receipt.exists():
+            raise RuntimeError("Asset publication has not completed")
+        assets = json.loads(asset_receipt.read_text())
+        if assets["issueId"] != issue_id:
+            raise RuntimeError("Asset publication belongs to a different archive")
+        attachments.extend(assets["attachments"])
+        documents.extend(assets["documents"])
+    health = api("/health")
+    if health.get("version") != PAPERCLIP_VERSION or health.get("deploymentMode") != "local_trusted" or health.get("status") != "ok":
+        raise RuntimeError("Paperclip instance changed; requalify the native API")
+    native_attachments = api(f"/issues/{issue_id}/attachments")
+    expected_attachments = {a["id"]: a["sha256"] for a in attachments}
+    if len(expected_attachments) != len(attachments) or len(native_attachments) != len(attachments) or expected_attachments != {a["id"]: a["sha256"] for a in native_attachments}:
+        raise RuntimeError("Published attachment index differs from verified receipts")
+    native_documents = api(f"/issues/{issue_id}/documents")
+    expected_documents = {d["key"]: d["body_sha256"] for d in documents}
+    if len(expected_documents) != len(documents) or len(native_documents) != len(documents) or expected_documents != {d["key"]: digest(d["body"].encode()) for d in native_documents}:
+        raise RuntimeError("Published document content differs from verified receipts")
+
+    def guarded_issue():
+        current = api(f"/issues/{issue_id}")
+        if current.get("id") != issue_id:
+            raise RuntimeError("Archive identity changed during completion")
+        verify_no_execution(current)
+        if current.get("status") not in ("backlog", "done"):
+            raise RuntimeError("Archive status changed; preserve its current workflow")
+        if any(current.get(key) for key in (
+            "parentId", "ancestors", "blockedBy", "blocks", "executionState",
+            "executionBlocker", "scheduledRetry", "activeRecoveryAction", "currentExecutionWorkspace",
+        )) or current.get("reviewAttention", {}).get("state") != "none":
+            raise RuntimeError("Archive has related work or an execution/review obligation")
+        if api(f"/issues/{issue_id}/interactions") != [] or api(f"/issues/{issue_id}/live-runs") != []:
+            raise RuntimeError("Archive has interactions or live runs")
+        return current
+
+    before = guarded_issue()
+    intent = receipts / "completion.pending.json"
+    if before["status"] == "backlog":
+        if intent.exists():
+            raise RuntimeError("Unreconciled archive completion; no retry attempted")
+        save_json(intent, {"issueId": issue_id, "status": "done"})
+        api(f"/issues/{issue_id}", "PATCH", {"status": "done"})
+    after = guarded_issue()
+    if after["status"] != "done":
+        raise RuntimeError("Archive completion did not persist")
+    result = {"issueId": issue_id, "status": "done", "completedAt": after.get("completedAt"),
+              "attachments": len(attachments), "documents": len(documents), "wakeRequestCount": 0,
+              "scope": "Imported snapshot; live fleet acceptance remains separate"}
+    verified = receipts / "completion.verified.json"
+    if not verified.exists():
+        save_json(verified, result)
+    return result
+
+
 def stamp(value) -> str:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -240,10 +309,17 @@ def publish(output: Path) -> None:
     final = receipts / "verified-publication.json"
     if not final.exists():
         save_json(final, completion)
+    completion["archive_completion"] = complete_archive(output)
     print(json.dumps(completion), flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    publish(parser.parse_args().output)
+    parser.add_argument("--complete-only", action="store_true",
+                        help="Reconcile verified publication and close its archive without exporting or uploading again")
+    args = parser.parse_args()
+    if args.complete_only:
+        print(json.dumps(complete_archive(args.output)), flush=True)
+    else:
+        publish(args.output)

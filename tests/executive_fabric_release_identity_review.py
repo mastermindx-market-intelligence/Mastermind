@@ -7,6 +7,16 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Exact captured GLM-helper fixture: HTTPError(code=...) response statuses.
+    # No account/principal identity is masked; any byte drift exposes all sites.
+    'ops/native_fabric/quota_continuity/tests/fixtures/glm_helper_531198.py': {
+        'sha256': '531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2',
+        'sites': (
+            (1430, 46, 49, 'int', '503'),
+            (1438, 42, 45, 'int', '401'),
+            (1519, 38, 41, 'int', '502'),
+        ),
+    },
     # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
     # Exact reviewed preview source/site only; any byte drift re-exposes it.
     'ops/fleet_storage_cleanup/linux_cache_preview.py': {
@@ -24,7 +34,7 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {'sha256': 'a5af142fda4911f6dbe72896dd37df3b10d24be26fcff57da61a4ad636c4c14e', 'sites': [[469, 66, 69, 'int', '502'], [1689, 32, 37, 'int', '0o700'], [2040, 140, 143, 'int', '900'], [2042, 33, 36, 'int', '900'], [2105, 22, 25, 'int', '429'], [2293, 79, 82, 'int', '500'], [2371, 34, 37, 'int', '400'], [2386, 33, 36, 'int', '500'], [2406, 34, 37, 'int', '502'], [2753, 92, 95, 'int', '400'], [2760, 99, 102, 'int', '503'], [2763, 80, 83, 'int', '409'], [2795, 110, 113, 'int', '503'], [2801, 100, 103, 'int', '409'], [2808, 101, 104, 'int', '409'], [2824, 31, 34, 'int', '409'], [2824, 51, 54, 'int', '503'], [2832, 73, 76, 'int', '409'], [2836, 99, 102, 'int', '503'], [2941, 107, 110, 'int', '503'], [2950, 102, 105, 'int', '400'], [2971, 96, 99, 'int', '429'], [2981, 103, 106, 'int', '503'], [2998, 105, 108, 'int', '503'], [3036, 27, 30, 'int', '503'], [3041, 101, 104, 'int', '502'], [3049, 91, 94, 'int', '401'], [3053, 96, 99, 'int', '400'], [3075, 476, 479, 'int', '512'], [3079, 94, 97, 'int', '400'], [3090, 101, 104, 'int', '409'], [3092, 110, 113, 'int', '503'], [3103, 101, 104, 'int', '409'], [3111, 105, 108, 'int', '409'], [3114, 101, 104, 'int', '409'], [3117, 104, 107, 'int', '400'], [3127, 105, 108, 'int', '409'], [3137, 94, 97, 'int', '400'], [3153, 109, 112, 'int', '400'], [3156, 96, 99, 'int', '400'], [3169, 96, 99, 'int', '429'], [3179, 102, 105, 'int', '503'], [3187, 106, 109, 'int', '429'], [3218, 103, 106, 'int', '503'], [3229, 272, 275, 'int', '502'], [3323, 23, 26, 'int', '400'], [3396, 35, 38, 'int', '429'], [3425, 37, 40, 'int', '404'], [3456, 27, 30, 'int', '400'], [3459, 27, 30, 'int', '400'], [3462, 27, 30, 'int', '400'], [3468, 31, 34, 'int', '400'], [3475, 31, 34, 'int', '429']]},
-    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': '5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878', 'sites': [[1044, 60, 65, 'int', '0o700']]},
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': 'ea856eaa36351c2b93d48aab1a0544ffd88b67040ad19750a285f30fb473e5c4', 'sites': [[1057, 60, 65, 'int', '0o700']]},
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
         "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
         "sites": (
@@ -1221,3 +1231,7 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Passive Paperclip asset document pagination: exact row-count bounds only.
+# No identity, permission or runtime topology change; any source drift restores D8.
+REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
