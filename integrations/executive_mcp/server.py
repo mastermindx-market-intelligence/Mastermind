@@ -596,6 +596,10 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     # Per-attempt T3 fleet projection: fixed literal path, strict v2 query
     # param ``attempt_id`` (run ids contain ``/`` and cannot ride the path).
     "/workspace/resources/t3/attempts/current",
+    # Per-attempt execution-return delivery read (L6 P1): same fixed-literal
+    # path + strict v2 query param shape — the persisted delivery receipt for
+    # one attempt, served honestly (absence is a 200 document, not an error).
+    "/workspace/resources/execution-returns/current",
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
@@ -1736,6 +1740,33 @@ def _build_profile_mcp_app(
     guard.fresh_conversation_transport = fresh_conversation_handler
     guard.project_conversation_transport = project_conversation_handler
     return guard
+
+
+def build_local_operator_mcp_app(
+    settings: Any, *, local_operator_config: Any, workspace_programs: Any = None
+) -> Any:
+    """Compose the socket-only local-operator app (L4) for the v3 profile.
+
+    A SEPARATE app instance, served only on the local-operator Unix socket
+    whose admission is the kernel peer uid (see
+    :mod:`integrations.executive_mcp.local_operator`). The TCP app object and
+    its code path are not branched on anything a request can carry: this
+    builder composes attribution from the installed configuration alone and
+    requires the same installed v3 composition the OS transport requires.
+    """
+    from integrations.executive_mcp.local_operator import (
+        LocalOperatorApp,
+        LocalOperatorAuthenticator,
+    )
+    from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
+
+    if not getattr(settings, "read_from_ceo_ingress", False):
+        raise ValueError("local operator socket requires the installed v3 composition")
+    if getattr(settings, "profile", None) not in (None, WEB_CEO_V3_PROFILE):
+        # The context payload names the serving profile; only v3 may carry it.
+        raise ValueError("local operator socket requires the Web-CEO v3 profile")
+    authenticator = LocalOperatorAuthenticator(local_operator_config)
+    return LocalOperatorApp(authenticator, workspace_programs=workspace_programs)
 
 
 def build_release_control_mcp_app(settings: Any, *, audit_sink: Any) -> Any:

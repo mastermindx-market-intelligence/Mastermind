@@ -224,3 +224,27 @@ unlinked-if-stale; socket removed on stop.
   tests/test_mastermind_os_session_transport.py`.
 - Land: merge trunk into lane, affected suites, non-force push
   `HEAD:feat/mmos-v1-integration-t3`. No app build, no install.
+
+## Lane closed — listener landed (writer glm-5.3, 2026-11-10)
+
+- Landed on `feat/mmos-v1-integration-t3` from `t3/mmos-v2-l4r`
+  (head `ca2cca616` at close): NEW `local_operator.py`,
+  `tests/test_executive_local_operator.py` (28 tests),
+  `tools/mmos_dev/local_operator_client.py`, findings record
+  `L4_LISTENER_ATTACK.md`; hooks only in `server.py`
+  (`build_local_operator_mcp_app`) and `executive_mcp_entry.py`
+  (optional `local_operator` block, listener beside uvicorn).
+- Attack: both grok-4.7 rounds fabricated (invented shas, no file, no
+  remote ref) — discarded; see `L4_LISTENER_ATTACK.md`. The real fixes
+  came from the principal's three h11 questions: 100-continue stall
+  and crashed-app silent close both reproduced then fixed
+  (`1e77c1bee`); chunked bodies work. Keep-alive was silently dead
+  (h11 0.16 API removal) and is fixed in the same commit.
+- CRITICAL for RC review (auth-adjacent new surface):
+  `integrations/executive_mcp/local_operator.py`,
+  `integrations/executive_mcp/server.py` (hook only),
+  `ops/executive_os/executive_mcp_entry.py` (hook only),
+  `tests/test_executive_local_operator.py`,
+  `tools/mmos_dev/local_operator_client.py`.
+- Lane closed as commissioned. No app build, no install, no config
+  change on any live machine.

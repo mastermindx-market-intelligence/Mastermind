@@ -4083,12 +4083,14 @@ def test_r7_armed_gate_finishes_far_inside_the_hook_budget(
     _, command, expected = row
     assert len(command) <= guard.R7_MAX_ARMED_COMMAND_CHARS
     _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
-    started = time.monotonic()
+    started = time.process_time()
     verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
-    elapsed = time.monotonic() - started
+    elapsed = time.process_time() - started
     assert verdict == expected, reason[:300]
     # The registered hook timeout is 10 s (provider_orchestrator_policy);
-    # every scan on the armed path is linear (measured ~1 s worst case).
+    # every scan on the armed path is linear (measured ~1 s worst case). CPU
+    # seconds, not wall: the linearity property is about the scan's WORK,
+    # which stays constant under load while wall time does not.
     assert elapsed < 5.0, (row[0], elapsed)
 
 
@@ -4577,15 +4579,43 @@ _R8_OWNER_SHIM = (
 )
 
 
+def _child_cpu_seconds() -> float:
+    """CPU seconds (user+system) consumed by the reaped children of this
+    process (``os.times()``). Unlike wall seconds this is immune to scheduler
+    contention and paging, so budget assertions on the hook's CPU-bound
+    scanning work stay deterministic when ~1300 tests run concurrently."""
+    t = os.times()
+    return t.children_user + t.children_system
+
+
+def _child_wall_from_stderr(stderr: str) -> float:
+    """Wall seconds measured INSIDE the hook child around ``m.main()`` (the
+    inject prints a ``GUARD_WALL_S <seconds>`` marker to stderr). Excludes
+    interpreter startup and parent-side scheduling delay — the load-noise
+    terms a watchdog-window assertion is not about."""
+    for line in reversed(stderr.splitlines()):
+        if line.startswith("GUARD_WALL_S "):
+            return float(line.split()[1])
+    raise AssertionError(f"no GUARD_WALL_S marker in child stderr: {stderr[-400:]!r}")
+
+
 def _r8_hook_cli(
     tmp_path: Path, command: str, *, bound: bool, owner: bool, inject: str = "",
-    extra_env: dict | None = None,
+    extra_env: dict | None = None, measure: str = "cpu",
 ) -> tuple[float, int, str]:
-    """(wall seconds, exit code, stdout) of the registered hook command line
-    ``python3 "<guard>"`` (or the owner shim) with the PreToolUse JSON on stdin."""
+    """(budget seconds, exit code, stdout) of the registered hook command line
+    ``python3 "<guard>"`` (or the owner shim) with the PreToolUse JSON on stdin.
+
+    ``measure="cpu"`` (default) returns the child's CPU seconds: the budget
+    rows assert the scan's WORK stays linear and inside the hook budget, and
+    CPU seconds measure exactly that work regardless of machine load (a
+    super-linear regression still explodes in CPU; a hung child still dies
+    loudly at the 60 s subprocess deadline). ``measure="child_wall"`` returns
+    wall seconds measured inside the child around ``m.main()`` via a stderr
+    marker the inject must emit — used where the wall-clock watchdog window
+    itself is the property under test."""
     import shutil
     import subprocess
-    import time
 
     if shutil.which("python3") is None:
         pytest.skip("no python3 on PATH for the registered hook command")
@@ -4597,24 +4627,43 @@ def _r8_hook_cli(
         line = f'python3 -c "$R8_SHIM" "{module_path}"'
     else:
         line = f'python3 "{module_path}"'
-    started = time.monotonic()
+    cpu0 = _child_cpu_seconds()
     result = subprocess.run(
         ["/bin/sh", "-c", line], input=json.dumps(_payload(cwd, command)), env=env,
         capture_output=True, text=True, timeout=60, check=False,
     )
-    return time.monotonic() - started, result.returncode, result.stdout.strip()
+    if measure == "child_wall":
+        return _child_wall_from_stderr(result.stderr), result.returncode, result.stdout.strip()
+    return _child_cpu_seconds() - cpu0, result.returncode, result.stdout.strip()
+
+
+#: Inject for watchdog-firing rows: replaces ``guard_fabric_launch`` with a
+#: 30 s sleep (interrupted by SIGALRM ~budget seconds in) and wraps ``m.main``
+#: so the wall time INSIDE the child around it lands in a stderr marker — the
+#: asserted window covers only the watchdog's own firing, not interpreter
+#: startup or parent-side scheduling noise. The ``finally`` emits the marker
+#: during the deny path's SystemExit unwind (the hook's normal exit 0).
+_R8_WALL_INJECT = (
+    "import sys, time\n"
+    "def _slow(*a, **k):\n"
+    "    time.sleep(30)\n"
+    "m.guard_fabric_launch = _slow\n"
+    "_real_main = m.main\n"
+    "def _timed_main():\n"
+    "    _t0 = time.monotonic()\n"
+    "    try:\n"
+    "        _real_main()\n"
+    "    finally:\n"
+    "        sys.stderr.write(f'GUARD_WALL_S {time.monotonic() - _t0:.6f}\\n')\n"
+    "m.main = _timed_main\n"
+)
 
 
 def test_r8_watchdog_through_the_hook_process(tmp_path: Path) -> None:
-    inject = (
-        "import time\n"
-        "def _slow(*a, **k):\n"
-        "    time.sleep(30)\n"
-        "m.guard_fabric_launch = _slow\n"
-    )
     elapsed, code, out = _r8_hook_cli(
-        tmp_path, _R6_L, bound=True, owner=True, inject=inject,
+        tmp_path, _R6_L, bound=True, owner=True, inject=_R8_WALL_INJECT,
         extra_env={"MASTERMIND_GUARD_BUDGET_S": "1"},
+        measure="child_wall",
     )
     assert code == 0
     decision = json.loads(out)["hookSpecificOutput"]
@@ -4686,7 +4735,8 @@ def test_r8_budget_rows_finish_through_the_real_hook_command_line(
         assert fragment in decision["permissionDecisionReason"], decision["permissionDecisionReason"][:400]
         assert "guard budget exceeded" not in decision["permissionDecisionReason"]
     # Registered timeout 10 s, watchdog 7 s; measured ≤ ~1.1 s on the M2 host
-    # (C6 ledger). A CI-safe bound well inside both:
+    # (C6 ledger). A CI-safe bound well inside both — on the child's CPU
+    # seconds (``_r8_hook_cli``), deterministic under load:
     assert elapsed < 4.0, (row_id, elapsed)
 
 
@@ -4698,7 +4748,7 @@ def test_r8_cap_boundary_through_the_real_hook_command_line(tmp_path: Path, size
     reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
     if size > _R8_CAP:
         assert "refused fail-closed" in reason and f"{size} characters" in reason
-        assert elapsed < 1.0, elapsed  # judged by length alone (measured ~0.08 s)
+        assert elapsed < 1.0, elapsed  # judged by length alone (child CPU ~0.08 s)
     else:
         assert "R6_EXPANSION" in reason
         assert elapsed < 4.0, elapsed
@@ -5065,9 +5115,11 @@ _R9_F4_TEXT = "touch /tmp/r9-never-run; : gh run view 123" + "\n" * 60000 + ": e
 def _r9_hook(
     tmp_path: Path, payload: dict, *, armed: bool, extra_env: dict | None = None
 ) -> tuple[float, int, str]:
+    """(child CPU seconds, exit code, stdout) — child CPU instead of wall:
+    deterministic under concurrent-suite load (see ``_r8_hook_cli``). The 60 s
+    subprocess timeout stays the bounded fail-loud deadline."""
     import shutil
     import subprocess
-    import time
 
     if shutil.which("python3") is None:
         pytest.skip("no python3 on PATH for the registered hook command")
@@ -5077,12 +5129,12 @@ def _r9_hook(
         env.pop("MASTERMIND_SHARED_PLACEMENT", None)
     env.update(extra_env or {})
     payload = dict(payload, cwd=str(cwd))
-    started = time.monotonic()
+    cpu0 = _child_cpu_seconds()
     result = subprocess.run(
         ["/bin/sh", "-c", f'python3 "{module_path}"'], input=json.dumps(payload), env=env,
         capture_output=True, text=True, timeout=60, check=False,
     )
-    return time.monotonic() - started, result.returncode, result.stdout.strip()
+    return _child_cpu_seconds() - cpu0, result.returncode, result.stdout.strip()
 
 
 def test_r9_unarmed_adversarial_ci_text_is_no_decision_well_inside_the_timeout(
@@ -5093,7 +5145,7 @@ def test_r9_unarmed_adversarial_ci_text_is_no_decision_well_inside_the_timeout(
     10 s provider kill."""
     elapsed, code, out = _r9_hook(tmp_path, _payload(tmp_path, _R9_F4_TEXT), armed=False)
     assert (code, out) == (0, "")
-    assert elapsed < 8.5, elapsed  # watchdog 7 s + interpreter start; kill at 10 s
+    assert elapsed < 8.5, elapsed  # child CPU: scan work only (watchdog verdict asserted above)
 
 
 @pytest.mark.parametrize("text", [
@@ -6150,13 +6202,16 @@ def test_r11_budget_rows_finish_through_the_real_hook_command_line(
 
 def test_r11_armed_budget_denial_stdout_is_byte_identical_to_r8(tmp_path: Path) -> None:
     """REVIEW6 N2 ACCEPT kept: the armed budget-DENY stdout (REVIEW4 F4
-    text, an injected 30 s step, budget 1.5 s) is byte-identical to r8–r10."""
+    text, an injected 30 s step, budget 1.5 s) is byte-identical to r8–r10.
+    Elapsed is the child-internal watchdog window (see ``_R8_WALL_INJECT``):
+    deterministic under load; the stdout digest is unchanged by the stderr
+    marker."""
     import hashlib
 
-    inject = "import time\ndef _slow(*a, **k):\n    time.sleep(30)\nm.guard_fabric_launch = _slow\n"
     elapsed, code, out = _r8_hook_cli(
-        tmp_path, _R6_L, bound=True, owner=True, inject=inject,
+        tmp_path, _R6_L, bound=True, owner=True, inject=_R8_WALL_INJECT,
         extra_env={"MASTERMIND_GUARD_BUDGET_S": "1.5"},
+        measure="child_wall",
     )
     assert code == 0
     assert hashlib.sha256((out + "\n").encode()).hexdigest() == (
@@ -6720,10 +6775,11 @@ def test_r12_construct_scan_is_linear() -> None:
         timings = []
         for size in (65_536, 262_144):
             text = (unit * (size // len(unit) + 1))[:size]
-            started = time.perf_counter()
+            started = time.process_time()  # CPU seconds: the linearity
+            # property is about the scan's work, invariant to machine load.
             guard.r12_constructs(text)
             guard.r12_literal_names_wrapper(text)
-            timings.append(time.perf_counter() - started)
+            timings.append(time.process_time() - started)
         assert timings[1] < 0.5, (unit, timings)
         assert timings[1] < 8 * timings[0] + 0.02, (unit, timings)
 
@@ -6791,14 +6847,14 @@ def test_r12_unarmed_output_is_byte_identical_to_r11(tmp_path: Path, row: tuple)
     if budget:
         env["MASTERMIND_GUARD_BUDGET_S"] = budget
     payload = _payload(cwd, command, background=background)
-    started = time.monotonic()
+    cpu0 = _child_cpu_seconds()
     result = subprocess.run(
         ["/bin/sh", "-c", f'python3 "{module_path}"'], input=json.dumps(payload), env=env,
         capture_output=True, text=True, timeout=60, check=False,
     )
     assert result.returncode == 0, result.stderr
     assert hashlib.sha256(result.stdout.encode()).hexdigest() == digest, result.stdout[:300]
-    assert time.monotonic() - started < 4.0
+    assert _child_cpu_seconds() - cpu0 < 4.0
 
 
 # --- r12 (6): fuzz -----------------------------------------------------------
@@ -7012,13 +7068,14 @@ def test_r12_budget_rows_finish_through_the_real_hook_command_line(tmp_path: Pat
 ])
 def test_r12_scanner_stays_fast_on_the_f1_f2_shapes(unit: str) -> None:
     """The unarmed (and secondary) reading after the F1/F2 fixes, at the
-    armed cap, in process: well inside the budget."""
+    armed cap, in process: well inside the budget. CPU seconds, not wall —
+    the same bound on the scanner's work, deterministic under load."""
     import time
 
     text = (unit * (_R8_CAP // len(unit) + 1))[:_R8_CAP]
-    started = time.perf_counter()
+    started = time.process_time()
     guard.r6_names_wrapper(text)
-    assert time.perf_counter() - started < 3.0, unit
+    assert time.process_time() - started < 3.0, unit
 
 
 # --- r13 (re-check #8): a continuation assembled by quote removal ----------
@@ -7231,7 +7288,7 @@ def test_r13_unquoted_view_is_linear() -> None:
 
     for unit in ('"a\\\\"\'\n\'', "x\\\n", "'\\'\n", 'ab"c"'):
         text = (unit * (_R8_CAP // len(unit) + 1))[:_R8_CAP]
-        started = _time.perf_counter()
+        started = _time.process_time()  # CPU seconds: load-invariant
         guard.r12_constructs(text)
         guard.r12_literal_names_wrapper(text)
-        assert _time.perf_counter() - started < 1.0, unit
+        assert _time.process_time() - started < 1.0, unit

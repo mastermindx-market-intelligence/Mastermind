@@ -68,6 +68,7 @@ _MODEL_CONFIGURATION_ROUTE = "/workspace/resources/models/current"
 _CAPACITY_FABRIC_ROUTE = "/workspace/resources/fabric/current"
 _T3_ATTEMPT_FLEET_ROUTE = "/workspace/resources/t3/attempts/current"
 _T3_THREAD_PROJECTION_ROUTE = "/workspace/resources/t3/threads/current"
+_EXECUTION_RETURN_ROUTE = "/workspace/resources/execution-returns/current"
 _HOST_OBSERVATION_ROUTE = "/workspace/resources/host-observation/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
@@ -1905,6 +1906,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         from integrations.mastermind_workspace_app.t3_thread_projection import t3_thread_projection_current
         return await t3_thread_projection_current(request, config=config)
 
+    async def execution_return_endpoint(request: Request) -> Response:
+        from integrations.mastermind_workspace_app.execution_return import execution_return_current
+        return await execution_return_current(request, config=config)
+
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
@@ -1972,6 +1977,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_CAPACITY_FABRIC_ROUTE, capacity_fabric_endpoint, methods=["GET"]),
         Route(_T3_ATTEMPT_FLEET_ROUTE, t3_attempt_fleet_endpoint, methods=["GET"]),
         Route(_T3_THREAD_PROJECTION_ROUTE, t3_thread_projection_endpoint, methods=["GET"]),
+        Route(_EXECUTION_RETURN_ROUTE, execution_return_endpoint, methods=["GET"]),
         Route(_HOST_OBSERVATION_ROUTE, host_observation_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
