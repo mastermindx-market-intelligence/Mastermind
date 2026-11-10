@@ -1,14 +1,14 @@
 # Mastermind OS — Always-on Team conversations and creation
 
 Date: 9 November 2026 UTC / 8 November 2026 America/Vancouver.\
-Operation: hermes-team-conversations-paper-20261108-c3.\
+Operation: team-daily-workspace-hardening-20261109-c3, continuing hermes-team-conversations-paper-20261108-c3.\
 Status: **Paper design and interactive companion complete. Runtime integration and production acceptance remain pending in the existing implementation programme.**
 
 ## Outcome and entry points
 
 The single Meta-CEO-centred entry becomes **Team** in the new design. Team exposes persistent teammates, direct conversations, groups, their active work and clear creation actions. Meta-CEO remains a named teammate and retains its existing office/decision destination. Code remains the detailed engineering workspace, joined to the originating Team conversation rather than becoming a separate source of company identity or task ownership.
 
-This lane added **21 editable native Paper artboards**: 16 product frames, three state boards and two build boards. It also added one entry to the existing design directory. The other session's Team, Project, Code, Fleet and Delivery boards remain intact.
+The original pass added 21 editable native Paper artboards. The resumed daily-workspace pass adds **10 more**: HC18–HC24, HS04–HS05 and HB03. This lane now owns **31 editable artboards**; the combined Team section contains 32 including the other session’s HC17. The existing directory now includes the new entry points. The other session’s Team, Project, Code, Fleet, Delivery and unified-settings boards remain intact.
 
 | Deliverable | Entry |
 | --- | --- |
@@ -22,16 +22,18 @@ This lane added **21 editable native Paper artboards**: 16 product frames, three
 
 Paper contains the editable visual specification, complete screen/state coverage and build annotations. The available Paper adapter does not provide a supported interaction-wiring API. The standalone HTML therefore supplies the executable click-through demonstration: download/open it in a browser and use **Advance sample** and **Connection** to exercise the simulated states. It contains original interface code and sample data, no production donor implementation, credentials, model calls or live scheduler. Only theme/language preferences persist across reload; a reconnect demonstration preserves the current in-memory conversation and draft.
 
-The HTML is 82,203 bytes; SHA-256:\
-9220b233366efdf0d8d7c3f92a5a47e2a9271b1b3c4dc7d994c8cb3ac5d99ad6
+The current HTML is **188,748 bytes**; SHA-256:\
+222f6bffbb0b6631c0c542ac31cac5652d688cc2f4b82ddaf80b0daaf8a35b13
+
+The current pass and its verification supersede the earlier companion digest and intermediate “next phase” checkpoints below. Original design/research receipts remain historical provenance.
 
 ## Assignment, sources and ownership
 
 The Chairman assigned complementary Paper work alongside the active integration session. This lane owns its HC/HS/HB frames and this guide. It does not take over Fable's live integration, maintenance, workers, provider processes, runtime custody or release holds.
 
-Protected procedure pin: **Mastermind ed7991199ccf76027f7acccc283c539c175e7e16**. The compatible protected docs/sol_skills/INDEX.md, applicable Paper/source/continuity/delivery laws and design instructions were read against the pinned sources.\
-Design source pin: **Macro 983e4d5439e5f318b9f713472d1511d0b93d123b**. The existing Noir/Atelier layout, typography, navigation and neutral palette are retained.\
-Source carrier: **sol/hermes-team-conversations-paper-20261108-c3**, one owned document path.\
+Protected procedure pin for this resumed pass: **Mastermind 494d095813dad415938800fa0e4d2719497738fa** (original pass: ed7991199ccf76027f7acccc283c539c175e7e16). The compatible protected docs/sol_skills/INDEX.md, applicable Paper/source/continuity/delivery laws and design instructions were read against the pinned sources.\
+Design source pin for this resumed pass: **Macro f92353edd85904b291d158e685c9c62d793587dd** (original pass: 983e4d5439e5f318b9f713472d1511d0b93d123b). The existing Noir/Atelier layout, typography, navigation and neutral palette are retained.\
+Source carrier: **sol/team-daily-workspace-hardening-20261109-c3**, one owned document path. The original carrier was completed by merged PR #2358 and was not reopened.\
 Authenticated source author: **mastermindx-3**. No technical review is represented as a GitHub approval.
 
 The initial coordination is recorded on [#2338](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2338#issuecomment-6731279263). Delivery of that comment is evidence of coordination, not evidence that another session has picked up this work. The other session's final source package was independently read at the immutable commit linked above; its guide blob is ff0388d4871b04ab722d2f240ea8f2131a528cff.
@@ -373,3 +375,128 @@ Read-only donor reasoning specialists completed and were explicitly stopped. No 
 - [T3 launch-tool schema at plan pin](https://github.com/pingdotgg/t3code/blob/0770446869d247a8b28c27d7ed93f47f8ff0c1e4/apps/server/src/mcp/toolkits/project/tools.ts)
 - [Same launch-tool schema at companion pin](https://github.com/pingdotgg/t3code/blob/d0f1f7200dce1229f75314b3d9eb1d7ac3abb607/apps/server/src/mcp/toolkits/project/tools.ts)
 - [Immutable companion implementation guide](https://github.com/mastermindx-market-intelligence/Mastermind/blob/e5d3a2489eb091a9b2f6749fd57c13184b3c2b60/docs/plans/2026-11-08-mmos-team-delivery-integration.md)
+
+
+## Resumed hardening — 9 November 2026
+
+The Chairman renewed this design commission: make the existing Hermes Team and T3 experience more robust and better designed. The original outcome, ownership and integration acceptance above remain in force. PR #2358 is merged at 494d095813dad415938800fa0e4d2719497738fa; its completed baseline is preserved.
+
+Current protected procedure pin: 494d095813dad415938800fa0e4d2719497738fa. Current Macro design pin: f92353edd85904b291d158e685c9c62d793587dd. The live Paper file permits disjoint target writers. Another session has added pages 17 Code workspace, 18 Unified settings, 17A Code states and 17B Code Build, plus HC17. Those targets are not owned or modified by this pass. Existing HC01 navigation has also been refreshed; this pass will build new disjoint HC18+ targets in page p-R-0 and new HS/HB targets on the existing state/build pages.
+
+### Bounded outcome and acceptance
+
+Improve everyday Team operation with four connected journeys: attention triage, side-by-side conversations, search with exact-message return, and parent/child work tracing. Add concrete partial-creation and result-delivery recovery, explicit group routing, and lifecycle actions. Preserve drafts, read positions, original message/task identity and the existing Code return destination. Native Paper product/state/build evidence is required; the HTML companion supports executable demonstrations but cannot substitute for Paper. Runtime integration and production acceptance remain outside this design-only pass.
+
+1. Inspect the current native Team frames and adjacent Code/settings surfaces; retain their palette, shell and ownership.
+2. Build the four primary journeys and bounded recovery states as native editable frames. Do not duplicate the other session's Code/settings design work.
+3. Verify actual screenshots, including deliberate narrow layouts and light/ZH treatment for affected daily flows. Resolve concrete readability, clipping and return-path defects.
+4. Extend the existing interactive companion for these accepted journeys, with focused behavior checks; replace its existing saved identity.
+5. Record exact frame IDs, action/acknowledgment/return contracts, preserved features, verification and remaining production proof here. Publish one Ready source PR from this branch and coordinate through #2338.
+
+Direct Paper composition and source integration are retained by the principal for PRINCIPAL_JUDGMENT and LOWER_TOTAL_OVERHEAD. One native reasoning-only audit reviewed workflow gaps; it performed no writes or runtime actions. Its recommendations were accepted for this bounded design pass, not as a live-canvas completeness verdict. No new daemon, queue, runtime identity, checkout allocator, watcher or integration owner is introduced.
+
+The exact revision-6 masterplan remains unverified unless later primary evidence resolves it. The new Code/session provider design is consumed as a capability choice; this pass does not hardcode a new runtime default or supersede the existing implementation owners.
+
+
+### Native daily-workspace milestone
+
+Four new editable product frames have been composed and inspected as actual Paper screenshots, on the existing product page p-R-0:
+
+| Frame | Node | Journey |
+| --- | --- | --- |
+| HC18 | 1NSP-0 | Needs-you inbox to the exact request, with distinct unread and work filters. |
+| HC19 | 1OAV-0 | Two conversations with separate recipients, drafts, queues and focused composer. |
+| HC20 | 1OVH-0 | Scoped search results to an exact highlighted message, surrounding context and return. |
+| HC21 | 1PB7-0 | Waiting parent, three delegated tasks, selected task dialogue and scoped guidance. |
+
+The native screenshot pass found and repaired the HC18 pinned-list overflow and the HC19 unread divider crossing into the adjacent pane. Search has a designed partial-history disclosure. Every new frame retains the existing Atelier shell and token palette. These are sample product states, not runtime receipts.
+
+Target reconciliation: the first HC18 duplication used a page ID where Paper required a root node ID. Upstream returned a target-not-found error with an unknown-effect classification. A same-carrier read of the original page verified its unchanged 17-board inventory and returned root_node_p-R-0. A materially corrected operation then created 1NSP-0. No blind retry or carrier switch occurred.
+
+The reasoning-only companion audit also identified the prototype's global DOM IDs and current-conversation binding as a split-view hazard. The continuation will parameterize the existing renderer and actions, reuse the existing per-conversation drafts/files/models/streams, and verify side-pane send, queue and Code-origin behavior. No duplicate state engine is planned.
+
+Next proof: recovery and narrow/light/ZH Paper frames, then the updated companion's actual click-through behavior and final source mapping. The design commission remains in progress.
+
+
+### Native daily-workspace pass — verified checkpoint
+
+Ten additional editable frames are now present in the original Paper file. Screenshots were inspected after creation; the split-pane unread divider and attention-rail spacing were corrected and rechecked.
+
+| Surface | Node | Verified design coverage |
+|---|---|---|
+| HC18 | 1NSP-0 | Needs-you inbox; exact request; unread and open requests remain distinct |
+| HC19 | 1OAV-0 | Two conversations; explicit recipients; independent drafts/queues; focused composer |
+| HC20 | 1OVH-0 | History search; exact message/context; return to results/latest and retained draft |
+| HC21 | 1PB7-0 | Parent waiting for delegated work; child dialogue; queued guidance; return destination |
+| HC22 | 1PPR-0 | 390px English attention inbox |
+| HC23 | 1PTB-0 | 390px English conversation tabs and retained second draft |
+| HC24 | 1PW0-0 | 390px Chinese light-theme search and exact-message return |
+| HS04 | 1PZ9-0 | Saved profile/start unknown; stale membership; activity-only task; archive active conversation |
+| HS05 | 1Q7B-0 | Finished routine/delivery failed or unknown; unavailable coordinator; restore archived conversation |
+| HB03 | 1QE6-0 | Conversation identity, search return, recovery and proof contracts |
+
+The Start-here directory gained an additive subsection at node `1QJJ-0`; the other session's HC17 and Code/settings work was preserved. Existing HC01–17, HS01–03, HB01–02 and pages 15/17/18 were not rewritten by this pass. This checkpoint proves native design creation and visual inspection only. The companion implementation and behavior verification remain the active next phase; it is not a live backend or revision-6 conformance claim.
+
+
+## Daily workspace hardening — completed design and companion
+
+**Bounded design outcome: PROVEN_OUTCOME.** The new native Paper frames and the executable companion behaviors are complete and inspected. **Parent runtime integration: not production-proven; the existing #2338 implementation programme remains open.** No Paper screenshot, local simulation, source commit or CI result is represented as a running Hermes/T3 integration.
+
+### What changed
+
+Before this pass, the companion had a single active conversation, a fixed “Needs you” badge, a simple history list, and optimistic creation/routine completions. The revised interface provides a daily working surface with independent conversations, a useful attention inbox, exact-message search and explicit recoverable states.
+
+- **Attention:** Needs you, Unread, Working and Archived are derived from conversation state. Reading changes the read pointer without resolving a request. A briefing destination, returned design review and scoped browser request resolve separately. Archived requests remain visible in Needs you.
+- **Two conversations:** Main/side panes have separate recipient, draft, model, attachment metadata, queue, streaming task and scroll state. Opening an already visible conversation focuses it. On a phone, the same conversations become tabs. Closing one pane preserves its draft.
+- **Search and return:** Search covers loaded message/sender text across all conversations or the selected conversation. Each result retains the exact conversation/message identity and opens surrounding context. Returning to results retains the query; closing search restores both original panes, drafts, reading positions and caret. A selected historical context does not start following incoming output until Latest is chosen.
+- **Streaming and keyboard behavior:** Concurrent streams update their own timelines. Unread/Working projections refresh on logical events, not every token. A focused message action and a focused composer retain keyboard focus while output arrives elsewhere. Send mode is derived consistently from the conversation override or shared preference.
+- **Creation recovery:** A saved profile with an unconfirmed start exposes Check status against the original start. Repeated checks produce one profile and one readiness message. Room edits compare the current room revision; a conflict retains the pending selection and presents current versus proposed membership. A second concurrent change is detected again.
+- **Delegated work:** Native child dialogue, direct guidance and scoped stop are separate capabilities. The activity-only fixture offers Message Engineering and Open Code without an unsupported child composer. Guidance to an addressable child remains visibly queued until consumption is known. Stopping one child leaves its sibling running.
+- **Routine execution and delivery:** Each run snapshots its original destination and instructions. A finished result remains available when delivery fails. Retry delivery reuses the retained result; a lost response checks the original delivery. Neither path reruns the routine or creates another result message.
+- **Conversation lifecycle:** Archive changes list visibility. It does not stop streams, tasks or routine delivery, erase a draft or create another room. Restore changes visibility without restarting work.
+- **Code route choice:** The launch form follows a sample project policy and presents the advertised Capacity Fabric and connected DeepSeek Harness/ACP routes. Both retain the exact original conversation, message and assigned environment; each opens its own settings context. The fixture still uses one existing workspace allocator and one launch identity. This represents the shared HC17/Code integration contract; it does not add a production provider router.
+
+### Native and companion coverage
+
+The preceding verified native inventory is final: HC18 `1NSP-0`, HC19 `1OAV-0`, HC20 `1OVH-0`, HC21 `1PB7-0`, HC22 `1PPR-0`, HC23 `1PTB-0`, HC24 `1PW0-0`, HS04 `1PZ9-0`, HS05 `1Q7B-0`, HB03 `1QE6-0`. Directory addition: `1QJJ-0`. The guarded finish-working operation returned `APPLIED_RESPONSE_OBSERVED` / `OK` for these exact owned nodes.
+
+The other session’s HC17, Code product/states/build pages and unified settings remain separate, preserved source work. Its observed CB03 node `1M93-0` records the newer donor references Hermes `109fd8161a509db5a00942152ba48882e446e8b0` and T3 `c6ca6056309904f89b90b6055d797973be0a0939`; the initial donor pins elsewhere in this document remain provenance for the earlier assessment. This pass did not reopen that donor assessment or change an installed runtime.
+
+### Verification receipts
+
+The inline executable script has SHA-256 `a1b6e9dddfcb3b44859fb75b6aed17660bce2433a8a4cae3189f6228dbe841b2`. Local Chromium/Playwright verification passed **83 assertions**:
+
+| Check group | Passed | Material proof |
+|---|---:|---|
+| Existing end-to-end paths | 11 | Bot readiness, group creation, queued edit, uncertain-send reconciliation, Code startup/result return, retained draft and phone fit |
+| Existing edge cases | 23 | Member limit, exact existing thread reuse, terminal stop during startup, browser control acknowledgment/offline gating, scoped child stop, ACP capability fallback, reconnect scroll/draft, no external requests/errors |
+| Daily-workspace behavior | 40 | Attention/read separation, split targets/drafts/models/files/queues, concurrent streams and focus, phone tabs, exact search/return/caret, original bot recovery, repeated membership conflict, retained routine delivery, archive/restore, coordinator recovery |
+| Coding-route and inherited-mode behavior | 9 | Project route preference, Capacity Fabric/ACP provider binding, correct settings context, exact side-conversation return, one result, preserved two drafts, inherited Queue display and send |
+
+The final font-only addition leaves that executable script unchanged. The final 188,748-byte artifact was separately loaded and screenshot-inspected at 390 × 844 in Chinese/light mode and at 1600 × 1080 for the English attention workspace. The embedded font loaded, horizontal overflow was absent, and no JavaScript errors or external HTTP requests occurred. The prior missing-glyph rendering was corrected with a 39,364-byte Noto Sans SC subset covering all 213 required non-Latin characters; the subset is renamed MMOS Preview CJK and includes the full OFL 1.1 notice in the HTML. No font fetch is needed.
+
+Native Paper screenshots were inspected for all ten new frames and the directory addition. The main repairs were the attention-list vertical spacing, explicit icon strokes and a split-pane divider that initially extended too far. Desktop split, exact search, 390px phone tabs and both recovery boards were visually checked.
+
+### Saved artifact and reproducible walkthrough
+
+The existing companion identity was replaced successfully, rather than creating a second file:
+
+- Library identity: `libfile_8455f2000dcc8191a32c5f455f10e3f7`.
+- Current file receipt: `file_00000000bd308212ae4febd6ae677416`.
+- Name/path: `/MastermindX/mastermind-team-prototype.html`.
+- Returned version number: `1`; the local Library identity/version metadata was applied successfully.
+- Complete HTML digest: `222f6bffbb0b6631c0c542ac31cac5652d688cc2f4b82ddaf80b0daaf8a35b13`.
+
+To review: open the companion, select Needs you and answer Secretary’s destination request; open Engineering beside OS launch team and type a different draft in each; send/queue in one pane, use Advance sample and switch phone tabs; search for “reconnect” and return to the exact request; then use Connection to select the next bot, room-edit, coordinator or routine-delivery failure scenario. Routines → Run once → View run exposes retained execution and delivery separately. Start coding from a message to compare the two advertised routes and return the result to that original conversation.
+
+### Scope, limits and continuation
+
+Only theme/language preferences persist across a full reload. Conversation/draft/queue/run identity is preserved through in-memory navigation and simulated reconnect, not a real gateway restart. Search covers loaded fixture messages; it is not a production full-history index. English/Chinese labels and light/dark appearance are demonstrated, while fixture message text keeps its original language. Local attachment metadata is not uploaded. No real bot, scheduler, admission, workspace allocation, model call, approval or provider control is exercised.
+
+The exact revision-6 masterplan remains unverified as recorded above. This pass does not claim full revision-6 conformity, merge/deployment completion or donor backend integration. The same ownership, live-writer and release holds remain in force. No second lifecycle, memory, authentication, routing, retry, queue, watcher or publication control plane was created.
+
+Primary implementation continuation: use this accepted design coverage and the shared Code/settings guide to implement and prove the corresponding adapters on the existing #2338 carrier after reconciling its live source writer and exact current head. Required production proof is real bot/room creation, actual streamed events, exact conversation/task/session return, original-identity recovery, and real retained-result delivery. Do not recreate the Paper frames or the companion, replace another live writer, re-run completed work, or equate sample test counts with production checks.
+
+The current source handoff is reviewable documentation on one branch. The earlier native branch-protection read returned 403; it was not retried through a different credential or carrier. That leaves merge enrollment unqualified in this session, not a new human design-approval requirement. Ready/source/CI/merge are reported separately.
+
+Both bounded reasoning tasks returned useful findings and received explicit ACCEPTED / STOP. No temporary watcher or runtime worker was started. GitHub coordination on #2338 is a delivered return, not evidence that another session has started implementation.

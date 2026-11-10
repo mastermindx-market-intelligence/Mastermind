@@ -913,11 +913,14 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
-# 2026-11-09 merge pin move: master #2365 (commit 6696153d3, manual pool
-# enrollment) inserts 9 lines above both sites; the two reviewed 500 operands
-# are byte-identical at 57/280. Master shipped the composition without moving
-# this pin (origin/master fails the reviewed-site token test for this path);
-# moved during the origin/master merge and flagged for distinct CRITICAL review.
+# Pin-move history converged at this merge (origin/master into
+# feat/mmos-v1-integration-t3, 2026-11-10). Master #2365 (commit 6696153d3,
+# accepted manual-pool enumeration xai, anthropic-oauth, openai-codex) moved
+# the same two reason-length tokens by nine lines (48->57, 271->280) with
+# unchanged enclosing validation expressions. The trunk moved this pin in its
+# 2026-11-09 merge (MERGE_MASTER_20261109); master independently re-pinned in
+# #2377/#2386. Both sides carried byte-identical pin value and sites here;
+# recomputed against the merged source at this merge — no side was picked.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),
