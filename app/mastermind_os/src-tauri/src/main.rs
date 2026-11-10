@@ -1,4 +1,5 @@
 mod auth;
+mod dev_log;
 mod native_session_send;
 mod project_planning;
 mod project_execution;
