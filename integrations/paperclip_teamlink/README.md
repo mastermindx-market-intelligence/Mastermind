@@ -7,6 +7,15 @@ queues, runs and transcripts. The bridge stores transport references and bounded
 advisory context; it does not create another agent runtime, task queue, daemon,
 authentication service or project acceptance owner.
 
+## Native bot instructions
+
+The bundled `agent_skill/SKILL.md` is installed through Paperclip's native company
+skill registry and selected for the existing bot team. The current `hermes_local`
+adapter reconciles Paperclip-managed skills on every run, including resumed runs.
+It does not automatically inject plugin tools, so the skill documents native
+tool discovery and the authenticated CLI/API route without introducing an agent
+identity, credential store or alternate runtime.
+
 ## Tools and ordinary workflow
 
 Tools are registered under the installed plugin's native namespace. Use native

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+const teamlinkSkill = readFileSync(new URL('./agent_skill/SKILL.md', import.meta.url), 'utf8');
 const string = { type: 'string', minLength: 1, maxLength: 256 };
 const schema = (properties, required = []) => ({ type: 'object', additionalProperties: false, properties, required });
 const issue = { issueId: string };
@@ -17,10 +19,13 @@ export default {
   description: 'Two-way Paperclip ↔ T3 conversations, exact-run returns, shared project context and live environment visibility.',
   categories: ['automation'],
   entrypoints: { worker: './worker.mjs' },
-  capabilities: ['issues.read', 'issues.checkout', 'issue.comments.read', 'issue.comments.create', 'issue.documents.read', 'agents.invoke', 'agents.read', 'database.namespace.read', 'database.namespace.write', 'database.namespace.migrate', 'events.subscribe', 'jobs.schedule', 'agent.tools.register', 'ui.action.register'],
+  capabilities: ['issues.read', 'issues.checkout', 'issue.comments.read', 'issue.comments.create', 'issue.documents.read', 'agents.invoke', 'agents.read', 'database.namespace.read', 'database.namespace.write', 'database.namespace.migrate', 'events.subscribe', 'jobs.schedule', 'agent.tools.register', 'ui.action.register', 'skills.managed'],
   database: { namespaceSlug: 'mastermind_teamlink', migrationsDir: './migrations' },
   jobs: [{ jobKey: 'reconcile', displayName: 'Reconcile original T3 exchanges', description: 'Observe original runs and reconcile transport receipts. Never redispatch a message.', schedule: '* * * * *' }],
   tools,
+  skills: [{ skillKey: 'teamlink', displayName: 'Paperclip Teamlink',
+    description: 'Communicate with exact T3 COO sessions, consume replies and recover project continuity through native Paperclip tools.',
+    markdown: teamlinkSkill }],
   instanceConfigSchema: schema({
     companyId: string, environmentId: string,
     projectIds: { type: 'array', minItems: 1, maxItems: 32, uniqueItems: true, items: string },

@@ -21,7 +21,7 @@ failure tests, protected source delivery and installed-source readback.
 Paperclip 2026.1106.0 is already running on M2, local_trusted/private port 3100,
 company a5f907fc-c4b1-478c-a1b1-1748d32206dd, thirteen existing hermes_local agents.
 Its native plugin SDK already supplies tools, events, scheduled jobs, state,
-issue comments/documents and idempotent issue wakeups. Plugin inventory is empty.
+issue comments/documents and native attention calls. Plugin inventory is empty.
 T3 0.1.7 is running on loopback 3773; its installed CLI owns local authentication,
 exact threads, queue-mode send and native observations.
 
@@ -43,10 +43,10 @@ Native per-delivery receipts record transport evidence, never execution authorit
 
 | Phase | Required result | State |
 | --- | --- | --- |
-| P1 qualify | Installed APIs, exact identities, incumbent collision and Teamlink contracts | in_progress |
-| P2 implement | Native Paperclip plugin tools, exact T3 transport, original-issue return, shared context and scoped telemetry | proposed |
-| P3 harden | Duplicate/lost-response/stale-target/restart/concurrent-message/secret-boundary tests | proposed |
-| P4 deliver | Same branch, source checks, normal protected PR release and exact merge readback | proposed |
+| P1 qualify | Installed APIs, exact identities, incumbent collision and Teamlink contracts | verified |
+| P2 implement | Native Paperclip plugin tools, exact T3 transport, original-issue return, shared context and scoped telemetry | verified |
+| P3 harden | Duplicate/lost-response/stale-target/restart/concurrent-message/secret-boundary tests | verified |
+| P4 deliver | Same branch, source checks, normal protected PR release and exact merge readback | PR #2419, protected checks pending |
 | P5 connect | Native plugin install/configure; role instructions through existing skill owner; fresh native tool discovery | proposed |
 | P6 accept | Real Paperclip to T3 message and correlated return, continuation recovery, native status/process proof | proposed |
 
@@ -94,3 +94,11 @@ Local verification: 19 Node transport scenarios and 11 Python boundary tests pas
 Adversarial reasoning found and corrected publication-CAS races, mutable assistant cursor loss, ambiguous reverse destinations, starvation by held receipts, and startup configuration scope. Lost comment receipts now need server-attributed native event provenance; visible markers alone do not prove plugin authorship. The accepted native CLI candidate is adopted with its original MIT license and exact patch hash. Its completed coordinator is not a live writer and its original worktree remains unchanged.
 
 Next: finish installed-SDK setup qualification, deliver the qualified head through native protected PR controls, build/install only the merged source, and prove both directions with real native bot/run/comment/consumption receipts. Preserve MAS-2 and the separate fleet/history/learning writers. No existing agent adapter, shared instruction file, T3 app, live session or server has been replaced/restarted by this work.
+
+## Runtime preparation
+
+The isolated native helper build passed all 37 focused tests. Six empty patch context lines were normalized for repository whitespace checks; reverse application verifies the stored patch against the same tested source. The relocatable runtime contains 22 dependency packages and no external worktree symlinks.
+
+Native acceptance issue `MAS-4` (`474dbaf5-ad88-42fc-88e6-8bbbbd120e0f`) is prepared as unassigned backlog. Its dedicated idle T3 root is `mcp:launch:de3dceeae2cfef0105545f884dcfe605f8d4921cb2449892f04fdc1098b30e56`, in native project `9de77193-e68a-49fe-adee-f85406f04772`. No provider run was launched by that idle creation. Activate the actual Meta-CEO only after merged-source installation and native discovery.
+
+The existing Hermes adapter does not inject plugin tools directly. A native company skill is therefore bundled for durable bot discovery and authenticated tool use. Install/select it through the existing Paperclip skill owner, preserving all current agent identities, adapters, roles and selected skills.
