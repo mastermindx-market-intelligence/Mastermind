@@ -313,6 +313,21 @@ class ExecutionReturnWiring:
                 store, job, attempt_id, "ORIGINAL_BINDING_MISSING",
                 "admission provenance lost the child-request command id")
             return None
+        # G3: attempt.root_id is the COMPANY ROOT of the original request —
+        # the projector's contract (see the committed sample record's
+        # "root-wo19-coding-7") and the original_requester binding it joins;
+        # the placement Job's own id (JOB-002 in the L1 canary) is a runtime
+        # ledger key, not the company identity the return record must carry.
+        # Project it from the admission provenance's child-request root_ref,
+        # falling back to the CLAIMED binding's root_run_ref (the same
+        # company root stamped at claim), and only then to the job root.
+        root_ref = ""
+        if isinstance(child_request, dict):
+            candidate = child_request.get("root_ref")
+            root_ref = candidate if isinstance(candidate, str) else ""
+        if not root_ref:
+            root_ref = str(binding.get("root_run_ref") or "")
+        root_id = root_ref or str(job.root_job_id or job.job_id)
         thread_id, native_run_id, ledger_refs = self._t3_result_reference(job)
 
         # Seal digest: the runtime's canonical digest over the terminal facts
@@ -344,7 +359,7 @@ class ExecutionReturnWiring:
             },
             "attempt": {
                 "attempt_id": attempt_id,
-                "root_id": str(job.root_job_id or job.job_id),
+                "root_id": root_id,
                 "idempotency_key": idempotency_key,
                 "authenticated_namespace": namespace,
                 "t3_thread_id": thread_id,
