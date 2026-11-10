@@ -5,15 +5,22 @@ No scheduler, credential store, provider router or runtime lifecycle is added.
 The server retains instruction/config revisions and skill ownership.
 """
 import argparse
+import ast
 import collections
 import copy
 import hashlib
 import json
+import os
+import subprocess
+import yaml
 from pathlib import Path
 import urllib.request
 
 COMPANY = "a5f907fc-c4b1-478c-a1b1-1748d32206dd"
 API = "http://127.0.0.1:3100/api"
+INSTANCE = Path("/Users/chriswong/.paperclip/instances/default")
+HERMES = "/Users/chriswong/.local/bin/hermes"
+DISABLED_FEEDBACK = {"complain", "suggestion-box"}
 MARKER = "<!-- mastermind-paperclip-fleet-readiness-v1 -->"
 ROSTER = {
     "ec1116b7-e972-40ed-89cb-15ed4f8b04c4": ("Engineering", "engineering"),
@@ -110,21 +117,227 @@ live writers and existing release/security holds; use normal protected delivery.
 Do not start an overlapping Hermes kanban task or timer for this Paperclip issue.
 Existing always-on listeners and routines keep their owners. External Slack/email
 messages, hiring and financial effects retain their actual task authorization.
+Do not use complain or suggestion-box to send unsolicited external feedback.
 Never auto-execute broker trades or present research as trade authority.
 """
 
 
-def skill_materialization(snapshot, home):
-    rows = []
-    for item in snapshot.get("entries", []):
-        if not item.get("managed") or not item.get("desired"):
+
+def selection_key(item):
+    return item if isinstance(item, str) else item["key"]
+
+
+def selected_skills(config, name):
+    """Preserve explicit versions, use OMH, and include the adapter's required skills."""
+    selected = {}
+    for item in config.get("paperclipSkillSync", {}).get("desiredSkills", []):
+        key = selection_key(item)
+        if key != CORE + "para-memory-files":
+            selected[key] = copy.deepcopy(item)
+    for key in [CORE + "paperclip", CORE + "complain", CORE + "suggestion-box"]:
+        selected.setdefault(key, key)
+    if name in PLANNERS:
+        key = CORE + "paperclip-converting-plans-to-tasks"
+        selected.setdefault(key, key)
+    return selected
+
+
+def version_path(skill_id, version_id):
+    import uuid
+    for value in (skill_id, version_id):
+        if str(uuid.UUID(value)) != value:
+            raise ValueError("Noncanonical skill/version identity.")
+    return INSTANCE / "skills" / COMPANY / "__versions__" / skill_id / version_id
+
+
+def verify_inventory(path, version):
+    """Attest the native immutable snapshot before linking it into a profile."""
+    expected = {}
+    for item in version["fileInventory"]:
+        relative = Path(item["path"])
+        if relative.is_absolute() or ".." in relative.parts or not isinstance(item.get("content"), str):
+            raise ValueError("Unsupported or unsafe native skill inventory.")
+        expected[relative.as_posix()] = item["content"].encode()
+    actual = {}
+    for file in path.rglob("*"):
+        if file.is_symlink():
+            raise ValueError("Native snapshot contains an unexpected symlink.")
+        if file.is_file():
+            actual[file.relative_to(path).as_posix()] = file.read_bytes()
+    if not expected or "SKILL.md" not in expected or actual != expected:
+        raise ValueError("Native skill snapshot inventory does not match its version.")
+
+
+def link_state(target, source):
+    if target.is_symlink():
+        return "ready" if target.resolve() == source.resolve() else "foreign_link"
+    if target.exists():
+        return "foreign_path"
+    return "missing"
+
+
+def disabled_names(value):
+    if isinstance(value, str):
+        value = ast.literal_eval(value) if value.strip().startswith("[") else [value]
+    if value is None:
+        return set()
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise ValueError("Unsupported existing disabled-skills configuration.")
+    return set(value)
+
+
+def profile_config(home):
+    data = yaml.safe_load((home / "config.yaml").read_text())
+    if not isinstance(data, dict):
+        raise ValueError("Profile configuration is not a mapping.")
+    return data
+
+
+def configure_feedback_filter(home, slug):
+    """Use Hermes' own key-level writer; never rewrite credentials."""
+    before = profile_config(home)
+    existing = disabled_names(before.get("skills", {}).get("disabled"))
+    desired = existing | DISABLED_FEEDBACK
+    if desired == existing:
+        return False
+    env = os.environ.copy()
+    env.pop("HERMES_HOME", None)
+    result = subprocess.run(
+        [HERMES, "--profile", slug, "config", "set", "skills.disabled", json.dumps(sorted(desired))],
+        env=env, text=True, capture_output=True, timeout=45,
+    )
+    if result.returncode:
+        raise RuntimeError(f"Hermes config writer returned {result.returncode}; reconcile its original target.")
+    after = profile_config(home)
+    if disabled_names(after.get("skills", {}).get("disabled")) != desired:
+        raise RuntimeError("Hermes feedback-filter readback mismatch.")
+    clean_before, clean_after = copy.deepcopy(before), copy.deepcopy(after)
+    clean_before.setdefault("skills", {}).pop("disabled", None)
+    clean_after.setdefault("skills", {}).pop("disabled", None)
+    if clean_before != clean_after:
+        raise RuntimeError("Concurrent or additional profile configuration change; inspect before continuing.")
+    return True
+
+
+def qualify_versions(selected, home, apply):
+    library = {s["key"]: s for s in request(f"/companies/{COMPANY}/skills")}
+    pinned, rows = [], []
+    for key, selection in selected.items():
+        skill = library.get(key)
+        if skill is None:
+            raise ValueError(f"Existing company skill not found: {key}")
+        version_id = selection.get("versionId") if isinstance(selection, dict) else None
+        version_id = version_id or skill.get("currentVersionId")
+        if not version_id and apply:
+            version = request(
+                f"/companies/{COMPANY}/skills/{skill['id']}/versions",
+                {"label": "Mastermind fleet readiness 2026-11-09"}, "POST",
+            )
+            version_id = version["id"]
+            version = request(f"/companies/{COMPANY}/skills/{skill['id']}/versions/{version_id}")
+        elif version_id:
+            version = request(f"/companies/{COMPANY}/skills/{skill['id']}/versions/{version_id}")
+        else:
+            rows.append({"key": key, "state": "needs_native_version"})
             continue
-        source, runtime_name = item.get("sourcePath"), item.get("runtimeName")
-        target = home / "skills" / (runtime_name or "__missing_runtime_name__")
-        ok = bool(source and runtime_name and (target / "SKILL.md").is_file()
-                  and target.resolve() == Path(source).resolve())
-        rows.append({"key": item["key"], "materialized": ok})
-    return rows
+        if version["companyId"] != COMPANY or version["companySkillId"] != skill["id"]:
+            raise ValueError("Native version identity mismatch.")
+        source = version_path(skill["id"], version_id)
+        verify_inventory(source, version)
+        runtime_name = skill["slug"]
+        if not runtime_name or Path(runtime_name).name != runtime_name:
+            raise ValueError("Unsafe skill runtime name.")
+        target = home / "skills" / runtime_name
+        state = link_state(target, source)
+        if state in {"foreign_link", "foreign_path"}:
+            raise RuntimeError(f"Preserving conflicting skill installation at {target}: {state}")
+        if apply and state == "missing":
+            # Creation is exclusive: an intervening writer wins and is never replaced.
+            target.symlink_to(source, target_is_directory=True)
+            state = link_state(target, source)
+            if state != "ready":
+                raise RuntimeError(f"Skill link readback failed: {target}")
+        pinned.append({"key": key, "versionId": version_id})
+        rows.append({"key": key, "state": state, "version_id": version_id})
+    return pinned, rows
+
+
+def configure_agent(aid, name, slug, apply):
+    a = request(f"/agents/{aid}")
+    if a["companyId"] != COMPANY or a["name"] != name or a["adapterType"] != "hermes_local":
+        raise ValueError(f"Identity/adapter changed for {name}.")
+    home = Path("/Users/chriswong/.hermes/profiles") / slug
+    snapshot = request(f"/agents/{aid}/skills")
+    native_paths = [e["sourcePath"] for e in snapshot.get("entries", [])
+                    if not e.get("managed") and e.get("sourcePath")]
+    homes = collections.Counter(p.split("/skills/")[0] for p in native_paths)
+    if not homes or homes.most_common(1)[0][0] != str(home) or not (home / "SOUL.md").is_file():
+        raise ValueError(f"Profile binding/guidance not proven for {name}.")
+    profile = profile_config(home)
+    if profile.get("model", {}).get("provider") != "capacity-fabric" or profile.get("memory", {}).get("provider") != "omh":
+        raise ValueError(f"Provider/memory owner changed for {name}; preserve and requalify.")
+    entry_path = f"/agents/{aid}/instructions-bundle/file?path=AGENTS.md"
+    entry = request(entry_path)
+    intended = instructions(name, slug)
+    if entry["content"] != intended and entry["content"].strip() not in GENERIC and MARKER not in entry["content"]:
+        raise ValueError(f"{name} has custom instructions; preserve and reconcile.")
+    config = copy.deepcopy(a.get("adapterConfig", {}))
+    if config.get("hermesCommand") not in (None, HERMES) or config.get("command") not in (None, "hermes", HERMES):
+        raise ValueError(f"{name} has a custom Hermes command; preserve and reconcile.")
+    if apply:
+        if a["status"] not in {"idle", "error"}:
+            raise ValueError(f"{name} is {a['status']}; no mutation.")
+        runs = request(f"/companies/{COMPANY}/heartbeat-runs?agentId={aid}&limit=30")
+        if any(r["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "skipped"} for r in runs):
+            raise ValueError(f"{name} has an unsettled Paperclip run; no mutation.")
+    selected = selected_skills(config, name)
+    pinned, rows = qualify_versions(selected, home, apply)
+    result = {
+        "agent": name, "profile": slug, "native_skills": len(native_paths),
+        "instructions_ready": entry["content"] == intended, "managed_skills": rows,
+        "max_concurrent_runs": a.get("runtimeConfig", {}).get("heartbeat", {}).get("maxConcurrentRuns"),
+        "hermes_command": config.get("command"),
+        "feedback_disabled": DISABLED_FEEDBACK.issubset(disabled_names(profile.get("skills", {}).get("disabled"))),
+        "model_provider": "capacity-fabric", "memory_provider": "omh", "changes": [],
+    }
+    if not apply:
+        return result
+    if entry["content"] != intended:
+        request(f"/agents/{aid}/instructions-bundle/file",
+                {"path": "AGENTS.md", "content": intended, "baseHash": entry["contentHash"]}, "PUT")
+        saved = request(entry_path)
+        if saved["content"] != intended:
+            raise RuntimeError(f"Instruction readback mismatch for {name}.")
+        result["changes"].append("instructions")
+        result["instruction_revision"] = saved["revision"]["id"]
+    sync = copy.deepcopy(config.get("paperclipSkillSync", {}))
+    sync["desiredSkills"] = pinned
+    if config.get("paperclipSkillSync") != sync or config.get("command") != HERMES:
+        fresh = request(f"/agents/{aid}")
+        if fresh.get("adapterConfig") != config:
+            raise RuntimeError("Concurrent adapter configuration change; preserve it.")
+        request(f"/agents/{aid}", {"adapterConfig": {"paperclipSkillSync": sync, "command": HERMES}}, "PATCH")
+        saved = request(f"/agents/{aid}")["adapterConfig"]
+        expected = {**config, "paperclipSkillSync": sync, "command": HERMES}
+        if saved != expected:
+            raise RuntimeError("Adapter configuration readback mismatch.")
+        result["changes"].append("pinned_skills_and_hermes_command")
+    fresh = request(f"/agents/{aid}")
+    runtime = copy.deepcopy(fresh.get("runtimeConfig", {}))
+    heartbeat = runtime.setdefault("heartbeat", {})
+    if heartbeat.get("maxConcurrentRuns") != 1:
+        heartbeat["maxConcurrentRuns"] = 1
+        request(f"/agents/{aid}", {"runtimeConfig": runtime}, "PATCH")
+        if request(f"/agents/{aid}")["runtimeConfig"] != runtime:
+            raise RuntimeError("Runtime configuration readback mismatch.")
+        result["changes"].append("single_profile_run")
+    if configure_feedback_filter(home, slug):
+        result["changes"].append("feedback_skill_filter")
+    result.update(
+        instructions_ready=True, max_concurrent_runs=1, hermes_command=HERMES,
+        feedback_disabled=True, instruction_sha256=hashlib.sha256(intended.encode()).hexdigest(),
+    )
+    return result
 
 
 def main():
@@ -136,66 +349,12 @@ def main():
     if health.get("version") != "2026.1106.0" or health.get("deploymentMode") != "local_trusted":
         raise SystemExit("Installed version or access mode changed; requalify before applying.")
     agents = {a["id"]: a for a in request(f"/companies/{COMPANY}/agents")}
+    if not set(ROSTER).issubset(agents):
+        raise SystemExit("Existing fleet identity set changed.")
     for aid, (name, slug) in ROSTER.items():
         if args.agent and name != args.agent:
             continue
-        a = request(f"/agents/{aid}")
-        if aid not in agents or a["name"] != name or a["adapterType"] != "hermes_local":
-            raise SystemExit(f"Identity/adapter changed for {name}; preserve current configuration.")
-        snapshot = request(f"/agents/{aid}/skills")
-        native_paths = [e["sourcePath"] for e in snapshot.get("entries", [])
-                        if not e.get("managed") and e.get("sourcePath")]
-        homes = collections.Counter(p.split("/skills/")[0] for p in native_paths)
-        home = Path("/Users/chriswong/.hermes/profiles") / slug
-        if not homes or homes.most_common(1)[0][0] != str(home) or not (home / "SOUL.md").is_file():
-            raise SystemExit(f"Profile binding/guidance not proven for {name}.")
-        path = f"/agents/{aid}/instructions-bundle/file?path=AGENTS.md"
-        entry = request(path)
-        intended = instructions(name, slug)
-        required = [CORE + "paperclip"]
-        if name in PLANNERS:
-            required += [CORE + "paperclip-converting-plans-to-tasks"]
-        before = skill_materialization(snapshot, home)
-        result = {"agent": name, "profile": slug, "native_skills": len(native_paths),
-                  "instructions_ready": entry["content"] == intended,
-                  "skill_files_ready": all(x["materialized"] for x in before),
-                  "max_concurrent_runs": a.get("runtimeConfig", {}).get("heartbeat", {}).get("maxConcurrentRuns"),
-                  "changes": []}
-        if args.apply:
-            if a["status"] != "idle":
-                raise SystemExit(f"{name} is {a['status']}; no mutation.")
-            if entry["content"] != intended:
-                if entry["content"].strip() not in GENERIC and MARKER not in entry["content"]:
-                    raise SystemExit(f"{name} has custom instructions; preserve and reconcile.")
-                request(f"/agents/{aid}/instructions-bundle/file",
-                    {"path": "AGENTS.md", "content": intended,
-                     "baseHash": entry["contentHash"]}, "PUT")
-                saved = request(path)
-                if saved["content"] != intended:
-                    raise SystemExit(f"Instruction readback mismatch for {name}.")
-                result["changes"].append("instructions")
-                result["instruction_revision"] = saved["revision"]["id"]
-            if not set(required).issubset(snapshot["desiredSkills"]) or not all(x["materialized"] for x in before):
-                snapshot = request(f"/agents/{aid}/skills/sync",
-                    {"mode": "add", "desiredSkills": required}, "POST")
-                result["changes"].append("skills")
-            materialized = skill_materialization(request(f"/agents/{aid}/skills"), home)
-            if not materialized or not all(x["materialized"] for x in materialized):
-                raise SystemExit(f"Skill materialization incomplete for {name}: {materialized}")
-            fresh = request(f"/agents/{aid}")
-            runtime = copy.deepcopy(fresh.get("runtimeConfig", {}))
-            heartbeat = runtime.setdefault("heartbeat", {})
-            if heartbeat.get("maxConcurrentRuns") != 1:
-                heartbeat["maxConcurrentRuns"] = 1
-                request(f"/agents/{aid}", {"runtimeConfig": runtime}, "PATCH")
-                check = request(f"/agents/{aid}")
-                if check["runtimeConfig"] != runtime:
-                    raise SystemExit(f"Runtime readback mismatch for {name}.")
-                result["changes"].append("single_profile_run")
-            result.update(instructions_ready=True, skill_files_ready=True, max_concurrent_runs=1)
-            result["managed_skills"] = len(materialized)
-            result["instruction_sha256"] = hashlib.sha256(intended.encode()).hexdigest()
-        print(json.dumps(result), flush=True)
+        print(json.dumps(configure_agent(aid, name, slug, args.apply)), flush=True)
 
 
 if __name__ == "__main__":
