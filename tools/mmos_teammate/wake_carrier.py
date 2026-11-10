@@ -69,17 +69,31 @@ def build_message(identifier: str, title: str, body: str, op: str) -> str:
     )
 
 
-def choose_issue(rows):
+def active_run_id(row):
+    """The run id an inbox row names as its active run (str or {id: …})."""
+    active = row.get("activeRun")
+    if isinstance(active, dict):
+        return active.get("id")
+    return active or None
+
+
+def choose_issue(rows, my_run_id=None):
     """Assigned issues eligible for this run: todo or in_progress (Paperclip's
     assignment automation moves a freshly assigned issue to in_progress before
-    the agent run starts — inbox-lite serves both), with no active run and
-    dependencies ready. Oldest update first."""
-    ready = [
-        r for r in rows
-        if r.get("status") in ("todo", "in_progress") and not r.get("activeRun")
-        and r.get("dependencyReady", True)
-    ]
-    return sorted(ready, key=lambda r: r.get("updatedAt") or "")
+    the agent run starts — inbox-lite serves both), dependencies ready, and
+    either no active run or an active run that IS this run. An issue whose
+    active run is this very run (the assignment wake binds it before the
+    carrier starts) is this run's to do; an issue held by another live run is
+    not. Oldest update first."""
+    def eligible(row):
+        if row.get("status") not in ("todo", "in_progress"):
+            return False
+        if not row.get("dependencyReady", True):
+            return False
+        active = active_run_id(row)
+        return active is None or active == my_run_id
+    return sorted([r for r in rows if eligible(r)],
+                  key=lambda r: r.get("updatedAt") or "")
 
 
 def scan_marker(messages, op):
@@ -309,24 +323,33 @@ def run_carrier(pc, t3_factory, opts):
     thread_id = binding["primaryThreadId"]
     t3 = t3_factory(thread_id)
 
-    candidates = choose_issue(pc.inbox())
+    candidates = choose_issue(pc.inbox(), pc.run_id)
     if not candidates:
         log("no ready issue in inbox; nothing to do")
         return 0
     issue = None
     for row in candidates:
         full = pc.issue(row["id"])
+        mine = active_run_id(row) == pc.run_id
         try:
             pc.checkout(row["id"], me["id"])
         except CarrierError as exc:
-            log(f"checkout of {row.get('identifier')} refused ({exc}); next")
-            continue
+            if mine and "HTTP 409" in str(exc):
+                # The assignment wake bound this issue to THIS run before the
+                # carrier started; a 409 here means "already checked out" by
+                # us. That is not a refusal — proceed with our own issue.
+                log(f"{row.get('identifier')} already checked out by this run "
+                    f"({pc.run_id}); proceeding")
+            else:
+                log(f"checkout of {row.get('identifier')} refused ({exc}); next")
+                continue
         issue = full
         break
     if issue is None:
         log("no issue could be checked out by this run")
         return 0
-    log(f"checked out {issue.get('identifier')} (run {pc.run_id})")
+    log(f"checked out {issue.get('identifier')} (run {pc.run_id}); inbox "
+        f"activeRun={active_run_id(row) or 'none'}")
 
     try:
         content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")

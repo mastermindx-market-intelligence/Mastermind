@@ -246,6 +246,56 @@ def test_choose_issue_skips_active_blocked_and_dependencies():
     assert [r["id"] for r in wc.choose_issue(rows)] == ["d", "e"]
 
 
+def test_choose_issue_takes_own_active_run_and_ignores_str_shape():
+    rows = [
+        # this run's own assignment wake: activeRun IS us -> eligible
+        {"id": "a", "status": "in_progress", "activeRun": {"id": "run-9"},
+         "updatedAt": "1"},
+        # another live run holds it -> not ours
+        {"id": "b", "status": "todo", "activeRun": {"id": "run-x"},
+         "updatedAt": "2"},
+        # activeRun as a bare string is handled too
+        {"id": "c", "status": "todo", "activeRun": "run-9", "updatedAt": "3"},
+    ]
+    assert [r["id"] for r in wc.choose_issue(rows, "run-9")] == ["a", "c"]
+    assert [r["id"] for r in wc.choose_issue(rows, "run-9")][:1] == ["a"]
+
+
+def test_assignment_wake_run_does_the_work_on_own_active_run():
+    # Item 1: the assignment wake binds the issue to THIS run before the
+    # carrier starts (activeRun == pc.run_id). The carrier must do the work,
+    # not skip it. A checkout 409 because it is already ours is not a refusal.
+    issues = {"is-1": {"identifier": "MMO-12", "status": "in_progress",
+                       "title": "T45 task", "description": "Reply: OK"}}
+    pc = FakePaperclip(issues=issues)
+    pc.inbox_rows_override = [{"id": "is-1", "identifier": "MMO-12",
+                               "status": "in_progress",
+                               "activeRun": {"id": pc.run_id}, "updatedAt": "1",
+                               "dependencyReady": True}]
+    original_inbox = pc.inbox
+
+    def inbox_with_active_run():
+        return [dict(r) for r in pc.inbox_rows_override]
+    pc.inbox = inbox_with_active_run
+    checkout_calls = []
+    original_checkout = pc.checkout
+
+    def checkout_409_once(issue_id, agent_id):
+        checkout_calls.append(issue_id)
+        if len(checkout_calls) == 1:
+            raise wc.CarrierError(
+                "POST /api/issues/is-1/checkout -> HTTP 409 "
+                '{"error":"issue already checked out"}')
+        return original_checkout(issue_id, agent_id)
+    pc.checkout = checkout_409_once
+    t3 = FakeT3(replies=["ASSIGNMENT-WAKE-OK"])
+    assert run(pc, t3) == 0
+    assert len(t3.sends) == 1                      # the work was sent once
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies == ["ASSIGNMENT-WAKE-OK"]        # delivered once
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
 def test_assignment_moved_in_progress_issue_is_picked_up():
     # Paperclip moves a freshly assigned issue to in_progress and wakes the
     # agent; the carrier must still check it out and complete it.
