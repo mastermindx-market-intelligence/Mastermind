@@ -293,8 +293,17 @@ CORTEX_FIXTURES = {
     ],
 }
 
+# Repository-native discovery is separate from the four BSC-P1 plugin families.
+# Admit only this inspected inert pointer; do not open .agents/skills to arbitrary
+# packages or allow mutable content to inherit this exact-source qualification.
+REPOSITORY_DISCOVERY_FILES = {
+    ".agents/skills/mastermind-long-horizon/SKILL.md":
+        "b0a910d26534c0a77cf6fb32034433d1fb682367e3b34d5a509492a72b179f70",
+}
+
 ALLOWED_PACKAGE_FILES = frozenset(
     {MARKETPLACE_PATH.as_posix()}
+    | set(REPOSITORY_DISCOVERY_FILES)
     | {
         f"plugins/{plugin}/.codex-plugin/plugin.json"
         for plugin in EXPECTED_SKILLS
@@ -1497,6 +1506,16 @@ def _validate_repository_snapshot(
                 "skills": list(skills),
             }
         )
+
+    # Pure exported BSC-P1 packages need no repository discovery wrapper. When
+    # its directory is present, require the exact complete inspected entrypoint.
+    if ".agents/skills" in snapshot.nodes:
+        for relative, expected_digest in REPOSITORY_DISCOVERY_FILES.items():
+            path = root / relative
+            text = _read_required_text(root, path, errors)
+            if text is not None and hashlib.sha256(text.encode("utf-8")).hexdigest() != expected_digest:
+                errors.append(_error(root, path, "REPOSITORY_DISCOVERY_CONTENT_MISMATCH",
+                                     "repository discovery wrapper differs from its inspected source"))
 
     _scan_files(root, errors)
     snapshot.settle()
