@@ -70,12 +70,45 @@ class CommittedSourceTests(unittest.TestCase):
                         "--filter=blob:none", self.source.as_uri(), str(clone)],
                        check=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
         oid = git(self.source, "rev-parse", self.commit + ":engine/module.py").strip()
-        before = git(clone, "cat-file", "--batch-check", input_data=oid + b"\n")
-        self.assertEqual(before, oid + b" missing\n")
-        with self.assertRaisesRegex(RuntimeError, "not locally available"):
+        # Git versions differ when a requested promisor object is absent: some
+        # report "missing", while others refuse with a nonzero exit status.
+        # Inventory only local objects so the witness itself never requests it.
+        def local_objects():
+            return set(git(clone, "cat-file", "--batch-all-objects",
+                           "--batch-check=%(objectname)").splitlines())
+
+        before = local_objects()
+        self.assertIn(self.commit.encode("ascii"), before)
+        self.assertNotIn(oid, before)
+        with self.assertRaises(RuntimeError):
             export_committed(clone, self.destination, self.commit, self.selected)
-        after = git(clone, "cat-file", "--batch-check", input_data=oid + b"\n")
+        after = local_objects()
         self.assertEqual(after, before)
+        self.assertNotIn(oid, after)
+        self.assertEqual(list(self.destination.iterdir()), [])
+
+    def test_missing_blob_refusal_when_git_batch_check_exits_nonzero(self):
+        original_run = subprocess.run
+        refusals = []
+
+        def refuse_missing_batch(arguments, **kwargs):
+            if ("cat-file" in arguments and "--batch-all-objects" not in arguments
+                    and any(arg.startswith("--batch-check") for arg in arguments)):
+                self.assertEqual(kwargs["env"]["GIT_NO_LAZY_FETCH"], "1")
+                self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+                self.assertTrue(kwargs["check"])
+                refusals.append(arguments)
+                raise subprocess.CalledProcessError(
+                    128, arguments, stderr=b"fixture: missing promisor blob")
+            return original_run(arguments, **kwargs)
+
+        with patch.object(support.subprocess, "run", side_effect=refuse_missing_batch):
+            self.test_missing_local_blob_refuses_without_lazy_fetch()
+        self.assertEqual(len(refusals), 1)
+
+    def test_unrelated_git_failure_still_refuses(self):
+        with self.assertRaisesRegex(RuntimeError, "Source fixture git cat-file failed"):
+            git(self.source, "cat-file", "--invalid-source-fixture-option")
         self.assertEqual(list(self.destination.iterdir()), [])
 
 
