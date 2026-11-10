@@ -684,23 +684,46 @@ def _compose_mixed(runtime, tmp_path, primary, port, *, state_path=None):
     ), composition
 
 
-def test_claimed_t3_route_launches_and_persists_the_pre_ack_binding(tmp_path):
+async def _record_original_native_attempt(mixed, job_id, lease):
+    """Retain a pre-existing raw-adapter execution for recovery tests.
+
+    This exercises the incumbent adapter and Runtime receipt APIs directly;
+    it grants no scope proof and never enters or bypasses governed START.
+    """
+    from control_plane.executive_supervisor import ActiveRun, _write_private_recovery_prompt
+    owner = mixed._select(lease.attempt)
+    runtime = owner.runtime
+    job = runtime.jobs.get_job(job_id)
+    schema = owner._write_schema(owner._run_dir(lease.attempt.attempt_id),
+        job=job, attempt=lease.attempt, effective_grant=None)
+    spec = owner._launch_spec(job, lease, schema, None, None, None)
+    prompt = schema.parent / "worker-prompt.txt"
+    _write_private_recovery_prompt(prompt, spec.prompt)
+    raw = await owner.adapter._inner.start(spec)
+    ref = owner.adapter._twin(raw)
+    metadata = owner._launch_metadata(job=job, lease=lease, spec=spec,
+        process_ref=ref, effective_grant=None, recovery_prompt_path=prompt)
+    runtime.attempts.record_process(lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+        pid=ref.pid, pgid=ref.pgid, process_start_identity=ref.process_start_identity,
+        boot_id=ref.boot_session_id, provider_session_id=ref.provider_session_id,
+        stdout_path=ref.stdout_path, stderr_path=ref.stderr_path,
+        result_path=ref.result_path, launch_metadata=metadata)
+    runtime.attempts.mark_running(lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token)
+    return mixed._retain(owner, ActiveRun(lease=lease, process_ref=ref, launch_spec=spec))
+
+
+def test_original_t3_receipt_preserves_the_pre_ack_recovery_binding(tmp_path):
     runtime, job_id, _workspace, observations = _t3_runtime_and_job(tmp_path)
     primary = _primary_owner(runtime, tmp_path)
     port = CountingT3Port(principal="oauth-client-compose")
     mixed, composition = _compose_mixed(runtime, tmp_path, primary, port)
     lease = _claim_t3_route(runtime, job_id, observations)
 
-    # The production launch path: mixed-owner selection + the supervisor's
-    # own _start_claimed_job (what start_job/start_cycle_job funnel into).
-    async def launch():
-        return await mixed._start(
-            mixed._select(lease.attempt), job_id, lease, None
-        )
+    active = asyncio.run(_record_original_native_attempt(mixed, job_id, lease))
 
-    active = asyncio.run(launch())
-
-    # The composed adapter really launched through the mixed owners map.
+    # The original raw adapter receipt remains inspectable through the owner.
     assert port.launch_count == 1
     minted_thread = port.receipts_by_key[
         active.process_ref.launch_nonce
@@ -757,9 +780,7 @@ def test_crash_before_the_running_ack_recovers_with_zero_native_launches(tmp_pat
         runtime.attempts, "mark_running", side_effect=SystemExit(9)
     ):
         with pytest.raises(SystemExit):
-            asyncio.run(mixed._start(
-                mixed._select(lease.attempt), job_id, lease, None
-            ))
+            asyncio.run(_record_original_native_attempt(mixed, job_id, lease))
 
     attempt_id = lease.attempt.attempt_id
     crashed = runtime.attempts.get_attempt(attempt_id)
@@ -806,9 +827,7 @@ def test_remote_native_process_controller_never_signals(tmp_path):
     port = CountingT3Port(principal="oauth-client-compose")
     mixed, _ = _compose_mixed(runtime, tmp_path, primary, port)
     lease = _claim_t3_route(runtime, job_id, observations)
-    active = asyncio.run(mixed._start(
-        mixed._select(lease.attempt), job_id, lease, None
-    ))
+    active = asyncio.run(_record_original_native_attempt(mixed, job_id, lease))
     attempt = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
 
     controller = T3NativeProcessController()
@@ -848,9 +867,7 @@ def _launch_coordinates(tmp_path):
     port = CountingT3Port(principal="oauth-client-compose")
     mixed, composition = _compose_mixed(runtime, tmp_path, primary, port)
     lease = _claim_t3_route(runtime, job_id, observations)
-    active = asyncio.run(
-        mixed._start(mixed._select(lease.attempt), job_id, lease, None)
-    )
+    active = asyncio.run(_record_original_native_attempt(mixed, job_id, lease))
     attempt = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
     assert attempt is not None
     from control_plane.worker_execution_contract import WorkerRecoveryBinding

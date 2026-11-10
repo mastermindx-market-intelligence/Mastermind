@@ -127,6 +127,10 @@ from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 from urllib.parse import quote
 
+from common.t3_native_read_contract import (
+    NativeReadUnavailable, qualify_read_page, qualify_wait, read_full_item,
+)
+
 from control_plane.child_execution_contracts import ExecutionBinding, FanoutEnvelope
 from control_plane.worker_adapter import AdapterBindingError
 from control_plane.worker_execution_contract import (
@@ -160,6 +164,7 @@ T3_LAUNCH_ATTESTATION_SCHEMA_VERSION = (
 # deliberately carries NO ``delegatedFrom`` field: external Hermes is not a
 # native T3 provider session, so delegation lineage is never forged.
 T3_LAUNCH_ENVELOPE_SCHEMA = "mastermind.t3_thread_launch_envelope/v1"
+T3_BOUND_LAUNCH_ENVELOPE_SCHEMA = "mastermind.t3_thread_launch_envelope/v2"
 T3_LAUNCH_RECEIPT_SCHEMA = "mastermind.t3_thread_launch_receipt/v1"
 T3_THREAD_READ_SCHEMA = "mastermind.t3_thread_read/v1"
 T3_INTERRUPT_OUTCOME_SCHEMA = "mastermind.t3_interrupt_outcome/v1"
@@ -419,6 +424,7 @@ class T3ThreadLaunchEnvelope:
     workspace_ref: str = ""
     model_selection: str = ""
     created_at: str = ""
+    project_ref: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -452,6 +458,7 @@ class T3ThreadReadResult:
     finished_at: str = ""
     error: str | None = None
     has_more: bool = False
+    project_id: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -480,6 +487,27 @@ class T3ResultReference:
     result_ref: str = ""
     native_status: str = ""
     recorded_at: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class T3TerminalEvidence:
+    """Original native termination evidence; never an OS exit or acceptance."""
+
+    job_id: str
+    attempt_id: str
+    worker_id: str
+    thread_id: str
+    native_run_id: str
+    project_id: str
+    native_status: str
+    result_ref: str
+    result_reference_sha256: str
+    original_binding_sha256: str
+    launch_spec_sha256: str
+    request_namespace: str
+    client_request_id: str
+    schema_version: str = dataclasses.field(
+        default="mastermind.executive_t3_terminal/v1", init=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2041,7 +2069,8 @@ class T3ExecutionAdapter:
         client_request_id = derive_t3_client_request_id(binding)
         self._verify_binding_join(binding, client_request_id, principal)
         namespace = t3_request_namespace(principal)
-        envelope = self._launch_envelope(spec, client_request_id, namespace)
+        envelope = self._launch_envelope(
+            spec, client_request_id, namespace, project_ref=binding.project_ref)
         intent = T3LaunchIntent(
             run_id=spec.run_id,
             client_request_id=client_request_id,
@@ -2240,8 +2269,12 @@ class T3ExecutionAdapter:
         spec: WorkerLaunchSpec,
         client_request_id: str,
         request_namespace: str = T3_REQUEST_NAMESPACE,
+        *, project_ref: str = "",
     ) -> T3ThreadLaunchEnvelope:
         return T3ThreadLaunchEnvelope(
+            schema=(T3_BOUND_LAUNCH_ENVELOPE_SCHEMA
+                    if getattr(self._port, "requires_bound_workspace", False)
+                    else T3_LAUNCH_ENVELOPE_SCHEMA),
             request_namespace=request_namespace,
             client_request_id=client_request_id,
             run_id=spec.run_id,
@@ -2251,6 +2284,7 @@ class T3ExecutionAdapter:
             workspace_ref=str(spec.workspace_path),
             model_selection=spec.model,
             created_at=self._now_iso(),
+            project_ref=project_ref or str(getattr(self._port, "project_ref", "") or ""),
         )
 
     # --- authenticated namespace (idempotency identity) --------------------
@@ -2392,6 +2426,25 @@ class T3ExecutionAdapter:
                 return WorkerRunStatus.CANCELLING
         return state
 
+    async def wait_status(self, ref: WorkerProcessRef, *, timeout_ms: int) -> WorkerRunStatus:
+        """One bounded wait owned by the original native event-stream service."""
+        run = self._require_run_state(ref)
+        reader = getattr(self._port, "wait_run", None)
+        if not callable(reader):
+            raise T3ExecutionAdapterError("native exact-run wait capability is unavailable")
+        thread_id, native_run_id = self._native_coordinates(run)
+        read = await reader(thread_id, native_run_id, timeout_ms=timeout_ms)
+        if (not isinstance(read, T3ThreadReadResult) or read.thread_id != thread_id
+                or read.run_id != native_run_id):
+            raise T3ExecutionAdapterError("native wait changed the original run")
+        state = _map_t3_status(read.native_status)
+        if run.cancel is not None and not run.cancel.settled:
+            if state in _TERMINAL_STATES:
+                self._settle(ref.run_id, run.cancel, state)
+            else:
+                return WorkerRunStatus.CANCELLING
+        return state
+
     # --- collect_result ----------------------------------------------------
 
     async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
@@ -2412,6 +2465,11 @@ class T3ExecutionAdapter:
         assert original is not None
         thread_id, native_run_id = self._native_coordinates(run)
         read = await self._read_terminal(thread_id, native_run_id)
+        envelope = run.intent.envelope if run.intent is not None else None
+        if (envelope is not None and envelope.schema == T3_BOUND_LAUNCH_ENVELOPE_SCHEMA
+                and (read.project_id != envelope.project_ref
+                     or run.receipt.project_id != envelope.project_ref)):
+            raise T3ExecutionAdapterError("native terminal read changed the original project")
         state = _map_t3_status(read.native_status)
         if state not in _TERMINAL_STATES:
             raise T3ExecutionAdapterError(
@@ -2473,6 +2531,54 @@ class T3ExecutionAdapter:
             stdout_sha256=_EMPTY_SHA256,
             stderr_sha256=_EMPTY_SHA256,
             result_sha256=hashlib.sha256(read.result_ref.encode("utf-8")).hexdigest(),
+        )
+
+    def qualify_terminal_collection(self, receipt: CollectionReceipt) -> T3TerminalEvidence:
+        """Join one collected result to the existing durable native run owner.
+
+        An adopted Runtime may rotate its fence/lease; all original native
+        command coordinates remain immutable. Runtime still owns settlement.
+        """
+        run = self._require_run_state(receipt.process_ref)
+        if (run.binding is None or run.spec is None or run.intent is None
+                or run.receipt is None or run.result_reference is None):
+            raise T3ExecutionAdapterError("native terminal collection has no complete original state")
+        current = self._binding_source(run.spec)
+        if (not isinstance(current, ExecutionBinding)
+                or current.adapter_id != T3_NATIVE_ADAPTER_ID
+                or current.runtime_kind != "t3-native"
+                or dataclasses.replace(run.binding, fence_counter=current.fence_counter,
+                                       lease_expiry=current.lease_expiry) != current):
+            raise T3ExecutionAdapterError("native terminal collection differs from the current assignment")
+        ref, result = receipt.process_ref, receipt.result
+        native, ledger, intent = run.receipt, run.result_reference, run.intent
+        reference_digest = hashlib.sha256(ledger.result_ref.encode("utf-8")).hexdigest()
+        original_prefix = f"t3://thread/{native.thread_id}/run/{native.run_id}/item/"
+        if (result.job_id != run.spec.job_id or result.run_id != run.spec.run_id
+                or result.worker_id != run.spec.worker_id or current.job_ref != result.job_id
+                or current.attempt_ref != result.run_id or current.worker_id != result.worker_id
+                or ref.run_id != result.run_id or ref.provider_session_id != native.thread_id
+                or result.provider_session_id != native.thread_id or result.exit_code is not None
+                or ledger.run_id != ref.run_id or ledger.thread_id != native.thread_id
+                or not ledger.result_ref.startswith(original_prefix)
+                or not ledger.result_ref[len(original_prefix):]
+                or _map_t3_status(ledger.native_status) not in _TERMINAL_STATES
+                or result.status != _map_t3_status(ledger.native_status)
+                or receipt.result_sha256 != reference_digest
+                or intent.client_request_id != derive_t3_client_request_id(run.binding)
+                or ref.launch_nonce != intent.client_request_id
+                or native.client_request_id != intent.client_request_id
+                or native.request_namespace != intent.request_namespace):
+            raise T3ExecutionAdapterError("native terminal evidence does not join the original result")
+        return T3TerminalEvidence(
+            job_id=result.job_id, attempt_id=result.run_id, worker_id=result.worker_id,
+            thread_id=native.thread_id, native_run_id=native.run_id, project_id=native.project_id,
+            native_status=ledger.native_status, result_ref=ledger.result_ref,
+            result_reference_sha256=reference_digest,
+            original_binding_sha256=hashlib.sha256(
+                _canonical_state_json(run.binding.to_dict()).encode("utf-8")).hexdigest(),
+            launch_spec_sha256=run.spec_sha256 or worker_launch_spec_sha256(run.spec),
+            request_namespace=intent.request_namespace, client_request_id=intent.client_request_id,
         )
 
     # --- cancel ------------------------------------------------------------
@@ -2982,9 +3088,9 @@ class T3ExecutionAdapter:
     ) -> T3ThreadLaunchEnvelope:
         """Same key under the CURRENT attested principal's namespace."""
         principal = self._require_attested_principal("replay")
-        return self._launch_envelope(
-            spec, client_request_id, t3_request_namespace(principal)
-        )
+        return dataclasses.replace(self._launch_envelope(
+            spec, client_request_id, t3_request_namespace(principal)),
+            schema=T3_LAUNCH_ENVELOPE_SCHEMA, project_ref="")
 
     async def _replay_and_adopt(
         self,
@@ -3548,6 +3654,7 @@ class T3McpToolPort:
         *,
         upstream_namespace: str,
         launch_arguments: Mapping[str, Any] | None = None,
+        require_bound_workspace: bool = False,
     ) -> None:
         if not callable(call_tool):
             raise T3ExecutionAdapterError("T3McpToolPort requires a call_tool transport")
@@ -3561,6 +3668,7 @@ class T3McpToolPort:
         self._call_tool = call_tool
         self._upstream_namespace = namespace
         self._launch_arguments = dict(launch_arguments or {})
+        self.requires_bound_workspace = require_bound_workspace is True
         if "environmentId" in self._launch_arguments:
             # Re-audit #3 R4: the donor's linked-environment forwarding
             # (PeerMcpClient) renews sessions on 404 and remaps 401 to
@@ -3573,6 +3681,11 @@ class T3McpToolPort:
                 "classifier relies on (nothing was sent)"
             )
         self.calls: list[dict[str, Any]] = []
+
+    @property
+    def project_ref(self) -> str:
+        """Explicit enrolled native project; frozen in each new launch intent."""
+        return str(self._launch_arguments.get("projectId") or "")
 
     def expected_launch_thread_id(self, client_request_id: str) -> str:
         """The thread id THIS principal would own for ``client_request_id``
@@ -3660,6 +3773,25 @@ class T3McpToolPort:
                 f"refusing to {op} with environmentId (linked-environment "
                 "forwarding; nothing was sent)"
             )
+        if envelope.schema not in {T3_BOUND_LAUNCH_ENVELOPE_SCHEMA, T3_LAUNCH_ENVELOPE_SCHEMA}:
+            raise T3PortRefusalError("unknown native launch envelope")
+        if (self.requires_bound_workspace and envelope.schema == T3_LAUNCH_ENVELOPE_SCHEMA
+                and op == "launch"):
+            raise T3PortRefusalError("legacy native intent is original-replay only")
+        # V1 original replays retain their original wire shape. Only V2 carries
+        # an explicitly bound project/worktree; never rewrite an old intent.
+        if envelope.schema == T3_BOUND_LAUNCH_ENVELOPE_SCHEMA:
+            project = str(envelope.project_ref or "").strip()
+            workspace = str(envelope.workspace_ref or "")
+            if (not project or not workspace or not Path(workspace).is_absolute()
+                    or arguments.get("projectId") not in (None, project)):
+                raise T3PortRefusalError(
+                    "native launch requires its original explicit project and existing worktree")
+            arguments["projectId"] = project
+            strategy = {"type": "existing_worktree", "worktreePath": workspace}
+            if arguments.get("workspaceStrategy") not in (None, strategy):
+                raise T3PortRefusalError("configured native workspace differs from the original spec")
+            arguments["workspaceStrategy"] = strategy
         arguments.update(
             title=envelope.title, message=envelope.message, clientRequestId=key,
         )
@@ -3689,6 +3821,10 @@ class T3McpToolPort:
                 "outcome unknown — the intent must be kept"
             )
         proven = bool(thread_id)
+        if (envelope.schema == T3_BOUND_LAUNCH_ENVELOPE_SCHEMA
+                and payload.get("projectId") != envelope.project_ref):
+            raise T3UnknownOutcomeError(
+                "native launch reply changed the original project; retain the original intent")
         return T3ThreadLaunchReceipt(
             thread_id=thread_id,
             run_id=str(payload.get("runId") or ""),
@@ -3781,7 +3917,8 @@ class T3McpToolPort:
         try:
             payload = self._invoke(
                 "t3_thread_wait",
-                {"threadId": thread_id, "runId": run_id, "timeoutMs": 1},
+                {"threadId": thread_id, "runId": run_id, "timeoutMs": 1,
+                 "untilDelegatedWorkSettled": False},
                 mutating=False,
             )
         except T3PortRefusalError as exc:
@@ -3870,6 +4007,7 @@ class T3McpToolPort:
         run: Mapping[str, Any] | None = None
         last_payload: Mapping[str, Any] = {}
         complete = False
+        expected_project = self._launch_arguments.get("projectId")
         for _ in range(_T3_RESULT_MAX_PAGES):
             arguments: dict[str, Any] = {
                 "threadId": thread_id, "view": "messages",
@@ -3880,13 +4018,26 @@ class T3McpToolPort:
                 arguments["afterPosition"] = position
             self.calls.append({"op": "read_result", "threadId": thread_id})
             payload = self._invoke("t3_thread_read", arguments, mutating=False)
-            self._require_thread(payload, thread_id)
+            try:
+                qualify_read_page(
+                    payload, thread_id=thread_id,
+                    project_id=expected_project,
+                    after_position=position, limit=_T3_RESULT_PAGE_LIMIT)
+                observed_project = payload["thread"].get("projectId")
+                if self.requires_bound_workspace and (
+                        type(observed_project) is not str or not observed_project):
+                    raise NativeReadUnavailable("native terminal page lost the original project")
+                if expected_project is None:
+                    expected_project = observed_project
+            except NativeReadUnavailable as exc:
+                raise T3PortRefusalError(str(exc)) from exc
             last_payload = payload
             run = self._exact_run(payload, run_id) or run
             for item in payload.get("items") or ():
                 if (
                     isinstance(item, Mapping)
                     and str(item.get("runId") or "") == run_id
+                    and item.get("sourceThreadId") == thread_id
                     and item.get("type") == "assistant_message"
                     and isinstance(item.get("text"), str)
                     and item.get("text")
@@ -3908,11 +4059,26 @@ class T3McpToolPort:
             run = self._run_status_entry(last_payload, thread_id, run_id)
         if not complete:
             final_item = None  # never name an intermediate item (N2)
+        text: str | None = None
+        if final_item is not None:
+            async def read_chunk(arguments: dict[str, Any]) -> Mapping[str, Any]:
+                return self._invoke("t3_thread_read", arguments, mutating=False)
+
+            def qualify_chunk(value: Mapping[str, Any]) -> None:
+                qualify_read_page(value, thread_id=thread_id,
+                                  project_id=expected_project,
+                                  after_position=None, limit=1)
+            try:
+                text, complete = await read_full_item(
+                    final_item, thread_id=thread_id, read=read_chunk, qualify=qualify_chunk)
+            except (NativeReadUnavailable, ValueError, UnicodeError) as exc:
+                raise T3PortRefusalError(str(exc)) from exc
+            if not complete:
+                raise T3PortRefusalError("native final result text is incomplete or exceeds its byte bound")
         item_id = str((final_item or {}).get("itemId") or "")
         result_ref = (
             f"t3://thread/{thread_id}/run/{run_id}/item/{item_id}" if item_id else ""
         )
-        text = str((final_item or {}).get("text") or "")
         return T3ThreadReadResult(
             thread_id=thread_id,
             run_id=run_id,
@@ -3920,16 +4086,31 @@ class T3McpToolPort:
             result_ref=result_ref,
             result_payload=(
                 {
-                    "text": text[-4000:],
+                    "text": text,
                     "item_id": item_id,
-                    "text_truncated": bool((final_item or {}).get("textTruncated"))
-                    or len(text) > 4000,
+                    "text_truncated": False,
                 }
                 if item_id else {}
             ),
             started_at=str((run or {}).get("startedAt") or ""),
             finished_at=str((run or {}).get("completedAt") or ""),
+            project_id=str(expected_project or ""),
         )
+
+    async def wait_run(self, thread_id: str, run_id: str, *, timeout_ms: int) -> T3ThreadReadResult:
+        """Await the existing native exact-run owner once, within its caller's lease loop."""
+        if type(timeout_ms) is not int or not 1 <= timeout_ms <= 30_000:
+            raise T3PortRefusalError("native wait requires a bounded timeout")
+        payload = self._invoke("t3_thread_wait", {
+            "threadId": thread_id, "runId": run_id, "timeoutMs": timeout_ms,
+            "untilDelegatedWorkSettled": False,
+        }, mutating=False)
+        try:
+            qualify_wait(payload, thread_id=thread_id, run_id=run_id)
+        except NativeReadUnavailable as exc:
+            raise T3PortRefusalError(str(exc)) from exc
+        return T3ThreadReadResult(thread_id=thread_id, run_id=run_id,
+                                  native_status=payload["status"])
 
     # -- interrupt -------------------------------------------------------------
 
@@ -3978,6 +4159,7 @@ __all__ = [
     "T3_ADAPTER_STATE_SCHEMA",
     "T3_INTERRUPT_OUTCOME_SCHEMA",
     "T3_LAUNCH_ENVELOPE_SCHEMA",
+    "T3_BOUND_LAUNCH_ENVELOPE_SCHEMA",
     "T3_LAUNCH_INTENT_SCHEMA",
     "T3_LAUNCH_RECEIPT_SCHEMA",
     "T3_NATIVE_ADAPTER_ID",
@@ -3994,6 +4176,7 @@ __all__ = [
     "T3LaunchIntent",
     "T3NativeClientPort",
     "T3ResultReference",
+    "T3TerminalEvidence",
     "T3ThreadLaunchEnvelope",
     "T3ThreadLaunchReceipt",
     "T3ThreadReadResult",
