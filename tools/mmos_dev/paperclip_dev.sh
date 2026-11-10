@@ -381,13 +381,18 @@ EOF
 # never from HOME. The script's OWN $HOME stays the real user home, so the
 # default-instance identity marker (~/.paperclip/) keeps working.
 ISOLATED_HOME="$DEV_HOME/home"
-mkdir -p "$ISOLATED_HOME"
-SCRUB_ENV=(env -u PORT -u HOST HOME="$ISOLATED_HOME" \
+# env(1) stops parsing options at the first NAME=VALUE operand, so every -u
+# must come BEFORE the HOME assignment or env treats "-u" as the program to
+# exec ("env: -u: No such file or directory").
+SCRUB_ENV=(env -u PORT -u HOST \
     -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
     -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
-    -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID)
+    -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID \
+    HOME="$ISOLATED_HOME")
 
-cli_env() { "${SCRUB_ENV[@]}" "$@"; }
+# Created lazily (never before static_refusal_checks) so a refused target
+# directory is not touched at all.
+cli_env() { mkdir -p "$ISOLATED_HOME"; "${SCRUB_ENV[@]}" "$@"; }
 
 # --------------------------------------------------------------------------- #
 # Seeding
