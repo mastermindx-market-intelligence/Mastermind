@@ -22,6 +22,27 @@ class ReadinessTests(unittest.TestCase):
         self.assertNotIn(r.CORE + "para-memory-files", selected)
         self.assertEqual(original, before)
 
+    def test_beta_pins_are_not_activated_when_the_native_feature_is_disabled(self):
+        resolved = [{"key": r.CORE + "paperclip", "versionId": "existing"}]
+        self.assertEqual(r.assignment_selections(resolved, False), [r.CORE + "paperclip"])
+        self.assertEqual(r.assignment_selections(resolved, True), resolved)
+
+    def test_unmaterialized_version_is_left_to_the_native_runtime(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            (home / "skills").mkdir()
+            skill = {"key": r.CORE + "paperclip", "id": "skill", "slug": "paperclip", "currentVersionId": "version"}
+            version = {"id": "version", "companyId": r.COMPANY, "companySkillId": "skill"}
+            calls = []
+            def request(path, body=None, method="GET"):
+                calls.append(method)
+                return [skill] if path.endswith("/skills") else version
+            with patch.object(r, "request", request), patch.object(r, "version_path", return_value=home / "absent"):
+                _, rows = r.qualify_versions({r.CORE + "paperclip": r.CORE + "paperclip"}, home, True)
+            self.assertEqual(rows[0]["state"], "pending_native_materialization")
+            self.assertEqual(list((home / "skills").iterdir()), [])
+            self.assertTrue(all(method == "GET" for method in calls))
+
     def test_disabled_filter_preserves_existing_entries_and_parses_cli_list(self):
         names = r.disabled_names('["existing-private-skill"]') | r.DISABLED_FEEDBACK
         self.assertEqual(names, {"existing-private-skill", "complain", "suggestion-box"})
