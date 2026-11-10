@@ -3636,7 +3636,7 @@ def api_runs() -> JSONResponse:
     """
     try:
         from brain import runlog
-        runs = runlog.list_runs()
+        runs = runlog.list_runs(strict=True)
         for r in runs:
             tz = _cached_zh(r.get("title") or "")
             if tz:
@@ -3646,7 +3646,9 @@ def api_runs() -> JSONResponse:
                 r["summary_zh"] = sz
         return JSONResponse(runs)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("run history unavailable (%s)", type(exc).__name__)
+        return JSONResponse({"run_status": "unavailable", "runs": None,
+                             "error": "run_history_unavailable"}, status_code=500)
 
 
 @router.get("/api/runlog")
@@ -3656,10 +3658,17 @@ def api_runlog(run_id: str | None = None) -> JSONResponse:
     Returns {run_id, ts, kind, title, steps: [{ts, type, title, detail, ...}]}."""
     try:
         from brain import runlog
-        return JSONResponse(runlog.read_run(run_id or None))
-    except Exception:
-        _log.exception("runlog read failed")
-        return JSONResponse({"run_id": run_id, "steps": [], "error": "runlog unavailable"}, status_code=500)
+        if run_id:
+            try:
+                runlog.validate_run_id(run_id)
+            except ValueError:
+                return JSONResponse({"run_id": None, "trace_status": "unavailable",
+                                     "steps": None, "error": "invalid run_id"}, status_code=400)
+        return JSONResponse(runlog.read_run(run_id or None, strict=True))
+    except Exception as exc:
+        _log.warning("runlog unavailable (%s)", type(exc).__name__)
+        return JSONResponse({"trace_status": "unavailable", "steps": None,
+                             "error": "runlog unavailable"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
