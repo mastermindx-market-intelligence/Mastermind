@@ -16,6 +16,13 @@ thread start/send/show/list and project add/remove/rename; pin lives behind
 the web client's thread action menu, apps/web/src/components/
 threadActionMenu.logic.ts:136). Pin the threads with roster_browser.js pin.
 
+Renaming also has no stock CLI command. ``apply`` drives
+``roster_browser.js rename`` whenever a saved/recovered thread's durable
+title differs from its canonical short title. Set ``browser_profile`` to an
+isolated, already-paired profile; renames are otherwise reported as pending
+and apply exits nonzero without claiming convergence. No credentials or
+pairing URLs are put on a command line.
+
 The server watches settings.json and reloads it live while running
 (apps/server/src/serverSettings.ts:1303-1311, debounced 100ms), so instance
 edits take effect without a restart; apply still works against a stopped
@@ -26,6 +33,7 @@ import json
 import os
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -442,7 +450,8 @@ def ensure_threads(spec, project_id):
         if found is not None:
             threads[mate["name"]] = {
                 "threadId": found["threadId"], "title": title,
-                "created": False,
+                "created": False, "currentTitle": found["title"],
+                "projectId": project_id, "pinnedAt": found["pinnedAt"],
                 "recoveredBy": _recovered_by(mate, found, recorded),
                 "instance": found["instance"] or mate["instance"],
             }
@@ -455,6 +464,8 @@ def ensure_threads(spec, project_id):
             "--provider", mate["instance"], "--model", spec["model"],
             "--title", title, "--json"]), "t3 thread start")
         threads[mate["name"]] = {"threadId": launched["threadId"],
+                                 "projectId": project_id, "pinnedAt": None,
+                                 "currentTitle": title,
                                  "title": title, "created": True,
                                  "recoveredBy": None,
                                  "instance": mate["instance"]}
@@ -475,6 +486,97 @@ def ensure_threads(spec, project_id):
     state["appliedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(spec, state, state_path)
     return threads, state_path
+
+
+def rename_threads(spec, threads):
+    """Apply short titles through the web UI, then require DB read-back.
+
+    Every call receives its already-known thread id and current title. No
+    operation can target a title prefix or another teammate's thread. The
+    profile is supplied by the operator, never inferred from a live server's
+    credential files, and no token appears in argv.
+    """
+    stale = [(mate, threads[mate["name"]]["currentTitle"])
+             for mate in spec["teammates"]
+             if threads[mate["name"]]["currentTitle"] != teammate_title(mate)]
+    if not stale:
+        return {mate["name"]: False for mate in spec["teammates"]}, []
+    profile = spec.get("browser_profile")
+    if not profile:
+        log("title renames pending: browser_profile is not configured")
+        return ({mate["name"]: False for mate in spec["teammates"]},
+                [mate["name"] for mate, _ in stale])
+    # A profile is credential-bearing state: require a private directory and
+    # an absolute root supplied by the spec (defaults to the server root).
+    profile = os.path.realpath(expand(profile))
+    allowed_root = os.path.realpath(expand(
+        spec.get("browser_profile_root") or spec["server"]["root"]))
+    if profile == allowed_root or not profile.startswith(allowed_root + os.sep):
+        die("browser_profile must be a private child of browser_profile_root "
+            "(default: the team server root)")
+    if not os.path.isdir(profile):
+        die(f"browser_profile does not exist: {profile}; pair it before apply")
+    if os.stat(profile).st_uid != os.getuid():
+        die("browser_profile belongs to another user")
+    if stat.S_IMODE(os.stat(profile).st_mode) & 0o077:
+        die("browser_profile must not be accessible by group or other users")
+    driver = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "roster_browser.js")
+    env_id = environment_id(spec)
+    if not env_id:
+        die("environment-id missing from the team home")
+    node_bin = spec.get("browser_node") or os.environ.get("TEAM_ROSTER_NODE")
+    if not node_bin:
+        import shutil
+        node_bin = shutil.which("node")
+    if not node_bin or not os.access(expand(node_bin), os.X_OK):
+        die("no executable Node for roster_browser.js; set browser_node")
+    evidence_path = expand(spec.get("rename_evidence_file") or os.path.join(
+        spec["server"]["root"], "run", "team_renames.jsonl"))
+    os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+    failures = []
+    with open(evidence_path, "a") as evidence:
+        os.chmod(evidence_path, 0o600)
+        for stale_thread in stale:
+            mate, current_title = stale_thread
+            title = teammate_title(mate)
+            tid = threads[mate["name"]]["threadId"]
+            url = (f"http://127.0.0.1:{spec['server']['port']}/{env_id}/"
+                   f"{tid.replace(':', '%3A')}")
+            result_path = (f"{evidence_path}.tmp.{os.getpid()}."
+                           f"{mate['slug']}.json")
+            proc = subprocess.run(
+                [expand(node_bin), driver, "rename", profile, url, tid,
+                 current_title, title, result_path],
+                cwd="/tmp", capture_output=True, text=True, timeout=120)
+            ok = proc.returncode == 0 and os.path.isfile(result_path)
+            live = None
+            if ok:
+                # Re-read the persisted projection; an in-memory or sidebar
+                # title update does not prove durable rename completion.
+                live = next((t for t in list_threads(
+                    spec, threads[mate["name"]]["projectId"])
+                    if t["threadId"] == tid), None)
+                ok = (live is not None and live["title"] == title and
+                      live["pinnedAt"] == threads[mate["name"]]["pinnedAt"])
+            row = {"threadId": tid, "oldTitle": current_title,
+                   "newTitle": title, "verified": ok,
+                   "pinnedAtBefore": threads[mate["name"]]["pinnedAt"],
+                   "pinnedAtAfter": (live or {}).get("pinnedAt")}
+            if not ok:
+                row["error"] = (proc.stderr or proc.stdout or
+                                "no durable title read-back")[:300]
+                failures.append(mate["name"])
+            evidence.write(json.dumps(row) + "\n")
+            evidence.flush()
+            if os.path.exists(result_path):
+                os.unlink(result_path)
+            if ok:
+                threads[mate["name"]]["title"] = title
+                threads[mate["name"]]["renamed"] = True
+                log(f"{mate['name']}: renamed {current_title!r} -> {title!r}")
+    return {mate["name"]: threads[mate["name"]].get("renamed", False)
+            for mate in spec["teammates"]}, failures
 
 
 def write_urls_file(spec, threads):
@@ -513,6 +615,7 @@ def cmd_apply(spec):
             + (f"(wrote {', '.join(wrote)})" if wrote else "(unchanged)"))
     ensure_instances(spec)
     threads, _ = ensure_threads(spec, project_id)
+    renames, rename_failures = rename_threads(spec, threads)
     urls_path = write_urls_file(spec, threads)
     log(f"thread URLs written: {urls_path} (0600, no credentials)")
     report = {
@@ -522,12 +625,17 @@ def cmd_apply(spec):
              "home": teammate_home(spec, mate),
              "threadId": threads[mate["name"]]["threadId"],
              "threadTitle": threads[mate["name"]]["title"],
-             "threadCreated": threads[mate["name"]]["created"]}
+             "threadCreated": threads[mate["name"]]["created"],
+             "renamed": renames[mate["name"]]}
             for mate in spec["teammates"]],
         "pin": "not applied by this tool; pin via roster_browser.js pin "
                "(web-client-only action)",
     }
     print(json.dumps(report, indent=2))
+    if rename_failures:
+        print("team_roster: INCOMPLETE title(s); these threads failed durable "
+              "read-back: " + ", ".join(rename_failures), file=sys.stderr)
+        return 1
     return 0
 
 

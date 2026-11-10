@@ -279,3 +279,119 @@ class TestRecovery:
         assert state["teammates"]["A"]["threadInstance"] == "a"
         assert state["teammates"]["A"]["recoveredBy"] == "instance"
         assert state["teammates"]["A"]["title"] == "A — quality"
+
+
+class TestRenameApplication:
+    def threads(self, spec, tmp_path):
+        profile = tmp_path / "t3-team" / "browser"
+        profile.mkdir(parents=True, mode=0o700)
+        (tmp_path / "t3-team" / "home" / "userdata").mkdir(parents=True)
+        (tmp_path / "t3-team" / "home" / "userdata" / "environment-id").write_text("env-1")
+        spec["browser_profile"] = str(profile)
+        spec["browser_node"] = "/bin/echo"
+        return {m["name"]: {
+            "threadId": "t1" if m["name"] == "A" else "t2",
+            "projectId": PROJECT,
+            "currentTitle": "A — old" if m["name"] == "A" else "B — product",
+            "title": team_roster.teammate_title(m),
+            "pinnedAt": "2026-11-10T12:00:00Z" if m["name"] == "A" else None,
+        } for m in spec["teammates"]}
+
+    def test_no_stale_title_needs_no_browser_profile(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path)
+        threads["A"]["currentTitle"] = "A — quality"
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert failures == []
+        assert renames == {"A": False, "B": False}
+
+    def test_missing_profile_reports_pending(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path)
+        del spec["browser_profile"]
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert renames == {"A": False, "B": False}
+        assert failures == ["A"]
+
+    def test_current_title_and_identity_drive_browser_rename(
+            self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path)
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            out = Path(argv[-1])
+            out.write_text(json.dumps({"threadId": "t1"}))
+            # Browser success alone is not enough: this fixture is followed
+            # by the actual persisted projection read-back.
+            with sqlite3.connect(team_roster.db_path(spec)) as conn:
+                conn.execute("UPDATE orchestration_v2_projection_threads "
+                             "SET title='A — quality', payload_json=? "
+                             "WHERE thread_id='t1'",
+                             (json.dumps({"id": "t1", "projectId": PROJECT,
+                                          "title": "A — quality",
+                                          "pinnedAt": "2026-11-10T12:00:00Z",
+                                          "providerInstanceId": "a"}),))
+
+            class Proc:
+                returncode = 0
+                stdout = "RENAME_DONE t1 A — quality"
+                stderr = ""
+            return Proc()
+
+        make_db(spec, [{"threadId": "t1", "title": "A — old", "instance": "a"}])
+        monkeypatch.setattr(team_roster.subprocess, "run", run)
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert failures == []
+        assert renames == {"A": True, "B": False}
+        assert calls[0][2:7] == ["rename", str(spec["browser_profile"]),
+                                 "http://127.0.0.1:3780/env-1/t1", "t1",
+                                 "A — old"]
+        assert calls[0][7:9] == ["A — quality", calls[0][8]]
+        evidence = (tmp_path / "t3-team" / "run" /
+                    "team_renames.jsonl").read_text().splitlines()
+        assert json.loads(evidence[-1])["pinnedAtBefore"] == \
+            json.loads(evidence[-1])["pinnedAtAfter"]
+
+    def test_browser_failure_is_partial_not_silent(self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path)
+
+        class Proc:
+            returncode = 1
+            stdout = ""
+            stderr = "Rename thread menu not present"
+
+        monkeypatch.setattr(team_roster.subprocess, "run", lambda *a, **k: Proc())
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert renames == {"A": False, "B": False}
+        assert failures == ["A"]
+        evidence = (tmp_path / "t3-team" / "run" /
+                    "team_renames.jsonl").read_text()
+        assert "Rename thread menu not present" in evidence
+
+    def test_missing_durable_readback_is_failure(self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path)
+        make_db(spec, [{"threadId": "t1", "title": "A — old", "instance": "a"}])
+
+        def run(argv, **kwargs):
+            Path(argv[-1]).write_text("{}")
+
+            class Proc:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return Proc()
+
+        monkeypatch.setattr(team_roster.subprocess, "run", run)
+        _, failures = team_roster.rename_threads(spec, threads)
+        assert failures == ["A"]
+
+    def test_profile_outside_server_root_refused(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path)
+        spec["browser_profile"] = str(tmp_path / "foreign")
+        with pytest.raises(SystemExit):
+            team_roster.rename_threads(spec, threads)
