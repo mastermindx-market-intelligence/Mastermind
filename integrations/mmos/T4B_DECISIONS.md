@@ -68,7 +68,13 @@ changes no issue status in the transport.
 
 **Blockers (goal 4).** Queue-full: the admission answer itself carries WAIT
 with a precise reason; the carrier posts it as a blocker comment before its
-run ends. Undeliverable return: the seam's refused receipt (e.g.
+run ends. Note WHICH cap binds this door: each frozen coding job is its own
+root, so the per-root ready cap can never fire here — the binding cap is the
+FLEET cap (`MMOS_CHILD_FLEET_READY_LIMIT`, cross-root, default 512; wait
+reason `CHILD_QUEUE_FLEET_READY_FULL`). The journey's `wait` scenario sets
+fleet limit 1 and points the door's T3 at a dead dev-range port so job 1
+provably stays queued and the second task's WAIT is deterministic.
+Undeliverable return: the seam's refused receipt (e.g.
 `ORIGIN_KIND_UNKNOWN` when the transport is deliberately not registered) is
 surfaced on the task by the door. If Paperclip itself is unreachable, nothing
 can write on the task; the receipt in the Executive store is then the record
@@ -149,9 +155,14 @@ Chairman's T3 app (3773/3774) and Hermes: never read for state, never written.
   (3790–3810 range) under V4's boundary, reusing the same pairing helper
   pointed at the dev base URL. One honest incident during bring-up, recorded:
   the helper's `t3 auth pairing create` CLI leg selects its server by
-  `T3CODE_HOME`/`T3CODE_PORT`, not by the helper's BASE url; the first smoke
-  run minted one 15-minute pairing code on the live T3 app (3773) before the
-  register/decision legs were refused at the dev base. The code was left to
-  expire unused — no client registered, no decision, no token. The door now
-  sets the dev `T3CODE_HOME`/`T3CODE_PORT` before any pairing, so the whole
-  mint is dev-side.
+  `T3CODE_HOME`/`T3CODE_PORT`, not by the helper's BASE url; before the fix,
+  repeated smoke runs minted 14 pairing codes total on the live T3 app (3773)
+  — 13 labeled `t4b-door-worker` plus 1 probe — each a 15-minute code, all
+  left to expire UNUSED: no client registered, no decision, no token, and
+  deliberately not deleted (that would be a write to the live app). Verified
+  expired by 22:03 UTC 2026-11-10. The fix is config law plus a readiness
+  gate: `DoorConfig` REQUIRES the dev pin (`t3.home_dir`, `t3.port` in the
+  3790–3810 range, proof base == that port) and the executor withholds the
+  pairing CLI entirely until the dev server answers `/`, so no leg can fall
+  back to the live app. Verified empirically after the fix: with the dev
+  server up, the CLI mints on dev only.

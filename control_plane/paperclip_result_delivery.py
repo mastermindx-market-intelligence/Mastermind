@@ -40,6 +40,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -459,7 +460,12 @@ class PaperclipResultDeliveryTransport:
             try:
                 _, created = self._request(
                     "POST", f"/api/issues/{quoted_issue}/comments",
-                    {"clientRequestId": f"coding-job-return-{attempt_id}",
+                    # the API requires a UUID here (invalid_format otherwise);
+                    # uuid5 keyed on the attempt keeps it deterministic so a
+                    # retried delivery posts the same request id
+                    {"clientRequestId": str(uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"paperclip-return:{attempt_id}")),
                      "body": body})
             except _TransportError as exc:
                 return self._refused(

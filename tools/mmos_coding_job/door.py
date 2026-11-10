@@ -37,6 +37,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -79,7 +80,9 @@ from tools.mmos_coding_job.envelope import (  # noqa: E402
 WORK_REF = "WS:EXECUTIVE-CAPACITY-FABRIC"
 HOST_ID = "host-t4b-door"
 WORKER_ID = "worker-t4b-door"
-QUOTA_REF = "quota/t4b-door"
+# provider:account shape (the placement authority rejects any ref without a
+# colon as "not unique provider:account refs"); the canary uses "glm:l1-canary"
+QUOTA_REF = "t3:t4b-door"
 REGISTRY_REVISION = "rev-t4b-door-1"
 THREAD_BUDGET = 2
 LEASE_SECONDS = 900
@@ -206,9 +209,11 @@ class PaperclipLoopbackClient:
         return rows
 
     def add_comment(self, issue_id, body: str):
+        # clientRequestId must be a UUID (the API answers invalid_format
+        # otherwise — the exact 400 the first live run hit)
         return self._request(
             "POST", f"/api/issues/{issue_id}/comments",
-            {"clientRequestId": f"t4b-door-{int(time.time()*1000)}",
+            {"clientRequestId": str(uuid.uuid4()),
              "body": body})
 
 
@@ -671,6 +676,10 @@ class CodingJobDoor:
             for command, entry in list(self.frozen.items()):
                 if entry.get("phase") in ("delivered", "surfaced"):
                     continue
+                # a surfaced blocker is the job's recorded result — re-running
+                # a hard-failed execute would route around a reported refusal
+                if entry.get("blocker_surfaced"):
+                    continue
                 if not entry.get("job_id"):
                     continue
                 try:
@@ -712,9 +721,10 @@ class CodingJobDoor:
         job's own launch arguments, durable census wrapper, optional crash
         hook on the fresh launch only."""
         from control_plane.t3_execution_adapter import SQLiteT3AdapterStateStore
-        from control_plane.t3_native_composition import compose_t3_native_adapter
-        from control_plane.t3_mcp_transport import (
-            T3McpHttpTransport, T3McpToolPort,
+        from control_plane.t3_native_composition import (
+            T3McpHttpTransport,
+            T3McpToolPort,
+            compose_t3_native_adapter,
         )
         launch_arguments = {
             "projectId": self.config.t3_project_id,
@@ -752,7 +762,7 @@ class CodingJobDoor:
 
     def _wait_terminal(self, adapter, ref, *, deadline_s: float = 1800.0,
                        interval_s: float = 15.0):
-        from control_plane.worker_contracts import WorkerRunStatus
+        from control_plane.worker_execution_contract import WorkerRunStatus
         terminal = frozenset({
             WorkerRunStatus.SUCCEEDED, WorkerRunStatus.FAILED,
             WorkerRunStatus.INVALID_RESULT, WorkerRunStatus.CANCELLED,
@@ -825,7 +835,7 @@ class CodingJobDoor:
             # the retained ref — ZERO native calls — then record the
             # provider-managed process and adopt the lease under a new fence
             # (the canary's MAIN-P2 path, verbatim).
-            from control_plane.worker_contracts import WorkerRecoveryBinding
+            from control_plane.worker_execution_contract import WorkerRecoveryBinding
             from control_plane.t3_execution_adapter import (
                 SQLiteT3AdapterStateStore,
             )
@@ -934,7 +944,8 @@ class CodingJobDoor:
         }
 
     def _observations(self):
-        from control_plane.child_placement_contracts import (
+        # same owner module the canary imports these from
+        from control_plane.executive_placement_authority import (
             HostObservation, PlacementObservations, SharedQuotaObservation,
         )
         now = int(time.time() * 1000)
@@ -961,7 +972,7 @@ class CodingJobDoor:
         }
 
     def _launch_spec(self, *, run_id: str, job_id: str, prompt: str):
-        from control_plane.worker_contracts import WorkerLaunchSpec
+        from control_plane.worker_execution_contract import WorkerLaunchSpec
         run_dir = self.root / "run" / "jobs" / run_id
         (run_dir / "input").mkdir(parents=True, exist_ok=True)
         (run_dir / "input" / "prompt.txt").write_text(prompt, encoding="utf-8")
@@ -995,13 +1006,15 @@ class CodingJobDoor:
     # ------------------------------------------------------ blocker surface
 
     def _surface_blocker(self, entry: dict, code: str, reason: str) -> None:
-        """ONE blocker comment on the task (an Executive-side act, no retry
-        loop). If Paperclip is unreachable the frozen record is the honest
-        residue and the phase stays delivery-refused/execute-failed."""
+        """ONE blocker comment per code on the task (an Executive-side act,
+        no retry loop). If Paperclip is unreachable the frozen record is the
+        honest residue and the phase stays delivery-refused/execute-failed."""
         issue = entry.get("issue") or {}
         issue_id = issue.get("id")
         if not issue_id:
             return
+        if entry.get("blocker_surfaced") == code:
+            return  # already on the task; the executor's retry must not spam
         body = (f"[t4b-door] coding job blocked — {code}\n\n{reason}\n\n"
                 f"frozen command: `{(entry.get('command') or '')[:80]}`\n"
                 f"at {_now()}")

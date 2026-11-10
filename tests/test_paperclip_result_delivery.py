@@ -16,6 +16,7 @@ import asyncio
 import json
 import threading
 import urllib.parse
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -115,6 +116,16 @@ class FakePaperclip:
                 return
             if method == "POST":
                 body = json.loads(raw or b"{}")
+                # the real Paperclip API requires a UUID clientRequestId
+                # (invalid_format 400 otherwise — hit live on 2026-11-10)
+                try:
+                    uuid.UUID(str(body.get("clientRequestId") or ""))
+                except ValueError:
+                    self._send(handler, 400, {
+                        "error": "Validation error",
+                        "details": [{"code": "invalid_format",
+                                     "format": "uuid"}]})
+                    return
                 with self._lock:
                     rows = self.comments.setdefault(issue, [])
                     row = {"id": f"cmt-{len(rows) + 1}",
