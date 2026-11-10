@@ -4148,6 +4148,31 @@ class _RuntimeReadProgressGuard:
         self._removed = True
 
 
+class _CooWriteReadProgressGuard(_RuntimeReadProgressGuard):
+    """Inert handler owned by one fresh COO write connection.
+
+    This is installed only at the two native writable connection constructors,
+    before the connection is handed to any caller. A borrowed authority reader
+    may activate its fixed budget, but cannot install, replace or remove it.
+    Transaction exit removes it; all writes, rollback and COMMIT see it inert.
+    """
+
+    __slots__ = ()
+
+    def _install_fresh(self, connection: sqlite3.Connection) -> None:
+        if type(self) is not _CooWriteReadProgressGuard:
+            raise StateConflict("COO transaction progress owner is invalid")
+        self._record_install(connection, None)
+        connection.set_progress_handler(self, 1)
+
+    def _remove_owned(self, connection: sqlite3.Connection) -> None:
+        if self._native is not connection or self._wrapper is not None or self._removed:
+            raise StateConflict("COO transaction progress lifetime changed")
+        self.deactivate()
+        connection.set_progress_handler(None, 0)
+        self._record_removal()
+
+
 class _BoundReadCursor:
     """Owned statement view, never a native Cursor compatibility surface."""
 
@@ -4379,6 +4404,7 @@ class RuntimeStore:
         # write-ownership proof: an ordinary ``read()`` snapshot also has an
         # active deferred transaction and can otherwise be upgraded by SQLite.
         self._write_connections: set[sqlite3.Connection] = set()
+        self._coo_write_progress: dict[sqlite3.Connection, _CooWriteReadProgressGuard] = {}
         # Exact handles currently owned by an unbound ``read()`` snapshot.
         self._read_connections: set[sqlite3.Connection] = set()
         self._finite_control_context: FiniteControlContext | None = None
@@ -4805,7 +4831,10 @@ class RuntimeStore:
                 "executive runtime schema v7 does not match the exact reviewed DDL"
             )
 
-    def _open_existing_writable(self) -> sqlite3.Connection:
+    def _open_existing_writable(self, *, _coo_progress=None) -> sqlite3.Connection:
+        if _coo_progress is not None and (type(_coo_progress) is not _CooWriteReadProgressGuard
+                or _coo_progress._native is not None or _coo_progress._removed):
+            raise StateConflict("COO transaction progress owner is not fresh")
         connection: sqlite3.Connection | None = None
         try:
             if self._upgrade_barrier_present():
@@ -4817,6 +4846,10 @@ class RuntimeStore:
                 timeout=self.busy_timeout_ms / 1000,
                 isolation_level=None,
             )
+            if _coo_progress is not None:
+                if type(_coo_progress) is not _CooWriteReadProgressGuard:
+                    raise StateConflict("COO transaction progress owner is invalid")
+                _coo_progress._install_fresh(connection)
             if self._upgrade_barrier_present():
                 connection.close()
                 connection = None
@@ -4844,12 +4877,18 @@ class RuntimeStore:
                 f"executive runtime database at {self.path} is unavailable: {exc}"
             ) from exc
 
-    def _open(self) -> sqlite3.Connection:
+    def _open(self, *, _coo_progress=None) -> sqlite3.Connection:
+        if _coo_progress is not None and (type(_coo_progress) is not _CooWriteReadProgressGuard
+                or _coo_progress._native is not None or _coo_progress._removed):
+            raise StateConflict("COO transaction progress owner is not fresh")
         if self.read_binding is not None:
             raise RuntimeReadUnavailable("bound store opens only inside read()")
         if self.existing_writable:
-            return self._open_existing_writable()
+            return (self._open_existing_writable() if _coo_progress is None else
+                    self._open_existing_writable(_coo_progress=_coo_progress))
         if not self.create:
+            if _coo_progress is not None:
+                raise StateConflict("COO transaction requires the original writable owner")
             return self._open_readonly()
         if self._upgrade_barrier_present():
             raise PersistenceError(
@@ -4877,6 +4916,10 @@ class RuntimeStore:
                 timeout=self.busy_timeout_ms / 1000,
                 isolation_level=None,
             )
+            if _coo_progress is not None:
+                if type(_coo_progress) is not _CooWriteReadProgressGuard:
+                    raise StateConflict("COO transaction progress owner is invalid")
+                _coo_progress._install_fresh(connection)
             if self._upgrade_barrier_present():
                 connection.close()
                 connection = None
@@ -4994,7 +5037,7 @@ class RuntimeStore:
             raise PersistenceError(f"database migration failed: {exc}") from exc
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(self, *, _coo_guarded: bool = False) -> Iterator[sqlite3.Connection]:
         if not self.create and not self.existing_writable:
             # Fail closed: a store opened for projection has no write path at all,
             # so a lifecycle call cannot reach the database even by mistake.
@@ -5006,7 +5049,10 @@ class RuntimeStore:
             raise PersistenceError(
                 "Executive schema upgrade barrier is present; normal writers remain quarantined"
             )
-        connection = self._open()
+        if type(_coo_guarded) is not bool:
+            raise StateConflict("COO transaction guard selection is invalid")
+        progress = _CooWriteReadProgressGuard() if _coo_guarded else None
+        connection = self._open() if progress is None else self._open(_coo_progress=progress)
         try:
             if self._upgrade_barrier_present():
                 raise PersistenceError(
@@ -5022,6 +5068,8 @@ class RuntimeStore:
             )
             initial_classifications = _classification_before_transaction(connection)
             self._write_connections.add(connection)
+            if progress is not None:
+                self._coo_write_progress[connection] = progress
             yield connection
             _finish_transaction(connection, initial_classifications)
             if self._upgrade_barrier_present():
@@ -5049,7 +5097,12 @@ class RuntimeStore:
             raise
         finally:
             self._write_connections.discard(connection)
-            connection.close()
+            self._coo_write_progress.pop(connection, None)
+            try:
+                if progress is not None:
+                    progress._remove_owned(connection)
+            finally:
+                connection.close()
 
     def _close_read_connection(self, connection: sqlite3.Connection | _BoundReadConnection) -> None:
         if isinstance(connection, _BoundReadConnection):
@@ -18634,7 +18687,157 @@ def _resolve_expected_child_selection(job_id, command_id, explicit):
     return explicit if explicit is not None else bound
 
 
-def _recheck_selected_child_admission(expected):
+_COO_WRITE_AUTHORITY_CAPABILITY = object()
+_COO_WRITE_AUTHORITY: ContextVar["_CooWriteAuthorityScope | None"] = ContextVar(
+    "mastermind_coo_original_write_authority", default=None
+)
+
+
+class _CooWriteAuthorityScope:
+    """Nontransferable reproof of one original synchronous COO write guard.
+
+    This is not a read observation or receipt. It exposes no connection and
+    never promises physical close: the original transaction still owns its
+    writer. Its only material read is the existing finite root selection.
+    """
+
+    __slots__ = ("_store", "_connection", "_root_job_id", "_command_id", "_thread",
+        "_active", "_reading", "_namespace")
+
+    def __init__(self, store, connection, root_job_id, command_id, *, _capability):
+        if _capability is not _COO_WRITE_AUTHORITY_CAPABILITY:
+            raise StateConflict("COO write authority is Runtime-owned")
+        self._store, self._connection = store, connection
+        self._root_job_id, self._command_id = root_job_id, command_id
+        self._thread = threading.get_ident()
+        self._active = True
+        self._reading = False
+        self._namespace = None
+
+    @property
+    def root_job_id(self):
+        return self._root_job_id
+
+    @property
+    def command_id(self):
+        return self._command_id
+
+    def _bind_namespace(self, capability):
+        from control_plane.runtime_namespace_custody import _RequestCapability, ServiceRuntimeNamespaceCustody
+        self._require_lexical()
+        if (type(capability) is not _RequestCapability
+                or type(capability.owner) is not ServiceRuntimeNamespaceCustody
+                or capability.owner.runtime.store is not self._store
+                or self._namespace is not None and self._namespace.owner is not capability.owner):
+            raise StateConflict("original COO write namespace cannot be replaced")
+        if self._namespace is None:
+            self._namespace = capability
+
+    def _require_lexical(self, store=None):
+        if (type(self) is not _CooWriteAuthorityScope or not self._active
+                or _COO_WRITE_AUTHORITY.get() is not self
+                or threading.get_ident() != self._thread
+                or (store is not None and store is not self._store)
+                or self._store.read_binding is not None
+                or self._connection not in self._store._write_connections
+                or self._connection.in_transaction is not True):
+            raise StateConflict("original COO write authority scope is unavailable")
+        progress = self._store._coo_write_progress.get(self._connection)
+        if (type(progress) is not _CooWriteReadProgressGuard
+                or progress._native is not self._connection or progress._removed):
+            raise StateConflict("original COO write authority budget is unavailable")
+        return progress
+
+    def require_current(self, store):
+        self._require_lexical(store)
+        self._store._assert_owned_snapshot_connection(self._connection)
+        _bounded_acquisition_identifier(self.root_job_id, name="root Job")
+        if (type(self.command_id) is not str or not _COMMAND_ID_RE.fullmatch(self.command_id)):
+            raise StateConflict("original COO write authority identity is invalid")
+        if self._namespace is not None:
+            self._namespace.validate(self._store.path)
+
+    def read_root(self):
+        """Same-writer bounded SELECTs; close every cursor, keep writer owned."""
+        self.require_current(self._store)
+        progress = self._require_lexical()
+        if self._reading:
+            raise StateConflict("COO write authority selection is already active")
+        self._reading = True
+        cursors = []
+        scope = self
+
+        class _OriginalQueries:
+            def execute(self, sql, parameters=()):
+                scope._require_lexical()
+                if type(sql) is not str or not sql.lstrip().upper().startswith("SELECT "):
+                    raise StateConflict("COO authority material is read-only")
+                cursor = scope._connection.execute(sql, parameters)
+                cursors.append(cursor)
+                return cursor
+
+        changed = self._connection.total_changes
+        try:
+            progress.activate()
+            loader = _BoundedRoleResultLoader(_OriginalQueries())
+            snapshot = _accounted_root_snapshot(loader, self.root_job_id)
+            provenance = snapshot.jobs[0].orchestration_provenance
+            command = provenance.get("command_id") if isinstance(provenance, Mapping) else None
+            if type(command) is not str or not _COMMAND_ID_RE.fullmatch(command):
+                raise StateConflict("COO authority root creation identity is unavailable")
+            rows = loader.execute("SELECT * FROM events WHERE command_id=?", (command,)).fetchall()
+            if len(rows) != 1:
+                raise StateConflict("COO authority root creation evidence is unavailable")
+            event = _event_from_row(rows[0])
+            if self._connection.total_changes != changed:
+                raise StateConflict("COO authority read changed its original transaction")
+            self._require_lexical()
+            return snapshot, event
+        except sqlite3.OperationalError as exc:
+            if progress.tripped:
+                raise RuntimeRoleResultOverBudget() from exc
+            raise
+        finally:
+            # Budget teardown cannot interrupt cursor cleanup, later lifecycle
+            # writes, rollback or COMMIT. No borrowed reader removes a handler.
+            progress.deactivate()
+            failure = None
+            for cursor in reversed(cursors):
+                try:
+                    cursor.close()
+                except BaseException as exc:
+                    failure = failure or exc
+            self._reading = False
+            if failure is not None:
+                self._active = False
+                raise RuntimeReadUnavailable("COO authority cursor close failed") from failure
+
+
+@contextmanager
+def _coo_write_authority_scope(store, connection, root_job_id, command_id):
+    if _COO_WRITE_AUTHORITY.get() is not None:
+        raise StateConflict("original COO write authority cannot be replaced")
+    scope = _CooWriteAuthorityScope(store, connection, root_job_id, command_id,
+        _capability=_COO_WRITE_AUTHORITY_CAPABILITY)
+    token = _COO_WRITE_AUTHORITY.set(scope)
+    try:
+        scope.require_current(store)
+        yield scope
+        scope.require_current(store)
+    finally:
+        scope._active = False
+        scope._namespace = None
+        _COO_WRITE_AUTHORITY.reset(token)
+
+
+def _current_coo_write_authority(store):
+    scope = _COO_WRITE_AUTHORITY.get()
+    if scope is not None:
+        scope.require_current(store)
+    return scope
+
+
+def _recheck_selected_child_admission(expected, store, connection):
     """Recheck the private synchronous guard inside the fresh claim transaction."""
     bound = _EXPECTED_CHILD_SELECTION.get()
     if bound is None:
@@ -18647,7 +18850,8 @@ def _recheck_selected_child_admission(expected):
     if (not callable(guard) or inspect.iscoroutinefunction(guard)
             or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
         raise StateConflict("selected child admission guard must be synchronous")
-    result = guard()
+    with _coo_write_authority_scope(store, connection, expected.root_job_id, expected.command_id):
+        result = guard()
     if inspect.isawaitable(result):
         if inspect.iscoroutine(result):
             result.close()
@@ -18819,6 +19023,11 @@ def _require_coo_requester_guard(guard):
         if inspect.iscoroutine(result):
             result.close()
         raise StateConflict("COO requester owner guard refused")
+
+
+def _require_coo_requester_transaction_guard(guard, store, connection, expected, command_id):
+    with _coo_write_authority_scope(store, connection, expected["root_job_id"], command_id):
+        _require_coo_requester_guard(guard)
 
 
 def _record_placement_deferral(store, connection, job_id: str, refusal, timestamp: int) -> None:
@@ -19850,7 +20059,9 @@ class AttemptRegistry:
         # branch. A mismatched bound selection can never degrade to a generic claim.
         expected = _resolve_expected_child_selection(job_id, command_id, expected_selection)
         timestamp = self.store.now_ms()
-        with self.store.transaction() as connection:
+        bound_guard = _EXPECTED_CHILD_SELECTION.get()
+        guarded = bound_guard is not None and bound_guard.admission_guard is not None
+        with self.store.transaction(**({"_coo_guarded": True} if guarded else {})) as connection:
             direct_row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
             direct_provenance=_direct_native_provenance(connection,direct_row) if direct_row is not None else None
             if direct_provenance is not None:
@@ -19931,7 +20142,7 @@ class AttemptRegistry:
                     )
             # Exact original replay above is read-only and does not reacquire
             # current mandate authority or reapply pre-claim Attempt absence.
-            _recheck_selected_child_admission(expected)
+            _recheck_selected_child_admission(expected, self.store, connection)
             if _initial_prepared is not None:
                 from control_plane.finite_initial_admission import _activate
                 _activate(_initial_prepared, self.store, connection, job_id, command_id, worker_id, selected_quota)
@@ -20277,7 +20488,7 @@ class AttemptRegistry:
                 raise StateConflict("finite initial common claim lost CAS")
             # Revocation before COMMIT rolls back Attempt, Job and claim event
             # together; no provider is started by this transaction.
-            _recheck_selected_child_admission(expected)
+            _recheck_selected_child_admission(expected, self.store, connection)
         return claimed
 
     def validate_fresh_launch_claim(self, job_id: str, lease: AttemptLease) -> None:
@@ -25182,77 +25393,32 @@ class OperatorHarnessRegistry:
             )
         intent_event, intent = g1_turn_intents[0]
         turn_id = str(intent.get("turn_id") or "")
-        intent_keys = {
-            "schema_version",
-            "operation_kind",
-            "attempt_id",
-            "session_epoch_id",
-            "process_generation_id",
-            "worker_id",
-            "provider_session_id",
-            "turn_id",
-        }
         op = OperationId(str(intent_event["command_id"]))
-        applied = self._event(
-            connection,
-            operation_receipt_command_id(op, OperationReceiptKind.APPLIED),
-        )
         unknown = self._event(
             connection,
             operation_receipt_command_id(op, OperationReceiptKind.EFFECT_UNKNOWN),
         )
-        applied_payload = (
-            _strict_canonical_json_loads(
-                str(applied["payload_json"]), name="G1 recovery TX-5 APPLIED"
-            )
-            if applied is not None
-            else None
+        if not turn_id or unknown is not None:
+            raise StateConflict("orchestration G1 recovery TX-5 evidence is incomplete")
+        turn = TurnRef(
+            turn_id, epoch.session_epoch_id, g1_generation_id, str(row["attempt_id"])
         )
-        applied_keys = {
-            "schema_version",
-            "operation_kind",
-            "attempt_id",
-            "session_epoch_id",
-            "process_generation_id",
-            "turn_id",
-            "provider_native_turn_id",
-            "acknowledged",
-        }
-        if (
-            set(intent) != intent_keys
-            or intent_event["aggregate_id"] != intent_event["command_id"]
-            or intent_event["job_id"] != row["job_id"]
-            or intent_event["worker_id"] != row["worker_id"]
-            or intent_event["quota_class"] != row["quota_class"]
-            or intent.get("schema_version")
-            != "mastermind.operator_harness_turn_intent/v1"
-            or intent.get("attempt_id") != row["attempt_id"]
-            or intent.get("session_epoch_id") != epoch.session_epoch_id
-            or intent.get("process_generation_id") != g1_generation_id
-            or intent.get("worker_id") != row["worker_id"]
-            or intent.get("provider_session_id") != epochs[0]["provider_session_id"]
-            or not turn_id
-            or applied is None
-            or unknown is not None
-            or applied["event_type"] != OperationReceiptKind.APPLIED.value
-            or applied["aggregate_type"] != "operator_operation"
-            or applied["aggregate_id"] != intent_event["command_id"]
-            or applied["job_id"] != row["job_id"]
-            or applied["worker_id"] != row["worker_id"]
-            or applied["quota_class"] != row["quota_class"]
-            or not isinstance(applied_payload, dict)
-            or set(applied_payload) != applied_keys
-            or applied_payload.get("schema_version")
-            != "mastermind.operator_harness_turn_applied/v1"
-            or applied_payload.get("operation_kind") != OperationKind.BEGIN_TURN.value
-            or applied_payload.get("attempt_id") != row["attempt_id"]
-            or applied_payload.get("session_epoch_id") != epoch.session_epoch_id
-            or applied_payload.get("process_generation_id") != g1_generation_id
-            or applied_payload.get("turn_id") != turn_id
-            or not isinstance(applied_payload.get("provider_native_turn_id"), str)
-            or not applied_payload["provider_native_turn_id"].strip()
-            or applied_payload.get("acknowledged") is not True
-        ):
+        # The original TX-5 owner validates both legacy V1 and retained V2
+        # request custody. A closed receipt shape is not permission to rerun it.
+        intent = self._require_turn_intent(
+            connection, row=row, turn=turn, operation_id=op, event=intent_event,
+            provider_session_id=str(epochs[0]["provider_session_id"]),
+        )
+        applied = self._require_turn_applied(
+            connection, row=row, turn=turn, operation_id=op, intent=intent,
+            event=self._event(
+                connection, operation_receipt_command_id(op, OperationReceiptKind.APPLIED)
+            ),
+        )
+        # Preserve the existing G1 recovery requirement even for a legacy V1
+        # receipt, whose general containment validator may allow an absent ID.
+        if (not isinstance(applied["provider_native_turn_id"], str)
+                or not applied["provider_native_turn_id"].strip()):
             raise StateConflict("orchestration G1 recovery TX-5 evidence is incomplete")
 
         competing = connection.execute(
@@ -25273,6 +25439,15 @@ class OperatorHarnessRegistry:
         ):
             raise StateConflict(
                 "orchestration G1 recovery was closed by durable work evidence"
+            )
+        if intent["schema_version"] == _TURN_INTENT_V2:
+            # Bound planner turns currently require original G1 custody in
+            # reserve_turn and provider dispatch. Refuse before TX-10 allocates
+            # G2 or a provider resume can occur; receipt validation grants no
+            # replacement turn or new producer selection.
+            raise StateConflict(
+                "retained planner request custody cannot resume into G2; "
+                "reconcile the original G1 turn"
             )
 
     def reserve_same_epoch_resume(
@@ -29267,6 +29442,7 @@ class BoundedRootOrigin:
     kind: str
     provenance: dict[str, Any] | None
     creation_event_digest: str
+    project_execution: dict[str, Any] | None = None
 
 
 class BoundedRuntimeReadObservation:
@@ -29866,7 +30042,9 @@ class BoundedRuntimeReadObservation:
         self._require_active()
         if self._origin_cache is not None:
             return tuple(dataclasses.replace(row, provenance=(None if row.provenance is None
-                else json.loads(_json_dumps(row.provenance)))) for row in self._origin_cache)
+                else json.loads(_json_dumps(row.provenance))), project_execution=(
+                None if row.project_execution is None else json.loads(_json_dumps(row.project_execution))))
+                for row in self._origin_cache)
         try:
             roots = self._origin_roots
             if (roots is None or len(roots) > BOUNDED_RUNTIME_ROOT_DISCOVERY_MAX_ROOTS
@@ -29964,9 +30142,19 @@ class BoundedRuntimeReadObservation:
                         from control_plane.runtime_root_origin import classify_legacy_root_creation
                         classified = classify_legacy_root_creation(job, event)
                         kind, provenance = classified["kind"], classified["provenance"]
+                    execution = None
+                    if kind == "STRICT_V2_CEO":
+                        from control_plane.project_execution_admission import (
+                            ORIGINAL_SOURCE_MAX_PAYLOAD_BYTES, validate_original_root_source,
+                        )
+                        execution = validate_original_root_source(job, event)
+                        # Match the original retained-source owner's raw
+                        # creation-payload ceiling inside this SAME budget.
+                        if execution is not None and lengths[columns.index("payload_json")] > ORIGINAL_SOURCE_MAX_PAYLOAD_BYTES:
+                            raise RuntimeReadUnavailable("project execution original source exceeds bound")
                     origins.append(BoundedRootOrigin(job.job_id, kind,
                         None if provenance is None else dict(provenance),
-                        _bounded_runtime_snapshot_digest(event.to_dict())))
+                        _bounded_runtime_snapshot_digest(event.to_dict()), execution))
                 self._origin_cache = tuple(origins)
             except sqlite3.OperationalError as exc:
                 if self._vm_progress.tripped:
@@ -29975,7 +30163,9 @@ class BoundedRuntimeReadObservation:
             finally:
                 self._vm_progress.deactivate()
             return tuple(dataclasses.replace(row, provenance=(None if row.provenance is None
-                else json.loads(_json_dumps(row.provenance)))) for row in self._origin_cache)
+                else json.loads(_json_dumps(row.provenance))), project_execution=(
+                None if row.project_execution is None else json.loads(_json_dumps(row.project_execution))))
+                for row in self._origin_cache)
         except BaseException:
             self._failed = True
             raise
@@ -32283,8 +32473,9 @@ class Runtime:
         selected = wire.acknowledgment(dict(request))
         expected = wire.identity(selected["result"])
         _require_coo_requester_guard(currentness_guard)
-        with self.store.transaction() as connection:
-            _require_coo_requester_guard(currentness_guard)
+        with self.store.transaction(_coo_guarded=True) as connection:
+            _require_coo_requester_transaction_guard(currentness_guard, self.store, connection,
+                expected, selected["command"])
             original = _coo_requester_return_snapshot(connection, job_id=expected["job_id"],
                 command_id=selected["command"], context=context, capability_profile_digest=capability_profile_digest)
             if original is None or wire.identity(original) != expected:
@@ -32298,12 +32489,14 @@ class Runtime:
                     command_id=wire.consumption_command_id(expected["attempt_id"]),
                     actor="coo-api-principal", job_id=expected["job_id"], attempt_id=expected["attempt_id"],
                     payload=consumed, timestamp_ms=timestamp)
-            _require_coo_requester_guard(currentness_guard)
+            _require_coo_requester_transaction_guard(currentness_guard, self.store, connection,
+                expected, selected["command"])
             observed = _coo_requester_return_snapshot(connection, job_id=expected["job_id"],
                 command_id=selected["command"], context=context, capability_profile_digest=capability_profile_digest)
             if observed is None or wire.identity(observed) != expected or observed["consumption"] is None:
                 raise StateConflict("COO requester acknowledgment lost its original result")
-            _require_coo_requester_guard(currentness_guard)
+            _require_coo_requester_transaction_guard(currentness_guard, self.store, connection,
+                expected, selected["command"])
         return observed
 
     def current_harness_binding_for_parent_pid(

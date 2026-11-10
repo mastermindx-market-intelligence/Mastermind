@@ -1,0 +1,21 @@
+{
+  "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
+  "candidate/go_shim.py": "6a396f8fedc2f3d44604b07e5a09c3c3ba329579",
+  "candidate/lease_broker.py": "cbb135641aa9d9509714fdb3587f6f0088d5d65b",
+  "candidate/go_lease_gateway.py": "9666d2c10c6dd2044a0ea783c534b58b8fe52f34",
+  "candidate/go_lease_capability.py": "f6ffb1a43dd7a9a53f08e75dd410234a040ab50d",
+  "candidate/application_http_transports.py": "63e3d9820d205eac31e471a0e3ddc86c04524111",
+  "candidate/provider_outcome.py": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
+  "candidate/quota_circuit.py": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
+  "candidate/pick.py": "d17447c3c9f472b061733e36fa49a7f8d7e34ee5",
+  "candidate/pool_ledger.py": "61dc4d5e83172e6c647d058ec844f00a0b3955a6",
+  "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
+  "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",
+  "tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
+  "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
+  "tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",
+  "tests/test_application_registered_pool_selection.py": "b0c1991f33bff830284225687700ee8d6b32e735",
+  "tests/test_application_registered_pool_composition.py": "59685ae3086241fec086c1e5eda4a37632ada044",
+  "tests/test_application_auto_request.py": "6e990aa3be10cea5dc6ee19c621bd0b3583de909",
+  "tests/test_application_cross_pool_auto.py": "0d70a47906a23176d5eaed71a4575e925a500341"
+}

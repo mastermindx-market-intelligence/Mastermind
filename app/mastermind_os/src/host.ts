@@ -46,12 +46,14 @@ import {
   decodeMission,
   decodeMissionv3,
   decodeMissionv4,
+  decodeProjectExecutionResourceRead,
   normalizeSelection,
   normalizeWorkspaceSelection,
   type MissionDocument,
   type MissionSelection,
   type Missionv3Document,
   type ProgramRead,
+  type ProjectExecutionResourceReader,
 } from "./mission";
 import {
   decodeProgramsEnvelope,
@@ -222,6 +224,8 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readMissionV3?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  /** Explicit read-only scope on the incumbent Mission v3 transport. */
+  readProjectExecutionResource?: ProjectExecutionResourceReader;
   readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
   readSourceOperationContext?: (request: SourceOperationContextSelection & { signal: AbortSignal }) => Promise<SourceOperationContext>;
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
@@ -311,6 +315,8 @@ export function bindMissionHost(
   const sourceContextReader = client.readSourceOperationContext;
   const sourceGroup = client.sourceOperations;
   const sourceEpochReader = client.invalidationGeneration;
+  const executionResourceReader = client.readMissionV3;
+  const executionResourceGeneration = client.invalidationGeneration;
   const sourceMethods = sourceGroup
     ? {
         options: sourceGroup.readProjectCreationOptions,
@@ -999,6 +1005,32 @@ export function bindMissionHost(
         throw new Error("MISSION_RESPONSE_INVALID");
       return result;
     },
+    ...(executionResourceReader && executionResourceGeneration ? {
+      async readProjectExecutionResource({ workRef, rootJobId, signal }: MissionSelection & { signal: AbortSignal }) {
+        const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
+        if (!selection) throw new Error("SELECTION_INVALID");
+        const started = epoch;
+        const generation = executionResourceGeneration.call(client);
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(generation) || generation < 0 ||
+              client.readMissionV3 !== executionResourceReader ||
+              client.invalidationGeneration !== executionResourceGeneration ||
+              executionResourceGeneration.call(client) !== generation)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("PROJECT_EXECUTION_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await executionResourceReader.call(client, { ...selection, signal });
+        verify();
+        const result = decodeProjectExecutionResourceRead(raw, selection);
+        if (!result) throw new Error("PROJECT_EXECUTION_RESOURCE_INVALID");
+        verify();
+        return result;
+      },
+    } : {}),
     async readMissionV3({ workRef, rootJobId, signal }) {
       const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
       if (!selection) throw new Error("SELECTION_INVALID");

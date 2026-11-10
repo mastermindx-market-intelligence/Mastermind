@@ -1,0 +1,61 @@
+{
+  "evidence": [
+    {
+      "path": "evidence/owner-diagnostic.log",
+      "sha256": "4b88017ed94adeea35874ab56fd4220c966680534196449f1a394c080b01f217"
+    },
+    {
+      "path": "evidence/pytest.log",
+      "sha256": "06fb96a4189dd2dfea979e789f29c2af45653412ac466fffbf73d9c5b0e36b17"
+    },
+    {
+      "path": "evidence/qualified-no-bytecode.log",
+      "sha256": "144a11ac6656fe1eda44dbeb3281c6c8f03ec13848ca746eda849b9ac914fe93"
+    }
+  ],
+  "limitations": [
+    "Original current-DATA fixture uses explicit inert source-seal and physical service binding/workspace preparation edges.",
+    "Real signed resource principals are verified; no fabricated VerifiedPrincipal is introduced.",
+    "No provider Attempt, native model, Unix listener, actual service installation, credential/profile activation or live effect is exercised.",
+    "This proves an original admission and missing read projection join, not production launch eligibility.",
+    "Durable bootstrap source has been traced; its separate incumbent service test qualification is not included in this initial artifact."
+  ],
+  "observed": [
+    "Real original DIRECT_NATIVE_CEO planning root retained.",
+    "Actual ProjectExecutionAppFactory creates a distinct strict-v2 ceo_intent aggregation root and retains exact adopted plan bytes.",
+    "Actual Programs discovery reports both roots as CONFLICT, with no selected root.",
+    "Both explicit Mission selections are refused; current work-reference Mission reader consults configured C only.",
+    "Dispatch is truthfully UNKNOWN/historical because evidence was not supplied by the current-DATA producer.",
+    "Final read-only projection calls write zero Runtime Events."
+  ],
+  "prior_failure": {
+    "budget_seconds": 15,
+    "cause": "Python import wrote a bytecode file into the disposable canonical source checkout; the unchanged configured-source guard correctly refused.",
+    "classification": "CURRENT_SOURCE_DRIFT",
+    "remaining_seconds": 13.39,
+    "repair": "Fresh fixture replay with Python -B; no owner, deadline, source output, or authorization check changed."
+  },
+  "production_changes": 0,
+  "replay": {
+    "argv": [
+      "python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-s",
+      "/workspace/scratch/dfef37b7f33a/estate-current-data-readiness-freeze/postimages/tests/test_current_data_execution_readiness.py"
+    ],
+    "cwd": "/workspace/scratch/dfef37b7f33a/estate-project-help-v6-qualification",
+    "env": {
+      "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+      "PYTHONPATH": "../estate-return-qualification/.qualification-deps:.:tests"
+    }
+  },
+  "state": "PROVEN_SOURCE_FINDING",
+  "tests": {
+    "failed": 0,
+    "passed": 1,
+    "seconds": 47.42
+  }
+}

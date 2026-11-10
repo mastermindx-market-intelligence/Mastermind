@@ -1,0 +1,63 @@
+{
+  "path": "control_plane/workspace_read_service.py",
+  "before_tree": "2b0dd1286c55cd9bedfbb1d659ef3498c0022899",
+  "before_sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98",
+  "after_sha256": "0b1f326f26c08438c1c97d01f0510b623a3804aeab51c76eebec9dd375903217",
+  "sites": [
+    [
+      723,
+      93,
+      96,
+      "int",
+      "403"
+    ],
+    [
+      725,
+      56,
+      59,
+      "int",
+      "403"
+    ],
+    [
+      732,
+      46,
+      49,
+      "int",
+      "403"
+    ],
+    [
+      733,
+      56,
+      59,
+      "int",
+      "403"
+    ]
+  ],
+  "unchanged_statements": [
+    {
+      "before_line": 723,
+      "after_line": 723,
+      "containing_statement": "Return",
+      "same_ast_sha256": "f5b690b9eaf4237857d92cfda3c8041a7afde91709fa05b27d43da1724c4aec3"
+    },
+    {
+      "before_line": 725,
+      "after_line": 725,
+      "containing_statement": "Return",
+      "same_ast_sha256": "f5b690b9eaf4237857d92cfda3c8041a7afde91709fa05b27d43da1724c4aec3"
+    },
+    {
+      "before_line": 732,
+      "after_line": 732,
+      "containing_statement": "Return",
+      "same_ast_sha256": "f5b690b9eaf4237857d92cfda3c8041a7afde91709fa05b27d43da1724c4aec3"
+    },
+    {
+      "before_line": 733,
+      "after_line": 733,
+      "containing_statement": "Return",
+      "same_ast_sha256": "f5b690b9eaf4237857d92cfda3c8041a7afde91709fa05b27d43da1724c4aec3"
+    }
+  ],
+  "new_exemptions": 0
+}

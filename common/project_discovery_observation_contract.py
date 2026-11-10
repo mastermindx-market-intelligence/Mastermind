@@ -7,15 +7,29 @@ from common.canonical_project_data_observation_contract import validate as data_
 from common.workspace_project_plan_contract import validate_source
 
 _HASH = re.compile(r'[a-f0-9]{64}')
+OBSERVATION_SCHEMA = 'mastermind.workspace_source_observation.v2'
+RESOURCE_OBSERVATION_SCHEMA = 'mastermind.workspace_source_observation.v3'
+OBSERVATION_KEYS = frozenset({'schema', 'state', 'selection', 'control_room', 'runtime', 'project_data'})
+RESOURCE_OBSERVATION_KEYS = OBSERVATION_KEYS | {'resource'}
 
 
-def validate_observation(value, *, work_ref, root_job_id, document, validity, currentness, fabric=None):
+def validate_coherence(value, *, work_ref, root_job_id):
+    """Validate closed receipt syntax and its internal joins, not owner currency.
+
+    The full owner validator below additionally binds the actual acquisition
+    inputs. A downstream projection must still obtain this receipt from that
+    owner; this function grants no authenticity, freshness or execution right.
+    """
     def fail():
         raise ValueError('PROJECT_DISCOVERY_OBSERVATION_INVALID')
-    if (type(value) is not dict or set(value) != {'schema', 'state', 'selection', 'control_room', 'runtime', 'project_data'}
-            or value['schema'] != 'mastermind.workspace_source_observation.v2' or value['state'] != 'SAME'
+    resource = type(value) is dict and value.get('schema') == RESOURCE_OBSERVATION_SCHEMA
+    if (type(value) is not dict or set(value) != (RESOURCE_OBSERVATION_KEYS if resource else OBSERVATION_KEYS)
+            or value['schema'] not in {OBSERVATION_SCHEMA, RESOURCE_OBSERVATION_SCHEMA} or value['state'] != 'SAME'
             or value['selection'] != (None if root_job_id is None else dict(work_ref=work_ref, root_job_id=root_job_id))):
         fail()
+    if resource:
+        from common.project_execution_resource_contract import validate_resource
+        validate_resource(value['resource'], work_ref=work_ref, root_job_id=root_job_id)
     c, p, runtime = value['control_room'], value['project_data'], value['runtime']
     if (type(c) is not dict or set(c) != {'instance_before', 'instance_after', 'publication_before', 'publication_after',
             'document_digest', 'source_validity_digest', 'cache_currentness_digest'}
@@ -61,6 +75,26 @@ def validate_observation(value, *, work_ref, root_job_id, document, validity, cu
     operation = witness['source_operation']
     if operation is not None and (operation['principal_scope'] != creation['principal_scope'] or operation['selection']['work_ref'] != work_ref):
         fail()
+    if any(type(p[key]) is not str or _HASH.fullmatch(p[key]) is None
+            for key in ('document_digest', 'source_validity_digest', 'cache_currentness_digest')):
+        fail()
+    if (type(runtime) is not dict or set(runtime) != {'schema', 'state', 'source_identity', 'before', 'after', 'snapshot_digest'}
+            or runtime['schema'] != 'mastermind.runtime_read_observation.v1' or runtime['state'] != 'SAME'
+            or type(runtime['source_identity']) is not str or not runtime['source_identity']
+            or type(runtime['before']) is not int or runtime['before'] < 0 or runtime['before'] != runtime['after']
+            or type(runtime['snapshot_digest']) is not str or _HASH.fullmatch(runtime['snapshot_digest']) is None):
+        fail()
+    return value
+
+
+def validate_observation(value, *, work_ref, root_job_id, document, validity, currentness, fabric=None):
+    validate_coherence(value, work_ref=work_ref, root_job_id=root_job_id)
+
+    def fail():
+        raise ValueError('PROJECT_DISCOVERY_OBSERVATION_INVALID')
+
+    p, runtime = value['project_data'], value['runtime']
+    witness = data_observation(p['data_observation'])
     if (validity.get('schema') != 'mastermind.project_data_source_validity.v1'
             or validity.get('profile') != 'workspace_project_data_read.v1'
             or validity.get('source_generation') != p['source_generation']
@@ -73,12 +107,7 @@ def validate_observation(value, *, work_ref, root_job_id, document, validity, cu
     if (generated.utcoffset() is None or document.get('schema') != 'mastermind.chairman_control_room.v1'
             or abs(generated.timestamp() * 1000 - witness['canonical_observed_at_ms']) >= 1000
             or document['autonomy']['generated_at'] != document['generated_at']
-            or [row.get('work_ref') for row in document['work']] != [work_ref]
-            or type(runtime) is not dict or set(runtime) != {'schema', 'state', 'source_identity', 'before', 'after', 'snapshot_digest'}
-            or runtime['schema'] != 'mastermind.runtime_read_observation.v1' or runtime['state'] != 'SAME'
-            or type(runtime['source_identity']) is not str or not runtime['source_identity']
-            or type(runtime['before']) is not int or runtime['before'] < 0 or runtime['before'] != runtime['after']
-            or type(runtime['snapshot_digest']) is not str or _HASH.fullmatch(runtime['snapshot_digest']) is None):
+            or [row.get('work_ref') for row in document['work']] != [work_ref]):
         fail()
     if fabric is not None:
         acquisition = fabric.get('runtime', {}).get('acquisition', {})
@@ -87,6 +116,17 @@ def validate_observation(value, *, work_ref, root_job_id, document, validity, cu
                 or acquisition.get('query') != dict(kind='root_detail', root_job_id=root_job_id)
                 or acquisition.get('snapshot_digest') != runtime['snapshot_digest']
                 or acquisition.get('generation') != {key: val for key, val in runtime.items() if key != 'snapshot_digest'}):
+            fail()
+    if value['schema'] == RESOURCE_OBSERVATION_SCHEMA:
+        # This is an explicitly scoped resource card, never evidence that the
+        # complete project has only one original root. Its separate history
+        # retains every original candidate from the bounded root owner.
+        rows = document.get('autonomy', {}).get('responsibilities', [])
+        if (len(rows) != 1 or rows[0].get('responsibility_ref') != work_ref
+                or rows[0].get('root_job_id') != root_job_id
+                or rows[0].get('root_job_candidates') != [root_job_id]
+                or rows[0].get('root_job_ambiguous') is not False
+                or rows[0].get('runtime_root_state') != 'RESOLVED'):
             fail()
     return value
 

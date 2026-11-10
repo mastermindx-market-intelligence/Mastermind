@@ -1,0 +1,41 @@
+{
+  "actual_remaining_selectors": [
+    "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-revoked]",
+    "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-foreign_root]",
+    "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-source_generation]",
+    "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-foreign_principal]",
+    "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-lost_response]",
+    "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-concurrent_ack]"
+  ],
+  "changed_branches": [
+    "revoked",
+    "foreign_root",
+    "source_generation",
+    "foreign_principal"
+  ],
+  "files": [
+    {
+      "path": "tests/test_joint_api_ingress.py",
+      "post_git_blob": "f970fd213c4172d8d6a0bf0a0459be4344c9521d",
+      "post_sha256": "fa5367923ae15aff15019f3799c3b0edfbb5ec0c8dc162a39a33777bc789dc07",
+      "pre_git_blob": "d1eec24c05487bea8bf7f3946da45ec9f76e0b0e",
+      "pre_sha256": "7d4f68e24faf65e5ead83056a15c8c4e768c59047a2d5e1f9473c000a90ee2ec"
+    }
+  ],
+  "original_qualification": {
+    "cases": 6,
+    "elapsed_seconds": 302.536,
+    "failed": 1,
+    "junit_sha256": "37eedf79eadb1ef4f1721a6bf1557000177a51b2c5a951a912b2c6da7f828387",
+    "passed": 5,
+    "receipt_sha256": "12ffc258968fe415e75d217b6f98d30a4b01fdc7f488d65c9d234ef852e88ed2",
+    "reconciliation": "Original revoked case has one COMPLETED child Attempt, no result acknowledgment, event high-water65. No operation replay.",
+    "skipped": 0
+  },
+  "patch_sha256": "3e241dfdf91115aa7f01f099ae5722b9ffcaf1d390a42746141ca0413cfc4ea5",
+  "production_changed": false,
+  "proof_status": "Compiled; original cases classified. Actual remaining six require new disposable host run; accepted five are not repeated.",
+  "reason": "Original installed immutable-scope changes are refused by BoundVerifier as HTTP 401 before the tool handler. Do not assert an in-band selected-child envelope.",
+  "schema": "mastermind.joint_api_auth_refusal_fixture.v1",
+  "source_tree": "5d81a751eb41ee38990c4a0e7e4e626a1d070457"
+}

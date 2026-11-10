@@ -860,7 +860,8 @@ def _validate_owner_observation(
     if owner_observation is None:
         return invalid("owner observation is absent", missing=True)
     row = _mapping(owner_observation)
-    if row.get('schema') == 'mastermind.workspace_source_observation.v2':
+    if row.get('schema') in {'mastermind.workspace_source_observation.v2',
+            'mastermind.workspace_source_observation.v3'}:
         from common.project_discovery_observation_contract import validate_observation
         try:
             validate_observation(dict(row), work_ref=selected_work_ref, root_job_id=selected_root_job_id,
@@ -1243,6 +1244,62 @@ def _children_section(
     return section, invalid
 
 
+def _resolved_mission_root(
+    responsibility, selected_root, fabric, *, fabric_valid,
+    duplicate_program=False, duplicate_responsibility=False,
+):
+    """The canonical root join, shared by reads and private effect reproofs."""
+    resolved_root, root_candidates, root_ambiguous, runtime_root_state = _root_identity(
+        responsibility, selected_root
+    )
+    if duplicate_program or duplicate_responsibility:
+        resolved_root = None
+        root_ambiguous = True
+        runtime_root_state = "CONFLICT"
+    root = _mapping(fabric.get("root")) if fabric_valid and resolved_root else {}
+    if resolved_root is not None and not root:
+        resolved_root = None
+        root = {}
+        if runtime_root_state == "RESOLVED":
+            runtime_root_state = "UNKNOWN"
+    elif resolved_root is not None and (
+        root.get("job_id") != resolved_root
+        or root.get("parent_job_id") is not None
+        or root.get("root_job_id") != resolved_root
+    ):
+        resolved_root = None
+        root = {}
+        root_ambiguous = True
+        runtime_root_state = "CONFLICT"
+    return resolved_root, root_candidates, root_ambiguous, runtime_root_state, root
+
+
+def _mission_observation_current(
+    *, control_current, owner_current, fabric_generation,
+    generation_state, dispatch_historical,
+):
+    """Pure conjunction; acquisition owners must independently prove custody."""
+    return (
+        control_current and owner_current and fabric_generation is not None
+        and generation_state not in {"STALE", "CONFLICT"}
+        and dispatch_historical is False
+    )
+
+
+def _mission_read_state(
+    *, control_valid, fabric_valid, cache_state, observation_current,
+    resolved_root, result_valid,
+):
+    if not control_valid and not fabric_valid:
+        return "UNAVAILABLE"
+    if cache_state == "historical_refresh_error":
+        return "HISTORICAL"
+    if (observation_current and control_valid and fabric_valid
+            and resolved_root is not None and result_valid):
+        return "CURRENT"
+    return "PARTIAL"
+
+
 def _compose_mission_workspace(
     *,
     control_room: Mapping[str, Any] | None,
@@ -1307,29 +1364,10 @@ def _compose_mission_workspace(
     duplicate_responsibility = len(matching_responsibilities) > 1
     responsibility = matching_responsibilities[0] if len(matching_responsibilities) == 1 else {}
 
-    resolved_root, root_candidates, root_ambiguous, runtime_root_state = _root_identity(
-        responsibility, root_job_id
+    resolved_root, root_candidates, root_ambiguous, runtime_root_state, root = _resolved_mission_root(
+        responsibility, root_job_id, fabric, fabric_valid=fabric_valid,
+        duplicate_program=duplicate_program, duplicate_responsibility=duplicate_responsibility,
     )
-    if duplicate_program or duplicate_responsibility:
-        resolved_root = None
-        root_ambiguous = True
-        runtime_root_state = "CONFLICT"
-
-    root = _mapping(fabric.get("root")) if fabric_valid and resolved_root else {}
-    if resolved_root is not None and not root:
-        resolved_root = None
-        root = {}
-        if runtime_root_state == "RESOLVED":
-            runtime_root_state = "UNKNOWN"
-    elif resolved_root is not None and (
-        root.get("job_id") != resolved_root
-        or root.get("parent_job_id") is not None
-        or root.get("root_job_id") != resolved_root
-    ):
-        resolved_root = None
-        root = {}
-        root_ambiguous = True
-        runtime_root_state = "CONFLICT"
 
     dispatch = _mapping(responsibility.get("dispatch"))
     raw_dispatch_state = dispatch.get("dispatch_state")
@@ -1349,15 +1387,11 @@ def _compose_mission_workspace(
     # receipt (SAME ⇒ True).  Anything else (UNKNOWN, malformed, structurally
     # valid CONFLICT) keeps the previous hard-coded False; the v1 path always
     # sees no owner observation at all, preserving v1 byte semantics.
-    cross_owner_generation_current = (
-        emit_owner_observation and observation_state == "SAME"
-        and fabric_generation is not None
-        and generation_projection["state"] not in {"STALE", "CONFLICT"}
-    )
-    observation_current = (
-        control_current
-        and cross_owner_generation_current
-        and dispatch.get("historical") is False
+    observation_current = _mission_observation_current(
+        control_current=control_current,
+        owner_current=emit_owner_observation and observation_state == "SAME",
+        fabric_generation=fabric_generation, generation_state=generation_projection["state"],
+        dispatch_historical=dispatch.get("historical"),
     )
 
     result, result_valid = result_validator(root.get("result")) if root else ({}, False)
@@ -1411,20 +1445,10 @@ def _compose_mission_workspace(
         fabric=fabric,
     )
 
-    if not control_valid and not fabric_valid:
-        read_state = "UNAVAILABLE"
-    elif cache.get("state") == "historical_refresh_error":
-        read_state = "HISTORICAL"
-    elif (
-        observation_current
-        and control_valid
-        and fabric_valid
-        and resolved_root is not None
-        and result_valid
-    ):
-        read_state = "CURRENT"
-    else:
-        read_state = "PARTIAL"
+    read_state = _mission_read_state(
+        control_valid=control_valid, fabric_valid=fabric_valid, cache_state=cache.get("state"),
+        observation_current=observation_current, resolved_root=resolved_root, result_valid=result_valid,
+    )
 
     usable_sections: list[str] = []
     if work:

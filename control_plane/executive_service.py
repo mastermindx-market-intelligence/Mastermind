@@ -6530,24 +6530,30 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
                 return
             from common import coo_agentos_context_contract as context_wire
-            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
+            from common import coo_project_help_contract as help_wire
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA,
+                    context_wire.HELP_CONTEXT_FRAME_SCHEMA, help_wire.FRAME_SCHEMA}:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
                     return
                 try:
                     parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
+                    project_help_read = parsed["schema"] == help_wire.FRAME_SCHEMA
+                    project_help_context = parsed["schema"] == context_wire.HELP_CONTEXT_FRAME_SCHEMA
                     discovery_context = parsed["schema"] == context_wire.DISCOVERY_FRAME_SCHEMA
-                    current_context = discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
-                    validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+                    current_context = project_help_read or project_help_context or discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    validator = help_wire.validate_frame if project_help_read else context_wire.validate_help_context_frame if project_help_context else context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
                     validator(parsed)
                     factory = app_binding.principal_facts_factory
                     runtime = self._require_runtime()
                     arms = (app_binding.armed, app_binding.principal_admission_armed)
+                    bridge_factory = app_binding.session_bridge_provider_factory if project_help_read else None
                     def require_context_host_current():
                         if (self._closing or not self._ceo_ingress_ready
                                 or self._service_state not in {"READY", "AWAITING_CANARY"}
                                 or self._ceo_ingress_app_binding is not app_binding
                                 or app_binding.principal_facts_factory is not factory
+                                or project_help_read and app_binding.session_bridge_provider_factory is not bridge_factory
                                 or (app_binding.armed, app_binding.principal_admission_armed) != arms
                                 or self._require_runtime() is not runtime
                                 or writer.get_extra_info("socket") is not connection
@@ -6563,23 +6569,36 @@ class ExecutiveControlService:
                     if type(provider) is not CooHostProvider or provider.workspace.runtime is not runtime:
                         raise ValueError("COO context owner unavailable")
                     source, workspace, context_reader = provider.source, provider.workspace, provider.agentos_context_reader
+                    original_input_reader = provider.project_execution_input_reader
                     data_binding = workspace._canonical_project_data
                     require_context_host_current()
                     from control_plane.workspace_owned_task import await_owned
-                    context_read = provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
-                    result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
+                    if project_help_read:
+                        bridge = None
+                        if app_binding.armed and callable(bridge_factory):
+                            bridge = bridge_factory(runtime)
+                            if type(bridge) is not SessionBridgeIngressOwner:
+                                raise ValueError("project-help target owner unavailable")
+                        require_context_host_current()
+                        result = await await_owned(asyncio.create_task(provider.read_project_help(parsed,
+                            session_bridge_owner=bridge, host_current=require_context_host_current)))
+                    else:
+                        context_read = provider.read_project_help_agentos_context if project_help_context else provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                        result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
                     require_context_host_current()
                     if (provider.source is not source or provider.workspace is not workspace
                             or provider.agentos_context_reader is not context_reader or workspace.runtime is not runtime
+                            or provider.project_execution_input_reader is not original_input_reader
                             or workspace._canonical_project_data is not data_binding):
                         raise ValueError("COO context owner changed")
-                    validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                    validator = help_wire.validate_result if project_help_read else context_wire.validate_help_context_result if project_help_context else context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
                     validator(result, expected_context=parsed["principal_context"],
                         capability_profile_digest=parsed["capability_profile_digest"],
                         **({"expected_workspace_principal": parsed["workspace_principal"]} if current_context else {}))
                     response = {"ok": True, "result": result}
-                    context_wire.encode(response, limit=context_wire.MAX_RESPONSE_BYTES - 1)
-                    await self._send_ceo_ingress_response(writer, response, response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                    ceiling = help_wire.MAX_RESPONSE_BYTES + 4096 if project_help_read else context_wire.MAX_RESPONSE_BYTES
+                    context_wire.encode(response, limit=ceiling - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=ceiling)
                 except Exception:
                     await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503),
                         response_ceiling=context_wire.MAX_RESPONSE_BYTES)
@@ -6773,7 +6792,7 @@ class ExecutiveControlService:
 
         from control_plane.coo_principal_envelope import PrincipalAdmissionContext
         from control_plane.coo_principal_host import CooHostProvider
-        from control_plane.coo_principal_mandate import project_coo_principal_mandate
+        from control_plane.coo_principal_mandate import AuthorityFact, PrincipalFact
         from control_plane.workspace_owned_task import await_owned
 
         try:
@@ -6877,19 +6896,20 @@ class ExecutiveControlService:
                 raise ValueError("selected-child receiving source changed")
             before = source.for_principal(parsed["principal"], target.work_ref)
             row, fact, authority = before
+            if not isinstance(fact, PrincipalFact) or not isinstance(authority, AuthorityFact):
+                raise ValueError("selected-child principal facts are unavailable")
             actual_context = PrincipalAdmissionContext(
                 row["work_ref"], fact.principal_binding_digest,
                 authority.mission_authority_ref, authority.authority_generation_digest,
             )
-            projection = project_coo_principal_mandate(
-                principal=fact, authority=authority,
-                mission_workspace=workspace.read_mission_for_work_ref(target.work_ref),
-            )
+            provider._require_selected_child_project_scope(
+                row, target.work_ref, child.selection.root_job_id)
+            mission_state = workspace._coo_guard_mission_state(target.work_ref)
             if (actual_context != frame_context
                     or authority.work_ref != target.work_ref
                     or authority.capability_profile_digest != parsed["capability_profile_digest"]
-                    or projection["mission"]["work_ref"] != target.work_ref
-                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or mission_state.work_ref != target.work_ref
+                    or mission_state.root_job_id != child.selection.root_job_id
                     or source.for_principal(parsed["principal"], target.work_ref) != before):
                 raise ValueError("selected-child principal is not current")
             require_current()
@@ -6909,12 +6929,14 @@ class ExecutiveControlService:
             return
         try:
             from common import coo_requester_return_contract as requester_wire
+            from common import coo_project_help_contract as help_wire
 
             def require_requester_return_current():
                 current_context, current_authority = require_read_current()
                 if (current_context != actual_context
                         or requester_wire.ACTION not in current_authority.principal_actions
-                        or source.catalogue_for_principal(parsed["principal"], work_ref=target.work_ref) != requester_wire.CATALOGUE):
+                        or source.catalogue_for_principal(parsed["principal"], work_ref=target.work_ref)
+                            not in {requester_wire.CATALOGUE, help_wire.API_REQUESTER_CATALOGUE}):
                     raise ValueError("original COO requester-return contract is not current")
                 require_read_current()
 

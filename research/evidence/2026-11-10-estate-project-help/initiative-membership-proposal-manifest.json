@@ -1,0 +1,38 @@
+{
+  "base_precondition": "Both target files must be absent; no existing source file is edited. Parent owns target integration HEAD.",
+  "census_macro_revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+  "classification_established": false,
+  "files": [
+    {
+      "after": {
+        "bytes": 44695,
+        "git_blob": "8c35ce05eebd32c33156513add9b9eec7b2a829e",
+        "mode": "100644",
+        "sha256": "ddb5629c61fb8db897789b16e22cbac9e5c8655aaff08a4f61f84380100b2a8b"
+      },
+      "before": null,
+      "path": "docs/ESTATE_INITIATIVE_MEMBERSHIP_PROPOSAL.md"
+    },
+    {
+      "after": {
+        "bytes": 111828,
+        "git_blob": "30196eaa19ab970004307d95c45608af51e0aa60",
+        "mode": "100644",
+        "sha256": "d06325f4b6fcf834f2746cda12961ca10633a14b1b949337b0b49ed91919aa38"
+      },
+      "before": null,
+      "path": "docs/evidence/estate_initiative_membership_proposal.sources.json"
+    }
+  ],
+  "linear_effect": false,
+  "live_config_change": false,
+  "macro_pr_head_preserved": "752394fc070259944e83891243844d2f6da9c2e7",
+  "patch_bytes": 159077,
+  "patch_sha256": "4cbf8c8a188dab05e7ee302175f3c6d4d66389be4045e0bbe905ed0542b2d4fb",
+  "protected_governance_pin": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+  "qualification_sha256": "abddbffcc5e2444bfb2c757d65c2c9a5a36a3ec71ec8fbfaf3c009239f16c59f",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "schema": "source_patch_envelope.v1",
+  "status": "UNAPPROVED",
+  "target_carrier": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2424"
+}

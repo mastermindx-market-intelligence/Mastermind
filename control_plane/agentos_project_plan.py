@@ -124,12 +124,13 @@ class AgentOsProjectPlanReader:
             "_expected_source_sha", "_allow_synthetic_fixture",
         ))
 
-    def read(self, *, work_ref: str):
+    def read(self, *, work_ref: str, deadline=None):
         from control_plane.installed_project_read_binding import (
             InstalledProjectReadUnavailable, read_installed_project_binding,
         )
         try:
-            return read_installed_project_binding(self, kind="project_plan", work_ref=work_ref)
+            return read_installed_project_binding(self, kind="project_plan", work_ref=work_ref,
+                **({"deadline": deadline} if deadline is not None else {}))
         except InstalledProjectReadUnavailable:
             raise ProjectPlanSourceUnavailable("SOURCE_UNAVAILABLE") from None
 

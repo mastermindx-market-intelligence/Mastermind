@@ -1,0 +1,23 @@
+{
+  "activation": "SOURCE_TEST_ONLY",
+  "change": "Only move identical module origin assertion after normal model discovery/describe and before first MCP tool call; no module import/guard bypass.",
+  "checks": [
+    "AST parse",
+    "git apply --check against frozen bridge postimage",
+    "git diff --check",
+    "canonical no-network normal schema/bridge preflight already passed; lazy module closure smoke pending"
+  ],
+  "dependency_patch_sha256": "67d6aa9722386974c0b3524218800a9cb23913e369c0ee0663d1907e5085341d",
+  "files": [
+    {
+      "path": "tests/paperclip_hermes_native_client.py",
+      "postimage_git_blob": "511e0bf1d6189b2e2fe4160a427afa1350758e7b",
+      "postimage_sha256": "7e92d1e619ad47aa7be76b54c2e0658ddfd24ba1588d16698e40bbfdc065cd8c",
+      "preimage_git_blob": "be25e061fcc700db70538d92de1ba5cd460247cb",
+      "preimage_sha256": "891e75812ea7aa1284e39ce1a50e3ac05a7ff579a50616269c9c2cda664f10fe"
+    }
+  ],
+  "original_failure": "PID66024; original Runtime QUEUED/0Attempt/0claim/0ACK; HTTP initialize/list only",
+  "patch_sha256": "72e811ea01acb523eeacac186b377fc3dac6596102740a75a797033d28a9d441",
+  "schema": "mastermind.source_increment.v1"
+}

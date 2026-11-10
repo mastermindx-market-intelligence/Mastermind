@@ -15,6 +15,7 @@ from integrations.hermes_runtime.errors import RuntimeRefusal
 from .agentos_memory_provider import AgentOsBinding, DEFAULT_BUDGET
 from .native_executive_consumer import (
     CONTEXT_TOOLS_SCHEMA_DIGEST, CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST, DISCOVERY_TOOLS_SCHEMA_DIGEST,
+    PROJECT_HELP_TOOLS_SCHEMA_DIGEST,
     ExecutiveContextConsumerPublication, _NativeMcpCaller, workspace_principal_frame)
 
 MAX_MCP_RESULT_BYTES = MAX_RESPONSE_BYTES - 4096
@@ -110,7 +111,7 @@ def decode_context_result(raw, publication, *, sdk_types=None):
         if parsed.tzinfo is None or parsed.utcoffset().total_seconds() != 0:
             _refuse()
         if current:
-            validator = wire.validate_discovery_result if publication.discovery else wire.validate_current_result
+            validator = wire.validate_help_context_result if publication.project_help is not None else wire.validate_discovery_result if publication.discovery else wire.validate_current_result
             return validator(value["data"], expected_context=expected_context(publication),
                 capability_profile_digest=publication.capability_profile_digest,
                 expected_workspace_principal=workspace_principal_frame(publication))
@@ -134,7 +135,7 @@ class NativeAgentOsContextRead:
                  server: Any, session: Any, loop: Any, currentness: Callable[[], bool],
                  binding_current: Callable[[AgentOsBinding], bool] | None = None):
         if (type(publication) is not ExecutiveContextConsumerPublication
-                or publication.tools_schema_digest != (DISCOVERY_TOOLS_SCHEMA_DIGEST if publication.discovery else CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+                or publication.tools_schema_digest != (PROJECT_HELP_TOOLS_SCHEMA_DIGEST if publication.project_help is not None else DISCOVERY_TOOLS_SCHEMA_DIGEST if publication.discovery else CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
                     if publication.workspace_principal is not None else CONTEXT_TOOLS_SCHEMA_DIGEST)
                 or not callable(currentness)):
             _refuse()

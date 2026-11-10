@@ -34,7 +34,7 @@ export function decodeProgramsObservation(value: unknown): ProgramsObservation {
   };
   const unavailable = envelope.availability === "UNAVAILABLE";
   const composition = controlRoom && typeof controlRoom === "object" && "schema" in controlRoom
-    && controlRoom.schema === "mastermind.programs_source_composition.v1" && "control_room" in controlRoom
+    && (controlRoom.schema === "mastermind.programs_source_composition.v1" || controlRoom.schema === "mastermind.programs_source_composition.v2") && "control_room" in controlRoom
     ? controlRoom : null;
   return {
     ...(composition && !unavailable ? { programsInput: controlRoom } : {}),

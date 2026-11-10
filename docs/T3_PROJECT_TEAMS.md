@@ -169,6 +169,66 @@ uncertain effects. It emits a native `delegate_task` request and
 retains the intended immediate parent. The function does not reserve capacity or
 call a model; native atomic admission remains the final gate.
 
+## Source-bound project help in the root handoff
+
+The optional project-plan arguments attach an exact read selector to the existing
+root handoff. They use the incumbent bounded Markdown plan loader and the shared
+`coo.project_help.v1` source comparison. Supply all five arguments together:
+
+```bash
+python3 -m integrations.session_bridge.t3_project_team_cli launch-request \
+  path/to/source-owned-team.json \
+  --project-id EXACT_NATIVE_PROJECT \
+  --environment-id EXACT_NATIVE_ENVIRONMENT \
+  --request-id original-project-operation \
+  --plan-workspace-root /path/to/assigned/workspace \
+  --project-plan docs/plans/project.md \
+  --plan-work-ref WS:PROJECT \
+  --plan-source-ref https://github.com/mastermindx-market-intelligence/Mastermind/blob/EXACT_COMMIT/docs/plans/project.md \
+  --plan-sha256 EXACT_SOURCE_BYTES_SHA256
+```
+
+Replace the commit and digest placeholders with the assigned source identities.
+The exact plan URL must equal the team's existing `mission.source_ref`.
+`--definition-ref` can still identify a separate immutable team JSON definition.
+The loader verifies the selected local bytes and rejects stale digests, escaping
+paths and symlinks. The shared contract validates the work reference, path,
+content digest and parsed contract digest. A syntactically valid reference is
+still a source expectation; the compiler does not authenticate the corresponding
+remote commit or an Executive mission.
+
+The resulting `project_help` guidance contains only the expected source plan and
+`executive_project_help({"work_ref": "WS:PROJECT"})`. It explicitly says
+`read_state: NOT_READ`, `execution_authority: false` and
+`native_origin_attested: false`. It contains no Executive root, parent binding,
+session receipt, capacity promise or native-origin assertion. The ordinary
+model-visible tool on the session's actual authenticated COO MCP connection is
+the read consumer. The compiler creates no Executive client or new connection.
+
+That connection must be explicitly enrolled for the new project-help contract
+and the exact original mission/source-plan scope. An old COO catalogue or a
+Hermes-only registration does not authorize a T3 caller. The authenticated owner
+revalidates the current original Executive root and adopted source before and
+after the read. The handoff requires the returned `scope.source_plan` to match
+its expectation exactly. Missing tool/enrollment, unavailable current source,
+or a different plan means project help is unavailable; none permits another
+principal, invented root or substitution of the T3 `mission_id`/thread ID.
+Returned addressability remains separate from teammate relationships, placement,
+execution permission and result consumption.
+
+The same optional arguments work with `check`, `brief` and `actions`; generated
+manual check/prepare actions retain them. Neither automatic project hook is
+enabled. Programmatic callers pass the actual parser output and exact source URL
+as `project_context` and `project_source_ref` to `ProjectTeam.root_handoff`,
+`ProjectTeamClient.launch` or `launch_request`. Omitting both preserves the
+incumbent handoff bytes. A programmatic dictionary or pasted help result is not
+an authenticated reader or authority.
+
+Keep the original prepared message and native receipt when reconciling a lost
+launch reply. Do not regenerate a different source expectation and treat it as
+a replay of the original effect. This optional read guidance neither performs
+that launch nor changes its existing recovery owner.
+
 ## Native T3 project actions
 
 Build a portable, standard-library-only CLI from an exact committed generation:

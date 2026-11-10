@@ -13,6 +13,10 @@ import sys
 import zipfile
 
 FILES = (
+    "common/coo_project_help_contract.py",
+    "common/project_task_contract.py",
+    "common/workspace_project_plan_contract.py",
+    "integrations/session_bridge/project_task_context.py",
     "integrations/session_bridge/t3_mission_brief.py",
     "integrations/session_bridge/t3_web_client.py",
     "integrations/session_bridge/t3_project_team.py",
@@ -42,6 +46,7 @@ def archive_bytes(source_root: Path, *, source_revision: str | None = None) -> t
                 "files": {path: hashlib.sha256(raw).hexdigest() for path, raw in contents.items()},
                 "runtime_effects": "none; caller imports or executes read-only compiler commands"}
     contents.update({
+        "common/__init__.py": b"",
         "integrations/__init__.py": b"",
         "integrations/session_bridge/__init__.py": b"",
         "__main__.py": b"from integrations.session_bridge.t3_project_team_cli import main\nraise SystemExit(main())\n",

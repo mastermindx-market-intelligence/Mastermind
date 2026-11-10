@@ -111,7 +111,10 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     assert manifest["source_status"] == "qualification_only" and manifest["source_revision"] is None
     assert archive_bytes(root)[0] == payload
     with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert len(archive.namelist()) == 9
+        assert {"common/coo_project_help_contract.py", "common/project_task_contract.py",
+                "common/workspace_project_plan_contract.py",
+                "integrations/session_bridge/project_task_context.py"} <= set(archive.namelist())
+        assert not any(name.startswith("control_plane/") for name in archive.namelist())
         assert all(not name.startswith("/") and ".." not in name for name in archive.namelist())
     app = tmp_path / "team.pyz"
     app.write_bytes(payload)

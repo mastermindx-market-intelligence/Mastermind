@@ -57,8 +57,8 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': 'af0a97de9bfc503db756626d0eacf65876848473cfb2230d8fbe478c9bb5c1cc',
-                                    'ast_sha256': '8ba83fc94d6ccbfe11eec5ed1b477a28e0ec92bd199f34c4123eb5be6803d912',
+                                    'source_sha256': 'b2191c2a96de45ee2ff7dc5cd4e55d6bc9163a6d9b110c45725b8de7d8851016',
+                                    'ast_sha256': '81679e142eace9674e3628247acde132457afba15210509581dc4897794f578c',
                                     'sites': ((('body',
                                                 3,
                                                 'body',
@@ -169,3 +169,12 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # unchanged; only the enclosing whole-source and ingress-method digests and
 # the mapped statement index (body 58 -> 59) move. No new literal site is
 # qualified.
+
+# Estate API/help composition retains the exact 136-node Fabric response
+# subtree, all three original HTTP operands and the full Company listener
+# AST from108e84da. Only the enclosing source/method fingerprints change.
+
+# Original-input help composition captures and rechecks its exact reader owner.
+# Full Company listener and protected Fabric response subtree stay identical;
+# the six original sites retain their exact AST paths/spans and literal bytes.
+# Only enclosing source/ingress fingerprints change after the bounded diff review.

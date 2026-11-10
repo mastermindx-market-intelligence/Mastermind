@@ -1,0 +1,23 @@
+{
+  "status": "test-only fixture repair; focused proof complete; affected consumer regression running separately",
+  "reproduction": {
+    "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q tests/test_fresh_conversation.py::test_real_fresh_admission_retention_original_status_and_no_replay --tb=short",
+    "result": "1 failed in 8.14s; original AttributeError at RemoteOperatorHarnessAdapter.require_planner_producer before provider I/O"
+  },
+  "qualified": {
+    "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q tests/test_fresh_conversation.py::test_fresh_fixture_preserves_producer_guard_and_forbids_physical_transport tests/test_fresh_conversation.py::test_real_fresh_admission_retention_original_status_and_no_replay --tb=short",
+    "result": "2 passed in 8.88s"
+  },
+  "limits": [
+    "Provider/process are original inert _NativeAdapter seam; physical Broker transport is explicitly forbidden.",
+    "No installed or live Runtime/profile/provider action.",
+    "No AF_UNIX attempt in this qualification; actual private ingress remains M2-only.",
+    "Frontier failure is independent Runtime TX-5 v1-only recovery reader, delegated to original TX-5 owner; no frontier test/production modification."
+  ],
+  "evidence": {
+    "original-fresh-reproduction.log": "963400687e8afb089585e7ef07aa634eeeeaabdd6400888c6e9117f51005ae78",
+    "repaired-fresh-smoke.log": "bc952f86909aeb5efc3f32e8ed3beed2c7891f917d07f6cf06e9b453e90b885d",
+    "original-frontier-reproduction.log": "dfdea851365877723e83883228f3515002f2aa5dccbe09a5393d57f96a50c193",
+    "frontier-exception-diagnostic.log": "b67a990480b5ef8e5b9cba990dc51bae47f35a43e5a58528e92f35fcfce87464"
+  }
+}

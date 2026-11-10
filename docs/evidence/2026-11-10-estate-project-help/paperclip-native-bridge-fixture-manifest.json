@@ -1,0 +1,33 @@
+{
+  "activation": "SOURCE_ONLY_NOT_INSTALLED",
+  "dependency_patch_sha256": "2e9fd6961da48f81e1ed713a1334b245638c7be9b6e7addb7cb49ddd2d764ea2",
+  "expected_parent_tree": "06ab016ab5a220cd1c20cabe26a533a8e421969f",
+  "files": [
+    {
+      "bytes": 13654,
+      "path": "tests/paperclip_hermes_native_client.py",
+      "postimage_git_blob": "be25e061fcc700db70538d92de1ba5cd460247cb",
+      "postimage_sha256": "891e75812ea7aa1284e39ce1a50e3ac05a7ff579a50616269c9c2cda664f10fe",
+      "preimage_git_blob": "e2468e2a53befd9f26c40124e317b68e05758336",
+      "preimage_sha256": "cf4e0fb1d4080f10eed33d03222200bfc40f8c0d4fee396bc421f2c4627cb32f"
+    },
+    {
+      "bytes": 10832,
+      "path": "tests/test_paperclip_hermes_api_transport.py",
+      "postimage_git_blob": "dcdce12d80317b081946a82d5dc778ffe8e10a68",
+      "postimage_sha256": "cc9f85a25ab863ed7c960c0ee5d5238101610be80e9770716e48e819336ad947",
+      "preimage_git_blob": "34a1b2765c51ab743ea96aaa1ddb125811292a1e",
+      "preimage_sha256": "09c52fb0eab03abfea5161da7c17e6f06d21adfb8109966d40015ee32d601cce"
+    }
+  ],
+  "full_API_lifecycle": "PENDING_NEW_DISPOSABLE_ORIGINAL_OPERATION",
+  "native_source_patch_sha256": "57bbd40fc9949103ee3834ed83fe3bd46f1ec18d365618eda7bde5069621a332",
+  "patch_sha256": "67d6aa9722386974c0b3524218800a9cb23913e369c0ee0663d1907e5085341d",
+  "qualification": [
+    "AST parse 2 files",
+    "git diff --check",
+    "reverse apply exact postimages",
+    "normal CLI alias selection and progressive schema/dispatcher owner proven by six native cases and canonical schema preflight"
+  ],
+  "schema": "mastermind.source_increment.v1"
+}

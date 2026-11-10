@@ -104,6 +104,15 @@ HERMES_NATIVE_CONTEXT_PROFILE_ID = "principal.hermes-native.executive-coo.contex
 HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID = "principal.hermes-native.executive-coo.current-context.v1"
 HERMES_NATIVE_DISCOVERY_PROFILE_ID = "principal.hermes-native.executive-coo.discovery-correction.v1"
 HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID = "principal.hermes-native.executive-coo.requester-return.v1"
+HERMES_NATIVE_PROJECT_HELP_PROFILE_ID = "principal.hermes-native.executive-coo.project-help.v1"
+# Ordinary enrolled T3 MCP calls use API-principal authority only. This surface
+# has no native origin attestation or worker adapter/placement mapping.
+T3_API_PRINCIPAL_EXECUTION_SURFACE = "t3-api-principal"
+T3_API_PROJECT_HELP_PROFILE_ID = "principal.t3-api.executive-coo.project-help.v1"
+T3_API_REQUESTER_RETURN_PROFILE_ID = "principal.t3-api.executive-coo.requester-return.v1"
+T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID = "principal.t3-api.executive-coo.project-help-requester.v1"
+PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE = "paperclip-api-principal"
+PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID = "principal.paperclip-api.executive-coo.project-help-requester.v1"
 # The incumbent principal policy's Executive COO OAuth grant identity and
 # transport contract. Two fixed catalogue alternatives use the same connection
 # name; a profile can resolve only one. The rich-Claude
@@ -115,6 +124,10 @@ PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID = "mastermind-executive-coo-context-v1"
 PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID = "mastermind-executive-coo-current-context-v1"
 PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID = "mastermind-executive-coo-discovery-correction-v1"
 PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID = "mastermind-executive-coo-requester-return-v1"
+PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID = "mastermind-executive-coo-t3-api-requester-return-v1"
+PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID = "mastermind-executive-coo-t3-api-project-help-requester-v1"
+PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID = "mastermind-executive-coo-paperclip-api-project-help-requester-v1"
+PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID = "mastermind-executive-coo-project-help-v1"
 PRINCIPAL_COO_MCP_URL = "https://mcp.mastermind-x.com/mcp/coo"
 # Paid model-only sealed-input extension: exactly one reviewed surface/realm/
 # profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
@@ -135,7 +148,8 @@ ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
     PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
-    HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
+    HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE, T3_API_PRINCIPAL_EXECUTION_SURFACE,
+    PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE,
 })
 _AUTH_REALMS = frozenset({
     "dedicated-worker-account", PAID_GLM_AUTH_REALM, ACP_PROVIDER_FREE_AUTH_REALM,
@@ -1130,7 +1144,8 @@ class ExecutionCapabilityProfile:
 
         if self.execution_surface in {
             CLAUDE_OPERATOR_EXECUTION_SURFACE, CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
-            HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
+            HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE, T3_API_PRINCIPAL_EXECUTION_SURFACE,
+            PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE,
         }:
             raise CapabilityPolicyError(
                 "Claude policy cannot use a Codex config projection; "
@@ -1264,7 +1279,8 @@ class ExecutionCapabilityProfile:
             }, launch_provenance={k: requested[k] for k in ("setting_sources", "strict_mcp_config", "skills")})
         if self.execution_surface in {
             CLAUDE_PRINCIPAL_EXECUTION_SURFACE,
-            HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
+            HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE, T3_API_PRINCIPAL_EXECUTION_SURFACE,
+            PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE,
         }:
             # Both principal surfaces share one projection structure and differ
             # only in their own execution surface, so each yields its own
@@ -1675,6 +1691,10 @@ class ExecutionCapabilityRegistry:
                     PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
                     PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
                     PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+                    PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID,
                 }
             ):
                 raise CapabilityPolicyError(
@@ -1873,7 +1893,11 @@ class ExecutionCapabilityRegistry:
             )
         context_grants = [mcp_registry[item] for item in (
             PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
-            PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID, PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID)
+            PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID, PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+            PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+            PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+            PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+            PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID)
             if item in mcp_registry]
         if context_grants:
             # One authenticated connection, with fixed mutually exclusive
@@ -2388,6 +2412,18 @@ class ExecutionCapabilityRegistry:
             if (PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID in mcp_server_ids
                     and profile_id != HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID):
                 raise CapabilityPolicyError("The requester-return catalogue requires its exact native principal profile")
+            if (PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != T3_API_REQUESTER_RETURN_PROFILE_ID):
+                raise CapabilityPolicyError("The T3 API requester-return catalogue requires its exact principal profile")
+            if (PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID):
+                raise CapabilityPolicyError("The joint T3 API catalogue requires its exact principal profile")
+            if (PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id != PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID):
+                raise CapabilityPolicyError("The joint Paperclip API catalogue requires its exact principal profile")
+            if (PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID in mcp_server_ids
+                    and profile_id not in {HERMES_NATIVE_PROJECT_HELP_PROFILE_ID, T3_API_PROJECT_HELP_PROFILE_ID}):
+                raise CapabilityPolicyError("The project-help catalogue requires its exact principal profile")
             resolved_resources = tuple(
                 resource_registry[item] for item in resource_ids
             )
@@ -2690,12 +2726,20 @@ class ExecutionCapabilityRegistry:
             is_hermes_native_principal = (
                 execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
             )
-            # The OAuth principal realm is shared by exactly two principal
-            # surfaces.  Every other surface keeps the incumbent refusal.
-            is_oauth_principal_surface = is_claude_principal or is_hermes_native_principal
+            is_t3_api_principal = execution_surface == T3_API_PRINCIPAL_EXECUTION_SURFACE
+            if is_t3_api_principal != (profile_id in {
+                    T3_API_PROJECT_HELP_PROFILE_ID, T3_API_REQUESTER_RETURN_PROFILE_ID,
+                    T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID}):
+                raise CapabilityPolicyError("T3 API principal requires its exact reviewed profile and surface")
+            is_paperclip_api_principal = execution_surface == PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE
+            if is_paperclip_api_principal != (profile_id == PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID):
+                raise CapabilityPolicyError("Paperclip API principal requires its exact reviewed profile and surface")
+            is_ordinary_api_principal = is_t3_api_principal or is_paperclip_api_principal
+            # Only these explicitly reviewed principal surfaces share the realm.
+            is_oauth_principal_surface = is_claude_principal or is_hermes_native_principal or is_ordinary_api_principal
             hermes_principal_ids = {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
                                    HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID,
-                                   HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID}
+                                   HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID, HERMES_NATIVE_PROJECT_HELP_PROFILE_ID}
             if is_hermes_native_principal and profile_id not in hermes_principal_ids:
                 raise CapabilityPolicyError(
                     "Hermes native principal surface requires its exact reviewed profile id"
@@ -2726,7 +2770,7 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} exceeds the closed Claude principal capability shape"
                 )
-            if is_hermes_native_principal and (
+            if (is_hermes_native_principal or is_ordinary_api_principal) and (
                 auth_realm != OAUTH_PRINCIPAL_AUTH_REALM
                 or sandbox_policy != "read-only"
                 or approval_policy != "never"
@@ -2746,7 +2790,7 @@ class ExecutionCapabilityRegistry:
                     f"profile {profile_id!r} exceeds the closed Hermes native principal "
                     "capability shape"
                 )
-            if is_hermes_native_principal:
+            if is_hermes_native_principal or is_ordinary_api_principal:
                 # Exactly the selected reviewed profile's Executive COO OAuth
                 # grant, on the incumbent transport. The original profile never
                 # inherits the new context grant. Rich-Claude candidates and
@@ -2757,7 +2801,12 @@ class ExecutionCapabilityRegistry:
                 expected_grant = {HERMES_NATIVE_CONTEXT_PROFILE_ID: PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
                     HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
                     HERMES_NATIVE_DISCOVERY_PROFILE_ID: PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
-                    HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID: PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID
+                    HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID: PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+                    HERMES_NATIVE_PROJECT_HELP_PROFILE_ID: PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID,
+                    T3_API_PROJECT_HELP_PROFILE_ID: PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID,
+                    T3_API_REQUESTER_RETURN_PROFILE_ID: PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+                    T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID: PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+                    PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID: PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
                     }.get(profile_id, PRINCIPAL_COO_MCP_CAPABILITY_ID)
                 if (
                     hermes_grant.capability_id != expected_grant
@@ -2939,10 +2988,21 @@ __all__ = [
     "HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID",
     "HERMES_NATIVE_DISCOVERY_PROFILE_ID",
     "HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID",
+    "HERMES_NATIVE_PROJECT_HELP_PROFILE_ID",
+    "T3_API_PRINCIPAL_EXECUTION_SURFACE",
+    "T3_API_PROJECT_HELP_PROFILE_ID",
+    "T3_API_REQUESTER_RETURN_PROFILE_ID",
+    "T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID",
+    "PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE",
+    "PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID",
     "PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID",
     "PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID",
     "PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID",
     "PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID",
+    "PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID",
     "OAUTH_PRINCIPAL_AUTH_REALM",
     "CapabilityPolicyError",
     "CompanyConsultationGrantProfile",

@@ -1,0 +1,19 @@
+{
+  "schema": "mastermind.evidence_terminal_newline_normalization.v1",
+  "changes": [
+    {
+      "path": "docs/evidence/2026-11-10-estate-project-help/CODEX_WORKSPACE_PAIRED_OAUTH_SOURCE_CONTRACT.md",
+      "original_sha256": "33efa4143d470c0c3402b7c2593a2dd020700a34ad38c3871a2d20554b3b2ecf",
+      "retained_sha256": "d72f0ab4c8186f45f92957b127c2c5696b8597ee98de01d5ffdf7cd94e2bad47",
+      "removed_terminal_newlines": 1
+    },
+    {
+      "path": "docs/evidence/2026-11-10-estate-project-help/project-execution-ui-qualified.log",
+      "original_sha256": "916d5634dd69b45ba6df0517139375b5c2d4e85a151519d5bcb4afc5b2e9becd",
+      "retained_sha256": "437c157e4fe8bac43f768291e3635f9ceae8bc537600acfc4a3e27361d12b300",
+      "removed_terminal_newlines": 1
+    }
+  ],
+  "reconstruction": "Append removed_terminal_newlines LF bytes to the retained artifact to reconstruct the immutable original bytes.",
+  "production_changed": false
+}

@@ -16,6 +16,7 @@ import tempfile
 MAPPING = {
     "__init__.py": "integrations/session_bridge/hermes_project_plugin.py",
     "project_task_context.py": "integrations/session_bridge/project_task_context.py",
+    "project_task_contract.py": "common/project_task_contract.py",
     "long_horizon_guidance.py": "integrations/session_bridge/long_horizon_guidance.py",
     "plugin.yaml": "integrations/session_bridge/hermes_project_plugin.yaml",
     "skill/SKILL.md": "skills/mastermind-long-horizon/SKILL.md",

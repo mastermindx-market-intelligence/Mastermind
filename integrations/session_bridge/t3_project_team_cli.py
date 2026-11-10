@@ -7,7 +7,7 @@ ProjectTeamClient supports actual launch for an already-authorized injected runn
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
@@ -23,8 +23,40 @@ from .t3_project_team import (
 )
 from .t3_web_client import NativeUnavailable, ThreadReceipt
 from .t3_project_team_inventory import inventory_from_document
+from .project_task_context import PlanContextError
 
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectPlanInput:
+    """Local source selection only; no authenticated help or Executive root."""
+
+    workspace_root: str
+    relative_path: str
+    work_ref: str
+    source_ref: str
+    content_sha256: str
+
+    def read_context(self) -> dict[str, Any]:
+        from .project_task_context import load_context
+
+        return load_context(workspace_root=self.workspace_root, relative_path=self.relative_path,
+                            workstream=self.work_ref, expected_sha256=self.content_sha256)
+
+    def arguments(self) -> list[str]:
+        return ["--plan-workspace-root", self.workspace_root,
+                "--project-plan", self.relative_path, "--plan-work-ref", self.work_ref,
+                "--plan-source-ref", self.source_ref, "--plan-sha256", self.content_sha256]
+
+
+def _project_plan_input(args) -> ProjectPlanInput | None:
+    values = [getattr(args, name, None) for name in (
+        "plan_workspace_root", "project_plan", "plan_work_ref", "plan_source_ref", "plan_sha256")]
+    if all(value is None for value in values):
+        return None
+    _require(all(value is not None for value in values), "TEAM_PROJECT_HELP_PLAN_SELECTION_INCOMPLETE")
+    return ProjectPlanInput(*values)
 
 
 def _read(path: str, limit: int) -> bytes:
@@ -82,9 +114,13 @@ def _emit(value: Any) -> None:
 
 
 def launch_request(team, *, project_id: str, request_id: str, environment_id: str,
-                   definition_ref: str | None = None) -> dict[str, Any]:
+                   definition_ref: str | None = None,
+                   project_context: dict[str, Any] | None = None,
+                   project_source_ref: str | None = None) -> dict[str, Any]:
     """Native tool payload only. No OAuth, provider selection, launch or retries."""
-    brief = team.root_handoff(project_id=project_id, request_id=request_id, definition_ref=definition_ref)
+    brief = team.root_handoff(project_id=project_id, request_id=request_id,
+                             definition_ref=definition_ref, project_context=project_context,
+                             project_source_ref=project_source_ref)
     _native_id(environment_id)
     arguments = {"projectId": project_id,
                  "title": "Project COO: " + request_id[:48], "message": brief.render(),
@@ -100,18 +136,23 @@ def launch_request(team, *, project_id: str, request_id: str, environment_id: st
 
 
 def project_actions(*, definition: str, launcher: str, project_id: str,
-                    request_id: str, environment_id: str, definition_ref: str | None = None) -> dict[str, Any]:
+                    request_id: str, environment_id: str, definition_ref: str | None = None,
+                    project_plan: ProjectPlanInput | None = None) -> dict[str, Any]:
     """Importable native T3 actions; all are explicitly manual and read-only."""
     _text(definition, 4096)
     _text(launcher, 4096)
     _require(Path(launcher).is_absolute(), "TEAM_LAUNCHER_ABSOLUTE_PATH_REQUIRED")
     _native_id(project_id)
     _native_id(environment_id)
+    _require(project_plan is None or type(project_plan) is ProjectPlanInput,
+             "TEAM_PROJECT_HELP_PLAN_SELECTION_INVALID")
     base = [launcher]
     reference_args = ["--definition-ref", definition_ref] if definition_ref else []
 
     def command(action, *extra):
-        return shlex.join([*base, action, definition, *extra, *(reference_args if action != "graph" else [])])
+        plan_args = project_plan.arguments() if project_plan is not None and action != "graph" else []
+        return shlex.join([*base, action, definition, *extra,
+                           *(reference_args if action != "graph" else []), *plan_args])
 
     scripts = [
         ("Check project team", command("check")),
@@ -145,21 +186,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--child-role", required=True)
         if name == "actions":
             sub.add_argument("--launcher", required=True, help="Absolute path to the packaged CLI")
+        if name in {"check", "brief", "launch-request", "actions"}:
+            sub.add_argument("--project-plan", help="Assigned Markdown source plan relative to its workspace")
+            sub.add_argument("--plan-workspace-root", help="Existing assigned workspace containing the plan")
+            sub.add_argument("--plan-work-ref", help="Exact WS: selector; never an Executive root")
+            sub.add_argument("--plan-source-ref", help="Immutable GitHub URL of that exact source plan")
+            sub.add_argument("--plan-sha256", help="Expected SHA-256 of the exact source bytes")
     args = parser.parse_args(argv)
     try:
         team = parse_team(_read(args.definition, MAX_DOCUMENT_BYTES))
+        plan_input = _project_plan_input(args)
+        plan_context = plan_input.read_context() if plan_input is not None else None
+        plan_source_ref = plan_input.source_ref if plan_input is not None else None
+        plan_kwargs = {"project_context": plan_context, "project_source_ref": plan_source_ref}
         if args.command == "check":
             brief = team.root_handoff(project_id="preview-project", request_id="preview-request",
-                                      definition_ref=args.definition_ref)
+                                      definition_ref=args.definition_ref, **plan_kwargs)
             _emit({"valid": True, "schema": team.document()["schema"], "team_sha256": team.fingerprint,
                    "roles": len(team.roles), "max_depth": max(len(team.ancestors(r.role_id)) + 1 for r in team.roles),
                    "root_prompt_bytes": len(brief.render().encode()), "execution_authorized": False})
         elif args.command == "brief":
             print(team.root_handoff(project_id=args.project_id, request_id=args.request_id,
-                                    definition_ref=args.definition_ref).render(), end="")
+                                    definition_ref=args.definition_ref, **plan_kwargs).render(), end="")
         elif args.command == "launch-request":
             _emit(launch_request(team, project_id=args.project_id, request_id=args.request_id,
-                                 environment_id=args.environment_id, definition_ref=args.definition_ref))
+                                 environment_id=args.environment_id, definition_ref=args.definition_ref,
+                                 **plan_kwargs))
         elif args.command in {"graph", "delegate"}:
             snapshot = _load_snapshot(args.snapshot)
             if args.command == "graph":
@@ -174,13 +226,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "actions":
             # Validate the complete eventual launch request before emitting a shell command.
             launch_request(team, project_id=args.project_id, request_id=args.request_id,
-                           environment_id=args.environment_id, definition_ref=args.definition_ref)
+                           environment_id=args.environment_id, definition_ref=args.definition_ref,
+                           **plan_kwargs)
             _emit(project_actions(definition=args.definition, launcher=args.launcher,
                                   project_id=args.project_id, request_id=args.request_id,
-                                  environment_id=args.environment_id, definition_ref=args.definition_ref))
+                                   environment_id=args.environment_id, definition_ref=args.definition_ref,
+                                   project_plan=plan_input))
         return 0
     except TeamError as error:
         _emit({"error": str(error), "effect_state": "NOT_DISPATCHED"})
+    except PlanContextError as error:
+        _emit({"error": "TEAM_PROJECT_HELP_SOURCE_UNAVAILABLE", "reason": str(error),
+               "effect_state": "NOT_DISPATCHED"})
     except (ValueError, TypeError, KeyError, OSError, RecursionError, UnicodeError, NativeUnavailable):
         _emit({"error": "TEAM_INPUT_OR_NATIVE_CONTRACT_INVALID", "effect_state": "NOT_DISPATCHED"})
     return 2

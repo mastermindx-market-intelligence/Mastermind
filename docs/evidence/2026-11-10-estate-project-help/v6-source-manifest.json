@@ -1,0 +1,334 @@
+{
+  "schema": "mastermind.source_qualification_manifest.v1",
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "law_pin": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+  "source_authority": "source-only; no installed activation",
+  "paths": [
+    {
+      "path": "common/coo_agentos_context_contract.py",
+      "base_git_blob": "d7b7991d4fb33d72ca8bf17a337a79a3cc11dab1",
+      "base_sha256": "343462028445962e28deaf155102f50cfc1872dc6a78d48ac3bc785009394dc5",
+      "post_git_blob": "035249d7058ff5ef966f5a07ff62cb72829a9f00",
+      "post_sha256": "c4b8501c052cdc8d1c50ec8a233b0354dfeab182b858acc0d39d9750eb52d9a4",
+      "bytes": 12054
+    },
+    {
+      "path": "common/coo_project_help_contract.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "a857823b87ffea3b5116a57da97af41383c46404",
+      "post_sha256": "78533893ee3ca92c583a8929342eb07e804aebbcaf9d6597b2c0c0e2a2241961",
+      "bytes": 15251
+    },
+    {
+      "path": "common/project_discovery_observation_contract.py",
+      "base_git_blob": "17c5b98ae56f85a9818175ff6dee03b0a775084e",
+      "base_sha256": "1a673b69abc6f01d04d67b67b9553c23b2fc7e67be77e0ca403f285d31730b31",
+      "post_git_blob": "e18c24e9c08adcde375c18ca7fe38ee406f07616",
+      "post_sha256": "1eb033f859bb6d25801e279f91572ea11314241a42c3b26b8b06a2c7dbc87644",
+      "bytes": 8968
+    },
+    {
+      "path": "common/project_task_contract.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "81f229179f219168bfe7382f7d62f7a190eca3cb",
+      "post_sha256": "ebdb97a746b79b0cb776702be709aea4a646f0a41b6e922ebfdc4abb2236c08b",
+      "bytes": 10721
+    },
+    {
+      "path": "config/executive_claude_principal_capabilities.json",
+      "base_git_blob": "797d3ec7fd36a95bb0756949528ee4397231bf7b",
+      "base_sha256": "bb59920c86aaf8c50c022b5ac44de9386a9bb62aa27b6535a31f5bf0b31eacb2",
+      "post_git_blob": "dde0b2d529919bc5e54da1c67d31bddd5c7582b8",
+      "post_sha256": "8a59f93af17e4a3bfb97a6c3e8ac9a0ddee899182bd23618bb4a2d64a60ffd73",
+      "bytes": 8693
+    },
+    {
+      "path": "control_plane/coo_principal_host.py",
+      "base_git_blob": "f6861dfdbe32a2b71480c17989ef47ac7837ed15",
+      "base_sha256": "9a13faedae2fd9830434e3ad01324692e142824c048f66c72c07af05723756d3",
+      "post_git_blob": "9b02d4b90e567e8b8fc165a3c32f3d40a38755ff",
+      "post_sha256": "5ed802447f40394fdd8040e84304a960052c424b960a0a2ede55e519181bf327",
+      "bytes": 35830
+    },
+    {
+      "path": "control_plane/coo_principal_mandate.py",
+      "base_git_blob": "64dcc28df70a8ce4b90e14a59810c77ec95ac64d",
+      "base_sha256": "8ff0338730d6b2edf10119eb755ede771c3081322f9293453894294f68e25c44",
+      "post_git_blob": "3c115b6f79313da86796115507f81955f1bdb030",
+      "post_sha256": "1b5b28105e7decae1e638fedec5ddcd12a43df45826990f558d49ac83ed72d32",
+      "bytes": 21638
+    },
+    {
+      "path": "control_plane/coo_project_help_read.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "931d601e164356baa299a4ca37201e4c76ef7b05",
+      "post_sha256": "f3aa024b6d431c7d1eef952596cea9d3013a20bd4cb67d81ddc7a1891c34a875",
+      "bytes": 13370
+    },
+    {
+      "path": "control_plane/executive_agent_capabilities.py",
+      "base_git_blob": "c1f9c00434a61a39838bf6eae96df1161c146471",
+      "base_sha256": "40d7d87f70e5e9a6757b41f88837d6c2e2c41b321d8cf4870be3b3ad8383662f",
+      "post_git_blob": "9a682b1d16944d68837d9a44653e196f4aa21195",
+      "post_sha256": "2c456ce482feb4090b85ff21564290716659d0ef434607b937998a58bfac1661",
+      "bytes": 138610
+    },
+    {
+      "path": "control_plane/executive_service.py",
+      "base_git_blob": "95113a063b021e9af2b9f4ce7849da0534fa436f",
+      "base_sha256": "7ded167cd7d280a717951ded9914d21676ae07d63b103042534a8581478c2395",
+      "post_git_blob": "83c28b82037f1a771168b484f5afd11b6c444ac0",
+      "post_sha256": "900f860ec952624cfe522720be85689abda394a8da997b40a37db22d4a449f35",
+      "bytes": 578730
+    },
+    {
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "base_git_blob": "598064540f79f0b776312c68deae44cfda2bc0de",
+      "base_sha256": "d5713e0b3b48df3ca5967abf3c21b0b00450d09fad6f5dad2d9f8a90e919d752",
+      "post_git_blob": "71253316a46deb20346774b1fa40d7724f2da2ee",
+      "post_sha256": "1bc7cfb14638c866141f5bbf9de6ba33fe4f57b12f75048e17d8547a49dbd1aa",
+      "bytes": 11067
+    },
+    {
+      "path": "control_plane/workspace_read_service.py",
+      "base_git_blob": "5fb3c19d30fc20baa126e54a6cb5461cd8dfd560",
+      "base_sha256": "5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa",
+      "post_git_blob": "2f3af87f4e2f27b945651394deddbf99804e217c",
+      "post_sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98",
+      "bytes": 149563
+    },
+    {
+      "path": "docs/PROJECT_HELP_READ.md",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "9c495b1d0041a9a05d2c5a5015df3667302d92e4",
+      "post_sha256": "802ae4dd9ca5a47845e40a3b13026636e5ddc626d180a047c83c168f1324ac8f",
+      "bytes": 11374
+    },
+    {
+      "path": "integrations/executive_mcp/coo.py",
+      "base_git_blob": "ed3421cb405943a35f8b209580a47513296c3fa4",
+      "base_sha256": "21ace77201935feb85abdf19313202b1fb63aa7187f1e8f2482b76ad63defc2d",
+      "post_git_blob": "7b596733af404dd2fa8cc257d999119307a87384",
+      "post_sha256": "200483892a017b6e6dd9f1b78199514b9c08d375da07a436b6124369b4509e96",
+      "bytes": 17526
+    },
+    {
+      "path": "integrations/executive_mcp/server.py",
+      "base_git_blob": "deed55bffdad17945f32d9a120bc3c2e14aa2c3e",
+      "base_sha256": "9861c4cef0970347db3d5b18924feb4bb2282e4b87fcebad7d804d79ce04d7f8",
+      "post_git_blob": "5865c07412e8ea078f2e0d2f7039908aa7aa6afe",
+      "post_sha256": "4a069aecc0074b03a81bbff72a994215843cc9d84665db55f5932234a1c3c197",
+      "bytes": 147864
+    },
+    {
+      "path": "integrations/hermes_harness/native_agentos_context.py",
+      "base_git_blob": "893a754e5ffed7dc39f2bc8471d775185c896767",
+      "base_sha256": "e08508a16bffb832331b57bc3c8fac57186b8e1904649223b6e842bc0af075f4",
+      "post_git_blob": "4b992d2fb7c2e7a406d556b8be3bf5b3426f8676",
+      "post_sha256": "58335eff6890028282969bb6059a91849ce8a234e90f8371033712a229071df1",
+      "bytes": 8441
+    },
+    {
+      "path": "integrations/hermes_harness/native_executive_consumer.py",
+      "base_git_blob": "03a70a40114c40521763487954875335556c7637",
+      "base_sha256": "82f2b6e642ec52c03697af0787769e617c7374cae0512480f618fe43d87ae2c0",
+      "post_git_blob": "e7f0be2d944839d1ec4a6d0b5eb458267f757f17",
+      "post_sha256": "28eb57133c808bd29b202e22214351832418075cd08f39e9b21449e2a94e904d",
+      "bytes": 76746
+    },
+    {
+      "path": "integrations/hermes_harness/native_project_help.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "8b7e14e4debb3fce3fa886308a9bb3c759afb7f3",
+      "post_sha256": "325546d0b11e0dc7dda4ee76b51173f93d2e856be8fd6d0de0a9011e42f4a834",
+      "bytes": 11035
+    },
+    {
+      "path": "integrations/hermes_harness/tests/test_native_project_help.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "1b8d56f6151dda235416f6f2497fbe9accf2323d",
+      "post_sha256": "36a11f3fc0e0d708ab16975d517f3700e8d1a83eb1e19f0e37bf23fdaeeecdc5",
+      "bytes": 22647
+    },
+    {
+      "path": "integrations/hermes_runtime/native_agentos_memory.py",
+      "base_git_blob": "dd0cc0197611d6a8c467a38708dce7bf32966fa4",
+      "base_sha256": "87003121113c93b9e767aa65ad7e0487f6ad753c9d14bd463f2c4afe0fa2f56f",
+      "post_git_blob": "b4a54a20f65d2799b9ac75caee1e43e953c0eae6",
+      "post_sha256": "e1accb218e8ea641df49f01f4c668e5af3085c347ecafa551e3ba4094464b2d0",
+      "bytes": 55891
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo.py",
+      "base_git_blob": "9e55e8b126577ef0597af6bc9a54c8840211f740",
+      "base_sha256": "8210d5d709a7f460e0df71a5c3e2b3f63e071645ea47d75c4d2ac8207918e818",
+      "post_git_blob": "101f8ed575aced744f63bc440f125b69b70ca15a",
+      "post_sha256": "da19f610b169a46b660888743fb32bb31a78e20470088c8bff0a350b2ca6d21e",
+      "bytes": 44633
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_installed.py",
+      "base_git_blob": "9c9edd154e462fe41ba4962811774d57b531bb3f",
+      "base_sha256": "e4f79cacf3a5914e758a718ec6738f5c5f5bd76a5b5a1605468e002535f445cd",
+      "post_git_blob": "97b308b7b41ef27770d02074a637ff1896ab5001",
+      "post_sha256": "c6c9982e3c0a15734110259ecc17d77bcdfefa5550fcf2d74d6d5209d0ff617c",
+      "bytes": 7272
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_project_help.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "58f9983144a9a78e1c9a89fb11d2cffa466b8407",
+      "post_sha256": "53aaf2967cdf4e61917ff0d607cc8b83da8f2421a85dda8c279bda9de864e1fa",
+      "bytes": 3483
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_project_help_avenues.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "de1fcd4d75efe597512245cc3a64c0b5936b2a75",
+      "post_sha256": "79aa8d8c146f2a7dee15eb2f0f4258e1e722d4447510df6950a6a275e3550873",
+      "bytes": 3742
+    },
+    {
+      "path": "integrations/mastermind_workspace_app/installed.py",
+      "base_git_blob": "3210198046c5dee08eb817c3541e77a1d6d8b3b1",
+      "base_sha256": "299317ed399d0fb4b92cfcd3663860f778311d4021593913bc5c3609e4344af0",
+      "post_git_blob": "62caf9cfca18f99ed01d8a3979a24ace756b36b2",
+      "post_sha256": "ffb2561088b70f7591cf2257fb23bd45abfc797de1329d6a5cc5f74ab42c675c",
+      "bytes": 17725
+    },
+    {
+      "path": "integrations/paperclip_control/agent_context.py",
+      "base_git_blob": "aa782d3c24476c46fec07791bdbcd07cf66663e3",
+      "base_sha256": "da8bad0e288d945ba56771738b52949e49fff3efb1bc0e8be3f15fb5b1ed7e2d",
+      "post_git_blob": "1d22950916039b526df1ff4879caf93c37153356",
+      "post_sha256": "1f9218adb11bbc6485aa599f504c1666669f6b2e7267489f2f3246ff8c4ab33d",
+      "bytes": 10642
+    },
+    {
+      "path": "integrations/paperclip_control/service.py",
+      "base_git_blob": "02c19bb6e2778d8028f426bc2304b8d641176b83",
+      "base_sha256": "22be60e4e870b634a3f26b1f66062ab50383052c624978d7bbeff6ee86f40d6a",
+      "post_git_blob": "b196790935028aeee48ef3d3f00f48bc8b7e227a",
+      "post_sha256": "51e053917210ae57ff81afadc0f2b9542fa1d2a1818b17446a55e98ad7560b39",
+      "bytes": 15707
+    },
+    {
+      "path": "integrations/session_bridge/hermes_project_plugin.py",
+      "base_git_blob": "57cba288411310b57d38a0c791f6dac8861811af",
+      "base_sha256": "b23c1946467c6c907899ff8009345c0f9b05722a88964273326d5db66824b368",
+      "post_git_blob": "411c30d08aeb93240cc92f4e54ce0ab6fb9afaa4",
+      "post_sha256": "9b321ceffb3916a88b2f6bdce620a36d2e2e0404bbd72fb2348fe843c7e74d03",
+      "bytes": 13864
+    },
+    {
+      "path": "integrations/session_bridge/project_task_context.py",
+      "base_git_blob": "8c17c918daf858955b44e4ac51af8e017a541883",
+      "base_sha256": "68943a458d4f8247f0fb38e9e7d6f904c6baa7d0f55b719438be7d33502c0739",
+      "post_git_blob": "e76490734211430851f898db1e714f7104276549",
+      "post_sha256": "266cbbf72f87004f25a566df68ffcfaaee44da3f853a763b3f73834441298229",
+      "bytes": 11983
+    },
+    {
+      "path": "ops/executive_os/coo_principal_host.py",
+      "base_git_blob": "03c3fe089ab76aff3522dd7b491078069cc83373",
+      "base_sha256": "a2438d38869b89faa236843aaf856b5fc509fcc239b6d38c06cba6cc6cd462dc",
+      "post_git_blob": "6dbc256479550ce9abf8586f5fa66d240227d5f3",
+      "post_sha256": "f71e787d5f741ea6e971f86bb25fcea9c9c03b41ae13f6d859f725fe8bcd2f3b",
+      "bytes": 25479
+    },
+    {
+      "path": "ops/executive_os/executive_mcp_entry.py",
+      "base_git_blob": "2bb5224c47ff4b455dfc27a570f20894c7cb6e96",
+      "base_sha256": "4fcb3dd248fbe3f7b3067bdcf97cd62b4d9a1aad9775ec7340e319d04a861f66",
+      "post_git_blob": "0750e03a01cbeb834bc07c0e621d955530ce04cf",
+      "post_sha256": "c1644758b4549d7b82282df64f1ed68c30940237084553173bafb8e159e9af2f",
+      "bytes": 54100
+    },
+    {
+      "path": "ops/executive_os/release_manifest.py",
+      "base_git_blob": "5e1b405a753c743d3ef532be94bd44a8468fc341",
+      "base_sha256": "c2e07c6a9cb3220749a9c1fc6ac6bf8451a0c1e3d715e8455c227a3783334726",
+      "post_git_blob": "abeeddc2a55c041542ef286e3e4b83593c2e1fd2",
+      "post_sha256": "7449c4fb65da1f3b8860cd2e87eb327637f3f1bd5bbd2e2e7342e1de5342e2b3",
+      "bytes": 69741
+    },
+    {
+      "path": "scripts/build_hermes_long_horizon_plugin.py",
+      "base_git_blob": "335db1f786e74eb14b03f7994694906b9d71e72d",
+      "base_sha256": "433d2000cb19aad4504e6dcc741c7675c913de2fe6b7c40c45b2ae7d9ef2c6fc",
+      "post_git_blob": "018500743abc5baa9646f622ca688c306b6caf06",
+      "post_sha256": "3eee65171e396fd324a6f0410bb8f05fec3ab188f0b45ecca6fbcce542a32619",
+      "bytes": 3344
+    },
+    {
+      "path": "tests/test_coo_project_help_authority.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "f7cf45eff0ecab7561819c05b84e0b0e280b7628",
+      "post_sha256": "102b6be3e1543e56c8745b50ebab6aa9f07374c77e6cb7dd33aa100d91a68969",
+      "bytes": 21982
+    },
+    {
+      "path": "tests/test_coo_project_help_avenues.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "2dad0488327663d329df54ce5d9da1514ad8315c",
+      "post_sha256": "57c214c977b1780548e36d451fb6a9cb1fc71ba92ad30a6c78a2a0b4c09e2b73",
+      "bytes": 8766
+    },
+    {
+      "path": "tests/test_coo_project_help_ingress.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "c838ec11fbfa8cfac29c79005f3cd61469544990",
+      "post_sha256": "492add2803e4a268e9447e677f8f30af4fee53247e12cd14501c106b7a8b584b",
+      "bytes": 9094
+    },
+    {
+      "path": "tests/test_t3_project_help_api.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "post_git_blob": "7aff2f3d5e8e913814a2a6b39ee8b846fd03b1f5",
+      "post_sha256": "9360963d873b16b5c756ba849a2048dac0e9db296b65e81352cb1db7813a93b6",
+      "bytes": 18628
+    }
+  ],
+  "separate_t3_dependency": {
+    "patch_sha256": "777e0c5fa9019c0962e283e7067c4af0af748eb216b8260281a45b3ca5acaabf",
+    "paths": [
+      {
+        "path": "docs/T3_PROJECT_TEAMS.md",
+        "post_sha256": "95846376cac6b155b632a8480b4dd3534704610e57e4643ab8a5d580818b641f"
+      },
+      {
+        "path": "integrations/session_bridge/t3_project_team.py",
+        "post_sha256": "71c90a45cb08b132c87e8fc42cd189dbfd12bcbcf09b5ceab5cbcb00465a14b2"
+      },
+      {
+        "path": "integrations/session_bridge/t3_project_team_cli.py",
+        "post_sha256": "e9f04b07b7531ee3f3d539245669e6f39de8e976ee63a8c48fa6ac6bdeb31ab9"
+      },
+      {
+        "path": "scripts/build_t3_project_team.py",
+        "post_sha256": "5699a577a6e13ccbf56ee9cb638fac72823cac2b9b88e5815fbb6a9323693f61"
+      },
+      {
+        "path": "tests/test_t3_project_help_handoff.py",
+        "post_sha256": "44aa280727c7ef68d38c2f9c65d727dbb8ae8bc8e1630f0907eee65a1e6230c2"
+      },
+      {
+        "path": "tests/test_t3_project_team_cli.py",
+        "post_sha256": "4149b016a4cbef8f92a02cdc7bab4f3634a90c4060784057aea034580ad79164"
+      }
+    ]
+  },
+  "patch_sha256": "d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d"
+}

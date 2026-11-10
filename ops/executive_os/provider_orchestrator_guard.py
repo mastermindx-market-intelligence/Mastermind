@@ -1290,6 +1290,11 @@ def _r7_glob_head_names_wrapper(text: str) -> bool:
     basename (``* run …``, ``p* run …``): the shell resolves it from the
     current directory, so it may BE the wrapper. An unreadable line is left
     to the other scope checks."""
+    # has_glob accepts only unquoted "lit" segments. The lexer creates those
+    # from unchanged raw characters/slices or "$"; quotes, escapes and ANSI
+    # decoding cannot synthesize an absent literal glob for this reading.
+    if not any(char in text for char in _R6_GLOB_CHARS):
+        return False
     tokens, error = _r6_lex(text)
     if error:
         return False

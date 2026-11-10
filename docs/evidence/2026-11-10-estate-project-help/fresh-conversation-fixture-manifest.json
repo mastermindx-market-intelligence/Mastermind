@@ -1,0 +1,19 @@
+{
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "tested_merge_commit": "a2bf5931c4ce69f9c2afc427c5e1bb399256c847",
+  "base_tree": "e2f3936b89a67ac88a02526f585c10182a285cf6",
+  "patch": "fresh-conversation-fixture.patch",
+  "patch_sha256": "1e88c95d924bc61be9dd7a7121943a4928ee4c616ff87f66e76d7ed8ad896855",
+  "files": [
+    {
+      "path": "tests/test_fresh_conversation.py",
+      "base_git_blob": "a1efd1be610a8ed26e40f6dbb3bcc423f6777a40",
+      "base_sha256": "541d16522cf17c1ca95f1854a285e5eb3d04603899b9748f606d393c80334049",
+      "postimage_git_blob": "5bf28903f7e40dc249cbb25b480aa90ae104af5b",
+      "postimage_sha256": "81c8060bb57a6d136944e1b92b7fed2e435d1c8b7b53b47c03906388f3927213",
+      "base_bytes": 19772,
+      "postimage_bytes": 21423
+    }
+  ],
+  "verification": "git apply --check --whitespace=error, apply and exact postimage readback passed in isolated original-file tree"
+}

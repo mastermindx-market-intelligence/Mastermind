@@ -343,7 +343,8 @@ def _hermes_native_gateway(value: Any, *, role: str = "mmsecretary",
             if (consumer.get("schema") == "mastermind.hermes_native_executive_consumer/v2"
                     and (derivation is None or derivation["kind"] != "diagnostic_privacy")):
                 raise ReleaseManifestError("Hermes context requires diagnostic privacy derivation")
-            if (consumer.get("schema") in {"mastermind.hermes_native_executive_consumer/v3", "mastermind.hermes_native_executive_consumer/v4"}
+            if (consumer.get("schema") in {"mastermind.hermes_native_executive_consumer/v3", "mastermind.hermes_native_executive_consumer/v4",
+                                           "mastermind.hermes_native_executive_consumer/v6"}
                     and (derivation is None or derivation["kind"] not in {"workspace_oauth_privacy", "native_eval_inputs"})):
                 raise ReleaseManifestError("Hermes current context requires Workspace OAuth privacy derivation")
             if not _defer_consumer:

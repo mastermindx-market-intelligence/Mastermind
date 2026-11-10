@@ -177,6 +177,14 @@ class OperatorMaterializationStatusObservation:
     status: str
     receipt: OperatorMaterializationReceipt | None
 
+    def to_dict(self) -> dict[str, Any]:
+        """Retain the receipt owner's versioned omission and digest contract."""
+        return {
+            "schema_version": self.schema_version,
+            "status": self.status,
+            "receipt": self.receipt.to_dict() if self.receipt is not None else None,
+        }
+
 
 @dataclasses.dataclass(frozen=True)
 class _ReceiptContentSignature:

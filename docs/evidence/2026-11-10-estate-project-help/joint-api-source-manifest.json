@@ -1,0 +1,347 @@
+{
+  "schema": "mastermind.estate_joint_api_source_qualification/v1",
+  "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "dependencies": {
+    "full_v6_manifest_sha256": "8edad79e828276747674775c69a3741c2d4b19c36f3af024bd0430c03fbdaf08",
+    "eg3_manifest_sha256": "7d330e78595619a6ca511e722fdd59ec3cff17a1b36966d70d470c44d1fef501"
+  },
+  "files": [
+    {
+      "path": "common/coo_project_help_contract.py",
+      "base_source": "v6-api-freeze",
+      "pre_sha256": "78533893ee3ca92c583a8929342eb07e804aebbcaf9d6597b2c0c0e2a2241961",
+      "pre_git_blob": "a857823b87ffea3b5116a57da97af41383c46404",
+      "post_sha256": "c8ca82f9ec3ed766b1db155be7607d555d34d2b4810b06345c06e96131983254",
+      "post_git_blob": "5d9b95381720c2d304c922f7c35bfb3492136069",
+      "bytes": 15461
+    },
+    {
+      "path": "config/executive_claude_principal_capabilities.json",
+      "base_source": "frozen-eg3",
+      "pre_sha256": "6ec75c267336f1d54f856a1f7a96ca41f36ec30a90011604a3434ffc41a22a12",
+      "pre_git_blob": "1cd8421fe0eb0432442f7ab739d1db6535739c0e",
+      "post_sha256": "3dfe09ee1f8e51c5749f897ebcc392facba85a30710e5236cc84d230a2090731",
+      "post_git_blob": "f09ffc55ab6089352e5c3d3913257a2236696192",
+      "bytes": 13073
+    },
+    {
+      "path": "control_plane/coo_principal_host.py",
+      "base_source": "v6-additional-api-freeze",
+      "pre_sha256": "5ed802447f40394fdd8040e84304a960052c424b960a0a2ede55e519181bf327",
+      "pre_git_blob": "9b02d4b90e567e8b8fc165a3c32f3d40a38755ff",
+      "post_sha256": "5cfaa438669480efe341e65df270ac09679b493b35fbec63943591f783ddf852",
+      "post_git_blob": "889f8a1fb7d7257fc8df194e58310cc936a27bd4",
+      "bytes": 37249
+    },
+    {
+      "path": "control_plane/coo_project_help_read.py",
+      "base_source": "v6-api-freeze",
+      "pre_sha256": "f3aa024b6d431c7d1eef952596cea9d3013a20bd4cb67d81ddc7a1891c34a875",
+      "pre_git_blob": "931d601e164356baa299a4ca37201e4c76ef7b05",
+      "post_sha256": "4433a6082eddf43d76163ec137bccab1d8b861084428880ab553e1f0abca479e",
+      "post_git_blob": "a3f8fde45ea3b7e84a24f63df1fc457bdc98efa9",
+      "bytes": 13427
+    },
+    {
+      "path": "control_plane/executive_agent_capabilities.py",
+      "base_source": "frozen-eg3",
+      "pre_sha256": "9cdb33a81d40039071e2335d7360f2c13b6e0fa2fe92706c9826bfea82dc014d",
+      "pre_git_blob": "da24e5b6264e5d9bed81a94f7d5811ff4828a426",
+      "post_sha256": "c1a9b35abd94ca8d4e2e58efb5b877883eb6a88ce0d95176166ce9f43a454fa0",
+      "post_git_blob": "341d141c958ab8e272f43831e55669d85eaa3615",
+      "bytes": 142221
+    },
+    {
+      "path": "control_plane/executive_service.py",
+      "base_source": "published-95762fc",
+      "pre_sha256": "900f860ec952624cfe522720be85689abda394a8da997b40a37db22d4a449f35",
+      "pre_git_blob": "83c28b82037f1a771168b484f5afd11b6c444ac0",
+      "post_sha256": "3c98ce090d9d147385edd7300b56c0eb58e88610f8018947b264a08ceae85638",
+      "post_git_blob": "9177cf37c47ad047507e546554257351f4cbcae3",
+      "bytes": 578996
+    },
+    {
+      "path": "docs/PROJECT_HELP_REQUESTER_API.md",
+      "base_source": "new",
+      "pre_sha256": null,
+      "pre_git_blob": null,
+      "post_sha256": "fba7cfbef464a008a9a436f58794a71533cf1233b293a20e799b4fcbc4884284",
+      "post_git_blob": "76093a85e6a616fc45362833d68397b3f9ec213f",
+      "bytes": 8376
+    },
+    {
+      "path": "integrations/executive_mcp/coo.py",
+      "base_source": "v6-api-freeze",
+      "pre_sha256": "200483892a017b6e6dd9f1b78199514b9c08d375da07a436b6124369b4509e96",
+      "pre_git_blob": "7b596733af404dd2fa8cc257d999119307a87384",
+      "post_sha256": "4e02e535da47a57e50d720d150ec4d6acb95222bdbd0b3b7d02017ea880a1e83",
+      "post_git_blob": "385f5b2d927c9c299eb6fbd84a90fe96881ab1cd",
+      "bytes": 18338
+    },
+    {
+      "path": "integrations/executive_mcp/server.py",
+      "base_source": "v6-api-freeze",
+      "pre_sha256": "4a069aecc0074b03a81bbff72a994215843cc9d84665db55f5932234a1c3c197",
+      "pre_git_blob": "5865c07412e8ea078f2e0d2f7039908aa7aa6afe",
+      "post_sha256": "16805fe1201ea0662c73eed99a4450f5d94acc5d15e67c4b426da5470ba5f492",
+      "post_git_blob": "56f8507efd3d95b46dabbc60fe3f9912bafe86e6",
+      "bytes": 148040
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo.py",
+      "base_source": "v6-api-freeze",
+      "pre_sha256": "da19f610b169a46b660888743fb32bb31a78e20470088c8bff0a350b2ca6d21e",
+      "pre_git_blob": "101f8ed575aced744f63bc440f125b69b70ca15a",
+      "post_sha256": "6db8a3f6884b7cebe32b25043893b8a7d8a08380c7854e181173a88102fd432e",
+      "post_git_blob": "6722b2c12f80cbcc77194e26e81a061c7960d186",
+      "bytes": 44925
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_project_help.py",
+      "base_source": "v6-additional-api-freeze",
+      "pre_sha256": "53aaf2967cdf4e61917ff0d607cc8b83da8f2421a85dda8c279bda9de864e1fa",
+      "pre_git_blob": "58f9983144a9a78e1c9a89fb11d2cffa466b8407",
+      "post_sha256": "4533141f3b195738abd95934b85c5f4c4d085302cdf0a421a244e9ea589114e5",
+      "post_git_blob": "17dc9b339cc58c92a079b32fa7c206d53f4648be",
+      "bytes": 3519
+    },
+    {
+      "path": "ops/executive_os/coo_principal_host.py",
+      "base_source": "frozen-eg3",
+      "pre_sha256": "c380369f6495cf16f8ca0d16d42ae72ef6fd266cf0c129b41952abf413b800d3",
+      "pre_git_blob": "a4a62be7ad4fac307236d438b4a9d692b44d0a6a",
+      "post_sha256": "357c70f1265e6e2d525c850acfea02bd331a18e75f7ceabe9d4ce129d875a01b",
+      "post_git_blob": "47b1eb0c951993b9848fdf49d89f196e3456239a",
+      "bytes": 27795
+    },
+    {
+      "path": "tests/test_joint_api_contract.py",
+      "base_source": "new",
+      "pre_sha256": null,
+      "pre_git_blob": null,
+      "post_sha256": "1fdd68bd695fd3f571a30452e70b2bb9010cbb4c2d1882e77f7d77d022feda8c",
+      "post_git_blob": "207e74ce52b84d737c2542dd968970bb1e3993fa",
+      "bytes": 8257
+    },
+    {
+      "path": "tests/test_joint_api_ingress.py",
+      "base_source": "new",
+      "pre_sha256": null,
+      "pre_git_blob": null,
+      "post_sha256": "7d4f68e24faf65e5ead83056a15c8c4e768c59047a2d5e1f9473c000a90ee2ec",
+      "post_git_blob": "d1eec24c05487bea8bf7f3946da45ec9f76e0b0e",
+      "bytes": 20541
+    },
+    {
+      "path": "tests/test_joint_api_project_owner.py",
+      "base_source": "new",
+      "pre_sha256": null,
+      "pre_git_blob": null,
+      "post_sha256": "adb9f3e59e81d32c6794470b4b9f453cc2bdd15c8ce53ff5a54b038abb4b6e39",
+      "post_git_blob": "4e23c10ff1c20ffd3310098ae73116bc644335cb",
+      "bytes": 21152
+    },
+    {
+      "path": "tests/test_t3_api_requester_contract.py",
+      "base_source": "frozen-eg3",
+      "pre_sha256": "e9a25ccad95434398dcc594ec785db0cb110ab0e4d0550f643751004285c1273",
+      "pre_git_blob": "d9224277d38149b1bc17a26ce9cc1c55a9a31b6b",
+      "post_sha256": "2b8e202beb03a910703e9dd5b8ad1d5cf939286a6f03d6a4b993d2411054e433",
+      "post_git_blob": "50a6a43801e5d41806631a4a00294bcea59d420a",
+      "bytes": 9887
+    }
+  ],
+  "patch": {
+    "path": "project-help-requester-api.patch",
+    "sha256": "98681a833ee4ace394437d5ca7f70020eb472351455f1cfa4be1adf6c2c8c495"
+  },
+  "catalogue": "coo.project_help_requester.v1",
+  "catalogue_schema_digest": "f98abf1e3928b1c56d6e58aeeeb2eacba04db07e6d96f8e38aeb8d9f1b65b905",
+  "test_environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    "PYTHONPATH": ".:tests:/workspace/scratch/dfef37b7f33a/estate-return-qualification/.qualification-deps"
+  },
+  "test_commands": [
+    {
+      "status": "PASS_50",
+      "log": "joint-owner-contracts.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_joint_api_project_owner.py",
+        "tests/test_joint_api_contract.py",
+        "tests/test_t3_api_requester_contract.py",
+        "--basetemp=/tmp/eg4-joint-owner-contracts",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "PASS_2",
+      "log": "joint-signed-read.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_joint_api_ingress.py",
+        "-k",
+        "discovers_joint_tools",
+        "--basetemp=/tmp/eg4-joint-signed-read2",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "COLLECTED_9_NOT_EXECUTED_IN_CLOUD",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_joint_api_ingress.py",
+        "-k",
+        "original_unix_requester_lifecycle",
+        "--basetemp=/tmp/eg4-joint-real-unix",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "PARTIAL_90_PASS_UNIX_PERMISSION_REFUSAL",
+      "log": "joint-legacy-owner.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_executive_coo_host.py",
+        "tests/test_executive_coo_app.py",
+        "tests/test_executive_coo_mcp.py",
+        "tests/test_executive_coo_install_binding.py",
+        "--basetemp=/tmp/eg4-joint-legacy",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "PARTIAL_7_PASS_MISSING_EXACT_SNAPSHOT_DEPENDENCY",
+      "log": "joint-legacy-owner-tail.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_executive_coo_mcp.py",
+        "tests/test_executive_coo_install_binding.py",
+        "-k",
+        "not signed_mcp_request_reaches_real_socket and not same_process_preserves",
+        "--basetemp=/tmp/eg4-joint-legacy-tail",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "UNEXECUTED_DEPENDENCY_FAILURE",
+      "log": "joint-legacy-owner-tail2.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_executive_coo_mcp.py",
+        "-k",
+        "combined_host",
+        "tests/test_executive_coo_install_binding.py",
+        "--basetemp=/tmp/eg4-joint-legacy-tail2",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "PARTIAL_1_PASS_MISSING_EXACT_SNAPSHOT_DEPENDENCY",
+      "log": "joint-combined-host.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_executive_coo_mcp.py",
+        "-k",
+        "combined_host",
+        "--basetemp=/tmp/eg4-joint-combined",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    },
+    {
+      "status": "PASS_14",
+      "log": "joint-install-binding.log",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_executive_coo_install_binding.py",
+        "--basetemp=/tmp/eg4-joint-install-binding",
+        "--maxfail=1",
+        "--tb=short"
+      ]
+    }
+  ],
+  "proofs": [
+    {
+      "path": "joint-owner-contracts.log",
+      "sha256": "fa1905236875344307aa6c2aff06825e733e66b17b40e7eddf56f29873a28877",
+      "tail": "50 passed, 1 warning in 39.73s"
+    },
+    {
+      "path": "joint-signed-read.log",
+      "sha256": "64869df1028c65bd284f7ca3d957b8d3ba6dcddf2eb1603a1522e5766c3d0982",
+      "tail": "2 passed, 9 deselected, 1 warning in 26.59s"
+    },
+    {
+      "path": "joint-legacy-owner.log",
+      "sha256": "51112e55005f47c307f04c71bc07e3c848aa7ac7b744077a6e0f28a8bd4da5f8",
+      "tail": "1 failed, 90 passed, 1 warning in 6.32s"
+    },
+    {
+      "path": "joint-legacy-owner-tail.log",
+      "sha256": "3dcab4ccf6b59522496cb45e4c99ae31a3f37ad1b5515fca6165018a1bc6ec1d",
+      "tail": "1 failed, 7 passed, 3 deselected, 1 warning in 2.53s"
+    },
+    {
+      "path": "joint-legacy-owner-tail2.log",
+      "sha256": "b59dd45ef724ad4ff6e58067eeea37c90e9ae364ba57d56fbe8f35f0af2be946",
+      "tail": "1 failed, 24 deselected, 1 warning in 1.27s"
+    },
+    {
+      "path": "joint-install-binding.log",
+      "sha256": "2b0a6d0cfda5bf6d98803f51d3c27abfab7913e1849ba1331823d446a349eed9",
+      "tail": "14 passed in 0.74s"
+    },
+    {
+      "path": "joint-combined-host.log",
+      "sha256": "4d79b44200a1b4c918bd62103ededed966e4f72feb8b19f25104908bea695173",
+      "tail": "1 failed, 1 passed, 10 deselected, 1 warning in 2.78s"
+    }
+  ],
+  "boundaries": [
+    "Source-only; both new profiles disabled; no installation, production grant or native-origin assertion.",
+    "52 focused owner/contract/signed API cases passed; 112 unique legacy cases passed before socket/dependency boundaries.",
+    "Nine actual Unix service cases collected; parent owns M2 execution.",
+    "Current-C joined fixture is continuation with prior consumed planner return, not new-root bootstrap.",
+    "Ordinary finite Hermes source loader/OAuth/dispatch qualification is a separate dependent increment; not claimed here."
+  ]
+}

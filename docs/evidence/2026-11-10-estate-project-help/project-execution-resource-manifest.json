@@ -1,0 +1,101 @@
+{
+  "dependencies": [
+    "v6 d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d",
+    "joint16 postimages from budget increment_base.json",
+    "budget 9ec4c227c17e06cb59147523ea61f1a164b5813837fda5511868931b234a18ba",
+    "budget test correction 7941228551542ffffdfea1a7b755bdc5602b8e70b3ea4adb1ffd993a33b24b34",
+    "G1 Runtime postimage 4924870e1666a5e2b6be6c5742e711881641b8ef9409be92551103bc6cdc1185"
+  ],
+  "files": [
+    {
+      "base_git_blob": "e18c24e9c08adcde375c18ca7fe38ee406f07616",
+      "base_sha256": "1eb033f859bb6d25801e279f91572ea11314241a42c3b26b8b06a2c7dbc87644",
+      "bytes": 10175,
+      "path": "common/project_discovery_observation_contract.py",
+      "post_git_blob": "220fa5ca60b28b2ad77cb5171200f5a86580aee2",
+      "post_sha256": "30152bf90d84d64dc1c22fe741ffdb2c110051387b88c511170bb3b9a9399019"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 5919,
+      "path": "common/project_execution_resource_contract.py",
+      "post_git_blob": "3387a7d91a7bc08f0329e26d8727845c30e70f6b",
+      "post_sha256": "b5f541483be7043de2108fc4795e37b18bd787819690689fcc3c80e37fae81d3"
+    },
+    {
+      "base_git_blob": "4ee6447abd23b1f72fc5ba756d8a302a790f479d",
+      "base_sha256": "4924870e1666a5e2b6be6c5742e711881641b8ef9409be92551103bc6cdc1185",
+      "bytes": 1622279,
+      "path": "control_plane/executive_runtime.py",
+      "post_git_blob": "7e27e20d454067e0101b1d8b0d9439bf306dfd8a",
+      "post_sha256": "1330ebdd61d1f9b2f86a2cef7e92beb6669a6765d361838bebcab0c5df05f33c"
+    },
+    {
+      "base_git_blob": "f82178f111892877fd3ab03f30d75c55abb0f26f",
+      "base_sha256": "2948a59431bab239a9ab9b52cb15a9ca7ef156912451db5a44e44da55e801dce",
+      "bytes": 92197,
+      "path": "control_plane/mission_workspace.py",
+      "post_git_blob": "6a9b89035e13de9473cde7e373ee22c18ce9c72a",
+      "post_sha256": "9336e8bb4a84c0f353b30a84028bf03b6336d3e5814ce962ed448547b8882500"
+    },
+    {
+      "base_git_blob": "d882e555ec5b0390092c9213d17d0791ab8b5e9b",
+      "base_sha256": "c04f0d0b038364065e8fe989faf401e68c92b50ed4a1ecc54e5f797a2a204216",
+      "bytes": 8802,
+      "path": "control_plane/project_discovery_projection.py",
+      "post_git_blob": "127793cf2fdb460c853c1513afca512a2fb53abd",
+      "post_sha256": "44f83da87031cbb2d9682aaa40aa7cccb1b5bb616170ff022d377c1ee947eceb"
+    },
+    {
+      "base_git_blob": "cc4a8bcb6487c8365700e3bd263773f658e5baa6",
+      "base_sha256": "079b389bd34d7ce53b248fe630b454def6fd65346094aec714b0069f8f918777",
+      "bytes": 31869,
+      "path": "control_plane/project_execution_admission.py",
+      "post_git_blob": "3da9977c41954a85ffe8cc7f3fe4f4a9b531288e",
+      "post_sha256": "a73512361213e34fa58e33aa7e707d265ff96974739eb177b22e6f9fae2426e3"
+    },
+    {
+      "base_git_blob": "03bcd157153c3bd17ebbbcf8bef035c3b5eadddc",
+      "base_sha256": "a28452b9b9822264cbc6e97497ae1e41c691d312f8d23db14e850c5878ebb7ec",
+      "bytes": 12976,
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "post_git_blob": "de9faa99f26a9485333e1e5b04165382b4c8e198",
+      "post_sha256": "75502465f3f3869909f1304f257654500a0ebcdd15ba2c6fa1784b1cfee3ae24"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 42955,
+      "path": "tests/fixtures/project-execution-resource-owner.json",
+      "post_git_blob": "db3c3a9cd4f69c65c7cc6c7e8164da4e0cc1de5a",
+      "post_sha256": "876ac0c4b565763950ed0762bce4dfb806b9171bf831f0a759efe52826d77398"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 3629,
+      "path": "tests/test_project_execution_resource_contract.py",
+      "post_git_blob": "f9c45b0d347ad497b19b6d00748a491ef7d2d8e7",
+      "post_sha256": "261093792dd1a0da482d6b4af076c48b5fb86b56648a3d79d2f3c6987e2efcae"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 15167,
+      "path": "tests/test_project_execution_resource_read.py",
+      "post_git_blob": "5ac36d99abb2a5068488c8ce8115d11509f83079",
+      "post_sha256": "ce2411c834e4241f46890fd08f9e63df3a10cdcfc9d6110482c003db2f5f6d7b"
+    }
+  ],
+  "patch": "project-execution-resource.patch",
+  "patch_sha256": "f6be9fd6918be7070f836303551029f2375029d3728c6c5699ea8b28b2dc04f1",
+  "published_base": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "schema": "mastermind.source_patch_manifest.v1",
+  "verification": {
+    "applied_postimages_exact": true,
+    "no_installed_effects": true,
+    "python_parse": true,
+    "strict_git_apply_check": true
+  }
+}

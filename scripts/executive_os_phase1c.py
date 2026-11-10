@@ -2721,8 +2721,10 @@ def _service_from_config(
             agentos_context_reader = packet_collector.agentos_context_reader(
                 macro_root=Path(raw["ceo_ingress_app_macro_root"]))
             def coo_factory(runtime):
+                from control_plane.project_execution_admission import bind_original_input_reader
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime),
-                    agentos_context_reader=agentos_context_reader)
+                    agentos_context_reader=agentos_context_reader,
+                    project_execution_input_reader=bind_original_input_reader(service, runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=coo_effects_armed,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
             # The SAME frozen selected-child publication the installed App

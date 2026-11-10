@@ -13,6 +13,7 @@ import re
 import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
+from urllib.parse import urlparse
 
 from .t3_mission_brief import MissionBrief, Phase
 from .t3_project_team_inventory import NativeInventory
@@ -280,7 +281,9 @@ class ProjectTeam:
         return _digest(self.document())
 
     def root_handoff(self, *, request_id: str, project_id: str,
-                     definition_ref: str | None = None) -> HandoffBrief:
+                     definition_ref: str | None = None,
+                     project_context: dict[str, Any] | None = None,
+                     project_source_ref: str | None = None) -> HandoffBrief:
         # Embed every assignment and phase check. source_ref identifies the
         # governing project brief, not proof that it contains this generated graph.
         # Oversized teams fail explicitly instead of silently dropping scope.
@@ -301,7 +304,13 @@ class ProjectTeam:
                            phase_ids=[phase.phase_id for phase in self.mission.phases],
                            detail_projection="immutable_source_reference",
                            mission_source_ref=self.mission.source_ref)
-        objective = self.mission.objective + "\n" + _TEAM_INSTRUCTIONS + "\n" + _json(context)
+        instructions = _TEAM_INSTRUCTIONS
+        if project_context is not None or project_source_ref is not None:
+            _require(project_source_ref == self.mission.source_ref,
+                     "TEAM_PROJECT_HELP_MISSION_SOURCE_DIFFERS")
+            context["project_help"] = _project_help_handoff(project_context, project_source_ref)
+            instructions += "\n" + _PROJECT_HELP_INSTRUCTIONS
+        objective = self.mission.objective + "\n" + instructions + "\n" + _json(context)
         _require(len(objective.encode()) <= 8192, "TEAM_ROOT_BRIEF_TOO_LARGE_USE_DEFINITION_REF")
         return HandoffBrief(request_id, project_id, objective, definition_ref or self.mission.source_ref,
                             self.mission.done_when, self.mission.stop_conditions,
@@ -335,6 +344,53 @@ _TEAM_INSTRUCTIONS = (
     "No new scheduler, queue, credential, memory or company task registry. "
     "Native completion and graph projection are not principal acceptance."
 )
+
+
+_PROJECT_HELP_INSTRUCTIONS = (
+    "For project help, use this session's existing authenticated COO MCP connection "
+    "only when executive_project_help is actually advertised under the enrolled "
+    "coo.project_help.v1 contract. Call it with exactly project_help.arguments. "
+    "This handoff has not performed the read and supplies no Executive root. "
+    "Require the returned scope.source_plan to match project_help.source_plan exactly, "
+    "including repository, commit, path, content digest and contract digest. "
+    "Obtain the original Executive root only from that current authenticated owner; "
+    "the T3 thread, team mission_id and notes are not substitutes. If the tool, "
+    "enrollment or current matching source is unavailable, report project help "
+    "unavailable and retain the original source plan without inventing another root "
+    "or borrowing another principal. This read attests no native T3 origin. "
+    "Honor unavailable relationship and placement fields. Addressable targets do "
+    "not establish teammate relationships, available capacity or execution grants. "
+    "Revalidate through the existing owner before contacting or dispatching."
+)
+
+
+def _project_help_handoff(context: Any, source_ref: Any) -> dict[str, Any]:
+    """Compile a parser-owned plan expectation, never a help read or grant.
+
+    The CLI obtains ``context`` from the incumbent bounded source-plan loader.
+    Programmatic callers retain that same source owner. Only the separately
+    authenticated COO tool can return an original Executive root or live help.
+    """
+    from common import coo_project_help_contract as help_wire
+
+    try:
+        if type(context) is not dict or type(source_ref) is not str:
+            raise ValueError
+        parts = urlparse(source_ref).path.split("/")
+        selected = {
+            "schema": help_wire.PLAN_SCHEMA, "work_ref": context["workstream"],
+            "source": {"repository": "/".join(parts[1:3]), "commit": parts[4],
+                       "path": "/".join(parts[5:]),
+                       "content_sha256": context["source_sha256"]},
+            "contract_sha256": context["contract_sha256"],
+        }
+        help_wire.context_matches_source_plan(context, selected, source_ref=source_ref)
+    except (ValueError, TypeError, KeyError, IndexError, UnicodeError):
+        raise TeamError("TEAM_PROJECT_HELP_SOURCE_INVALID") from None
+    return {"catalogue": help_wire.CATALOGUE, "tool": help_wire.TOOL,
+            "arguments": {"work_ref": selected["work_ref"]}, "source_plan": selected,
+            "read_state": "NOT_READ", "execution_authority": False,
+            "native_origin_attested": False}
 
 
 @dataclass(frozen=True, slots=True)
@@ -731,8 +787,12 @@ class ProjectTeamClient:
         self.environment_id = _native_id(environment_id)
 
     async def launch(self, team: ProjectTeam, *, project_id: str, request_id: str,
-                     definition_ref: str | None = None) -> RoleBinding:
-        brief = team.root_handoff(project_id=project_id, request_id=request_id, definition_ref=definition_ref)
+                     definition_ref: str | None = None,
+                     project_context: dict[str, Any] | None = None,
+                     project_source_ref: str | None = None) -> RoleBinding:
+        brief = team.root_handoff(project_id=project_id, request_id=request_id,
+                                 definition_ref=definition_ref, project_context=project_context,
+                                 project_source_ref=project_source_ref)
         receipt = await self.client.launch(brief)
         return RoleBinding(team.root.role_id, self.environment_id, receipt.thread_id,
                            None, None, receipt, team.fingerprint)

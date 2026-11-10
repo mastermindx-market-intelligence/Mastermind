@@ -1,0 +1,14 @@
+{
+  "base_carrier_sha256": "9ec4c227c17e06cb59147523ea61f1a164b5813837fda5511868931b234a18ba",
+  "files": [
+    {
+      "base_git_blob": "5e2c4d48b948dd3cedf3c18b9a8d7280d969026b",
+      "base_sha256": "d030bca483a75904389a478d64e1ed4e906c9c3b632990b0ea60b2ec0ee87684",
+      "path": "tests/test_coo_project_help_budget.py",
+      "postimage_git_blob": "9cb6e5c09e14d7b40952d0eafc930ddcaf573319",
+      "postimage_sha256": "7ae3e19e7f00146e3a2257ed2638cff01a507cbff5077340762ea9b8a79b4b0d"
+    }
+  ],
+  "patch_sha256": "7941228551542ffffdfea1a7b755bdc5602b8e70b3ea4adb1ffd993a33b24b34",
+  "qualification_sha256": "3e7ee528ba34ed70c4a5c3e0d1210c13efde08176cbd540ff328e2fdee1f4720"
+}

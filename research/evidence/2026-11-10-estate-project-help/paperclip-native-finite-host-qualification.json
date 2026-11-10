@@ -1,0 +1,305 @@
+{
+  "after_tree": "2b791e5ca7d35446dde1837fa95b399901bd59ce",
+  "argv": [
+    "python3",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "anyio.pytest_plugin",
+    "tests/test_paperclip_hermes_api_transport.py",
+    "--maxfail=1",
+    "--tb=short",
+    "--basetemp=/tmp/estate-paperclip-finite-native-discovery-20261110-c4",
+    "--junitxml=/tmp/estate-paperclip-finite-native-discovery-20261110-c4.xml"
+  ],
+  "basetemp": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4",
+  "elapsed_seconds": 48.727,
+  "junit_sha256": "7001a677da4e829883d8e7168c68559defe1c119253a04ded8f281ad23e6435c",
+  "log_sha256": "99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87",
+  "native_dependency_fact_sha256": "b29cf28250a1045859e9982af2371bb8797e3aa7f58fe10ab0eef42f8c63a790",
+  "native_dependency_fact_unchanged": true,
+  "native_patch_installed": false,
+  "native_patched_source": {
+    "tests/tools/test_tool_search_deferred_schema.py": "1befb7516c76eb1b59ef78c61b15113703ddeaea82712a6a5011b6218d38f4ee",
+    "tools/tool_search.py": "bcaf4ed695a5493fdda421f7c969db5a6fd9cf06d8ad92a8cb546c3326f52866"
+  },
+  "native_patched_source_unchanged": true,
+  "native_private_candidate": "/tmp/estate-hermes-native-deferred-schema-ba4ddf9-20261110-c4",
+  "native_source": {
+    "all_git_blobs_verified": true,
+    "archive_format_reconciliations": [
+      {
+        "archive_blob": "16efe8e095743e4abb2499a1f79bc2941cc2048c",
+        "exact_git_blob": "e58ed04c91a3e61d1dac481a8642f6ded946d056",
+        "path": "activate.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "f46796efe74769c5f781f2a7b4d0e6fbf5be464e",
+        "exact_git_blob": "cc15dc791a016a7494fc3209a43a856268bd996f",
+        "path": "apps/desktop/scripts/update-relaunch-waiter.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "75e3fb720c9704bf85ddfb852279892d51d95109",
+        "exact_git_blob": "fc486d119cbb6946c9824f89709acdad8b406aa6",
+        "path": "apps/desktop/scripts/verify-signed-payloads.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "8f2584db8e0bc8b00b6af3c0aa636fb2415bf1f2",
+        "exact_git_blob": "0f3cd764561c60c7205dd35b2ae984607263fe11",
+        "path": "evals/update_streaming/watchdog.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "0de81d1634dc7370f2ee7da83013e99053d5e65d",
+        "exact_git_blob": "65dd6d8b6c999f8323f94df4bfec679b599708ec",
+        "path": "optional-skills/software-development/ast-grep/install.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "4cdf94ed51bebe56339ea04f0756b8349269d093",
+        "exact_git_blob": "b051d1ce04ee92cae34d5ece0247de3fa7bb6fe6",
+        "path": "optional-skills/software-development/ast-grep/tests/smoke.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "bb33bf20139f0250d3ec1441865601632cb65168",
+        "exact_git_blob": "4f6f656fed3836602644c2f2c9c305e2afb3c4c2",
+        "path": "scripts/build-bundle.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "bf54bcee7966f7c142cf1fa41c63b5f6c1316370",
+        "exact_git_blob": "35c5c171937ce54260a6eb2176c3d4096d317682",
+        "path": "scripts/build/windows-deps.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "82cfdc2c70d82c45885c65bce3e2a8b41a5bbe86",
+        "exact_git_blob": "5a4bca802e78ccbf1fb441e3db2a129e01b3e38d",
+        "path": "scripts/ci/warm_powershell_module_cache.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "431752edf25319e07562c64b4ff5abd7dd4b8661",
+        "exact_git_blob": "7b9647873d96278e95f233429d80bff6a269d327",
+        "path": "scripts/desktop-update.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "df527495691dde7620fc6cb8d493ad50335ea67f",
+        "exact_git_blob": "3ee01affb08fb77d48f527900ff903bbf6e5ae17",
+        "path": "scripts/desktop-update/marker-claim.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "95f4b19c44751df36a06a0c7441cf2688b2df0e1",
+        "exact_git_blob": "27478317490d18a56e62975f002cf6d18bd0805c",
+        "path": "scripts/desktop-update/marker.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "cefc517bbc3234159d64b38f45fd6c01e243d60d",
+        "exact_git_blob": "8b6c8260068b6322b3f0e8403516f4d5596ec1c8",
+        "path": "scripts/desktop-update/runtime.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "2f57121cd82643d27b8a58386941b54e712882a5",
+        "exact_git_blob": "85b5fdedde76652e4476861b99559fa8792d5d36",
+        "path": "scripts/desktop-update/update-job.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "2f896e3b52a090b1e90e3567f1d45974e26922d5",
+        "exact_git_blob": "8ace25578f616f072f1b4f9b690dd8c7e7d42ab9",
+        "path": "scripts/desktop-update/windows.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "b4f55505ad8498d9738d7bb074f177f44debfbee",
+        "exact_git_blob": "c0552ec8b9d2fbdc7127ec384c221b683d1e733a",
+        "path": "scripts/install.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "caff36d89c4b1213382a769e8640d749bde034cf",
+        "exact_git_blob": "997738df80bf39f0ebcf589fc3d1dbac22161e0c",
+        "path": "scripts/tests/test-install-ps1-longpath.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "69dbe3273660730a8680b6dce43b35d7f028ddc7",
+        "exact_git_blob": "c6f4ca32fef1b99ec23afc960050058ab0021c39",
+        "path": "scripts/tests/test-install-ps1-node-compatibility.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "2a22704d4d7a214828f2c7455218928a321ab82c",
+        "exact_git_blob": "fdfa2e596a58ef9f1cae24b9b88073087bb50e79",
+        "path": "scripts/tests/test-install-ps1-store-guard.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "f4b64c274cffbc17a386265d7df5a6ef5b6cc761",
+        "exact_git_blob": "80d7bbf0d1109995263f44404284f64d05734169",
+        "path": "scripts/tests/test-install-ps1-utf8.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "542703f53ed2bccd2bb45c879279455c074867bd",
+        "exact_git_blob": "7c193027c500dae552797cf917422d7cd9ba73e4",
+        "path": "scripts/update-test/hermes-update-rehearsal.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "3529fb2491827f1a18d89601724cf862adfab7e1",
+        "exact_git_blob": "d875454651b4c42669ed53b2a712d9d00e4b07f1",
+        "path": "scripts/update-test/smoke-test.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "26a583b3fbc70506d40db8c6ccfd2697c8874898",
+        "exact_git_blob": "b328a7e1e8da4fde3418114158632a4c1fdad3cc",
+        "path": "scripts/windows-build-deps.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "929674f02363018d791d01bf9eea816e3f8e75c9",
+        "exact_git_blob": "b3e229dfd98352dae375e2a67ca804d902b128d7",
+        "path": "scripts/windows_e2e_harness.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "4371c15b7404edaebbb890990da93e3e0446ec7c",
+        "exact_git_blob": "8bb0b64be88019bfdcb9c1871029f7afc354bc9d",
+        "path": "setup-hermes.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "c94bdd8b8d3953f12f2975d10d215aebbcf1fd46",
+        "exact_git_blob": "2b899ad40e9b8e5d7201ccd3ed47b72fe19ee2a6",
+        "path": "tests/install/e2e-assets/desktop-smoke-windows.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "6d3570e7e5df6642cf8bd608702d483e313af6a2",
+        "exact_git_blob": "a49e9ac4a505228b771dd38a81e9946b9ab2f36c",
+        "path": "tests/install/e2e-assets/record-start.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "c344277c3a47ef490ccf9caade4ad86c57adb43f",
+        "exact_git_blob": "594b3a417bf16f46e462d75b38cefb54af3b9fcb",
+        "path": "tests/install/e2e-assets/record-stop.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "d82c8a01dcbbd3f74bf65b5d8aa656b09f234420",
+        "exact_git_blob": "ff4c7994fd9bb522a7e5e3699cec18349a78211b",
+        "path": "tests/install/e2e-assets/source-build-env.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "45ee78dd3ff9566bca94651833c93647573186dd",
+        "exact_git_blob": "706bbeca01133095cd8bd5c4ffa2f66ada9005c8",
+        "path": "tests/install/e2e-assets/source-driver.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "de870c732523bf24bdc0c15bb0b94281182ac237",
+        "exact_git_blob": "cc9acc878055e6ceb9cbffdf0bf55688d810427d",
+        "path": "tests/install/e2e-assets/ts-prefix.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "3a3045db1014b7909665ff8fd0f0f3dc20e12d76",
+        "exact_git_blob": "45d2904b9c3506226c599067bb5f3c30271146a3",
+        "path": "tests/install/e2e-assets/windows-bundle-metadata.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "ec512753ffe846b896b88d5d21a53579422559f8",
+        "exact_git_blob": "e1d9d67ec97268eea5b023769d9bb716e2e45b1b",
+        "path": "tests/install/e2e-assets/windows-bundle-metadata.test.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "16f07fdca49782b91edb5891fde1513db2473736",
+        "exact_git_blob": "544d5f562e463d63a2a61150fade9793deec6e2b",
+        "path": "tests/install/e2e-assets/windows-bundle-plugin-smoke.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "f27fc8ff3f96169548d5715c90f28630b1d29bda",
+        "exact_git_blob": "20b6c66a7c4585c9c400ae434cea1aacc861ce09",
+        "path": "tests/install/e2e-assets/windows-bundled-drive-update.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "49095a962c2dceb8841a3d505e0d7760ff88a0dd",
+        "exact_git_blob": "83018e32cadf49afe3c523cf87654d812bd4ce1e",
+        "path": "tests/install/e2e-assets/windows-bundled-processes.test.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "3a2c55e5b0bc258c5fbc376eafaf3497ba37b1c0",
+        "exact_git_blob": "26cdb812eee107c777cfec0bba3e158d33c0bf5b",
+        "path": "tests/install/windows-bundle-smoke.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "f7afc13211e1245a64cf3b1fe20bbdcbda7eebbf",
+        "exact_git_blob": "307c57efa69a7800f830879c65ab51a028139136",
+        "path": "tests/install/windows-bundled-e2e.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      },
+      {
+        "archive_blob": "cdb7941defc1e27aeebb83d4e1e7eb973553d650",
+        "exact_git_blob": "39702f8cbb570dbdff6184584c6161bef51c4cb9",
+        "path": "tests/install/windows-e2e.ps1",
+        "reason": "Git archive applied declared PowerShell CRLF conversion; restored exact pinned blob bytes"
+      }
+    ],
+    "archive_sha256": "7cf9cadd02b5421a54ffcdefa4b930f8829a7f291fd511e6d66d2aec4ca7d076",
+    "bytes": 243122150,
+    "elapsed_seconds": 11.746,
+    "files": 22553,
+    "ref": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+    "schema": "mastermind.native_source_snapshot.v1",
+    "source": "/tmp/estate-hermes-native-source-ba4ddf9-20261110-c4",
+    "tree": "cd69b1c914e644149423b98211d18789e1161eff"
+  },
+  "pytest_pid": 85128,
+  "returncode": 0,
+  "source": {
+    "control_plane/coo_principal_host.py": "5469b4d1f4b88393a781bbf387efd23f4183c6f504defd6e2a7ec5c2cc99ac24",
+    "control_plane/executive_runtime.py": "363276f69185150e4089fbfe03fcd7121197cc5427a37870169fccf9c59da516",
+    "control_plane/executive_service.py": "b2191c2a96de45ee2ff7dc5cd4e55d6bc9163a6d9b110c45725b8de7d8851016",
+    "control_plane/mission_workspace.py": "61d962771dc9823204d80c5838fc1fe4ae8009b669141db11372a41f9c8ffc20",
+    "control_plane/runtime_namespace_custody.py": "0e4255b9ec9ddda5b613b2bf610156b221aa5efadf51702be0d62ad5f3776cf2",
+    "control_plane/workspace_read_service.py": "291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254",
+    "tests/paperclip_hermes_native_client.py": "7e92d1e619ad47aa7be76b54c2e0658ddfd24ba1588d16698e40bbfdc065cd8c",
+    "tests/test_joint_api_ingress.py": "fa5367923ae15aff15019f3799c3b0edfbb5ec0c8dc162a39a33777bc789dc07",
+    "tests/test_joint_api_project_owner.py": "72f45a1090f3533f1d98c832f852c0aa18d65d2ed489663abd7aff5ab9f16d58",
+    "tests/test_paperclip_hermes_api_transport.py": "cc9f85a25ab863ed7c960c0ee5d5238101610be80e9770716e48e819336ad947"
+  },
+  "source_unchanged": true,
+  "suites": [
+    {
+      "errors": "0",
+      "failures": "0",
+      "hostname": "m2studio",
+      "name": "pytest",
+      "skipped": "0",
+      "tests": "2",
+      "time": "46.043",
+      "timestamp": "2026-11-10T08:23:46.303739-07:00"
+    }
+  ],
+  "tree": "2b791e5ca7d35446dde1837fa95b399901bd59ce"
+}

@@ -1,0 +1,14 @@
+........................................................................ [ 16%]
+........................................................................ [ 32%]
+........................................................................ [ 48%]
+........................................................................ [ 64%]
+........................................................................ [ 80%]
+........................................................................ [ 96%]
+................                                                         [100%]
+=============================== warnings summary ===============================
+tests/test_mastermind_executive_app_asgi.py:39
+  /workspace/scratch/dfef37b7f33a/estate-coo-transaction-qualification/tests/test_mastermind_executive_app_asgi.py:39: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+448 passed, 1 warning in 78.33s (0:01:18)

@@ -1,0 +1,244 @@
+{
+  "schema": "mastermind.source_qualification.v1",
+  "source_manifest_sha256": "8edad79e828276747674775c69a3741c2d4b19c36f3af024bd0430c03fbdaf08",
+  "patch_sha256": "d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d",
+  "working_directory": "/workspace/scratch/dfef37b7f33a/estate-project-help-v6-qualification",
+  "executor_prefix": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -m pytest -q",
+  "runs": [
+    {
+      "name": "actual-authority",
+      "passed": 8,
+      "skipped": 0,
+      "deselected": 0,
+      "seconds": 240.01,
+      "selection": "tests/test_coo_project_help_authority.py",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-authority-current.log",
+        "sha256": "deb035b982742dcd21ecd0300673e57e162ab312d723fa0d2ecfd6ea6c5cd977",
+        "artifact_copy": "evidence/actual-authority.log"
+      }
+    },
+    {
+      "name": "t3-authenticated-api",
+      "passed": 10,
+      "skipped": 0,
+      "deselected": 0,
+      "seconds": 292.73,
+      "selection": "tests/test_t3_project_help_api.py",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/estate-t3-project-help-qualification/api-proof/pytest.log",
+        "sha256": "546ee6c8145b7096048345e4f7b298a2145cf2066ab9f9edfcb5df41a037a616",
+        "artifact_copy": "evidence/t3-authenticated-api.log"
+      }
+    },
+    {
+      "name": "hermes-publication-package",
+      "passed": 12,
+      "skipped": 0,
+      "deselected": 5,
+      "seconds": 8.2,
+      "selection": "integrations/hermes_harness/tests/test_native_project_help.py -k 'not current_source_help and not original_current_help'",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-package.log",
+        "sha256": "e272a630d125b0d90cb4206f778594d7325704b91eb2e4e1c9655aa4a051715d",
+        "artifact_copy": "evidence/hermes-publication-package.log"
+      }
+    },
+    {
+      "name": "hermes-reached-native",
+      "passed": 1,
+      "skipped": 0,
+      "deselected": 0,
+      "seconds": 92.19,
+      "selection": "integrations/hermes_harness/tests/test_native_project_help.py::test_current_source_help_reaches_actual_native_tool_memory_and_prompt",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-positive.log",
+        "sha256": "d1ea90c67abf59e7936e853e8a250999253b88cf18a0a37d2973095da3e5d20e",
+        "artifact_copy": "evidence/hermes-reached-native.log"
+      }
+    },
+    {
+      "name": "hermes-currentness",
+      "passed": 4,
+      "skipped": 0,
+      "deselected": 13,
+      "seconds": 168.03,
+      "selection": "integrations/hermes_harness/tests/test_native_project_help.py -k original_current_help",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-currentness.log",
+        "sha256": "2e19245388a445cc3f6114251dcde6075e3feef1c05c403200c3a32fcfaf17a9",
+        "artifact_copy": "evidence/hermes-currentness.log"
+      }
+    },
+    {
+      "name": "company-capacity-main",
+      "passed": 3,
+      "skipped": 0,
+      "deselected": 0,
+      "seconds": null,
+      "selection": "tests/test_coo_project_help_avenues.py",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-avenues-full.log",
+        "sha256": "f9397891a150274e06a663998d578da0d61b1b659baa6e1903337107b541c0a4",
+        "artifact_copy": "evidence/company-capacity-main.log"
+      }
+    },
+    {
+      "name": "company-capacity-revocation",
+      "passed": 1,
+      "skipped": 0,
+      "deselected": 0,
+      "seconds": 46.97,
+      "selection": "tests/test_coo_project_help_avenues.py::test_original_company_grant_rotation_during_outer_bracket_withholds_result",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-avenues-revocation.log",
+        "sha256": "8a526473ac25919278c23db74f87329321b65fb37afc9a73583648128ab3abc4",
+        "artifact_copy": "evidence/company-capacity-revocation.log"
+      }
+    },
+    {
+      "name": "installed-factory",
+      "passed": 1,
+      "skipped": 0,
+      "deselected": 2,
+      "seconds": 25.36,
+      "selection": "tests/test_coo_project_help_ingress.py -k installed_factory",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-help-factory.log",
+        "sha256": "82d428e899df3cbac5eb356f7b5d25266593aba6ea66e36522928a37683ef676",
+        "artifact_copy": "evidence/installed-factory.log"
+      }
+    },
+    {
+      "name": "company-parser-legacy",
+      "passed": 132,
+      "skipped": 0,
+      "deselected": 0,
+      "seconds": 1.24,
+      "selection": "tests/test_paperclip_connections.py tests/test_paperclip_agent_context.py tests/test_long_horizon_guidance.py",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-company-parser-legacy.log",
+        "sha256": "18c7c7749777c2a503f490ecf6cd21eea2d30ff63fb5293d25adbd96b7e7086b",
+        "artifact_copy": "evidence/company-parser-legacy.log"
+      }
+    },
+    {
+      "name": "legacy-coo-context-profile",
+      "passed": 317,
+      "skipped": 0,
+      "deselected": 2,
+      "seconds": 31.19,
+      "selection": "tests/test_executive_coo_host.py tests/test_coo_principal_mandate.py tests/test_executive_coo_install_binding.py tests/test_executive_coo_agentos_context.py tests/test_executive_agent_capabilities.py -k 'not signed_mcp_roundtrip'",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-legacy-coo-focused.log",
+        "sha256": "311cb287c01b5bfe13d6c9a1ca811cec64959f2461ffdf9906fdce2a5f0992ca",
+        "artifact_copy": "evidence/legacy-coo-context-profile.log"
+      }
+    },
+    {
+      "name": "legacy-capability-missing-fixture-replay",
+      "passed": 4,
+      "skipped": 0,
+      "deselected": 73,
+      "seconds": 0.59,
+      "selection": "tests/test_executive_agent_capabilities.py -k bounded_policy_source_capability_exact_limit",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-capability-recovered.log",
+        "sha256": "cfe94492495fbb1c1f50068007d03eb1891369f53719433a3930fa199cea112d",
+        "artifact_copy": "evidence/legacy-capability-missing-fixture-replay.log"
+      }
+    },
+    {
+      "name": "legacy-native-main",
+      "passed": 113,
+      "skipped": 11,
+      "deselected": 0,
+      "seconds": null,
+      "selection": "integrations/hermes_harness/tests/test_native_executive_consumer.py integrations/hermes_runtime/tests/test_native_agentos_memory.py",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-legacy.log",
+        "sha256": "86d81355cca979788a558ae2e29c69e1179f69b7379de3eb67c928f8510bb5da",
+        "artifact_copy": "evidence/legacy-native-main.log"
+      }
+    },
+    {
+      "name": "legacy-native-missing-fixture-replay",
+      "passed": 10,
+      "skipped": 0,
+      "deselected": 71,
+      "seconds": 10.4,
+      "selection": "integrations/hermes_runtime/tests/test_native_agentos_memory.py -k 'v2_config_uses_agentos or supervisor_separates_context or v2_isolated_installation or v2_refuses_original or context_v2_recipe_requires'",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-legacy-recovered.log",
+        "sha256": "fc06cde9ea3ef5d2fbc69623d6cc05ea033409c2a539a0d60c3194aa75bbe1b6",
+        "artifact_copy": "evidence/legacy-native-missing-fixture-replay.log"
+      }
+    },
+    {
+      "name": "legacy-native-profile-replay",
+      "passed": 1,
+      "skipped": 0,
+      "deselected": 81,
+      "seconds": 3.58,
+      "selection": "integrations/hermes_runtime/tests/test_native_agentos_memory.py -k 'v2_config_uses_agentos or supervisor_separates_context'",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-legacy-profile.log",
+        "sha256": "dbecfda631ffa46cc168d367042d0f179328aec55d9536a20e34cc2a073d0840",
+        "artifact_copy": "evidence/legacy-native-profile-replay.log"
+      }
+    },
+    {
+      "name": "legacy-native-config-replay",
+      "passed": 1,
+      "skipped": 0,
+      "deselected": 82,
+      "seconds": 2.0,
+      "selection": "integrations/hermes_runtime/tests/test_native_agentos_memory.py -k v2_config_uses_agentos",
+      "log": {
+        "path": "/workspace/scratch/dfef37b7f33a/eg2-native-legacy-config-qualified.log",
+        "sha256": "638e8779a3f560e014f9921ad26e01badb1115a1a2eaa893132f306c4c12c0af",
+        "artifact_copy": "evidence/legacy-native-config-replay.log"
+      }
+    }
+  ],
+  "pending_host_replay": {
+    "command": "python -m pytest -q tests/test_coo_project_help_ingress.py",
+    "service_cases": 2,
+    "executor_service_execution": "NOT_ATTEMPTED",
+    "required_capability": "AF_UNIX; real original Control service and Runtime namespace",
+    "no_mocked_private_dispatch": true,
+    "collection_log": {
+      "path": "/workspace/scratch/dfef37b7f33a/eg2-help-ingress-collect.log",
+      "sha256": "ae087fb6b4ae690f31575d6492fd27dd70c063cd601d576632e297f41114d8ec",
+      "note": "Two real service cases collected before addition of the separately passing factory case; the full file now contains three tests."
+    }
+  },
+  "limitations": [
+    "No installed activation, credential changes, model turn or provider dispatch.",
+    "Native lifecycle proofs execute pinned attributed upstream bodies at explicit model/PluginManager/credential/source-seal/service fixture boundaries.",
+    "T3 API proof uses actual signed SDK/App source/profile; its private Control hop is explicit same-process callback.",
+    "Company lowest network edge supplies recorded source rows; real Paperclip client/binding/service/sanitizers run. Capacity uses the real Workspace handler and ExistingCapacityFabricSource with explicit in-process transport edge.",
+    "Root seal/process UID in installed-factory case are explicit incumbent fixture edges, not installed custody.",
+    "Initial broad legacy MCP batch was interrupted and is not qualification evidence; it included an incumbent socket case. New v6 service cases remain host-pending and were not executed here."
+  ],
+  "corrected_runs": {
+    "company-capacity-main": "One final error-envelope assertion expected absent data instead of existing data:null; corrected only that test assertion and replayed its actual owner case successfully. Other three cases passed in the recorded full run.",
+    "legacy-coo-context-profile": "One missing unchanged capability fixture caused an additional failure; recovered exact957 bytes and replayed affected parametrization.",
+    "legacy-native-main": "Twelve missing unchanged dependency fixtures caused additional failures; exact957 recovery and focused reruns are recorded, never production/test-semantic replacement.",
+    "legacy-native-profile-replay": "Supervisor case passed; only config case remained blocked by missing unchanged Steward/qualification YAML and preflight dependencies, all recovered at exact957. Its final affected case passed separately."
+  },
+  "separate_proof_manifests": [
+    "/workspace/scratch/dfef37b7f33a/eg2-authority-qualification.json",
+    "/workspace/scratch/dfef37b7f33a/estate-t3-project-help-qualification/api-proof/source_manifest.json"
+  ],
+  "qualification_outcome": {
+    "new_read_consumer_cases_passed": 40,
+    "legacy_native_unique_passed": 125,
+    "legacy_native_vendor_skips": 11,
+    "legacy_coo_context_profile_unique_passed": 318,
+    "legacy_company_parser_passed": 132,
+    "t3_handoff_separate_dependency_passed": 111,
+    "new_real_unix_service_cases_pending_m2": 2,
+    "source_semantic_repairs_after_freeze": 0
+  }
+}

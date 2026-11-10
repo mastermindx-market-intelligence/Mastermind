@@ -1,0 +1,85 @@
+{
+  "boundaries": [
+    "Actual disposable Git/adoption/current DATA/ProjectExecution admission/Runtime/Workspace providers run.",
+    "Existing fixture credential/source-seal, physical execution binding and workspace preparation edges remain inert and explicit.",
+    "No AF_UNIX, installed profile activation, provider execution, external repository mutation or native attribution was performed.",
+    "Resource Mission remains PARTIAL with dispatch_evidence_not_supplied; generic mandate rejects resource observation.",
+    "Retained private input authority is explicitly absent and current adoption is not read by this resource slice.",
+    "T3 reached UI consumer is a separate coordinated source artifact; no generic active Mission/action selection change."
+  ],
+  "evidence": [
+    {
+      "bytes": 597,
+      "path": "selected-resource-positive.log",
+      "sha256": "61aa8cf1b8edeed5e978fe91b21e7a6444cc621345d60ae38bb5d22013c6c827"
+    },
+    {
+      "bytes": 411,
+      "path": "selected-resource-positive.xml",
+      "sha256": "6fbd23b61b0097ddc993abe8c774b50f6f48fba4a4b2900d03cc9210da48f4a9"
+    },
+    {
+      "bytes": 587,
+      "path": "selected-resource-qualification.log",
+      "sha256": "6e02c9d064108775546626d55c93cec9f263e5d6ffafc581bf06eee00a19772a"
+    },
+    {
+      "bytes": 8443,
+      "path": "selected-resource-qualification.xml",
+      "sha256": "c30fd0bbfe805474d9853fefd3c49964892354d20d964c7ed070fb2e3d0d2744"
+    },
+    {
+      "bytes": 597,
+      "path": "selected-resource-self-contained.log",
+      "sha256": "36385de045035fc954f8e1ad1d2144cf820e63502071a067a39c87e628031bed"
+    },
+    {
+      "bytes": 411,
+      "path": "selected-resource-self-contained.xml",
+      "sha256": "0a9fa4f340c45daafafe8467bcb9ad40f2b10febbdc164c3fe81ed8149777422"
+    },
+    {
+      "bytes": 598,
+      "path": "selected-resource-final.log",
+      "sha256": "65aaf6be6c5cb0cb99c4cf2d07ac06516a330af983743f8b6527e6f9e6ad9fa3"
+    },
+    {
+      "bytes": 3701,
+      "path": "selected-resource-final.xml",
+      "sha256": "ae6ad0788105950762826044b2240edce1180e48b01cfd82340ac6dfcebfaf2d"
+    }
+  ],
+  "failed_cases": 0,
+  "full_replay_targets": [
+    "tests/test_project_execution_resource_read.py",
+    "tests/test_project_execution_resource_contract.py",
+    "tests/test_project_execution_factory.py",
+    "tests/test_project_execution_service.py::test_new_project_background_service_completes_nested_team_after_request_closes",
+    "tests/test_project_discovery_installed_plan.py::test_actual_create_default_reload_programs_and_explicit_runtime_mission"
+  ],
+  "replay_prefix": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q",
+  "runs": [
+    {
+      "cases": 49,
+      "log": "selected-resource-qualification.log",
+      "scope": "actual bounded DATA/history/resource owners, original factories/service and legacy default Programs/Mission; prior to final malformed-false hardening and test helper inlining",
+      "seconds": 256.74
+    },
+    {
+      "cases": 1,
+      "log": "selected-resource-self-contained.log",
+      "scope": "actual owner positive after inlining byte/AST-equivalent signed-principal test helper; no unpublished readiness-test dependency",
+      "seconds": 53.6
+    },
+    {
+      "cases": 20,
+      "log": "selected-resource-final.log",
+      "scope": "final actual owner positive plus19 closed-wire contract cases including5 malformed non-boolean authority flags",
+      "seconds": 52.45
+    }
+  ],
+  "schema": "mastermind.source_qualification.v1",
+  "source_manifest_sha256": "f457aff5c77d57b4b32d9ce5d0d9cf0ded9629c0b792da0278199f6e0c78e6d6",
+  "test_helper_inlining_ast_equal": true,
+  "unique_passed_cases": 54
+}

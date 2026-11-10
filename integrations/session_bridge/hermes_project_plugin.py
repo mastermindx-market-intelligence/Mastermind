@@ -161,7 +161,7 @@ def register(ctx: Any, *, lineage_reader=None) -> None:
             _LOG.warning("Mastermind source-plan binding unavailable; no stable section supplied")
             return ""
 
-    def read_bound(session_id: str) -> dict | None:
+    def read_source(session_id: str) -> dict | None:
         if not current():
             raise PlanContextError("HERMES_REGISTRATION_NOT_CURRENT")
         resolved = _binding(ctx, session_id, lineage_reader)
@@ -177,6 +177,21 @@ def register(ctx: Any, *, lineage_reader=None) -> None:
         context["native_plan_binding"] = {"current_session_id": session_id,
             "configured_session_id": configured_id,
             "relation": "EXACT_CONFIG" if configured_id == session_id else "NATIVE_COMPRESSION_CONTINUATION"}
+        return context
+
+    def read_bound(session_id: str) -> dict | None:
+        context = read_source(session_id)
+        slot = getattr(getattr(ctx, "_manager", None), "_mmx_native_executive_consumer", None)
+        if context is None or getattr(getattr(slot, "publication", None), "project_help", None) is None:
+            return context
+        from integrations.hermes_harness.native_project_help import project_context_help, unavailable
+        context = project_context_help(ctx, session_id, context)
+        try:
+            render_context(context)
+        except PlanContextError:
+            # Preserve every source-plan field. Do not trim original objectives
+            # or tasks in order to insert an oversized help observation.
+            context["project_help"] = unavailable("PROJECT_HELP_CONTEXT_OVER_BUDGET")
         return context
 
     def current_plan(session_id: str = "", **_unused: Any) -> dict | None:
@@ -229,6 +244,10 @@ def register(ctx: Any, *, lineage_reader=None) -> None:
                 entry = registry.get_entry(TOOL_NAME, scope=manager.scope_key)
                 if entry is None or entry.handler is not read_tool or entry.schema != TOOL_SCHEMA:
                     raise PlanContextError("HERMES_CONTEXT_TOOL_READBACK_MISMATCH")
+                slot = getattr(manager, "_mmx_native_executive_consumer", None)
+                if getattr(getattr(slot, "publication", None), "project_help", None) is not None:
+                    from integrations.hermes_harness.native_project_help import register_source_context
+                    register_source_context(ctx, reader=read_source, lease_current=current, handler=read_tool)
         except Exception:
             live["ready"] = False
             for lease in reversed(leases):

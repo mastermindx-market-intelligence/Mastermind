@@ -1,0 +1,174 @@
+{
+  "artifacts": [
+    {
+      "path": "budget-negatives.log",
+      "sha256": "87a8500fcefb5b61649a49aa4469803924f7b71670281248db6cbfdd7152f3d4"
+    },
+    {
+      "path": "budget-negatives.xml",
+      "sha256": "1e9dbc4fce9329d007bfcede0e5d73af2abcb06b3e0f26d31ea55fdae58bb80d"
+    },
+    {
+      "path": "budget-consumer-regression.log",
+      "sha256": "a4262a98112a209f9af76b592d958ba4b1457599a744bfefd4c6c1ccac103e8b"
+    },
+    {
+      "path": "budget-consumer-regression.xml",
+      "sha256": "e3ef4fdf579c443e749df579c8b1be796a7ae160345bb1af976376d5cad661ca"
+    },
+    {
+      "path": "budget-recovered-fixture.log",
+      "sha256": "364fae48cbe8f4ef8e995f8fb3224d43792e784eb9919ceefea2fe0106918edf"
+    },
+    {
+      "path": "budget-recovered-fixture.xml",
+      "sha256": "836fe650a4cfb1941c7d99a61d14fd4811b8d21471e6decf906b70be6bcc0f8a"
+    },
+    {
+      "path": "budget-positive-current.log",
+      "sha256": "5739ffad254bd7f1e671af3d427a4b8466aa7a8d0c501a0a1cb4f84253d0b72c"
+    },
+    {
+      "path": "budget-positive-current.xml",
+      "sha256": "ad7efcdd4102ecdad10f83f6e46a3854c5941780f6e4364cbc9bae8c7a0aa627"
+    },
+    {
+      "path": "budget-deadline-shape.log",
+      "sha256": "cbd2bb6e5722ca5d83f74cd764c8f2e440317341623c9d405f4d53461d6cd094"
+    }
+  ],
+  "budget_carrier_sha256": "9ec4c227c17e06cb59147523ea61f1a164b5813837fda5511868931b234a18ba",
+  "commands": {
+    "consumer_regression": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q tests/test_coo_project_help_budget.py::test_same_issuer_replacement_does_not_replace_original_read_binding tests/test_t3_project_help_api.py::test_prepared_t3_guidance_reaches_real_authenticated_current_help tests/test_t3_project_help_api.py::test_owned_capture_keeps_loop_live_and_cancellation_joins_original_read tests/test_project_discovery_installed_plan.py::test_real_current_n_plan_uses_installed_collector_and_pinned_c_child tests/test_project_discovery_installed_plan.py::test_actual_late_latest_grant_withdrawal_withholds_completed_child tests/test_project_discovery_installed_plan.py::test_actual_create_default_reload_programs_and_explicit_runtime_mission tests/test_agentos_project_plan_source.py --tb=short --junitxml=budget-consumer-regression.xml",
+    "negative_owner_suite": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q tests/test_coo_project_help_budget.py tests/test_coo_project_help_authority.py::test_actual_plan_read_cannot_release_after_original_mission_revocation -k 'not actual_private_help_uses_two and not deadline_cannot_expand' --tb=short --junitxml=budget-negatives.xml",
+    "recovered_fixture": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q tests/test_agentos_project_plan_source.py::test_frontend_wire_fixture_is_actual_bounded_macro_parser_output --tb=short --junitxml=budget-recovered-fixture.xml"
+  },
+  "cwd": "/workspace/scratch/dfef37b7f33a/estate-project-help-budget-qualification",
+  "evidence": [
+    "Actual private help uses two DATA views for four original physical collector children and closes both issued captures.",
+    "Original late permission/adoption/discovery-owner changes, missing or foreign Plan enrollment and both 25-second next-stage expiries refuse without Runtime Event writes.",
+    "Authentic owner reissuance and explicitly adversarial equal-valued nominal-token copy both refuse at original-owner currentness.",
+    "Actual T3 API-principal SDK/App authenticated help consumer passes; private service hop in this fixture remains same-process, not Unix ingress.",
+    "Unchanged actual cancellation proof keeps event loop live, cancels caller, joins original off-loop capture before returning cancellation and makes zero SessionBridge target calls.",
+    "Legacy installed Plan/default Programs/Mission and parser source checks pass; deadline omission keeps old behavior."
+  ],
+  "limits": [
+    "No live installation, profile, credential, provider, GitHub or M2 mutation.",
+    "No executor AF_UNIX attempt. Parent owns actual host ingress qualification.",
+    "25-second cooperative composition deadline does not preempt blocking operating-system calls; original read ownership is retained and joined.",
+    "Original DATA15-second caps and client30-second cap unchanged."
+  ],
+  "production_postimages": [
+    {
+      "git_blob": "39f7f5de7f4063b7d94ab1b2b16169a290b717a0",
+      "path": "control_plane/agentos_project_plan.py",
+      "sha256": "f176a0aa2031c46d165c25eb3e5407e58bdcaf7df2d7368a007eb4145ff1dcda"
+    },
+    {
+      "git_blob": "fd9e56f7d7955dadd26159a60e3d331617af6df1",
+      "path": "control_plane/coo_project_help_read.py",
+      "sha256": "d237e556c5e9c20e65f12f214a44dceda2288fdd6ab103151d9fd0ed0a85f664"
+    },
+    {
+      "git_blob": "8d98896e0124c677c4f003055ff4bce8107a2918",
+      "path": "control_plane/installed_canonical_project_data_binding.py",
+      "sha256": "eacc64df641d15c1660e1f5d5fb5129cd5bae256cbafc89f6b2735e0b5a08888"
+    },
+    {
+      "git_blob": "1a3268d339884003f1aa43ef20011dc847024dc4",
+      "path": "control_plane/installed_project_discovery_binding.py",
+      "sha256": "b1cecbdb3e9e55759b215edea1e16bda7758ed5d9df1d1888d77041eed2177c8"
+    },
+    {
+      "git_blob": "37a637a537d1a7084dc36209293298c72700a5eb",
+      "path": "control_plane/installed_project_read_binding.py",
+      "sha256": "c863b1ed408b931dba5cbce80f6f9ce5a2206946b6e47d2b3ebd490deef4e251"
+    },
+    {
+      "git_blob": "48dfa5c554bf86aa7f12ac70fd7b60b0bb9ce09f",
+      "path": "control_plane/project_canonical_data.py",
+      "sha256": "3a666644c20358c2524b9bc36d7dfbd2d55018e0704bd98f0f9faaecd5043aa7"
+    },
+    {
+      "git_blob": "918626080c1f0af65fd38725bd2df52175305e7d",
+      "path": "control_plane/workspace_owned_task.py",
+      "sha256": "2698215154edf13fcadc882e3cde972b015b6dbfa22a04610ebe76773cba8e90"
+    },
+    {
+      "git_blob": "03bcd157153c3bd17ebbbcf8bef035c3b5eadddc",
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "sha256": "a28452b9b9822264cbc6e97497ae1e41c691d312f8d23db14e850c5878ebb7ec"
+    },
+    {
+      "git_blob": "8514e0633f595ac2ed8baa9213f4e5429f262ff9",
+      "path": "control_plane/workspace_project_git_publisher.py",
+      "sha256": "df941392dad0a5cd0bb5b644183f15c388b1ceb27659c84a1acb4a7b80823f7d"
+    },
+    {
+      "git_blob": "471eb0550b3d8a8006d01a1b827649182fb3107c",
+      "path": "control_plane/workspace_read_service.py",
+      "sha256": "0b1f326f26c08438c1c97d01f0510b623a3804aeab51c76eebec9dd375903217"
+    },
+    {
+      "git_blob": "9764db88e201dff5c7938099b1879938b22c7096",
+      "path": "integrations/executive_mcp/installed.py",
+      "sha256": "011446cb6d35528824e90f033deb571944dbbb84d8ec53654fa32f077219937d"
+    },
+    {
+      "git_blob": "4787451c3caf0b10790230289f3149289666c029",
+      "path": "integrations/mastermind_workspace_app/canonical_project_data.py",
+      "sha256": "60f11c4604e2c1b8084bce9b1f237571dd4320f812de4e81d90ba4bfa8fc1f94"
+    },
+    {
+      "git_blob": "89642904292f61a5e65fbfaa671deaec046f9dd8",
+      "path": "integrations/mastermind_workspace_app/project_discovery.py",
+      "sha256": "49e2a77c0a2f2200f9488a9c2ea6f15e375fdac872b64636c1f18ebfdbf5a0c3"
+    },
+    {
+      "git_blob": "c18d98857ca114fbe47fa27353d71b68261eec8b",
+      "path": "tests/test_coo_project_help_authority.py",
+      "sha256": "78bb81ebf8082400d5daacc10e1367429e0eb194db6c9594216b31c3b4e41104"
+    }
+  ],
+  "production_unchanged_from_frozen_carrier": true,
+  "recovered_fixture": {
+    "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "git_blob": "c364d3e17165db06e082ec3d3d62b9593abbb2d7",
+    "path": "app/mastermind_os/src/fixtures/project-plan-canonical-owner.json",
+    "sha256": "e78599164d148fcd4a8095cfc4416e64d670e603dc62aad61653c2c2af82751b"
+  },
+  "runs": [
+    {
+      "name": "actual_shared_acquisition",
+      "passed": 1,
+      "seconds": 58.7
+    },
+    {
+      "name": "deadline_shape_maximum",
+      "passed": 4,
+      "seconds": 12.62
+    },
+    {
+      "failed": 1,
+      "failure": "Test precondition: original installed_binding emits a new qualifier lambda, so authentic reissued tokens are not dataclass-equal. No owner replacement or source effect occurred at the failing assertion.",
+      "name": "negative_owners_before_test_correction",
+      "passed": 8,
+      "seconds": 361.06
+    },
+    {
+      "failed": 1,
+      "failure": "Unchanged exact957 frontend fixture absent in isolated checkout; canonical parser output itself ran.",
+      "name": "corrected_binding_sdk_cancel_and_legacy_regression",
+      "passed": 17,
+      "seconds": 219.92
+    },
+    {
+      "failed": 0,
+      "name": "recovered_exact_base_fixture",
+      "passed": 1,
+      "seconds": 0.26
+    }
+  ],
+  "status": "PROVEN_SOURCE_READ_INCREMENT_HOST_INGRESS_SEPARATE",
+  "unique_passed": 31
+}

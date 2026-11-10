@@ -1,0 +1,85 @@
+{
+  "artifacts": [
+    {
+      "bytes": 5574,
+      "path": "QUALIFICATION.md",
+      "sha256": "1c509c60143e20dcf89e8d8c786870937979edcb0504564911aca4221a713710"
+    },
+    {
+      "bytes": 2964,
+      "path": "provider-scanner-glob-fast-path.patch",
+      "sha256": "55fbe3900e64baae31046f39cbf492e2a4384a6eb49fd8c0b7bd19d17d79dc24"
+    },
+    {
+      "bytes": 906,
+      "path": "scanner-affected.log",
+      "sha256": "9cfef07679069e68f49218920d984d6afd92983d2947f08f6a51333eff69b18e"
+    },
+    {
+      "bytes": 1998,
+      "path": "scanner-ci-failure.log",
+      "sha256": "88654956dfa4c1c40bcdb3aab437907c45ab7adf898c0898989a25d2032d2180"
+    },
+    {
+      "bytes": 183,
+      "path": "scanner-lexical-before.log",
+      "sha256": "833deb52724340d37a49a94293d523b18344264b91690855b7a770e4eb07d507"
+    },
+    {
+      "bytes": 2109,
+      "path": "scanner-serial-comparison.log",
+      "sha256": "a1dca70df7444291ee707dd435cf3cf6bfd182f8727e7c77d500138d80ef8997"
+    },
+    {
+      "bytes": 3551,
+      "path": "scanner_probe.py",
+      "sha256": "e441515a36bdf851f9b9f323e09cacbdbf3c1001bb1ca63b912aa77928e6dfc8"
+    }
+  ],
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "files": [
+    {
+      "after_git_blob": "3f7f3b44a10e24923744368c8a08b39f8d54c372",
+      "after_sha256": "ab4c5190fd8a536ffed9d77bcbf6ab2a3e2d73164351fc7e479a4fa3389b644c",
+      "before_git_blob": "5cb9470dee6d61cfda12bffb6d7aebbf3d394ef6",
+      "before_sha256": "12b43256cb26d2f5e70bf9746a6ae3cf1e81bc9bac2bddba76c95035ad7bfdc3",
+      "mode": "100644",
+      "path": "ops/executive_os/provider_orchestrator_guard.py",
+      "postimage": "postimage/ops/executive_os/provider_orchestrator_guard.py"
+    },
+    {
+      "after_git_blob": "5953a905057e75aaa9db078d702a59064e71b59f",
+      "after_sha256": "c167fae43ecd51fbdae948546936d94efde70e447eb409b0a6d19e34047f9fbe",
+      "before_git_blob": null,
+      "before_sha256": null,
+      "mode": "100644",
+      "path": "tests/test_provider_orchestrator_glob_fast_path.py",
+      "postimage": "postimage/tests/test_provider_orchestrator_glob_fast_path.py"
+    }
+  ],
+  "patch": {
+    "path": "provider-scanner-glob-fast-path.patch",
+    "sha256": "55fbe3900e64baae31046f39cbf492e2a4384a6eb49fd8c0b7bd19d17d79dc24"
+  },
+  "qualification": {
+    "comparison_cases": 223,
+    "decision_differences": 0,
+    "local_result": "104 passed, 1242 deselected, 1 warning in 17.62s",
+    "original_escape_rows": 18,
+    "patch_replay_exact": true,
+    "raw_absence_cases": 111,
+    "unchanged_timing_cap_seconds": 3
+  },
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "runtime_effects": false,
+  "schema": "mastermind.source_patch_manifest.v1",
+  "source_only": true,
+  "unchanged_tests": [
+    {
+      "git_blob": "37ecdae9bb1065fbb109ee9c41afe632934b6095",
+      "path": "tests/test_provider_orchestrator_policy.py",
+      "sha256": "c69aaed76033801596df2ba1cb090e4996fcc7706366c5f4f63e49c36c140242"
+    }
+  ],
+  "workflow_reruns": 0
+}

@@ -1,0 +1,7 @@
+# Native source provenance
+
+The finite qualification uses exact locally verified PM checkout commit `ba4ddf9945a213ede9dda016602a86591ed634f9`, tree `cd69b1c914e644149423b98211d18789e1161eff`. The original local Git remote is configured as `https://github.com/NousResearch/hermes-agent.git`. All22,553 original tracked blobs were verified in the private original snapshot; the candidate changes one production file and adds one test file, leaving22,552 tracked blobs unchanged.
+
+A configured remote is not proof that the local commit is published there. The source owner's GitHub Contents lookup returned404 with no commit found for that ref. The parent's separate direct source fetch returned429 before content, so it did not resolve or contradict the source owner's finding. No upstream release, remotely fetchable native commit, native fork publication or installation is claimed. The exact local commit/tree, patch bytes, production/test postimages, actual dependency facts and original transport receipts supply this qualification's provenance.
+
+The patch envelope's repository field identifies the observed configured origin. To reproduce the native proof, use the exact retained local source snapshot and frozen patch; do not substitute current upstream bytes or infer permission to alter the protected live checkout. The prior companion candidate is being adapted through its original credential/cutover owner separately.

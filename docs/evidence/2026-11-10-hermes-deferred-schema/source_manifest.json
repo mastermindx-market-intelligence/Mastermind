@@ -1,0 +1,34 @@
+{
+  "activation": "SOURCE_ONLY_NOT_INSTALLED",
+  "candidate_path": "/tmp/estate-hermes-native-deferred-schema-ba4ddf9-20261110-c4",
+  "files": [
+    {
+      "bytes": 33052,
+      "path": "tools/tool_search.py",
+      "postimage_git_blob": "dee2fd2f2eba7e55e83d02b1ca2bada58293580a",
+      "postimage_sha256": "bcaf4ed695a5493fdda421f7c969db5a6fd9cf06d8ad92a8cb546c3326f52866",
+      "preimage_git_blob": "4657a8e44a9c3530597d3de803374fbde0163418",
+      "preimage_sha256": "87e06c029304dae1ff1f592fa97f238165a04f1406cbdab68a2e3a0c3fd489a5"
+    },
+    {
+      "bytes": 7388,
+      "path": "tests/tools/test_tool_search_deferred_schema.py",
+      "postimage_git_blob": "8258d339640b23380b8b905cc9bd900fe1080de6",
+      "postimage_sha256": "1befb7516c76eb1b59ef78c61b15113703ddeaea82712a6a5011b6218d38f4ee",
+      "preimage_git_blob": null,
+      "preimage_sha256": null
+    }
+  ],
+  "native_base_ref": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "native_base_tree": "cd69b1c914e644149423b98211d18789e1161eff",
+  "patch_sha256": "57bbd40fc9949103ee3834ed83fe3bd46f1ec18d365618eda7bde5069621a332",
+  "qualification": {
+    "actual_native_cases": 6,
+    "actual_native_sdk": "mcp 2.3.0; httpx2/httpcore2 2.15.1; Python 3.14.9",
+    "canonical_delegation_schema_preflight": "PASS; discovery and inert dispatcher only",
+    "full_API_lifecycle": "PENDING",
+    "model_provider_or_network_used": false
+  },
+  "schema": "mastermind.source_increment.v1",
+  "unchanged_tracked_blobs_verified": 22552
+}

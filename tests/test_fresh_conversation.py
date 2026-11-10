@@ -18,12 +18,15 @@ import pytest
 from common import fresh_conversation_contract as wire
 from common.session_bridge_private_contract import PRIVATE_SCHEMA
 from control_plane import fresh_conversation as module
-from control_plane.executive_operator_supervisor import ExecutiveOperatorSupervisor
+from control_plane.executive_operator_supervisor import (
+    ExecutiveOperatorSupervisor, ExecutiveOperatorSupervisorError,
+)
 from control_plane.executive_runtime import JobStatus, Runtime
 from control_plane.executive_service import CeoIngressAppBinding, ExecutiveControlService
 from control_plane.executive_supervisor import ExecutiveSupervisor
 from control_plane.foreground_operation import _session_bridge_foreground_dispatch
 from control_plane.principal_projection import neutral_principal_projection
+from control_plane.remote_codex_operator_adapter import codex_remote_capabilities
 from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
 from integrations.company_consultation_host import CompanyConsultationHost
 from tests.test_executive_service import _config, _source_repository
@@ -32,6 +35,11 @@ from tests.test_session_bridge_installed import principal_frame
 from tests.test_workspace_read_service import cache_fixture
 from control_plane.workspace_read_service import WorkspaceReadService
 from common.executive_workspace_contract import RESOURCE, SCOPE, PRINCIPAL_KEYS
+
+
+class _ForbiddenBrokerTransport:
+    def request_sync(self, *_args, **_kwargs):
+        raise AssertionError("fresh conversation fixture forbids physical broker transport")
 
 
 def case(tmp_path, principal=None, *, runtime_override=None, workspace_override=None, workspace_reader_override=None, work_ref_override=None):
@@ -57,7 +65,8 @@ def case(tmp_path, principal=None, *, runtime_override=None, workspace_override=
         # RemoteAdapter guard implementation and check it at the same writes.
         def __init__(self, runtime, loader):
             _NativeAdapter.__init__(self, runtime, loader, cancel_during_collect=False)
-            self._fresh_effect_guard = self._foreground_attempt_id = None
+            RemoteOperatorHarnessAdapter.__init__(self, _ForbiddenBrokerTransport(),
+                turn_input_loader=loader, capabilities=codex_remote_capabilities())
             self.start_calls = 0
         def start_session(self, **kwargs):
             hook = getattr(service, "_fixture_before_native_io", None)
@@ -129,6 +138,29 @@ def case(tmp_path, principal=None, *, runtime_override=None, workspace_override=
     owner._fixture_workspace_principal = workspace_principal
     owner._fixture_catalogue = owners, clock
     return service, runtime, owner, principal, request, adapters
+
+
+def test_fresh_fixture_preserves_producer_guard_and_forbids_physical_transport(tmp_path):
+    from control_plane.executive_orchestration_result import PLAN_SCHEMA_V3
+    from tests.test_executive_operator_supervisor import (
+        _PromptSource, _seed_dispatchable_operator_planner,
+    )
+
+    service, _, _, _, _, _ = case(tmp_path / "fresh")
+    adapter = service.operator_supervisor.adapter_factory(lambda _turn: "")
+    adapter.require_planner_producer(None)
+    assert adapter.describe_capabilities() == codex_remote_capabilities()
+    runtime, _, planner = _seed_dispatchable_operator_planner(
+        tmp_path / "versioned", plan_schema_version=PLAN_SCHEMA_V3)
+    supervisor = ExecutiveOperatorSupervisor(runtime,
+        adapter_factory=lambda _loader: adapter, prompt_source=_PromptSource())
+    before = runtime.events.list_events()
+    with pytest.raises(ExecutiveOperatorSupervisorError, match="producer custody differs"):
+        supervisor._require_adapter_contract(planner, adapter)
+    assert runtime.events.list_events() == before
+    assert adapter.start_calls == adapter.begin_turn_calls == 0
+    with pytest.raises(AssertionError, match="forbids physical broker transport"):
+        adapter.client.request_sync("ohf-validate", {})
 
 
 async def preview(owner, principal, request):

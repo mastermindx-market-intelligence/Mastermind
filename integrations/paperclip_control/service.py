@@ -6,6 +6,7 @@ Every invocation uses the existing Workspace principal and one configured compan
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from .contract import (
@@ -166,7 +167,8 @@ class PaperclipWorkspace:
         company, observed_revision = await asyncio.gather(self._company(), self._health())
         result = {"schema": SCHEMA, "state": "CURRENT", "view": selected["view"],
                   "company": company, "bindingRevision": self.binding.revision,
-                  "scopeKey": self.binding.scope(self.principal), "observedAt": timestamp(),
+                  "scopeKey": self.binding.scope(self.principal),
+                  "observedAt": datetime.fromtimestamp(self.now(), timezone.utc).isoformat().replace("+00:00", "Z"),
                   "sourceRevision": observed_revision, "qualifiedRevision": self.binding.source_revision,
                   "capabilities": [], "collections": {}, "item": None,
                   "ownership": {"work": self.binding.work_owner, "wake": self.binding.wake_owner,

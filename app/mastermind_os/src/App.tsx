@@ -85,6 +85,7 @@ import { RetainedResults } from "./RetainedResults";
 import { RetainedActivityInspector, type RetainedActivityReader } from "./planning/RetainedActivityInspector";
 import { validActivitySelection } from "./planning/retained-activity";
 import { RetainedRootChoice } from "./RetainedRootChoice";
+import { canChooseRetainedHistory, isProjectExecutionHistoryRoot } from "./project-discovery";
 import { normalizeResultReferencesSelection } from "./result-references";
 import { parseDirectConsumeTarget } from "./direct-native-result";
 import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
@@ -3180,6 +3181,15 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   : notice === "Source and observation clocks are displayed as projected; this render did not refresh them."
               ? copy.sourceClocksNotice : notice,
     open = (w: string, r: string | null, direct = false) => {
+      const cards = index.state === "AVAILABLE" ? index.programs.filter(card => card.workRef === w) : [];
+      if (r && cards.some(card => isProjectExecutionHistoryRoot(card.rootHistory, r))) {
+        // An original execution is a separate read-only resource. Its current
+        // catalogue choice never replaces the active Mission or its command.
+        if (cards.length !== 1 || !currentProgramsRead() || !canChooseRetainedHistory(cards[0], r)) return;
+        chooseRetainedRoot({workRef: w, rootJobId: r});
+        setCatalogueProject(null); setProjectTab(null); setActive("Programs");
+        return;
+      }
       setCatalogueProject(null);
       if (r) {
         office.clearSelection({ workRef: w, rootJobId: r });
@@ -4995,11 +5005,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     retainedRoot.hostGeneration === retainedHostGeneration &&
     retainedRoot.missionWorkRef === (selection?.workRef ?? null) &&
     (!authState || authState.acquisition) && retainedProgram.length === 1 &&
-    retainedProgram[0].rootState === "CONFLICT" &&
-    retainedProgram[0].rootCandidates.length > 1 &&
-    retainedRoot.candidates === JSON.stringify(retainedProgram[0].rootCandidates) &&
-    retainedProgram[0].rootCandidates.includes(retainedRoot.pair.rootJobId)
+    canChooseRetainedHistory(retainedProgram[0], retainedRoot.pair.rootJobId) &&
+    retainedRoot.candidates === JSON.stringify(retainedProgram[0].rootCandidates)
       ? retainedRoot : null;
+  const retainedChoiceFrame = useRef(currentRetainedRoot);
+  retainedChoiceFrame.current = currentRetainedRoot;
   useLayoutEffect(() => {
     if (retainedRoot && !currentRetainedRoot) setRetainedRoot(null);
   }, [retainedRoot, currentRetainedRoot]);
@@ -5009,9 +5019,8 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         programIndexEpoch !== programRequest.current ||
         (authState && !authState.acquisition)) return;
     const programmes = index.programs.filter(p => p.workRef === normalized.workRef);
-    if (programmes.length !== 1 || programmes[0].rootState !== "CONFLICT" ||
-        programmes[0].rootCandidates.length < 2 ||
-        !programmes[0].rootCandidates.includes(normalized.rootJobId)) return;
+    if (programmes.length !== 1 || !canChooseRetainedHistory(programmes[0], normalized.rootJobId) ||
+        (programmes[0].rootHistory !== undefined && !currentProgramsRead())) return;
     setRetainedRoot({ pair: normalized, index, epoch: programIndexEpoch,
       authRevision, host: retainedResultHost, hostGeneration: retainedHostGeneration,
       missionWorkRef: selection?.workRef ?? null,
@@ -5082,11 +5091,12 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       latest.catalogueOwner === catalogueListOwner.current && conversationListOwnerCurrent(latest.catalogueOwner, false) &&
       latest.index.state === "AVAILABLE";
   };
-  const todayCatalogueFrame = useRef({active, index, epoch: programIndexEpoch});
-  todayCatalogueFrame.current = {active, index, epoch: programIndexEpoch};
-  const currentTodayCatalogue = () => todayCatalogueFrame.current.active === "Today" &&
-    todayCatalogueFrame.current.index === index && todayCatalogueFrame.current.epoch === programIndexEpoch &&
+  const catalogueNavigationFrame = useRef({active, index, epoch: programIndexEpoch});
+  catalogueNavigationFrame.current = {active, index, epoch: programIndexEpoch};
+  const currentCatalogueFor = (view: "Today" | "Team") => catalogueNavigationFrame.current.active === view &&
+    catalogueNavigationFrame.current.index === index && catalogueNavigationFrame.current.epoch === programIndexEpoch &&
     currentProgramsRead();
+  const currentTodayCatalogue = () => currentCatalogueFor("Today");
   const openCreatedProject = (workRef: string, current: () => boolean): Promise<boolean> => {
     const host = window.MastermindMissionHost, selected = projectJourney.selection;
     try {
@@ -5365,7 +5375,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       authGeneration={authRevision} canRead={Boolean(authState?.status === "signed_in" && authState.acquisition)} locale={locale}
       onNavigate={destination => { setProjectTab(null); setActive(destination); }}
       onOpenProject={workRef => {
-        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return false;
+        if (!currentCatalogueFor("Team") || index.state !== "AVAILABLE") return false;
         const matches = index.programs.filter(card => card.workRef === workRef);
         if (matches.length !== 1) return false;
         const card = matches[0];
@@ -5807,16 +5817,24 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 </span>
                 <small>
                   {p.rootJobId
-                    ? `Mission ${p.rootJobId}`
+                    ? `${isProjectExecutionHistoryRoot(p.rootHistory, p.rootJobId) ? "Execution" : "Mission"} ${p.rootJobId}`
                     : p.rootState === "CONFLICT"
                       ? (locale === "zh-CN" ? "任务根存在冲突：当前任务仍未确定。" : "Root conflict: the current Mission stays unresolved.")
                       : "Root unknown; no mission was guessed"}
                 </small>
               </button>
-              {p.rootState === "CONFLICT" && p.rootCandidates.length > 1 ? <RetainedRootChoice workRef={p.workRef} rootCandidates={p.rootCandidates}
-                rootState={p.rootState} locale={locale}
+              {p.rootCandidates.some(root => canChooseRetainedHistory(p, root)) ? <RetainedRootChoice workRef={p.workRef} rootCandidates={p.rootCandidates}
+                rootState={p.rootState} rootHistory={p.rootHistory} locale={locale}
                 selectedRootJobId={currentRetainedRoot?.pair.workRef === p.workRef
                   ? currentRetainedRoot.pair.rootJobId : null}
+                resourceInspection={retainedResultHost?.readProjectExecutionResource ? {
+                  read: retainedResultHost.readProjectExecutionResource,
+                  generation: JSON.stringify([authRevision, programIndexEpoch, retainedHostGeneration, currentRetainedRoot?.pair]),
+                  current: () => !!currentRetainedRoot && retainedChoiceFrame.current === currentRetainedRoot &&
+                    currentRetainedRoot.pair.workRef === p.workRef && currentProgramsRead() &&
+                    window.MastermindMissionHost === retainedResultHost && authRevisionRef.current === authRevision &&
+                    (retainedResultHost.invalidationGeneration?.() ?? 0) === retainedHostGeneration,
+                } : undefined}
                 onChooseRoot={chooseRetainedRoot} /> : null}
               {currentRetainedRoot?.pair.workRef === p.workRef ? selectedHistoryPanel : null}
               </div>

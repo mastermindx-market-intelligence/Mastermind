@@ -727,7 +727,11 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # lines above the handler; the same four reviewed denial operands are
 # byte-identical and shift by four more lines.
 # Estate composition self-check: unchanged existing guarded statements; no new exemptions.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254',
+ 'sites': ((723, 93, 96, 'int', '403'),
+           (725, 56, 59, 'int', '403'),
+           (732, 46, 49, 'int', '403'),
+           (733, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -962,13 +966,13 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 
 # Requester-return composition: file digest/locations move for the same six
 # accepted HTTP-status operands; enclosing statement ASTs are unchanged; no new mask.
-REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '8210d5d709a7f460e0df71a5c3e2b3f63e071645ea47d75c4d2ac8207918e818',
- 'sites': [(246, 75, 78, 'int', '400'),
-           (256, 93, 96, 'int', '503'),
-           (647, 37, 40, 'int', '400'),
-           (668, 54, 57, 'int', '503'),
-           (688, 54, 57, 'int', '503'),
-           (698, 56, 59, 'int', '503')]}
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '6db8a3f6884b7cebe32b25043893b8a7d8a08380c7854e181173a88102fd432e',
+ 'sites': ((251, 75, 78, 'int', '400'),
+           (261, 93, 96, 'int', '503'),
+           (660, 37, 40, 'int', '400'),
+           (685, 54, 57, 'int', '503'),
+           (705, 54, 57, 'int', '503'),
+           (715, 56, 59, 'int', '503'))}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.
@@ -1266,3 +1270,8 @@ REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256':
 # Passive Paperclip asset document pagination: exact row-count bounds only.
 # No identity, permission or runtime topology change; any source drift restores D8.
 REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
+
+# The new-group purpose textarea has a 600-character input bound. This
+# exact full-file/token review does not qualify an account, peer, scope or
+# nearby value; any source/path/spelling drift restores ordinary D8.
+REVIEWED_FILES['app/mastermind_os/src/team/NewGroupPanel.tsx'] = {'sha256': 'b84219e674c305e9d57571214e9c970c63508b774573b5d284d0bf8be869459d', 'sites': ((187, 25, 28, 'int', '600'),)}

@@ -733,8 +733,10 @@ class WorkspaceReadService:
         except Exception: return error("access_denied", 403)
         return result
 
-    def _read_project_plan(self, selected, principal=None):
+    def _read_project_plan(self, selected, principal=None, *, _deadline=None):
         from common import workspace_project_plan_contract as wire
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        remaining_read_seconds(_deadline, maximum=15.0)
         selected=wire.validate_selection(selected)
         before = self.cache.snapshot()
         work_ref = selected["work_ref"]
@@ -742,7 +744,8 @@ class WorkspaceReadService:
         data=None
         if self._canonical_project_data is not None and principal is not None:
             from control_plane.installed_canonical_project_data_binding import read_installed_project_data
-            data=read_installed_project_data(self._canonical_project_data,principal,operation='project_plan',selection=selected)
+            data=read_installed_project_data(self._canonical_project_data,principal,operation='project_plan',selection=selected,
+                **({'deadline':_deadline} if _deadline is not None else {}))
         def member(snapshot):
             if not _qualified(snapshot):raise ValueError("source_unavailable")
             rows=[row for row in snapshot.document["work"] if row.get("work_ref")==work_ref]
@@ -759,7 +762,8 @@ class WorkspaceReadService:
         member(before)
         if data is None and self._project_plan_reader is None:
             return wire.unavailable(work_ref, "SOURCE_UNAVAILABLE")
-        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref) if data is None else data[0])
+        body = wire.validate_body(self._project_plan_reader.read(work_ref=work_ref,
+            **({'deadline':_deadline} if _deadline is not None else {})) if data is None else data[0])
         if body['selection']!=selected:return wire.unavailable(work_ref,"SOURCE_CHANGED")
         after = self.cache.snapshot()
         member(after)
@@ -774,6 +778,7 @@ class WorkspaceReadService:
             if (data is not None and code!=data[1].code_commit) or source['commit']!=(code if data is None else data[1].data_commit):
                 return wire.unavailable(work_ref, "SOURCE_CHANGED")
         if data is not None:data[1].check()
+        remaining_read_seconds(_deadline, maximum=15.0)
         bounded_canonical({"ok": True, "result": body}, limit=wire.MAX_RESPONSE_BYTES)
         return body
 
@@ -1892,15 +1897,17 @@ class WorkspaceReadService:
                           limit=MAX_RESULT_RESPONSE_BYTES - 1)
         return {"ok": True, "result": body}
 
-    def _read_mission_v3(self, frame):
+    def _read_mission_v3(self, frame, *, _project_help=False, _deadline=None):
         """Join the canonical v3 companion and reducer through existing custody."""
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        remaining_read_seconds(_deadline, maximum=15.0)
         selected = frame["selection"]
         before = self.cache.snapshot()
         if self._project_discovery is not None and not any(row.get('work_ref') == selected['work_ref'] for row in before.document.get('work', [])):
             if not _qualified(before):
                 raise ValueError('source_unavailable')
             from control_plane.workspace_project_discovery_read import read_mission
-            return read_mission(self, frame, before)
+            return read_mission(self, frame, before, project_help=_project_help, deadline=_deadline)
         _join(before.document, selected)
         if not _qualified(before, selected):
             raise ValueError("source_unavailable")
@@ -1930,6 +1937,7 @@ class WorkspaceReadService:
                          cache_currentness=after.currentness, source_generation=None,
                          owner_observation=observation)
         response = {"ok": True, "result": result}
+        remaining_read_seconds(_deadline, maximum=15.0)
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
 
@@ -2137,6 +2145,107 @@ class WorkspaceReadService:
                 or role_body.get("source_observation", {}).get("state") != "SAME"):
             return False
         return True
+
+    def _coo_guard_mission_state(self, work_ref):
+        """Reprove authority inside the original writer without a read receipt.
+
+        Ordinary callers still acquire the public, physically closed Mission.
+        Only Runtime's synchronous selected-claim/ACK guard can supply a live
+        scope. That scope cannot escape its original thread or transaction.
+        """
+        from control_plane import executive_runtime as er, mission_workspace as mw
+        from control_plane.coo_principal_mandate import _MissionState, _mission_state, _owner_identifier
+        scope = er._current_coo_write_authority(self.runtime.store)
+        if scope is None:
+            return _mission_state(self.read_mission_for_work_ref(work_ref), expected_work_ref=work_ref)
+        from common.executive_workspace_contract import _check_work_ref
+        from control_plane.fabric_job_view import (
+            _document_observed_fabric_view_v2, _project_retained_root_snapshot,
+        )
+        from control_plane.runtime_namespace_custody import _coo_write_namespace
+        if not _check_work_ref(work_ref) or not callable(self._bounded_runtime):
+            raise ValueError("COO transaction mission source unavailable")
+        runtime, cache, bounded_factory = self.runtime, self.cache, self._bounded_runtime
+        bound_runtime = bounded_factory(runtime)
+        namespace = _coo_write_namespace(bound_runtime, runtime, scope)
+        selected = {"work_ref": work_ref, "root_job_id": scope.root_job_id}
+        before = cache.snapshot()
+        responsibility = _join(before.document, selected)
+        if not _qualified(before, selected):
+            raise ValueError("source_unavailable")
+        snapshot, creation = scope.read_root()
+
+        def creation_reader(command):
+            return creation if command == creation.command_id else None
+
+        retained = _project_retained_root_snapshot(snapshot, scope.root_job_id,
+            creation_event_reader=creation_reader, notes=[], runtime=None,
+            expected_work_ref=work_ref)
+        # This companion truthfully has UNKNOWN public read-generation
+        # evidence. Only the private live scope qualifies the effect predicate.
+        fabric = _document_observed_fabric_view_v2(scope.root_job_id,
+            armed=self.armed, runtime_identity=self.runtime_identity,
+            observed={**retained, "failed": False, "generation": None})
+        fabric = mw.validate_mission_workspace_v2_input(fabric_view=fabric)
+        after = cache.snapshot()
+        _join(after.document, selected)
+        if (not _qualified(after, selected) or before.owner is not after.owner
+                or before.instance != after.instance or before.publication != after.publication
+                or digest(before.document) != digest(after.document)
+                or _plan_validity_identity(before.validity) != _plan_validity_identity(after.validity)
+                or self.runtime is not runtime or self.cache is not cache
+                or self._bounded_runtime is not bounded_factory):
+            raise ValueError("COO transaction mission source changed")
+        namespace.validate(bound_runtime.store.path)
+        scope.require_current(runtime.store)
+        control = before.document
+        generation = mw._source_generation(None)
+        resolved, candidates, ambiguous, root_state, root = mw._resolved_mission_root(
+            responsibility, scope.root_job_id, fabric, fabric_valid=True)
+        current = mw._mission_observation_current(
+            control_current=mw._qualified_current(validity=after.validity, cache=after.currentness,
+                responsibility=responsibility, responsibility_ref=work_ref, root_job_id=resolved,
+                control_generated_at=mw._safe_timestamp(control.get("generated_at")),
+                autonomy_generated_at=mw._safe_timestamp(control["autonomy"].get("generated_at"))),
+            owner_current=True, fabric_generation=mw._safe_timestamp(fabric.get("generated_at")),
+            generation_state=generation["state"],
+            dispatch_historical=mw._mapping(responsibility.get("dispatch")).get("historical"))
+        result, valid = mw._valid_result_v2(root.get("result")) if root else ({}, False)
+        read_state = mw._mission_read_state(control_valid=True, fabric_valid=True,
+            cache_state=after.currentness.get("state"), observation_current=current,
+            resolved_root=resolved, result_valid=valid)
+        dispatch = mw._mapping(responsibility.get("dispatch"))
+        dispatch_state = (dispatch.get("dispatch_state")
+            if dispatch.get("dispatch_state") in mw.PROJECTED_DISPATCH_STATES else "UNKNOWN")
+        review = mw._mapping(root.get("review"))
+        posture, rule = mw._posture_v2(
+            execution=mw._closed_string(result.get("state"), mw.EXECUTION_STATES_V2) or "UNKNOWN",
+            dispatch=dispatch_state, current=current,
+            conflict=root_state == "CONFLICT" or generation["state"] == "CONFLICT",
+            blocker=bool(responsibility.get("blocker") or responsibility.get("declared_blocker")),
+            acceptance={"state": "NOT_PROJECTED"},
+            review=mw._closed_string(review.get("verdict"), mw.REVIEW_VERDICTS) or "NOT_YET")
+        owed, _ = mw._project_owed_turn(responsibility.get("owed_turn"))
+        qualified = (read_state == "CURRENT" and resolved == scope.root_job_id
+            and root_state == "RESOLVED" and ambiguous is False and candidates == [resolved]
+            and _owner_identifier(resolved) and _owner_identifier(posture))
+        # These private labels deliberately cannot pass the public Mission
+        # CURRENT/SAME validator or be mistaken for physically closed evidence.
+        state = _MissionState(work_ref=work_ref, root_job_id=resolved,
+            read_state="LIVE_TRANSACTION", owner_observation_state="LIVE_TRANSACTION",
+            source_generation_state=generation["state"], runtime_root_state=root_state,
+            root_job_ambiguous=ambiguous,
+            accountable_seat=mw._closed_string(responsibility.get("accountable_seat"), mw.ACCOUNTABLE_SEATS),
+            owed_seat=None if owed is None else owed.get("seat"),
+            owed_reason=None if owed is None else owed.get("reason"),
+            posture=posture, posture_rule=rule, dispatch_state=dispatch_state,
+            qualified=qualified, effect_unknown=posture == "EFFECT_UNKNOWN" or dispatch_state == "EFFECT_UNKNOWN",
+            reconciliation_required=posture == "RECONCILIATION_REQUIRED"
+                or dispatch_state == "RUNTIME_BINDING_RECONCILIATION_REQUIRED",
+            reason_codes=() if qualified else ("mission_transaction_not_current",))
+        namespace.validate(bound_runtime.store.path)
+        scope.require_current(runtime.store)
+        return state
 
     def read_mission_for_work_ref(self, work_ref):
         """Host-internal COO consumer of the SAME Mission v3 acquisition.

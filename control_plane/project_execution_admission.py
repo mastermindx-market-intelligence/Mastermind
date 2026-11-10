@@ -1,14 +1,16 @@
 """Private source custody for a strict-v2 project root; no scheduler or grant store."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import inspect
 import json
 import re
+import time
 
 from common.project_execution_private_contract import canonical, digest, KEY_RE
 
 SCHEMA = "mastermind.project_execution_source.v1"
 COMMISSION_PATH = "research/executive_commissions/PROJECT_EXECUTION.md"
+ORIGINAL_SOURCE_MAX_PAYLOAD_BYTES = 65536
 _SEAL = object()
 _FIELDS = frozenset({"schema", "intent_id", "command_id", "work_ref", "operation_key",
     "intent_fingerprint", "arguments_sha256", "principal_scope_sha256", "workspace_permission_sha256",
@@ -120,13 +122,19 @@ def issue_source(issuer, operation, material, guard):
     return source
 
 
-def read_source(runtime, root):
-    """Read only the original immutable root; current project text is irrelevant."""
+def validate_original_root_source(root, event):
+    """Validate the original Job and its owner-qualified unique creation Event.
+
+    This pure part is shared with bounded root-origin acquisition. The caller
+    still owns unique Event selection, raw-byte limits and the physical source
+    observation; this function never opens Runtime or qualifies current DATA.
+    """
     from control_plane.executive_runtime import StateConflict
     try:
-        if root is None:
+        if (root is None or event is None or event.event_type != "JOB_CREATED"
+                or event.job_id != root.job_id or event.aggregate_type != "job"
+                or event.aggregate_id != root.job_id):
             raise ValueError()
-        event = runtime.store.unique_root_created_event(root.job_id)
         payload = event.payload
         provenance = payload.get("provenance") or {}
         if type(provenance) is not dict:
@@ -150,6 +158,19 @@ def read_source(runtime, root):
                 or digest(provenance.get("dialogue_source")) != material["dialogue_source_sha256"]):
             raise ValueError()
         return material
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise StateConflict("PROJECT_EXECUTION_ORIGINAL_SOURCE_INVALID") from None
+
+
+def read_source(runtime, root):
+    """Read only the original immutable root; current project text is irrelevant."""
+    from control_plane.executive_runtime import StateConflict
+    try:
+        if root is None:
+            raise ValueError()
+        event = runtime.store.unique_root_created_event(
+            root.job_id, max_payload_bytes=ORIGINAL_SOURCE_MAX_PAYLOAD_BYTES)
+        return validate_original_root_source(root, event)
     except (ValueError, TypeError, KeyError, AttributeError):
         raise StateConflict("PROJECT_EXECUTION_ORIGINAL_SOURCE_INVALID") from None
 
@@ -229,6 +250,134 @@ def read_original_input(supervisor, material):
     except (ValueError, TypeError, KeyError, UnicodeError, ceo_intent.CeoIntentError):
         raise ValueError("PROJECT_EXECUTION_ORIGINAL_INPUT_UNAVAILABLE") from None
     return payload
+
+
+_INPUT_READ_SEAL = object()
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectExecutionInputReadOwner:
+    """One captured service/supervisor input reader, with no execution grant.
+
+    The enrolled help owner must independently qualify its principal pair,
+    exact root and actual current Plan before calling this private port.
+    Original private bytes never leave it. A missing owner is not substituted.
+    """
+    _seal: object = field(repr=False)
+    _service: object = field(repr=False)
+    _runtime: object = field(repr=False)
+    _binding: object = field(repr=False)
+    _supervisor: object = field(repr=False)
+    _original_owner: object = field(repr=False)
+    _namespace: object = field(repr=False)
+    _runs_root: object = field(repr=False)
+
+    def _current(self):
+        from control_plane.executive_service import ExecutiveControlService
+        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+        service = self._service
+        if (self._seal is not _INPUT_READ_SEAL or type(service) is not ExecutiveControlService
+                or service._closing or service._require_runtime() is not self._runtime
+                or service._ceo_ingress_app_binding is not self._binding or self._binding is None
+                or service._require_supervisor() is not self._supervisor
+                or type(self._namespace) is not ServiceRuntimeNamespaceCustody
+                or service._namespace_custody is not self._namespace
+                or self._original_owner is None
+                or input_owner(self._supervisor) is not self._original_owner
+                or self._original_owner.runs_root != self._runs_root):
+            raise ValueError("PROJECT_EXECUTION_INPUT_READ_OWNER_UNAVAILABLE")
+        return self._namespace.bound_runtime(self._runtime)
+
+    def read(self, *, selected_scope, expected_source_sha256, adopted_content,
+             project_plan_sha256, deadline=None):
+        from common import coo_project_help_contract as help_wire
+        from common.project_task_contract import parse_plan, contract_digest
+        from control_plane.terminal_original_input_artifacts import MAX_PAYLOAD_BYTES
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        if deadline is None:
+            deadline = time.monotonic() + help_wire.PRIVATE_READ_MAX_SECONDS
+        def current():
+            remaining_read_seconds(deadline, maximum=help_wire.PRIVATE_READ_MAX_SECONDS)
+            return self._current()
+        current()
+        selected = help_wire.scope(selected_scope)
+        expected_source_sha256 = help_wire._digest(expected_source_sha256)
+        help_wire._digest(project_plan_sha256)
+        if type(adopted_content) is not str:
+            raise ValueError("PROJECT_EXECUTION_INPUT_READ_UNAVAILABLE")
+        current_bytes = adopted_content.encode("utf-8", errors="strict")
+        if not 0 < len(current_bytes) <= MAX_PAYLOAD_BYTES:
+            raise ValueError("PROJECT_EXECUTION_INPUT_READ_UNAVAILABLE")
+        work_ref = selected["source_plan"]["work_ref"]
+        root_job_id = selected["root_job_id"]
+
+        def original_source():
+            bound = current()
+            material = read_source(bound, bound.jobs.get_job(root_job_id))
+            if (material is None or material["work_ref"] != work_ref
+                    or digest(material) != expected_source_sha256):
+                raise ValueError("PROJECT_EXECUTION_INPUT_READ_UNAVAILABLE")
+            bound.store.read_binding.validate_before_core_return()
+            current()
+            return material
+
+        material = original_source()
+        payload = read_original_input(self._supervisor, material)
+        current()
+        original = json.loads(payload)
+        project = original["project"]
+        plan = project["plan"]
+        if (type(plan) is not dict or set(plan) != {"schema", "work_ref", "authored_record",
+                "adoption", "adopted_plan", "decisions"}
+                or plan["schema"] != "mastermind.project_execution_plan_input.v1"
+                or plan["work_ref"] != work_ref or type(plan["adopted_plan"]) is not dict
+                or set(plan["adopted_plan"]) != {"source", "content"}
+                or type(plan["adopted_plan"]["content"]) is not str):
+            raise ValueError("PROJECT_EXECUTION_INPUT_READ_UNAVAILABLE")
+        adopted = plan["adopted_plan"]
+        original_bytes = adopted["content"].encode("utf-8", errors="strict")
+        parsed = parse_plan(original_bytes)
+        original_plan = help_wire.source_plan(dict(schema=help_wire.PLAN_SCHEMA, work_ref=work_ref,
+            source=adopted["source"], contract_sha256=contract_digest(parsed)))
+        expected_adoption = project["expected_context"]["adoption"]
+        if (parsed["workstream"] != work_ref or original_plan != selected["source_plan"]
+                or hashlib.sha256(original_bytes).hexdigest() != original_plan["source"]["content_sha256"]
+                or original_bytes != current_bytes
+                or type(expected_adoption) is not dict or expected_adoption.get("state") != "AVAILABLE"
+                or expected_adoption.get("adopted_source") != adopted["source"]
+                or original_source() != material):
+            raise ValueError("PROJECT_EXECUTION_INPUT_READ_UNAVAILABLE")
+        witness = dict(schema=help_wire.EXECUTION_WITNESS_SCHEMA,
+            selection=dict(work_ref=work_ref, root_job_id=root_job_id),
+            original_source_sha256=digest(material), input_reference_sha256=digest(material["input_reference"]),
+            input_artifact_sha256=material["input_reference"]["artifact_sha256"],
+            input_payload_sha256=hashlib.sha256(payload).hexdigest(), input_context_sha256=material["context_sha256"],
+            original_source_plan=original_plan, current_adoption=dict(
+                state="MATCHES_ORIGINAL_ADOPTED_SOURCE_AND_BYTES",
+                source_plan_sha256=help_wire.digest(selected["source_plan"]), project_plan_sha256=project_plan_sha256),
+            execution_authorized=False)
+        current()
+        return help_wire.validate_execution_witness(witness, selected_scope=selected,
+            project_plan_sha256=project_plan_sha256)
+
+
+def bind_original_input_reader(service, runtime):
+    """Capture the existing service's exact owner; defer unavailable reads.
+
+    A legacy help/COO read does not depend on this optional port being ready.
+    Only an execution-resource help read enters it and requires real custody.
+    """
+    from control_plane.executive_service import ExecutiveControlService
+    if type(service) is not ExecutiveControlService or service._require_runtime() is not runtime:
+        raise ValueError("PROJECT_EXECUTION_INPUT_READ_OWNER_UNAVAILABLE")
+    supervisor = service.supervisor
+    try:
+        original = input_owner(supervisor)
+    except (AttributeError, TypeError, ValueError):
+        original = None
+    return ProjectExecutionInputReadOwner(_INPUT_READ_SEAL, service, runtime,
+        service._ceo_ingress_app_binding, supervisor, original, service._namespace_custody,
+        None if original is None else original.runs_root)
 
 
 def input_for_job(supervisor, job):

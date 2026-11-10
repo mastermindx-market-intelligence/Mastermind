@@ -1,0 +1,1849 @@
+{
+  "classification_established": false,
+  "confidence_meaning": {
+    "HIGH": "The observed primary outcome directly matches one protected definition; still unapproved.",
+    "LOW": "The umbrella does not state a sufficiently dominant primary outcome; a strategic ruling is necessary.",
+    "MODERATE": "A defensible primary reading with material cross-scope contribution or narrower historical corroboration."
+  },
+  "created_date": "2026-11-10",
+  "execution_authority": false,
+  "intended_consumer": "written strategic review on existing Mastermind architecture carrier",
+  "linear_mutations_performed_by_this_proposal": false,
+  "macro_source_mutated_by_this_proposal": false,
+  "not_production_companion": true,
+  "original_strategy_preservation": {
+    "additions_overlap_original_memberships": [],
+    "companion_source": {
+      "content_sha256": "8c0362ee9f7a0fa73a242fea5b4b8053edad016570c78d4d6f9204985de7b86c",
+      "git_blob": "65e3d896a2f2fd81858e48456e7529ad9c1b9d23",
+      "path": "config/linear_initiative_portfolio.v1.json",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "d6059039bed2caf27aca8b87aaa42af3d6024ebc",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d6059039bed2caf27aca8b87aaa42af3d6024ebc/config/linear_initiative_portfolio.v1.json"
+    },
+    "digest_algorithm": "sha256 of UTF-8 JSON with sorted keys, separators comma/colon, ensure_ascii=False",
+    "exception_changes": [],
+    "existing_membership_changes": [],
+    "initiative_metadata_changes": [],
+    "original_exception_count": 2,
+    "original_exceptions": [
+      {
+        "identity": "WS:WATCHLIST-PORTFOLIO-CEO",
+        "identity_kind": "workstream_key",
+        "reason": "compatibility_redirect"
+      },
+      {
+        "identity": "9aef6461-306a-4a3c-911b-c6a4b6635a78",
+        "identity_kind": "linear_project_id",
+        "reason": "canonical_parent_unresolved"
+      }
+    ],
+    "original_exceptions_sha256": "825f12f1a631b2705c1999e2823f0fb3ee96cc63b76460a96e92872c1297e192",
+    "original_membership_count": 63,
+    "original_memberships_sha256": "b560dbc8e100ba2c7e79b94ca5d71482227fce904ff458bf51053424da3578ab",
+    "strategic_source_ref": "law-temporal-amendment"
+  },
+  "proposal_counts": [
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 19,
+      "initiative_key": "canonical-intelligence-substrate-learning",
+      "name": "Canonical Intelligence Substrate & Learning",
+      "proposed_additions": 9,
+      "protected_memberships": 10
+    },
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 19,
+      "initiative_key": "legendary-alpha-discovery-timing",
+      "name": "Legendary Alpha Discovery & Timing",
+      "proposed_additions": 2,
+      "protected_memberships": 17
+    },
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 23,
+      "initiative_key": "institutional-company-event-intelligence",
+      "name": "Institutional Company & Event Intelligence",
+      "proposed_additions": 12,
+      "protected_memberships": 11
+    },
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 10,
+      "initiative_key": "global-markets-regimes-risk-command",
+      "name": "Global Markets, Regimes & Risk Command",
+      "proposed_additions": 4,
+      "protected_memberships": 6
+    },
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 11,
+      "initiative_key": "personal-institutional-desk",
+      "name": "Personal Institutional Desk",
+      "proposed_additions": 7,
+      "protected_memberships": 4
+    },
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 12,
+      "initiative_key": "trusted-production-customer-platform",
+      "name": "Trusted Production & Customer Platform",
+      "proposed_additions": 4,
+      "protected_memberships": 8
+    },
+    {
+      "hypothetical_total_if_all_preferred_choices_approved": 12,
+      "initiative_key": "autonomous-ai-organization",
+      "name": "Autonomous AI Organization",
+      "proposed_additions": 5,
+      "protected_memberships": 7
+    }
+  ],
+  "proposals": [
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.7",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Connect the installed Mastermind Chrome extension to one authenticated Browser service so authorized ChatGPT, Claude, Grok Bot, OpenClaw and Fabric agents can discover enrolled estate browsers, select exact shared tabs, work concurrently on distinct tabs, and create tabs or windows with local consent. Completion requires installed one-host and two-host acceptance, recovery and revocation proof, and actual client use.",
+      "preserved_boundary": "Browser permission and installed one-host/two-host acceptance remain separate; a strategic home grants neither.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "autonomous-ai-organization",
+      "rationale": "Its direct outcome is coordinated, authenticated browser work by already authorized estate agents, including exact shared tabs, recovery and revocation. That enables governed operators to act across sessions through an existing service.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-browser-fabric"
+      ],
+      "workstream_key": "WS:BROWSER-FABRIC",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "personal-institutional-desk",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.6",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Make the visitor-to-retention journey coherent, measurable, and trustworthy: genuine intelligence before registration; a personal act before a minimal free account; canonical state preserved through signup; measurable free and paid activation; contextual paid asks after value; authority-sourced billing; and a useful personalized return. Done means a real anonymous visitor can experience intelligence, save a personally meaningful state through free account creation, return to it, activate, upgrade at a measured value boundary, and retain — with every stage machine-readable from the existing analytics plane.\n",
+      "preserved_boundary": "Preserve the existing analytics/event and billing owners.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "rationale": "The objective binds registration, preserved customer state, authority-sourced billing and measurable activation/retention into a trustworthy commercial path. Those account and commercial guarantees most directly fit the customer-platform outcome.",
+      "reserved_choice_id": "R01",
+      "source_refs": [
+        "ws-commercial-activation"
+      ],
+      "workstream_key": "WS:COMMERCIAL-ACTIVATION",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "institutional-company-event-intelligence",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Finish Commission 19 end to end under the Chairman's 2026-10-11 successor masterplan: the 18 C19 topics (C1-C18) are reconciled against their 19 report carriers, each in-scope producer (MAS-267 FIF cross-period, MAS-268 FIF query kernel, MAS-271 earnings expectations, MAS-272 capital structure, MAS-273 macro release/expectations, MAS-274 composer) is qualified against a specific consumer with a specific acceptance, the integrated answer path has real entitled-user and natural-source proof, and every remaining obligation is accepted, explicitly rejected/deferred, or held with an exact receiver. Done when MAS-263 can be closed truthfully by its acceptance evidence rather than by publication.",
+      "preserved_boundary": "Producer-specific acceptance, entitled-user proof, natural-source evidence and declared scientific looks remain with their original owners.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The mission qualifies several independently owned producers, their time/identity and query seams, and an integrated answer path across financial, earnings, capital-structure and macro evidence. The reusable cross-domain composition is the proposed primary outcome.",
+      "reserved_choice_id": "R02",
+      "source_refs": [
+        "ws-commission-19-data-intelligence"
+      ],
+      "workstream_key": "WS:COMMISSION-19-DATA-INTELLIGENCE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Take the accepted R15 Consumer economics design to a real source-bound, entitled, browser-visible PLNT economic-change experience. Done means an entitled user opens PLNT and sees a source-bound explanation of the selected reported revenue/advertising change with correct signs, scale and limitations, with anonymous users receiving no paid closure. V1-CORE (the deterministic composition) is the merged first wave; the entitled/browser legs stay frozen behind external owners.\n",
+      "preserved_boundary": "The current blocked status and separately held entitled/browser legs remain unchanged.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The declared user outcome is a source-bound PLNT explanation of a reported revenue/advertising change, with correct signs, scale, limitations and entitlement. This is issuer-specific economic and event understanding.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-consumer-cyclical-v1"
+      ],
+      "workstream_key": "WS:CONSUMER-CYCLICAL-V1",
+      "workstream_status_at_source": "blocked"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Implement the frozen Consumer Defensive CDV-1 vertical as bounded native producer, publication, reader and display lanes. Done means the adjudicated task chain is merged, qualified through the named gate job, and released with readers enabled before the disabled producer flag.\n",
+      "preserved_boundary": "Readers-before-producer ordering, shared-foundation custody and source/mount acceptance gates are retained.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The Program boundary identifies the actual CDV-1 deliverable as the P&G demand and earnings-quality dossier. Its native producer, publication, reader and display lanes serve that company-research outcome.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-consumer-defensive-cdv1"
+      ],
+      "workstream_key": "WS:CONSUMER-DEFENSIVE-CDV1",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Complete the existing equity-data contract through three real consumers (Terminal daily OHLC with a narrow data-origin readout, DataWorkspace canonical read, basket membership/price composition) under one declared view contract. Done when all three consumer positives, the declared market/population contract, independent numerical/temporal/access proof, installed production reads and correction/recovery/second-cycle evidence exist on main and live.",
+      "preserved_boundary": "A shared strategic home does not replace the existing data/view, access or publication owners.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "One declared equity-data view contract must serve Terminal OHLC, the canonical DataWorkspace read and basket membership/price composition, with numerical, temporal, access, correction and recovery proof. This is reusable owner-native intelligence across consumers.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-data-os-completion"
+      ],
+      "workstream_key": "WS:DATA-OS-COMPLETION",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Extend the existing contradiction detector with the healthy-tension/impossible-contradiction classification and the existing response-eval system with deterministic numeric-to-source verification. Neither may create a replacement detector or rubric.\n",
+      "preserved_boundary": "No replacement detector or rubric is authorized.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The exact work extends existing contradiction classification and deterministic numeric-to-source response verification. These are reusable reliability and evidence-evaluation capabilities rather than a single product interface or runtime lifecycle.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-eval-os-reliability-extensions"
+      ],
+      "workstream_key": "WS:EVAL-OS-RELIABILITY-EXTENSIONS",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.7",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Reach AUTONOMY_V1_PROVEN_LIVE by one complete real production acceptance operation on the installed Mastermind Executive host: Sol admits exactly one root through the canonical CEO ingress, the COO decomposes it, at least two governed workers execute child Jobs including a browser-proven UI child, one DECISION_REQUEST is ruled by Sol and consumed by the same operation, independent review and bounded repair run as separate Jobs, the runtime terminalizes without duplicate work under a recovery case, GitHub and Agent OS hold the evidence, and the host is disarmed and re-armed without credential re-exposure — with no second lifecycle, queue, router, retry ledger, identity plane or release controller created.\n",
+      "preserved_boundary": "The installed production operation, ingress, worker and release gates are not satisfied by membership.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "autonomous-ai-organization",
+      "rationale": "The required journey is one real CEO-originated root through COO decomposition, governed workers, decision consumption, independent review, repair and recovery. That directly establishes reliable executive orchestration without a second lifecycle.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-executive-autonomy-v1-closure"
+      ],
+      "workstream_key": "WS:EXECUTIVE-AUTONOMY-V1-CLOSURE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.7",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Complete Mastermind Executive OS, its Subagent Fabric bindings and the Mastermind OS app so that one real Chairman-originated request traverses the full multi-level path — authenticated identity, correct source custody, valid admission, economical placement, retained result, actual review, original-parent consumption, recoverable continuation and a coherent app outcome — and both a successful and an interrupted journey are proven on the live host. Census, architecture, merged PRs, green CI, a worker run or a dashboard demo are rungs, not the outcome.\n",
+      "preserved_boundary": "Source, CI, worker execution and dashboard evidence remain distinct from live end-to-end acceptance.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "autonomous-ai-organization",
+      "rationale": "Its original Chairman request must traverse authenticated multi-level admission, economical placement, retained result, review, original-parent consumption and interrupted recovery with a coherent app outcome. The primary outcome is the governed company operating system.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-executive-ecosystem-completion"
+      ],
+      "workstream_key": "WS:EXECUTIVE-ECOSYSTEM-COMPLETION",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.6",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Every storage pool the fleet touches is byte-attributed with its REACH stated, each one's reclaimable share is recorded rather than its size alone, and the acts that would actually free space are sitting in front of the operator as bounded reversible choices. Done is observable: `research/WORKTREE_GC_POLICY.md` §9 names every measured pool with its reclaimable figure, no session re-measures a pool already recorded null, and no automated deleter is armed over a population protected only by a naming accident.\n",
+      "preserved_boundary": "A proposal never arms deletion or widens a protected population.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "rationale": "The mission measures actual storage reach and reclaimable bytes and presents bounded reversible space-recovery choices while protecting active checkouts. It protects the reliability and recoverability of company-critical infrastructure.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-fleet-storage-lifecycle"
+      ],
+      "workstream_key": "WS:FLEET-STORAGE-LIFECYCLE",
+      "workstream_status_at_source": "blocked"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.4",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Build the governed measurement plane for global liquidity transmission without acquiring trading authority. Done means the state producer, its sole downstream reader, the causal transmission lab and the accepted product surface each pass their separately commissioned gates, with explicit point-in-time and quality receipts and a natural (not simulated) source-to-user update.\n",
+      "preserved_boundary": "Trading authority and later promotion remain excluded.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "global-markets-regimes-risk-command",
+      "rationale": "The producer, downstream reader, causal transmission lab and product explain global liquidity transmission with point-in-time quality and a natural source-to-user update. The explicit primary deliverable is market-environment context.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-global-liquidity-transmission"
+      ],
+      "workstream_key": "WS:GLOBAL-LIQUIDITY-TRANSMISSION",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Serve the Communications vertical's company routes on the shared foundation with admitted sources. Done = #8039's proven routes landed on the accepted base, source enrollment admitted through the existing source owner, reviewed, merged, browser proof.\n",
+      "preserved_boundary": "Source enrollment and shared-company-route custody remain separate from this recommendation.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The canonical objective serves company routes using admitted sources. The referenced owner checkpoint narrows the missing evidence to issuer-specific financial measures, original guidance, definitions and provenance, which makes company understanding the direct outcome.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-communications",
+        "communications_scope"
+      ],
+      "workstream_key": "WS:GMI-COMMUNICATIONS",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Land the nuclear theme-research vertical module (#8002) on the accepted #7870 base with one VerticalRegistration and mount for nuclear_power, served/browser/privacy proof and real admission. Done = #8002 reconciled, reviewed, merged, nuclear route and mount proven live.\n",
+      "preserved_boundary": "Prepared evidence is not minted/admitted evidence; existing rights and milestone refusals remain.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The actual nuclear research slice concerns company product capability, reported operating measures and separately qualified regulatory milestones, exposed through the existing research vertical. It adds specialist primary-source understanding rather than a market-bucket hierarchy.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-energy-nuclear"
+      ],
+      "workstream_key": "WS:GMI-ENERGY-NUCLEAR",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Ship a paid, evidence-backed Finance Intelligence journey (Theme Tracker / Sector Intelligence → Financials → Finance Intelligence → Money Movement → company/evidence → Securities Infrastructure → existing stock/basket/sector workflow) as ONE read-only projection over existing owners, with exact missing/conflict states, authenticated private full-fidelity data, and browser proof at 1440/390 × light/dark × EN/ZH plus a keyboard-only journey. Done = first vertical PROVEN_LIVE on the accepted release; the broader 52-slice programme stays PARTIAL until its breadth waves are proven.\n",
+      "preserved_boundary": "The first vertical does not complete the broader 52-slice programme or acquire basket/trade authority.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The first accepted journey connects Financials, Money Movement and Securities Infrastructure to company/evidence and existing stock workflows using exact missing/conflict states. Its durable outcome is specialist financial-sector and issuer research depth.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-finance-intelligence"
+      ],
+      "workstream_key": "WS:GMI-FINANCE-INTELLIGENCE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver the maintained GMI Themes Healthcare vertical, beginning with a truthful GLP-1 slice and its visible FDA supply consumer while preserving the twelve-family roadmap. Completion is observable when the admitted releases reach their declared user journeys and per-release adjudication without adding ranking, sizing, or trade effects.\n",
+      "preserved_boundary": "The twelve-family roadmap and the prohibition on ranking, sizing and trading effects remain intact.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The concrete first slice explains GLP-1 and FDA supply evidence, then a distinct mechanism, under per-release adjudication. The healthcare source/evidence explanation is specialist company/event intelligence.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-healthcare"
+      ],
+      "workstream_key": "WS:GMI-HEALTHCARE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Implement the frozen Industrials nine-task plan on the Semiconductor-led shared foundation as fabric-built PRs in dependency order. Done means both real, signed-in Exponent and Pentair dossiers pass the T09 real-path proofs (two journeys, correction, revocation, ordinary refresh, non-interference) with every one of the 56 inherited requirements executed — never a merged slice alone.\n",
+      "preserved_boundary": "All 56 inherited obligations and original shared-foundation gates remain separate.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The acceptance requires real Exponent and Pentair dossiers, issuer profiles, result-to-cash derivations, editions/comparisons and correction/revocation journeys. Those exact issuer economics are the primary outcome.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-industrials-first-vertical"
+      ],
+      "workstream_key": "WS:GMI-INDUSTRIALS-FIRST-VERTICAL",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver the first bounded Mining release inside the existing GMI Themes experience on the Semiconductor-led shared foundation: an investor can explain a copper operating change (Freeport, theme:copper_steel_electrify) and a rare-earth processing/economic change (MP Materials, theme:rare_earth_critical_min) from real permitted sources, correctly bound companies, useful signed economics and an explicit counter-thesis. Done means both real-source journeys W-C and W-R pass with all forty MGD obligations executed on the integrated candidate, independent review, exact-head CI and the authorized release path - never a merged slice alone. M1 acceptance is recorded separately from the full Mining sector mission.\n",
+      "preserved_boundary": "M1 evidence does not complete the full Mining mission or bypass real-source admission.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The user must explain Freeport copper operating changes and MP Materials processing/economic changes from permitted sources, correct company identities, signed economics and a counter-thesis. That is specialist issuer/event depth.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-mining-m1-integration"
+      ],
+      "workstream_key": "WS:GMI-MINING-M1-INTEGRATION",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Re-land the Robotics theme intelligence vertical on main without breaking repo-wide import resolution. Done = the #7908 capability re-landed on the accepted #7870 base, ci-pack-10 green, served with browser proof, and the Robotics R1 corpus available for cross-vertical rights qualification.\n",
+      "preserved_boundary": "The canonical workstream records a re-land after a revert; the older checkpoint is scope evidence, not current release or acceptance proof.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The linked original owner checkpoint limits the work to Precision Motion and Perception research composition, company/source evidence qualification and coverage, while leaving ranking and trading surfaces unchanged. This supports differentiated specialist research depth.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-robotics",
+        "robotics_scope"
+      ],
+      "workstream_key": "WS:GMI-ROBOTICS",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "institutional-company-event-intelligence",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Land the shared theme-research foundation carried by #7870 (the VerticalRegistration shell, curation assertion, owner-bundle wire grammar, shared routes) at its approved scope so every other vertical integrates into ONE base instead of rebuilding it; then build the Semiconductor vertical content on that base. Done = #7870 merged at approved scope with the separable-foundation evidence accepted, the Option A registry follow-on landed, and the Semiconductor vertical served with rights-qualified evidence.\n",
+      "preserved_boundary": "Semiconductor content and rights-qualified served proof remain owned obligations; this does not move other verticals or shared custody.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "Its first and explicit shared outcome is one VerticalRegistration shell, assertion/owner-bundle grammar and common routes that all verticals consume. That reusable evidence foundation is proposed as primary for this combined workstream.",
+      "reserved_choice_id": "R03",
+      "source_refs": [
+        "ws-gmi-semiconductors"
+      ],
+      "workstream_key": "WS:GMI-SEMICONDUCTORS",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Serve the Technology ex-Semis economic-change vertical on the shared theme-research foundation (company_profile entries over the #7870 shell) without a parallel base. Done = #7891 reconciled onto the accepted base with Option A's entry_kind, reviewed, merged and served with browser proof.\n",
+      "preserved_boundary": "The shared base, Option A, review and browser-proof gates remain.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The declared deliverable is an economic-change vertical using company_profile entries on the existing shared foundation. It adds company-specific interpretation rather than another foundational platform.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-gmi-technology-ex-semis"
+      ],
+      "workstream_key": "WS:GMI-TECHNOLOGY-EX-SEMIS",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.4",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver a global market observatory above the existing country research cockpit — a 63-jurisdiction versioned universe with coverage as a capability vector, a four-clock qualified observation contract with the USD/local/FX return identity, a global scanner, market dossiers, dislocation research, typed transmission evidence into US exposure and replay/saved/watch lifecycle — each wave landed as reviewed PRs with served anonymous and entitled journeys proven on www.mastermind-x.com.",
+      "preserved_boundary": "A scanner or dislocation view does not grant security ranking, position sizing or trade authority.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "global-markets-regimes-risk-command",
+      "rationale": "The 63-jurisdiction observatory, market dossiers, EM credit/dollar context, dislocation research and transmission into US exposure explain the global environment surrounding investments. Four-clock coverage and explicit abstention support that context.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-intl-global-surveillance"
+      ],
+      "workstream_key": "WS:INTL-GLOBAL-SURVEILLANCE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "legendary-alpha-discovery-timing",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.4",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Complete the existing Rotation Command / Sector Central programme so Mastermind explains which sectors, industries and themes are gaining or losing leadership, how early that was observable, participation breadth, durability versus false start, and what the system knew and displayed at each earlier time. Done means the measured US sector journey (map/list/detail/history) is live for real users with evidence modes stated, the scientific disposition is recorded with frozen protocols, and any predictive claim is separately qualified or explicitly not.\n",
+      "preserved_boundary": "MEASURED_PRODUCT_COMPLETE, scientific disposition and predictive qualification must remain separate; no confluence/ranking authority follows.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "global-markets-regimes-risk-command",
+      "rationale": "The current required outcome explains leadership changes, breadth, durability and what was observable earlier, while recording predictive qualification as a separate state. The proposed home reflects the measured market-context product.",
+      "reserved_choice_id": "R04",
+      "source_refs": [
+        "ws-leadership-rotation-intelligence"
+      ],
+      "workstream_key": "WS:LEADERSHIP-ROTATION-INTELLIGENCE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "canonical-intelligence-substrate-learning",
+      "applied": false,
+      "confidence": "LOW",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver the Mastermind #1258 overlay (packages P/N/E/F/R/L/V/I/S) end to end under the Chairman's 2026-10-05 Meta-CEO handoff: every package either reaches a merged, blob-verified artifact on origin/main, is handed to its lawful incumbent owner with a RESULT on that owner's carrier, or is recorded as an exact human/authority gate for the Chairman. Done when the Chairman-facing blocker list is the only remaining work.",
+      "preserved_boundary": "Its packages retain their own source owners, scientific gates and acceptance; the validated program field is not this classification's basis.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "The source describes an owner-preserving overlay whose delivered surfaces are ticker/news changes, an expectations/evidence dossier and theme/leadership context. The proposed primary value is bringing those incumbent intelligence capabilities into a usable research experience.",
+      "reserved_choice_id": "R05",
+      "source_refs": [
+        "ws-market-intelligence-institutional-buildout"
+      ],
+      "workstream_key": "WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "global-markets-regimes-risk-command",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Let a user or machine inspect any sufficiently covered historical date before Mastermind existed, with source-bound market observations, first-print macro chronology, explicit unavailable evidence and separately revealed outcomes.\n",
+      "preserved_boundary": "Historical coverage and retrospective compatibility are not prospective predictive evidence or permission to retune live settings.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The mission supplies source-bound historical observations, first-print macro chronology, explicit unavailable evidence and separately revealed outcomes to both people and machines. Its retained archive, filing and Data & Lab consumers make reusable historical evidence the proposed primary capability.",
+      "reserved_choice_id": "R06",
+      "source_refs": [
+        "ws-market-time-machine"
+      ],
+      "workstream_key": "WS:MARKET-TIME-MACHINE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "personal-institutional-desk",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.6",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver the Marketing X docket (immutable 9651a77e, research/marketing_dockets/ catalyst_fable_20261031/) as a robust engine: a trustworthy SEC-event source-to-reader composition that gives first value without identification (A1/A2), a consent path that never grants, sends or discloses outside its gates (B1/B2), a rights-gated editorial asset factory with correction lineage (C1/C2), and a commercial bridge that passes only opaque attribution (D1), each proven to the rung its evidence reaches and never reported higher.\n",
+      "preserved_boundary": "Publication, source rights, consent, flags and external-owner acceptance stay separate.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "rationale": "The assigned engine must deliver first anonymous value, gated consent, rights-safe editorial assets with correction lineage and an opaque-attribution commercial bridge. Trustworthy acquisition/consent/commercial behavior is the proposed primary company outcome.",
+      "reserved_choice_id": "R07",
+      "source_refs": [
+        "ws-marketing-x-catalyst-loop"
+      ],
+      "workstream_key": "WS:MARKETING-X-CATALYST-LOOP",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Turn the existing Analyst OS into a useful investment-research workspace that investigates evidence, computes financial implications, tests competing theses and carries an authorized case through the existing thesis and monitor owners. Completion requires real customer-path evidence, not source presence or API success.\n",
+      "preserved_boundary": "Intelligence producers and thesis/monitor ownership are reused, not replaced.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "The existing Analyst OS must investigate evidence, compute financial implications, test rival theses and preserve a case through thesis/monitor owners. That is a coherent personal research-to-monitoring workspace with actual customer-path acceptance.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-mastermind-ai-flagship"
+      ],
+      "workstream_key": "WS:MASTERMIND-AI-FLAGSHIP",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Customers can ask the existing Mastermind AI chat for charts and visual explanations, receive bounded source-aware native templates, and recover the same visuals from their authorized saved conversation on Macro and Terminal. Completion requires published code, admitted release checks, actual model-selection proof and production-browser delivery; fixture previews or passing unit tests alone are not completion.",
+      "preserved_boundary": "Model-selection and production-browser delivery remain required; a preview is not acceptance.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "Customers must request source-aware charts and visual explanations in the existing AI chat and recover the same visuals from authorized conversations on Macro and Terminal. The primary benefit is a continuous customer research experience.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-mastermind-ai-illustrations"
+      ],
+      "workstream_key": "WS:MASTERMIND-AI-ILLUSTRATIONS",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Replace only the rented renderer (lightweight-charts 5.2.0) behind the Terminal's own chart-engine contract (terminal/lib/chart-engine/api.ts) with an original Canvas2D renderer, while every existing workflow (drawings, live bars, bar replay, pane sync, indicators, keyboard access) keeps behaving identically. Done means the \"mm\" engine passes the factory-agnostic conformance corpus, ChartPanel runs on it behind a dark-launch selector with a one-flag rollback to \"lwc\", and production renders the same crops.\n",
+      "preserved_boundary": "Dark launch, conformance, production crops and rollback/default-flip gates remain distinct.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "The bounded renderer replacement must preserve actual chart drawings, live bars, replay, pane sync, indicators and keyboard workflows under the existing chart contract. The observable outcome is the customer's live-analysis surface with equivalent behavior.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-native-chart-engine"
+      ],
+      "workstream_key": "WS:NATIVE-CHART-ENGINE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "institutional-company-event-intelligence",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Converge the existing news estate (qbus_news_* delivery, news_events/news_event_ledger, news_impact benchmark and producer, Mastermind get_intelligence/portfolio lens consumers, terminal news rail) into three independently accepted outcomes per research/news_intelligence_estate_20261021/MASTERPLAN.md: (1) reliable factual delivery with corrections and rights propagated and observable; (2) contextual research that cites events, sectors and themes against the existing MarketOntology and theme graph; (3) qualified quantitative influence only through the measured news_impact packets behind the registered section 11 gate. Done when the masterplan §9 seven vertical proofs (the first including a correction) are evidenced on production paths, each outcome has its own claim/evidence matrix, and no second store, scheduler, router, publication system or retry plane was built.\n",
+      "preserved_boundary": "The three outcomes remain independently accepted; no global gate, new store or automatic quantitative authority is created.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The mission converges delivery, correction/rights propagation, contextual evidence and separately gated quantitative packets across existing news, ontology, portfolio and Terminal owners. Reusable evidence and correction-safe composition are proposed as the common primary capability.",
+      "reserved_choice_id": "R08",
+      "source_refs": [
+        "ws-news-intelligence-estate-convergence"
+      ],
+      "workstream_key": "WS:NEWS-INTELLIGENCE-ESTATE-CONVERGENCE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.7",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Enable an assigned Astra, Codex or Claude orchestrator to preserve one recorded project goal, phase plan, accepted work and next action across compaction and interruption, then continue a real multi-phase project through delegation, review and acceptance without repeated human instructions to continue.\n",
+      "preserved_boundary": "The new strategic source pointer does not prove membership, installed delivery, native consumption or W1/W4 closure.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "autonomous-ai-organization",
+      "rationale": "The exact outcome preserves an original goal, phase plan, accepted work and next action across interruption, then continues through delegation, review and acceptance without repeated Chairman prompts. This is durable executive orchestration.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-orchestrator-project-continuity"
+      ],
+      "workstream_key": "WS:ORCHESTRATOR-PROJECT-CONTINUITY",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.4",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver the existing International product with the received foundation, ten views and existing-owner Saved integration, preserved legacy tools, truthful source qualification, independent review, served user journeys and a subsequent normal publication.",
+      "preserved_boundary": "Source qualification, responsive/served journeys and existing Saved ownership remain required.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "global-markets-regimes-risk-command",
+      "rationale": "The retained International programme's actual views cover country inspection, macro/policy, risk/transmission, history/scenarios and qualified comparisons. Its core outcome is intelligible global and country context, even though much of the remaining work is presentation and saved investigations.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-paper-international-waves"
+      ],
+      "workstream_key": "WS:PAPER-INTERNATIONAL-WAVES",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "trusted-production-customer-platform",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Rebuild the autonomous, china and hk paper books into an engineered paper system whose numbers can be defended. The program is complete only when all three active books carry qualified current economics, every manager cycle is accountable, execution assumptions are realistic, lineage from snapshot to claim to target to outcome is reliable, the product is proven in an authenticated browser, experiments run in isolation, and incidents have a documented rollback path. The investment upgrade is a separate result. It is accepted only for its tested scope and only when its predeclared evidence criteria are met. Tilts that fail are removed or narrowed, and specialists that add nothing are removed. If no credible edge is proven, the product says so and limits its claim to supported research, disciplined simulation and decision accountability (masterplan section 12.2).\n",
+      "preserved_boundary": "No account reset, repair trade, live-policy cutover or investment claim is authorized.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "The required product makes the three paper books' actual economics, manager decisions, pending effects, performance and position reviews defensible in an authenticated interface. That portfolio operating experience is proposed as primary; the investment upgrade is expressly a separate result.",
+      "reserved_choice_id": "R09",
+      "source_refs": [
+        "ws-portfolio-bot-rebuild"
+      ],
+      "workstream_key": "WS:PORTFOLIO-BOT-REBUILD",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.2",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Complete the Prophet upgrade end to end across US, China, Hong Kong and Canada under the Chairman's masterplan of 2026-10-20 (Prophet_End_to_End_Masterplan_Fable): every build unit B00–B28, question Q01–Q24 and decision D01–D12 dispositioned with evidence; the three core US sleeves (Early Leadership, Earnings, Cycle) accepted as useful, evidence-backed workflows; one shared research journey with truthful current-entry language on every surface (a quote is not a Buy; unavailable is not a maturity stage); US B4 entry built from current source over the frozen reader → B3 → B4 boundary; China, HK and Canada journeys proven market-native; served/installed/rollback proof before any release claim; an evidence-bound completion statement. Design is upgraded on a NEW Paper page before implementation; the R6 page is never mutated.\n",
+      "preserved_boundary": "A quote is not a Buy; unavailable is not maturity; source, served identity and rollback remain separate proof.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "legendary-alpha-discovery-timing",
+      "rationale": "The masterplan requires useful Early Leadership, Earnings and Cycle sleeves, truthful current-entry language, qualified US entry and market-native China/HK/Canada research journeys. The direct outcome is evidenced opportunity discovery and timing.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-prophet-end-to-end-r7"
+      ],
+      "workstream_key": "WS:PROPHET-END-TO-END-R7",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "legendary-alpha-discovery-timing",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Turn company news into a measured, span-cited, typed business-impact packet that Prophet can consume as context_only evidence. Done means: three frozen event templates with acceptance labels and closed schemas live under contracts/news_impact/; a validator in engine/news_impact/ rejects unknown fields and unsolicited instructions; a 600-case graded benchmark (200/200/200) reports critical-numeric correctness, material-event routing recall and zero unsupported ticker-to-supplier assertions against the masterplan §11 thresholds; and the Prophet evidence owner reads the packets without any change to master procedures, live portfolios, B4 gates, source licenses or provider authentication.\n",
+      "preserved_boundary": "The 600-case benchmark, section-11 gate and unchanged portfolios/B4/source-license boundaries remain.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The actual deliverable is a span-cited business-impact packet for three company-event templates, with numeric correctness and no unsupported supplier assertions. Its direct job is company/event interpretation consumed as context_only evidence.",
+      "reserved_choice_id": "R10",
+      "source_refs": [
+        "ws-prophet-news-impact"
+      ],
+      "workstream_key": "WS:PROPHET-NEWS-IMPACT",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "trusted-production-customer-platform",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.3",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver a rights-qualified public market-event story through the existing D14 Press pipeline, linked to its canonical stock dossier and the existing acquisition pathway, with verified publication and recoverable evidence.",
+      "preserved_boundary": "The existing Press/acquisition pipeline, quarantined draft and uncertain Research ingestion remain untouched.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "rationale": "The explicit deliverable is a rights-qualified market-event story linked to its canonical stock dossier, with verified publication and recoverable evidence. The recommendation treats the event explanation and dossier intelligence as primary.",
+      "reserved_choice_id": "R11",
+      "source_refs": [
+        "ws-public-intelligence-network"
+      ],
+      "workstream_key": "WS:PUBLIC-INTELLIGENCE-NETWORK",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver isolated original research features through causal inputs, existing Trial and Vault accounting, trusted evaluation, authenticated review and prospective evidence. Source checks and merges do not complete the programme.\n",
+      "preserved_boundary": "Runtime containment, original uncertain effects, RF-16, trial budgets and methods/admission gates remain unchanged.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The exact charter lets an operator inspect an original feature primitive, full generation history, source/input identities, trusted evaluation, challenge and prospective status through existing Trial/Vault/Experiments owners. It explicitly excludes automatic return-alpha discovery and trading, making reusable research/evaluation capability primary.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-research-factory-codegen",
+        "codegen_charter"
+      ],
+      "workstream_key": "WS:RESEARCH-FACTORY-CODEGEN",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Turn the private Research Vault (MarketDesk producer -> private inbox -> ingest -> catalog/corpus -> API/product) into a governed, deterministic intelligence fabric without creating a second vault, producer, auth plane, queue or publication plane. Done means every #8438 phase F1-F6 is merged and production-proven, the live F2 read-only R2 census receipt gates an F3 corpus repair that leaves zero unusable catalog rows, the Mac13,1 producer returns SOURCE_FRESH through the incumbent path, and the real authorized ChatGPT + Deep Research path meets the #8438 DONE_WHEN.\n",
+      "preserved_boundary": "It creates no replacement vault, auth path or queue; actual private-resource authorization and live ingestion remain separate.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The mission makes one existing private Vault's producer, ingest, catalog/corpus and authorized API consumers deterministic, source-fresh and correction-safe. Full text, source identity and citation reopen serve multiple research products.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-research-vault-ai-fabric"
+      ],
+      "workstream_key": "WS:RESEARCH-VAULT-AI-FABRIC",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "global-markets-regimes-risk-command",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Finish macro #7646 (operation sector-central-redesign-20260921-sol-001) through one Sector Intelligence experience in Beta Shared Shell. Preserve Macro analytical ownership, all B01–B12, P01–P23, J01–J15 and 134 capability rows; complete retained Cycles, industry evidence, durable investigations and exact continuation using masterplan version 1.1 and its Prophet v5.1 integration amendment. Prove backend, editable Paper, implemented consumer, normal release, actual permitted served journeys, next natural scheduled update or qualified no-change and scientific disposition separately. Retire competing UX only after source, destination, access and saved-context parity.\n",
+      "preserved_boundary": "All B/P/J/capability obligations and distinct scientific, natural-update and product acceptance remain.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "The current objective is one coherent investigation through Brief, Rotation, Dossier, Cycles, dated members and stock/Prophet/Research with exact return and saved continuity. It preserves Macro analytical ownership, so the integrated customer workflow is proposed as primary.",
+      "reserved_choice_id": "R12",
+      "source_refs": [
+        "ws-sector-intelligence-completion"
+      ],
+      "workstream_key": "WS:SECTOR-INTELLIGENCE-COMPLETION",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.7",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Give Chat-native CEO Sol one coherent, source-attributed and safely writable operating experience across the existing canonical systems. Complete only with Truth, Intelligence, Product and Learning proven through real production and measured canaries, not source, CI, merge, installation or QUEUED admission alone. Never create another lifecycle, authority, identity, memory, queue, retry or control plane.",
+      "preserved_boundary": "Authenticated capability, provider, runtime, wake and acceptance gates remain with current owners.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "autonomous-ai-organization",
+      "rationale": "Chat-native CEO Sol must operate existing canonical systems coherently with attributed truth, safe actions, capacity and measured real canaries. The mission explicitly serves company direction and operator continuity without new control planes.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-sol-capability-fabric"
+      ],
+      "workstream_key": "WS:SOL-CAPABILITY-FABRIC",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.5",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Complete the Hub forming-candle data, repair the live reducer, and share calendar/countdown boundaries so measured price changes update coherent OHLCV through the existing polling path; done requires required CI, an exact protected merge, deployment, and live verification with honest coverage.",
+      "preserved_boundary": "Partial pre/post candles, natural-session movement and producer/publication custody remain explicit.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "rationale": "The work connects measured price changes to coherent visible OHLCV and calendar/countdown behavior through the current Hub/reducer/polling path. Its bounded user outcome is trustworthy live chart analysis in Terminal.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-terminal-forming-candles"
+      ],
+      "workstream_key": "WS:TERMINAL-FORMING-CANDLES",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": "personal-institutional-desk",
+      "applied": false,
+      "confidence": "MODERATE",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.6",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Review the twenty supplied Terminal repair missions through the admitted Subagent Fabric, repair rejected returns through qualified escalation, and deliver accepted changes through their existing source owners with exact CI and production evidence. Whole-mission acceptance requires the original observable outcomes; a scoped patch or checkpoint does not satisfy it.",
+      "preserved_boundary": "Accepted child patches never imply whole-mission acceptance or release of source/auth/production holds.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "rationale": "The actual retained scope includes account export integrity, Pine containment, drawing transactions, freshness and reliable release evidence across twenty repair missions. The proposed common outcome is correctness and recoverability of existing customer-critical paths.",
+      "reserved_choice_id": "R13",
+      "source_refs": [
+        "ws-terminal-repair-audit20-2026-10"
+      ],
+      "workstream_key": "WS:TERMINAL-REPAIR-AUDIT20-2026-10",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.2",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Upgrade Terminal from descriptive Day Trade Mode to an integrated, evidence-grounded workflow for forming and confirmed short-horizon opportunities, conditional exhaustion/reclaim and candidate extremes, extended-session context, and separately evaluated one-to-three-day follow-through. Completion requires real inputs, existing-Radar integration, visible Terminal/browser proof, prospective evaluation and species-specific promotion decisions; options expressions are separately evaluated.",
+      "preserved_boundary": "Descriptive context, options expressions and any earned decision authority remain separately evaluated.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "legendary-alpha-discovery-timing",
+      "rationale": "The explicit capability is forming/confirmed short-horizon opportunity discovery, conditional exhaustion/reclaim and independently evaluated follow-through integrated with the existing Radar. Prospective and species-specific promotion are integral to its timing outcome.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-terminal-tactical-intelligence"
+      ],
+      "workstream_key": "WS:TERMINAL-TACTICAL-INTELLIGENCE",
+      "workstream_status_at_source": "active"
+    },
+    {
+      "alternative_initiative_key": null,
+      "applied": false,
+      "confidence": "HIGH",
+      "execution_authority": false,
+      "initiative_scope_ref": {
+        "section": "8.1",
+        "source_ref": "law-base"
+      },
+      "objective_at_source": "Deliver the Chairman-licensed Tiingo history and BOATS feed through the existing Macro archive/Data OS and Terminal Quote Hub. Completion requires real source receipts, historical identity and revision verification, admitted production capture, accepted consumer tests/review/CI, approved VPS release and responsive live browser acceptance.",
+      "preserved_boundary": "Rights, production capture, original operation receipts and live browser acceptance remain distinct.",
+      "proposal_status": "UNAPPROVED",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "rationale": "The licensed historical and BOATS source must reach the existing archive/Data OS and Quote Hub with source receipts, historical identity, revision and consumer proof. Reusable data identity/history/availability is its primary capability across product consumers.",
+      "reserved_choice_id": null,
+      "source_refs": [
+        "ws-tiingo-data-os"
+      ],
+      "workstream_key": "WS:TIINGO-DATA-OS",
+      "workstream_status_at_source": "active"
+    }
+  ],
+  "required_gates": [
+    {
+      "requirement": "Chairman written-spec approval and protected strategic amendment; unresolved cross-scope choices remain unassigned.",
+      "sections": [
+        "5.5",
+        "17.7",
+        "21"
+      ],
+      "source_ref": "law-base"
+    },
+    {
+      "requirement": "A new accepted epoch must explicitly replace exact 63/count/source literals before the existing compiler/companion can change.",
+      "sections": [
+        "5",
+        "6",
+        "7"
+      ],
+      "source_ref": "law-temporal-amendment"
+    },
+    {
+      "requirement": "One primary home, fresh full Project-plan/Linear identity reconciliation, exact existing owners and same-operation effect recovery before any separately authorized live apply.",
+      "sections": [
+        "6",
+        "17.1",
+        "17.3",
+        "17.4",
+        "17.5"
+      ],
+      "source_ref": "law-base"
+    }
+  ],
+  "reserved_choices": [
+    {
+      "alternative_initiative_key": "personal-institutional-desk",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R01",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "question": "Should the durable primary outcome be commercial/account trust, as proposed, or the personal product journey? The record materially commits to both; do not decide from its terminal-user-services program.",
+      "workstream_key": "WS:COMMERCIAL-ACTIVATION"
+    },
+    {
+      "alternative_initiative_key": "institutional-company-event-intelligence",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R02",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "question": "Confirm whether this umbrella is primarily reusable producer/consumer intelligence composition or company/financial research depth. Its adjudication role alone does not make it an Autonomous AI Organization programme.",
+      "workstream_key": "WS:COMMISSION-19-DATA-INTELLIGENCE"
+    },
+    {
+      "alternative_initiative_key": "institutional-company-event-intelligence",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R03",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "question": "Does the durable combined workstream primarily own the cross-vertical foundation, as proposed, or Semiconductor research content? Both are in the accepted objective; a strategic ruling must choose one home without silently splitting the workstream.",
+      "workstream_key": "WS:GMI-SEMICONDUCTORS"
+    },
+    {
+      "alternative_initiative_key": "legendary-alpha-discovery-timing",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R04",
+      "proposed_initiative_key": "global-markets-regimes-risk-command",
+      "question": "Confirm measured sector/regime explanation as the primary outcome, or explicitly rule that early-opportunity discovery is primary. Do not move it merely because a later predictive claim might qualify.",
+      "workstream_key": "WS:LEADERSHIP-ROTATION-INTELLIGENCE"
+    },
+    {
+      "alternative_initiative_key": "canonical-intelligence-substrate-learning",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R05",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "question": "This broad umbrella has no single dominant outcome stated as clearly as the narrow workstreams. Choose customer research integration versus reusable cross-domain composition, with Institutional Company & Event Intelligence also a plausible secondary contribution; leave it unassigned until ruled.",
+      "workstream_key": "WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT"
+    },
+    {
+      "alternative_initiative_key": "global-markets-regimes-risk-command",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R06",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "question": "Choose reusable historical evidence/history semantics versus a historical macro-market explanation product. Both are directly represented; the proposal favors the former because multiple machine and browser consumers share the archive.",
+      "workstream_key": "WS:MARKET-TIME-MACHINE"
+    },
+    {
+      "alternative_initiative_key": "personal-institutional-desk",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R07",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "question": "Confirm commercial trust/acquisition as primary, or favor the first-value customer journey. A new growth Initiative is not proposed and the SEC-event content does not itself settle this umbrella's strategic home.",
+      "workstream_key": "WS:MARKETING-X-CATALYST-LOOP"
+    },
+    {
+      "alternative_initiative_key": "institutional-company-event-intelligence",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R08",
+      "proposed_initiative_key": "canonical-intelligence-substrate-learning",
+      "question": "Choose shared cross-estate evidence composition versus company/event research depth as the primary outcome. Quantitative influence is a separately gated contribution, not grounds for multiple Initiative parents.",
+      "workstream_key": "WS:NEWS-INTELLIGENCE-ESTATE-CONVERGENCE"
+    },
+    {
+      "alternative_initiative_key": "trusted-production-customer-platform",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R09",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "question": "Confirm the portfolio/account operating experience as primary, or prioritize reliable economic accounting and recoverability. The separate investment-evidence result must not automatically make the whole programme an Alpha Initiative member.",
+      "workstream_key": "WS:PORTFOLIO-BOT-REBUILD"
+    },
+    {
+      "alternative_initiative_key": "legendary-alpha-discovery-timing",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R10",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "question": "Confirm business-impact understanding as primary, or rule that measured incremental opportunity information is the durable primary outcome. The Prophet consumer name alone cannot decide membership.",
+      "workstream_key": "WS:PROPHET-NEWS-IMPACT"
+    },
+    {
+      "alternative_initiative_key": "trusted-production-customer-platform",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R11",
+      "proposed_initiative_key": "institutional-company-event-intelligence",
+      "question": "Confirm event-research quality as the primary company outcome, or classify the programme around reliable public distribution/acquisition. The present record names both, so this proposal does not establish either as approved.",
+      "workstream_key": "WS:PUBLIC-INTELLIGENCE-NETWORK"
+    },
+    {
+      "alternative_initiative_key": "global-markets-regimes-risk-command",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R12",
+      "proposed_initiative_key": "personal-institutional-desk",
+      "question": "Choose the coherent cross-tool investigation product versus sector/cycle market-context understanding as the primary durable outcome. Do not infer a home from the Sector label or from consuming Prophet.",
+      "workstream_key": "WS:SECTOR-INTELLIGENCE-COMPLETION"
+    },
+    {
+      "alternative_initiative_key": "personal-institutional-desk",
+      "authority": "Sol/Chairman strategic scope ruling under protected base 17.7",
+      "disposition": "RESERVED_UNAPPROVED",
+      "id": "R13",
+      "proposed_initiative_key": "trusted-production-customer-platform",
+      "question": "Confirm repair/reliability as the umbrella's primary outcome, or prioritize completion of the customer chart/editor/workspace journey. Fabric orchestration is execution method, not evidence for an Autonomous AI Organization home.",
+      "workstream_key": "WS:TERMINAL-REPAIR-AUDIT20-2026-10"
+    }
+  ],
+  "schema": "mastermind.estate_initiative_membership_proposal.v1",
+  "source_snapshot": {
+    "active_or_candidate": 97,
+    "current_workstreams": 115,
+    "existing_mapped_active_or_candidate": 53,
+    "existing_workstream_exception_count": 1,
+    "governing_mastermind_revision": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+    "macro_revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+    "no_live_linear_census": true,
+    "uncovered_active_or_candidate": 43,
+    "unmapped_nonactive_excluded": 8
+  },
+  "sources": {
+    "codegen_charter": {
+      "current_release_or_acceptance_claim": false,
+      "git_blob": "6a0d7009560f2353ef77de7a4c48b919c61a600e",
+      "path": "research/research_factory_codegen/2026-10-12/EXECUTION_CHARTER.md",
+      "read_range": "1-150",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "PROTECTED_CHARTER_SCOPE",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/research/research_factory_codegen/2026-10-12/EXECUTION_CHARTER.md"
+    },
+    "communications_scope": {
+      "current_release_or_acceptance_claim": false,
+      "git_blob": "a3a416f3107c423f90abfd4be7f1cc4867be469f",
+      "path": "agentos/handoffs/GMI-COMMUNICATIONS-RESEARCH-2026-09-23.md",
+      "read_range": "1-100",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "c79aaca04948203d041973d60e549473242071e8",
+      "role": "HISTORICAL_OWNER_SCOPE_ONLY",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/c79aaca04948203d041973d60e549473242071e8/agentos/handoffs/GMI-COMMUNICATIONS-RESEARCH-2026-09-23.md"
+    },
+    "law-base": {
+      "content_sha256": "f1584c7b30e7728a99399161d1db4fa14d2c978c7e8fa73dae0f462b36098466",
+      "git_blob": "24541b5341fa0c16d1277a9c670ed4b816a519ce",
+      "locators": [
+        "5.5",
+        "6",
+        "8.1-8.7",
+        "17.1-17.7",
+        "21"
+      ],
+      "path": "docs/superpowers/specs/2026-08-29-linear-initiative-portfolio-architecture-design.md",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+      "role": "PROTECTED_LAW",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/c065e56b4cb7c4487e51249795ca6ebf010e6ffa/docs/superpowers/specs/2026-08-29-linear-initiative-portfolio-architecture-design.md"
+    },
+    "law-consolidation": {
+      "git_blob": "b6c74d5e2c68a4c64f7133a82fc502437d728b6b",
+      "locators": [
+        "1",
+        "2",
+        "3"
+      ],
+      "path": "docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+      "role": "PROTECTED_LAW",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/c065e56b4cb7c4487e51249795ca6ebf010e6ffa/docs/superpowers/specs/2026-09-02-linear-initiative-portfolio-v1-current-epoch-source-consolidation.md"
+    },
+    "law-temporal-amendment": {
+      "content_sha256": "ac6f80c55f6b666f762453de68b26021ed69c82b49ecaf7377132849285b0c58",
+      "git_blob": "b1c1554c39fe9c322b783db35b7741e5774d33e5",
+      "locators": [
+        "2",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8"
+      ],
+      "original_protected_revision": "6c5c2a6225a3fa2c2ec3e3398dcc8b8629b3a988",
+      "path": "docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "revision": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+      "role": "PROTECTED_LAW",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/c065e56b4cb7c4487e51249795ca6ebf010e6ffa/docs/superpowers/specs/2026-09-03-linear-initiative-portfolio-v1-temporal-grain-current-epoch-amendment.md"
+    },
+    "robotics_scope": {
+      "current_release_or_acceptance_claim": false,
+      "git_blob": "0b01ad808d4b4f260ce1487dc1bad8cc7734cb28",
+      "path": "agentos/handoffs/GMI-THEME-GRAPH-2026-09-24-robotics-implementation.md",
+      "read_range": "1-100",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "d259ec08d58c7e6762151e84959dbf8f80870fbf",
+      "role": "HISTORICAL_OWNER_SCOPE_ONLY",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/d259ec08d58c7e6762151e84959dbf8f80870fbf/agentos/handoffs/GMI-THEME-GRAPH-2026-09-24-robotics-implementation.md"
+    },
+    "ws-browser-fabric": {
+      "content_sha256": "bcffdb98d479d1d07efd4f56de9b156c4c01060f43230c2a6085c92fc512b409",
+      "git_blob": "92775ec12d4575ca2973807c9202be17f840b52c",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-BROWSER-FABRIC.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-BROWSER-FABRIC.md"
+    },
+    "ws-commercial-activation": {
+      "content_sha256": "15ad86e8d059665601c00b7e2bf68bfea52fd2cba8cb6cc7b2767aec666295e5",
+      "git_blob": "d438a0620c3b282ad32f8d75af539007ec820b9b",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-COMMERCIAL-ACTIVATION.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-COMMERCIAL-ACTIVATION.md"
+    },
+    "ws-commission-19-data-intelligence": {
+      "content_sha256": "9647001ae17c090e2f4809cb5407fb34091991b9752590854cabf9755b268a91",
+      "git_blob": "79e777cf901a9ce20ec90b055db31778c754a56e",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-COMMISSION-19-DATA-INTELLIGENCE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-COMMISSION-19-DATA-INTELLIGENCE.md"
+    },
+    "ws-consumer-cyclical-v1": {
+      "content_sha256": "7d816185708e7857230df461626f8b9eb3b0f56467e5eb1de6c0b6cde3cd72aa",
+      "git_blob": "c46e8d7d762771931689cf06bb2765b42ac63451",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-CONSUMER-CYCLICAL-V1.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-CONSUMER-CYCLICAL-V1.md"
+    },
+    "ws-consumer-defensive-cdv1": {
+      "content_sha256": "5143b79652535d6cc8d5dd251904cb0659383a8e84cf0230fef304f61cf704a6",
+      "git_blob": "774140fb64c29dd010b542fe2281bf387c00d5be",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-CONSUMER-DEFENSIVE-CDV1.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-CONSUMER-DEFENSIVE-CDV1.md"
+    },
+    "ws-data-os-completion": {
+      "content_sha256": "ad933c8d98054281b76591cb77d56edce5f7a67d53947cef14dd59eeea37629e",
+      "git_blob": "a8e85dedceec23e4a91217cf70eabfbac8ce2b0e",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-DATA-OS-COMPLETION.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-DATA-OS-COMPLETION.md"
+    },
+    "ws-eval-os-reliability-extensions": {
+      "content_sha256": "03c207379db4878a3e5efc1ac165c161293f9417b5a8e7062e8287056a6fc43c",
+      "git_blob": "ab6ae568e35e22f5d56ab18c63d2c7a097b26f24",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-EVAL-OS-RELIABILITY-EXTENSIONS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-EVAL-OS-RELIABILITY-EXTENSIONS.md"
+    },
+    "ws-executive-autonomy-v1-closure": {
+      "content_sha256": "d55a77afe7080295c428557c483d380bf26a2b7e335392c8a5b11a9a3d83d9e8",
+      "git_blob": "0df28e6f8dcccc8401924b08c48c63de582a0f7f",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md"
+    },
+    "ws-executive-ecosystem-completion": {
+      "content_sha256": "3dbc9b7aaca44e3ad43ddb8e4b80800fea4c1b9a6477cff15add1817372938d4",
+      "git_blob": "a0a821381a3963be382dcd349c68e6805ef1402a",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md"
+    },
+    "ws-fleet-storage-lifecycle": {
+      "content_sha256": "e4b6f550580dbeedd31299b4b92395b73371f02f8fe19c9638034690d469de45",
+      "git_blob": "5d92d60242a35852f8ea1707c881019bed394713",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-FLEET-STORAGE-LIFECYCLE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-FLEET-STORAGE-LIFECYCLE.md"
+    },
+    "ws-global-liquidity-transmission": {
+      "content_sha256": "d070121deb2eadbf5d70f6c713aecc56f355bbc79f7bc2031c7355fec7edcdb3",
+      "git_blob": "1f33c15df80c491c8175d78d968e4836f6e9a657",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GLOBAL-LIQUIDITY-TRANSMISSION.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GLOBAL-LIQUIDITY-TRANSMISSION.md"
+    },
+    "ws-gmi-communications": {
+      "content_sha256": "2a86c7dcc912c8e43ac10025e01cf70ded0a8c92d4676cb3673ea76742e9c31a",
+      "git_blob": "2a9d8ee3cd09907c099f3b052638fddc42c6c764",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-COMMUNICATIONS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-COMMUNICATIONS.md"
+    },
+    "ws-gmi-energy-nuclear": {
+      "content_sha256": "d679435a7d84a215f167c95a708c207e18385be422f4583299dad62b8ac4e325",
+      "git_blob": "5cc7e1261d6ca0127d897f6bba96c0ad93b6d084",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-ENERGY-NUCLEAR.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-ENERGY-NUCLEAR.md"
+    },
+    "ws-gmi-finance-intelligence": {
+      "content_sha256": "2f3eaca8dac36b0b37b43ed35a499b299f1b20565026ce87374a1ffe07a60b22",
+      "git_blob": "e35f0babfaf3efd418b33106afd7da96e6333941",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-FINANCE-INTELLIGENCE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-FINANCE-INTELLIGENCE.md"
+    },
+    "ws-gmi-healthcare": {
+      "content_sha256": "d3d4e45aeb5da7aa51cfe247a9836662957f2afce40ec4a29aeb84db15e75c3f",
+      "git_blob": "04f17e91ee98254507d946a84e6f9246b52f4ecb",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-HEALTHCARE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-HEALTHCARE.md"
+    },
+    "ws-gmi-industrials-first-vertical": {
+      "content_sha256": "04ba492d472ccbe446c7f0093a090e61118cb06d80d6cb1be19ee69d20863427",
+      "git_blob": "1fbe6bca70f4431cd6163df1de402019ee5df572",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-INDUSTRIALS-FIRST-VERTICAL.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-INDUSTRIALS-FIRST-VERTICAL.md"
+    },
+    "ws-gmi-mining-m1-integration": {
+      "content_sha256": "eafb3e659da85bc89859b9600ea974757998a3e58387ed3de6fdea600fefbc47",
+      "git_blob": "1ae8b74ebf71f54fbfb99598b0c5cdb4fd98e692",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-MINING-M1-INTEGRATION.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-MINING-M1-INTEGRATION.md"
+    },
+    "ws-gmi-robotics": {
+      "content_sha256": "50961ade63203b48d61975a20437e896afa5b122401f272d684f7648797dd455",
+      "git_blob": "8ab0f31f996b5406e705a33ebd30ce4a263a4dea",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-ROBOTICS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-ROBOTICS.md"
+    },
+    "ws-gmi-semiconductors": {
+      "content_sha256": "2e9f550d0058f7b6db9cfcf5921da811aaa9c3e287484ab80dcf92c74eedceb6",
+      "git_blob": "c884e91e8318eff31126525524c0e8b4877f8070",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-SEMICONDUCTORS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-SEMICONDUCTORS.md"
+    },
+    "ws-gmi-technology-ex-semis": {
+      "content_sha256": "6b3158357166230b076eafff0439da840d558b7991ee25a48e41578baa9042a0",
+      "git_blob": "b0011b50dc24866bc3b2cf9d8806d66a49022c95",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-GMI-TECHNOLOGY-EX-SEMIS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-GMI-TECHNOLOGY-EX-SEMIS.md"
+    },
+    "ws-intl-global-surveillance": {
+      "content_sha256": "40bb972abcd048b2b08ff351b8c62e346ba49c1e91c66bdd303c9c0d741ab734",
+      "git_blob": "ddf60e50fe2792ea40d5a59de75bd305b7b44f76",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-INTL-GLOBAL-SURVEILLANCE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-INTL-GLOBAL-SURVEILLANCE.md"
+    },
+    "ws-leadership-rotation-intelligence": {
+      "content_sha256": "d411120a3c956f086a062ea664d10be987f55716d6c9100c4e06ddbd29e52a01",
+      "git_blob": "5ab4b783b7a0cde0b78e263fe27504022e3ac185",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-LEADERSHIP-ROTATION-INTELLIGENCE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-LEADERSHIP-ROTATION-INTELLIGENCE.md"
+    },
+    "ws-market-intelligence-institutional-buildout": {
+      "content_sha256": "6233d85eb3e46c05bee84fea441b7abd05fafe971de011b73f54f9d1bc802702",
+      "git_blob": "bb1f1f30de650b5b5d2a225b6e0de9a4b4c2e093",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.md"
+    },
+    "ws-market-time-machine": {
+      "content_sha256": "f0c99bc3a2ea0a449f9adc6ff04eaf7cb9532fea18fb928b33e48cc13e2752a1",
+      "git_blob": "686f3e63d6c68d0e2fa60fcaa722833e5998453f",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-MARKET-TIME-MACHINE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-MARKET-TIME-MACHINE.md"
+    },
+    "ws-marketing-x-catalyst-loop": {
+      "content_sha256": "091b6b0d48d9e3795beefc6356acbde9f4a1de9873f1f42f05fdfb51a8e41c8b",
+      "git_blob": "098c21a9e60ae50a16b30e85d18545bdde0acd87",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-MARKETING-X-CATALYST-LOOP.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-MARKETING-X-CATALYST-LOOP.md"
+    },
+    "ws-mastermind-ai-flagship": {
+      "content_sha256": "ef9cf1fe7894f95da72dbc4df0bcb276b0f74903bd8b9e08608acff260273b9f",
+      "git_blob": "def58e5640de1a97046d6e44d7c64940cf2655d5",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-MASTERMIND-AI-FLAGSHIP.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-MASTERMIND-AI-FLAGSHIP.md"
+    },
+    "ws-mastermind-ai-illustrations": {
+      "content_sha256": "65b0a8c96c5e3351d66eea0cd9f9d2016b1a9e63f9494e02a29c44d05c6a8e22",
+      "git_blob": "301eccf69a6b8a29e14246aea124312c7cb16429",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-MASTERMIND-AI-ILLUSTRATIONS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-MASTERMIND-AI-ILLUSTRATIONS.md"
+    },
+    "ws-native-chart-engine": {
+      "content_sha256": "2b133033a212f0ab393b9cbcc112cc10c7cce9686ee7dbb46e12b5521e7df58f",
+      "git_blob": "d62824483a32ffec7dbb5bfb369f9871301eac15",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-NATIVE-CHART-ENGINE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-NATIVE-CHART-ENGINE.md"
+    },
+    "ws-news-intelligence-estate-convergence": {
+      "content_sha256": "32461440facc2b4d584f11610dbaee7c4fc956d7ae76eef776f84280e410a7ab",
+      "git_blob": "9581daae267503df29ceaa954c9f5a7a8acab1a2",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-NEWS-INTELLIGENCE-ESTATE-CONVERGENCE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-NEWS-INTELLIGENCE-ESTATE-CONVERGENCE.md"
+    },
+    "ws-orchestrator-project-continuity": {
+      "content_sha256": "f8cee3d91305a01f48ee8fb1a0084c42446f2298420c5ac01b74b170ee97dea3",
+      "git_blob": "00f75948fdcd8f77945a757c3e05b02a85d8e88a",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-ORCHESTRATOR-PROJECT-CONTINUITY.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-ORCHESTRATOR-PROJECT-CONTINUITY.md"
+    },
+    "ws-paper-international-waves": {
+      "content_sha256": "2342224f8745916be12501e17cd39f47854fa36b82d120fe1d1c74ae574c31bd",
+      "git_blob": "7880120f486fbdcfd246832786aa145a56f2f670",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-PAPER-INTERNATIONAL-WAVES.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-PAPER-INTERNATIONAL-WAVES.md"
+    },
+    "ws-portfolio-bot-rebuild": {
+      "content_sha256": "bc625fdaa4df7c2e5d2393a2828625370c54b911b7722257c2cd6d04ddd4ff56",
+      "git_blob": "4c1ad327cc9595f6d20ff05226c78251c2ec8fad",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-PORTFOLIO-BOT-REBUILD.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-PORTFOLIO-BOT-REBUILD.md"
+    },
+    "ws-prophet-end-to-end-r7": {
+      "content_sha256": "ac0bffc4dc438c5023b642a3b4ff55d8f92a0d8cefe1315e2c704cd5b0281150",
+      "git_blob": "e21fb16f15607001e2be2bb5c7ca482aa52fbb0c",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-PROPHET-END-TO-END-R7.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-PROPHET-END-TO-END-R7.md"
+    },
+    "ws-prophet-news-impact": {
+      "content_sha256": "3f5221427afedd6472a317ce28258c57ea2ddf3347719e15e429266185df76fe",
+      "git_blob": "4c56c750cd5c7e9d52e1dfacbe28565b11cc6727",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-PROPHET-NEWS-IMPACT.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-PROPHET-NEWS-IMPACT.md"
+    },
+    "ws-public-intelligence-network": {
+      "content_sha256": "b46874c461d97cf946ea1aaa8c9951fd472bb27cddc25416a800bc87c3698b53",
+      "git_blob": "95a37de79520074a4a51e5d7cb5d65d3c5a02eab",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-PUBLIC-INTELLIGENCE-NETWORK.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-PUBLIC-INTELLIGENCE-NETWORK.md"
+    },
+    "ws-research-factory-codegen": {
+      "content_sha256": "462454c82cfd3f9f3b4b7bf4fe5091583bd51542fde9d3baacfd19ce02e50c79",
+      "git_blob": "223665e210455d138bb47fbaab55adf1e7b6e0bc",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-RESEARCH-FACTORY-CODEGEN.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-RESEARCH-FACTORY-CODEGEN.md"
+    },
+    "ws-research-vault-ai-fabric": {
+      "content_sha256": "1206bb36125aae2d2891bf571404847e76483241472bf002b8a6f64442d7a64c",
+      "git_blob": "ae4abaa430c9f2c45134ef25a4299de7f180698e",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-RESEARCH-VAULT-AI-FABRIC.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-RESEARCH-VAULT-AI-FABRIC.md"
+    },
+    "ws-sector-intelligence-completion": {
+      "content_sha256": "b7e039681dc41cfda61479d235420b3a7df6e2ea58db366d83b66741c12a7e74",
+      "git_blob": "7ad449229678056a1adaf372865f1a9fc189c289",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-SECTOR-INTELLIGENCE-COMPLETION.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-SECTOR-INTELLIGENCE-COMPLETION.md"
+    },
+    "ws-sol-capability-fabric": {
+      "content_sha256": "548e72dd489414d1786375c6cc81433f12a3da1998b681ae38af48923c525820",
+      "git_blob": "ba594f9237b15d1d9b5b4b8258cc5f07f9c8484f",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-SOL-CAPABILITY-FABRIC.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-SOL-CAPABILITY-FABRIC.md"
+    },
+    "ws-terminal-forming-candles": {
+      "content_sha256": "091ebbc4bfca1290e230cf470674a93ff37ca4fd2cb26383860332a283f705fa",
+      "git_blob": "b20ae7a477663d87d871ae875c5c74ec9a85f97d",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-TERMINAL-FORMING-CANDLES.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-TERMINAL-FORMING-CANDLES.md"
+    },
+    "ws-terminal-repair-audit20-2026-10": {
+      "content_sha256": "125ab0f26d110cabd566f631f0ccfb937f83917cf632271e4b17430585507e19",
+      "git_blob": "a3c2de526eacc482744108d3820e5cdac27c4d24",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-TERMINAL-REPAIR-AUDIT20-2026-10.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-TERMINAL-REPAIR-AUDIT20-2026-10.md"
+    },
+    "ws-terminal-tactical-intelligence": {
+      "content_sha256": "6ac161c100ceaf522a8d0ad50feb8a36c1e149b6378fe3acd30a4ce401cdf6e8",
+      "git_blob": "eafc4f1a72dbbf685c64c1c35f9629f8d98fabd4",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-TERMINAL-TACTICAL-INTELLIGENCE.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-TERMINAL-TACTICAL-INTELLIGENCE.md"
+    },
+    "ws-tiingo-data-os": {
+      "content_sha256": "5fab80988aa7d7ea7cce937751e352da8ad7e2c0515000c69456526c9b03ce5c",
+      "git_blob": "870da6b0c1b946cb7e89a14244cb889d6a24e7ec",
+      "locators": [
+        "frontmatter.objective",
+        "frontmatter.waves",
+        "body"
+      ],
+      "path": "agentos/workstreams/WS-TIINGO-DATA-OS.md",
+      "repository": "mastermindx-market-intelligence/macro",
+      "revision": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+      "role": "CANONICAL_WORKSTREAM_SNAPSHOT",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/0267bf8fffc083cd048504bdb5c8e775025d6396/agentos/workstreams/WS-TIINGO-DATA-OS.md"
+    }
+  },
+  "status": "UNAPPROVED"
+}

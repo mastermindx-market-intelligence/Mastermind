@@ -24,10 +24,20 @@ from control_plane.executive_agent_capabilities import (
     HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID,
     HERMES_NATIVE_DISCOVERY_PROFILE_ID,
     HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID,
+    HERMES_NATIVE_PROJECT_HELP_PROFILE_ID,
+    T3_API_PRINCIPAL_EXECUTION_SURFACE, T3_API_PROJECT_HELP_PROFILE_ID,
+    T3_API_REQUESTER_RETURN_PROFILE_ID,
+    T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID,
+    PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE,
+    PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID,
     PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
     PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
     PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
     PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -181,14 +191,21 @@ class CooInstalledSource:
         if (profile is None or not profile.enabled
                 or profile.profile_digest != row["capability_profile_digest"]
                 or profile.execution_surface not in {
-                    CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE}
+                    CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE,
+                    T3_API_PRINCIPAL_EXECUTION_SURFACE, PAPERCLIP_API_PRINCIPAL_EXECUTION_SURFACE}
                 or (profile.execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
                     and profile.profile_id not in {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
                                                    HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID,
-                                                   HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID})
+                                                   HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID, HERMES_NATIVE_PROJECT_HELP_PROFILE_ID})
                 or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         self._profile_catalogue(profile)
+        if profile.profile_id in {T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID, PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID}:
+            from common import coo_project_help_contract as help_wire
+            from common import coo_requester_return_contract as requester_wire
+            if (row.get("authority_version") != 4
+                    or not {help_wire.ACTION, requester_wire.ACTION} <= set(_authority(row).principal_actions)):
+                _refuse()
         fact = PrincipalFact(policy_id=binding["policy_id"], issuer_digest=binding["issuer_digest"],
             subject_digest=binding["subject_digest"], client_ref=binding["client_ref"],
             resource_ref=binding["resource"], scopes=tuple(binding["scopes"]),
@@ -199,6 +216,7 @@ class CooInstalledSource:
     def _profile_catalogue(profile):
         from common import coo_agentos_context_contract as wire
         from common import coo_requester_return_contract as requester_wire
+        from common import coo_project_help_contract as help_wire
         from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, catalogue_specs
         found = []
         context_profiles = {
@@ -206,6 +224,8 @@ class CooInstalledSource:
             wire.CURRENT_CATALOGUE: (HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID),
             wire.DISCOVERY_CATALOGUE: (HERMES_NATIVE_DISCOVERY_PROFILE_ID, PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID),
             requester_wire.CATALOGUE: (HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID, PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID),
+            help_wire.CATALOGUE: (HERMES_NATIVE_PROJECT_HELP_PROFILE_ID, PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID),
+            help_wire.API_REQUESTER_CATALOGUE: (T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID, PRINCIPAL_COO_T3_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID),
         }
         for catalogue in (wire.LEGACY_CATALOGUE, *context_profiles):
             specs = {s.name: {"name": s.name, "inputSchema": s.input_schema, "annotations": s.annotations}
@@ -214,15 +234,28 @@ class CooInstalledSource:
             for grant in profile.mcp_server_grants:
                 if (grant.server_identity == COO_SERVER_NAME and grant.server_version == COO_SERVER_VERSION
                         and set(grant.enabled_tools) == set(specs) and grant.tool_schema_digest == schema_digest):
-                    if catalogue in context_profiles and (
-                            (profile.profile_id, grant.capability_id) != context_profiles[catalogue]):
-                        _refuse()
+                    if catalogue in context_profiles:
+                        expected = {context_profiles[catalogue]}
+                        if catalogue == help_wire.CATALOGUE:
+                            expected.add((T3_API_PROJECT_HELP_PROFILE_ID, PRINCIPAL_COO_PROJECT_HELP_MCP_CAPABILITY_ID))
+                        if catalogue == requester_wire.CATALOGUE:
+                            expected.add((T3_API_REQUESTER_RETURN_PROFILE_ID, PRINCIPAL_COO_T3_API_REQUESTER_RETURN_MCP_CAPABILITY_ID))
+                        if catalogue == help_wire.API_REQUESTER_CATALOGUE:
+                            expected.add((PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID, PRINCIPAL_COO_PAPERCLIP_API_PROJECT_HELP_REQUESTER_MCP_CAPABILITY_ID))
+                        if (profile.profile_id, grant.capability_id) not in expected:
+                            _refuse()
                     found.append(catalogue)
         if len(found) != 1:
             _refuse()
         for catalogue, (profile_id, _) in context_profiles.items():
             if profile.profile_id == profile_id and found[0] != catalogue:
                 _refuse()
+        if profile.profile_id == T3_API_PROJECT_HELP_PROFILE_ID and found[0] != help_wire.CATALOGUE:
+            _refuse()
+        if profile.profile_id == T3_API_REQUESTER_RETURN_PROFILE_ID and found[0] != requester_wire.CATALOGUE:
+            _refuse()
+        if profile.profile_id == PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID and found[0] != help_wire.API_REQUESTER_CATALOGUE:
+            _refuse()
         return found[0]
 
     def catalogue_for_principal(self, principal, *, work_ref=None):
@@ -233,6 +266,7 @@ class CooInstalledSource:
         existing tools does not require this new projection.
         """
         from common import coo_agentos_context_contract as wire
+        from common import coo_project_help_contract as help_wire
         from common import coo_requester_return_contract as requester_wire
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_executive_app.coo_binding import select_coo_binding, _digest
@@ -254,7 +288,12 @@ class CooInstalledSource:
             actions = {HERMES_NATIVE_CONTEXT_PROFILE_ID: wire.ACTION,
                        HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: wire.CURRENT_ACTION,
                        HERMES_NATIVE_DISCOVERY_PROFILE_ID: wire.CURRENT_ACTION,
-                       HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID: requester_wire.ACTION}
+                       HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID: requester_wire.ACTION,
+                       T3_API_REQUESTER_RETURN_PROFILE_ID: requester_wire.ACTION,
+                       T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID: requester_wire.ACTION,
+                       PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID: requester_wire.ACTION,
+                       HERMES_NATIVE_PROJECT_HELP_PROFILE_ID: help_wire.ACTION,
+                       T3_API_PROJECT_HELP_PROFILE_ID: help_wire.ACTION}
             if (not _check_work_ref(work_ref) or len(scoped) != 1
                     or scoped[0]["capability_profile_id"] not in actions
                     or actions[scoped[0]["capability_profile_id"]] not in _authority(scoped[0]).principal_actions):
@@ -284,13 +323,18 @@ class CooInstalledSource:
     def has_context_read_grant(self):
         """Installed composition selector, never an effect-admission arm."""
         from common import coo_agentos_context_contract as wire
+        from common import coo_project_help_contract as help_wire
         self.require_context_source_current()
         coo = self._load_coo()
         found = False
         for row in validate_missions(coo.get("missions", [])):
             alternatives = {HERMES_NATIVE_CONTEXT_PROFILE_ID: (wire.ACTION, wire.CATALOGUE),
                             HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: (wire.CURRENT_ACTION, wire.CURRENT_CATALOGUE),
-                            HERMES_NATIVE_DISCOVERY_PROFILE_ID: (wire.CURRENT_ACTION, wire.DISCOVERY_CATALOGUE)}
+                            HERMES_NATIVE_DISCOVERY_PROFILE_ID: (wire.CURRENT_ACTION, wire.DISCOVERY_CATALOGUE),
+                            HERMES_NATIVE_PROJECT_HELP_PROFILE_ID: (help_wire.ACTION, help_wire.CATALOGUE),
+                            T3_API_PROJECT_HELP_PROFILE_ID: (help_wire.ACTION, help_wire.CATALOGUE),
+                            T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID: (help_wire.ACTION, help_wire.API_REQUESTER_CATALOGUE),
+                            PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID: (help_wire.ACTION, help_wire.API_REQUESTER_CATALOGUE)}
             if (row["enabled"] and row["capability_profile_id"] in alternatives):
                 _, fact, authority = self._snapshot(row["work_ref"], coo)
                 principal = {"policy_id": fact.policy_id, "issuer_digest": fact.issuer_digest,

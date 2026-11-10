@@ -1,0 +1,8 @@
+......                                                                   [100%]
+=============================== warnings summary ===============================
+tests/test_workspace_read_app.py:25
+  /workspace/scratch/dfef37b7f33a/estate-joint-api-fixture-qualification/tests/test_workspace_read_app.py:25: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+6 passed, 1 warning in 67.98s (0:01:07)

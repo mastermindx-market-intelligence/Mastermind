@@ -1,0 +1,231 @@
+{
+  "base": {
+    "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "dependencies": {
+      "v6_patch_sha256": "d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d",
+      "joint_help_read_postimage_sha256": "4433a6082eddf43d76163ec137bccab1d8b861084428880ab553e1f0abca479e"
+    },
+    "copied_files": 1423,
+    "scope": "Source-only isolated compositional read-budget qualification; no installed/runtime/GitHub mutation.",
+    "joint_postimages": [
+      {
+        "path": "common/coo_project_help_contract.py",
+        "sha256": "c8ca82f9ec3ed766b1db155be7607d555d34d2b4810b06345c06e96131983254"
+      },
+      {
+        "path": "config/executive_claude_principal_capabilities.json",
+        "sha256": "3dfe09ee1f8e51c5749f897ebcc392facba85a30710e5236cc84d230a2090731"
+      },
+      {
+        "path": "control_plane/coo_principal_host.py",
+        "sha256": "5cfaa438669480efe341e65df270ac09679b493b35fbec63943591f783ddf852"
+      },
+      {
+        "path": "control_plane/coo_project_help_read.py",
+        "sha256": "4433a6082eddf43d76163ec137bccab1d8b861084428880ab553e1f0abca479e"
+      },
+      {
+        "path": "control_plane/executive_agent_capabilities.py",
+        "sha256": "c1a9b35abd94ca8d4e2e58efb5b877883eb6a88ce0d95176166ce9f43a454fa0"
+      },
+      {
+        "path": "control_plane/executive_service.py",
+        "sha256": "3c98ce090d9d147385edd7300b56c0eb58e88610f8018947b264a08ceae85638"
+      },
+      {
+        "path": "docs/PROJECT_HELP_REQUESTER_API.md",
+        "sha256": "fba7cfbef464a008a9a436f58794a71533cf1233b293a20e799b4fcbc4884284"
+      },
+      {
+        "path": "integrations/executive_mcp/coo.py",
+        "sha256": "4e02e535da47a57e50d720d150ec4d6acb95222bdbd0b3b7d02017ea880a1e83"
+      },
+      {
+        "path": "integrations/executive_mcp/server.py",
+        "sha256": "16805fe1201ea0662c73eed99a4450f5d94acc5d15e67c4b426da5470ba5f492"
+      },
+      {
+        "path": "integrations/mastermind_executive_app/coo.py",
+        "sha256": "6db8a3f6884b7cebe32b25043893b8a7d8a08380c7854e181173a88102fd432e"
+      },
+      {
+        "path": "integrations/mastermind_executive_app/coo_project_help.py",
+        "sha256": "4533141f3b195738abd95934b85c5f4c4d085302cdf0a421a244e9ea589114e5"
+      },
+      {
+        "path": "ops/executive_os/coo_principal_host.py",
+        "sha256": "357c70f1265e6e2d525c850acfea02bd331a18e75f7ceabe9d4ce129d875a01b"
+      },
+      {
+        "path": "tests/test_joint_api_contract.py",
+        "sha256": "1fdd68bd695fd3f571a30452e70b2bb9010cbb4c2d1882e77f7d77d022feda8c"
+      },
+      {
+        "path": "tests/test_joint_api_ingress.py",
+        "sha256": "7d4f68e24faf65e5ead83056a15c8c4e768c59047a2d5e1f9473c000a90ee2ec"
+      },
+      {
+        "path": "tests/test_joint_api_project_owner.py",
+        "sha256": "adb9f3e59e81d32c6794470b4b9f453cc2bdd15c8ce53ff5a54b038abb4b6e39"
+      },
+      {
+        "path": "tests/test_t3_api_requester_contract.py",
+        "sha256": "2b8e202beb03a910703e9dd5b8ad1d5cf939286a6f03d6a4b993d2411054e433"
+      }
+    ]
+  },
+  "patch_sha256": "9ec4c227c17e06cb59147523ea61f1a164b5813837fda5511868931b234a18ba",
+  "files": [
+    {
+      "path": "control_plane/agentos_project_plan.py",
+      "base_git_blob": "985e4cf0b5fe292b1f3927a3e0b7db5a3ceb93f5",
+      "base_sha256": "673adc5b33f5348f6f128a8a52e1e5f1a5fbe06be7a0c4a122451903001ac236",
+      "base_bytes": 16410,
+      "change": "modified",
+      "postimage_sha256": "f176a0aa2031c46d165c25eb3e5407e58bdcaf7df2d7368a007eb4145ff1dcda",
+      "postimage_git_blob": "39f7f5de7f4063b7d94ab1b2b16169a290b717a0",
+      "postimage_bytes": 16501
+    },
+    {
+      "path": "control_plane/coo_project_help_read.py",
+      "base_git_blob": "a3f8fde45ea3b7e84a24f63df1fc457bdc98efa9",
+      "base_sha256": "4433a6082eddf43d76163ec137bccab1d8b861084428880ab553e1f0abca479e",
+      "base_bytes": 13427,
+      "change": "modified",
+      "postimage_sha256": "d237e556c5e9c20e65f12f214a44dceda2288fdd6ab103151d9fd0ed0a85f664",
+      "postimage_git_blob": "fd9e56f7d7955dadd26159a60e3d331617af6df1",
+      "postimage_bytes": 15023
+    },
+    {
+      "path": "control_plane/installed_canonical_project_data_binding.py",
+      "base_git_blob": "5b1ef44fcd463d5963ba6a6d5ebb63e04108a04c",
+      "base_sha256": "e76f7227b32f65f7fd550925f41353f122dbf7832205b9a6eb8e452cef8856b1",
+      "base_bytes": 3886,
+      "change": "modified",
+      "postimage_sha256": "eacc64df641d15c1660e1f5d5fb5129cd5bae256cbafc89f6b2735e0b5a08888",
+      "postimage_git_blob": "8d98896e0124c677c4f003055ff4bce8107a2918",
+      "postimage_bytes": 4638
+    },
+    {
+      "path": "control_plane/installed_project_discovery_binding.py",
+      "base_git_blob": "ef092adbefcd845236689c7ca4d58868ff220755",
+      "base_sha256": "49cb24fa7654d025c50cfc33c2072909cb0efc46d395d8585fe77c0e8f7cb42f",
+      "base_bytes": 2037,
+      "change": "modified",
+      "postimage_sha256": "b1cecbdb3e9e55759b215edea1e16bda7758ed5d9df1d1888d77041eed2177c8",
+      "postimage_git_blob": "1a3268d339884003f1aa43ef20011dc847024dc4",
+      "postimage_bytes": 2769
+    },
+    {
+      "path": "control_plane/installed_project_read_binding.py",
+      "base_git_blob": "c165d85fb4625c6243a872b15c3ab573882577b1",
+      "base_sha256": "a62e225a7577ea9858562f0268bed365c9353015ceaef13067989efed946b9a4",
+      "base_bytes": 11453,
+      "change": "modified",
+      "postimage_sha256": "c863b1ed408b931dba5cbce80f6f9ce5a2206946b6e47d2b3ebd490deef4e251",
+      "postimage_git_blob": "37a637a537d1a7084dc36209293298c72700a5eb",
+      "postimage_bytes": 11870
+    },
+    {
+      "path": "control_plane/project_canonical_data.py",
+      "base_git_blob": "6fa5d86b3a52207f1fd5d1e32ad72b29ff925859",
+      "base_sha256": "65caaabd7f1d43416bb2533fd3a08f5d9936776cf54cf53c0afce86d9059b4f1",
+      "base_bytes": 19124,
+      "change": "modified",
+      "postimage_sha256": "3a666644c20358c2524b9bc36d7dfbd2d55018e0704bd98f0f9faaecd5043aa7",
+      "postimage_git_blob": "48dfa5c554bf86aa7f12ac70fd7b60b0bb9ce09f",
+      "postimage_bytes": 19332
+    },
+    {
+      "path": "control_plane/workspace_owned_task.py",
+      "base_git_blob": "1442100cfa51352fb6b7924ded262a3388dae91a",
+      "base_sha256": "737ffd9c7badcfc34b55e98e131a1b669c33e788e6ae8331998269a09698740d",
+      "base_bytes": 882,
+      "change": "modified",
+      "postimage_sha256": "2698215154edf13fcadc882e3cde972b015b6dbfa22a04610ebe76773cba8e90",
+      "postimage_git_blob": "918626080c1f0af65fd38725bd2df52175305e7d",
+      "postimage_bytes": 1680
+    },
+    {
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "base_git_blob": "71253316a46deb20346774b1fa40d7724f2da2ee",
+      "base_sha256": "1bc7cfb14638c866141f5bbf9de6ba33fe4f57b12f75048e17d8547a49dbd1aa",
+      "base_bytes": 11067,
+      "change": "modified",
+      "postimage_sha256": "a28452b9b9822264cbc6e97497ae1e41c691d312f8d23db14e850c5878ebb7ec",
+      "postimage_git_blob": "03bcd157153c3bd17ebbbcf8bef035c3b5eadddc",
+      "postimage_bytes": 11374
+    },
+    {
+      "path": "control_plane/workspace_project_git_publisher.py",
+      "base_git_blob": "ea2ab637e419bb316bd8140d97ab2b9c4524e23b",
+      "base_sha256": "e14432209bd0628548049c570e8b4d7ab0182029385551e988bbea168903adf6",
+      "base_bytes": 128246,
+      "change": "modified",
+      "postimage_sha256": "df941392dad0a5cd0bb5b644183f15c388b1ceb27659c84a1acb4a7b80823f7d",
+      "postimage_git_blob": "8514e0633f595ac2ed8baa9213f4e5429f262ff9",
+      "postimage_bytes": 128333
+    },
+    {
+      "path": "control_plane/workspace_read_service.py",
+      "base_git_blob": "2f3af87f4e2f27b945651394deddbf99804e217c",
+      "base_sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98",
+      "base_bytes": 149563,
+      "change": "modified",
+      "postimage_sha256": "0b1f326f26c08438c1c97d01f0510b623a3804aeab51c76eebec9dd375903217",
+      "postimage_git_blob": "471eb0550b3d8a8006d01a1b827649182fb3107c",
+      "postimage_bytes": 150148
+    },
+    {
+      "path": "integrations/executive_mcp/installed.py",
+      "base_git_blob": "38c2886c3b4c64d3d3831be8e25c95e83d870fa7",
+      "base_sha256": "db231f0be4bd1504827270adea2251987b2c46aa7d4368afeaf4d91e0dc8cb4f",
+      "base_bytes": 189860,
+      "change": "modified",
+      "postimage_sha256": "011446cb6d35528824e90f033deb571944dbbb84d8ec53654fa32f077219937d",
+      "postimage_git_blob": "9764db88e201dff5c7938099b1879938b22c7096",
+      "postimage_bytes": 190109
+    },
+    {
+      "path": "integrations/mastermind_workspace_app/canonical_project_data.py",
+      "base_git_blob": "8db901b2d78fe541fc0a10e18951b61951b6a028",
+      "base_sha256": "c7ae4714e6dd23a79c1ac276d8554da69819866c7fe89a48871db863abfadd31",
+      "base_bytes": 12886,
+      "change": "modified",
+      "postimage_sha256": "60f11c4604e2c1b8084bce9b1f237571dd4320f812de4e81d90ba4bfa8fc1f94",
+      "postimage_git_blob": "4787451c3caf0b10790230289f3149289666c029",
+      "postimage_bytes": 13389
+    },
+    {
+      "path": "integrations/mastermind_workspace_app/project_discovery.py",
+      "base_git_blob": "ff8ab90bf5f295d245685e153e86096078f851db",
+      "base_sha256": "bf4cfcba5ca9ded3bc0b97138f298529580e4dc76ce651a103331fc92433abd4",
+      "base_bytes": 7475,
+      "change": "modified",
+      "postimage_sha256": "49e2a77c0a2f2200f9488a9c2ea6f15e375fdac872b64636c1f18ebfdbf5a0c3",
+      "postimage_git_blob": "89642904292f61a5e65fbfaa671deaec046f9dd8",
+      "postimage_bytes": 9050
+    },
+    {
+      "path": "tests/test_coo_project_help_authority.py",
+      "base_git_blob": "f7cf45eff0ecab7561819c05b84e0b0e280b7628",
+      "base_sha256": "102b6be3e1543e56c8745b50ebab6aa9f07374c77e6cb7dd33aa100d91a68969",
+      "base_bytes": 21982,
+      "change": "modified",
+      "postimage_sha256": "78bb81ebf8082400d5daacc10e1367429e0eb194db6c9594216b31c3b4e41104",
+      "postimage_git_blob": "c18d98857ca114fbe47fa27353d71b68261eec8b",
+      "postimage_bytes": 22225
+    },
+    {
+      "path": "tests/test_coo_project_help_budget.py",
+      "base_git_blob": null,
+      "base_sha256": null,
+      "base_bytes": 0,
+      "change": "added",
+      "postimage_sha256": "d030bca483a75904389a478d64e1ed4e906c9c3b632990b0ea60b2ec0ee87684",
+      "postimage_git_blob": "5e2c4d48b948dd3cedf3c18b9a8d7280d969026b",
+      "postimage_bytes": 11637
+    }
+  ],
+  "qualification": "Original-file strict whitespace/apply and exact postimage readback pass. Actual shared-owner positive and4 budget-shape cases pass; additional qualification is running and will be delivered separately."
+}

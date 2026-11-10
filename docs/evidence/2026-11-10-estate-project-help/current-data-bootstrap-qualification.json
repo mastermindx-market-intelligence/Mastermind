@@ -1,0 +1,49 @@
+{
+  "actual_path": [
+    "Original canonical project CREATE/current DATA/source publication",
+    "Real Git plan and typed adoption",
+    "Original current plan capture and exact retained bytes",
+    "Actual signed principal verification",
+    "ProjectExecutionAppFactory strict-v2 durable admission",
+    "Actual same-service binding and worker registration",
+    "Actual credentialless workspace preparation",
+    "Existing service root selection and finite CooCycle",
+    "PLANNER_CREATED",
+    "DISPATCHED original planner",
+    "PLAN_ADMITTED original plan",
+    "DISPATCHED first work with actual Runtime completion"
+  ],
+  "invariants": [
+    "Original DIRECT_NATIVE_CEO planning root remains untouched with no Attempt.",
+    "New execution root stays original JOB-002.",
+    "Physical starts are original distinct JOB-003 and JOB-004.",
+    "No Mission/W3C selected-child API is used to authorize startup."
+  ],
+  "limits": [
+    "Physical provider execution uses incumbent inert _FakeSupervisor/start and actual Runtime completion helpers.",
+    "Original fixture source seal, credential/PR, native planning availability and host enrollment edges remain explicit test seams.",
+    "No model, Unix listener, installed profile/configuration, live service activation or external effect is exercised.",
+    "This proof does not fix the independent current-DATA projection ambiguity or establish COO continuation availability."
+  ],
+  "log_sha256": "d7d3370c43675e1097278003d9e9f54fd15fc23fe838905148c7b646c2ea9776",
+  "passed": 1,
+  "production_changes": 0,
+  "replay": {
+    "argv": [
+      "python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-s",
+      "/workspace/scratch/dfef37b7f33a/estate-current-data-bootstrap-freeze/postimages/tests/test_current_data_execution_bootstrap.py"
+    ],
+    "cwd": "/workspace/scratch/dfef37b7f33a/estate-project-help-v6-qualification",
+    "env": {
+      "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+      "PYTHONPATH": "../estate-return-qualification/.qualification-deps:.:tests"
+    }
+  },
+  "schema": "mastermind.owner_qualification.v1",
+  "seconds": 44.11
+}

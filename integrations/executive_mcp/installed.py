@@ -2466,10 +2466,15 @@ class InstalledBootPacketCollector:
         return (self._source_root,self._macro_root,self._code_root,self._expected_source_sha,
                 self._python,self._runner,self._allow_synthetic_fixture)
 
-    def _capture_canonical_code(self):
+    def _capture_canonical_code(self, *, deadline=None):
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        remaining_read_seconds(deadline, maximum=15.0)
+        limit = time.monotonic() + 15.0
+        if deadline is not None:
+            limit = min(limit, deadline)
         snapshots=[]
         observations=self._snapshot_pair(_installed_child_env(code_root=self._code_root,
-            macro_root=self._macro_root),deadline=time.monotonic()+15.0,snapshot_capture=snapshots)
+            macro_root=self._macro_root),deadline=limit,snapshot_capture=snapshots)
         if self._allow_synthetic_fixture or len(snapshots)!=1:
             raise ValueError('CANONICAL_DATA_UNAVAILABLE')
         return _CanonicalCodeCapture(_CANONICAL_CODE_CAPTURE,self,

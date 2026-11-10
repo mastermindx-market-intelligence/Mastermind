@@ -38,9 +38,8 @@ def _issue_project_data_read(owner,*,qualifier):
                                   qualifier,plan_callback,agentos_context_callback)
 
 
-def read_installed_project_data(binding,principal,*,operation,selection):
-    def current():
-        return (type(binding) is _ProjectDataReadBinding and binding.key is _KEY
+def _current_project_data_binding(binding):
+    return (type(binding) is _ProjectDataReadBinding and binding.key is _KEY
             and binding.qualifier(binding.owner) is True
             and binding.owner.context_binding==binding.context_callback
             and type(binding.owner).__dict__.get('context_binding') is binding.context_callback.__func__
@@ -51,13 +50,30 @@ def read_installed_project_data(binding,principal,*,operation,selection):
             and type(binding.owner).__dict__.get('read_plan') is binding.plan_callback.__func__
             and binding.owner.read_context==binding.agentos_context_callback
             and type(binding.owner).__dict__.get('read_context') is binding.agentos_context_callback.__func__)
+
+
+def require_installed_project_data_owner(binding, *, owner, store):
+    """Prove the existing Plan reader enrollment for a same-owner read join."""
+    if (not _current_project_data_binding(binding) or binding.owner is not owner
+            or binding.store is not store):
+        raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+
+
+def read_installed_project_data(binding,principal,*,operation,selection,deadline=None):
+    if deadline is not None:
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        if operation!='project_plan':raise ValueError('CANONICAL_DATA_UNAVAILABLE')
+        remaining_read_seconds(deadline,maximum=15.0)
+    def current():
+        return _current_project_data_binding(binding)
     if not current():raise ValueError('CANONICAL_DATA_UNAVAILABLE')
     if operation not in {'project_plan','project_knowledge_catalogue','project_knowledge_memory',
                           'project_knowledge_source','project_discovery_source','agentos_current_context'}:
         raise ValueError('CANONICAL_DATA_UNAVAILABLE')
     callback=(binding.plan_callback if operation=='project_plan' else binding.agentos_context_callback
               if operation=='agentos_current_context' else binding.callback)
-    result=callback(principal,operation=operation,selection=selection)
+    result=callback(principal,operation=operation,selection=selection,
+        **({'deadline':deadline} if deadline is not None else {}))
     if not current():raise ValueError('CANONICAL_DATA_UNAVAILABLE')
     if result is None:return None
     from control_plane.project_canonical_data import CanonicalProjectDataView

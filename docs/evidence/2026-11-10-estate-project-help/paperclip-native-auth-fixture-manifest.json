@@ -1,0 +1,29 @@
+{
+  "activation": "SOURCE_TEST_ONLY",
+  "actual_native_outcome": "PENDING_NEW_DISPOSABLE_CASE_AFTER_PARENT_COMPOSITION",
+  "checks": [
+    "Python AST parse: 2 files passed",
+    "git diff --check: passed"
+  ],
+  "dependency_patch_sha256": "c347e9e5abf2e29f994ee8e5e93a68aaa09970c9cc20ee2384eca03897a97566",
+  "files": [
+    {
+      "path": "tests/paperclip_hermes_native_client.py",
+      "postimage_git_blob": "e2468e2a53befd9f26c40124e317b68e05758336",
+      "postimage_sha256": "cf4e0fb1d4080f10eed33d03222200bfc40f8c0d4fee396bc421f2c4627cb32f",
+      "preimage_git_blob": "55c00727d455d342d11baa972d0c2a22fe8886f6",
+      "preimage_sha256": "76a7b6fc313d6173697225978091ca08255890b46224c1ffba8f821e1b0e5bf8"
+    },
+    {
+      "path": "tests/test_paperclip_hermes_api_transport.py",
+      "postimage_git_blob": "34a1b2765c51ab743ea96aaa1ddb125811292a1e",
+      "postimage_sha256": "09c52fb0eab03abfea5161da7c17e6f06d21adfb8109966d40015ee32d601cce",
+      "preimage_git_blob": "181f49522143468ce50a2153b38f279390bf7ede",
+      "preimage_sha256": "72f73a3a1b00fbcda288ecee838aeb11092b50c254b5e00b6e4bcb495d6edf65"
+    }
+  ],
+  "native_source": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "patch_sha256": "2e9fd6961da48f81e1ed713a1334b245638c7be9b6e7addb7cb49ddd2d764ea2",
+  "schema": "mastermind.source_increment.v1",
+  "source_base_tree": "762490642b3746e58763c817562d5c9976518a70"
+}

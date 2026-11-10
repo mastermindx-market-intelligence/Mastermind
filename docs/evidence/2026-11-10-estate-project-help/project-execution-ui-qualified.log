@@ -1,0 +1,13 @@
+
+ RUN  v5.0.1 /workspace/scratch/dfef37b7f33a/estate-project-execution-ui-qualification/source/app/mastermind_os
+
+································································································
+
+ Test Files  7 passed (7)
+      Tests  96 passed (96)
+   Start at  07:17:03
+   Duration  3.51s (transform 48%, environment 25%, tests 15%, import 11%, worker 1%)
+
+  Transform  transforming modules took 4.52s · 48% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns

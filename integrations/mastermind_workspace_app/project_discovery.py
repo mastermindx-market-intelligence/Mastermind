@@ -77,7 +77,12 @@ class InstalledProjectDiscovery:
         from control_plane.installed_project_discovery_binding import _issue_project_discovery
         return _issue_project_discovery(self, qualifier=lambda owner: type(owner) is InstalledProjectDiscovery)
 
-    def capture(self, frame, *, work_ref=None):
+    def capture(self, frame, *, work_ref=None, include_plan=False, deadline=None):
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        if type(include_plan) is not bool or include_plan and work_ref is None:
+            _fail()
+        remaining_read_seconds(deadline, maximum=15.0)
+        outer_deadline = deadline
         owner = self.data
         context = self.context_binding()
         principal = _ReadPrincipal(owner, _bytes(frame))
@@ -87,6 +92,8 @@ class InstalledProjectDiscovery:
         read_stamp = owner._read_stamp(principal)
         latest_stamp = owner._latest_stamp(principal)
         deadline = time.monotonic() + 15.0
+        if outer_deadline is not None:
+            deadline = min(deadline, outer_deadline)
 
         def guard():
             if (time.monotonic() >= deadline or self.context_binding() != context
@@ -112,7 +119,8 @@ class InstalledProjectDiscovery:
                 try:
                     proof = capture_source_publication(owner.events, lookup, scope, guard=guard)
                     creation = proof.check(scope)
-                    view = owner.view(principal, work_ref=lookup['work_ref'])
+                    view = owner.view(principal, work_ref=lookup['work_ref'],
+                        **({'deadline': deadline} if outer_deadline is not None else {}))
                     if view is None:
                         _fail()
                     retained.append((view, proof))
@@ -132,9 +140,24 @@ class InstalledProjectDiscovery:
                         with owner.collector.canonical_project_data_scope(view, work_ref=lookup['work_ref']):
                             record = owner.collector.read_project_discovery(work_ref=lookup['work_ref'],
                                 observed_at_ms=witness['canonical_observed_at_ms'], timeout=min(15.0, capture.remaining()))
+                            if include_plan:
+                                # Both parsers consume this SAME issued DATA/CODE
+                                # view, principal, publication and original budget.
+                                # A separately acquired Plan DTO is not a source
+                                # witness for the current project card.
+                                from common.workspace_project_plan_contract import validate_body
+                                plan = validate_body(owner.collector.read_project_plan(
+                                    work_ref=lookup['work_ref'], timeout=min(15.0, capture.remaining())))
+                                if (plan['selection'] != {'work_ref': lookup['work_ref']}
+                                        or plan.get('availability') == 'AVAILABLE'
+                                        and plan.get('source', {}).get('commit') != view.data_commit):
+                                    _fail()
                         proof.check(scope)
-                    entries.append(dict(record=record, creation_publication=creation, data_observation=witness,
-                        source_generation=hashlib.sha256(_bytes(dict(record=record, creation=creation, witness=witness))).hexdigest()))
+                    entry = dict(record=record, creation_publication=creation, data_observation=witness,
+                        source_generation=hashlib.sha256(_bytes(dict(record=record, creation=creation, witness=witness))).hexdigest())
+                    if include_plan:
+                        entry['plan'] = plan
+                    entries.append(entry)
                 except (ValueError, PermissionError):
                     guard()
                     if view is not None:

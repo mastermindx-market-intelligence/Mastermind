@@ -1,0 +1,19 @@
+{
+  "tree": "fed53cd4baa8ea2708255052c9e3be8b288e7d56",
+  "exit_code": 0,
+  "elapsed_seconds": 591.494,
+  "report": "/tmp/estate-help-fresh-managed-service-20261110-c4.xml",
+  "report_sha256": "3ef8882f68244ef884a03688a61a0c512b1021044da9645d51d4d03d9e87e50a",
+  "suites": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "30",
+      "time": "589.226",
+      "timestamp": "2026-11-10T05:46:15.974686-07:00",
+      "hostname": "m2studio"
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "qualified_composition_tree": "9aaddcedbb5a9b4cb11156e88a6e9b455c4a5ed2",
+  "files": [
+    {
+      "path": "scripts/validate_mastermind_plugins.py",
+      "base_blob": "21b01b8efd21b2007c49c8d7a8bb213e1d5f7f49",
+      "base_sha256": "64585dc5032c8cec87e548c45d188ab82387dd68fd6956c8774d2b0c55f48684",
+      "post_blob": "91ae200655e3449efaad17bc6ab52941635a95d0",
+      "post_sha256": "1281f51cfc2e3b55d512996e6ec01da975461a94d7463472c512a1444930c42f",
+      "bytes": 82542,
+      "composition_note": null
+    },
+    {
+      "path": "tests/executive_company_identity_review.py",
+      "base_blob": "7a5bd8adc3864775d27154eda5efac1b55c4b3f3",
+      "base_sha256": "23da834bc324cfc3d38897840c10423c4031f68f608a07fa2aead8aa9b374a20",
+      "post_blob": "35601d9cfd5da827901e6d0185cbb117f08e629b",
+      "post_sha256": "1c4ae5f29486e6a2c7d9720769615e6e4f1ab83230845a5bcc27936284115149",
+      "bytes": 10326,
+      "composition_note": null
+    },
+    {
+      "path": "tests/executive_fabric_release_identity_review.py",
+      "base_blob": "9398f9d594b4545b5c98e20c14dfea66c1c3dd10",
+      "base_sha256": "6f1a679df98714a3489b5dbb76b5c61d1be8e57a56de7dd9a7a613338138f554",
+      "post_blob": "232927aeaa2ed3f4874d2cfbc347ab26d0b75337",
+      "post_sha256": "9113e5f5534f44f411af421f5931b49a72045ce73c73d5479043eb28e0907168",
+      "bytes": 91964,
+      "composition_note": "M2 retains preceding two exact source-identity repairs; this increment appends one independent reviewed nonidentity record"
+    },
+    {
+      "path": "tests/test_ceo_submit_armed_composition.py",
+      "base_blob": "02e89f63717e922d00909c248dc9284f222cb9c1",
+      "base_sha256": "e1a83159ed21d5622f5bc8e6df93358c0517b2a0b6bfdfa4c357549685be5179",
+      "post_blob": "7d30c9c9b7eac55c4c542ba57d51cb5f8c493769",
+      "post_sha256": "3ae96ad2e649a3f13331dfa821bbbf1e93958d91a10ae69c9dc6013c85888544",
+      "bytes": 156766,
+      "composition_note": null
+    },
+    {
+      "path": "tests/test_discovery_correction_identity_review.py",
+      "base_blob": "855ce1900b949d38ac04102ea1759c4219ba23bb",
+      "base_sha256": "28cc9484ddf9090bebb4713872618296bb167eefbc17d7f384b35531adc37b7e",
+      "post_blob": "1eb9728b6fca7bfd7618c4773e309a109a50987e",
+      "post_sha256": "dbe1e4f11de769b113f18d3a0fc48f7d90c82d52a9d396b009265f3e547ef0a6",
+      "bytes": 3393,
+      "composition_note": null
+    },
+    {
+      "path": "tests/test_hermes_installed_source_join.py",
+      "base_blob": "cab2fd86478c88e45cf1de0b064e4c07a90b71dc",
+      "base_sha256": "63ff016a7c542e729c55f4e6a83eb09a83c174d02d3b140b632b0616432967f8",
+      "post_blob": "e72e64d357de31afaeac12f03626726efccd5e1a",
+      "post_sha256": "662229855fda8d4ae9f0dcf2b9cb1f2ac8f712e9a5336054016678ea108da0b8",
+      "bytes": 48975,
+      "composition_note": null
+    },
+    {
+      "path": "tests/test_mastermind_plugin_packages.py",
+      "base_blob": "7505521f7a3460524375a62ec9e039fcb322f452",
+      "base_sha256": "9507fdbe25da81a30d9a19a9df87831f7d52bb8728d0b7aed3dd099bcbd40cbb",
+      "post_blob": "747c7d2d754670aef04f3d857884728b5ac8f5cd",
+      "post_sha256": "afc440c0eea150ad9b78969dcbd23595fc35b245310d896be8cd8a760fd838d7",
+      "bytes": 51935,
+      "composition_note": null
+    },
+    {
+      "path": "tests/test_workspace_control_room_review_pins.py",
+      "base_blob": "10f6e9421833e29cc90fa7fa0f7d27d7f132e32b",
+      "base_sha256": "d049e16c9eaeafd9f56a440da5cf0e1e99d72e5ff04393f5042c9a236bbdfa49",
+      "post_blob": "eef883af297b5e6ada8d7f90554dddf761509d2f",
+      "post_sha256": "8bba8bccebff09694baf0388dac095af7df845e9e469a60a62dbad29eb4e1fe5",
+      "bytes": 4076,
+      "composition_note": null
+    },
+    {
+      "path": "tests/test_workspace_fabric_review_pins.py",
+      "base_blob": "f5c6e0aaad8512753f29d18a3025065736ff728d",
+      "base_sha256": "a6117a4ebf289d3a66775aa1028ada1f5c307899c2a38fb0813c8af8377923d5",
+      "post_blob": "95a643d9c8fa7f9e08db9653a5532e7d17e80956",
+      "post_sha256": "d3baa788ef89ea8c396b09ae65f1a6388a8e4140201050707cea984800719946",
+      "bytes": 8056,
+      "composition_note": null
+    }
+  ],
+  "patch_sha256": "804d631b48ea286efb8112143d1aa5aae286a9a236bca9fd1cd894b2720278fd",
+  "state": "SOURCE_PREPARED_HOST_QUALIFICATION_PENDING"
+}

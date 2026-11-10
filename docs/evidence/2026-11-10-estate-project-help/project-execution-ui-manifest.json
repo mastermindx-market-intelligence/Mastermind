@@ -1,0 +1,164 @@
+{
+  "app_join_included": false,
+  "artifacts": [
+    {
+      "bytes": 4053,
+      "path": "APP_JOIN.md",
+      "sha256": "8e3acf5725e37c076d036f238275593150213bb555127973ff6845b6ef364f06"
+    },
+    {
+      "bytes": 6441,
+      "path": "QUALIFICATION.md",
+      "sha256": "7bb22774efae09400e5dce81c8b35c966b83d9cfc20c16d40985e09f99f7da25"
+    },
+    {
+      "bytes": 726,
+      "path": "consumer-final.log",
+      "sha256": "916d5634dd69b45ba6df0517139375b5c2d4e85a151519d5bcb4afc5b2e9becd"
+    },
+    {
+      "bytes": 640,
+      "path": "existing-ui-tests.log",
+      "sha256": "9e20b017e925e650457dda7c64549bd75ad9ed9e89bf5e8687f8de9a0301ab33"
+    },
+    {
+      "bytes": 126,
+      "path": "npm-ci.log",
+      "sha256": "d460104dc0d501102b0d843b1d62c1b33726d0837bcb2669c2d068e65be2e865"
+    },
+    {
+      "bytes": 101596,
+      "path": "project-execution-ui.patch",
+      "sha256": "e093b559214ccd00ccc49609623517bfc18b01154437a40b65dd76a8231d5a34"
+    },
+    {
+      "bytes": 308,
+      "path": "resource-contract-tests.log",
+      "sha256": "caaf11c14bcd25cec4d925a6c4cb3f01a5bd280bc95df372370584f62ba46e3d"
+    },
+    {
+      "bytes": 308,
+      "path": "resource-rendered-tests.log",
+      "sha256": "ea00aa4e8dcae5799e8d15e1bd12035030610d7ba0157120c9b053fdc445bfcb"
+    },
+    {
+      "bytes": 263,
+      "path": "tsconfig.qualification.json",
+      "sha256": "40db59d1fece05847af2f63e78531f90f8c03ae193514fa3d8eb53ba8c6ce7ea"
+    },
+    {
+      "bytes": 0,
+      "path": "typecheck-final.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "files": [
+    {
+      "after_git_blob": "5ae6dc9ada21c988d6517940e4fce4090e194380",
+      "after_sha256": "1c64352feb47ef5c1d30e996c3672efc0fcde1b5bb1187e0af7d5abc8cbc2e76",
+      "before_git_blob": null,
+      "before_sha256": null,
+      "mode": "100644",
+      "path": "app/mastermind_os/src/ProjectExecutionInspection.integration.test.tsx",
+      "postimage": "postimage/app/mastermind_os/src/ProjectExecutionInspection.integration.test.tsx"
+    },
+    {
+      "after_git_blob": "e1ffd3023e75586c72631135b17a92709b21a2d1",
+      "after_sha256": "8634a45006251ed9b358baa5406abe31e0f557c85451442062bad0cc21d84359",
+      "before_git_blob": null,
+      "before_sha256": null,
+      "mode": "100644",
+      "path": "app/mastermind_os/src/ProjectExecutionInspection.tsx",
+      "postimage": "postimage/app/mastermind_os/src/ProjectExecutionInspection.tsx"
+    },
+    {
+      "after_git_blob": "b5ce882d22ebe988ccc58bd9e62c95f8f1dbf866",
+      "after_sha256": "be1d414bde40e562d9084f0618c4ec6c49539931995b1cea9fd4c1279c6842bd",
+      "before_git_blob": "48a923f3c573a9e339ea34995c9287ba033a45a8",
+      "before_sha256": "25e02dbe5ce02d9f8e6f13b75907a131e6297e747b911171e9761864eb469bc4",
+      "mode": "100644",
+      "path": "app/mastermind_os/src/RetainedRootChoice.tsx",
+      "postimage": "postimage/app/mastermind_os/src/RetainedRootChoice.tsx"
+    },
+    {
+      "after_git_blob": "db3c3a9cd4f69c65c7cc6c7e8164da4e0cc1de5a",
+      "after_sha256": "876ac0c4b565763950ed0762bce4dfb806b9171bf831f0a759efe52826d77398",
+      "before_git_blob": null,
+      "before_sha256": null,
+      "mode": "100644",
+      "path": "app/mastermind_os/src/fixtures/project-execution-resource-owner.json",
+      "postimage": "postimage/app/mastermind_os/src/fixtures/project-execution-resource-owner.json"
+    },
+    {
+      "after_git_blob": "cb4a304896b37020caad94cd9da8c2c29c092c09",
+      "after_sha256": "d596fc01ed3d2265f5a6bdf864a4274984d680b253d89cf81b41d250390b5a72",
+      "before_git_blob": "6c50d70f1c222c9e4d56618af5fa7f23285f1788",
+      "before_sha256": "586101b5610c444733b464d9e64f65cc77cf5984a3979938a6a0276cfa6f0180",
+      "mode": "100644",
+      "path": "app/mastermind_os/src/host.ts",
+      "postimage": "postimage/app/mastermind_os/src/host.ts"
+    },
+    {
+      "after_git_blob": "a6f4585fcfb2346c1c573874dddcdf7ba29b0863",
+      "after_sha256": "f22fb4e4224d311a296d4c978a5c129a73769696b1ad6e8643b014cd03e0b628",
+      "before_git_blob": "255c0f88c7d8983cf06a71b44349a2335fedc32d",
+      "before_sha256": "07e7ed5815788ee839aa2becdbd806443923f2249172de7997cae3770deb1c44",
+      "mode": "100644",
+      "path": "app/mastermind_os/src/mission.ts",
+      "postimage": "postimage/app/mastermind_os/src/mission.ts"
+    },
+    {
+      "after_git_blob": "2182328da081300c56e1869a036a06dcd54200b2",
+      "after_sha256": "92ed107d18c514eb23bf0068ab9872f014976afff6e2dd64a809ee82f476644b",
+      "before_git_blob": "c62c83ba02b2329f0d919df80b4099c34e25a375",
+      "before_sha256": "7dffc3ddadc3b1380a70434204bffda2d65d0fd779a60e1a8a7a1fcf9fe9beaa",
+      "mode": "100644",
+      "path": "app/mastermind_os/src/programs-observation.ts",
+      "postimage": "postimage/app/mastermind_os/src/programs-observation.ts"
+    },
+    {
+      "after_git_blob": "292e411794f4cc2f25270b99635268880787a3b0",
+      "after_sha256": "70fb9c12f2da4c77a9589bc711e4ed257c58ba303040e258bf1fc2ca2b01511c",
+      "before_git_blob": "cb9285c4c79f6e6cac541c313c5ac43c6f9613d8",
+      "before_sha256": "a4d539f729a9918585499c4c23fc169ed13439f102bf6554d5a2bcc284788742",
+      "mode": "100644",
+      "path": "app/mastermind_os/src/project-discovery.ts",
+      "postimage": "postimage/app/mastermind_os/src/project-discovery.ts"
+    },
+    {
+      "after_git_blob": "5aa46d1e011a78bdafd2603ff31ac7e86253d394",
+      "after_sha256": "486872c332232d5edc07607aa520f14b42fe01743409d950d38ba28d0e93b3f0",
+      "before_git_blob": null,
+      "before_sha256": null,
+      "mode": "100644",
+      "path": "app/mastermind_os/src/project-execution-resource.test.ts",
+      "postimage": "postimage/app/mastermind_os/src/project-execution-resource.test.ts"
+    },
+    {
+      "after_git_blob": "fa7b77eeaf9fd1494d7eed2fc2975a3fc91dc61f",
+      "after_sha256": "9dfb3b5794024de1fbe7499b03e417421d735200a32274cf6d958955478577dc",
+      "before_git_blob": "e9300bd6181b39fa09db31fb1de9e5e44ce0dda7",
+      "before_sha256": "dece354a0c3744af41cf36e435cd8edee1f2247a0f7b07cef1974cc47d2990d5",
+      "mode": "100644",
+      "path": "app/mastermind_os/src/workspace-contract.ts",
+      "postimage": "postimage/app/mastermind_os/src/workspace-contract.ts"
+    }
+  ],
+  "fixture_sha256": "876ac0c4b565763950ed0762bce4dfb806b9171bf831f0a759efe52826d77398",
+  "patch": {
+    "path": "project-execution-ui.patch",
+    "sha256": "e093b559214ccd00ccc49609623517bfc18b01154437a40b65dd76a8231d5a34"
+  },
+  "qualification": {
+    "full_app_typecheck": false,
+    "patch_replay_exact": true,
+    "rendered_consumer": "jsdom with actual NativeClient/MissionHost and actual Python owner output; native edge inert",
+    "tests": "96 passed across 7 files in 3.51s",
+    "typecheck": "changed production slice and transitive original imports; exit 0"
+  },
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "runtime_effects": false,
+  "schema": "mastermind.source_patch_manifest.v1",
+  "source_only": true
+}

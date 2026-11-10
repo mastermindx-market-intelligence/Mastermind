@@ -1,0 +1,105 @@
+{
+  "schema": "mastermind.t3_project_help_api_proof.v1",
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "source_only": true,
+  "native_origin_attested": false,
+  "production_installed": false,
+  "profile_activated": false,
+  "owned_paths": [
+    {
+      "path": "tests/test_t3_project_help_api.py",
+      "preimage": "absent",
+      "sha256": "9360963d873b16b5c756ba849a2048dac0e9db296b65e81352cb1db7813a93b6",
+      "git_blob": "7aff2f3d5e8e913814a2a6b39ee8b846fd03b1f5"
+    }
+  ],
+  "original_handoff_patch_sha256": "777e0c5fa9019c0962e283e7067c4af0af748eb216b8260281a45b3ca5acaabf",
+  "patch_sha256": "c85cae392afdb9035cc3e751c514e1dfbd8cc4ec765dd793c26657516cc986cb",
+  "test_result": "10 passed, 1 deprecation warning in 292.73s",
+  "pytest_log_sha256": "546ee6c8145b7096048345e4f7b298a2145cf2066ab9f9edfcb5df41a037a616",
+  "mcp_sdk": "1.29.0",
+  "python": "3.12",
+  "private_hop": "same-process callback into actual CooHostProvider; no AF_UNIX service proof",
+  "dependencies": [
+    {
+      "path": "common/coo_project_help_contract.py",
+      "sha256": "78533893ee3ca92c583a8929342eb07e804aebbcaf9d6597b2c0c0e2a2241961"
+    },
+    {
+      "path": "common/project_task_contract.py",
+      "sha256": "ebdb97a746b79b0cb776702be709aea4a646f0a41b6e922ebfdc4abb2236c08b"
+    },
+    {
+      "path": "common/workspace_project_plan_contract.py",
+      "sha256": "c72fe752f625260f8f0f27ca25f0375b96a34f801c2a9d6c430b6adfd8e119ae"
+    },
+    {
+      "path": "integrations/session_bridge/project_task_context.py",
+      "sha256": "266cbbf72f87004f25a566df68ffcfaaee44da3f853a763b3f73834441298229"
+    },
+    {
+      "path": "integrations/session_bridge/t3_project_team.py",
+      "sha256": "71c90a45cb08b132c87e8fc42cd189dbfd12bcbcf09b5ceab5cbcb00465a14b2"
+    },
+    {
+      "path": "integrations/session_bridge/t3_project_team_cli.py",
+      "sha256": "e9f04b07b7531ee3f3d539245669e6f39de8e976ee63a8c48fa6ac6bdeb31ab9"
+    },
+    {
+      "path": "control_plane/coo_project_help_read.py",
+      "sha256": "f3aa024b6d431c7d1eef952596cea9d3013a20bd4cb67d81ddc7a1891c34a875"
+    },
+    {
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "sha256": "1bc7cfb14638c866141f5bbf9de6ba33fe4f57b12f75048e17d8547a49dbd1aa"
+    },
+    {
+      "path": "control_plane/workspace_read_service.py",
+      "sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98"
+    },
+    {
+      "path": "control_plane/coo_principal_mandate.py",
+      "sha256": "1b5b28105e7decae1e638fedec5ddcd12a43df45826990f558d49ac83ed72d32"
+    },
+    {
+      "path": "control_plane/executive_agent_capabilities.py",
+      "sha256": "2c456ce482feb4090b85ff21564290716659d0ef434607b937998a58bfac1661"
+    },
+    {
+      "path": "ops/executive_os/coo_principal_host.py",
+      "sha256": "f71e787d5f741ea6e971f86bb25fcea9c9c03b41ae13f6d859f725fe8bcd2f3b"
+    },
+    {
+      "path": "config/executive_claude_principal_capabilities.json",
+      "sha256": "8a59f93af17e4a3bfb97a6c3e8ac9a0ddee899182bd23618bb4a2d64a60ffd73"
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo.py",
+      "sha256": "da19f610b169a46b660888743fb32bb31a78e20470088c8bff0a350b2ca6d21e"
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_project_help.py",
+      "sha256": "53aaf2967cdf4e61917ff0d607cc8b83da8f2421a85dda8c279bda9de864e1fa"
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_project_help_avenues.py",
+      "sha256": "79aa8d8c146f2a7dee15eb2f0f4258e1e722d4447510df6950a6a275e3550873"
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_binding.py",
+      "sha256": "4a72d07b81eb9034c4390e60072331a9760b4e2705b5a22bcba383bc58fb9e3a"
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo_installed.py",
+      "sha256": "c6c9982e3c0a15734110259ecc17d77bcdfefa5550fcf2d74d6d5209d0ff617c"
+    },
+    {
+      "path": "integrations/executive_mcp/server.py",
+      "sha256": "4a069aecc0074b03a81bbff72a994215843cc9d84665db55f5932234a1c3c197"
+    },
+    {
+      "path": "tests/test_coo_project_help_authority.py",
+      "sha256": "102b6be3e1543e56c8745b50ebab6aa9f07374c77e6cb7dd33aa100d91a68969"
+    }
+  ]
+}

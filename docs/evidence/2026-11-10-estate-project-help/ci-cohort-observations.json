@@ -1,0 +1,73 @@
+{
+  "schema": "mastermind.ci_cohort_reconciliation.v1",
+  "primary_head": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "tested_merge": "a2bf5931c4ce69f9c2afc427c5e1bb399256c847",
+  "run": {
+    "id": 42796811883,
+    "run_attempt": 1,
+    "head_sha": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "head_branch": "sol/estate-graph-integration-20261109-c4",
+    "path": ".github/workflows/ci.yml",
+    "event": "pull_request",
+    "conclusion": "failure",
+    "created_at": "2026-11-10T10:10:01Z"
+  },
+  "job_id": 129774519664,
+  "workflow_before_blob": "d80e562479c5b30e7c7cdbdb85e4b23d495fd923",
+  "workflow_after_blob": "b201f8336b34bdd4a82469f234a4d2f622febd33",
+  "macro_before": {
+    "commit": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
+    "test_blob": "be7a4ac292226d15e0385ec269ec4306b50f679c"
+  },
+  "macro_after": {
+    "commit": "0c0521169260d87889da8a7711a90460982eefa2",
+    "test_blob": "649a89dacaf2ad62e359da048862523cba221c83"
+  },
+  "owning_fixture_repair": {
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2387",
+    "number": 2387,
+    "title": "fix(tests): create private ledger fixtures for permissive runner umasks",
+    "state": "closed",
+    "merged": true,
+    "head_sha": "28975b1a93c91ba1e4c64d4884b421ed9a01066a",
+    "merge_commit_sha": "ebc48690f20bb5c0554f91ec7cf2b4533f641f5a",
+    "merged_at": "2026-11-10T01:00:45Z"
+  },
+  "accepted_pin_owner": {
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2401",
+    "number": 2401,
+    "title": "Equip T3 with qualified background computer use and fleet browser skills",
+    "state": "closed",
+    "merged": true,
+    "head_sha": "bc64b1a4952044c65b8ae6dec99cd7e9627502bc",
+    "merge_commit_sha": "fd9f414bf63b3a2e059d192ce580c5754aababcd",
+    "merged_at": "2026-11-10T07:31:28Z"
+  },
+  "current_shared_repair": {
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2404",
+    "number": 2404,
+    "title": "fix(ci): stabilize transport acquisition and security test fixtures",
+    "state": "open",
+    "merged": false,
+    "head_sha": "c10cd0b45fc3cd64c145bfbae01307926c8b446e",
+    "merge_commit_sha": "c5ec8955ea005ea311dd98ad7b003a961fbf8582",
+    "merged_at": null
+  },
+  "macro_owner": {
+    "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10740",
+    "number": 10740,
+    "title": "Connect Fabric gateway inference to shared provider and Brain consumers",
+    "state": "open",
+    "merged": false,
+    "head_sha": "0c0521169260d87889da8a7711a90460982eefa2",
+    "merge_commit_sha": null,
+    "merged_at": null
+  },
+  "owner_proof": {
+    "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6757956429",
+    "updated_at": "2026-11-10T03:16:05Z"
+  },
+  "installed_effects": false,
+  "workflow_reruns": 0,
+  "macro_edits": 0
+}

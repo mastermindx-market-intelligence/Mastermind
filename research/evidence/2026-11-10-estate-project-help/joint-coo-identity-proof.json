@@ -1,0 +1,89 @@
+{
+  "path": "integrations/mastermind_executive_app/coo.py",
+  "before_tree": "e66cce468a5f256848cebfe4add52aa3205757c8",
+  "before_sha256": "da19f610b169a46b660888743fb32bb31a78e20470088c8bff0a350b2ca6d21e",
+  "after_sha256": "6db8a3f6884b7cebe32b25043893b8a7d8a08380c7854e181173a88102fd432e",
+  "sites": [
+    [
+      251,
+      75,
+      78,
+      "int",
+      "400"
+    ],
+    [
+      261,
+      93,
+      96,
+      "int",
+      "503"
+    ],
+    [
+      660,
+      37,
+      40,
+      "int",
+      "400"
+    ],
+    [
+      685,
+      54,
+      57,
+      "int",
+      "503"
+    ],
+    [
+      705,
+      54,
+      57,
+      "int",
+      "503"
+    ],
+    [
+      715,
+      56,
+      59,
+      "int",
+      "503"
+    ]
+  ],
+  "unchanged_statements": [
+    {
+      "before_line": 250,
+      "after_line": 251,
+      "containing_statement": "Return",
+      "same_ast_sha256": "56fb62fe168660057bdd7651216a91051a989ea31356307c74c6593788c71ae4"
+    },
+    {
+      "before_line": 260,
+      "after_line": 261,
+      "containing_statement": "Return",
+      "same_ast_sha256": "0ed5b816b96200e58901380b35c5b997a5d3795b78eb06ca5259e5b8f2a785c5"
+    },
+    {
+      "before_line": 657,
+      "after_line": 660,
+      "containing_statement": "Return",
+      "same_ast_sha256": "214168a645c3a930788d180f9845489a1b925f6a16dab97d6a8aada0b0e48023"
+    },
+    {
+      "before_line": 682,
+      "after_line": 685,
+      "containing_statement": "Return",
+      "same_ast_sha256": "bede17943afb0ed196cf549ccbe042db0ff04a5aba363e9d4a0916c5c5b137a9"
+    },
+    {
+      "before_line": 702,
+      "after_line": 705,
+      "containing_statement": "Return",
+      "same_ast_sha256": "bede17943afb0ed196cf549ccbe042db0ff04a5aba363e9d4a0916c5c5b137a9"
+    },
+    {
+      "before_line": 712,
+      "after_line": 715,
+      "containing_statement": "Return",
+      "same_ast_sha256": "dedf172cc38329f969aa68e279449455b62cac636fca393c480d3324ea24d7ad"
+    }
+  ],
+  "new_exemptions": 0
+}

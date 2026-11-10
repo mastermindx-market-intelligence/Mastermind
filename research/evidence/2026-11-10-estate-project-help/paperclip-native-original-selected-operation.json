@@ -1,0 +1,23 @@
+{
+  "credential_values_read_or_exported": false,
+  "original_auth_selector": null,
+  "original_profile_configuration_keys": [
+    "oauth",
+    "trust",
+    "url"
+  ],
+  "original_studio_pid": 42488,
+  "readback_studio_pid": 92916,
+  "requester_ack_event_count": 0,
+  "runtime_path": "/tmp/estate-paperclip-finite-native-20261110-c4/test_finite_native_hermes_requ0/planning/runtime/data/control_plane/executive.sqlite3",
+  "schema": "mastermind.original_native_operation_readback.v1",
+  "selected_command_event_count": 0,
+  "selected_command_id": "coo-cycle:JOB-001:dispatch:JOB-003:attempt:1",
+  "selected_job": {
+    "attempt_count": 0,
+    "current_attempt_id": null,
+    "job_id": "JOB-003",
+    "status": "QUEUED"
+  },
+  "total_event_count": 47
+}

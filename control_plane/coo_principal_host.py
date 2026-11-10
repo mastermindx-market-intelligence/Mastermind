@@ -48,6 +48,7 @@ MISSION_KEYS_V1 = frozenset({"enabled", "work_ref", "principal_binding_digest",
     "execution_profiles", "allowed_write_paths"})
 MISSION_KEYS_V2 = MISSION_KEYS_V1 | frozenset({"authority_version", "principal_actions"})
 MISSION_KEYS_V3 = MISSION_KEYS_V2 | frozenset({"memory_evaluation_delegation"})
+MISSION_KEYS_V4 = MISSION_KEYS_V2 | frozenset({"project_help"})
 MISSION_KEYS = MISSION_KEYS_V1
 
 # --- the frozen selected-child target -------------------------------------------
@@ -233,14 +234,19 @@ def _mission_actions(row):
     keys = set(row)
     if keys == MISSION_KEYS_V1:
         return DEFAULT_PRINCIPAL_ACTIONS
-    if keys not in (MISSION_KEYS_V2, MISSION_KEYS_V3) or type(row.get("authority_version")) is not int:
+    if keys not in (MISSION_KEYS_V2, MISSION_KEYS_V3, MISSION_KEYS_V4) or type(row.get("authority_version")) is not int:
         _refuse()
-    if row["authority_version"] != (3 if keys == MISSION_KEYS_V3 else MISSION_AUTHORITY_VERSION):
+    if row["authority_version"] != (4 if keys == MISSION_KEYS_V4 else 3 if keys == MISSION_KEYS_V3 else MISSION_AUTHORITY_VERSION):
         _refuse()
     if keys == MISSION_KEYS_V3:
         from common.memory_evaluation_contract import delegation
         grant = delegation(row["memory_evaluation_delegation"])
         if grant["principal_binding_digest"] != row["principal_binding_digest"]:
+            _refuse()
+    if keys == MISSION_KEYS_V4:
+        from common import coo_project_help_contract as help_wire
+        selected = help_wire.scope(row["project_help"])
+        if selected["source_plan"]["work_ref"] != row["work_ref"] or help_wire.ACTION not in row.get("principal_actions", []):
             _refuse()
     actions = row.get("principal_actions")
     if (type(actions) is not list or not actions
@@ -297,7 +303,8 @@ class CooHostProvider:
     The installed launcher separately requires the exact root-sealed adapter.
     Keeping this dependency structural preserves the core/integration boundary.
     """
-    def __init__(self, source, workspace, *, agentos_context_reader=None):
+    def __init__(self, source, workspace, *, agentos_context_reader=None,
+                 project_execution_input_reader=None):
         from control_plane.workspace_read_service import WorkspaceReadService
         if (not callable(getattr(source, "snapshot", None))
                 or not callable(getattr(source, "for_principal", None))
@@ -308,6 +315,17 @@ class CooHostProvider:
         if agentos_context_reader is not None and type(agentos_context_reader) is not AgentOsContextBundleReader:
             _refuse()
         self.agentos_context_reader = agentos_context_reader
+        from control_plane.project_execution_admission import ProjectExecutionInputReadOwner
+        if (project_execution_input_reader is not None
+                and (type(project_execution_input_reader) is not ProjectExecutionInputReadOwner
+                    or project_execution_input_reader._runtime is not workspace.runtime)):
+            _refuse()
+        self.project_execution_input_reader = project_execution_input_reader
+
+    async def read_project_help(self, frame, *, session_bridge_owner=None, host_current=None):
+        from control_plane.coo_project_help_read import read_project_help
+        return await read_project_help(self, frame, session_bridge_owner=session_bridge_owner,
+            host_current=host_current)
 
     def read_agentos_context(self, frame):
         """One explicitly granted read; never invoke fresh-effect eligibility."""
@@ -350,13 +368,17 @@ class CooHostProvider:
     def read_discovery_agentos_context(self, frame):
         return self._read_current_agentos_context(frame, discovery=True)
 
-    def _read_current_agentos_context(self, frame, *, discovery):
+    def read_project_help_agentos_context(self, frame):
+        return self._read_current_agentos_context(frame, discovery=False, project_help=True)
+
+    def _read_current_agentos_context(self, frame, *, discovery, project_help=False):
         """Join two authenticated projections to the original installed DATA owner."""
         import base64
         from common import coo_agentos_context_contract as wire
+        from common import coo_project_help_contract as help_wire
         from common.executive_workspace_contract import permission_stamp
         from control_plane.installed_canonical_project_data_binding import read_installed_project_data
-        (wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
+        (wire.validate_help_context_frame if project_help else wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
         context = wire.context(frame["principal_context"])
         source, workspace = self.source, self.workspace
         binding, authorize, runtime = workspace._canonical_project_data, workspace.authorize, workspace.runtime
@@ -376,8 +398,9 @@ class CooHostProvider:
             if (row["enabled"] is not True or actual != context or joined != (row, fact, authority)
                     or authority.capability_profile_digest != frame["capability_profile_digest"]
                     or wire.CURRENT_ACTION not in authority.principal_actions
-                    or source.catalogue_for_principal(frame["principal"]) !=
-                        (wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE)
+                    or source.catalogue_for_principal(frame["principal"]) not in
+                        ({help_wire.CATALOGUE, help_wire.API_REQUESTER_CATALOGUE} if project_help
+                         else {wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE})
                     or authorize(frame["workspace_principal"]) is not True):
                 _refuse()
             stamp = permission_stamp(authorize, frame["workspace_principal"])
@@ -396,7 +419,7 @@ class CooHostProvider:
         raw = base64.b64decode(body["bundle_base64"], validate=True)
         result = wire.current_result(raw, body["receipt"], principal_context=frame["principal_context"],
             capability_profile_digest=frame["capability_profile_digest"], workspace_principal=frame["workspace_principal"],
-            discovery=discovery)
+            discovery=discovery, project_help=project_help)
         view.check()
         if capture() != before:
             _refuse()
@@ -465,6 +488,7 @@ class CooHostProvider:
         )
         if row["enabled"] is not True or context != current:
             raise ValueError("selected child capture authority is unavailable")
+        self._require_selected_child_project_scope(row, work_ref, root_job_id)
         if self.source.for_principal(principal, work_ref) != before:
             raise ValueError("selected child capture authority changed")
         # The owned Workspace mission names the exact root. An ambiguous root
@@ -480,6 +504,30 @@ class CooHostProvider:
         if self._mission_association(work_ref, root_job_id) != association:
             raise ValueError("selected child capture mission changed")
         return capture
+
+    @staticmethod
+    def _require_selected_child_project_scope(row, work_ref, root_job_id):
+        """Keep an explicit joint API enrollment on its original project root.
+
+        The caller supplies an already validated installed source row. This
+        check adds no authority and performs no Workspace read with borrowed
+        credentials. The row's complete scope is also covered by the existing
+        authority generation retained in the original selected-child claim.
+        """
+        from common import coo_project_help_contract as help_wire
+        from control_plane.executive_agent_capabilities import (
+            T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID,
+            PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID,
+        )
+        if row["capability_profile_id"] not in {
+                T3_API_PROJECT_HELP_REQUESTER_PROFILE_ID,
+                PAPERCLIP_API_PROJECT_HELP_REQUESTER_PROFILE_ID}:
+            return
+        scope = help_wire.scope(row.get("project_help"))
+        if (row.get("authority_version") != 4 or row["work_ref"] != work_ref
+                or scope["source_plan"]["work_ref"] != work_ref
+                or scope["root_job_id"] != root_job_id):
+            raise ValueError("selected child project scope is not current")
 
     def _mission_association(self, work_ref, root_job_id):
         """The genuine mission/root association of one owned Workspace read.
@@ -622,6 +670,9 @@ class CooHostProvider:
                 _refuse()
             before = self.source.snapshot(context.work_ref)
             row, principal, authority = before
+            from control_plane.coo_principal_mandate import AuthorityFact, PrincipalFact
+            if not isinstance(principal, PrincipalFact) or not isinstance(authority, AuthorityFact):
+                _refuse()
             current = PrincipalAdmissionContext(
                 row["work_ref"], principal.principal_binding_digest,
                 authority.mission_authority_ref, authority.authority_generation_digest,
@@ -630,19 +681,21 @@ class CooHostProvider:
                     or authority.capability_profile_digest != capability_profile_digest
                     or "governed_orchestration" not in authority.principal_actions):
                 _refuse()
-            def read_mandate():
-                return project_coo_principal_mandate(principal=principal,
-                    authority=authority,
-                    mission_workspace=self.workspace.read_mission_for_work_ref(context.work_ref))
-            mandate = read_mandate()
-            mission = mandate["mission"]
-            if (mandate["new_effect_gate"] != "OPEN"
-                    or mandate["decision_posture"] != "DECIDE_CONTINUE"
-                    or mission["work_ref"] != context.work_ref
-                    or mission["root_job_id"] != root_job_id
-                    or mission["accountable_seat"] != "coo"
-                    or mission["owed_turn"]["seat"] != "coo"
-                    or read_mandate() != mandate
+            from control_plane.coo_principal_mandate import (
+                _decision_posture, _effect_gate, DecisionPosture, NewEffectGate,
+            )
+            def read_state():
+                return self.workspace._coo_guard_mission_state(context.work_ref)
+            state = read_state()
+            gate, _ = _effect_gate(state, authority)
+            decision, _ = _decision_posture(state, gate)
+            if (gate is not NewEffectGate.OPEN
+                    or decision is not DecisionPosture.DECIDE_CONTINUE
+                    or state.work_ref != context.work_ref
+                    or state.root_job_id != root_job_id
+                    or state.accountable_seat != "coo"
+                    or state.owed_seat != "coo"
+                    or read_state() != state
                     or self.source.snapshot(context.work_ref) != before):
                 _refuse()
         except Exception:

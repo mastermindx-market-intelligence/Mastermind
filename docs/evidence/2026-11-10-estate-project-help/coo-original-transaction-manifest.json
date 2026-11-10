@@ -1,0 +1,189 @@
+{
+  "schema": "mastermind.coo_original_transaction_authority_qualification/v1",
+  "base": {
+    "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "joint_core_patch_sha256": "98681a833ee4ace394437d5ca7f70020eb472351455f1cfa4be1adf6c2c8c495",
+    "dependencies": [
+      {
+        "directory": "estate-project-help-budget-freeze",
+        "manifest_sha256": "ea013346bff50c75ad135021491f7e3ece738b5f5b0d9387fb111e09c4e75601",
+        "patch_sha256": "9ec4c227c17e06cb59147523ea61f1a164b5813837fda5511868931b234a18ba"
+      },
+      {
+        "directory": "estate-g1-turn-recovery-freeze",
+        "manifest_sha256": "0cf8ec72ee330c75b7b56547f36de1f9f0c6e75837d1e0cef6939a937dd21ae0",
+        "patch_sha256": "c1136ddb8f08b0c0ce742724292245047689bdde59e68d931e7cb792d2d4dcb9"
+      },
+      {
+        "directory": "estate-joint-api-fixture-freeze",
+        "manifest_sha256": "45e41a54f1de8efbba332946358547875f63a9aa1832e9eeb8821afcf6063d7e",
+        "patch_sha256": null
+      }
+    ],
+    "files": [
+      {
+        "path": "control_plane/executive_runtime.py",
+        "sha256": "4924870e1666a5e2b6be6c5742e711881641b8ef9409be92551103bc6cdc1185",
+        "git_blob": "4ee6447abd23b1f72fc5ba756d8a302a790f479d"
+      },
+      {
+        "path": "control_plane/runtime_namespace_custody.py",
+        "sha256": "6ac400ba307a4c98a77ea8ab8f9a61db2a2fd6493de806147cb7600996273624",
+        "git_blob": "2dd87e55600e625525ad49495b151555bb72960d"
+      },
+      {
+        "path": "control_plane/workspace_read_service.py",
+        "sha256": "0b1f326f26c08438c1c97d01f0510b623a3804aeab51c76eebec9dd375903217",
+        "git_blob": "471eb0550b3d8a8006d01a1b827649182fb3107c"
+      },
+      {
+        "path": "control_plane/mission_workspace.py",
+        "sha256": "2948a59431bab239a9ab9b52cb15a9ca7ef156912451db5a44e44da55e801dce",
+        "git_blob": "f82178f111892877fd3ab03f30d75c55abb0f26f"
+      },
+      {
+        "path": "control_plane/coo_principal_host.py",
+        "sha256": "5cfaa438669480efe341e65df270ac09679b493b35fbec63943591f783ddf852",
+        "git_blob": "889f8a1fb7d7257fc8df194e58310cc936a27bd4"
+      },
+      {
+        "path": "control_plane/executive_service.py",
+        "sha256": "3c98ce090d9d147385edd7300b56c0eb58e88610f8018947b264a08ceae85638",
+        "git_blob": "9177cf37c47ad047507e546554257351f4cbcae3"
+      }
+    ]
+  },
+  "files": [
+    {
+      "path": "control_plane/executive_runtime.py",
+      "pre_git_blob": "4ee6447abd23b1f72fc5ba756d8a302a790f479d",
+      "pre_sha256": "4924870e1666a5e2b6be6c5742e711881641b8ef9409be92551103bc6cdc1185",
+      "post_git_blob": "d8da11d961ceae8654bbfa6f99102493239bb2fd",
+      "post_sha256": "943c8f73cf705212b8e243ea252ca53d1517482641ef7b7d505c7113020cf5f7",
+      "bytes": 1631918
+    },
+    {
+      "path": "control_plane/runtime_namespace_custody.py",
+      "pre_git_blob": "2dd87e55600e625525ad49495b151555bb72960d",
+      "pre_sha256": "6ac400ba307a4c98a77ea8ab8f9a61db2a2fd6493de806147cb7600996273624",
+      "post_git_blob": "a7f12db00ebba59b9039f498bd046ac8458ce4f3",
+      "post_sha256": "0e4255b9ec9ddda5b613b2bf610156b221aa5efadf51702be0d62ad5f3776cf2",
+      "bytes": 19375
+    },
+    {
+      "path": "control_plane/workspace_read_service.py",
+      "pre_git_blob": "471eb0550b3d8a8006d01a1b827649182fb3107c",
+      "pre_sha256": "0b1f326f26c08438c1c97d01f0510b623a3804aeab51c76eebec9dd375903217",
+      "post_git_blob": "9d6181742fa08834b53ec0fd5b7c7e949d5db8a0",
+      "post_sha256": "291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254",
+      "bytes": 156937
+    },
+    {
+      "path": "control_plane/mission_workspace.py",
+      "pre_git_blob": "f82178f111892877fd3ab03f30d75c55abb0f26f",
+      "pre_sha256": "2948a59431bab239a9ab9b52cb15a9ca7ef156912451db5a44e44da55e801dce",
+      "post_git_blob": "2474979dc84fc6933472247ef3e251ce17013951",
+      "post_sha256": "12efed883d6407b5c4049e74b71673edeecace499545e1032ea843597220a543",
+      "bytes": 93403
+    },
+    {
+      "path": "control_plane/coo_principal_host.py",
+      "pre_git_blob": "889f8a1fb7d7257fc8df194e58310cc936a27bd4",
+      "pre_sha256": "5cfaa438669480efe341e65df270ac09679b493b35fbec63943591f783ddf852",
+      "post_git_blob": "12cb8df91467e799d6078817fd305ced9d0117c1",
+      "post_sha256": "285965b20dd52f8391e3066fdcf9b970086d6217a48769e8b2f8e40baa052f64",
+      "bytes": 37514
+    },
+    {
+      "path": "control_plane/executive_service.py",
+      "pre_git_blob": "9177cf37c47ad047507e546554257351f4cbcae3",
+      "pre_sha256": "3c98ce090d9d147385edd7300b56c0eb58e88610f8018947b264a08ceae85638",
+      "post_git_blob": "f110092e9e9e8a1463594041c278b61fd3bbbef3",
+      "post_sha256": "323374c560f3b85af617d1f334b504adce858141796b785fbb35e8a72426a6fe",
+      "bytes": 579021
+    },
+    {
+      "path": "tests/test_coo_transaction_authority.py",
+      "pre_git_blob": null,
+      "pre_sha256": null,
+      "post_git_blob": "79d9473e3e9d737e7af5e5f959c9646224ff0fc7",
+      "post_sha256": "42eb05e2c74ac2a35baf05dfbac4cc4a9f52c240b20b053ebe199bde86b09713",
+      "bytes": 12252
+    },
+    {
+      "path": "tests/test_coo_transaction_mission.py",
+      "pre_git_blob": null,
+      "pre_sha256": null,
+      "post_git_blob": "154bc23445b83282f181650edb18a71c329f3492",
+      "post_sha256": "0561b38ad996e50e0e965ce9cad8e132df5f6a28f274b37d6f386d75a009badb",
+      "bytes": 5964
+    },
+    {
+      "path": "docs/COO_ORIGINAL_TRANSACTION_AUTHORITY.md",
+      "pre_git_blob": null,
+      "pre_sha256": null,
+      "post_git_blob": "668ad5a202a2ace7f8199f23913032f4f83abd8c",
+      "post_sha256": "476c32b3d84b1f3063124c2ae1f92a0d92dca66cb6ad8b15e5c83dc98677a7a1",
+      "bytes": 7234
+    }
+  ],
+  "patch_sha256": "5a5b4110e0a18aec22a500a1d1ada1f91c381b139d8e01233480163cf29c9d61",
+  "changed_existing_methods": {
+    "control_plane/executive_runtime.py": [
+      "RuntimeStore.__init__",
+      "RuntimeStore._open_existing_writable",
+      "RuntimeStore._open",
+      "RuntimeStore.transaction",
+      "_recheck_selected_child_admission",
+      "AttemptRegistry.claim_job",
+      "Runtime.acknowledge_coo_selected_child_result"
+    ],
+    "control_plane/runtime_namespace_custody.py": [],
+    "control_plane/workspace_read_service.py": [],
+    "control_plane/mission_workspace.py": [
+      "_compose_mission_workspace"
+    ],
+    "control_plane/coo_principal_host.py": [
+      "CooHostProvider.guard_dialogue"
+    ],
+    "control_plane/executive_service.py": [
+      "ExecutiveControlService._handle_selected_child_frame"
+    ]
+  },
+  "all_other_existing_method_ASTs": "unchanged",
+  "separate_parent_composition": "Preserve selected-history Runtime postimage 1330ebdd61d1f9b2f86a2cef7e92beb6669a6765d361838bebcab0c5df05f33c and later disjoint source patches. This increment is against the exact G1/joint/budget preimages.",
+  "proof": {
+    "totals": {
+      "tests": 448,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "argv": [
+      "python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_coo_transaction_authority.py",
+      "tests/test_coo_transaction_mission.py",
+      "tests/test_mission_workspace.py",
+      "tests/test_coo_principal_mandate.py",
+      "tests/test_executive_coo_host.py",
+      "tests/test_coo_requester_return.py",
+      "--maxfail=1",
+      "--tb=short",
+      "--junitxml=transaction-qualification.xml"
+    ],
+    "environment": {
+      "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": ".:tests:/workspace/scratch/dfef37b7f33a/estate-return-qualification/.qualification-deps",
+      "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]"
+    },
+    "log_sha256": "532e83e3fa4a7df2c50e47aaa0b740a0f1a11898cdb82b0bcedd467b17c4aa0a",
+    "junit_sha256": "3ab3cee8772c32ad4de8e9c36e94087d8f7e007b7353bfa5db57f6e9dab98a5a",
+    "apply_roundtrip": "PASS: all nine postimages exactly match"
+  },
+  "remaining_proof": "Actual signed MCP/App/Unix joint API journey on the composed M2 source; no installed activation claimed."
+}

@@ -88,6 +88,92 @@
       ],
       "default_tools_approval_mode": "approve",
       "tool_schema_digest": "94db08906bd04c78565f6172d7a657c13bbe608f3b14dba5649cbedb23deed42"
+    },
+    "mastermind-executive-coo-project-help-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_agentos_current_context",
+        "executive_fabric",
+        "executive_inbox",
+        "executive_mandate",
+        "executive_project_help",
+        "executive_state",
+        "mmx_delegate",
+        "principal_intent_status",
+        "submit_principal_intent"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "0b7d9e4b7c336d0330665f40ebd8f2156997c3e42a0245c641dda625893a3e6e"
+    },
+    "mastermind-executive-coo-t3-api-requester-return-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "29d6f504b79e806feefed6ab16f413338dd267de5019c7590fdc3655765537e3"
+    },
+    "mastermind-executive-coo-t3-api-project-help-requester-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate",
+        "executive_agentos_current_context",
+        "executive_project_help"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "f98abf1e3928b1c56d6e58aeeeb2eacba04db07e6d96f8e38aeb8d9f1b65b905"
+    },
+    "mastermind-executive-coo-paperclip-api-project-help-requester-v1": {
+      "config_name": "mastermindExecutiveCoo",
+      "transport": "streamable-http",
+      "url": "https://mcp.mastermind-x.com/mcp/coo",
+      "required": true,
+      "auth_status": "oAuth",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "executive_mandate",
+        "executive_state",
+        "executive_inbox",
+        "executive_fabric",
+        "submit_principal_intent",
+        "principal_intent_status",
+        "mmx_delegate",
+        "executive_agentos_current_context",
+        "executive_project_help"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "f98abf1e3928b1c56d6e58aeeeb2eacba04db07e6d96f8e38aeb8d9f1b65b905"
     }
   },
   "resources": {},
@@ -194,6 +280,116 @@
       "skills": [],
       "mcp_servers": [
         "mastermind-executive-coo-discovery-correction-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.hermes-native.executive-coo.project-help.v1": {
+      "enabled": false,
+      "execution_surface": "hermes-native-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-project-help-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.t3-api.executive-coo.project-help.v1": {
+      "enabled": false,
+      "execution_surface": "t3-api-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-project-help-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.t3-api.executive-coo.requester-return.v1": {
+      "enabled": false,
+      "execution_surface": "t3-api-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-t3-api-requester-return-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.t3-api.executive-coo.project-help-requester.v1": {
+      "enabled": false,
+      "execution_surface": "t3-api-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-t3-api-project-help-requester-v1"
+      ],
+      "resources": [],
+      "plugins": [],
+      "forbidden": [
+        "browser-control",
+        "filesystem-write",
+        "worker-launch"
+      ]
+    },
+    "principal.paperclip-api.executive-coo.project-help-requester.v1": {
+      "enabled": false,
+      "execution_surface": "paperclip-api-principal",
+      "auth_realm": "oauth-principal-account",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-executive-coo-paperclip-api-project-help-requester-v1"
       ],
       "resources": [],
       "plugins": [],

@@ -1,0 +1,66 @@
+{
+  "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "required_dependency": "Exact three-file EG2 profile postimages from /workspace/scratch/dfef37b7f33a/estate-project-help-profile-freeze",
+  "dependency_manifest_sha256": "9c03cf90df6dbc5886b7ab942c04b5bed4bfa9e8c170812573152ba1d2cccf0d",
+  "patch": "t3-api-requester-return.patch",
+  "patch_sha256": "f556198a30525b18f12cbf2477f5b5a0504ce06d5a262665e924935907e4f869",
+  "files": [
+    {
+      "path": "control_plane/executive_agent_capabilities.py",
+      "pre_blob": "9a682b1d16944d68837d9a44653e196f4aa21195",
+      "pre_sha256": "2c456ce482feb4090b85ff21564290716659d0ef434607b937998a58bfac1661",
+      "post_blob": "da24e5b6264e5d9bed81a94f7d5811ff4828a426",
+      "post_sha256": "9cdb33a81d40039071e2335d7360f2c13b6e0fa2fe92706c9826bfea82dc014d",
+      "post_bytes": 139523
+    },
+    {
+      "path": "ops/executive_os/coo_principal_host.py",
+      "pre_blob": "6dbc256479550ce9abf8586f5fa66d240227d5f3",
+      "pre_sha256": "f71e787d5f741ea6e971f86bb25fcea9c9c03b41ae13f6d859f725fe8bcd2f3b",
+      "post_blob": "a4a62be7ad4fac307236d438b4a9d692b44d0a6a",
+      "post_sha256": "c380369f6495cf16f8ca0d16d42ae72ef6fd266cf0c129b41952abf413b800d3",
+      "post_bytes": 25996
+    },
+    {
+      "path": "config/executive_claude_principal_capabilities.json",
+      "pre_blob": "dde0b2d529919bc5e54da1c67d31bddd5c7582b8",
+      "pre_sha256": "8a59f93af17e4a3bfb97a6c3e8ac9a0ddee899182bd23618bb4a2d64a60ffd73",
+      "post_blob": "1cd8421fe0eb0432442f7ab739d1db6535739c0e",
+      "post_sha256": "6ec75c267336f1d54f856a1f7a96ca41f36ec30a90011604a3434ffc41a22a12",
+      "post_bytes": 10079
+    },
+    {
+      "path": "tests/test_t3_api_requester_contract.py",
+      "pre_blob": null,
+      "pre_sha256": null,
+      "post_blob": "d9224277d38149b1bc17a26ce9cc1c55a9a31b6b",
+      "post_sha256": "e9a25ccad95434398dcc594ec785db0cb110ab0e4d0550f643751004285c1273",
+      "post_bytes": 9498
+    },
+    {
+      "path": "tests/test_t3_api_requester_ingress.py",
+      "pre_blob": null,
+      "pre_sha256": null,
+      "post_blob": "1abba2bbb2d43867f0329afa4f53f177eaa42765",
+      "post_sha256": "611cd7dff812311299c8f89002e987dea30a3963235b94ae74a8aef3668aa709",
+      "post_bytes": 11464
+    },
+    {
+      "path": "docs/T3_API_REQUESTER_RETURN.md",
+      "pre_blob": null,
+      "pre_sha256": null,
+      "post_blob": "b63c8d4ce11c3f6f92de48579d0139b5cf9eba6f",
+      "post_sha256": "976734b32fdfb5c3963d6eecf10d99f79950fc01b2ac4ac09861d99cc2fb081c",
+      "post_bytes": 4273
+    }
+  ],
+  "source_scope": "Only existing capability/installed-catalogue owners plus disabled config, tests and docs. Runtime/service/wire/ACK code unchanged.",
+  "validation_at_freeze": {
+    "contract_tests": "19 passed; includes actual signed OAuth and MCP ClientSession catalogue",
+    "unix_ingress": "9 cases collected; real Unix execution delegated to parent M2; no cloud Unix proof claimed",
+    "patch": "git apply --check, apply and all six postimage hashes verified",
+    "broader_affected_owners": "Qualification in progress; separate final evidence will report exact command/result"
+  },
+  "installed_activation": false,
+  "native_origin_attested": false
+}

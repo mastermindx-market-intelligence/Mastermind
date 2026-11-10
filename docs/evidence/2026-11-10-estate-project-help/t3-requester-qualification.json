@@ -1,0 +1,55 @@
+{
+  "source_manifest_sha256": "7d330e78595619a6ca511e722fdd59ec3cff17a1b36966d70d470c44d1fef501",
+  "patch_sha256": "f556198a30525b18f12cbf2477f5b5a0504ce06d5a262665e924935907e4f869",
+  "source_postimages_reverified": true,
+  "cwd": "/workspace/scratch/dfef37b7f33a/estate-t3-api-requester-qualification",
+  "environment": {
+    "python": "3.12.14 (main, Aug 25 2026, 14:00:49) [Clang 22.1.3 ]",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "mcp": "1.29.0",
+    "pytest": "9.2.0",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    "PYTHONPATH": ".:tests:/workspace/scratch/dfef37b7f33a/estate-return-qualification/.qualification-deps"
+  },
+  "pytest_args": [
+    "-q",
+    "tests/test_executive_agent_capabilities.py",
+    "tests/test_executive_coo_host.py",
+    "tests/test_executive_coo_install_binding.py",
+    "tests/test_coo_requester_return_contract.py",
+    "tests/test_executive_coo_mcp.py",
+    "tests/test_coo_requester_ack_classification.py",
+    "tests/test_coo_requester_return.py",
+    "tests/test_t3_api_requester_contract.py",
+    "-k",
+    "not test_signed_mcp_request_reaches_real_socket_and_one_durable_job",
+    "--maxfail=1",
+    "--tb=short"
+  ],
+  "result": "216 passed, 1 deselected, 1 warning in20.60s",
+  "new_profile_cases": 19,
+  "real_unix_cases_collected": 9,
+  "real_unix_qualification": "Parent owns M2 execution; cloud AF_UNIX socket creation is denied (PermissionError errno1). No source regression inferred and no cloud socket proof claimed.",
+  "logs": [
+    {
+      "path": "eg3-contract-tests.log",
+      "sha256": "40309ce0746c64b8cb879798763b62ea9e882faa4651e781f584c826ebeaabb4"
+    },
+    {
+      "path": "eg3-affected-owner-tests.log",
+      "sha256": "38189dc11dbad0737461c9f7e5d64b84e69ea754b8da7d9e5e76116291075064"
+    },
+    {
+      "path": "eg3-real-ingress-collection.log",
+      "sha256": "30af7c926c2d71e6d20ccf3c1cd02a81c5b8e0ff66b291b8a73d8532ec3d1c70"
+    },
+    {
+      "path": "eg3-affected-owner-unix-unavailable.log",
+      "sha256": "ae5188b61af7f5a323d17626b5c7d3fbde35ea5d834d9e8e59025ba5f8e6151a"
+    },
+    {
+      "path": "eg3-recovered-sources.json",
+      "sha256": "1e1f27da9d76136e20dab655d9ec16e069beff8e7b353069ba5df7daea1057c4"
+    }
+  ]
+}

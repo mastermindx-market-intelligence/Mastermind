@@ -1,0 +1,72 @@
+[
+  {
+    "path": "integrations/paperclip_hermes/README.md",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "06c8da32a396fb4c04414c6b8deae565e76cdac5",
+    "sha256": "3c50114a2b38f66077e13d00bb0a59ffd847cf0f9784bbf759cb0959281e0b8f"
+  },
+  {
+    "path": "ops/paperclip_fleet/HERMES_GATEWAY_INTEGRATION.md",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "8401a42f1c14695f896c4ddcb2e2a742b270e9a4",
+    "sha256": "27f8c84b89e6edd8bcbf8e6b4227c791c7ea3daf87ab5c420e1f2a5c9cf0918e"
+  },
+  {
+    "path": "ops/paperclip_fleet/README.md",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "6ba8f5d86366fc090d458c89a0a1edb60e1c275d",
+    "sha256": "a8a477b86a56d4c955c8c6989a9a93dde3335683d3c14f38e5a4e0e7ef285674"
+  },
+  {
+    "path": "integrations/paperclip_hermes/build_overlay.py",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "b3e223556f06ddd9060216d593f9f921c0bea425",
+    "sha256": "2285be6abfff657d29a20dd0e652376109ce0f01d098324ca92b893828f4d331"
+  },
+  {
+    "path": "integrations/paperclip_hermes/paperclip_plugin/__init__.py",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "e5afdfe2153c342c08745e22bda24dc5032067ac",
+    "sha256": "01ddaaa057964f4e25bfb387f8fa65e596f794e6365a3e8b37f39b250f9fcca7"
+  },
+  {
+    "path": "integrations/paperclip_hermes/paperclip_plugin/plugin.yaml",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "bdb8c0367d1c6a9ec0bc794f464576c772324342",
+    "sha256": "8a7de178f24c3cf5ffe4c969393746af727be053d1c2af5df1645966b6c5df2a"
+  },
+  {
+    "path": "ops/paperclip_fleet/paperclip_readiness.py",
+    "ref": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+    "sha": "5dfdc9db47b266b53f6d4d89655db80c1c0e9ec8",
+    "sha256": "320a648a2e6e0b27badeccd86123399eeb650240d4a543e4b77c7918298d6a6d"
+  },
+  {
+    "path": "source957/integrations/hermes_runtime/native_gateway_entry.py",
+    "ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "source_path": "integrations/hermes_runtime/native_gateway_entry.py",
+    "sha": "0b70dcddd2fcbfe6f99fee25b46757008e20d912",
+    "sha256": "cb7e297af33c70af2d96adefc954782d97489877fe50c560b6edb90280726041"
+  },
+  {
+    "path": "source957/integrations/hermes_runtime/native_session_control.py",
+    "ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "source_path": "integrations/hermes_runtime/native_session_control.py",
+    "sha": "997b9ed7ba45d460cf9615b0e2024751bf0c0c95",
+    "sha256": "3d617c4c58b1940fe8ac3a2a06d839d4dfc8564f5dc3ffdde80f2faf3ae782a5"
+  },
+  {
+    "path": "source957/integrations/hermes_runtime/native_agentos_memory.py",
+    "ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "source_path": "integrations/hermes_runtime/native_agentos_memory.py",
+    "sha": "dd0cc0197611d6a8c467a38708dce7bf32966fa4",
+    "sha256": "87003121113c93b9e767aa65ad7e0487f6ad753c9d14bd463f2c4afe0fa2f56f"
+  },
+  {
+    "path": "source957/integrations/hermes_harness/native_selected_child_plugin/__init__.py",
+    "ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "source_path": "integrations/hermes_harness/native_selected_child_plugin/__init__.py",
+    "sha": "de1f7c51cb7096f084fbd02cdbc9a27ef55723fc",
+    "sha256": "ecce0ee2f6e4d0541977050b96c6dcd2492ff2c1223a00b2162fb1f33d3fec2e"
+  }
+]
