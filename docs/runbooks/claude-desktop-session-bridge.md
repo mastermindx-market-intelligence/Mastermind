@@ -58,11 +58,17 @@ uses the shared Anthropic Desktop identity. The wrappers also register
 claude:// as the same URL scheme. A generic native Desktop handoff therefore
 cannot reliably choose the account that owns a bound session.
 
-On macOS hosts with at least two numbered Parall wrappers installed,
-open_claude_code_in_desktop now refuses the native Desktop handoff with
+On macOS hosts with at least two **distinct Claude Desktop app bundles**
+(including a Default/Official plus one numbered Parall wrapper),
+open_claude_code_in_desktop refuses the native Desktop handoff with
 failure_kind=ambiguous before invoking the PTY handoff. Likewise,
 open_claude_desktop refuses claude:// URLs before asking LaunchServices
-to select a handler. No app is launched or credential inspected, and there
+to select a handler. Symlink aliases of the same bundle do not count as
+separate accounts. Both /Applications and ~/Applications are inspected:
+LaunchServices can resolve an app bundle from either directory. An
+unreadable required inventory refuses closed rather than guessing which
+account owns the session; an absent optional ~/Applications directory
+does not create a false ambiguity. No app is launched or credential inspected, and there
 is no retry under another account. The existing binding vocabulary has no
 authorized exact Parall account selector: adding such a selector requires
 explicit account-to-session qualification, not an arbitrary default.
@@ -78,11 +84,16 @@ is not installed-runtime acceptance.
 The same repair extends the **existing** `mastermind_fabric_routing_guard.py`
 used by Claude and Codex, not a second watcher or provider control plane.
 It blocks generic Desktop launches, the shared Anthropic bundle-ID route,
-raw Parall runtime launches, ambiguous `claude://` opens, and native
-`claude --desktop` use within covered Mastermind shell calls. Ordinary
-headless and resume CLI commands remain permitted. Its scope includes both
-`/Volumes/Mastermind/agent-workspaces` and the current
-`/Volumes/Mastermind 2/agent-workspaces` external SSD root.
+raw Parall runtime launches, ambiguous Claude URL-scheme opens, and native
+Claude --desktop use in covered Claude/Codex Bash PreToolUse calls
+**regardless of their working directory**. A follow-up repair moved the
+incumbent early Mastermind-scope return to AFTER this GUI-denial block.
+All unrelated Fabric/CI routing and GitHub wait policies remain
+Mastermind-workspace-scoped, including the legacy and current external
+SSD workspace roots. Ordinary headless and resume Claude CLI commands
+remain permitted. This is not an OS-wide app blocker: Codex Code Mode
+paths, native update helpers, GUI clicks and direct host actions may never
+invoke a shell hook.
 
 The reviewed source fragments are under `ops/claude_parall_isolation/`.
 The drift-checked installer operates only on the incumbent guard and the
@@ -94,14 +105,51 @@ python3 scripts/install_claude_parall_isolation.py
 python3 scripts/install_claude_parall_isolation.py --apply --evidence /absolute/new/evidence-directory
 ```
 
-It only upgrades the known pre-isolation guard hash or validates the exact
-installed fragment. Unrecognized host drift refuses without replacing
-another owner's configuration; applies use private backups and atomic
-per-file writes. No background daemon, CLI binary change, provider login,
-or Parall account data modification occurs. A shell PreToolUse guard is
-not comprehensive OS-level enforcement: GUI/browser/native launch paths
-outside supported shell hooks still require the application-level account
-selection repair and real-path proof.
+It upgrades only historically pinned exact guard versions (including the
+merged PR #1647 version) and accepts only their committed fixture hashes.
+Unrecognized host drift refuses without replacing another owner's
+configuration; applies use private backups and atomic per-file writes. No
+background daemon, CLI binary change, provider login, or Parall account
+data modification occurs. The covered shell guard now recursively inspects
+common execution prefixes (env, sudo, nohup, exec, command, nice, time,
+caffeinate and nested sh/bash/zsh -c up to a bound). It also handles
+case-insensitive generic Claude app names, bundle IDs and URL schemes,
+and joins POSIX backslash-newline command continuations before shell
+argument inspection. This does not parse all possible shell scripts or
+guard a native Electron auto-updater. Claude CLI -p, --resume, and prompts
+*describing* GUI commands remain allowed. Do not claim OS-wide enforcement.
+
+### Native updater residual risk and account-safe vendor migration
+
+At 2026-10-19 16:08:49 PDT macOS recorded a Claude 6 application exit,
+at 16:08:52-53 replacement app-bundle file events, at 16:08:54.452 a ShipIt
+(standard Electron/Squirrel.Mac update helper) LaunchServices event, and at
+16:08:54.650 a replacement Claude runtime. That runtime PID 82118 had
+**Claude Default** Parall data files open, not the managed Claude 6 profile.
+The correlation strongly suggests a native updater-to-legacy-launcher collision;
+the identity of any originating agent is unproven. Neither the Control Room
+adapter nor a shell PreToolUse hook can intercept the Electron updater.
+
+The M2 had Parall 2.4.0 and 11 legacy Claude shortcut bundles, with all 11
+existing ParallDataStorage settings mapped to their correct distinct account
+directories. Parall's newer native-launch handling requires **updating the
+vendor application AND editing/saving each existing shortcut in place**;
+updating the app alone does not rebuild old shortcuts. The App Store CLI
+attempt was denied with ISErrorDomain -128 (No purchase was requested), and
+must not be silently retried under another account/carrier.
+
+For a human-authorized maintenance window, first upgrade Parall through its
+own signed-in App Store account. Preserve each original app name, bundle
+identity, shortcut destination and data storage path; do not delete any
+Application Support directories. On the M2, the private read-only manifest
+and 11 hash-verified wrapper backups are held under
+/Volumes/Mastermind 2/evidence/claude-parall-isolation-20261019-v2/.
+Prove one idle shortcut's new launcher opens exactly its own storage profile
+before updating the remaining shortcuts one by one. Do not regenerate an
+active numbered Claude account or terminate PID 82118 just to silence an
+unattributed process; first reconcile account and unsaved session state.
+The 2026-10-19 native updater mechanism remains a **separate vendor
+dependency** until this is completed and observed in use.
 
 ## Remote-use boundary
 
