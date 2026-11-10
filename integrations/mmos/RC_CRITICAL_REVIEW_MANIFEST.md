@@ -173,3 +173,36 @@ rows total**; window `e6479f848..8d4e24d12`, 60 commits.
 - Non-CRITICAL post-window landings (master merge `fe4265176` via `376c66d38`, NM-06 TS
   mirror `a392b8a7f`, install ledger `f9ae7aa6f`, this manifest): no auth/permission/
   exactly-once/release-automation/identity-pin surface beyond the row above.
+
+## 7. RC CRITICAL surface table (lane L6 driver update, 2026-11-10)
+
+The complete set of files that need CRITICAL review at RC, grouped by producing lane.
+Path status checked against `origin/feat/mmos-v1-integration-t3` head `2ee546d71` at the
+time of this edit: **TRUNK** = present on trunk now; *expected* = in flight on the named
+lane branch, not on trunk yet.
+
+### (a) Unix-socket local door (lane L4)
+
+| Status | Files | Question the release reviewer must answer |
+|---|---|---|
+| *expected* | `integrations/executive_mcp/local_operator.py` | Is peer-uid admission on the Unix socket the ONLY door (no token, no TCP fallback, no ambient trust), and does a mismatched uid fail closed before any frame is read? |
+
+### (b) Child-request admit gate (lane L1)
+
+| Status | Files | Question |
+|---|---|---|
+| TRUNK (gate hunks from L1 land on top) | `integrations/mastermind_executive_app/coo.py`; `control_plane/executive_service.py` (selected-child frames) | Can an unattested or model-shaped child-request envelope reach admission, and is every selected-child frame shape closed and authorized? (Extends carried row P3.) |
+
+### (c) Shell-mode window (lane L8)
+
+| Status | Files | Question |
+|---|---|---|
+| *expected* (no `MM_SHELL_URL` token exists in `app/mastermind_os/src-tauri` at `2ee546d71`) | `MM_SHELL_URL` gate inside `app/mastermind_os/src-tauri` | Can any shell-mode URL other than the one fixed gate value open a window, and is the refusal fail-closed on unset/malformed values? |
+
+### (d) Lane L6 read producers (this lane)
+
+| Status | Files | Question |
+|---|---|---|
+| TRUNK since `572895459` (item-1 landing) | `common/workspace_t3_thread_projection_contract.py`, `control_plane/workspace_t3_thread_projection_read.py`, `integrations/mastermind_workspace_app/t3_thread_projection.py`; additive hunks in `control_plane/executive_service.py`, `control_plane/workspace_read_service.py`, `integrations/executive_mcp/server.py`, `integrations/mastermind_workspace_app/app.py` + `installed.py` | Same class as A3: can a non-control-room principal or expired token obtain a frame past the post-await authorizer/permission/expiry recheck, and is every refusal a typed closed document rather than transport success? |
+| *expected* (on `t3/mmos-l6s`, pending landing) | `common/workspace_execution_return_contract.py`, `control_plane/workspace_execution_return_read.py`, `integrations/mastermind_workspace_app/execution_return.py`; same five additive hunk sites incl. the `installed.py` unix-client frame branch | As above, plus: does the two-hop `original_requester` provenance join stay read-only and honest-null when any hop is unreachable, and can a malformed receipt row ever be served partially rather than as `RECEIPT_PAYLOAD_MALFORMED`? |
+| TRUNK (existing file; item-3 flake fix pending on `t3/mmos-l6s`) | `tests/test_provider_orchestrator_policy.py` | Not itself a CRITICAL surface, but it tests the PERMISSIONS guard: confirm the flake fix changes only the clock source (wall → child CPU / in-child watchdog marker) and loosens no numeric bound. |

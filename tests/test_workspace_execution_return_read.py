@@ -46,12 +46,54 @@ def _clock():
     return datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)
 
 
+_WORKER = "W-1"
+_QUOTA = "Q-1"
+_HASH64 = "a" * 64
+_NOW_MS = 1_800_000_000_000
+
+
+def _seed_parents(connection, events):
+    """Insert the FK parent rows the events table requires — the workers,
+    quota class, jobs and attempts rows Executive admission would have
+    created before any receipt event exists."""
+    connection.execute(
+        "INSERT INTO workers(worker_id, provider, account_label, worker_type,"
+        " last_seen_at_ms, created_at_ms, updated_at_ms) VALUES(?,?,?,?,?,?,?)",
+        (_WORKER, "fabric", "fixture", "fixture", _NOW_MS, _NOW_MS, _NOW_MS))
+    connection.execute(
+        "INSERT INTO worker_quota_classes(worker_id, quota_class, status, provider,"
+        " last_seen_at_ms, created_at_ms, updated_at_ms) VALUES(?,?,?,?,?,?,?)",
+        (_WORKER, _QUOTA, "AVAILABLE", "fabric", _NOW_MS, _NOW_MS, _NOW_MS))
+    for job_id in sorted({e.get("job_id") for e in events} - {None}):
+        connection.execute(
+            "INSERT INTO jobs(job_id, objective, department, status, authority_level,"
+            " constraints_json, requested_authorities_json, authority_policy_hash,"
+            " available_at_ms, created_at_ms, updated_at_ms)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (job_id, "fixture objective", "fixture", "QUEUED", "CONTROL",
+             "{}", "[]", _HASH64, _NOW_MS, _NOW_MS, _NOW_MS))
+    for attempt_id, job_id in sorted(
+            {(e.get("attempt_id"), e.get("job_id")) for e in events} - {(None, None)}):
+        if attempt_id is None:
+            continue
+        connection.execute(
+            "INSERT INTO attempts(attempt_id, job_id, attempt_number, worker_id,"
+            " quota_class, status, fence_generation, authority_policy_hash,"
+            " lease_token, lease_owner, lease_expires_at_ms, heartbeat_at_ms,"
+            " started_at_ms, created_at_ms, updated_at_ms)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (attempt_id, job_id, 1, _WORKER, _QUOTA, "CLAIMED", 1, _HASH64,
+             "lease-fixture", "fixture", _NOW_MS + 60_000, _NOW_MS,
+             _NOW_MS, _NOW_MS, _NOW_MS))
+
+
 def _write_store(tmp_path, events):
     """Create a real RuntimeStore and append the given events through it."""
     from control_plane.executive_runtime import RuntimeStore
 
     store = RuntimeStore(tmp_path)
     with store.transaction() as connection:
+        _seed_parents(connection, events)
         for event in events:
             store.append_event(
                 connection,
