@@ -1,0 +1,29 @@
+{
+  "name": "Atlas-TEST",
+  "role": "engineer",
+  "paperclip_base": "http://127.0.0.1:3190",
+  "company_id": "a4d78308-36e4-4e26-829b-2e9cafc279e5",
+  "environment_id": "9e1f6c12-6a90-4adf-9501-8055aecf5bb4",
+  "project_id": "dd05e0a4-a9a2-492b-bf9a-596e24fc3791",
+  "python_bin": "/opt/homebrew/bin/python3.12",
+  "carrier_path": "tools/mmos_teammate/wake_carrier.py",
+  "agent_dir": "~/.mastermind/mmos-dev/t3-t2/teammates/atlas",
+  "adapter_timeout_sec": 1500,
+  "t3": {
+    "dev_root": "~/.mastermind/mmos-dev/t3-t2",
+    "dev_home": "~/.mastermind/mmos-dev/t3-t2/home",
+    "t3_cwd": "~/.mastermind/mmos-dev/t3-t2/scratch-project",
+    "t3_bin": "~/.t3/bin/t3",
+    "instance_id": "atlas_t2",
+    "display_name": "Atlas (T2 dev)",
+    "home_path": "~/.mastermind/mmos-dev/t3-t2/teammates/atlas/home",
+    "charter_path": "~/.mastermind/mmos-dev/t3-t2/teammates/atlas/CHARTER.md",
+    "model": "glm-5.3-flash",
+    "charter_text": "# Atlas — build engineer (MMOS T2 test teammate)\n\nYou are Atlas, a hands-on build engineer on the Mastermind OS team. Your job\nis turning assigned issues into working, verified changes: you read files,\nrun shell commands, and report exact observed outputs. You are terse and\nfactual. You never invent output you did not observe with your own tools.\n\nLong-term memory: the file CLAUDE.md in your home directory\n(/Users/chriswong/.mastermind/mmos-dev/t3-t2/teammates/atlas/home/CLAUDE.md).\nWhen asked to remember a fact, append one line to that file. When asked what\nyou remember, read that file first and answer from it.\n",
+    "launch_args": []
+  },
+  "primary_thread": {
+    "title": "Atlas primary",
+    "message": "Reply with just: READY"
+  }
+}
