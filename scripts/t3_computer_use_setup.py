@@ -159,7 +159,9 @@ def run_mcp_command(op: dict, remove: bool = False):
 
 
 def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
-              *, browser_skills_only: bool = False) -> dict:
+              *, browser_skills_only: bool = False, native_only: bool = False) -> dict:
+    if browser_skills_only and native_only:
+        raise SetupError("Choose native-only or browser-skills-only, not both")
     t3_home = t3_home.resolve()
     user_home = (user_home or Path.home()).resolve()
     settings_path = t3_home / "userdata/settings.json"
@@ -186,14 +188,12 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
 
     operations = []
     dependencies = [{"path": str(settings_path), "sha256": digest(settings_raw)}]
-    selected_skills = ("mastermind-browser-use",) if browser_skills_only else SKILLS
+    selected_skills = (("mastermind-browser-use",) if browser_skills_only else
+                       ("mastermind-computer-use",) if native_only else SKILLS)
     expected = {}
     if not browser_skills_only:
         quiet = user_home / ".cursor/quiet-computer-use/quiet_mcp.py"
         peekaboo = quiet.parent / "vendor/peekaboo-macos-arm64/peekaboo"
-        browser = t3_home / "mcp/mmx-browser/server.js"
-        runtime = browser.with_name("runtime.json")
-        node = user_home / ".local/share/mastermind-runtime/node/bin/node"
         claude = (user_home / ".local/bin/claude").resolve()
         if not claude.is_file() or not os.access(claude, os.X_OK):
             raise SetupError("Existing Claude configuration CLI is unavailable")
@@ -202,24 +202,30 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
             raise SetupError("Existing quiet adapter differs from the qualified revision")
         if not peekaboo.is_file() or not os.access(peekaboo, os.X_OK) or file_digest(peekaboo) != PEEKABOO_SHA256:
             raise SetupError("Existing signed Peekaboo binary differs from the qualified artifact")
-        browser_raw = read_regular(browser)
-        browser_fixed = qualified_browser_server(browser_raw)
-        descriptor = load_json(runtime)
-        if descriptor.get("schema") != "mastermind.browser.mcp_runtime/v1":
-            raise SetupError("Existing Mastermind browser descriptor has an unknown schema")
-        if not node.is_file() or not os.access(node, os.X_OK):
-            raise SetupError("Existing Mastermind browser Node runtime is unavailable")
         expected = {
             "peekaboo": {"type": "stdio", "command": "/usr/bin/python3", "args": [str(quiet)]},
-            "mmx-browser": {"type": "stdio", "command": str(node), "args": [str(browser)]},
         }
         dependencies += [
             {"path": str(quiet), "sha256": QUIET_SHA256},
             {"path": str(peekaboo), "sha256": PEEKABOO_SHA256},
             {"path": str(claude), "sha256": claude_sha256},
-            {"path": str(browser), "sha256": digest(browser_raw)},
-            {"path": str(runtime), "sha256": digest(read_regular(runtime))},
         ]
+        if not native_only:
+            browser = t3_home / "mcp/mmx-browser/server.js"
+            runtime = browser.with_name("runtime.json")
+            node = user_home / ".local/share/mastermind-runtime/node/bin/node"
+            browser_raw = read_regular(browser)
+            browser_fixed = qualified_browser_server(browser_raw)
+            descriptor = load_json(runtime)
+            if descriptor.get("schema") != "mastermind.browser.mcp_runtime/v1":
+                raise SetupError("Existing Mastermind browser descriptor has an unknown schema")
+            if not node.is_file() or not os.access(node, os.X_OK):
+                raise SetupError("Existing Mastermind browser Node runtime is unavailable")
+            expected["mmx-browser"] = {"type": "stdio", "command": str(node), "args": [str(browser)]}
+            dependencies += [
+                {"path": str(browser), "sha256": digest(browser_raw)},
+                {"path": str(runtime), "sha256": digest(read_regular(runtime))},
+            ]
 
     def file_change(path: Path, data: bytes, expected_before: dict | None = None):
         if not path.parent.resolve().is_relative_to(t3_home):
@@ -234,7 +240,7 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
             operations.append({"path": str(path), "before": before, "after": after,
                                "content": data.decode("utf-8")})
 
-    if not browser_skills_only:
+    if not browser_skills_only and not native_only:
         file_change(browser, browser_fixed)
 
     for skill in selected_skills:
@@ -277,7 +283,8 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
             operations.append({"path": str(link), "before": before,
                                "after": {"kind": "symlink", "target": str(target)}})
     public = {"schema": SCHEMA, "t3_home": str(t3_home), "providers": [n for n, _ in sorted(providers)],
-              "components": ["browser-skills"] if browser_skills_only else ["native", "browser", "skills"],
+              "components": (["browser-skills"] if browser_skills_only else
+                             ["native", "skills"] if native_only else ["native", "browser", "skills"]),
               "dependencies": dependencies, "operations": [public_operation(op) for op in operations]}
     plan_sha256 = digest(json.dumps(public, sort_keys=True, separators=(",", ":")).encode())
     return dict(public, plan_sha256=plan_sha256, operations=operations)
@@ -437,8 +444,11 @@ def main():
     parser.add_argument("--t3-home", type=Path, default=Path.home() / ".t3")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--expected-plan-sha256")
-    parser.add_argument("--browser-skills-only", action="store_true",
-                        help="Install only the portable browser skill; do not configure or claim a runtime")
+    components = parser.add_mutually_exclusive_group()
+    components.add_argument("--browser-skills-only", action="store_true",
+                            help="Install only the portable browser skill; do not configure or claim a runtime")
+    components.add_argument("--native-only", action="store_true",
+                            help="Configure the qualified quiet native owner and install its skill; preserve browser routing")
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--expected-receipt-sha256")
     args = parser.parse_args()
@@ -448,7 +458,8 @@ def main():
                 parser.error("rollback needs --receipt and --expected-receipt-sha256")
             result = rollback(args.receipt, args.expected_receipt_sha256)
         else:
-            plan = make_plan(args.t3_home, args.source_root, browser_skills_only=args.browser_skills_only)
+            plan = make_plan(args.t3_home, args.source_root, browser_skills_only=args.browser_skills_only,
+                             native_only=args.native_only)
             if args.action == "apply":
                 if not args.expected_plan_sha256:
                     parser.error("apply needs the preceding preview's --expected-plan-sha256")

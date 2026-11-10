@@ -1,9 +1,12 @@
 import importlib.util
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -298,6 +301,101 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
         self.assertFalse((self.homes[2] / "skills").exists())
         setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
         self.assertFalse((self.t3 / "skills/mastermind-browser-use/SKILL.md").exists())
+
+    def test_native_only_preserves_remote_browser_and_needs_no_local_browser(self):
+        shutil.rmtree(self.t3 / "mcp")
+        shutil.rmtree(self.home / ".local/share/mastermind-runtime")
+        native_source = self.home / "native-source"
+        native_skill = native_source / "skills/mastermind-computer-use/SKILL.md"
+        native_skill.parent.mkdir(parents=True)
+        native_skill.write_bytes((SOURCE / "skills/mastermind-computer-use/SKILL.md").read_bytes())
+        browser_skill = self.t3 / "skills/mastermind-browser-use/SKILL.md"
+        browser_skill.parent.mkdir(parents=True)
+        browser_skill.write_text("Existing browser instructions must survive\n")
+        browser_bytes = browser_skill.read_bytes()
+        remote = {"type": "stdio", "command": "/usr/bin/ssh", "args": ["existing-route", "browser-owner"],
+                  "env": {"BROWSER_PRIVATE": "never-in-native-receipts"}}
+        for home in self.homes[:2]:
+            path = home / ".claude.json"
+            data = json.loads(path.read_text())
+            data["mcpServers"]["mmx-browser"] = remote
+            self.write_json(path, data)
+            (home / "skills").mkdir()
+            (home / "skills/mastermind-browser-use").symlink_to(browser_skill.parent)
+        plan = setup.make_plan(self.t3, native_source, self.home, native_only=True)
+        self.assertEqual(plan["components"], ["native", "skills"])
+        self.assertNotIn("never-in-native-receipts", json.dumps(plan))
+        result = setup.apply_plan(plan, plan["plan_sha256"])
+        for home in self.homes[:2]:
+            data = json.loads((home / ".claude.json").read_text())
+            self.assertEqual(data["mcpServers"]["mmx-browser"], remote)
+            self.assertIn("peekaboo", data["mcpServers"])
+            self.assertTrue((home / "skills/mastermind-computer-use/SKILL.md").is_file())
+            self.assertEqual((home / "skills/mastermind-browser-use/SKILL.md").read_bytes(), browser_bytes)
+        self.assertEqual((self.homes[2] / ".claude.json").read_bytes(), self.originals[self.homes[2]])
+        self.assertEqual(setup.make_plan(self.t3, native_source, self.home, native_only=True)["operations"], [])
+        path = self.homes[0] / ".claude.json"
+        newer = json.loads(path.read_text())
+        newer["mcpServers"]["mmx-browser"]["args"] = ["newer-authorized-route", "browser-owner"]
+        newer["new-sdk-cache"] = "preserve"
+        self.write_json(path, newer)
+        setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
+        restored = json.loads(path.read_text())
+        self.assertEqual(restored["mcpServers"]["mmx-browser"]["args"][0], "newer-authorized-route")
+        self.assertEqual(restored["new-sdk-cache"], "preserve")
+        self.assertNotIn("peekaboo", restored["mcpServers"])
+        self.assertFalse((self.t3 / "skills/mastermind-computer-use/SKILL.md").exists())
+        self.assertEqual(browser_skill.read_bytes(), browser_bytes)
+        for home in self.homes[:2]:
+            self.assertTrue((home / "skills/mastermind-browser-use").is_symlink())
+        self.assertNotIn("never-in-native-receipts", Path(result["receipt"]).read_text())
+
+    def test_native_only_still_requires_the_qualified_native_cohort(self):
+        quiet = self.home / ".cursor/quiet-computer-use/quiet_mcp.py"
+        cli = self.home / ".local/bin/claude"
+        for target, reason in [(quiet, "quiet adapter differs"), (self.binary, "binary differs"),
+                               (cli, "configuration CLI is unavailable")]:
+            with self.subTest(target=target.name):
+                raw, mode = target.read_bytes(), target.stat().st_mode & 0o777
+                try:
+                    if target == cli:
+                        target.chmod(0o600)
+                    else:
+                        target.write_bytes(b"unqualified local artifact")
+                    with self.assertRaisesRegex(setup.SetupError, reason):
+                        setup.make_plan(self.t3, SOURCE, self.home, native_only=True)
+                    for home in self.homes:
+                        self.assertEqual((home / ".claude.json").read_bytes(), self.originals[home])
+                finally:
+                    target.write_bytes(raw)
+                    target.chmod(mode)
+
+    def test_native_only_cli_plan_binds_the_component_selection(self):
+        output = io.StringIO()
+        args = ["t3_computer_use_setup.py", "plan", "--native-only", "--t3-home", str(self.t3),
+                "--source-root", str(SOURCE)]
+        with patch.object(sys, "argv", args), patch.object(Path, "home", return_value=self.home):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(setup.main(), 0)
+        native = setup.make_plan(self.t3, SOURCE, self.home, native_only=True)
+        self.assertEqual(json.loads(output.getvalue())["plan_sha256"], native["plan_sha256"])
+        portable = setup.make_plan(self.t3, SOURCE, self.home, browser_skills_only=True)
+        with self.assertRaisesRegex(setup.SetupError, "Preview is stale"):
+            setup.apply_plan(native, portable["plan_sha256"])
+        for home in self.homes:
+            self.assertEqual((home / ".claude.json").read_bytes(), self.originals[home])
+
+    def test_component_selection_is_exclusive_before_any_target_access(self):
+        with self.assertRaisesRegex(setup.SetupError, "not both"):
+            setup.make_plan(self.home / "absent", SOURCE, self.home,
+                            native_only=True, browser_skills_only=True)
+        result = subprocess.run(
+            [sys.executable, str(SOURCE / "scripts/t3_computer_use_setup.py"), "plan",
+             "--native-only", "--browser-skills-only", "--t3-home", str(self.home / "absent")],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("not allowed with argument", result.stderr)
+        self.assertFalse((self.home / "absent").exists())
 
     def test_provider_or_skill_escape_is_refused(self):
         outside = self.home / "outside"

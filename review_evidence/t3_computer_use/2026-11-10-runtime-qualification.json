@@ -6,7 +6,8 @@
   "source_pr": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2401",
   "installer_tests": {
     "command": "python3 -m unittest discover -s tests -p test_t3_computer_use_setup.py -q",
-    "passed": 18
+    "passed": 22,
+    "native_only": "Qualified native owner and computer skill can be composed with an existing remote browser; independent browser updates survive rollback"
   },
   "protocol_repair": {
     "existing_owner": "~/.t3/mcp/mmx-browser/server.js",
@@ -132,7 +133,8 @@
     "ubuntu2": "enabled T3 capacity_fabric; no discovered MCP or new skills",
     "ubuntu3": "enabled T3 capacity_fabric; no discovered MCP or new skills",
     "reverse_transport_to_m2": "M1 existing m2-recovery SSH route proven with strict host keys and batch authentication; no credentials, aliases or provider configuration changed",
-    "m1_sdk": "Existing official Python mcp 1.28.1 imports successfully under Python3.12.13"
+    "m1_sdk": "Existing official Python mcp 1.28.1 imports successfully under Python3.12.13",
+    "m1_native": "Existing CLI4.5 and GUI4.6 differ from qualified cohort; all three permissions observed true for local and selected daemon; qualified quiet owner absent and installation pending"
   },
   "ci_dependency": {
     "prior_fixture": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",

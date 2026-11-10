@@ -22,6 +22,21 @@ The installer changes no credentials, provider models, enabled flags, OS grants,
 
 Configuration is loaded by **fresh agent sessions**. Use a new bounded T3 canary to prove consumption. Preserve running threads; T3's existing Restart agent session action is available for an idle thread that should reload its setup.
 
+### Native control with an existing remote browser
+
+On a Mac whose browser MCP is routed to an existing remote owner, configure only the qualified local native adapter and computer-use skill:
+
+```bash
+python3 scripts/t3_computer_use_setup.py plan --native-only
+python3 scripts/t3_computer_use_setup.py apply --native-only \
+  --expected-plan-sha256 <preview-digest>
+python3 scripts/t3_computer_use_setup.py verify --native-only
+```
+
+This mode requires the same exact quiet-adapter and Peekaboo artifacts and the existing Claude configuration CLI. It does not download those prerequisites or change their qualification requirements. It reads no local browser adapter, browser runtime descriptor or Node binary, and preserves the provider's existing `mmx-browser` entry and browser skill. Install the portable browser skill separately when needed. `--native-only` and `--browser-skills-only` are mutually exclusive, and each mode has its own preview digest.
+
+For a newly provisioned native host, verify the actual descriptor's `/usr/bin/python3` child, restricted MCP catalog and serving backend before the fresh T3 canary. A permission check from another CLI version or a previously running daemon does not qualify the new session. Preserve existing native services and other writers.
+
 ### Portable browser skill
 
 On another T3 execution host, install only the browser skill without requiring a local Peekaboo binary, browser release, or MCP configuration:
@@ -49,7 +64,7 @@ Browser page-local input and supported native background actions can avoid takin
 
 ## Qualification
 
-The retained setup tests cover preservation of unrelated/private config, enabled provider homes, idempotence, artifact integrity, unsupported drivers, conflicting MCP owners, changed preview/dependencies, SDK writers at the mutation boundary, failed owner commands without fallback, path escape, interrupted rollback, partial-effect receipts, strict JSON-RPC responses and portable skill-only installation. Eighteen focused tests pass for this candidate.
+The retained setup tests cover preservation of unrelated/private config, enabled provider homes, idempotence, artifact integrity, unsupported drivers, conflicting MCP owners, changed preview/dependencies, SDK writers at the mutation boundary, failed owner commands without fallback, path escape, interrupted rollback, partial-effect receipts, strict JSON-RPC responses and portable skill-only installation. Native-only coverage also proves installation without browser prerequisites, preservation of an existing remote browser and browser skill, rollback after an independent browser update, native artifact refusal and component-bound previews. Twenty-two focused tests pass for this candidate.
 
 Live acceptance must separately establish:
 
