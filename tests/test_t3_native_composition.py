@@ -1144,6 +1144,146 @@ def test_bridge_reattach_refuses_entry_from_a_running_event_loop(tmp_path):
     assert "running event loop" in str(caught.value)
 
 
+# --- L1B3-2 / L1B3-3: launch-arguments source precedence --------------------
+
+
+def test_explicit_launch_arguments_win_over_the_ambient_env_var(tmp_path):
+    # L1B3-2 (HIGH): on a host where MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE is
+    # set (the standard deployment shape), a caller's explicit
+    # launch_arguments mapping must compose — the ambient env var is not
+    # consulted, cannot manufacture a both-sources refusal, and cannot
+    # shadow the explicit arguments with the file's content.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    # The env-named file carries DIFFERENT arguments and is even valid: the
+    # explicit mapping must win on content, not just on admission.
+    ambient = _write_launch_arguments(
+        tmp_path,
+        {"projectId": "ambient-project"},
+        name="ambient-args.json",
+    )
+    explicit = {"projectId": "explicit-project"}
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        launch_arguments=explicit,
+        transport_factory=lambda url, token: RecordingTransport(url, token),
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={T3_LAUNCH_ARGUMENTS_FILE_ENV: str(ambient)},
+    )
+    assert composition.status == COMPOSITION_COMPOSED
+    assert composition.composed
+    port = composition.adapter._port
+    assert port._launch_arguments == {"projectId": "explicit-project"}
+
+
+def test_ambient_launch_arguments_env_var_is_never_consulted_for_explicit_args(
+    tmp_path,
+):
+    # The L1B3-2 failure shape sharpened: the ambient env var may name a
+    # MISSING or MALFORMED file — still no refusal, because it is never
+    # read when the caller passed an explicit mapping.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    for label, env_value in (
+        ("missing file", str(tmp_path / "absent-args.json")),
+        ("malformed file", str(_write_launch_arguments(
+            tmp_path, {"projectId": "  "}, name="blank-args.json",
+        ))),
+    ):
+        composition = compose_t3_native_adapter(
+            runtime,
+            inspector=FakeInspector(),
+            token_file=token_file,
+            launch_arguments={"projectId": "explicit-project"},
+            state_store=SQLiteT3AdapterStateStore(
+                tmp_path / f"state-{label.replace(' ', '-')}.sqlite3"
+            ),
+            environ={T3_LAUNCH_ARGUMENTS_FILE_ENV: env_value},
+        )
+        assert composition.status == COMPOSITION_COMPOSED, label
+
+
+def test_both_explicit_launch_argument_sources_are_refused(tmp_path):
+    # The both-sources refusal fires ONLY on the EXPLICIT call (both
+    # launch_arguments and launch_arguments_file passed by the caller) —
+    # zero coverage before L1B3-2.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    launch_arguments_file = _write_launch_arguments(tmp_path)
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        launch_arguments={"projectId": "explicit-project"},
+        launch_arguments_file=launch_arguments_file,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert not composition.composed
+    assert composition.adapter is None
+    assert "launch_arguments" in composition.reason
+    assert "launch_arguments_file" in composition.reason
+
+
+def test_port_factory_ignores_the_ambient_launch_arguments_env_var(tmp_path):
+    # L1B3-3 (MEDIUM): a port_factory caller owns port construction (launch
+    # arguments ride the factory), so the env-named file is neither required
+    # nor read, validated and then silently dropped — even a MALFORMED
+    # env-named file must not refuse the composition.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    malformed = _write_launch_arguments(
+        tmp_path, {"projectId": "  "}, name="malformed-args.json"
+    )
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        port_factory=lambda _token: CountingT3Port(
+            principal="oauth-client-compose"
+        ),
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={T3_LAUNCH_ARGUMENTS_FILE_ENV: str(malformed)},
+    )
+    assert composition.status == COMPOSITION_COMPOSED
+    assert composition.composed
+
+
+def test_port_factory_with_explicit_launch_arguments_is_refused(tmp_path):
+    # L1B3-3: no caller combines port_factory with an explicit
+    # launch-arguments source (the canary rides arguments inside its own
+    # factory), so the contradictory combination is a typed refusal at
+    # composition time — never validated and then silently dropped.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    with pytest.raises(T3NativeCompositionError) as caught:
+        compose_t3_native_adapter(
+            runtime,
+            inspector=FakeInspector(),
+            token_file=token_file,
+            port_factory=lambda _token: CountingT3Port(
+                principal="oauth-client-compose"
+            ),
+            launch_arguments={"projectId": "explicit-project"},
+            state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+            environ={},
+        )
+    assert "port_factory" in str(caught.value)
+    # The explicit file source is the same contradictory combination.
+    launch_arguments_file = _write_launch_arguments(tmp_path)
+    with pytest.raises(T3NativeCompositionError) as caught:
+        compose_t3_native_adapter(
+            runtime,
+            inspector=FakeInspector(),
+            token_file=token_file,
+            port_factory=lambda _token: CountingT3Port(
+                principal="oauth-client-compose"
+            ),
+            launch_arguments_file=launch_arguments_file,
+            state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+            environ={},
+        )
+    assert "port_factory" in str(caught.value)
+
+
 def test_launch_arguments_provider_instance_is_admitted_and_kept_off_the_wire(tmp_path):
     # Lead review L1: the host names the T3 provider instance serving the
     # claimed model; the port holds it for modelSelection, never top-level.
