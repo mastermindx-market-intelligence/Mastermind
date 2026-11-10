@@ -12,8 +12,10 @@ on:
       - tests/test_workbench_browser_port.py
       - .github/workflows/mastermind-os.yml
       - tests/test_native_macos_ci.py
-  merge_group:
-    types: [checks_requested]
+  # No merge_group trigger: this workflow is not a required check, so the merge
+  # queue never waits for it, and every built, rebuilt or discarded queue group
+  # would spend runners on it. The path-filtered push run below proves each
+  # landed change instead. Policy: tests/test_ci_merge_group_capacity.py.
   push:
     branches: [master]
     paths:
