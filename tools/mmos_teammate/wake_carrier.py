@@ -170,6 +170,16 @@ class PaperclipClient:
             {"clientRequestId": str(uuid.uuid4()), "body": body},
         )
 
+    def request_confirmation(self, issue_id, idem_key, prompt):
+        """A pending request_confirmation interaction is this build's review
+        path: without it, an agent PATCH to in_review is refused with
+        invalid_issue_disposition (422). The server dedupes by idempotencyKey."""
+        return self._request(
+            "POST", f"/api/issues/{issue_id}/interactions",
+            {"kind": "request_confirmation", "idempotencyKey": idem_key,
+             "payload": {"version": 1, "prompt": prompt}},
+        )
+
     def set_status(self, issue_id, status):
         return self._request("PATCH", f"/api/issues/{issue_id}", {"status": status})
 
@@ -250,13 +260,25 @@ def release_issue(pc, issue_id, note):
         log(f"release of issue {issue_id} also failed: {exc}")
 
 
-def deliver(pc, issue, reply, crash_after=None):
+def deliver(pc, issue, reply, op, crash_after=None):
+    """Deliver the thread's answer onto the issue, idempotently:
+    comment (skip if the exact text is already posted), a pending
+    request_confirmation addressed to the board (the review path this build
+    requires), then status -> in_review. A crash between steps is repaired
+    by the next run without duplicating anything."""
     if crash_after == "pre-comment":
         log(f"CRASH_SWITCH pre-comment (run {pc.run_id}); no comment will be posted")
         os._exit(97)
-    pc.add_comment(issue["id"], reply)
+    if not comment_already_present(pc, issue["id"], reply):
+        pc.add_comment(issue["id"], reply)
+    pc.request_confirmation(
+        issue["id"], f"{op}-confirm",
+        "The teammate answered in its T3 thread and the answer is posted as a "
+        "comment. Confirm it completes this issue (accept) or send it back "
+        "(reject with a reason).")
     pc.set_status(issue["id"], "in_review")
-    log(f"posted reply as comment on {issue.get('identifier')}; status -> in_review")
+    log(f"posted reply as comment on {issue.get('identifier')}; "
+        "request_confirmation pending; status -> in_review")
 
 
 def run_carrier(pc, t3_factory, opts):
@@ -306,10 +328,7 @@ def run_carrier(pc, t3_factory, opts):
             reply = existing
         if not reply.strip():
             raise CarrierError("thread reply was empty")
-        if comment_already_present(pc, issue["id"], reply):
-            log("reply is already on the issue; not posting twice")
-        else:
-            deliver(pc, issue, reply, crash_after)
+        deliver(pc, issue, reply, op, crash_after)
         return 0
     except NeedsHuman:
         try:

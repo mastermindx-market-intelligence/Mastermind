@@ -26,6 +26,7 @@ class FakePaperclip:
         self.run_id = "run-9"
         self.issues = issues or {}
         self.comment_rows = dict(comments or {})
+        self.interaction_keys = []
         self.calls = []
         self.fail = set(fail)
         self.metadata = metadata
@@ -65,6 +66,14 @@ class FakePaperclip:
         self._guard("comment")
         self.calls.append(("comment", issue_id, body))
         self.comment_rows.setdefault(issue_id, []).append({"body": body})
+
+    def request_confirmation(self, issue_id, idem_key, prompt):
+        self._guard("interaction")
+        if idem_key in self.interaction_keys:  # server dedupes by idem key
+            return {"id": "dup", "deduped": True}
+        self.interaction_keys.append(idem_key)
+        self.calls.append(("interaction", issue_id, idem_key))
+        return {"id": "ix-1"}
 
     def set_status(self, issue_id, status):
         self._guard("status")
@@ -115,12 +124,15 @@ def run(pc, t3, opts=None, agent_env="ag-1"):
     return wc.run_carrier(pc, lambda tid: t3, opts or {})
 
 
-def test_happy_path_one_send_one_comment_status():
+def test_happy_path_one_send_one_comment_confirmation_status():
     pc, t3 = FakePaperclip(issues=one_issue()), FakeT3(replies=["line1\nline2\nline3"])
     assert run(pc, t3) == 0
     assert len(t3.sends) == 1
     kinds = [(c[0], c[2] if c[0] == "status" else None) for c in pc.calls]
     assert ("status", "in_review") in kinds
+    # ordering: comment -> interaction -> status
+    seq = [c[0] for c in pc.calls]
+    assert seq.index("comment") < seq.index("interaction") < seq.index("status")
     bodies = [c[2] for c in pc.calls if c[0] == "comment"]
     assert bodies == ["line1\nline2\nline3"]  # comment == thread answer, exactly
 
@@ -265,6 +277,10 @@ def test_reply_already_commented_is_not_posted_twice():
                         comments={"is-1": [{"body": "fake answer"}]})
     assert run(pc2, t3) == 0
     assert [c for c in pc2.calls if c[0] == "comment"] == []
+    # reconciliation still completes delivery: interaction + status ensured
+    seq = [c[0] for c in pc2.calls]
+    assert "interaction" in seq and ("status", "in_review") in \
+        [(c[0], c[2] if c[0] == "status" else None) for c in pc2.calls]
 
 
 def test_unexpected_exception_still_releases_the_issue():
