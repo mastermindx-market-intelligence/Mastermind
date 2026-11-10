@@ -67,6 +67,11 @@ class Attack:
         self.routine_id = ""
         self.reused = None
         self.cleanup_actions = []
+        # The create route reuses a root-level non-terminal issue whose
+        # normalized title matches one created in the last 48h. A per-run tag
+        # keeps every probe on fresh objects (observed: run 2's "ATK-1" create
+        # silently returned run 1's in_review MMO-28).
+        self.run_tag = "%s-%d" % (time.strftime("%H%M%S"), os.getpid())
 
     def http(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -175,6 +180,7 @@ class Attack:
                      "confirmations": 1, "pending_confirmations": 1}
 
     def create_issue(self, title, description):
+        title = f"{title} [at{self.run_tag}]"
         body = {"title": title, "description": description, "assigneeAgentId": ATLAS, "status": "todo"}
         if PROJECT:
             body["projectId"] = uid(PROJECT, "project id")
@@ -289,7 +295,8 @@ class Attack:
 
     def seq3(self):
         raw = self.http("POST", f"/api/companies/{CID}/routines", {
-            "title": "ATK-3 heartbeat", "description": "Routine-created issue. Reply with exactly: ATK3-OK",
+            "title": f"ATK-3 heartbeat [at{self.run_tag}]",
+            "description": "Routine-created issue. Reply with exactly: ATK3-OK",
             "assigneeAgentId": ATLAS, "status": "active", "projectId": self.project_id(),
             "concurrencyPolicy": "skip_if_active", "catchUpPolicy": "skip_missed"})
         row = raw.get("routine") if isinstance(raw.get("routine"), dict) else raw
