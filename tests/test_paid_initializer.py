@@ -627,9 +627,20 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     # Census fallback advances exactly one additional historical member.
     assert sum(before[p]==current[p] for p in before)==59
+    core_successors = {
+        "ext/go_lease_capability.py": ("d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940", "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
+        "ext/go_lease_gateway.py": ("adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949", "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
+        "ext/lease_broker.py": ("0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+    }
     for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
-        assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
+        actual=hashlib.sha256(source.read_bytes()).hexdigest()
+        if name in core_successors:
+            predecessor,successor=core_successors[name]
+            assert current[name]==predecessor
+            assert actual==successor
+        else:
+            assert current[name]==actual
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
     source=(native/'rollout/native_install.py').read_text()
@@ -949,10 +960,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification adds two jobs, but full-mode H1 security checks and
-    # the required fan-in remain enforced by the canonical validator above.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards']
+    # PR qualification and early pin guards add three jobs; full-mode H1
+    # security checks and the required fan-in remain enforced by the validator.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']

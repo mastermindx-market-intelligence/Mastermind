@@ -1027,6 +1027,16 @@ def run_native_host(
                 if not action_gate.acquire(blocking=False):
                     continue
                 try:
+                    # The action worker may have consumed the reply after the
+                    # outer poll. Recheck under its gate before reading the pipe.
+                    try:
+                        still_readable, _, _ = select.select(
+                            [chrome_in], [], [], 0.0
+                        )
+                    except (OSError, TypeError, ValueError) as exc:
+                        raise NativeHostError("host_poll_failed") from exc
+                    if chrome_in not in still_readable:
+                        continue
                     try:
                         unsolicited_deadline = Deadline(
                             ends_at=time.monotonic() + timeout

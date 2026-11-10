@@ -206,7 +206,9 @@ def test_actions_consumer_is_read_only_nonblocking_and_never_executes_pr_source(
     assert data["permissions"] == {"contents": "read", "actions": "read"}
     assert data["concurrency"]["cancel-in-progress"] is False
     job = data["jobs"]["profile"]
-    assert job["runs-on"] == "ubuntu-latest"
+    # GitHub-hosted only: the self-hosted fleet runners also advertise the
+    # `ubuntu-latest` label, so this job must name the hosted image explicitly.
+    assert job["runs-on"] == "ubuntu-24.04"
     assert job["if"] == "github.event_name == 'workflow_run' || github.ref == 'refs/heads/master'"
     assert "permissions" not in job  # no broader per-job override
     import re

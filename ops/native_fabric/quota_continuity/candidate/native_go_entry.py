@@ -18,6 +18,13 @@ import sys
 
 
 GLM_HELPER_SHA256 = "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc"
+# The observed helper retains the exact seven Go utility functions and their
+# transitive module bindings. Its inert fixture and compatibility receipt are
+# captured in this source release; the APPLICATION adapter stays separate.
+GLM_HELPER_SHA256S = frozenset({
+    GLM_HELPER_SHA256,
+    "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2",
+})
 MODULES = (
     "native_runtime_bindings", "commission_deadline", "provider_outcome",
     "quota_remote", "glm_keys", "quota_circuit", "model_tier", "pool_status",
@@ -81,8 +88,11 @@ def _existing_database(path):
 def _module_identity(name, path, expected):
     loaded = sys.modules.get(name)
     if loaded is not None:
+        cached = _LOADED_MODULES.get(name)
+        owned = (cached is not None and loaded is cached[0]
+                 and expected == cached[1])
         if (getattr(loaded, "__file__", None) != str(path)
-                or loaded is not _LOADED_MODULES.get(name)
+                or not owned
                 and not (name == "native_go_entry" and loaded is sys.modules.get(__name__))):
             raise ValueError("native Go module conflict: " + name)
         _regular(path, expected=expected)
@@ -101,7 +111,7 @@ def _load(name, path, raw, expected):
     try:
         # Execute the bytes just checked; __file__ remains the real filename.
         exec(compile(raw, str(path), "exec"), module.__dict__)
-        _LOADED_MODULES[name] = module
+        _LOADED_MODULES[name] = (module, expected)
     except BaseException:
         sys.modules.pop(name, None)
         raise
@@ -125,6 +135,13 @@ class Startup:
     bailian_keys: object = None
     http_projection_sha256: str | None = None
     handler_sha256: str | None = None
+    glm_adapter: object = None
+    glm_keys: object = None
+    glm_projection: bytes | None = None
+    glm_projection_sha256: str | None = None
+
+
+GLM_HTTP_MEMBERS = frozenset({"ext/glm_application_adapter.py", "ext/application_http_realms.v2.json"})
 
 
 def inspect(*, verified_root, verified_metadata):
@@ -139,9 +156,12 @@ def inspect(*, verified_root, verified_metadata):
         raise ValueError("native Go verified entry context refused")
     files = meta["files"]
     http_present = HTTP_MEMBERS & set(files)
+    glm_present = set(files) & GLM_HTTP_MEMBERS
+    if glm_present and (glm_present != GLM_HTTP_MEMBERS or not HTTP_MEMBERS.issubset(files) or "ext/glm_keys.py" not in files):
+        raise ValueError("native GLM application HTTP closure incomplete")
     if http_present and http_present != HTTP_MEMBERS:
         raise ValueError("native application HTTP closure incomplete")
-    modules = MODULES + HTTP_MODULES if http_present else MODULES
+    modules = (MODULES + HTTP_MODULES if http_present else MODULES) + (("glm_application_adapter",) if glm_present else ())
     _regular(here / "native_go_entry.py", mode=0o555,
              expected=files["ext/native_go_entry.py"])
     sources = {}
@@ -173,9 +193,12 @@ def inspect(*, verified_root, verified_metadata):
     }
     _directory(paths["go"])
     _directory(paths["helper"].parent)
-    helper_raw = _regular(paths["helper"], expected=GLM_HELPER_SHA256)
-    _module_identity("glm_shim", paths["helper"], GLM_HELPER_SHA256)
-    _load("glm_shim", paths["helper"], helper_raw, GLM_HELPER_SHA256)
+    helper_raw = _regular(paths["helper"])
+    helper_digest = hashlib.sha256(helper_raw).hexdigest()
+    if helper_digest not in GLM_HELPER_SHA256S:
+        raise ValueError("native Go source identity refused")
+    _module_identity("glm_shim", paths["helper"], helper_digest)
+    _load("glm_shim", paths["helper"], helper_raw, helper_digest)
     # The authentic historical helper adds the flat ext directory. Put the
     # verified generation first again before any incumbent lazy import.
     sys.path[:] = [str(here)] + [p for p in sys.path if p != str(here)]
@@ -226,10 +249,34 @@ def inspect(*, verified_root, verified_metadata):
             encoded, _ = broker._application_http_recipe(recipe, pool="bailian", model=model)
             rows.append(encoded)
         recipes = tuple(rows)
+    glm_adapter, glm_keys, glm_projection, glm_digest = None, None, None, None
+    if glm_present:
+        glm_digest = files["ext/application_http_realms.v2.json"]
+        glm_projection = _regular(here / "application_http_realms.v2.json", mode=0o555, expected=glm_digest)
+        reader = sys.modules["application_http_realm_projection"]
+        reader.validate_projection(glm_projection, expected_sha256=glm_digest)
+        if json.loads(glm_projection)["legacy_projection"] != json.loads(http_projection):
+            raise ValueError("GLM application legacy projection differs")
+        glm_adapter, glm_keys = sys.modules["glm_application_adapter"], sys.modules["glm_keys"]
+        driver = glm_adapter.GlmChatCompletionsDriver(
+            transport=handler.application_http_transport,
+            realm_projection=glm_projection, projection_sha256=glm_digest)
+        glm_driver_identity = driver.identity
+        rows = list(recipes)
+        for model in sorted(glm_driver_identity.allowed_models):
+            recipe = {"schema": "mastermind.application_http_recipe.v1",
+                      "pool": "glm", "model": model, "driver_id": glm_driver_identity.driver_id,
+                      "realm_id": glm_driver_identity.realm_id, "provider": glm_driver_identity.provider,
+                      "protocol": glm_driver_identity.protocol, "endpoint": glm_driver_identity.endpoint,
+                      "source_projection_sha256": glm_digest,
+                      "credential_owner": "glm_keys.selected_account_key"}
+            encoded, _ = broker._application_http_recipe(recipe, pool="glm", model=model)
+            rows.append(encoded)
+        recipes = tuple(rows)
     return Startup(handler, broker, paths, root.name, yaml_runtime,
                    yaml_bytes[0], yaml_bytes[1], yaml_check, sys.modules["fabric_policy_snapshot"],
                    http_projection, recipes, http_transports, bailian_keys, http_digest,
-                   files["ext/go_application_handler.py"])
+                   files["ext/go_application_handler.py"], glm_adapter=glm_adapter, glm_keys=glm_keys, glm_projection=glm_projection, glm_projection_sha256=glm_digest)
 
 
 SERVICE_SCHEMA = "mastermind.native_go_application_service.v1"
@@ -322,11 +369,13 @@ def validate_application_role_scope(scope):
     return profile
 
 
-def application_service_owners(startup, *, application_http=False):
+def application_service_owners(startup, *, application_http=False, glm_provider_profile=None):
     owners = {key: str(startup.paths[key]) for key in
             ("go", "db_path", "lock_path", "accounts_path")}
     if application_http:
         owners["provider_profile"] = str(application_http_profile(startup))
+    if glm_provider_profile is not None:
+        owners["glm_provider_profile"] = str(glm_provider_profile)
     return owners
 
 
@@ -340,15 +389,15 @@ def application_http_profile(startup):
     return path
 
 
-def application_http_recipe(startup, model):
+def application_http_recipe(startup, model, *, pool="bailian"):
     """One immutable recipe derived from the verified generation's source."""
     if startup.http_projection is None or startup.http_transports is None:
         raise ValueError("native application HTTP source unavailable")
-    matches = [json.loads(raw) for raw in startup.http_recipes if json.loads(raw)["model"] == model]
+    matches = [json.loads(raw) for raw in startup.http_recipes if json.loads(raw).get("model") == model and json.loads(raw).get("pool") == pool]
     if len(matches) != 1:
         raise ValueError("native application HTTP model unavailable")
     recipe = matches[0]
-    startup.broker_module._application_http_recipe(recipe, pool="bailian", model=model)
+    startup.broker_module._application_http_recipe(recipe, pool=pool, model=model)
     return recipe
 
 
@@ -359,10 +408,127 @@ class HTTPServiceProjection:
     provider_profile: Path
 
 
+
+def application_glm_http_profile(startup):
+    """Return the original key-owner path without reading credentials."""
+    if startup.glm_keys is None:
+        raise ValueError("GLM application key owner unavailable")
+    path = Path(startup.glm_keys._config_path())
+    if not path.is_absolute() or ".." in path.parts:
+        raise ValueError("GLM application provider profile invalid")
+    return path
+
+
+@dataclass(frozen=True)
+class GLMHTTPServiceProjection:
+    recipes_json: tuple
+    accounts: tuple
+    provider_profile: Path
+    provider_profile_identity_json: str
+    provider_profile_sha256: str
+
+
+def _glm_application_http_binding(startup, projection):
+    """Use the original selected-account owner only at fresh-send preflight."""
+    if type(projection) is not GLMHTTPServiceProjection or startup.glm_adapter is None:
+        raise ValueError("GLM application HTTP projection unavailable")
+    module = startup.glm_keys
+    profile = projection.provider_profile
+    expected_identity = json.loads(projection.provider_profile_identity_json)
+
+    def credential(account):
+        if module is None or sys.modules.get("glm_keys") is not module:
+            raise ValueError("GLM application key owner changed")
+        if Path(module._config_path()) != profile:
+            raise ValueError("GLM application provider profile changed")
+        _directory(profile.parent)
+        if stat.S_IMODE(profile.parent.lstat().st_mode) != stat.S_IRWXU:
+            raise ValueError("GLM application provider directory mode changed")
+        raw, before = _service_private(profile)
+        if before != expected_identity or hashlib.sha256(raw).hexdigest() != projection.provider_profile_sha256:
+            raise ValueError("GLM application provider profile custody changed")
+        if not module.enabled() or module.openai_base_url() != "https://api.z.ai/api/coding/paas/v4":
+            raise ValueError("GLM application coding-plan configuration unavailable")
+        value = module.selected_account_key(account, module.accounts(quiet=True))
+        if application_file_identity(profile) != before or Path(module._config_path()) != profile:
+            raise ValueError("GLM application provider profile changed during key selection")
+        return value
+
+    driver = startup.glm_adapter.GlmChatCompletionsDriver(
+        transport=startup.handler.application_http_transport,
+        realm_projection=startup.glm_projection,
+        projection_sha256=startup.glm_projection_sha256)
+    binding = startup.handler.ApplicationHTTPBinding(
+        driver=driver, accounts=frozenset(projection.accounts),
+        source_projection_sha256=startup.glm_projection_sha256, credential_loader=credential)
+    for raw in projection.recipes_json:
+        model = json.loads(raw)["model"]
+        if binding.recipe(model) != application_http_recipe(startup, model, pool="glm"):
+            raise ValueError("GLM application HTTP binding differs from current source")
+    return binding
+
+
+def _http_service_projection_map(value):
+    if value is None:
+        return {}
+    if type(value) is HTTPServiceProjection:
+        return {"bailian": value}
+    if type(value) is GLMHTTPServiceProjection:
+        return {"glm": value}
+    if type(value) is dict and set(value).issubset({"bailian", "glm"}):
+        if any(type(item) is not (HTTPServiceProjection if pool == "bailian"
+                                 else GLMHTTPServiceProjection)
+               for pool, item in value.items()):
+            raise ValueError("application HTTP projection pool differs")
+        return dict(value)
+    raise ValueError("application HTTP projection shape invalid")
+
+
+def _merge_http_service_projections(existing, added):
+    if added is None:
+        return existing
+    result = _http_service_projection_map(existing)
+    for pool, incoming in _http_service_projection_map(added).items():
+        prior = result.get(pool)
+        if prior is None:
+            result[pool] = incoming
+            continue
+        if pool == "bailian":
+            if prior != incoming:
+                raise ValueError("Bailian application projection differs between services")
+            continue
+        if (prior.provider_profile, prior.provider_profile_identity_json,
+                prior.provider_profile_sha256) != (
+                incoming.provider_profile, incoming.provider_profile_identity_json,
+                incoming.provider_profile_sha256):
+            raise ValueError("GLM application provider custody differs between services")
+        recipes = {json.loads(raw)["model"]: raw for raw in prior.recipes_json}
+        for raw in incoming.recipes_json:
+            model = json.loads(raw)["model"]
+            if model in recipes and recipes[model] != raw:
+                raise ValueError("GLM application recipe differs between services")
+            recipes[model] = raw
+        result[pool] = GLMHTTPServiceProjection(
+            tuple(recipes[model] for model in sorted(recipes)),
+            tuple(sorted(set(prior.accounts) | set(incoming.accounts))),
+            prior.provider_profile, prior.provider_profile_identity_json,
+            prior.provider_profile_sha256)
+    return result
+
+
+def _application_http_bindings(startup, projection):
+    if type(projection) is HTTPServiceProjection:
+        return _application_http_binding(startup, projection)
+    return {pool: _application_http_binding(startup, item)
+            for pool, item in _http_service_projection_map(projection).items()}
+
+
 def _application_http_binding(startup, projection):
     """Compose the real H driver with B's original I/O and exact key owner."""
     # The historical enrollment authenticates recovery. Fresh admissions use
     # only this generation's current recipe and A's current scoped grant.
+    if type(projection) is GLMHTTPServiceProjection:
+        return _glm_application_http_binding(startup, projection)
     profile, module = application_http_profile(startup), startup.bailian_keys
     if projection.provider_profile != profile:
         raise ValueError("native application HTTP credential owner changed")
@@ -571,6 +737,51 @@ def _validate_service_family(startup, document, *, routed=False, workloads=False
     return bindings, first["native_host"], Path(first["account_profile"])
 
 
+
+GLM_SERVICE_PROJECTION_FIELDS = frozenset({
+    "pool", "source_projection_sha256", "recipes", "accounts"})
+GLM_SERVICE_CUSTODY_FIELDS = frozenset({
+    "provider_profile", "provider_profile_identity", "provider_profile_sha256"})
+
+
+def validate_glm_application_http_projection(startup, record, *, normalized):
+    """Parse a recorded projection without consulting current provider custody."""
+    fields = GLM_SERVICE_PROJECTION_FIELDS | (GLM_SERVICE_CUSTODY_FIELDS if normalized else frozenset())
+    if type(record) is not dict or set(record) != fields or record["pool"] != "glm":
+        raise ValueError("GLM application service projection shape invalid")
+    digest = record["source_projection_sha256"]
+    accounts, recipes = record["accounts"], record["recipes"]
+    if (type(digest) is not str or re.fullmatch("[0-9a-f]{64}", digest) is None or
+            type(accounts) is not list or not 1 <= len(accounts) <= 128 or
+            any(type(account) is not str or IDENTITY.fullmatch(account) is None for account in accounts) or
+            accounts != sorted(set(accounts)) or type(recipes) is not list or
+            not 1 <= len(recipes) <= 128):
+        raise ValueError("GLM application service projection inventory invalid")
+    encoded, models = [], []
+    for recipe in recipes:
+        if type(recipe) is not dict or recipe.get("source_projection_sha256") != digest:
+            raise ValueError("GLM application service recipe projection differs")
+        model = recipe.get("model")
+        raw, _ = startup.broker_module._application_http_recipe(recipe, pool="glm", model=model)
+        encoded.append(raw)
+        models.append(model)
+    if models != sorted(set(models)):
+        raise ValueError("GLM application service recipes must have unique ordered models")
+    if not normalized:
+        return None
+    profile, identity, profile_digest = (
+        record["provider_profile"], record["provider_profile_identity"], record["provider_profile_sha256"])
+    if (type(profile) is not str or not Path(profile).is_absolute() or ".." in Path(profile).parts or
+            type(identity) is not dict or set(identity) != SERVICE_IDENTITY_FIELDS or
+            any(type(value) is not int or value < 0 for value in identity.values()) or
+            identity["mode"] != 0o600 or identity["nlink"] != 1 or
+            type(profile_digest) is not str or re.fullmatch("[0-9a-f]{64}", profile_digest) is None):
+        raise ValueError("GLM application service provider custody invalid")
+    return GLMHTTPServiceProjection(
+        tuple(encoded), tuple(accounts), Path(profile),
+        startup.broker_module._application_json(identity), profile_digest)
+
+
 def validate_application_service_document(startup, document):
     if type(document) is dict and document.get("schema") == SERVICE_FRESH_FAMILY_SCHEMA:
         return _validate_service_family(startup, document, fresh_family=True)
@@ -589,12 +800,19 @@ def validate_application_service_document(startup, document):
     admin = type(document) is dict and document.get("schema") == SERVICE_ADMIN_SCHEMA
     role = type(document) is dict and document.get("schema") == SERVICE_ROLE_SCHEMA
     selected = type(document) is dict and document.get("schema") in (SERVICE_SELECTED_SCHEMA, SERVICE_ADMIN_SCHEMA, SERVICE_ROLE_SCHEMA)
+    glm_projection = None
+    if role and "glm_application_http" in document:
+        if type(document.get("scope")) is not dict or "route_scope" not in document["scope"]:
+            raise ValueError("GLM HTTP projection requires routed v9 role")
+        fields = fields | {"glm_application_http"}
+        glm_projection = validate_glm_application_http_projection(
+            startup, document["glm_application_http"], normalized=True)
     if http:
         fields |= {"application_recipe", "application_accounts"}
     if (type(document) is not dict or set(document) != fields
             or document["schema"] != (SERVICE_ROLE_SCHEMA if role else SERVICE_HTTP_SCHEMA if http else SERVICE_ADMIN_SCHEMA if admin else
                                       SERVICE_SELECTED_SCHEMA if selected else SERVICE_SCHEMA)
-            or document["owners"] != application_service_owners(startup, application_http=http)):
+            or document["owners"] != application_service_owners(startup, application_http=http, glm_provider_profile=glm_projection.provider_profile if glm_projection is not None else None)):
         raise ValueError("native application service projection refused")
     for key in ("plan_digest", "source_generation", "ingress_digest"):
         if type(document[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", document[key]) is None:
@@ -646,6 +864,8 @@ def validate_application_service_document(startup, document):
         startup.broker_module._application_http_recipe(recipe, pool="bailian", model=recipe.get("model"))
         return (binding,), scope["native_host"], profile, HTTPServiceProjection(
             startup.broker_module._application_json(recipe), tuple(accounts), application_http_profile(startup))
+    if glm_projection is not None:
+        return (binding,), scope["native_host"], profile, glm_projection
     return (binding,), scope["native_host"], profile
 
 
@@ -666,6 +886,10 @@ def validate_completed_application_records(startup, raw, binding_identity, inten
     scope_field = "scopes" if service_set else "scope"
     receipt_fields = {"schema", "operation_id", "plan_digest", "source_generation", "ingress_digest",
                       scope_field, "binding_sha256", "binding_identity", "accounts_sha256", "accounts_identity"}
+    if role and "glm_application_http" in document:
+        receipt_fields = receipt_fields | {"glm_application_http"}
+        if receipt.get("glm_application_http") != document["glm_application_http"]:
+            raise ValueError("GLM completed service projection differs from receipt")
     if http:
         receipt_fields |= {"application_recipe_digest", "source_projection_sha256", "provider_profile_identity"}
     if (set(intent) != intent_fields or intent["schema"] != (SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA if fresh_family else SERVICE_ROLE_ENROLLMENT_SCHEMA if role else SERVICE_WORKLOAD_ENROLLMENT_SCHEMA if workloads else SERVICE_ROUTED_ENROLLMENT_SCHEMA if routed else SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else SERVICE_SET_ENROLLMENT_SCHEMA if service_set else SERVICE_HTTP_ENROLLMENT_SCHEMA if http else
@@ -752,6 +976,8 @@ def load_all_completed_application_startup(startup):
         result = load_completed_application_startup(startup, profile)
         if not result[0]:
             continue
+        if len(result) > 3:
+            http_projection = _merge_http_service_projections(http_projection, result[3])
         if services and (result[1], result[2]) != (host, account_profile):
             raise ValueError("native application services have different physical owners")
         for candidate in result[0]:
@@ -860,7 +1086,7 @@ def main(*, verified_root, verified_metadata, application_services=(), applicati
             raise ValueError("native Go original database changed during startup")
         return startup.handler.main(application_broker=broker, application_services=application_services,
             **({"application_selection_profile": selection_profile} if selection_profile is not None else {}),
-            **({"application_http_binding": _application_http_binding(startup, http_projection)}
+            **({"application_http_binding": _application_http_bindings(startup, http_projection)}
                if http_projection is not None else {}))
 
 

@@ -167,6 +167,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "plan-control-component",
         "apply-control-component",
         "reconcile-control-component",
+        "resume-control-component",
     }
     # The OS gateway publication domain: the two closed verbs carry only the
     # bounded digests and the original transaction id, and never accept a

@@ -139,6 +139,10 @@ persist exact state/next action to existing owners.
 ### `BOOTSTRAP_KERNEL.md`
 Compact Project boot, not a substitute for loading this Skillpack.
 
+### `docs/sol_skills/mastermind-x-operations/SKILL.md`
+Conditional Hermes integration and delivery guidance; load for that work after
+the governing same-pin owners. Adds no authority or universal load gate.
+
 ## Mandatory universal source-law companions
 
 ### `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`

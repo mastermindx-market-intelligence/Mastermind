@@ -1,0 +1,28 @@
+{
+  "Memory_and_support_patch_source_map_exact": true,
+  "actual_current_or_publication_claim": false,
+  "all_other_old_target_members_exact": true,
+  "all_scientific_verification_flags": false,
+  "base_count": 116,
+  "changed_target_members_vs_old_profile": [
+    "ext/native_plan_worker.py"
+  ],
+  "default_unchanged": true,
+  "native_release_or_runtime_effects": false,
+  "old_profile": "ops/native_fabric/provider_plans/memory118_support_status/profile.json",
+  "old_profile_and_runtime_code_unchanged": true,
+  "old_profile_sha256": "4c1500a13f23aa1e0bbf27182ce6c9f98a7d15b4b235327d3dd245c2977b55a8",
+  "old_worker_sha256": "ef27796c353e408aaaa8df89fa66c3332175007d6b1cfd6354a644a2d23bbef0",
+  "prospective_predecessor": {
+    "generation": "5b5713e6870b688b1cc2f9978df9d7539159b25b291f5019853a293f905a5b3a",
+    "previous": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+    "schema": "native-code-selection.v1",
+    "sequence": 41
+  },
+  "retained_worker_sha256": "2df8947c446e143d46bbf979e30dd11965080922839e2e37c3d8c0289ef2af7b",
+  "schema": "mastermind.terminal_preserving_memory_source.v1",
+  "source_base": "d4fe956edae66bb15dbf46ca9e9b262a2ba05302",
+  "target_count": 119,
+  "terminal_profile": "ops/native_fabric/provider_plans/terminal_diagnostics/current40/profile.json",
+  "terminal_profile_sha256": "02f1ab856b74e236a04213fc387fbf498b81b81a224e46f7ac0e45c2d62ab6c4"
+}

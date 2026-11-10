@@ -76,7 +76,7 @@ class BufferedNativeChatTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
         return patcher.start()
 
-    def setUp(self):
+    def setUp(self, *, service_mode_id="mastermind_chat_fabric"):
         import yaml
         from engine.fabric_inference_client import NATIVE_PROTOCOL
 

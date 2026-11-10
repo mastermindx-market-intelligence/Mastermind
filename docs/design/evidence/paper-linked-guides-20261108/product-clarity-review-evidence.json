@@ -1,0 +1,4250 @@
+{
+  "scope": "Read-only product clarity review for parent. No Paper/source/runtime/browser/external writes.",
+  "pins": {
+    "Mastermind": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+    "Macro": "b5674d8ef898e503d6164922654f5ff89be9981c",
+    "AERLOR": "c6f7deee41b9d941182130d9bfb95c1e84f8a319"
+  },
+  "coverage": {
+    "metadataPages": 72,
+    "pageErrors": 0,
+    "byFile": {
+      "Mastermind · Market Dashboard Popups · Redesign": 8,
+      "MarketOntology": 7,
+      "Mastermind · Market Guide · Re-envisioning": 7,
+      "International Markets · Core + Global Surveillance": 21,
+      "Mastermind AI": 10,
+      "Mastermind Product Design System — Canonical": 10,
+      "AERLOR — Hospitality Website & Design System": 9
+    },
+    "jsxBoards": 13,
+    "screenshots": 8
+  },
+  "screenshots": [
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-9-1",
+      "nodeId": "5HU-1",
+      "key": "shot_aerlor_solutions_mobile",
+      "observation": "Current R9 mobile solutions composition; header count has no identifying label or icon."
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-9-1",
+      "nodeId": "5HT-1",
+      "key": "shot_aerlor_planner",
+      "observation": "Current R9 business planner; first-priority preview has no matching input; project-stage input has no preview."
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "pageId": "p-1-0",
+      "nodeId": "1VE-0",
+      "key": "shot_ai_answer_mobile",
+      "observation": "Concise answer, optional evidence and depth, design fixture label. No fresh redesign recommended."
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "pageId": "p-1-0",
+      "nodeId": "1WO-1",
+      "key": "shot_guide_current_mobile",
+      "observation": "Question-led guide entry with optional longer explanation and clear guide-not-live labeling."
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "pageId": "p-2-0",
+      "nodeId": "OX-0",
+      "key": "shot_ontology_first_visit",
+      "observation": "Public first visit clearly separates explanation from sign-in-only current trace; no fabricated private readings."
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "pageId": "p-I-0",
+      "nodeId": "IRV-0",
+      "key": "shot_intl_scanner_mobile",
+      "observation": "Frozen R14 specimen, long mobile scanner with explicit clocks, coverage, units, source limitations; do not casually simplify frozen constraints."
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "pageId": "p-1-0",
+      "nodeId": "8R6-0",
+      "key": "shot_popup_partial_mobile",
+      "observation": "Partial-data popup retains quantitative qualifiers and evidence path. No fresh behavior change proposed without payload verification."
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "pageId": "p-9-0",
+      "nodeId": "47Q-0",
+      "key": "shot_system_build",
+      "observation": "Build overview separates navigation and source contracts; preserves candidate and HOLD status. Full source URLs visible."
+    }
+  ],
+  "jsxReviews": [
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "pageId": "p-9-0",
+      "nodeId": "1MO-0",
+      "key": "ai_build",
+      "texts": [
+        {
+          "id": "1XQ-0",
+          "text": "MASTERMIND AI · R10 NOIR · BUILD FROM THE CONVERSATION"
+        },
+        {
+          "id": "1XS-0",
+          "text": "The first-time user should immediately find the input, understand the takeaway, and know how to ask the next question. Do not rebuild the busy research console."
+        },
+        {
+          "id": "1XW-0",
+          "text": "40 · START"
+        },
+        {
+          "id": "1XX-0",
+          "text": "Ask a question"
+        },
+        {
+          "id": "1XY-0",
+          "text": "→"
+        },
+        {
+          "id": "1Y0-0",
+          "text": "41 · ANSWER"
+        },
+        {
+          "id": "1Y1-0",
+          "text": "Get the main point"
+        },
+        {
+          "id": "1Y2-0",
+          "text": "↔"
+        },
+        {
+          "id": "1Y4-0",
+          "text": "42 · SOURCES"
+        },
+        {
+          "id": "1Y5-0",
+          "text": "Inspect, then return"
+        },
+        {
+          "id": "1Y7-0",
+          "text": "43–44 · MOBILE"
+        },
+        {
+          "id": "1Y8-0",
+          "text": "The same conversation"
+        },
+        {
+          "id": "1YF-0",
+          "text": "01 · Make the answer effortless"
+        },
+        {
+          "id": "1YG-0",
+          "text": "One 720px desktop reading column; 20px mobile side padding. Keep body text at 16–18px. Use a direct takeaway and zero or one useful visual—not a mandatory report template. Keep dates, missing inputs and material uncertainty beside the answer."
+        },
+        {
+          "id": "1YH-0",
+          "text": "Use the shared Noir tokens and 8/10/12/14px radii. History starts closed. Do not turn the source panel into a permanent second column."
+        },
+        {
+          "id": "1YK-0",
+          "text": "02 · Explore without losing your place"
+        },
+        {
+          "id": "1YL-0",
+          "text": "Sources and Inputs &amp; math use one temporary drawer or mobile sheet. Opening either makes no research call. Sources remain answer-bound snapshots. Keep the answer, reading position, scope and draft. For 65–66, reuse R2 13: RT assumptions/limits, QN exact values and RI unknowns, plus the current target-margin equation. Use the 42/51 Close and Back controls. In production, content scrolls between them; Close/Escape restores trigger focus. Only the top dialog is active; late closes cannot unlock a newer one. Paper states are static."
+        },
+        {
+          "id": "1YP-0",
+          "text": "03 · Save HOLD · See preserved boundaries"
+        },
+        {
+          "id": "1YQ-0",
+          "text": "Reuse Brain, renderers, citations, stream/history, identity, permissions, cases and monitors. Keep R7/R8’s facts, calculations, assumptions and unknowns distinct. Go deeper… opens 67–68, the current R2 16 depth/usage review; it never grants source access."
+        },
+        {
+          "id": "1YR-0",
+          "text": "Add context previews permitted scope and keeps drafts. Explain a chart uses it when needed. Neither sends; Send needs text. Disabled scopes make no calls; attachments need a qualified path. Context grants no access and never silently drops rejected evidence. Save… opens review 47–48; Cancel keeps answer and draft. Only a matching identity, case ID, version and save receipt routes to 55–56 as Saved, with monitoring off. Expiry returns to review after sign-in without auto-save. Unknown writes reconcile the original request ID. Case &amp; alerts uses R2 14: separate review, confirmation and receipt before monitoring."
+        },
+        {
+          "id": "1YU-0",
+          "text": "04 · Prove ease, not just appearance"
+        },
+        {
+          "id": "1YV-0",
+          "text": "Test whether a new user finds the input, understands the takeaway, opens Sources and returns without losing a draft. Verify keyboard focus, screen-reader labels, mobile keyboard clearance and reflow at 320, 390, tablet and desktop widths."
+        },
+        {
+          "id": "1YW-0",
+          "text": "Test 320px, short viewports, long English/Chinese and 200% text. Keep 44px controls keyboard-safe; preserve draft, caret and reading position. State 59 is static. Stop shows Stopping until cancellation is confirmed, then Research stopped. If completion wins, keep the answer. Preserve verified content and citations. Reuse 63 without source-error/Retry UI unless a source failed; no output means No answer yet. Never auto-send; retry failed sources only. Prove keyboard, scrolling, stale/gapped data, reconnect, save/reopen and monitoring at runtime."
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "pageId": "p-9-0",
+      "nodeId": "5VN-0",
+      "key": "ai_gaps",
+      "texts": [
+        {
+          "id": "5VP-0",
+          "text": "BUILD · SOURCE CHECK · 8 NOV 2026"
+        },
+        {
+          "id": "5VQ-0",
+          "text": "Bind evidence to the answer"
+        },
+        {
+          "id": "5VR-0",
+          "text": "Add to the existing R10 build map and preserved boundaries. Macro source: 338a1085."
+        },
+        {
+          "id": "5VU-0",
+          "text": "Present source"
+        },
+        {
+          "id": "5VV-0",
+          "text": "templates/chat.html already uses the existing brain thread, history and streaming routes. It passes selected symbol/page context, but the inspected template has no context_receipt binding. A selected-context badge alone does not establish which evidence supported an answer."
+        },
+        {
+          "id": "7DI-0",
+          "text": "ADDITIONAL SOURCE OBSERVATION · PROPOSED CONTEXT REPAIR"
+        },
+        {
+          "id": "7DJ-0",
+          "text": "Draft mentions must not silently apply context."
+        },
+        {
+          "id": "7DK-0",
+          "text": "Current Macro main 277d15c4e443cebd85d3a209c597167faa0a0c1a · templates/chat.html · blob 93c56416344e6a5099308d6397bc6256d0d4d952. This file is byte-identical to the earlier ba32 pin. The input listener immediately applies its first @ticker match; deleting that mention leaves the active symbol behind."
+        },
+        {
+          "id": "7DL-0",
+          "text": "A replay of the exact input handler retained MSFT after @MSFT was removed, and AAPL after @AAPL was removed. No network or research request was made. This is source-level evidence, not browser acceptance."
+        },
+        {
+          "id": "7DM-0",
+          "text": "Proposal: p-B-0 / 72Y-0 · Proposed · Draft mention context · desktop and six EN/中文 mobile panes"
+        },
+        {
+          "id": "7DN-0",
+          "text": "Separate literal draft text, suggested context and applied symbol context. Detect a complete supported identifier without committing it. Eligibility must be established by the existing context owner before Apply; a regex match does not establish it. Apply is an explicit local choice that keeps the draft and does not send. Removing an uncommitted mention removes only its suggestion; deleting text after Apply does not clear the applied selection."
+        },
+        {
+          "id": "7DO-0",
+          "text": "Send and Enter review every conflicting complete mention: Use the eligible suggested context without sending, deliberately send the literal question with the displayed current context, or Cancel. Bind Apply and Send to the exact reviewed draft, candidate, displayed applied context and current conversation/access context. Any of those changing retires the review. Late callbacks cannot apply or send an obsolete candidate. Preserve Chinese IME composition."
+        },
+        {
+          "id": "7DP-0",
+          "text": "Extend the existing chat/context/send owner. No new resolver, account, conversation, persistence or research endpoint is asserted. Applied context is not answer evidence. Existing receipt binding, incomplete-answer recovery, Chats 69–73, source access and Save/monitoring holds remain controlling."
+        },
+        {
+          "id": "5VY-0",
+          "text": "Required evidence behavior"
+        },
+        {
+          "id": "5VZ-0",
+          "text": "Bind Sources to the specific response receipt: thread, answer/version, citation IDs, source clocks and access outcome. Old answers without that binding show “Evidence details unavailable.” Opening or closing Sources preserves the draft, scroll, selected answer and focus. Keep the existing brain lifecycle and allowance owner."
+        },
+        {
+          "id": "5W2-0",
+          "text": "Save viability"
+        },
+        {
+          "id": "5W3-0",
+          "text": "The preserved R10 boundary says create-thesis creates an active watched case. Verify that API before implementing “Saved · Monitoring off.” A genuine non-monitoring save must extend the incumbent thesis/version owner with the correct receipt; creating an active case then archiving it does not establish that behavior."
+        },
+        {
+          "id": "5W6-0",
+          "text": "Build sequence and proof"
+        },
+        {
+          "id": "5W7-0",
+          "text": "First bind and render an answer receipt; then prove source access, missing-receipt and stale-answer states. Separately resolve the non-monitoring save contract and demonstrate exact save identity/version plus unknown-outcome reconciliation. Exercise old history, quota refusal, partial stream, interrupted save, Escape return, EN/ZH and narrow layouts."
+        },
+        {
+          "id": "62H-0",
+          "text": "PROPOSED R10 OUTCOME · EXISTING REQUEST OWNER"
+        },
+        {
+          "id": "62I-0",
+          "text": "An interrupted response stays incomplete"
+        },
+        {
+          "id": "62J-0",
+          "text": "Editable companions: Desktop 5WL-0 and Mobile 5YW-0 on the current R10 workbench. Preserve research-in-progress 3CZ-0 and source-specific partial answer 3F5-0 as distinct states. The new examples retain the existing question, a short piece of received prose and the follow-up draft; they establish no live research result."
+        },
+        {
+          "id": "62M-0",
+          "text": "Response completion and request outcome are separate"
+        },
+        {
+          "id": "62N-0",
+          "text": "EOF or a read error without the answer’s completion event marks that answer incomplete. Keep permitted received prose and the user’s draft; suppress unqualified visuals and do not manufacture citations. Sources obey the existing response-receipt binding: when absent, show Evidence details unavailable. A transport interruption does not prove that research stopped, was cancelled or had no effects."
+        },
+        {
+          "id": "62Q-0",
+          "text": "Return to draft is a local focus action"
+        },
+        {
+          "id": "62R-0",
+          "text": "Return to draft focuses the still-current, owner-matched composer without changing its text, starting a request or cancelling the original one. The illustrated request outcome is unconfirmed: retain its existing request reference and admission guard. No automatic retry or new operation may replace an uncertain attempt. The incumbent request owner supplies any later confirmed outcome; do not freeze every interruption into a permanent unknown state."
+        },
+        {
+          "id": "62U-0",
+          "text": "Preserve focus, ownership and the distinction between outcomes"
+        },
+        {
+          "id": "62V-0",
+          "text": "Announce the status politely without moving focus or opening a sheet. A late event from an older answer/conversation cannot replace or relabel the current answer. Access or account changes clear restricted content and retire callbacks while preserving original operation custody. Prove interruption before text, after text, read rejection, intentional Stop, source-specific failure, absent evidence receipt, conversation switch and owner change. A new eligible attempt follows the existing review/Start research boundary only after the original outcome permits it."
+        },
+        {
+          "id": "62Y-0",
+          "text": "BEFORE TEXT · PROPOSED VARIANT"
+        },
+        {
+          "id": "62Z-0",
+          "text": "Mastermind · Incomplete response"
+        },
+        {
+          "id": "630-0",
+          "text": "No response text was received."
+        },
+        {
+          "id": "631-0",
+          "text": "Your follow-up draft is kept. Research status is unconfirmed."
+        },
+        {
+          "id": "633-0",
+          "text": "Return to draft"
+        },
+        {
+          "id": "636-0",
+          "text": "Source checked at Macro main 069f4a102de251433544d2423ef5df5f1e576454. The current finishStream clears progress and visuals without labeling retained prose incomplete when done was not received. This is a source observation, not deployed-browser proof. Existing AI architecture, context-receipt work, Save/monitoring holds and request custody remain controlling."
+        },
+        {
+          "id": "637-0",
+          "text": "Open the current stream consumer source ↗"
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "pageId": "p-8-0",
+      "nodeId": "ADK-0",
+      "key": "ontology_build",
+      "texts": [
+        {
+          "id": "ACN-0",
+          "text": "Answers &amp; source contracts"
+        },
+        {
+          "id": "ACO-0",
+          "text": "Original builder contracts preserved with node identities. Product screens retain their sources, limitations and actions."
+        },
+        {
+          "id": "HJ-0",
+          "text": "BUILDER CONTRACT / 13 SOURCE LENS / DESIGN SPECIMEN"
+        },
+        {
+          "id": "HK-0",
+          "text": "Reuse the authorized source viewer. Bind the selected span, page, source revision, issuer and comparison quarter; these are conceptual bindings, not a new API. Copy includes attribution. A missing or inaccessible passage shows an unavailable state, never invented text. Keep keyboard focus recoverable when returning to the originating claim. Test source revisions, revoked access, long passages and period changes. This board has no live source connection or interactive hotspots."
+        },
+        {
+          "id": "LY-0",
+          "text": "BUILDER CONTRACT / 15 THESIS REVIEW / BEFORE SAVE"
+        },
+        {
+          "id": "LZ-0",
+          "text": "Use the existing thesis owner and the current AI review pattern, not a new case store. Draft, saving, confirmed saved and failed are distinct states. Preserve user edits on errors; reconcile an ambiguous save using the existing request identity before any retry. Validate source revisions and access again at confirmation. Save the reviewed assumptions and countercase with the source references. Alert setup is a separate confirmed operation. These controls are visual specifications, not an active persistence integration. Review scenario opens the existing review with the current inputs and revision; it does not save. Cancel restores that draft. A counterfactual is not the saved input baseline. Choosing a company or connecting a document does not establish the earnings claim."
+        },
+        {
+          "id": "NE-0",
+          "text": "BUILDER CONTRACT / 16 SOURCE-CHANGE REVIEW / READ BEFORE UPDATE"
+        },
+        {
+          "id": "NF-0",
+          "text": "Compare the same issuer, metric definition, unit and coverage period. Missing or unknown coverage is not zero. A changed source revision invalidates dependent calculation and narrative versions; do not label the old result current. Review proposed text changes before an explicit save through the existing thesis owner. Preserve the prior thesis and source versions. Source version 2 is not automatically thesis version 2. Loading, inaccessible and incomparable sources need separate states. No live monitor or notification is demonstrated here. Keep saved version preserves thesis v1 and notes; its dependent scenario remains marked as needing refresh. This action does not accept the new source or make the old calculation current."
+        },
+        {
+          "id": "QX-0",
+          "text": "BUILDER CONTRACT / EXISTING ONTOLOGY ROUTE / PUBLIC FIRST VISIT ONLY"
+        },
+        {
+          "id": "QZ-0",
+          "text": "Modify the existing ontology template and its presentation, not the state engine. Reuse shared navigation, theme/language controls, authentication and Ask Mastermind. Sign-in must return to the same-origin route including its revision and valid hash focus; an invalid or missing focus falls back honestly. The overview link opens transmission.html; the AI entry uses only authorized public page context."
+        },
+        {
+          "id": "R0-0",
+          "text": "No private leg names, current readings or fabricated preview in the public shell. Preserve signed-in loading, quiet, active, stale, unavailable and access-denied states. Company continuation uses a closed ontology/transmission origin and one canonical opaque security field; URL context is never silently saved to the thesis. Verify desktop/mobile, keyboard, enlarged text, sign-in return, copied/new-tab links and actual return navigation before release. This board is static design—not deployed UI or signed-in proof."
+        },
+        {
+          "id": "TP-0",
+          "text": "BUILDER CONTRACT · EXTEND THE EXISTING CONTEXT STRIP"
+        },
+        {
+          "id": "TQ-0",
+          "text": "Static specification · not deployed product UI"
+        },
+        {
+          "id": "TT-0",
+          "text": "ACCEPT + DISPLAY"
+        },
+        {
+          "id": "TU-0",
+          "text": "Closed origins: ontology or transmission. One canonical opaque security field. Current-alias identity proof. Source-specific EN/ZH label and return action."
+        },
+        {
+          "id": "TW-0",
+          "text": "REFUSE OR DEGRADE"
+        },
+        {
+          "id": "TX-0",
+          "text": "Reject unknown, duplicate, malformed or mismatched context. If the source changed, keep the company page and explain the lost return state."
+        },
+        {
+          "id": "TZ-0",
+          "text": "NEVER PERSIST SILENTLY"
+        },
+        {
+          "id": "U0-0",
+          "text": "No mo_* fields enter Thesis. Copied and new-tab links remain safe. Ordinary company navigation clears the strip. URL context is not authorization or a signal."
+        },
+        {
+          "id": "UY-0",
+          "text": "Mobile implementation contract"
+        },
+        {
+          "id": "V0-0",
+          "text": "LAYOUT + TOUCH"
+        },
+        {
+          "id": "V1-0",
+          "text": "Context precedes the company bar. Return controls span the available width and remain at least 44px high. Mobile navigation stays visible."
+        },
+        {
+          "id": "V3-0",
+          "text": "HONEST STATE"
+        },
+        {
+          "id": "V4-0",
+          "text": "Verified origin and source loss are visibly different. Missing or mismatched context never becomes a plausible source badge."
+        },
+        {
+          "id": "V6-0",
+          "text": "CLEAR + PRESERVE"
+        },
+        {
+          "id": "V7-0",
+          "text": "Changing companies clears every mo_* key. Thesis requests remain non-empty and contain no navigation context."
+        },
+        {
+          "id": "V9-0",
+          "text": "Static specification for the existing Terminal strip. Not deployed product UI."
+        },
+        {
+          "id": "133-0",
+          "text": "BUILDER CONTRACT · EXTEND ASK MASTERMIND + THE EXISTING VISUAL ENGINE"
+        },
+        {
+          "id": "134-0",
+          "text": "Static specification · not deployed product UI"
+        },
+        {
+          "id": "137-0",
+          "text": "MODEL CHOOSES THE EXPLANATION"
+        },
+        {
+          "id": "138-0",
+          "text": "Select the smallest approved artifact and plain-language takeaway. Do not emit arbitrary chart code or a second planning agent."
+        },
+        {
+          "id": "13A-0",
+          "text": "HOST OWNS NUMBERS + MARKS"
+        },
+        {
+          "id": "13B-0",
+          "text": "Validate units, settled inputs, calculations, nulls and permissions. Render the chart and table deterministically from source-bound data."
+        },
+        {
+          "id": "13D-0",
+          "text": "EVERY CLAIM GETS A RECEIPT"
+        },
+        {
+          "id": "13E-0",
+          "text": "Numeric claims link to an exact value, calculation or source span. Without one, decline the number using the same absence grammar."
+        },
+        {
+          "id": "13G-0",
+          "text": "SAFE INTERACTION"
+        },
+        {
+          "id": "13H-0",
+          "text": "Support stop, retry, edit-and-branch, keyboard mark selection and a table alternative. Missing is never zero; chat/export obey source permissions."
+        },
+        {
+          "id": "ACR-0",
+          "text": "Thesis &amp; receipt contracts"
+        },
+        {
+          "id": "ACS-0",
+          "text": "Original versioning, monitor, history and return requirements. Product changes require explicit actions; inspecting evidence has no modifying effect."
+        },
+        {
+          "id": "276-0",
+          "text": "Production contract · R15"
+        },
+        {
+          "id": "277-0",
+          "text": "Extends existing Thesis, monitor, history and Ask Mastermind owners. Versioning, notification delivery and evidence permissions remain separate."
+        },
+        {
+          "id": "278-0",
+          "text": "Paper design evidence · not deployed UI"
+        },
+        {
+          "id": "2Q0-0",
+          "text": "Production contract · R17"
+        },
+        {
+          "id": "2Q1-0",
+          "text": "One change artifact must produce the same before/after chart, exact table, receipt stack, thesis impact and return target through existing owners."
+        },
+        {
+          "id": "2Q2-0",
+          "text": "Paper design evidence · not deployed UI"
+        },
+        {
+          "id": "2OQ-0",
+          "text": "Return contract"
+        },
+        {
+          "id": "2OS-0",
+          "text": "Orientation preserved"
+        },
+        {
+          "id": "2OU-0",
+          "text": "Close with orientation intact."
+        },
+        {
+          "id": "2OV-0",
+          "text": "The receipt closes back to the breadth-pressure card, with the Thesis, change set, selection and scroll position preserved."
+        },
+        {
+          "id": "2P2-0",
+          "text": "Returns to"
+        },
+        {
+          "id": "2P3-0",
+          "text": "Material changes · Breadth pressure"
+        },
+        {
+          "id": "2P4-0",
+          "text": "card BRD-EW-042 · same thesis v1 · same review position"
+        },
+        {
+          "id": "2P9-0",
+          "text": "ESC"
+        },
+        {
+          "id": "2PA-0",
+          "text": "Close receipt"
+        },
+        {
+          "id": "2PB-0",
+          "text": "focus → invoking card"
+        },
+        {
+          "id": "2PF-0",
+          "text": "←"
+        },
+        {
+          "id": "2PG-0",
+          "text": "Back action"
+        },
+        {
+          "id": "2PH-0",
+          "text": "same return target"
+        },
+        {
+          "id": "2PL-0",
+          "text": "ASK"
+        },
+        {
+          "id": "2PM-0",
+          "text": "Follow-up composer"
+        },
+        {
+          "id": "2PN-0",
+          "text": "receipt context retained"
+        },
+        {
+          "id": "2PQ-0",
+          "text": "No route may return to page root, clear the selected change, expand source scope or create another history entry."
+        },
+        {
+          "id": "2QA-0",
+          "text": "Production contract · R18"
+        },
+        {
+          "id": "2Q9-0",
+          "text": "Mobile preserves the thesis, deltas, evidence scope and reviewed-version law. Paper design evidence, not deployed UI."
+        },
+        {
+          "id": "2G5-0",
+          "text": "Production contract · R16"
+        },
+        {
+          "id": "2G6-0",
+          "text": "Mobile preserves the thesis, deltas, evidence scope and reviewed-version law. Paper design evidence, not deployed UI."
+        },
+        {
+          "id": "38V-0",
+          "text": "Builder contract · extend existing owners"
+        },
+        {
+          "id": "38W-0",
+          "text": "One portfolio. One event surface. One evidence model."
+        },
+        {
+          "id": "38X-0",
+          "text": "R19 is a visual and interaction contract for the existing PortfolioView, PortfolioBriefPanel, EventImpactPanel, Ask Mastermind and source/identity/permission owners. It does not authorize another portfolio store, event calendar, graph service, renderer, AI host or lifecycle plane."
+        },
+        {
+          "id": "390-0",
+          "text": "Design contract · not implemented"
+        },
+        {
+          "id": "393-0",
+          "text": "Existing data owners"
+        },
+        {
+          "id": "394-0",
+          "text": "Actual open positions only. Watchlists stay separate. Portfolio weight uses the named priced subset; unpriced or unreadable holdings remain explicit."
+        },
+        {
+          "id": "396-0",
+          "text": "Relationship law"
+        },
+        {
+          "id": "397-0",
+          "text": "A holding is promoted only by an authorized ontology relationship or an event that explicitly names the position. Shared themes never create a path."
+        },
+        {
+          "id": "399-0",
+          "text": "Deterministic rendering"
+        },
+        {
+          "id": "39A-0",
+          "text": "The host validates weights, units, revisions, permissions and nulls. The same artifact must render the same map and equivalent ledger."
+        },
+        {
+          "id": "39C-0",
+          "text": "Inclusive proof"
+        },
+        {
+          "id": "39D-0",
+          "text": "Keyboard path selection, table parity, non-color meanings, English/Chinese order, source denial, stale data and reduced motion are release gates."
+        },
+        {
+          "id": "39F-0",
+          "text": "Production proof required: signed-in portfolio → select scenario → inspect causal path → open exact receipt → ask follow-up → return with selection and scroll position preserved."
+        },
+        {
+          "id": "39G-0",
+          "text": "R19 · MarketOntology · 29 Sep 2026"
+        },
+        {
+          "id": "3KU-0",
+          "text": "Mobile production contract · R20"
+        },
+        {
+          "id": "3KW-0",
+          "text": "NOT IMPLEMENTED"
+        },
+        {
+          "id": "3KY-0",
+          "text": "One path. One proof sheet. No lost context."
+        },
+        {
+          "id": "3KZ-0",
+          "text": "R20 is the mobile interaction contract for the existing portfolio, event, Brain and source owners. It does not authorize a new data or control plane."
+        },
+        {
+          "id": "3L3-0",
+          "text": "01"
+        },
+        {
+          "id": "3L5-0",
+          "text": "Touch + focus"
+        },
+        {
+          "id": "3L6-0",
+          "text": "Every control is at least 44px. Closing a sheet returns focus to the invoking path, never the page root."
+        },
+        {
+          "id": "3L9-0",
+          "text": "02"
+        },
+        {
+          "id": "3LB-0",
+          "text": "Exact parity"
+        },
+        {
+          "id": "3LC-0",
+          "text": "Map, compact ledger and accessible table share one validated artifact, denominator, revision and null rules."
+        },
+        {
+          "id": "3LF-0",
+          "text": "03"
+        },
+        {
+          "id": "3LH-0",
+          "text": "Permission + evidence"
+        },
+        {
+          "id": "3LI-0",
+          "text": "Retrieval, receipts, Ask Mastermind, copy and export use the same source permissions. Evidence never expands authorization."
+        },
+        {
+          "id": "3LL-0",
+          "text": "04"
+        },
+        {
+          "id": "3LN-0",
+          "text": "Inclusive meaning"
+        },
+        {
+          "id": "3LO-0",
+          "text": "Direct, indirect and withheld never rely on color alone. EN/ZH order, reduced motion and nonvisual reading remain equivalent."
+        },
+        {
+          "id": "3LQ-0",
+          "text": "This atlas may establish"
+        },
+        {
+          "id": "3LR-0",
+          "text": "Named mechanism · exact current position weight · priced denominator · direct / indirect / withheld state · exact proof or explicit absence."
+        },
+        {
+          "id": "3LT-0",
+          "text": "This atlas must refuse"
+        },
+        {
+          "id": "3LU-0",
+          "text": "Probability · expected return · ranking · buy/sell/rebalance guidance · unsupported earnings or price response · theme-only inferred relationships."
+        },
+        {
+          "id": "3LW-0",
+          "text": "Production proof: signed-in Portfolio → choose scenario → inspect path → open exact receipt → Ask Mastermind → close sheet → return with focus, selection and scroll preserved."
+        },
+        {
+          "id": "3LY-0",
+          "text": "Paper design contract · no live position claim"
+        },
+        {
+          "id": "3LZ-0",
+          "text": "R20 · 29 Sep 2026"
+        }
+      ]
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "pageId": "p-1-0",
+      "nodeId": "37N-0",
+      "key": "guide_map",
+      "texts": [
+        {
+          "id": "37P-0",
+          "text": "MARKET GUIDE / EXPLANATION DESIGN LIBRARY"
+        },
+        {
+          "id": "37Q-0",
+          "text": "A clear path from question to understanding."
+        },
+        {
+          "id": "37R-0",
+          "text": "Start with the R14 entry designs below. Open a focused page for deeper explanations or retained comparison coverage."
+        },
+        {
+          "id": "37U-0",
+          "text": "Choose the question you need to answer."
+        },
+        {
+          "id": "37Y-0",
+          "text": "Keep revisions distinct. Keep coverage visible."
+        },
+        {
+          "id": "37Z-0",
+          "text": "The R14 entry set has four variants; it does not replace the complete eight-variant baseline. Retained originals now live on REF · Guide Baseline · Themes + Locales. No designs were discarded."
+        },
+        {
+          "id": "380-0",
+          "text": "Compact help stays on page 02. The full Risk Radar teaching experience now has its own page 04, with English and Chinese, light and dark, desktop and mobile together."
+        },
+        {
+          "id": "381-0",
+          "text": "Use the matching page name in Paper’s sidebar. These are design references, not proof of live navigation, data or production acceptance."
+        },
+        {
+          "id": "4EU-0",
+          "text": "PROPOSED · GUIDE RETURN CHOICES · 08 NOV 2026"
+        },
+        {
+          "id": "4EV-0",
+          "text": "Open Proposed · Guide return clarity → p-8-0 / 44J-0. Six EN/ZH panes distinguish destination opening, a qualified origin and rejection before navigation."
+        },
+        {
+          "id": "4EW-0",
+          "text": "Implementation remains open with the existing navigation owner. Compact help has bounded Close copy; all eight full Risk Guide variants now use SPY observation-based horizons."
+        }
+      ]
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "pageId": "p-8-0",
+      "nodeId": "AHN-0",
+      "key": "popups_build",
+      "texts": [
+        {
+          "id": "AHO-0",
+          "text": "Popup return &amp; future-state contracts"
+        },
+        {
+          "id": "AHP-0",
+          "text": "Original interaction requirements and gated future examples. Save, monitoring and delivery remain distinct. Hold #8186 is unchanged."
+        },
+        {
+          "id": "8Y1-0",
+          "text": "Return spec: keep the same story, draft, row, filters, scroll and focus. Close exits the desk and restores its original trigger."
+        },
+        {
+          "id": "8Y2-0",
+          "text": "Static states · actions not wired or tested. No save, monitoring job or notification is created. Saved, monitoring and delivered are separate statuses."
+        },
+        {
+          "id": "94Y-0",
+          "text": "返回要求：保留同一则新闻、草稿、列表行、筛选、滚动位置及焦点。关闭工作台时，恢复原始触发控件的焦点。"
+        },
+        {
+          "id": "94Z-0",
+          "text": "静态设计；交互尚未接通或测试。未执行保存、启动监测任务或发送通知。已保存偏好、监测已启用、更新已送达是独立状态。"
+        },
+        {
+          "id": "9KV-0",
+          "text": "FUTURE SUPPORTED SERVICE · STATE SPECS"
+        },
+        {
+          "id": "9KW-0",
+          "text": "Pending, Saved and Confirmed failure examples after a supported save request. Saving is still unverified; the review above cannot reach these states today. Static specifications; actions are not wired."
+        },
+        {
+          "id": "9L0-0",
+          "text": "FUTURE SERVICE · PENDING"
+        },
+        {
+          "id": "9L1-0",
+          "text": "Saving your follow…"
+        },
+        {
+          "id": "9L4-0",
+          "text": "YOUR DRAFT IS RETAINED"
+        },
+        {
+          "id": "9L5-0",
+          "text": "NVDA · Buyback story"
+        },
+        {
+          "id": "9L8-0",
+          "text": "Waiting for the original request. Your choices stay visible. Do not send another save while this request is pending."
+        },
+        {
+          "id": "9LC-0",
+          "text": "Save in progress"
+        },
+        {
+          "id": "9LE-0",
+          "text": "Back to story →"
+        },
+        {
+          "id": "9LG-0",
+          "text": "Back does not cancel the request. On return, check that same request. If its reply is lost, use Save status unknown; never infer failure or retry automatically."
+        },
+        {
+          "id": "9LW-0",
+          "text": "FUTURE SERVICE · SAVE CONFIRMED"
+        },
+        {
+          "id": "9LV-0",
+          "text": "Your choices are saved."
+        },
+        {
+          "id": "9LT-0",
+          "text": "SAVED PREFERENCE"
+        },
+        {
+          "id": "9LS-0",
+          "text": "NVDA · Buyback story"
+        },
+        {
+          "id": "9LP-0",
+          "text": "This confirms your saved preference only. It doesn’t confirm monitoring or that an update was delivered."
+        },
+        {
+          "id": "9LO-0",
+          "text": "View Following →"
+        },
+        {
+          "id": "9LM-0",
+          "text": "Back to story →"
+        },
+        {
+          "id": "9LJ-0",
+          "text": "Show only after the owning service’s receipt/readback confirms this exact request and subject. View Following opens the existing saved list. Back restores the same story, row, filters, scroll and focus."
+        },
+        {
+          "id": "9MB-0",
+          "text": "FUTURE SERVICE · CONFIRMED FAILURE"
+        },
+        {
+          "id": "9MA-0",
+          "text": "Couldn’t save this follow."
+        },
+        {
+          "id": "9M8-0",
+          "text": "YOUR DRAFT IS RETAINED"
+        },
+        {
+          "id": "9M7-0",
+          "text": "NVDA · Buyback story"
+        },
+        {
+          "id": "9M4-0",
+          "text": "The service confirmed this request wasn’t saved. Your choices are still here. The story and source evidence remain available."
+        },
+        {
+          "id": "9M3-0",
+          "text": "Try again"
+        },
+        {
+          "id": "9M1-0",
+          "text": "Back to story →"
+        },
+        {
+          "id": "9LY-0",
+          "text": "Try again submits this retained draft only when you choose it after confirmed failure. A missing reply stays Unknown; never retry automatically. Back restores the same story, row, filters, scroll and focus."
+        },
+        {
+          "id": "9NO-0",
+          "text": "FUTURE SUPPORTED SERVICE · STATE SPECS"
+        },
+        {
+          "id": "9NN-0",
+          "text": "Pending, Saved and Confirmed failure examples after a supported save request. Saving is still unverified; the review above cannot reach these states today. Static specifications; actions are not wired."
+        },
+        {
+          "id": "9NL-0",
+          "text": "FUTURE SERVICE · PENDING"
+        },
+        {
+          "id": "9NK-0",
+          "text": "Saving your follow…"
+        },
+        {
+          "id": "9NI-0",
+          "text": "YOUR DRAFT IS RETAINED"
+        },
+        {
+          "id": "9NH-0",
+          "text": "NVDA · Buyback story"
+        },
+        {
+          "id": "9NE-0",
+          "text": "Waiting for the original request. Your choices stay visible. Do not send another save while this request is pending."
+        },
+        {
+          "id": "9ND-0",
+          "text": "Save in progress"
+        },
+        {
+          "id": "9NB-0",
+          "text": "Back to story →"
+        },
+        {
+          "id": "9N8-0",
+          "text": "Back does not cancel the request. On return, check that same request. If its reply is lost, use Save status unknown; never infer failure or retry automatically."
+        },
+        {
+          "id": "9N6-0",
+          "text": "FUTURE SERVICE · SAVE CONFIRMED"
+        },
+        {
+          "id": "9N5-0",
+          "text": "Your choices are saved."
+        },
+        {
+          "id": "9N3-0",
+          "text": "SAVED PREFERENCE"
+        },
+        {
+          "id": "9N2-0",
+          "text": "NVDA · Buyback story"
+        },
+        {
+          "id": "9MZ-0",
+          "text": "This confirms your saved preference only. It doesn’t confirm monitoring or that an update was delivered."
+        },
+        {
+          "id": "9MY-0",
+          "text": "View Following →"
+        },
+        {
+          "id": "9MW-0",
+          "text": "Back to story →"
+        },
+        {
+          "id": "9MT-0",
+          "text": "Show only after the owning service’s receipt/readback confirms this exact request and subject. View Following opens the existing saved list. Back restores the same story, row, filters, scroll and focus."
+        },
+        {
+          "id": "9MR-0",
+          "text": "FUTURE SERVICE · CONFIRMED FAILURE"
+        },
+        {
+          "id": "9MQ-0",
+          "text": "Couldn’t save this follow."
+        },
+        {
+          "id": "9MO-0",
+          "text": "YOUR DRAFT IS RETAINED"
+        },
+        {
+          "id": "9MN-0",
+          "text": "NVDA · Buyback story"
+        },
+        {
+          "id": "9MK-0",
+          "text": "The service confirmed this request wasn’t saved. Your choices are still here. The story and source evidence remain available."
+        },
+        {
+          "id": "9MJ-0",
+          "text": "Try again"
+        },
+        {
+          "id": "9MH-0",
+          "text": "Back to story →"
+        },
+        {
+          "id": "9ME-0",
+          "text": "Try again submits this retained draft only when you choose it after confirmed failure. A missing reply stays Unknown; never retry automatically. Back restores the same story, row, filters, scroll and focus."
+        },
+        {
+          "id": "9P1-0",
+          "text": "未来服务支持后的状态规范"
+        },
+        {
+          "id": "9P0-0",
+          "text": "以下为服务支持保存请求后的处理中、已保存和确认失败示例。保存功能尚未验证，上方复核目前无法进入这些状态。仅为静态规范；交互尚未接通。"
+        },
+        {
+          "id": "9OY-0",
+          "text": "未来服务 · 处理中"
+        },
+        {
+          "id": "9OX-0",
+          "text": "正在保存关注设置…"
+        },
+        {
+          "id": "9OV-0",
+          "text": "草稿已保留"
+        },
+        {
+          "id": "9OU-0",
+          "text": "NVDA · 回购事件"
+        },
+        {
+          "id": "9OR-0",
+          "text": "正在等待原请求的结果。已选设置保持可见。此请求处理中，请勿再次提交保存。"
+        },
+        {
+          "id": "9OQ-0",
+          "text": "保存处理中"
+        },
+        {
+          "id": "9OO-0",
+          "text": "返回新闻 →"
+        },
+        {
+          "id": "9OL-0",
+          "text": "返回不会取消请求。再次进入时，核查同一个请求。若未收到回复，进入「保存状态未知」；不得推断失败或自动重试。"
+        },
+        {
+          "id": "9OJ-0",
+          "text": "未来服务 · 保存已确认"
+        },
+        {
+          "id": "9OI-0",
+          "text": "已保存关注设置"
+        },
+        {
+          "id": "9OG-0",
+          "text": "已保存偏好"
+        },
+        {
+          "id": "9OF-0",
+          "text": "NVDA · 回购事件"
+        },
+        {
+          "id": "9OC-0",
+          "text": "这仅确认偏好已保存，不代表监测已启用或更新已送达。"
+        },
+        {
+          "id": "9OB-0",
+          "text": "查看已关注 →"
+        },
+        {
+          "id": "9O9-0",
+          "text": "返回新闻 →"
+        },
+        {
+          "id": "9O6-0",
+          "text": "仅在负责服务的回执或回读确认这一请求及对象后显示。「查看已关注」打开现有保存列表。返回时，恢复同一则新闻、列表行、筛选、滚动位置及焦点。"
+        },
+        {
+          "id": "9O4-0",
+          "text": "未来服务 · 确认失败"
+        },
+        {
+          "id": "9O3-0",
+          "text": "未能保存关注设置"
+        },
+        {
+          "id": "9O1-0",
+          "text": "草稿已保留"
+        },
+        {
+          "id": "9O0-0",
+          "text": "NVDA · 回购事件"
+        },
+        {
+          "id": "9NX-0",
+          "text": "服务已确认此请求未保存。已选设置仍保留，新闻及来源证据仍可查看。"
+        },
+        {
+          "id": "9NW-0",
+          "text": "重试"
+        },
+        {
+          "id": "9NU-0",
+          "text": "返回新闻 →"
+        },
+        {
+          "id": "9NR-0",
+          "text": "仅在确认失败后，由你选择「重试」才提交保留的草稿。未收到回复仍属未知；不得自动重试。返回时，恢复同一则新闻、列表行、筛选、滚动位置及焦点。"
+        },
+        {
+          "id": "9QE-0",
+          "text": "未来服务支持后的状态规范"
+        },
+        {
+          "id": "9QD-0",
+          "text": "以下为服务支持保存请求后的处理中、已保存和确认失败示例。保存功能尚未验证，上方复核目前无法进入这些状态。仅为静态规范；交互尚未接通。"
+        },
+        {
+          "id": "9QB-0",
+          "text": "未来服务 · 处理中"
+        },
+        {
+          "id": "9QA-0",
+          "text": "正在保存关注设置…"
+        },
+        {
+          "id": "9Q8-0",
+          "text": "草稿已保留"
+        },
+        {
+          "id": "9Q7-0",
+          "text": "NVDA · 回购事件"
+        },
+        {
+          "id": "9Q4-0",
+          "text": "正在等待原请求的结果。已选设置保持可见。此请求处理中，请勿再次提交保存。"
+        },
+        {
+          "id": "9Q3-0",
+          "text": "保存处理中"
+        },
+        {
+          "id": "9Q1-0",
+          "text": "返回新闻 →"
+        },
+        {
+          "id": "9PY-0",
+          "text": "返回不会取消请求。再次进入时，核查同一个请求。若未收到回复，进入「保存状态未知」；不得推断失败或自动重试。"
+        },
+        {
+          "id": "9PW-0",
+          "text": "未来服务 · 保存已确认"
+        },
+        {
+          "id": "9PV-0",
+          "text": "已保存关注设置"
+        },
+        {
+          "id": "9PT-0",
+          "text": "已保存偏好"
+        },
+        {
+          "id": "9PS-0",
+          "text": "NVDA · 回购事件"
+        },
+        {
+          "id": "9PP-0",
+          "text": "这仅确认偏好已保存，不代表监测已启用或更新已送达。"
+        },
+        {
+          "id": "9PO-0",
+          "text": "查看已关注 →"
+        },
+        {
+          "id": "9PM-0",
+          "text": "返回新闻 →"
+        },
+        {
+          "id": "9PJ-0",
+          "text": "仅在负责服务的回执或回读确认这一请求及对象后显示。「查看已关注」打开现有保存列表。返回时，恢复同一则新闻、列表行、筛选、滚动位置及焦点。"
+        },
+        {
+          "id": "9PH-0",
+          "text": "未来服务 · 确认失败"
+        },
+        {
+          "id": "9PG-0",
+          "text": "未能保存关注设置"
+        },
+        {
+          "id": "9PE-0",
+          "text": "草稿已保留"
+        },
+        {
+          "id": "9PD-0",
+          "text": "NVDA · 回购事件"
+        },
+        {
+          "id": "9PA-0",
+          "text": "服务已确认此请求未保存。已选设置仍保留，新闻及来源证据仍可查看。"
+        },
+        {
+          "id": "9P9-0",
+          "text": "重试"
+        },
+        {
+          "id": "9P7-0",
+          "text": "返回新闻 →"
+        },
+        {
+          "id": "9P4-0",
+          "text": "仅在确认失败后，由你选择「重试」才提交保留的草稿。未收到回复仍属未知；不得自动重试。返回时，恢复同一则新闻、列表行、筛选、滚动位置及焦点。"
+        },
+        {
+          "id": "AI7-0",
+          "text": "Original 8VD-0 · Saving unavailable in review; pending outcome requires a separately supported and submitted save."
+        },
+        {
+          "id": "8VY-0",
+          "text": "STATE 01 · REVIEW · SUPPORT UNVERIFIED"
+        },
+        {
+          "id": "8WV-0",
+          "text": "STATE 02 · FUTURE SUPPORTED SERVICE"
+        },
+        {
+          "id": "8WW-0",
+          "text": "Separate example after an explicit save becomes supported. The gated review above cannot trigger this state now."
+        },
+        {
+          "id": "AI9-0",
+          "text": "Original 90C-0 · Saving unavailable in review; pending outcome requires a separately supported and submitted save."
+        },
+        {
+          "id": "90V-0",
+          "text": "STATE 01 · REVIEW · SUPPORT UNVERIFIED"
+        },
+        {
+          "id": "91L-0",
+          "text": "STATE 02 · FUTURE SUPPORTED SERVICE"
+        },
+        {
+          "id": "91M-0",
+          "text": "Separate example after an explicit save becomes supported. The gated review above cannot trigger this state now."
+        },
+        {
+          "id": "AIB-0",
+          "text": "Original 92Q-0 · Saving unavailable in review; pending outcome requires a separately supported and submitted save."
+        },
+        {
+          "id": "939-0",
+          "text": "状态 01 · 复核 · 功能支持未核实"
+        },
+        {
+          "id": "93Z-0",
+          "text": "状态 02 · 未来服务支持后的示例"
+        },
+        {
+          "id": "940-0",
+          "text": "独立示例：仅适用于服务已支持且用户已提交保存请求的情况。上方不可用的保存确认目前不会触发此状态。"
+        },
+        {
+          "id": "AID-0",
+          "text": "Original 954-0 · Saving unavailable in review; pending outcome requires a separately supported and submitted save."
+        },
+        {
+          "id": "95N-0",
+          "text": "状态 01 · 复核 · 功能支持未核实"
+        },
+        {
+          "id": "96D-0",
+          "text": "状态 02 · 未来服务支持后的示例"
+        },
+        {
+          "id": "96E-0",
+          "text": "独立示例：仅适用于服务已支持且用户已提交保存请求的情况。上方不可用的保存确认目前不会触发此状态。"
+        },
+        {
+          "id": "AIF-0",
+          "text": "Preserved dark-theme method and return rules"
+        },
+        {
+          "id": "92K-0",
+          "text": "Return spec: keep the same story, draft, row, filters, scroll and focus. Close exits the desk and restores its original trigger."
+        },
+        {
+          "id": "92L-0",
+          "text": "Static states · actions not wired or tested. No save, monitoring job or notification is created. Saved, monitoring and delivered are separate statuses."
+        },
+        {
+          "id": "97C-0",
+          "text": "返回要求：保留同一则新闻、草稿、列表行、筛选、滚动位置及焦点。关闭工作台时，恢复原始触发控件的焦点。"
+        },
+        {
+          "id": "97D-0",
+          "text": "静态设计；交互尚未接通或测试。未执行保存、启动监测任务或发送通知。已保存偏好、监测已启用、更新已送达是独立状态。"
+        },
+        {
+          "id": "5QA-0",
+          "text": "Live factor owners, update rules and versioned definitions still require implementation."
+        },
+        {
+          "id": "5QB-0",
+          "text": "The design specifies how evidence is shown—not a hidden scoring formula or production acceptance."
+        },
+        {
+          "id": "5WP-0",
+          "text": "Live source resolvers, translation versions and correction propagation still require implementation."
+        },
+        {
+          "id": "5WQ-0",
+          "text": "This design specifies inspectable method behavior—not a classifier, crawler, publication system or production acceptance."
+        },
+        {
+          "id": "4M5-0",
+          "text": "Live source mappings, update rules and interaction behavior still require implementation and real-path testing."
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "pageId": "p-1-0",
+      "nodeId": "41M-0",
+      "key": "intl_map",
+      "texts": [
+        {
+          "id": "41O-0",
+          "text": "INTERNATIONAL MARKETS / R10 WORKSPACE"
+        },
+        {
+          "id": "41P-0",
+          "text": "Find the market. Follow the evidence."
+        },
+        {
+          "id": "41Q-0",
+          "text": "Start with the market. Inspect a country, company or saved question only when needed."
+        },
+        {
+          "id": "41T-0",
+          "text": "What would you like to review?"
+        },
+        {
+          "id": "41X-0",
+          "text": "Compare the experience, not just the screen."
+        },
+        {
+          "id": "41Y-0",
+          "text": "Keep desktop, mobile and language variants in view. Narrow-screen and enlarged-text examples test readability; their extra height is intentional."
+        },
+        {
+          "id": "41Z-0",
+          "text": "Market, country, company and research screens preserve the original selection and evidence context when you return."
+        },
+        {
+          "id": "420-0",
+          "text": "Start with pages 01–04B for R10 core research, or Global Surveillance · R14 for IM13–IM18. R14’s written spec and freeze amendments govern that extension. Page 80 holds builder contracts; 05–06 redirect elsewhere. Availability comes from qualified source payloads."
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "pageId": "p-B-0",
+      "nodeId": "P9-0",
+      "key": "intl_engine",
+      "texts": [
+        {
+          "id": "PB-0",
+          "text": "INTERNATIONAL MARKETS · BUILDER BLUEPRINT · 90–93"
+        },
+        {
+          "id": "PC-0",
+          "text": "Restore depth. Reuse the intelligence."
+        },
+        {
+          "id": "PD-0",
+          "text": "Implementation direction for R10. Native mockups contain illustrative data; these notes distinguish existing sources, proposed upgrades and unverified integration. They do not certify a deployment."
+        },
+        {
+          "id": "PG-0",
+          "text": "IM-ARCH-01 · PRODUCT + ROUTES"
+        },
+        {
+          "id": "PH-0",
+          "text": "A simple first read. Four deliberate research layers."
+        },
+        {
+          "id": "PJ-0",
+          "text": "Overview answers what changed, where leadership is broad or narrow, and which evidence is missing. Deep views expose component contributions, data tables, method definitions, history and source records. The research library keeps all 18 retained capability families discoverable. An optional map serves spatial questions; it must not replace accessible comparison tables."
+        },
+        {
+          "id": "PK-0",
+          "text": "Current primary journey: overview → country inspector 805-0 / tablet 8KL-0 / mobile 50H-0 → evidence 8AM-0 / 547-0 → Follow draft 57H-0 and review 5AN-0 → exact return. Contract 5IR-0 owns the interaction requirements. Preserve the earlier R9 journey as historical design evidence, not as current-file node IDs. Reuse existing country, evidence and alert owners; do not create competing inspector or monitoring lifecycles."
+        },
+        {
+          "id": "PL-0",
+          "text": "Never hide material coverage or freshness behind “Advanced.” Price trend, economic regime, descriptive risk and accepted entry authority are separate. No synthetic global confidence, buy/trim label, or country allocation follows from this illustrative design."
+        },
+        {
+          "id": "PN-0",
+          "text": "IM-BE-01 · ENGINE + MIGRATION LEDGER"
+        },
+        {
+          "id": "PO-0",
+          "text": "Compose the existing owners; do not rebuild them."
+        },
+        {
+          "id": "PP-0",
+          "text": "The current scripts/build_intl.py composition already connects many of these families. “Existing” below means source or builder evidence at the audit pin—not that every field is usable, the R10 interface is bound, or production migration is accepted. Publish a dated adoption receipt for each upgraded consumer."
+        },
+        {
+          "id": "Q1-0",
+          "text": "Migration status for R10 bindings: NOT VERIFIED. Required receipt: source owner + contract/version + adopted fields + parity/abstention tests + deployed consumer + real-path proof. “Exists,” “merged,” “bound,” “deployed,” and “accepted” are not interchangeable."
+        }
+      ]
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "pageId": "p-9-0",
+      "nodeId": "47Q-0",
+      "key": "system_build",
+      "texts": [
+        {
+          "id": "47S-0",
+          "text": "F02 / SHARED PRODUCT PATTERNS / DRAFT CANDIDATE 2"
+        },
+        {
+          "id": "47U-0",
+          "text": "Compare the data. Understand its limits. Inspect the exact source. Return to the same context."
+        },
+        {
+          "id": "47Y-0",
+          "text": "F02-SYSTEM / 1.0.0-candidate.2"
+        },
+        {
+          "id": "47Z-0",
+          "text": "Shared anatomy, tokens, charts, tables, evidence and recovery."
+        },
+        {
+          "id": "481-0",
+          "text": "Draft for independent review"
+        },
+        {
+          "id": "482-0",
+          "text": "Native editable construction. Production behavior remains unverified."
+        },
+        {
+          "id": "48T-0",
+          "text": "Choose what you need to build."
+        },
+        {
+          "id": "48U-0",
+          "text": "Start with Foundations. Use Components for controls and evidence, Patterns for states and data, References for complete screens, and Utilities for builder acceptance. Current source and release boundaries follow the navigation."
+        },
+        {
+          "id": "9RG-0",
+          "text": "02 · Foundations"
+        },
+        {
+          "id": "9RH-0",
+          "text": "Semantic colors, type, spacing, density and existing icon anatomy."
+        },
+        {
+          "id": "9RI-0",
+          "text": "foundations [48W-0]"
+        },
+        {
+          "id": "9RJ-0",
+          "text": "Open the observed page; use the exact board IDs above"
+        },
+        {
+          "id": "9RK-0",
+          "text": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-3-0"
+        },
+        {
+          "id": "9RN-0",
+          "text": "03 · Components"
+        },
+        {
+          "id": "9RO-0",
+          "text": "Metrics, buttons/tabs/disclosures, exact evidence, read/access/save states and exceptional compositions."
+        },
+        {
+          "id": "9RP-0",
+          "text": "metrics [4E3-0] · metrics-light [4H1-0] · controls [4JP-0] · states-matrix [6Q3-0] · controls-variants [771-0] · density-40-52-comparison [8W7-0] · fault-compositions [905-0]"
+        },
+        {
+          "id": "9RQ-0",
+          "text": "Open the observed page; use the exact board IDs above"
+        },
+        {
+          "id": "9RR-0",
+          "text": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-4-0"
+        },
+        {
+          "id": "9RU-0",
+          "text": "04 · Patterns"
+        },
+        {
+          "id": "9RV-0",
+          "text": "Chart/table grammar, narrow evidence, responsive widths, localized return paths and density examples."
+        },
+        {
+          "id": "9RW-0",
+          "text": "grammar [4LC-0] · company-eps-overlay-320 [70C-0] · company-dividend-overlay-320 [72T-0] · options-full-row-evidence-320 [74P-0] · macro-dark-en-390 [7CM-0] · macro-light-zh-390 [7IS-0] — CAPTURED; historical G15/provenance HOLD · macro-docked-1280 [8G2-0] · macro-zh-evidence-return-390 [8N8-0] — separate evidence-return companion · company-fy2025-eps-evidence-390 [8PF-0] · editorial-calculation-evidence-390 [8R5-0] · editorial-reading-390 [8TF-0] · width-768-overlay [98N-0] · width-1024-overlay [9EB-0] · width-1600-docked [9K6-0]"
+        },
+        {
+          "id": "9RX-0",
+          "text": "Open the observed page; use the exact board IDs above"
+        },
+        {
+          "id": "9RY-0",
+          "text": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-5-0"
+        },
+        {
+          "id": "9S1-0",
+          "text": "05 · Reference Screens"
+        },
+        {
+          "id": "9S2-0",
+          "text": "Macro, Company, Options and public editorial in both themes. These are representative shared-pattern compositions."
+        },
+        {
+          "id": "9S3-0",
+          "text": "macro-dark [4PO-0] · macro-light [4YD-0] · company-dark [56L-0] · company-light [5HV-0] · options-dark [5VE-0] · options-light [67V-0] · editorial-dark [6JX-0] · editorial-light [6NG-0]"
+        },
+        {
+          "id": "9S4-0",
+          "text": "Open the observed page; use the exact board IDs above"
+        },
+        {
+          "id": "9S5-0",
+          "text": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-6-0"
+        },
+        {
+          "id": "9S8-0",
+          "text": "06 · Utilities"
+        },
+        {
+          "id": "9S9-0",
+          "text": "Source ownership, integration sequence, acceptance, performance targets and rollback."
+        },
+        {
+          "id": "9SA-0",
+          "text": "builder [4NV-0]"
+        },
+        {
+          "id": "9SB-0",
+          "text": "Open the observed page; use the exact board IDs above"
+        },
+        {
+          "id": "9SC-0",
+          "text": "https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-7-0"
+        },
+        {
+          "id": "485-0",
+          "text": "THE USER JOURNEY"
+        },
+        {
+          "id": "486-0",
+          "text": "Question &amp; period → comparison → limitations → exact evidence → return → owner-confirmed action"
+        },
+        {
+          "id": "48A-0",
+          "text": "Own the shared behavior"
+        },
+        {
+          "id": "48B-0",
+          "text": "Read a dense comparison in light or dark. Distinguish direction from workflow status, unknown from zero, stale from partial, and selection from focus. Open the exact row and return without losing context."
+        },
+        {
+          "id": "48D-0",
+          "text": "Preserve domain meaning"
+        },
+        {
+          "id": "48E-0",
+          "text": "F01 owns navigation and shell composition. D07 owns Company statement modes; D08 owns the Options workflow; D23/current service owns save confirmation. Verdicts, count partitions and lifecycle transitions retain their domain owners."
+        },
+        {
+          "id": "9QS-0",
+          "text": "Candidate boundary and retained responsibilities"
+        },
+        {
+          "id": "9QT-0",
+          "text": "F02 owns shared anatomy and tokens. F01 owns the joint shell/navigation contract. Domain owners retain their source identities, routes, access rules, verdicts, count partitions, lifecycle transitions and saved-state authority."
+        },
+        {
+          "id": "9QU-0",
+          "text": "All 32 native board pairs are captured, including Chinese comparison 7IS-0. G15 current-effect absence was reconciled on the original carrier; its historical transport result remains UNKNOWN and must not be replayed. Current children 9SE-0/9SM-0 lack recovered write responses. Final freeze and joint F01/F02 acceptance remain HOLD pending verified provenance, actual keyboard/touch/400% journeys, consumer integration and required native/release gates."
+        },
+        {
+          "id": "9QV-0",
+          "text": "F02 retains the accepted candidate.2 geometry and records clause-specific concurrence with F01 candidate.4. Brain Close is distinct from Stop; conditional focus ownership, the focused Terminal reader exception and the existing shared-component owners remain explicit source contracts, not executed runtime proof."
+        },
+        {
+          "id": "9QW-0",
+          "text": "All numerical examples are illustrative. Participation uses the count-first v3 fixture; Company and Options keep their existing v2 raw records. The earlier HTML/static candidate is historical supporting evidence. No product implementation, merge or deployment is claimed."
+        },
+        {
+          "id": "9QG-0",
+          "text": "Source contract and exact review identity"
+        },
+        {
+          "id": "9QH-0",
+          "text": "Current build contract — draft branch navigation"
+        },
+        {
+          "id": "9QI-0",
+          "text": "https://github.com/mastermindx-market-intelligence/macro/blob/design/f02-system-v1-20261102-c2/research/design_candidates/production_design_20261102/f02/SYSTEM_CONTRACT.md"
+        },
+        {
+          "id": "9QJ-0",
+          "text": "Source/data and fixture authority"
+        },
+        {
+          "id": "9QK-0",
+          "text": "https://github.com/mastermindx-market-intelligence/macro/blob/design/f02-system-v1-20261102-c2/research/design_candidates/production_design_20261102/f02/SOURCE_AND_DATA_CONTRACT.md"
+        },
+        {
+          "id": "9QL-0",
+          "text": "Native board/capture index and immutable review references"
+        },
+        {
+          "id": "9QM-0",
+          "text": "https://github.com/mastermindx-market-intelligence/macro/blob/design/f02-system-v1-20261102-c2/research/design_candidates/production_design_20261102/f02/paper/README.md"
+        },
+        {
+          "id": "9QN-0",
+          "text": "Independent review record and open gates"
+        },
+        {
+          "id": "9QO-0",
+          "text": "https://github.com/mastermindx-market-intelligence/macro/blob/design/f02-system-v1-20261102-c2/research/design_candidates/production_design_20261102/f02/paper/reviews/NATIVE_REVIEW_REPORT.md"
+        },
+        {
+          "id": "9QP-0",
+          "text": "These links navigate the current draft. The source manifests identify immutable reviewed bytes; a mutable Paper URL, snapshot guard or token hash does not establish approval."
+        }
+      ]
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-3-0",
+      "nodeId": "18U-0",
+      "key": "aerlor_foundations",
+      "texts": [
+        {
+          "id": "18W-0",
+          "text": "AERLOR / THE DESIGN LANGUAGE"
+        },
+        {
+          "id": "18Y-0",
+          "text": "Warm materials. Editorial typography. A quietly precise product presence. The shared foundation for the 1440px desktop and 390px mobile website."
+        },
+        {
+          "id": "194-0",
+          "text": "Paper"
+        },
+        {
+          "id": "195-0",
+          "text": "#F3F0E9"
+        },
+        {
+          "id": "199-0",
+          "text": "Ink"
+        },
+        {
+          "id": "19A-0",
+          "text": "#2C2A25"
+        },
+        {
+          "id": "19E-0",
+          "text": "Muted"
+        },
+        {
+          "id": "19F-0",
+          "text": "#625D54"
+        },
+        {
+          "id": "19J-0",
+          "text": "Line"
+        },
+        {
+          "id": "19K-0",
+          "text": "#D7D1C6"
+        },
+        {
+          "id": "19O-0",
+          "text": "Sand"
+        },
+        {
+          "id": "19P-0",
+          "text": "#EAE5DB"
+        },
+        {
+          "id": "19T-0",
+          "text": "Forest"
+        },
+        {
+          "id": "19U-0",
+          "text": "#30362F"
+        },
+        {
+          "id": "19Y-0",
+          "text": "Clay"
+        },
+        {
+          "id": "19Z-0",
+          "text": "#8D4E35"
+        },
+        {
+          "id": "1A4-0",
+          "text": "DISPLAY / CORMORANT GARAMOND"
+        },
+        {
+          "id": "1A5-0",
+          "text": "A considered essential."
+        },
+        {
+          "id": "1A6-0",
+          "text": "An exceptional stay."
+        },
+        {
+          "id": "1A9-0",
+          "text": "BODY / DM SANS"
+        },
+        {
+          "id": "1AA-0",
+          "text": "The little things make the stay."
+        },
+        {
+          "id": "1AB-0",
+          "text": "Body copy is designed to be read, not just admired. Use warm neutrals, generous line height, and plain language. Product imagery remains explicitly conceptual until specifications and approvals are verified."
+        },
+        {
+          "id": "1AC-0",
+          "text": "CAPTIONS / 11PX · BODY / 14PX · CONTROLS / 44PX MINIMUM"
+        },
+        {
+          "id": "1AH-0",
+          "text": "Discover the collection"
+        },
+        {
+          "id": "1AI-0",
+          "text": "↗"
+        },
+        {
+          "id": "1AL-0",
+          "text": "Explore PRO"
+        },
+        {
+          "id": "1AM-0",
+          "text": "↗"
+        },
+        {
+          "id": "1AP-0",
+          "text": "Visible keyboard focus"
+        },
+        {
+          "id": "1AQ-0",
+          "text": "↗"
+        },
+        {
+          "id": "6G5-0",
+          "text": "Preview notice"
+        },
+        {
+          "id": "6G6-0",
+          "text": "Nothing is sent or stored."
+        },
+        {
+          "id": "6G9-0",
+          "text": "Validation feedback"
+        },
+        {
+          "id": "6GA-0",
+          "text": "Correct the highlighted fields."
+        },
+        {
+          "id": "6GD-0",
+          "text": "Local brief ready"
+        },
+        {
+          "id": "6GE-0",
+          "text": "A file is prepared for download."
+        },
+        {
+          "id": "1BB-0",
+          "text": "IMPLEMENTATION CONTRACT"
+        },
+        {
+          "id": "1BC-0",
+          "text": "Native colors and typography are exported to src/paper-tokens.css. The responsive browser implementation owns interactions, focus, validation, and motion. The product study is static artwork in Paper and an interactive 3D scene on the website. No certifications, hotel partnerships, or availability are implied."
+        }
+      ]
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-9-1",
+      "nodeId": "5HU-1",
+      "key": "aerlor_mobile_solution",
+      "texts": [
+        {
+          "id": "5UL-1",
+          "text": "9:41"
+        },
+        {
+          "id": "5UV-1",
+          "text": "AERLOR"
+        },
+        {
+          "id": "5UX-1",
+          "text": "0"
+        },
+        {
+          "id": "5V2-1",
+          "text": "AERLOR / BUSINESS SOLUTIONS"
+        },
+        {
+          "id": "5V4-1",
+          "text": "A guest suite. A styling chair. A quiet moment at the mirror. Technology considered alongside the space."
+        },
+        {
+          "id": "5V6-1",
+          "text": "Explore the environments"
+        },
+        {
+          "id": "5V7-1",
+          "text": "→"
+        },
+        {
+          "id": "5V9-1",
+          "text": "THE OBJECT / AERLOR HAIR DRYER"
+        },
+        {
+          "id": "5VC-1",
+          "text": "01 / WHERE WE FIT"
+        },
+        {
+          "id": "5VE-1",
+          "text": "Different environments have different needs. Choose the setting closest to yours."
+        },
+        {
+          "id": "5VH-1",
+          "text": "Hotels &amp; Resorts"
+        },
+        {
+          "id": "5VI-1",
+          "text": "↗"
+        },
+        {
+          "id": "5VJ-1",
+          "text": "Guestrooms · openings · property groups"
+        },
+        {
+          "id": "5VR-1",
+          "text": "Salons &amp; Stylists"
+        },
+        {
+          "id": "5VS-1",
+          "text": "↗"
+        },
+        {
+          "id": "5VT-1",
+          "text": "Stylist stations · independent salons"
+        },
+        {
+          "id": "5VV-1",
+          "text": "Spas &amp; Wellness"
+        },
+        {
+          "id": "5VW-1",
+          "text": "↗"
+        },
+        {
+          "id": "5VY-1",
+          "text": "Fitness &amp; Private Clubs"
+        },
+        {
+          "id": "5VZ-1",
+          "text": "↗"
+        },
+        {
+          "id": "5W1-1",
+          "text": "Luxury Residences"
+        },
+        {
+          "id": "5W2-1",
+          "text": "↗"
+        },
+        {
+          "id": "5W4-1",
+          "text": "Cruise &amp; Travel"
+        },
+        {
+          "id": "5W5-1",
+          "text": "↗"
+        },
+        {
+          "id": "5W7-1",
+          "text": "Beauty Academies"
+        },
+        {
+          "id": "5W8-1",
+          "text": "↗"
+        },
+        {
+          "id": "5WA-1",
+          "text": "Studios &amp; Backstage"
+        },
+        {
+          "id": "5WB-1",
+          "text": "↗"
+        },
+        {
+          "id": "5WE-1",
+          "text": "AERLOR"
+        },
+        {
+          "id": "5WF-1",
+          "text": "Collection in development. Product visuals are design studies; supply terms remain unconfirmed."
+        },
+        {
+          "id": "5WG-1",
+          "text": "© 2026 AERLOR · Privacy · Terms"
+        }
+      ]
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-9-1",
+      "nodeId": "5HV-1",
+      "key": "aerlor_mobile_salon",
+      "texts": [
+        {
+          "id": "5WK-1",
+          "text": "9:41"
+        },
+        {
+          "id": "5WU-1",
+          "text": "AERLOR"
+        },
+        {
+          "id": "5WW-1",
+          "text": "0"
+        },
+        {
+          "id": "5X1-1",
+          "text": "AERLOR / PROFESSIONAL HAIRCARE"
+        },
+        {
+          "id": "5X3-1",
+          "text": "Start with the stylist’s workflow, station layout, power access and a workable service plan."
+        },
+        {
+          "id": "5X5-1",
+          "text": "AERLOR DESIGN STUDY / NOT A SALON INSTALLATION"
+        },
+        {
+          "id": "5X7-1",
+          "text": "Plan your salon setup"
+        },
+        {
+          "id": "5X8-1",
+          "text": "→"
+        },
+        {
+          "id": "5XB-1",
+          "text": "01 / THE PROFESSIONAL STATION"
+        },
+        {
+          "id": "5XD-1",
+          "text": "A beautiful tool only earns its place when it fits the real working environment."
+        },
+        {
+          "id": "5XF-1",
+          "text": "01 / WORKFLOW"
+        },
+        {
+          "id": "5XG-1",
+          "text": "In the stylist’s hand"
+        },
+        {
+          "id": "5XH-1",
+          "text": "Evaluate the proposed model with the people who use it."
+        },
+        {
+          "id": "5XJ-1",
+          "text": "02 / PLACEMENT"
+        },
+        {
+          "id": "5XK-1",
+          "text": "On the salon floor"
+        },
+        {
+          "id": "5XL-1",
+          "text": "Review outlets, cord routing, storage and shared space."
+        },
+        {
+          "id": "5XN-1",
+          "text": "03 / OPERATION"
+        },
+        {
+          "id": "5XO-1",
+          "text": "Across the business"
+        },
+        {
+          "id": "5XP-1",
+          "text": "Plan cleaning, checks, servicing and replacement."
+        },
+        {
+          "id": "6F9-1",
+          "text": "02 / THE PROFESSIONAL EXPERIENCE"
+        },
+        {
+          "id": "6FA-1",
+          "text": "Designed for the working day."
+        },
+        {
+          "id": "6FB-1",
+          "text": "From the first appointment to the last finishing touch, the right tools belong naturally in every professional routine."
+        },
+        {
+          "id": "5Y4-1",
+          "text": "05 / BUSINESS PLANNING"
+        },
+        {
+          "id": "5Y6-1",
+          "text": "Create a private project brief for your team. Nothing is submitted to AERLOR."
+        },
+        {
+          "id": "5Y8-1",
+          "text": "Prepare a business brief"
+        },
+        {
+          "id": "5Y9-1",
+          "text": "→"
+        },
+        {
+          "id": "5YC-1",
+          "text": "AERLOR"
+        },
+        {
+          "id": "5YD-1",
+          "text": "Preproduction collection. No commercial-use approval or stock is implied."
+        },
+        {
+          "id": "5YE-1",
+          "text": "© 2026 AERLOR · Privacy · Terms"
+        }
+      ]
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-9-1",
+      "nodeId": "5HT-1",
+      "key": "aerlor_planner",
+      "texts": [
+        {
+          "id": "5RA-1",
+          "text": "AERLOR"
+        },
+        {
+          "id": "5RC-1",
+          "text": "Products"
+        },
+        {
+          "id": "5RD-1",
+          "text": "Solutions ⌄"
+        },
+        {
+          "id": "5RE-1",
+          "text": "Resources"
+        },
+        {
+          "id": "5RF-1",
+          "text": "About"
+        },
+        {
+          "id": "5RI-1",
+          "text": "Plan a project"
+        },
+        {
+          "id": "5RJ-1",
+          "text": "Project list{'  '}0"
+        },
+        {
+          "id": "5RN-1",
+          "text": "AERLOR / PROJECT PLANNING"
+        },
+        {
+          "id": "5RP-1",
+          "text": "No sales script. No arbitrary quantity assumption. A practical brief for the people who will specify the actual equipment."
+        },
+        {
+          "id": "5RR-1",
+          "text": "PRIVATE BY DESIGN"
+        },
+        {
+          "id": "5RS-1",
+          "text": "NO TRANSMISSION"
+        },
+        {
+          "id": "5RT-1",
+          "text": "NO ACCOUNT"
+        },
+        {
+          "id": "5RU-1",
+          "text": ""
+        },
+        {
+          "id": "5RY-1",
+          "text": "01 / YOUR PROJECT"
+        },
+        {
+          "id": "5RZ-1",
+          "text": "Build the brief."
+        },
+        {
+          "id": "5S0-1",
+          "text": "Your answers stay in this browser. Nothing is submitted."
+        },
+        {
+          "id": "5S5-1",
+          "text": "YOUR ENVIRONMENT"
+        },
+        {
+          "id": "5S6-1",
+          "text": "The essentials."
+        },
+        {
+          "id": "5S7-1",
+          "text": "01 — 03"
+        },
+        {
+          "id": "5SA-1",
+          "text": "Business environment"
+        },
+        {
+          "id": "5SC-1",
+          "text": "Salons &amp; Stylists"
+        },
+        {
+          "id": "5SE-1",
+          "text": "Country or market"
+        },
+        {
+          "id": "5SG-1",
+          "text": "Choose a market ⌄"
+        },
+        {
+          "id": "5SJ-1",
+          "text": "Estimated units / stations"
+        },
+        {
+          "id": "5SL-1",
+          "text": "e.g. 20"
+        },
+        {
+          "id": "5SN-1",
+          "text": "Number of locations"
+        },
+        {
+          "id": "5SP-1",
+          "text": "e.g. 2"
+        },
+        {
+          "id": "5SR-1",
+          "text": "Project stage"
+        },
+        {
+          "id": "5ST-1",
+          "text": "Choose a project stage ⌄"
+        },
+        {
+          "id": "5SV-1",
+          "text": "THE COLLECTION"
+        },
+        {
+          "id": "5SW-1",
+          "text": "02 — 03"
+        },
+        {
+          "id": "5SZ-1",
+          "text": "□ Hairdryers"
+        },
+        {
+          "id": "5T1-1",
+          "text": "□ Illuminated mirrors"
+        },
+        {
+          "id": "5T3-1",
+          "text": "□ Styling tools"
+        },
+        {
+          "id": "5T5-1",
+          "text": "ADDITIONAL REQUIREMENTS"
+        },
+        {
+          "id": "5T6-1",
+          "text": "03 — 03"
+        },
+        {
+          "id": "5T8-1",
+          "text": "Your space, electrical needs, workflow or questions..."
+        },
+        {
+          "id": "5TB-1",
+          "text": "Download project brief"
+        },
+        {
+          "id": "5TC-1",
+          "text": "→"
+        },
+        {
+          "id": "5TE-1",
+          "text": "Copy text"
+        },
+        {
+          "id": "5TF-1",
+          "text": "Local text file only. No quote, stock confirmation or enquiry submission."
+        },
+        {
+          "id": "5TI-1",
+          "text": "LIVE PROJECT PREVIEW"
+        },
+        {
+          "id": "5TK-1",
+          "text": "LOCAL ONLY"
+        },
+        {
+          "id": "5TM-1",
+          "text": "Your project essentials appear here as you fill in the form."
+        },
+        {
+          "id": "5TO-1",
+          "text": "Environment"
+        },
+        {
+          "id": "5TP-1",
+          "text": "Salons &amp; Stylists"
+        },
+        {
+          "id": "5TR-1",
+          "text": "Market"
+        },
+        {
+          "id": "5TS-1",
+          "text": "Not selected"
+        },
+        {
+          "id": "5TU-1",
+          "text": "Equipment positions"
+        },
+        {
+          "id": "5TV-1",
+          "text": "—"
+        },
+        {
+          "id": "5TX-1",
+          "text": "Locations"
+        },
+        {
+          "id": "5TY-1",
+          "text": "—"
+        },
+        {
+          "id": "5U0-1",
+          "text": "Collection"
+        },
+        {
+          "id": "5U1-1",
+          "text": "Not selected"
+        },
+        {
+          "id": "5U3-1",
+          "text": "First priority"
+        },
+        {
+          "id": "5U4-1",
+          "text": "Not selected"
+        },
+        {
+          "id": "5U6-1",
+          "text": "QUESTIONS TO RESOLVE"
+        },
+        {
+          "id": "5UB-1",
+          "text": "AERLOR"
+        },
+        {
+          "id": "5UH-1",
+          "text": "© 2026 AERLOR{'                                    '}Privacy{'   '}Terms{'   '}Accessibility"
+        }
+      ]
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "pageId": "p-2-0",
+      "nodeId": "R3-0",
+      "key": "aerlor_old_planner",
+      "texts": [
+        {
+          "id": "RA-0",
+          "text": "×"
+        },
+        {
+          "id": "RF-0",
+          "text": "AERLOR / HOSPITALITY"
+        },
+        {
+          "id": "RJ-0",
+          "text": "Tell us what a more considered essential could look like for your property."
+        },
+        {
+          "id": "RT-0",
+          "text": "Your name"
+        },
+        {
+          "id": "RW-0",
+          "text": "Alex Morgan"
+        },
+        {
+          "id": "RZ-0",
+          "text": "Work email"
+        },
+        {
+          "id": "S2-0",
+          "text": "alex@yourhotel.com"
+        },
+        {
+          "id": "S6-0",
+          "text": "Hotel or group"
+        },
+        {
+          "id": "S9-0",
+          "text": "Your property or portfolio"
+        },
+        {
+          "id": "SE-0",
+          "text": "Country"
+        },
+        {
+          "id": "SH-0",
+          "text": "Canada"
+        },
+        {
+          "id": "SK-0",
+          "text": "Approximate room count"
+        },
+        {
+          "id": "SN-0",
+          "text": "Select a range"
+        },
+        {
+          "id": "ST-0",
+          "text": "Which concept interests you?"
+        },
+        {
+          "id": "T0-0",
+          "text": "PRO"
+        },
+        {
+          "id": "T5-0",
+          "text": "LITE"
+        },
+        {
+          "id": "TA-0",
+          "text": "Both / exploring"
+        },
+        {
+          "id": "TE-0",
+          "text": "What matters most?"
+        },
+        {
+          "id": "TG-0",
+          "text": "Your guest experience, design direction, timing, or operational requirements…"
+        },
+        {
+          "id": "TK-0",
+          "text": "Create my pilot brief"
+        },
+        {
+          "id": "TM-0",
+          "text": "↗"
+        },
+        {
+          "id": "TP-0",
+          "text": "This creates a local text file, not an order or a sample reservation."
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "AGENTS.md",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/AGENTS.md",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "docs/PROJECT_BOOTSTRAP.md",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/docs/PROJECT_BOOTSTRAP.md",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "README.md",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/README.md",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "design/precision-r5/README.md",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/design/precision-r5/README.md",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "design/paper/README.md",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/design/paper/README.md",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "scripts/r4/ui.mjs",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/scripts/r4/ui.mjs",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "scripts/build-storefront.mjs",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/scripts/build-storefront.mjs",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "src/storefront.ts",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/src/storefront.ts",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "src/main.ts",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/src/main.ts",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "src/pilot.ts",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/src/pilot.ts",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "pin": "c6f7deee41b9d941182130d9bfb95c1e84f8a319",
+      "path": "LAUNCH.md",
+      "url": "https://github.com/mastermindx-market-intelligence/aerlor/blob/c6f7deee41b9d941182130d9bfb95c1e84f8a319/LAUNCH.md",
+      "status": "content read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "pin": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "path": "templates/chat.html",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/chat.html",
+      "status": "content read; no new behavior repair proposed"
+    }
+  ],
+  "heldAndReferencePages": [
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pageId": "p-2-0",
+      "pageName": "Reference · Historical program handoff",
+      "artboards": [
+        {
+          "id": "61-0",
+          "name": "Popup Upgrade · Continuation Checkpoint",
+          "width": 900,
+          "height": 720,
+          "childCount": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-6-0",
+      "pageName": "04 · Implementation + Visual Engine · References",
+      "artboards": [
+        {
+          "id": "13J-0",
+          "name": "20 · IMPLEMENTATION MAP · Existing Brain + Visual Engine · R12",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "9T-0",
+          "name": "90 · VISUAL ENGINE · Patterns + artwork · R1",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "1HF-0",
+          "name": "22 · INTERACTION SYSTEM · Inspect Challenge Save · R14",
+          "width": 1440,
+          "height": null,
+          "childCount": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "fileName": "MarketOntology",
+      "pageId": "p-5-0",
+      "pageName": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+      "artboards": [
+        {
+          "id": "4VC-0",
+          "name": "15 · R8 · DESKTOP · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "50G-0",
+          "name": "16 · R8 STATE of 15 · Desktop · Company Evidence",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "56Q-0",
+          "name": "17 · R8 · MOBILE · Prepared Companies",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "59N-0",
+          "name": "18 · R8 STATE of 17 · Mobile · Sources Inspector",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5B8-0",
+          "name": "19 · R8 · DESKTOP · Light · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5GC-0",
+          "name": "20 · R9 STATE · Desktop · Revised Readings Ready",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5LM-0",
+          "name": "21 · R9 · DESKTOP · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5S8-0",
+          "name": "22 · R9 · MOBILE · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5TV-0",
+          "name": "23 · R9 · TABLET · Review Revised Readings",
+          "width": 768,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5VO-0",
+          "name": "24 · R9 · MOBILE · Light · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5XB-0",
+          "name": "25 · R9 · MOBILE · Find Workspace",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "618-0",
+          "name": "27 · R10 · DESKTOP · Refine Comparison",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "67J-0",
+          "name": "28 · R40 · Refine comparison · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "693-0",
+          "name": "29 · R40 · Comparison no matches · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6A3-0",
+          "name": "30 · R40 · Comparison no matches · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6B3-0",
+          "name": "59 · R40 · Refine comparison · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6CN-0",
+          "name": "60 · R40 · Comparison filtered · Phone Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6F1-0",
+          "name": "61 · R40 · Comparison filtered · Phone Light",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6HF-0",
+          "name": "62 · R40 · Refine · 320 · Dark EN",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6IZ-0",
+          "name": "63 · R40 · Refine · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6KJ-0",
+          "name": "64 · R40 · No matches · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "6LJ-0",
+          "name": "65 · R40 · Comparison filtered · 320 · Light ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "8GI-0",
+          "name": "15 · R8 · DESKTOP · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8LM-0",
+          "name": "19 · R8 · DESKTOP · Light · Prepared Companies",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8QQ-0",
+          "name": "16 · R8 STATE of 15 · Desktop · Company Evidence",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "8X0-0",
+          "name": "17 · R8 · MOBILE · Prepared Companies",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "8ZX-0",
+          "name": "18 · R8 STATE of 17 · Mobile · Sources Inspector",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "91I-0",
+          "name": "20 · R9 STATE · Desktop · Revised Readings Ready",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "96S-0",
+          "name": "21 · R9 · DESKTOP · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9DE-0",
+          "name": "22 · R9 · MOBILE · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9F1-0",
+          "name": "23 · R9 · TABLET · Review Revised Readings",
+          "width": 768,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "9GU-0",
+          "name": "24 · R9 · MOBILE · Light · Review Revised Readings",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9IH-0",
+          "name": "25 · R9 · MOBILE · Find Workspace",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "9ME-0",
+          "name": "27 · R10 · DESKTOP · Refine Comparison",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9SP-0",
+          "name": "28 · R40 · Refine comparison · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9U9-0",
+          "name": "29 · R40 · Comparison no matches · Phone Dark",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9V9-0",
+          "name": "30 · R40 · Comparison no matches · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9W9-0",
+          "name": "59 · R40 · Refine comparison · Phone Light",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "9XT-0",
+          "name": "60 · R40 · Comparison filtered · Phone Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "A07-0",
+          "name": "61 · R40 · Comparison filtered · Phone Light",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "A2L-0",
+          "name": "62 · R40 · Refine · 320 · Dark EN",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A45-0",
+          "name": "63 · R40 · Refine · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A5P-0",
+          "name": "64 · R40 · No matches · 320 · Light ZH",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "A6P-0",
+          "name": "65 · R40 · Comparison filtered · 320 · Light ZH",
+          "width": 320,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "HL-0",
+          "name": "14 · WIP · Company bridge · NOT FOR BUILD",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "pageId": "p-5-0",
+      "pageName": "REF · Guide Baseline · Themes + Locales",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "Market Guide · Light · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "3W-0",
+          "name": "Market Guide · Dark · EN · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "EY-0",
+          "name": "Market Guide · Light · ZH · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "IO-0",
+          "name": "Market Guide · Dark · ZH · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "7M-0",
+          "name": "Market Guide · Light · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "BA-0",
+          "name": "Market Guide · Dark · EN · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "ME-0",
+          "name": "Market Guide · Light · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "Q2-0",
+          "name": "Market Guide · Dark · ZH · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-B-0",
+      "pageName": "80 · R10 · Builder Contracts & Reference States",
+      "artboards": [
+        {
+          "id": "P9-0",
+          "name": "90 · R10 SPEC · Product + Engine Ledger",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "Q2-0",
+          "name": "91 · R10 SPEC · Data + Historical + MO",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "R0-0",
+          "name": "92 · R10 SPEC · Interaction + Release",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "2FN-0",
+          "name": "93 · R10 SPEC · State Specimens & Recovery",
+          "width": 1440,
+          "height": 1100,
+          "childCount": 4
+        },
+        {
+          "id": "2WI-0",
+          "name": "94 · R10 SPEC · Mobile Macro + Risk Contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3PB-0",
+          "name": "95 · R10 SPEC · History, Scenarios & Library Contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3Q6-0",
+          "name": "100 · R10 SPEC · Research Library Group Contracts",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3R1-0",
+          "name": "101 · R10 SPEC · Library Reflow + Search",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3TE-0",
+          "name": "96 · R10 SPEC · Small Screen + Enlarged Text",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3U4-0",
+          "name": "97 · R10 SPEC · Scenario States + Reflow",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "422-0",
+          "name": "106 · R10 SPEC · Search, Coverage + Saved States",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "6EG-0",
+          "name": "124 · R10 SPEC · Saved Research Workspace + Evidence Refresh",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-I-0",
+      "pageName": "R14 · Global Surveillance · Frozen design",
+      "artboards": [
+        {
+          "id": "G9J-0",
+          "name": "R14 · Scanner · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "HIX-0",
+          "name": "R14 · Scanner · Desktop · Dark · ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "I5E-0",
+          "name": "R14 · Scanner · Desktop · Light · ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "GWG-0",
+          "name": "R14 · Scanner · Desktop · Light · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "IRV-0",
+          "name": "R14 · Scanner · Mobile · Dark · EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "J74-0",
+          "name": "R14 · Scanner · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "JLR-0",
+          "name": "R14 · Scanner · Mobile · Dark · ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "K0E-0",
+          "name": "R14 · Scanner · Mobile · Light · ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "KF1-0",
+          "name": "R14 · Dislocation explorer · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "KUS-0",
+          "name": "R14 · Transmission workbench · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "LLI-0",
+          "name": "R14 · EM market dossier · Desktop · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "MH8-0",
+          "name": "R14 · Scenario lab · Replay · Watch · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "M06-0",
+          "name": "R14 · Coverage and data states · Desktop · Light · EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "N8D-0",
+          "name": "R14 · State matrix · Dark/Light · EN/ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-G-0",
+      "pageName": "REF · R12 · Country Intelligence",
+      "artboards": [
+        {
+          "id": "DMX-0",
+          "name": "R12 · Country Intelligence · Desktop Dark",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "DW7-0",
+          "name": "R12 · Country Intelligence · Desktop Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "E4D-0",
+          "name": "R12 · Country Intelligence · Mobile Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "EC2-0",
+          "name": "R12 · Country Intelligence · Mobile Light",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "ER4-0",
+          "name": "R12 · UK · Policy and fiscal detail",
+          "width": 768,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "ER5-0",
+          "name": "R12 · Taiwan · Policy and forecast detail",
+          "width": 768,
+          "height": null,
+          "childCount": 6
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-H-0",
+      "pageName": "REF · R13 · Global Surveillance · Expansion",
+      "artboards": [
+        {
+          "id": "EZ1-0",
+          "name": "R13 · 01 Global scanner · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "FZY-0",
+          "name": "R13 · 01 Global scanner · Light ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "FUM-0",
+          "name": "R13 · 01 Global scanner · Dark ZH",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "FNH-0",
+          "name": "R13 · 01B Global scanner · Light EN",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "F4Y-0",
+          "name": "R13 · 02 Dislocation explorer · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "F93-0",
+          "name": "R13 · 03 Transmission to US · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "FCL-0",
+          "name": "R13 · 04 EM market dossier · Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 10
+        },
+        {
+          "id": "FG7-0",
+          "name": "R13 · 05 Global scanner · Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "G73-0",
+          "name": "R13 · 05 Mobile · Light ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "G5A-0",
+          "name": "R13 · 05 Mobile · Dark ZH",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "FST-0",
+          "name": "R13 · 05B Global scanner · Mobile Light EN",
+          "width": 390,
+          "height": null,
+          "childCount": 11
+        },
+        {
+          "id": "FIB-0",
+          "name": "R13 · 06 Coverage and partial data · Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-A-0",
+      "pageName": "ARCHIVE · Relocated Families · Not for Build",
+      "artboards": [
+        {
+          "id": "AOD-0",
+          "name": "Returns Calendar · Stock Dossier · Desktop",
+          "width": 1440,
+          "height": 1000,
+          "childCount": 4
+        },
+        {
+          "id": "QYU-0",
+          "name": "WORKING HOLD · Comparison references · Not for build",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "AT2-0",
+          "name": "Returns Calendar · Native Dossier · 390",
+          "width": 390,
+          "height": 844,
+          "childCount": 1
+        },
+        {
+          "id": "AWJ-0",
+          "name": "Returns Calendar · Early Close State",
+          "width": 760,
+          "height": 440,
+          "childCount": 1
+        },
+        {
+          "id": "AXL-0",
+          "name": "Returns v2 · Desktop Study · 1440",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "B4J-0",
+          "name": "Returns v2 · Mobile Study · 390",
+          "width": 390,
+          "height": 1290,
+          "childCount": 4
+        },
+        {
+          "id": "B9F-0",
+          "name": "Returns v2 · Rail Entry · 360",
+          "width": 360,
+          "height": 320,
+          "childCount": 2
+        },
+        {
+          "id": "BAB-0",
+          "name": "Returns v2 · Expanded Sessions and Recovery",
+          "width": 900,
+          "height": 620,
+          "childCount": 2
+        },
+        {
+          "id": "8OX-0",
+          "name": "00 · SPEC · China Journey + State Contract",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 1
+        },
+        {
+          "id": "8Q7-0",
+          "name": "10 · DESKTOP · China Intelligence",
+          "width": 1440,
+          "height": 1180,
+          "childCount": 1
+        },
+        {
+          "id": "90H-0",
+          "name": "20 · TABLET · China Intelligence",
+          "width": 820,
+          "height": 1533,
+          "childCount": 2
+        },
+        {
+          "id": "99H-0",
+          "name": "30 · MOBILE · China Intelligence",
+          "width": 390,
+          "height": 2583,
+          "childCount": 3
+        },
+        {
+          "id": "ANO-0",
+          "name": "00 · ARCHIVED · Intelligence Hub R1–R3 · Redirect",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "pageId": "p-9-0",
+      "pageName": "90 · ARCHIVE · Returns v2 duplicate studies · NOT FOR BUILD",
+      "artboards": [
+        {
+          "id": "BBL-0",
+          "name": "ARCHIVE COPY · Returns v2 · Desktop Study",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "BI8-0",
+          "name": "ARCHIVE COPY · Returns v2 · Mobile Study",
+          "width": 390,
+          "height": 1290,
+          "childCount": 4
+        },
+        {
+          "id": "BN1-0",
+          "name": "ARCHIVE COPY · Returns v2 · Rail Entry",
+          "width": 360,
+          "height": 320,
+          "childCount": 2
+        },
+        {
+          "id": "BNW-0",
+          "name": "ARCHIVE COPY · Returns v2 · Recovery Study",
+          "width": 900,
+          "height": 620,
+          "childCount": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-2-0",
+      "pageName": "01 · Interaction + Recovery · R2 References",
+      "artboards": [
+        {
+          "id": "4B-0",
+          "name": "10 · STATE · Desktop · Collapsed Launcher",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "AR-0",
+          "name": "11 · STATE · Desktop · Context Popup",
+          "width": 1440,
+          "height": 900,
+          "childCount": 2
+        },
+        {
+          "id": "IJ-0",
+          "name": "12 · STATE · Desktop · Expanded Research",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "NJ-0",
+          "name": "13 · ANSWER STATE · Desktop · Financial Scenario",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "SI-0",
+          "name": "14 · STATE · Desktop · Save Case Review",
+          "width": 1440,
+          "height": 900,
+          "childCount": 3
+        },
+        {
+          "id": "X6-0",
+          "name": "15 · VARIANT STATE · Mobile · Conversation Sheet",
+          "width": 390,
+          "height": 844,
+          "childCount": 4
+        },
+        {
+          "id": "YK-0",
+          "name": "16 · BUILDER SPEC · R2 · First Open + Continuity",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 2
+        },
+        {
+          "id": "11E-0",
+          "name": "17 · BUILDER SPEC · R2 · Trust + Recovery",
+          "width": 1440,
+          "height": 1000,
+          "childCount": 3
+        },
+        {
+          "id": "130-0",
+          "name": "18 · BUILDER SPEC · R2 · Interaction Blueprint",
+          "width": 1440,
+          "height": 1660,
+          "childCount": 5
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-3-0",
+      "pageName": "02 · Answer Craft · R7–R8 References",
+      "artboards": [
+        {
+          "id": "14Y-0",
+          "name": "20 · BUILDER SPEC · R7 · Answer Craft",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "17B-0",
+          "name": "21 · BUILDER SPEC · R7 · System Contract",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "18K-0",
+          "name": "22 · BUILDER REF · R7 · Popup + Narrow Specimens",
+          "width": 1440,
+          "height": 1040,
+          "childCount": 2
+        },
+        {
+          "id": "1B7-0",
+          "name": "30 · ANSWER SPECIMEN · R8 · Desktop · Finance",
+          "width": 1440,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "1DA-0",
+          "name": "31 · ANSWER SPECIMEN · R8 · Desktop · Compare",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1FW-0",
+          "name": "32 · ANSWER SPECIMEN · R8 · Desktop · Relationships",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1IL-0",
+          "name": "33 · ANSWER SPECIMEN · R8 · Desktop · Sources",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "1L4-0",
+          "name": "34 · ANSWER SPECIMEN · R8 · Mobile · Narrow",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-4-0",
+      "pageName": "03 · Legacy Reference + Assets",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "90 · LEGACY REF · Desktop · Quiet Command Center",
+          "width": 1440,
+          "height": 980,
+          "childCount": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-7-0",
+      "pageName": "05 · SOURCE ONLY · Chat Live Baseline",
+      "artboards": [
+        {
+          "id": "6JU-0",
+          "name": "SOURCE ONLY · 08 · Mastermind AI · Chat live baseline",
+          "width": 1440,
+          "height": 1000,
+          "childCount": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "fileName": "Mastermind AI",
+      "pageId": "p-6-0",
+      "pageName": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+      "artboards": [
+        {
+          "id": "4LL-0",
+          "name": "10 · R11 · DESKTOP · Research Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4RN-0",
+          "name": "34 · R11 · DESKTOP · Light · Research Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "4XP-0",
+          "name": "31 · R11 STATE · Desktop · Evidence Inspector",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "54L-0",
+          "name": "32 · R11 · MOBILE · Guided Long Read",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "58E-0",
+          "name": "33 · R11 STATE of 32 · Mobile · Claim Evidence",
+          "width": 390,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "59J-0",
+          "name": "35 · R11 · MOBILE · Research Outline",
+          "width": null,
+          "height": null,
+          "childCount": 2
+        },
+        {
+          "id": "5E3-0",
+          "name": "36 · R11 · TABLET · Guided Long Read",
+          "width": null,
+          "height": null,
+          "childCount": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-6-0",
+      "pageName": "05 · Reference Screens",
+      "artboards": [
+        {
+          "id": "3D0-0",
+          "name": "Reference · Sector Breadth · Desktop · Dark",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3GU-0",
+          "name": "Reference · Sector Breadth · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3KO-0",
+          "name": "Reference · Sector Breadth · Mobile · Dark",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "3NL-0",
+          "name": "Reference · Sector Breadth · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "40D-1",
+          "name": "Reference · NOIR Profile Application",
+          "width": 1440,
+          "height": 1080,
+          "childCount": 4
+        },
+        {
+          "id": "4PO-0",
+          "name": "F02 · Macro · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "4YD-0",
+          "name": "F02 · Macro · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "56L-0",
+          "name": "F02 · Company · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5HV-0",
+          "name": "F02 · Company · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5VE-0",
+          "name": "F02 · Options · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "67V-0",
+          "name": "F02 · Options · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6JX-0",
+          "name": "F02 · Editorial · Dark · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "6NG-0",
+          "name": "F02 · Editorial · Light · Candidate 2",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M312VSDSZFVT45674GDVJVZN",
+      "fileName": "Mastermind Product Design System — Canonical",
+      "pageId": "p-8-1",
+      "pageName": "07 · Source Imports + Assets · Pending Review",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "SOURCE / Macro · 1440 · Dark EN · Sep 11 snapshot · import under review",
+          "width": 1440,
+          "height": 2699,
+          "childCount": 4
+        },
+        {
+          "id": "23O-0",
+          "name": "PENDING / public-browser PNG transfer · local witness preserved",
+          "width": 1440,
+          "height": 2699,
+          "childCount": 2
+        }
+      ]
+    }
+  ],
+  "aerlorAllPages": [
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-3-0",
+      "pageName": "00 / Foundations and components",
+      "artboards": [
+        {
+          "id": "18U-0",
+          "name": "AERLOR / Foundations and components",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        }
+      ],
+      "root": "root_node_p-3-0",
+      "nodeCount": 71,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-9-1",
+      "pageName": "08 / R9 / Solutions · Editorial + Professional",
+      "artboards": [
+        {
+          "id": "5HR-1",
+          "name": "R9 / Solutions flagship / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "5HS-1",
+          "name": "R9 / Salons professional / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "5HT-1",
+          "name": "R9 / Business planner / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "5HU-1",
+          "name": "R9 / Solutions flagship / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "5HV-1",
+          "name": "R9 / Salons professional / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 7
+        }
+      ],
+      "root": "root_node_p-9-1",
+      "nodeCount": 494,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-8-0",
+      "pageName": "07 / R7 / Consumer flagship + business",
+      "artboards": [
+        {
+          "id": "4ZS-0",
+          "name": "R7 / Image masters / Generated design studies",
+          "width": 1440,
+          "height": null,
+          "childCount": 12
+        },
+        {
+          "id": "50D-0",
+          "name": "R7 / Consumer home desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "53B-0",
+          "name": "R7 / Consumer home mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "562-1",
+          "name": "R7 / Retail product desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "597-1",
+          "name": "R7 / Retail product mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "5YG-1",
+          "name": "R8 / Retail flagship / Desktop / Editorial",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        },
+        {
+          "id": "61L-1",
+          "name": "R8 / Retail flagship / Mobile / Editorial",
+          "width": 390,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "5C5-1",
+          "name": "R7 / Product menu and bag states",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "5DK-1",
+          "name": "R7 / Business channel desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 4
+        }
+      ],
+      "root": "root_node_p-8-0",
+      "nodeCount": 945,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-7-0",
+      "pageName": "06 / R6 / Solutions · Salons + specialty markets",
+      "artboards": [
+        {
+          "id": "4IX-0",
+          "name": "Solutions / Overview / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4IY-0",
+          "name": "Salons & Stylists / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4IZ-0",
+          "name": "Spas & Wellness / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "4J0-0",
+          "name": "Fitness & Clubs / Desktop 1440",
+          "width": 1440,
+          "height": null,
+          "childCount": 5
+        },
+        {
+          "id": "4SN-0",
+          "name": "Navigation / Solutions dropdown / Desktop",
+          "width": 1440,
+          "height": null,
+          "childCount": 3
+        },
+        {
+          "id": "4SO-0",
+          "name": "Solutions / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "4SP-0",
+          "name": "Salons & Stylists / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 4
+        },
+        {
+          "id": "4SQ-0",
+          "name": "Navigation / Solutions expanded / Mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-7-0",
+      "nodeCount": 572,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-6-0",
+      "pageName": "05 / R5 Release / Premium technology",
+      "artboards": [
+        {
+          "id": "3UX-0",
+          "name": "R5 / Home desktop / Release design",
+          "width": 1440,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "3Z2-0",
+          "name": "R5 / Home mobile / Release design",
+          "width": 390,
+          "height": null,
+          "childCount": 9
+        },
+        {
+          "id": "47I-0",
+          "name": "R5 / Product desktop / Release design",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4BD-0",
+          "name": "R5 / Product mobile / Release design",
+          "width": 390,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "4F3-0",
+          "name": "R5 / Hotels desktop / Release design",
+          "width": 1440,
+          "height": null,
+          "childCount": 8
+        }
+      ],
+      "root": "root_node_p-6-0",
+      "nodeCount": 551,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-5-0",
+      "pageName": "04 / R5 / Brand + product / Design-first rebuild",
+      "artboards": [
+        {
+          "id": "3NB-0",
+          "name": "R5 / A1 product / Desktop / Design review",
+          "width": 1440,
+          "height": null,
+          "childCount": 7
+        },
+        {
+          "id": "3OZ-0",
+          "name": "R5 / Brand home / Desktop / Design review",
+          "width": 1440,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3SE-0",
+          "name": "R5 / Brand home / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 6
+        },
+        {
+          "id": "3TV-0",
+          "name": "R5 / A1 product / Mobile 390",
+          "width": 390,
+          "height": null,
+          "childCount": 3
+        }
+      ],
+      "root": "root_node_p-5-0",
+      "nodeCount": 262,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-4-0",
+      "pageName": "03 / R4 / Precision hospitality",
+      "artboards": [
+        {
+          "id": "1BE-0",
+          "name": "R4 / Home / Precision technology / 1440",
+          "width": 1440,
+          "height": 980,
+          "childCount": 3
+        },
+        {
+          "id": "1CJ-0",
+          "name": "R4 / home / mobile / 390",
+          "width": 390,
+          "height": 9500.28,
+          "childCount": 10
+        },
+        {
+          "id": "1ON-0",
+          "name": "R4 / home / desktop / 1440",
+          "width": 1440,
+          "height": 5635.12,
+          "childCount": 10
+        },
+        {
+          "id": "211-0",
+          "name": "R4 / collection / desktop / 1440",
+          "width": 1440,
+          "height": 2835.67,
+          "childCount": 5
+        },
+        {
+          "id": "29P-0",
+          "name": "R4 / product / desktop / 1440",
+          "width": 1440,
+          "height": 5196.98,
+          "childCount": 10
+        },
+        {
+          "id": "2M6-0",
+          "name": "R4 / product / mobile / 390",
+          "width": 390,
+          "height": 7293.38,
+          "childCount": 10
+        },
+        {
+          "id": "2Y9-0",
+          "name": "R4 / hotels / desktop / 1440",
+          "width": 1440,
+          "height": 5547.05,
+          "childCount": 11
+        },
+        {
+          "id": "3B1-0",
+          "name": "R4 / project / desktop / 1440",
+          "width": 1440,
+          "height": 3274.78,
+          "childCount": 6
+        },
+        {
+          "id": "3L5-0",
+          "name": "R4 / Foundations / Precision system",
+          "width": 1440,
+          "height": 1190,
+          "childCount": 5
+        }
+      ],
+      "root": "root_node_p-4-0",
+      "nodeCount": 2740,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-2-0",
+      "pageName": "02 / Product and interaction states",
+      "artboards": [
+        {
+          "id": "KT-0",
+          "name": "AERLOR / PRO / desktop",
+          "width": 1000,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "ME-0",
+          "name": "Pilot planner / default / mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "PH-0",
+          "name": "AERLOR / LITE / desktop",
+          "width": 1000,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "R3-0",
+          "name": "Pilot planner / default / desktop",
+          "width": 660,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "TR-0",
+          "name": "Pilot planner / validation / desktop",
+          "width": 660,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "WI-0",
+          "name": "Pilot planner / local brief ready / desktop",
+          "width": 660,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "Z9-0",
+          "name": "AERLOR / PRO / mobile",
+          "width": 367,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "10U-0",
+          "name": "AERLOR / LITE / mobile",
+          "width": 367,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "12F-0",
+          "name": "Pilot planner / validation / mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "154-0",
+          "name": "Pilot planner / local brief ready / mobile",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "17T-0",
+          "name": "Privacy and preview notice / mobile",
+          "width": 354,
+          "height": null,
+          "childCount": 1
+        },
+        {
+          "id": "18D-0",
+          "name": "Navigation / mobile expanded",
+          "width": 390,
+          "height": null,
+          "childCount": 1
+        }
+      ],
+      "root": "root_node_p-2-0",
+      "nodeCount": 644,
+      "error": false
+    },
+    {
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "fileName": "AERLOR — Hospitality Website & Design System",
+      "pageId": "p-1-0",
+      "pageName": "01 · Website · Desktop & Mobile",
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "AERLOR / Home / Desktop 1440",
+          "width": 1440,
+          "height": 5866.53125,
+          "childCount": 10
+        },
+        {
+          "id": "A4-0",
+          "name": "AERLOR / Home / Mobile 390",
+          "width": 390,
+          "height": 6790.734375,
+          "childCount": 10
+        }
+      ],
+      "root": "root_node_p-1-0",
+      "nodeCount": 550,
+      "error": false
+    }
+  ]
+}

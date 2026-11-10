@@ -1,0 +1,42 @@
+{
+  "adapter_materialization": {
+    "bytes": 1349834,
+    "files": 124,
+    "lazy_fetch_permitted": false,
+    "method": "verified_existing_local_committed_blob_export",
+    "worktree_content_used": false
+  },
+  "candidate": "workspace-sha256:b4cc80d15269ad084f37f4c998b380b62978cea5a0887435cdb1ef471f56ab12",
+  "installed": false,
+  "live_source_unchanged": true,
+  "native_core_files": 20,
+  "observed_at": "2026-11-08T01:50:48.854808+00:00",
+  "owner_materialization": {
+    "bytes": 74718668,
+    "files": 2532,
+    "lazy_fetch_permitted": false,
+    "method": "verified_local_committed_blobs",
+    "unique_blobs": 2529,
+    "worktree_content_used": false
+  },
+  "provider_requests": 0,
+  "runtime_reload": false,
+  "schema": "mastermind.hermes_h4_combined_qualification_preparation.v1",
+  "security_fixture_commit": "9a4a24041ec8a121c3cb9e03e5e4c1185774999e",
+  "security_fixture_postimage_sha256": "00441fa0c776ac57fec0cab276afbcb959f1ac5bc0673bcb5f5eea809ad80d59",
+  "security_fixture_preimage_sha256": "0e9d578a4880b57b6cee9451ef364f2f769e77b15eda6ea81a3262aa97f9c7da",
+  "source_parent": "e830c1c85675ab9bfe977fefae0bde6e710363a5",
+  "tracked_overlay": [
+    "agent/agent_init_fallback.py",
+    "agent/chat_completion_helpers.py",
+    "tests/tui_gateway/test_kanban_resume_guard.py",
+    "tests/tui_gateway/test_protocol.py",
+    "tests/tui_gateway/test_tui_gateway_server.py",
+    "tui_gateway/methods_session.py"
+  ],
+  "untracked_overlay": [
+    "tests/test_fallback_family_first.py",
+    "tests/tui_gateway/test_omit_messages_resume_bounded_ack.py"
+  ],
+  "worker_dispatches": 0
+}

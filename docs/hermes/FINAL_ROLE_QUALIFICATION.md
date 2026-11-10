@@ -204,6 +204,19 @@ qualified0700 directory; compare an existing fixture's exact facts rather than
 rewriting it. Capture the installed unit/drop-ins and effective ExecStart,
 Restart, User, Group, ControlGroup, IPAddressDeny/Allow, dependencies and paths.
 
+The existing runtime installer can perform a first installation into a role state
+root containing only this qualification directory. It requires both directories
+to be owned by the installing role with0700 mode and every retained member to
+be a role-owned0600, single-link regular file. Only the exact synthetic marker,
+validated role/state/secrets-path profiles named `profile-*.yaml`, and matching
+role reports using the v2 qualification schema named `report-*.json` are accepted.
+Foreign entries, links, changed contents or changed custody refuse installation.
+The installer rechecks the complete retained preimage before publishing `current`.
+A failed attempt preserves qualification bytes and removes only its own unchanged
+allocation artifacts. Installation and upgrades retain those records in place.
+These records are evidence retention, including truthful INCOMPLETE reports;
+they do not satisfy native-runtime, credential, provider or enrollment admission.
+
 Prepare one root-owned0644 drop-in with an operation-specific previously absent
 name, for example `90-isolation-<qid>-a1.conf`. This is a reviewable template;
 substitute paths and executable from the approved effective unit:

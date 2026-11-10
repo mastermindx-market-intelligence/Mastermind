@@ -390,6 +390,11 @@ _MEASURED_SIX_JOB_PLACEMENT = {
     'tests/test_workspace_result_http.py': 0,  # 8.7s
     'tests/test_workspace_result_service.py': 3,  # 14.5s
     'tests/test_workspace_retained_root_selection.py': 1,  # 8.8s
+    # Later single-module forward pin; all historical pins above are unchanged.
+    # Actual closed run42540190617 measured this unpinned module on shard0;
+    # shard4 had the lightest repository step. Partial timings, no speedup claim.
+    # Evidence: ci/shard_timings/42540190617-hermes-forward.json.
+    'tests/test_hermes_primary_application_enrollment.py': 4,
 }
 
 
