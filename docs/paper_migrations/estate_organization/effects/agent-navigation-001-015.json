@@ -1,0 +1,5629 @@
+{
+  "schema": "paper.estate.operation_receipts.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "phase": "AI worker navigation",
+  "records": [
+    {
+      "operation_id": "peo-20261109-c1-agent-protocol-page-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "name": "00A · AGENT README · Protocol",
+        "icon": "blueprint"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "5de70a0d083e575d4f2554aa0e98caa1a53a9f032da49673ccabf0f7973b90b9",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-agent-protocol-page-01",
+        "tool": "create_page",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"pageId\": \"p-B-0\",\n  \"name\": \"00A · AGENT README · Protocol\",\n  \"icon\": \"blueprint\"\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "5de70a0d083e575d4f2554aa0e98caa1a53a9f032da49673ccabf0f7973b90b9",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "48818e9d0cc50f9362d242191e85043a15dbc959a04cc2510e0b6ef5b1fd73ed",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-agent-protocol-header-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "root_node_p-B-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#FFFFFF;display:flex;flex-direction:column;gap:24px;padding:48px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;\"><div layer-name=\"Agent guide header\" style=\"display:flex;flex-direction:column;gap:12px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.08em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:40px;line-height:48px;font-weight:700;color:#1C2430;\">Agent navigation protocol</div><div style=\"font-size:18px;line-height:28px;color:#5D6B7E;\">Find the exact scope, source and target before acting. This page is for AI workers learning the estate, editing designs or preparing implementation.</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#1C2430;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW<br/>PAGE_ID: p-B-0<br/>ROLE: guide<br/>EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "48818e9d0cc50f9362d242191e85043a15dbc959a04cc2510e0b6ef5b1fd73ed",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-agent-protocol-header-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"GY-0\",\n      \"name\": \"AGENT README | INTERNAL | NOT PRODUCT UI\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"GZ-0\",\n      \"name\": \"Agent guide header\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"H0-0\",\n      \"name\": \"INTERNAL AGENT GUIDE…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"H1-0\",\n      \"name\": \"Agent navigation pro…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"H2-0\",\n      \"name\": \"Find the exact scope…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"H3-0\",\n      \"name\": \"FILE_ID: 01M6XQ0KYY6…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "48818e9d0cc50f9362d242191e85043a15dbc959a04cc2510e0b6ef5b1fd73ed",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-authority-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | authority\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">Your assignment supplies authority</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">These are navigation facts. A working design, recorded contract, proposal and historical reference serve different jobs. A title, revision number, date or polished screen does not approve a build, edit or release. Read the relevant current source for the specific decision. An unresolved choice affects that choice; continue independent assigned work.</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-authority-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"H5-0\",\n      \"name\": \"Agent protocol | authority\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"H6-0\",\n      \"name\": \"Your assignment supp…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"H7-0\",\n      \"name\": \"These are navigation…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-learn-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | learn\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">LEARN · Understand a product</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Open Product map, choose the product’s exact scope, then read its Agent README and named content entry. Read only the pages needed for the question.<br/><br/>PRODUCT_MAP<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-2-0</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-learn-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"H9-0\",\n      \"name\": \"Agent protocol | learn\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HA-0\",\n      \"name\": \"LEARN · Understand a…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HB-0\",\n      \"name\": \"Open Product map, ch…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-design-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | design\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">DESIGN · Change Paper</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Use the local guide to select the relevant page. Read that page’s returned artboard list and the exact target board/node before editing. Preserve stable product IDs and unrelated designs. Refresh the exact file before each bounded change; reconcile same-target changes and uncertain effects. Add or update the existing index when navigation changes.</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-design-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"HD-0\",\n      \"name\": \"Agent protocol | design\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HE-0\",\n      \"name\": \"DESIGN · Change Pape…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HF-0\",\n      \"name\": \"Use the local guide …\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-build-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | build\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">PREPARE_BUILD · Find the implementation source</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Read the local build/behavior contract, its cited decision and the retained requirements for your scope. Carry forward the decision’s date and limits. If selection is unresolved, name the precise open choice and source to check; do not silently choose the highest revision.<br/><br/>BUILD_SOURCES<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0<br/>RETAINED_REQUIREMENTS<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-8-0</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-build-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"HH-0\",\n      \"name\": \"Agent protocol | build\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HI-0\",\n      \"name\": \"PREPARE_BUILD · Find…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HJ-0\",\n      \"name\": \"Read the local build…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-history-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | history\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">COMPARE_OR_RECOVER · Use historical material</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Follow the exact historical scope. A redirect proves a route; it does not prove preservation. A recovery copy remains a snapshot. A staging copy needs a recorded scope-specific cutover before becoming the working source. Preserve substantive old requirements and unproved successor relationships.<br/><br/>RECOVERY_AND_CLEANUP<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-9-0</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-history-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"HL-0\",\n      \"name\": \"Agent protocol | history\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HM-0\",\n      \"name\": \"COMPARE_OR_RECOVER ·…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HN-0\",\n      \"name\": \"Follow the exact his…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-reader-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | reader\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">MCP_READ · Use the requested result</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Pass explicit fileId and pageId to get_basic_info. Read requested content from result and confirm its returned file/page IDs. document.basic_info may describe the user-active page instead. Use verified board IDs for get_jsx; an empty page-root JSX is not proof of an empty page. document.snapshot_sha256 is a mutation drift guard, not content proof, permission or writer exclusivity.</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-reader-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"HP-0\",\n      \"name\": \"Agent protocol | reader\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HQ-0\",\n      \"name\": \"MCP_READ · Use the r…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HR-0\",\n      \"name\": \"Pass explicit fileId…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-roles-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | roles\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">ROLE · Meaning, not rank</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">guide — select a scope and destination<br/>working_design — entry for assigned design work<br/>recorded_contract — bounded decision; preserve date and qualifications<br/>proposal — adoption is not established by its presence<br/>retained_reference — historical or complementary requirements<br/>redirect — navigation only<br/>recovery_snapshot — reconstruction or comparison; preserve<br/>staging_copy — transfer comparison; check exact cutover evidence<br/><br/>Unknown role or missing evidence stays explicit. Technical/empty/container records are not product designs.</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-roles-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"HT-0\",\n      \"name\": \"Agent protocol | roles\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HU-0\",\n      \"name\": \"ROLE · Meaning, not …\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HV-0\",\n      \"name\": \"guide — select a sco…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-export-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | export\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">EXTRACT_PRODUCT_UI · Exclude internal guides</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Agent README, estate maps, build notes and recovery receipts are internal documentation. Select the actual product board for the assigned workflow before get_jsx. Do not export the guide as a product screen or infer that every board on a page belongs in the application.</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-export-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"HX-0\",\n      \"name\": \"Agent protocol | export\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HY-0\",\n      \"name\": \"EXTRACT_PRODUCT_UI ·…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"HZ-0\",\n      \"name\": \"Agent README, estate…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-return-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "targetNodeId": "GY-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"Agent protocol | return\" style=\"display:flex;flex-direction:column;gap:10px;padding:24px;background:#F7F8FA;border:1px solid #DDE2E9;\"><div style=\"font-family:Inter,system-ui,sans-serif;font-size:22px;line-height:30px;font-weight:700;color:#1C2430;\">RETURN · Leave a usable trail</div><div style=\"font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:25px;color:#354358;white-space:pre-wrap;overflow-wrap:anywhere;\">Return exact file/page/board IDs, changed targets, source qualifications, readback evidence and remaining decisions to the existing task record. Re-read relevant current pages when a snapshot is stale. Do not rebuild the estate index, replace a live writer or create a second authority store just to continue a bounded task.</div></div>"
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-return-01",
+        "tool": "write_html",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"createdNodes\": [\n    {\n      \"id\": \"I1-0\",\n      \"name\": \"Agent protocol | return\",\n      \"component\": \"Frame\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"I2-0\",\n      \"name\": \"RETURN · Leave a usa…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    },\n    {\n      \"id\": \"I3-0\",\n      \"name\": \"Return exact file/pa…\",\n      \"component\": \"Text\",\n      \"worldX\": null,\n      \"worldY\": null,\n      \"x\": null,\n      \"y\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-ai-cover-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "updates": [
+          {
+            "nodeId": "3-0",
+            "html": "MASTERMIND / AI WORKER ENTRY"
+          },
+          {
+            "nodeId": "4-0",
+            "html": "Find the right source."
+          },
+          {
+            "nodeId": "5-0",
+            "html": "AI workers: read the Agent README, choose a product and exact scope, then follow its source and retained requirements. Internal guide pages are separate from product UI."
+          },
+          {
+            "nodeId": "CH-0",
+            "html": "Agent README"
+          },
+          {
+            "nodeId": "CI-0",
+            "html": "Task routes, exact reads and source roles"
+          },
+          {
+            "nodeId": "CJ-0",
+            "html": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0"
+          },
+          {
+            "nodeId": "CL-0",
+            "html": "Product map"
+          },
+          {
+            "nodeId": "CM-0",
+            "html": "Working entries, by task and scope"
+          },
+          {
+            "nodeId": "CN-0",
+            "html": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-2-0"
+          },
+          {
+            "nodeId": "CQ-0",
+            "html": "Family and retained-source destinations"
+          },
+          {
+            "nodeId": "BW-0",
+            "html": "Read the recorded source before implementing."
+          },
+          {
+            "nodeId": "BX-0",
+            "html": "Match your assignment to the workflow’s scope, existing source qualifications and retained requirements. Working design, recorded contract, proposal and historical reference have different roles. A file name or revision number does not supply acceptance."
+          }
+        ]
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-ai-cover-01",
+        "tool": "set_text_content",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"updates\": [\n    {\n      \"nodeId\": \"3-0\"\n    },\n    {\n      \"nodeId\": \"4-0\"\n    },\n    {\n      \"nodeId\": \"5-0\"\n    },\n    {\n      \"nodeId\": \"CH-0\"\n    },\n    {\n      \"nodeId\": \"CI-0\"\n    },\n    {\n      \"nodeId\": \"CJ-0\"\n    },\n    {\n      \"nodeId\": \"CL-0\"\n    },\n    {\n      \"nodeId\": \"CM-0\"\n    },\n    {\n      \"nodeId\": \"CN-0\"\n    },\n    {\n      \"nodeId\": \"CQ-0\"\n    },\n    {\n      \"nodeId\": \"BW-0\"\n    },\n    {\n      \"nodeId\": \"BX-0\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-ai-start-page-label-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "update_pages",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "updates": [
+          {
+            "pageId": "p-1-0",
+            "name": "00 · AI START · Read first",
+            "icon": "arrow"
+          }
+        ]
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · Start here · Estate guide",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-ai-start-page-label-01",
+        "tool": "update_pages",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"updates\": [\n    {\n      \"pageId\": \"p-1-0\",\n      \"name\": \"00 · AI START · Read first\",\n      \"icon\": \"arrow\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · Start here · Estate guide",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "1abe8cedff442a6c85b36f1a677712173705532cf73b39b6107f32d98cc9e268",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · AI START · Read first",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "256ca1abda085f26222255d57ad251359b0079d85cdd18a681a4fabd3be0ca65",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-protocol-page-order-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "order": [
+          "p-1-0",
+          "p-B-0",
+          "p-2-0",
+          "p-6-0",
+          "p-8-0",
+          "p-7-0",
+          "p-3-0",
+          "p-4-0",
+          "p-5-0",
+          "p-A-0",
+          "p-9-0"
+        ]
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · AI START · Read first",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "256ca1abda085f26222255d57ad251359b0079d85cdd18a681a4fabd3be0ca65",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-protocol-page-order-01",
+        "tool": "arrange_pages",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "{\n  \"pages\": [\n    {\n      \"type\": \"page\",\n      \"id\": \"p-1-0\",\n      \"name\": \"00 · AI START · Read first\",\n      \"icon\": \"arrow\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-B-0\",\n      \"name\": \"00A · AGENT README · Protocol\",\n      \"icon\": \"blueprint\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-2-0\",\n      \"name\": \"01 · Product map\",\n      \"icon\": \"design\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-6-0\",\n      \"name\": \"02 · Build sources & decisions\",\n      \"icon\": \"blueprint\",\n      \"isActive\": true\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-8-0\",\n      \"name\": \"03 · Lineage & retained requirements\",\n      \"icon\": \"blueprint\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"divider\",\n      \"id\": \"p-7-0\"\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-3-0\",\n      \"name\": \"10 · Family index · Foundations & markets\",\n      \"icon\": \"images\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-4-0\",\n      \"name\": \"11 · Family index · Evidence & tools\",\n      \"icon\": \"images\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-5-0\",\n      \"name\": \"12 · Family index · Products & history\",\n      \"icon\": \"images\",\n      \"isActive\": false\n    },\n    {\n      \"type\": \"divider\",\n      \"id\": \"p-A-0\"\n    },\n    {\n      \"type\": \"page\",\n      \"id\": \"p-9-0\",\n      \"name\": \"90 · Recovery & cleanup\",\n      \"icon\": \"paper\",\n      \"isActive\": false\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · AI START · Read first",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "256ca1abda085f26222255d57ad251359b0079d85cdd18a681a4fabd3be0ca65",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · AI START · Read first",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-finish-agent-protocol-01",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "nodeIds": [
+          "1-0",
+          "GY-0"
+        ]
+      },
+      "before": {
+        "basic_info": {
+          "fileName": "00 · Paper Estate · Start Here",
+          "pageName": "02 · Build sources & decisions",
+          "pageId": "p-6-0",
+          "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+          "rootNodeId": "root_node_p-6-0",
+          "nodeCount": 109,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "8L-0",
+              "name": "Estate · Build sources and decisions",
+              "childCount": 14,
+              "width": 1440,
+              "height": 3363,
+              "worldX": 0,
+              "worldY": 1285
+            }
+          ],
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · AI START · Read first",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-B-0",
+              "name": "00A · AGENT README · Protocol",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 · Product map",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "02 · Build sources & decisions",
+              "icon": "blueprint",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "03 · Lineage & retained requirements",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-7-0"
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "10 · Family index · Foundations & markets",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "11 · Family index · Evidence & tools",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "12 · Family index · Products & history",
+              "icon": "images",
+              "isActive": false
+            },
+            {
+              "type": "divider",
+              "id": "p-A-0"
+            },
+            {
+              "type": "page",
+              "id": "p-9-0",
+              "name": "90 · Recovery & cleanup",
+              "icon": "paper",
+              "isActive": false
+            }
+          ],
+          "fontFamilies": [
+            "Inter",
+            "System Sans-Serif",
+            "System Monospace"
+          ],
+          "tokens": {
+            "items": []
+          },
+          "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "identity": {
+          "kind": "file-id",
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+        },
+        "snapshot_sha256": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+        "write_binding_ready": true,
+        "binding_error": null
+      },
+      "after": {
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "operation_id": "peo-20261109-c1-finish-agent-protocol-01",
+        "tool": "finish_working_on_nodes",
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\n  \"file\": {\n    \"id\": \"01M6XQ0KYY6ZDDV6F3G85SX6WW\",\n    \"name\": \"00 · Paper Estate · Start Here\"\n  },\n  \"contentHash\": {\n    \"tokens\": \"811c9dc5\"\n  }\n}"
+            },
+            {
+              "type": "text",
+              "text": "OK"
+            }
+          ]
+        },
+        "before": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · AI START · Read first",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "after": {
+          "basic_info": {
+            "fileName": "00 · Paper Estate · Start Here",
+            "pageName": "02 · Build sources & decisions",
+            "pageId": "p-6-0",
+            "url": "https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0",
+            "rootNodeId": "root_node_p-6-0",
+            "nodeCount": 109,
+            "artboardCount": 1,
+            "artboards": [
+              {
+                "id": "8L-0",
+                "name": "Estate · Build sources and decisions",
+                "childCount": 14,
+                "width": 1440,
+                "height": 3363,
+                "worldX": 0,
+                "worldY": 1285
+              }
+            ],
+            "pages": [
+              {
+                "type": "page",
+                "id": "p-1-0",
+                "name": "00 · AI START · Read first",
+                "icon": "arrow",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-B-0",
+                "name": "00A · AGENT README · Protocol",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-2-0",
+                "name": "01 · Product map",
+                "icon": "design",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-6-0",
+                "name": "02 · Build sources & decisions",
+                "icon": "blueprint",
+                "isActive": true
+              },
+              {
+                "type": "page",
+                "id": "p-8-0",
+                "name": "03 · Lineage & retained requirements",
+                "icon": "blueprint",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-7-0"
+              },
+              {
+                "type": "page",
+                "id": "p-3-0",
+                "name": "10 · Family index · Foundations & markets",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-4-0",
+                "name": "11 · Family index · Evidence & tools",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "page",
+                "id": "p-5-0",
+                "name": "12 · Family index · Products & history",
+                "icon": "images",
+                "isActive": false
+              },
+              {
+                "type": "divider",
+                "id": "p-A-0"
+              },
+              {
+                "type": "page",
+                "id": "p-9-0",
+                "name": "90 · Recovery & cleanup",
+                "icon": "paper",
+                "isActive": false
+              }
+            ],
+            "fontFamilies": [
+              "Inter",
+              "System Sans-Serif",
+              "System Monospace"
+            ],
+            "tokens": {
+              "items": []
+            },
+            "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "contentHash": {
+              "tokens": "811c9dc5"
+            }
+          },
+          "identity": {
+            "kind": "file-id",
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+          },
+          "snapshot_sha256": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+          "write_binding_ready": true,
+          "binding_error": null
+        },
+        "retry_allowed": false,
+        "production_acceptance": false
+      }
+    }
+  ]
+}

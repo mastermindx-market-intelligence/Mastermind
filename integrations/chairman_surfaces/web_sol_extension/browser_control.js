@@ -83,12 +83,32 @@
       current(r);
       return tab;
     }
+    // Keep API failure context without returning URLs, page text or raw exceptions.
+    // A diagnostic category never changes permission or possible-effect decisions.
+    class PageChannelError extends Error {
+      constructor(stage, error) {
+        super("BROWSER_UNAVAILABLE");
+        const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+        let category = "API_REJECTED";
+        if (/extension context invalidated/.test(message)) category = "CONTEXT_INVALIDATED";
+        else if (/cannot access contents|missing host permission|permission denied|access denied/.test(message)) category = "ACCESS_REJECTED";
+        else if (/could not load file|failed to load file/.test(message)) category = "SCRIPT_UNAVAILABLE";
+        else if (/no document|document.*(?:not found|removed|does not exist)|no frame with id/.test(message)) category = "DOCUMENT_UNAVAILABLE";
+        else if (/receiving end does not exist|could not establish connection/.test(message)) category = "RECEIVER_MISSING";
+        else if (/message (?:port|channel) closed|channel closed before/.test(message)) category = "MESSAGE_PORT_CLOSED";
+        else if (/is not a function|cannot read properties of undefined/.test(message)) category = "API_UNAVAILABLE";
+        this.detail = Object.freeze({stage,
+          api:stage === "SCRIPT_INJECTION" ? "chrome.scripting.executeScript" : "chrome.tabs.sendMessage",category});
+      }
+    }
     async function page(r, action=r.action, params=r.params, beforeSend=null) {
       const tab = await tabFor(r);
       let documentId = documents.get(tab.id);
       if (action === "snapshot") {
         if (!documents.has(tab.id) && documents.size >= 128) throw new Error("TAB_LIMIT");
-        const installed = await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},files:["browser_page.js"],world:"ISOLATED"});
+        let installed;
+        try {installed = await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},files:["browser_page.js"],world:"ISOLATED"});}
+        catch (error) {throw new PageChannelError("SCRIPT_INJECTION",error);}
         documentId = installed && installed[0] && installed[0].documentId;
         if (!bounded(documentId,1,128)) throw new Error("DOCUMENT_ID_UNAVAILABLE");
         documents.set(tab.id,documentId);
@@ -97,8 +117,10 @@
       await tabFor(r);
       current(r);
       if (beforeSend) beforeSend();
-      const value = await chrome.tabs.sendMessage(tab.id,{kind:"MMX_BROWSER_PAGE_V1",action,
-        session_id:r.session_id,snapshot_id:r.snapshot_id,ref:r.ref,params,expires_at:r.expires_at},{documentId});
+      let value;
+      try {value = await chrome.tabs.sendMessage(tab.id,{kind:"MMX_BROWSER_PAGE_V1",action,
+        session_id:r.session_id,snapshot_id:r.snapshot_id,ref:r.ref,params,expires_at:r.expires_at},{documentId});}
+      catch (error) {throw new PageChannelError("DOCUMENT_MESSAGE",error);}
       if (!value || typeof value.ok !== "boolean" || !bounded(value.code,1,64) ||
           !["APPLIED","NOT_APPLIED","EFFECT_UNKNOWN"].includes(value.effect)) throw new Error("PAGE_RESPONSE_INVALID");
       return value;
@@ -245,7 +267,9 @@
           "BROWSER_PERMISSION_REQUIRED","STALE_SNAPSHOT","DOCUMENT_ID_UNAVAILABLE","PAGE_RESPONSE_INVALID","TAB_LIMIT","CONNECTION_CHANGED","REQUEST_EXPIRED",
           "DEBUGGER_PERMISSION_REQUIRED","DEBUGGER_RECONCILIATION_REQUIRED","SCREENSHOT_UNAVAILABLE","SCREENSHOT_TOO_LARGE","HISTORY_UNAVAILABLE","FOCUS_NOT_CONFIRMED"]);
         const code = allowed.has(error && error.message) ? error.message : "BROWSER_UNAVAILABLE";
-        return receipt(r,attempted ? "ACTION_EFFECT_UNKNOWN" : code,null,attempted ? "EFFECT_UNKNOWN" : "NOT_APPLIED");
+        return receipt(r,attempted ? "ACTION_EFFECT_UNKNOWN" : code,
+          error instanceof PageChannelError ? {detail:error.detail} : null,
+          attempted ? "EFFECT_UNKNOWN" : "NOT_APPLIED");
       } finally {busy = false;}
     }
     if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener(id=>{documents.delete(id);createdTabs.delete(id);});
@@ -255,3 +279,4 @@
   root.MMXBrowserControl = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);
+
