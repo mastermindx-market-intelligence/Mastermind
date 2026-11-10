@@ -2,6 +2,7 @@
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
 pub mod hermes_native;
+pub mod paperclip;
 pub mod control_room_read;
 pub mod company_priorities;
 mod draft_continuity;

@@ -54,6 +54,8 @@ async function main() {
     ['native_child_inventory_request_schema', accepts(mcp.OrchestratorMcpThreadListInput, input.inventory)],
     ['native_child_inventory_rejects_bad_cursor', !accepts(mcp.OrchestratorMcpThreadListInput, { ...input.inventory, cursor: -1 })],
     ['native_child_inventory_rejects_oversize_page', !accepts(mcp.OrchestratorMcpThreadListInput, { ...input.inventory, limit: 101 })],
+    ['native_settled_wait_schema', accepts(mcp.OrchestratorMcpThreadWaitInput, input.settledWait)],
+    ['native_settled_wait_rejects_non_boolean_join', !accepts(mcp.OrchestratorMcpThreadWaitInput, { ...input.settledWait, untilDelegatedWorkSettled: 'true' })],
     ['native_launch_request_id_schema', accepts(mcp.OrchestratorMcpClientRequestId, input.launch.arguments.clientRequestId)],
     ['native_message_fits_prompt_contract', accepts(mcp.OrchestratorMcpDelegateTaskInput.fields.task, input.launch.arguments.message)],
   ];

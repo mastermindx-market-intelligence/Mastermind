@@ -11,6 +11,27 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Studio Direct host targeting (avoid false M2 outages)
+
+For the existing **M2-hosted Studio Direct gateway**, ordinary Desktop Commander
+file/process tools run on local `m2studio` when an MCP session is **unselected**.
+Do **not** call `studio_select_host({hostRef: "m2"})` to reach that default: the
+selector binds only an operator-configured **remote** route before any local
+Desktop Commander operation. `studio_ping.selectedHostRef: null` means no remote
+binding, **not** a failed M2 connection. `studio_fleet_status.physicalFleet`
+is advisory Fabric inventory, **not** the list of selectable Studio remote routes.
+
+A `FLEET_ROUTE_PREFLIGHT_REFUSED` / `NOT_APPLIED` result from trying to select
+`m2` is a failed remote-route selection, **not evidence that M2 SSH, the release
+host, or Studio Direct's local backend is down**. When separately authorized,
+check local access using the same unselected Studio Direct session's
+`start_process({command: "hostname", timeout_ms: 10000})` and classify that
+result independently. Keep remote-route, SSH/release-receipt, and browser/Chrome
+extension UI blockers distinct. A session cannot switch to a remote host after
+local Desktop Commander calls; select an actually configured remote host in a
+separate authorized session for an independent operation, never to replay a
+refused or effect-unknown call. See `integrations/studio_direct_mcp/README.md`.
+
 ## Standing commercial data rights
 
 Apply [the Chairman's October 23 commercial-data-rights ruling](docs/COMMERCIAL_DATA_RIGHTS.md) for the Research Factory Yahoo/yfinance route, Massive/Polygon, Tiingo and ThetaData options. The commercial rights and approval gate is settled as `APPROVED_BY_CHAIRMAN_ATTESTATION`; no session may require repeated approval or contract/public-terms re-proof.
@@ -185,7 +206,21 @@ Verify the exact website origin, intended account, and relation to the current t
 supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
 passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
 or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
-unrelated personal accounts. A saved secret is not independent authority for account/security
+unrelated personal accounts.
+
+**Chairman fleet-sync ruling (issued 2026-11-08 by Chris, recorded verbatim authority under
+this section).** Enrolled Mastermind fleet hosts owned by the same principal (`chriswong`)
+constitute one trust domain for credential availability. When the Chairman explicitly directs
+it in the session record, an assigned session may synchronize saved credentials (keychain
+items, browser profiles/cookies, API keys) from the seat host to an enrolled fleet host
+under ALL of: (a) transport is an authenticated encrypted fleet channel (SSH/Tailscale) or
+an encrypted archive whose passphrase travels on that same channel; (b) secrets land only
+in the destination host's own protected stores (login keyring, Chrome profile directory,
+owner-only-mode credential files) — never as plaintext dumps, transcripts, prompts, logs, or
+world-readable files; (c) the destination host remains under fleet enrollment controls;
+(d) nothing is copied to third parties, unenrolled machines, or public surfaces. This ruling
+does not authorize vault export to external media, personal accounts, or non-fleet machines,
+and the Chairman may revoke it in writing at any time. A saved secret is not independent authority for account/security
 changes, spending, money movement, trading, production deployment, or other reserved actions.
 
 This instruction does not override OS/tool permissions, site controls, explicit access refusals,

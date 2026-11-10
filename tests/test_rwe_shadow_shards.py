@@ -160,7 +160,7 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     assert shards["needs"] == ["prepare-lock"]
     assert shards["strategy"] == {"fail-fast": False, "max-parallel": 6,
                                    "matrix": {"index": list(range(6))}}
-    assert shards["runs-on"] == "ubuntu-latest"
+    assert shards["runs-on"] == "ubuntu-24.04"
     macro_checkout = next(step["with"] for step in shards["steps"]
                           if step.get("with", {}).get("repository") ==
                           "mastermindx-market-intelligence/macro")
