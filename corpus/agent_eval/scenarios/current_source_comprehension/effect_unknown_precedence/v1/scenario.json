@@ -1,0 +1,82 @@
+{
+  "authorship": {
+    "author_ref": "person:c0-worker",
+    "independent_reviewer_ref": "person:sol"
+  },
+  "capability_policy": {
+    "allowed_capability_ids": [
+      "read_frozen_extract"
+    ],
+    "allowed_tool_schema_digests": [
+      "sha256:d6082861ca88c8053e1af896404ea1f1fda1a15ffc6639f57d72182d779e14a0"
+    ],
+    "forbidden_capability_ids": [
+      "execute_shell",
+      "network_fetch",
+      "search_repo",
+      "write_file"
+    ],
+    "profile_digest": "sha256:a54272329eb124008c153334bf825ac88c15083e022746fd8161f27f0fd15cc0",
+    "profile_id": "read_only_extract_reviewer"
+  },
+  "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+  "effect_policy": {
+    "allowed_operation_refs": [],
+    "mode": "NO_EFFECT_ONLY"
+  },
+  "execution_policy": {
+    "allowed_degradations": [],
+    "fresh_process_required": true,
+    "fresh_session_required": true,
+    "fresh_workspace_required": true,
+    "max_elapsed_ms": 300000,
+    "max_tool_calls": 20,
+    "network_allowlist": [],
+    "network_policy": "DENY_ALL",
+    "resume_allowed": false
+  },
+  "expected_contract": {
+    "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/effect_unknown_precedence/v1/fixtures/expected.json",
+    "digest": "sha256:5eba1bc8ff1ce88c88038a6899ae639b06a665ed7de9cc7f97a9ea2fb057a6dd"
+  },
+  "input_fixture": {
+    "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/effect_unknown_precedence/v1/fixtures/input.json",
+    "digest": "sha256:e1debb26bde7eabbe9ef347e0a18fd2ef714dd664d626a60f3f085d25b192bfd"
+  },
+  "objective": "Answer a grounded factual question about a frozen extract of the EVAL-R0 deterministic-validity precedence law.",
+  "privacy": {
+    "classification": "PUBLIC_SAFE",
+    "model_visible_artifact_refs": [
+      "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/effect_unknown_precedence/v1/fixtures/input.json"
+    ],
+    "retention_class": "BOUNDED"
+  },
+  "risk_tier": "LOW",
+  "scenario_digest": "sha256:00a1af267c99034fdb6195eb75c4e783ca7954ff34b3f5b730b0998437830b06",
+  "scenario_family": "mastermind.current_source_comprehension.v1",
+  "scenario_id": "scenario:current_source_comprehension:effect_unknown_precedence",
+  "scenario_version": 1,
+  "schema": "mastermind.agent_evaluation_scenario.v1",
+  "scoring_policy": {
+    "optional_scorers": [],
+    "required_dimensions": [
+      "cleanup_integrity",
+      "configuration_integrity",
+      "effect_integrity",
+      "source_integrity"
+    ],
+    "required_scorers": [
+      "mastermind.technical_integrity.v1"
+    ]
+  },
+  "source_policy": {
+    "allowlist_artifacts": [],
+    "denylist_refs": [],
+    "solution_refs_hidden": []
+  },
+  "supersedes": null,
+  "temporal": {
+    "authored_at": "2026-09-01T00:30:00Z",
+    "cutoff_at": "2026-09-01T00:00:00Z"
+  }
+}

@@ -211,6 +211,14 @@ def test_packet_shape_and_embedded_brief(tmp_path):
     assert isinstance(packet["strategic_state"], dict)
     assert packet["strategic_state"]["company_phase"]
     assert isinstance(packet["strategic_state"]["north_star"], list)
+    assert isinstance(packet["strategic_state"]["resource_policy"], dict)
+    assert isinstance(packet["strategic_state"]["core_product_value_model"], dict)
+    assert packet["strategic_state"]["core_product_value_model"]["products"] == [
+        "Prophet", "Macro Dashboard", "Sector Intelligence", "Research Vault",
+        "Terminal", "Options Intelligence",
+    ]
+    assert isinstance(packet["strategic_state"]["phase_gates"], dict)
+    assert isinstance(packet["strategic_state"]["review_triggers"], list)
     assert isinstance(packet["strategic_state"]["p0"], list)
     assert set(packet["strategic_state"]["p0"][0]) == {
         "id", "department", "objective", "status"
@@ -349,9 +357,7 @@ def test_missing_macro_root_degrades_and_still_exits_zero(tmp_path, monkeypatch,
     assert packet["macro"]["root"] is None
     assert packet["macro"]["sha"] is None
     assert packet["macro"]["resolved_via"] is None
-    assert [c["via"] for c in packet["macro"]["candidates_tried"]] == [
-        "flag", "sibling", "vendor",
-    ]
+    assert [c["via"] for c in packet["macro"]["candidates_tried"]] == ["flag"]
     assert all(c["usable"] is False for c in packet["macro"]["candidates_tried"])
     assert packet["handoffs"] == []
     assert packet["degraded"]
@@ -413,13 +419,13 @@ _LADDER = [
     ("legacy_unblocked_ignored", {"needs_ceo": [], "blocked": [],
                                   "unblocked": [{"workstream": "WS-C", "wave": "W2",
                                                  "title": "t", "next_action": "Draft the spec"}]},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
     ("legacy_unblocked_title_ignored", {"needs_ceo": [], "blocked": [],
                                         "unblocked": [{"workstream": "WS-C", "wave": "W2",
                                                        "title": "Cut the arc"}]},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
     ("quiet", {"needs_ceo": [], "blocked": [], "unblocked": []},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
 ]
 
 
@@ -521,6 +527,16 @@ def test_text_render_carries_every_section(tmp_path, frozen_git):
     assert "schema mastermind.ceo_boot_packet.v1" in text
     assert "STRATEGY — " in text
     assert "north star:" in text
+    assert "resource bias:" in text
+    assert "core products:" in text
+    assert "P0 CORE_INTELLIGENCE_PRODUCTIZATION [active]" in text
+    assert "P0 PREMIUM_PRODUCT_EXPERIENCE [active]" in text
+    assert "P0 DISTRIBUTION_AND_REVENUE [active]" in text
+    assert "P0 AUTONOMY_FORCE_MULTIPLIER [active]" in text
+    assert "P0 US_PROPHET_ENTRY_TIMING" not in text
+    assert "retired P0 identities preserved; not shown" in text
+    assert "GATE AUTONOMY_BASELINE" in text
+    assert "GATE SELL_READY" in text
     assert "AGENT OS — ceo_brief.v1 @" in text
     assert "WS-CN-LIMIT-ALPHA" in text
     assert "NEEDS CEO (1)" in text
@@ -615,8 +631,6 @@ def test_env_is_used_when_no_flag_is_given(tmp_path):
 
 
 def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
-    absent = tmp_path / "absent"
-
     no_script = tmp_path / "no_script"
     (no_script / "agentos").mkdir(parents=True)
 
@@ -626,19 +640,18 @@ def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
 
     good = make_macro_root(tmp_path, name="good")
 
-    # Stage them through the ladder: flag -> env -> sibling.  The sibling slot is
+    # Stage them through the discovery ladder: env -> sibling.  The sibling slot is
     # `<repo_root>/../Macro Dashboard`, so build a repo_root whose parent holds one.
     home = tmp_path / "home"
     (home / "sub").mkdir(parents=True)
     (home / "Macro Dashboard").symlink_to(good, target_is_directory=True)
 
     resolved, via, candidates = resolve_macro_root(
-        os.fspath(absent), {ENV_MACRO_ROOT: os.fspath(no_script)}, home / "sub"
+        None, {ENV_MACRO_ROOT: os.fspath(no_script)}, home / "sub"
     )
     assert via == "sibling"
     assert resolved == home / "Macro Dashboard"
     assert [(c["via"], c["usable"], c["reason"]) for c in candidates] == [
-        ("flag", False, "missing"),
         ("env", False, "no scripts/agentos.py"),
         ("sibling", True, None),
     ]
@@ -650,6 +663,34 @@ def test_unusable_candidates_are_recorded_with_reasons(tmp_path):
         "via": "flag", "path": os.fspath(no_store), "usable": False,
         "reason": "no agentos/ store",
     }
+
+
+def test_unusable_explicit_root_never_falls_through_to_valid_discovery_candidates(
+    tmp_path,
+):
+    missing = tmp_path / "missing-explicit"
+    env_root = make_macro_root(tmp_path, name="from_env")
+    home = tmp_path / "home"
+    repo = home / "Mastermind"
+    repo.mkdir(parents=True)
+    make_macro_root(home, name="Macro Dashboard")
+
+    resolved, via, candidates = resolve_macro_root(
+        os.fspath(missing),
+        {ENV_MACRO_ROOT: os.fspath(env_root)},
+        repo,
+    )
+
+    assert resolved is None
+    assert via is None
+    assert candidates == [
+        {
+            "via": "flag",
+            "path": os.fspath(missing),
+            "usable": False,
+            "reason": "missing",
+        }
+    ]
 
 
 def test_vendor_is_last_because_the_pin_is_stale_by_design(tmp_path):
@@ -711,6 +752,123 @@ def test_module_imports_no_execution_plane():
     forbidden = {
         name for name in imported
         if name.startswith("control_plane.")
-        and name != "control_plane.strategic_state"
+        and name not in {"control_plane.strategic_state", "control_plane.company_orientation"}
     }
     assert not forbidden, f"read-only bridge must not import {sorted(forbidden)}"
+    # The one new advisory value projector is itself execution-plane-free;
+    # this is not a blanket exemption for transitive control-plane imports.
+    from control_plane import company_orientation
+    import hashlib
+    helper_source = Path(company_orientation.__file__).read_bytes()
+    assert hashlib.sha256(helper_source).hexdigest() == "7dd83a23f420aff83adc2adb257c2902ca0c72004912cc6f97a0ae3cde924598"
+    helper_imports = set()
+    for node in ast.walk(ast.parse(helper_source.decode("utf-8"))):
+        if isinstance(node, ast.Import):
+            helper_imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            helper_imports.add(node.module)
+    assert helper_imports == {"__future__", "datetime", "copy", "re"}
+
+
+def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    repo.mkdir()
+    macro.mkdir()
+    boot_python = tmp_path / "sealed-python"
+    mastermind_sha = "a" * 40
+    macro_sha = "b" * 40
+    packet = {
+        "schema": SCHEMA,
+        "mastermind": {"sha": mastermind_sha},
+        "macro": {"sha": macro_sha},
+    }
+    seen = {}
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(packet)
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = list(argv)
+        seen["kwargs"] = dict(kwargs)
+        return Result()
+
+    def fake_sha(path):
+        return mastermind_sha if path.resolve() == repo.resolve() else macro_sha
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(mod, "git_sha", fake_sha)
+    result = mod.build_packet_in_interpreter(
+        boot_python=boot_python,
+        repo_root=repo,
+        macro_root=macro,
+        timeout=3.0,
+        now="2026-09-16T10:00:00Z",
+    )
+    assert result == packet
+    assert seen["argv"][:3] == [str(boot_python.resolve()), "-I", "-B"]
+    env = seen["kwargs"]["env"]
+    assert "HOME" not in env
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert {env["GIT_CONFIG_VALUE_0"], env["GIT_CONFIG_VALUE_1"]} == {
+        str(repo.resolve()), str(macro.resolve()),
+    }
+    assert env["MACRO_MASTERMIND_REPO"] == str(repo.resolve())
+
+
+def test_build_packet_in_interpreter_grounding_mismatch_degrades(tmp_path, monkeypatch):
+    repo = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    repo.mkdir()
+    macro.mkdir()
+    packet = {
+        "schema": SCHEMA,
+        "mastermind": {"sha": "c" * 40},
+        "macro": {"sha": "d" * 40},
+    }
+
+    class Result:
+        returncode = 0
+        stdout = json.dumps(packet)
+
+    monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(mod, "git_sha", lambda _p: "a" * 40)
+    monkeypatch.setattr(
+        mod, "build_packet", lambda **_kwargs: {"schema": SCHEMA, "degraded": []}
+    )
+    result = mod.build_packet_in_interpreter(
+        boot_python=tmp_path / "sealed-python",
+        repo_root=repo,
+        macro_root=macro,
+        timeout=3.0,
+    )
+    assert result["degraded"] == [
+        "installed boot helper unavailable: grounding_mismatch"
+    ]
+
+
+def test_rendered_ceo_boot_packet_names_executable_successor_not_ghost_owner():
+    # Text only: no new Job, status field, queue or assignment authority.
+    minimal = {
+        "schema": SCHEMA,
+        "generated_at": "2026-11-02T00:00:00Z",
+        "mastermind": {"sha": "a" * 40, "branch": "master"},
+        "macro": {"sha": None, "root": None},
+        "strategic_state": None,
+        "brief": None,
+        "handoffs": [],
+        "degraded": [],
+        "next_recommended_act": "Reconcile the current source-linked workstream",
+    }
+    rendered = render_packet(minimal)
+    flat = " ".join(rendered.split())
+    assert "LEADERSHIP / RECOVERY (source law controls)" in rendered
+    assert "current assigned session owns the next authorized recovery step" in flat
+    assert "archived chats and prior PR authors are not live owners" in flat
+    assert "EFFECT_UNKNOWN on the original carrier" in flat
+    assert "Independent non-author review and protected release remain required" in flat
+    assert rendered == render_packet(minimal)
+    assert max(map(len, rendered.splitlines())) <= 80
+    assert set(minimal) == _PACKET_KEYS

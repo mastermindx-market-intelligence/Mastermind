@@ -1,0 +1,11 @@
+{
+  "schema": "hermes-native-loader-required-proof.v1",
+  "source_before": "659578237735ba7c83d05f2ee1f5c79df025f084",
+  "workflow_before_sha256": "8d3543ca189cf58e8dd0f96b56ce39726a7ae28e01270b2e1a13d59d7518168b",
+  "workflow_after_sha256": "a2b04ee0fa5dac52f1ed9994bff2475d01742a3e0f372e459f1a57dd2028c3bc",
+  "pinned_upstream": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+  "observed_gap": "Local host/memory run retained 11 native loader skips, and the existing hosted harness workflow did not supply the required vendor checkout.",
+  "change": "Existing harness matrix checks out the exact native pin, runs its existing tests with isolated HERMES_HOME, and requires a positive real-loader case count with zero errors/failures/skips. No new test runner or CI workflow.",
+  "verification": "New exact-head hosted execution is required; the earlier skips remain skips.",
+  "local_upstream_observation": "The live user checkout was a different pin and had modifications; it was not used or changed."
+}

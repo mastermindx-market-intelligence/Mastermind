@@ -72,22 +72,44 @@ Usage
 """
 from __future__ import annotations
 
+import copy
 import hashlib
+import inspect
 import json
 import re
+import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from control_plane.executive_runtime import Job, StateConflict
+from control_plane.executive_runtime import (
+    Job,
+    StateConflict,
+    normalize_executive_dialogue_source,
+)
 
 #: Schema of the envelope this module accepts.  A bump means a migration.
 INTENT_SCHEMA = "mastermind.ceo_intent.v1"
 INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
+INTENT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_intent.v1"
+
+#: Schema of the strict NON-CEO service-principal intent.  Same sink, same
+#: adapter, same Job path — a second *principal class*, never a second control
+#: plane.  Deliberately NOT a member of the ``mastermind.ceo_intent.`` family:
+#: no CEO reader may classify a bounded service audit as CEO provenance
+#: (``executive_inbox.py:118`` keeps its CEO-only pin unchanged).
+INTENT_SCHEMA_SERVICE = "mastermind.executive_service_intent.v1"
+INTENT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent.v1"
 
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
 RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
+RECEIPT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_receipt.v1"
+RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
+RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
+_DIALOGUE_SOURCE_UNSET = object()
+_PROJECT_EXECUTION_SOURCE_UNSET = object()
+_FRONTIER_SELECTION_UNSET = object()
 
 #: Namespace for the durable event ``command_id``.  The prefix keeps CEO intent
 #: ids from colliding with the runtime's own ``uuid4().hex`` command ids, which
@@ -128,8 +150,44 @@ _REQUIRED_KEYS = frozenset(
 )
 _OPTIONAL_KEYS = frozenset({"workstream"})
 _V2_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"intent_kind", "business_impact"})
+_V2_OPTIONAL_KEYS = _OPTIONAL_KEYS | frozenset({'frontier_model_alias'})
+_PRINCIPAL_IDENTITY_KEYS = frozenset({
+    "seat", "principal_binding_digest", "mission_authority_ref",
+    "authority_generation_digest", "workstream",
+})
+_PRINCIPAL_REQUIRED_KEYS = _REQUIRED_KEYS | _PRINCIPAL_IDENTITY_KEYS
 _V2_INTENT_KIND = "executive_coo_cycle"
 _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
+
+#: The strict service-principal envelope: the v1 key set plus exactly two typed
+#: evidence keys.  ``principal_id`` names the bounded service identity;
+#: ``task_kind`` names the reviewed work class.  The grant still lives in
+#: ``execution_contract.requested_authorities`` — this branch adds no authority
+#: carrier, it only pins the class and constrains the contract.
+_SERVICE_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"principal_id", "task_kind"})
+_SERVICE_OPTIONAL_KEYS = _OPTIONAL_KEYS
+_SERVICE_TASK_KINDS = frozenset({"research"})
+_SERVICE_PRINCIPAL_RE = re.compile(r"^svc-[a-z0-9-]{3,63}$")
+_SERVICE_INTENT_ID_PREFIX = "svc-"
+_SERVICE_ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH"})
+#: Canonical sink-owned enrollment contract for the current non-CEO service
+#: principal tier. A syntactically valid svc-* identifier is not enrollment.
+#: Future principals require a reviewed source change here; upstream emitters
+#: must prove their registry remains identical to this closed set.
+SERVICE_PRINCIPAL_BINDINGS = frozenset(
+    {("svc-site-maintenance", "svc-site-maintenance")}
+)
+#: The READ level of the A0-A7 effect ladder is its weakest rung, ``A0`` — the
+#: same default v1 already rides (``create_job(authority_level="A0")`` and
+#: ``ceo_request.AUTHORITY_LEVEL``).  Not an invented value.
+_SERVICE_AUTHORITY_LEVEL = "A0"
+#: Identities the service schema may never claim, mirrored from the emitter
+#: (``executive_service_principal.py:168``) because the sink may not import the
+#: emitter: the CEO stamp, the human seats, and the runtime's unattributed
+#: ``operator`` default are outside any service principal.
+_RESERVED_ACTOR_RE = re.compile(
+    r"^(ceo[-_.]?sol|ceo$|chairman|chris|operator)", re.IGNORECASE
+)
 
 _GROUNDING_REQUIRED = frozenset({"mastermind_sha", "macro_sha"})
 _GROUNDING_OPTIONAL = frozenset({"boot_packet_schema"})
@@ -272,6 +330,14 @@ class CeoIntentError(ValueError):
     ``ValueError`` onto the ``request_failed`` error code, so a refusal reaches
     the caller as a legible bounded message instead of ``internal_error``.
     """
+
+
+class CeoIntentConflict(CeoIntentError):
+    """An immutable accepted intent disagrees with the submitted identity."""
+
+
+class _FreshAdmissionObserverFailed(RuntimeError):
+    """The root is committed; its original operation needs reconciliation."""
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +600,124 @@ def _execution_contract(value: Any) -> dict[str, Any]:
     return result
 
 
+def _require_service_ceiling(contract: Mapping[str, Any]) -> None:
+    """The READ/RESEARCH-only ceiling for the non-CEO service schema.
+
+    The downstream :class:`ExecutiveAuthorityPolicy` GRANTS
+    ``WRITE_BRANCH``/``RUN_TESTS`` when they arrive (``executive_authority.py:21``),
+    so a per-schema read-only ceiling cannot live in the policy file or in the
+    runtime.  It lives here, at the service discriminator: the sink is what
+    stops a service intent from ever REQUESTING a write.
+
+    Called from :func:`validate_intent` and again as a belt immediately before
+    ``create_job`` in :func:`submit_intent`.
+    """
+
+    requested = set(contract["requested_authorities"])
+    if not requested:
+        raise CeoIntentError(
+            "service execution_contract.requested_authorities must not be empty"
+        )
+    outside = sorted(requested - _SERVICE_ALLOWED_AUTHORITIES)
+    if outside:
+        raise CeoIntentError(
+            "service execution_contract.requested_authorities is READ/RESEARCH "
+            f"only; refused {outside}"
+        )
+    if contract.get("allowed_write_paths"):
+        raise CeoIntentError(
+            "a READ/RESEARCH service intent may not declare allowed_write_paths"
+        )
+    level = contract.get("authority_level")
+    if level is not None and level != _SERVICE_AUTHORITY_LEVEL:
+        raise CeoIntentError(
+            "service execution_contract.authority_level must be the READ level "
+            f"{_SERVICE_AUTHORITY_LEVEL!r}; got {level!r}"
+        )
+
+
+def _principal_identity(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate immutable context shape, never authenticate its author."""
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    if value.get("actor") != "coo-principal" or value.get("seat") != "coo":
+        raise CeoIntentError("principal actor and seat must be role-correct")
+    try:
+        context = PrincipalAdmissionContext(
+            work_ref=value["workstream"],
+            principal_binding_digest=value["principal_binding_digest"],
+            mission_authority_ref=value["mission_authority_ref"],
+            authority_generation_digest=value["authority_generation_digest"],
+        )
+    except (KeyError, TypeError, ValueError):
+        raise CeoIntentError("principal immutable identity is invalid") from None
+    return {"seat": "coo", "work_ref": context.work_ref,
+            "principal_binding_digest": context.principal_binding_digest,
+            "mission_authority_ref": context.mission_authority_ref,
+            "authority_generation_digest": context.authority_generation_digest}
+
+
+def _require_principal_contract(intent: Mapping[str, Any]) -> None:
+    """Keep the principal episode inside the existing two worker profiles."""
+    from control_plane import ceo_request
+    from control_plane.coo_principal_request import INTENT_ID_RE as PRINCIPAL_ID_RE
+    contract = intent["execution_contract"]
+    required = {"requested_authorities", "authority_level", "branch", "worktree", "attempt_limit"}
+    allowed = required | {"allowed_write_paths", "validation_commands"}
+    authorities = contract["requested_authorities"]
+    research = ceo_request.derive_authorities("research_only")
+    code = ceo_request.derive_authorities("bounded_code_change")
+    if (not required <= set(contract) or not set(contract) <= allowed
+            or PRINCIPAL_ID_RE.fullmatch(intent["intent_id"]) is None
+            or contract["authority_level"] != ceo_request.AUTHORITY_LEVEL
+            or type(contract["attempt_limit"]) is not int
+            or not 1 <= contract["attempt_limit"] <= 2
+            or contract["branch"] != ceo_request.derive_branch(intent["intent_id"])
+            or authorities not in (research, code)):
+        raise CeoIntentError("principal worker contract is invalid")
+    paths, commands = contract.get("allowed_write_paths"), contract.get("validation_commands")
+    if ((authorities == research and (paths or commands))
+            or (authorities == code and (not paths or not commands))):
+        raise CeoIntentError("principal worker profile requirements differ")
+
+
+def _require_principal_request_ref(value: Any, intent_id: str) -> str:
+    from control_plane.coo_principal_request import principal_intent_id
+    try:
+        if principal_intent_id(value) != intent_id:
+            raise ValueError()
+    except (TypeError, ValueError):
+        raise CeoIntentError("principal request identity does not bind intent") from None
+    return value
+
+
+def _require_principal_context(intent, context, request_ref, guard) -> None:
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    if type(context) is not PrincipalAdmissionContext or not callable(guard):
+        raise CeoIntentError("trusted principal admission is unavailable")
+    identity = _principal_identity(intent)
+    if any(identity[key] != getattr(context, key) for key in identity if key != "seat"):
+        raise CeoIntentError("principal admission context does not bind envelope")
+    _require_principal_request_ref(request_ref, intent["intent_id"])
+
+
+def _run_principal_guard(intent, guard) -> None:
+    """Recheck trusted synchronous owner facts without exposing private errors."""
+    # A host callback is not OAuth/peer authentication or model-authored authority.
+    try:
+        if (not callable(guard) or inspect.iscoroutinefunction(guard)
+                or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
+            raise ValueError
+        result = guard(copy.deepcopy(intent))
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise ValueError
+        if result is not None:
+            raise ValueError
+    except Exception:
+        raise CeoIntentError("trusted principal admission refused") from None
+
+
 def validate_intent(payload: Any) -> dict[str, Any]:
     """Return the canonical form of one closed CEO intent envelope.
 
@@ -551,11 +735,17 @@ def validate_intent(payload: Any) -> dict[str, Any]:
     if schema == INTENT_SCHEMA:
         _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_V2:
-        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _OPTIONAL_KEYS)
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_DIRECT:
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset({"project_planning_sha256"}))
+    elif schema == INTENT_SCHEMA_SERVICE:
+        _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_PRINCIPAL:
+        _exact_keys(raw, "intent", _PRINCIPAL_REQUIRED_KEYS, frozenset())
     else:
         raise CeoIntentError(
-            f"intent.schema must be {INTENT_SCHEMA!r} or {INTENT_SCHEMA_V2!r}; "
-            f"got {schema!r}"
+            f"intent.schema must be {INTENT_SCHEMA!r}, {INTENT_SCHEMA_V2!r}, or "
+            f"{INTENT_SCHEMA_SERVICE!r}; got {schema!r}"
         )
     intent: dict[str, Any] = {
         "schema": schema,
@@ -571,6 +761,20 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         "grounding": _grounding(raw["grounding"]),
         "execution_contract": _execution_contract(raw["execution_contract"]),
     }
+    if schema == INTENT_SCHEMA_DIRECT:
+        contract = intent["execution_contract"]
+        if (raw["intent_kind"] != "direct_native_readonly"
+                or raw["business_impact"] != "routine"
+                or set(contract["requested_authorities"]) != {"READ", "RESEARCH"}
+                or contract.get("attempt_limit") != 1
+                or contract.get("allowed_write_paths")
+                or contract.get("validation_commands")
+                or contract.get("constraints")):
+            raise CeoIntentError("direct native intent requires its exact read-only contract")
+        intent.update(intent_kind="direct_native_readonly", business_impact="routine")
+        if "project_planning_sha256" in raw:
+            intent["project_planning_sha256"] = _text(raw["project_planning_sha256"],
+                "intent.project_planning_sha256", pattern=_FINGERPRINT_RE, max_chars=64)
     if schema == INTENT_SCHEMA_V2:
         intent_kind = _text(
             raw["intent_kind"], "intent.intent_kind", max_chars=64
@@ -601,6 +805,58 @@ def validate_intent(payload: Any) -> dict[str, Any]:
             )
         intent["intent_kind"] = intent_kind
         intent["business_impact"] = impact
+        if "frontier_model_alias" in raw:
+            from control_plane.frontier_selection import validate_alias, FrontierSelectionError
+            try:
+                intent["frontier_model_alias"] = validate_alias(raw["frontier_model_alias"])
+            except FrontierSelectionError as exc:
+                raise CeoIntentError(str(exc)) from exc
+    if schema == INTENT_SCHEMA_SERVICE:
+        # Closed values first, then the read-only ceiling.  Every refusal here is
+        # service-schema-only: v1/v2 validation above is untouched.
+        principal_id = _text(
+            raw["principal_id"], "intent.principal_id", pattern=_SERVICE_PRINCIPAL_RE
+        )
+        task_kind = _text(raw["task_kind"], "intent.task_kind", max_chars=32)
+        if task_kind not in _SERVICE_TASK_KINDS:
+            raise CeoIntentError(
+                f"intent.task_kind must be {sorted(_SERVICE_TASK_KINDS)!r}; the "
+                "service principal tier admits no other task kind"
+            )
+        if not intent["intent_id"].startswith(_SERVICE_INTENT_ID_PREFIX):
+            raise CeoIntentError(
+                "service intent.intent_id must start with "
+                f"{_SERVICE_INTENT_ID_PREFIX!r} (the service id domain); got "
+                f"{intent['intent_id']!r}"
+            )
+        if _RESERVED_ACTOR_RE.match(intent["actor"]) is not None:
+            raise CeoIntentError(
+                f"service intent.actor {intent['actor']!r} claims a reserved "
+                "identity; the CEO stamp, the chairman/chris seats, and the "
+                "unattributed 'operator' default are outside any service principal"
+            )
+        matching_actors = sorted(
+            actor
+            for enrolled_principal_id, actor in SERVICE_PRINCIPAL_BINDINGS
+            if enrolled_principal_id == principal_id
+        )
+        if len(matching_actors) != 1:
+            raise CeoIntentError(
+                f"service intent.principal_id {principal_id!r} is not a reviewed "
+                "service principal"
+            )
+        if intent["actor"] != matching_actors[0]:
+            raise CeoIntentError(
+                f"service intent.actor {intent['actor']!r} does not match the "
+                f"reviewed principal {principal_id!r}"
+            )
+        _require_service_ceiling(intent["execution_contract"])
+        intent["principal_id"] = principal_id
+        intent["task_kind"] = task_kind
+    if schema == INTENT_SCHEMA_PRINCIPAL:
+        _principal_identity(raw)
+        intent.update({key: raw[key] for key in _PRINCIPAL_IDENTITY_KEYS})
+        _require_principal_contract(intent)
     if "workstream" in raw:
         # A pointer into the Agent OS knowledge plane, recorded for provenance.
         # Nothing in this path opens, resolves, or writes that store.
@@ -669,8 +925,11 @@ def _receipt(
     duplicate: bool,
     created_at_ms: int,
     receipt_schema: str = RECEIPT_SCHEMA,
+    principal: dict[str, Any] | None = None,
+    request_ref: str | None = None,
+    work_ref: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    value = {
         "schema": receipt_schema,
         "intent_id": intent_id,
         "fingerprint": fingerprint,
@@ -679,8 +938,9 @@ def _receipt(
         "accepted": True,
         "duplicate": bool(duplicate),
         # ALWAYS False.  This field exists so a caller can never confuse
-        # acceptance with execution: nothing on this path dispatches, and the
-        # control service structurally refuses to dispatch a CEO-created job.
+        # acceptance with execution: this sink never dispatches. The new direct
+        # host path has a separate execution capability; legacy generic dispatch
+        # keeps its fixed-proof guard.
         "dispatched": False,
         "authority": {
             # Read off the DURABLE Job, never echoed back from the request.
@@ -691,6 +951,16 @@ def _receipt(
         "grounding": dict(grounding),
         "created_at_ms": int(created_at_ms),
     }
+    if receipt_schema == RECEIPT_SCHEMA_PRINCIPAL:
+        if principal is None:
+            raise CeoIntentError("principal receipt identity is unavailable")
+        value["principal"] = dict(principal)
+        value["request_ref"] = _require_principal_request_ref(request_ref, intent_id)
+    if receipt_schema in {RECEIPT_SCHEMA_V2, RECEIPT_SCHEMA_DIRECT} and work_ref is not None:
+        value["work_ref"] = _text(
+            work_ref, "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
+        )
+    return value
 
 
 def build_receipt(
@@ -700,8 +970,9 @@ def build_receipt(
     fingerprint: str,
     duplicate: bool,
     created_at_ms: int,
+    principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
-    """Assemble the ``mastermind.ceo_intent_receipt.v1`` envelope."""
+    """Assemble the receipt envelope matching the intent schema."""
 
     return _receipt(
         job,
@@ -710,15 +981,33 @@ def build_receipt(
         grounding=intent["grounding"],
         duplicate=duplicate,
         created_at_ms=created_at_ms,
-        receipt_schema=(
-            RECEIPT_SCHEMA_V2
-            if intent.get("schema") == INTENT_SCHEMA_V2
-            else RECEIPT_SCHEMA
-        ),
+        receipt_schema=_receipt_schema_for(intent.get("schema")),
+        principal=_principal_identity(intent) if intent.get("schema") == INTENT_SCHEMA_PRINCIPAL else None,
+        request_ref=principal_request_ref,
+        work_ref=intent.get("workstream") if intent.get("schema") in {INTENT_SCHEMA_V2, INTENT_SCHEMA_DIRECT} else None,
     )
 
 
-def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
+def _receipt_schema_for(intent_schema: Any) -> str:
+    """The receipt schema for an intent schema, one-to-one and closed.
+
+    The service receipt is deliberately a distinct string so a receipt reader
+    (``autonomy_first_stratum.py:176`` pins the CEO receipt family) cannot
+    mistake a bounded service audit for a CEO submission.
+    """
+
+    if intent_schema == INTENT_SCHEMA_PRINCIPAL:
+        return RECEIPT_SCHEMA_PRINCIPAL
+    if intent_schema == INTENT_SCHEMA_V2:
+        return RECEIPT_SCHEMA_V2
+    if intent_schema == INTENT_SCHEMA_DIRECT:
+        return RECEIPT_SCHEMA_DIRECT
+    if intent_schema == INTENT_SCHEMA_SERVICE:
+        return RECEIPT_SCHEMA_SERVICE
+    return RECEIPT_SCHEMA
+
+
+def _provenance(intent: Mapping[str, Any], fingerprint: str, *, principal_request_ref: str | None = None) -> dict[str, Any]:
     """The durable record of WHO asked, for WHAT, grounded on WHICH revisions."""
 
     value = {
@@ -730,6 +1019,21 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str) -> dict[str, Any]:
     }
     if "workstream" in intent:
         value["workstream"] = intent["workstream"]
+    if "project_planning_sha256" in intent:
+        value["project_planning_sha256"] = intent["project_planning_sha256"]
+    if intent["schema"] == INTENT_SCHEMA_SERVICE:
+        # Typed service evidence, read off the VALIDATED envelope and stamped
+        # beside the shared base fields.  These are EVIDENCE, never a grant: the
+        # grant is adjudicated downstream, unchanged, by the authority policy.
+        requested = list(intent["execution_contract"]["requested_authorities"])
+        value["principal_id"] = intent["principal_id"]
+        value["task_kind"] = intent["task_kind"]
+        value["requested_authorities"] = requested
+        value["effective_authorities"] = list(requested)
+        value["write_authorities"] = []
+    if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
+        value.update({key: intent[key] for key in _PRINCIPAL_IDENTITY_KEYS})
+        value["request_ref"] = _require_principal_request_ref(principal_request_ref, intent["intent_id"])
     return value
 
 
@@ -739,6 +1043,9 @@ def _receipt_from_event(
     *,
     intent_id: str,
     fingerprint: str | None,
+    requested_frontier_alias: Any = _FRONTIER_SELECTION_UNSET,
+    dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
+    frontier_selection: Any = _FRONTIER_SELECTION_UNSET,
 ) -> dict[str, Any]:
     """Reconcile an already-accepted intent into the receipt it first produced."""
 
@@ -755,8 +1062,34 @@ def _receipt_from_event(
     # record before treating it as a CEO intent so a malformed or foreign event
     # under this prefix is a legible refusal, never a receipt for an objective
     # the CEO never sent.
+    from control_plane.frontier_selection import (
+        FrontierSelectionError, selection_from_provenance, validate_selection,
+    )
+    try:
+        durable_selection = selection_from_provenance(provenance)
+    except FrontierSelectionError as exc:
+        raise CeoIntentError("durable frontier selection is invalid") from exc
+    if frontier_selection is not _FRONTIER_SELECTION_UNSET:
+        try:
+            expected_selection = (
+                None if frontier_selection is None else validate_selection(
+                    frontier_selection, requested_alias=provenance.get("frontier_model_alias"))
+            )
+        except FrontierSelectionError as exc:
+            raise CeoIntentConflict("immutable frontier selection conflicts") from exc
+        if expected_selection != durable_selection:
+            raise CeoIntentConflict("immutable frontier selection conflicts")
+    if (requested_frontier_alias is not _FRONTIER_SELECTION_UNSET
+            and requested_frontier_alias != provenance.get("frontier_model_alias")):
+        raise CeoIntentConflict("durable frontier selection differs from requested alias")
     provenance_schema = provenance.get("schema")
-    if provenance_schema not in {INTENT_SCHEMA, INTENT_SCHEMA_V2}:
+    if provenance_schema not in {
+        INTENT_SCHEMA,
+        INTENT_SCHEMA_V2,
+        INTENT_SCHEMA_DIRECT,
+        INTENT_SCHEMA_SERVICE,
+        INTENT_SCHEMA_PRINCIPAL,
+    }:
         raise CeoIntentError(
             f"intent {intent_id!r} resolves to a record whose provenance schema is "
             f"{provenance_schema!r}, not a closed CEO intent schema"
@@ -772,7 +1105,9 @@ def _receipt_from_event(
             f"intent {intent_id!r} has no well-formed fingerprint in its durable record"
         )
     if fingerprint is not None and recorded != fingerprint:
-        raise CeoIntentError(
+        if provenance_schema == INTENT_SCHEMA_PRINCIPAL:
+            raise CeoIntentConflict("principal operation conflicts; reconcile the original request")
+        raise CeoIntentConflict(
             f"intent_id {intent_id!r} was already accepted with a different envelope: "
             f"recorded fingerprint {recorded} != submitted fingerprint {fingerprint}. "
             "Submit a new intent_id; an accepted intent is never rewritten."
@@ -781,6 +1116,8 @@ def _receipt_from_event(
     job = runtime.jobs.get_job(job_id) if job_id else None
     if job is None:
         raise CeoIntentError(f"intent {intent_id!r} names job {job_id!r}, which does not exist")
+    if provenance_schema == INTENT_SCHEMA_DIRECT:
+        runtime.jobs.direct_native_provenance(job.job_id)
     if provenance_schema == INTENT_SCHEMA_V2:
         cycle = job.orchestration_provenance
         if (
@@ -803,9 +1140,107 @@ def _receipt_from_event(
             raise CeoIntentError(
                 f"intent {intent_id!r} does not resolve to its strict v2 aggregation root"
             )
+        from control_plane.project_execution_admission import read_source as read_project_execution_source
+        try:
+            read_project_execution_source(runtime, job)
+        except StateConflict as exc:
+            raise CeoIntentError("project execution original record is invalid") from exc
+        durable_source = provenance.get("dialogue_source")
+        from control_plane.fresh_conversation_admission import read_creation_restriction
+        try:
+            read_creation_restriction(runtime, job)
+        except StateConflict as exc:
+            raise CeoIntentError("fresh conversation creation record is invalid") from exc
+        durable_source_digest = provenance.get("dialogue_source_digest")
+        if durable_source is None:
+            if durable_source_digest is not None:
+                raise CeoIntentError(
+                    f"intent {intent_id!r} has drifted host dialogue-source evidence"
+                )
+        else:
+            work_ref = provenance.get("workstream")
+            if not isinstance(work_ref, str):
+                raise CeoIntentError(
+                    f"intent {intent_id!r} has no durable workstream for its "
+                    "host dialogue source"
+                )
+            try:
+                normalized_durable_source = normalize_executive_dialogue_source(
+                    durable_source,
+                    work_ref=work_ref,
+                ).to_dict()
+            except StateConflict as exc:
+                raise CeoIntentError(str(exc)) from exc
+            expected_source_digest = hashlib.sha256(
+                json.dumps(
+                    normalized_durable_source,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest()
+            if (
+                durable_source != normalized_durable_source
+                or not isinstance(durable_source_digest, str)
+                or _FINGERPRINT_RE.fullmatch(durable_source_digest) is None
+                or durable_source_digest != expected_source_digest
+            ):
+                raise CeoIntentError(
+                    f"intent {intent_id!r} has drifted host dialogue-source evidence"
+                )
+        if dialogue_source is not _DIALOGUE_SOURCE_UNSET:
+            if dialogue_source is None:
+                if durable_source is not None:
+                    raise CeoIntentConflict(
+                        f"intent {intent_id!r} was accepted with a different "
+                        "host dialogue source"
+                    )
+            else:
+                work_ref = provenance.get("workstream")
+                if not isinstance(work_ref, str):
+                    raise CeoIntentError(
+                        f"intent {intent_id!r} has no durable workstream for its "
+                        "host dialogue source"
+                    )
+                try:
+                    expected_source = normalize_executive_dialogue_source(
+                        dialogue_source,
+                        work_ref=work_ref,
+                    ).to_dict()
+                except StateConflict as exc:
+                    raise CeoIntentConflict(
+                        f"intent {intent_id!r} was accepted with a different "
+                        "host dialogue source"
+                    ) from exc
+                if durable_source != expected_source:
+                    raise CeoIntentConflict(
+                        f"intent {intent_id!r} was accepted with a different "
+                        "host dialogue source"
+                    )
     elif job.orchestration_role is not None:
         raise CeoIntentError(
             f"v1 intent {intent_id!r} resolved to a cycle-eligible Job"
+        )
+    principal = None
+    request_ref = None
+    if provenance_schema == INTENT_SCHEMA_PRINCIPAL:
+        principal = _principal_identity(provenance)
+        request_ref = _require_principal_request_ref(provenance.get("request_ref"), intent_id)
+        expected_keys = {"schema", "intent_id", "actor", "fingerprint", "grounding", "request_ref"} | _PRINCIPAL_IDENTITY_KEYS
+        if (set(provenance) != expected_keys or job.owner_seat != "coo"
+                or job.escalation_target != "coo" or job.parent_job_id is not None
+                or not 1 <= job.attempt_limit <= 2):
+            raise CeoIntentError("principal durable identity or Job binding differs")
+    work_ref = None
+    if provenance_schema in {INTENT_SCHEMA_V2, INTENT_SCHEMA_DIRECT} and "workstream" in provenance:
+        # Revalidate the immutable source pointer before exposing it on replay.
+        # Older v2 events without this optional field remain readable as-is.
+        work_ref = _text(
+            provenance["workstream"],
+            "intent.workstream",
+            pattern=_WORKSTREAM_RE,
+            max_chars=72,
         )
     grounding = provenance.get("grounding")
     return _receipt(
@@ -815,11 +1250,10 @@ def _receipt_from_event(
         grounding=grounding if isinstance(grounding, Mapping) else {},
         duplicate=True,
         created_at_ms=int(event.get("created_at_ms") or 0),
-        receipt_schema=(
-            RECEIPT_SCHEMA_V2
-            if provenance_schema == INTENT_SCHEMA_V2
-            else RECEIPT_SCHEMA
-        ),
+        receipt_schema=_receipt_schema_for(provenance_schema),
+        principal=principal,
+        request_ref=request_ref,
+        work_ref=work_ref,
     )
 
 
@@ -861,12 +1295,40 @@ def _require_workspace(intent: Mapping[str, Any], workspace_root: Path | None) -
         )
 
 
+def _notify_fresh_admission(fresh_admission_observer,job,command_id,created):
+    if fresh_admission_observer is not None:
+        try:
+            if created is None or created.get("job_id") != job.job_id:
+                raise ValueError("canonical root creation source is unavailable")
+            observed = fresh_admission_observer(job.job_id, command_id)
+            if observed is not None:
+                if inspect.iscoroutine(observed):
+                    observed.close()
+                raise ValueError("fresh admission observer returned a value")
+        except Exception as exc:
+            # Do not classify a post-commit observation failure as a zero-Job
+            # refusal, swallow it as a concurrent duplicate, or run a worker.
+            raise _FreshAdmissionObserverFailed(
+                "fresh admission observation failed; reconcile the original operation"
+            ) from exc
+
+
 def submit_intent(
     runtime: Any,
     payload: Any,
     *,
     workspace_root: "Path | str | None" = None,
     execution_binding: "dict[str, Any] | None" = None,
+    dialogue_source: Any = _DIALOGUE_SOURCE_UNSET,
+    frontier_selection: Any = _FRONTIER_SELECTION_UNSET,
+    require_dialogue_source: bool = False,
+    principal_context: Any = None,
+    principal_request_ref: str | None = None,
+    principal_admission_guard: Any = None,
+    fresh_admission_observer: Any = None,
+    direct_admission: Any = None,
+    fresh_conversation_source: Any = None,
+    project_execution_source: Any = _PROJECT_EXECUTION_SOURCE_UNSET,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -885,9 +1347,90 @@ def submit_intent(
     intent fingerprint.  The runtime validates and persists the exact binding
     in Job constraints, making provider/profile selection host-owned while the
     original CEO operation identity remains the complete normalized envelope.
+
+    Strict-v2 ``dialogue_source`` is trusted host admission input, never a
+    public envelope field and never part of the caller-controlled fingerprint.
+    The source is stored in immutable root ``JOB_CREATED`` provenance and a
+    duplicate submission cannot attach, remove, or rewrite it after admission.
+    A configured host provider sets ``require_dialogue_source`` so a missing
+    first source refuses before root creation.  Omitting the keyword on replay
+    trusts the already-accepted durable source; explicitly changing or removing
+    that source remains an exact identity conflict.
     """
 
+    # Principal admission is dormant for every incumbent caller: all three
+    # trusted keyword-only inputs are required. The future installed App must
+    # authenticate and derive context outside model control; its App-only peer
+    # path must provide the canonical fresh mission/binding/effect guard.
+    # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
+        from control_plane.project_execution_admission import ProjectExecutionSource
+        if (type(project_execution_source) is not ProjectExecutionSource
+                or intent["schema"] != INTENT_SCHEMA_V2 or fresh_conversation_source is not None):
+            raise CeoIntentError("PROJECT_EXECUTION_SOURCE_REQUIRED")
+        project_execution_source.check_intent(intent)
+    if fresh_conversation_source is not None:
+        from control_plane.fresh_conversation_admission import FreshConversationCreationSource
+        if type(fresh_conversation_source) is not FreshConversationCreationSource or intent["schema"] != INTENT_SCHEMA_V2:
+            raise CeoIntentError("FRESH_CONVERSATION_SOURCE_REQUIRED")
+        fresh_conversation_source.check_intent(intent)
+    if intent["schema"] == INTENT_SCHEMA_DIRECT:
+        from control_plane import direct_native_execution as direct
+        if type(direct_admission) is not direct.DirectNativeAdmission:
+            raise CeoIntentError("direct native host admission is not composed")
+        if fresh_admission_observer is not None and (not callable(fresh_admission_observer)
+                or inspect.iscoroutinefunction(fresh_admission_observer)):
+            raise CeoIntentError("fresh native admission observer must be synchronous")
+        try:
+            direct_admission.check()
+            expected_planning = direct_admission._project_planning
+            if intent.get("project_planning_sha256") != (None if expected_planning is None else direct.digest(expected_planning)):
+                raise CeoIntentError("project planning fingerprint differs from private admission")
+            _require_workspace(intent,Path(workspace_root) if workspace_root else None)
+            fingerprint=intent_fingerprint(intent)
+            command=command_id_for(intent["intent_id"])
+            existing=runtime.store.find_event_by_command_id(command)
+            if existing is not None:
+                actual=runtime.jobs.direct_native_provenance(existing["job_id"])
+                if actual != direct.admission_material(direct_admission):
+                    raise CeoIntentConflict("direct native admission identity changed")
+                return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
+            try:
+                job=runtime.jobs.create_direct_native_job(intent,fingerprint=fingerprint,command_id=command,
+                    workspace_root=workspace_root,admission=direct_admission)
+            except (StateConflict, sqlite3.IntegrityError):
+                existing=runtime.store.find_event_by_command_id(command)
+                if existing is None: raise
+                actual=runtime.jobs.direct_native_provenance(existing["job_id"])
+                if actual != direct.admission_material(direct_admission):
+                    raise CeoIntentConflict("direct native admission identity changed")
+                return _receipt_from_event(runtime,existing,intent_id=intent["intent_id"],fingerprint=fingerprint)
+            created=runtime.store.find_event_by_command_id(command)
+            _notify_fresh_admission(fresh_admission_observer,job,command,created)
+            return build_receipt(job,intent=intent,fingerprint=fingerprint,duplicate=False,created_at_ms=int(created["created_at_ms"]))
+        except CeoIntentError:
+            raise
+        except (ValueError,StateConflict) as exc:
+            raise CeoIntentError("direct native host admission refused") from exc
+    if direct_admission is not None:
+        raise CeoIntentError("direct admission cannot promote another schema")
+    # Private host source seam, never a frame field or a launch capability.
+    # Only the actual new-root branch calls it. Public/replay receipts remain
+    # queued, and no observer may turn a duplicate into a fresh admission.
+    if fresh_admission_observer is not None and (
+        intent["schema"] != INTENT_SCHEMA_V2
+        or not callable(fresh_admission_observer)
+        or inspect.iscoroutinefunction(fresh_admission_observer)
+    ):
+        raise CeoIntentError("fresh admission observer requires synchronous v2 host source")
+    if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
+        _require_principal_context(intent, principal_context, principal_request_ref, principal_admission_guard)
+        from control_plane.ceo_request import derive_worktree
+        if not workspace_root or intent["execution_contract"]["worktree"] != derive_worktree(str(workspace_root), intent["intent_id"]):
+            raise CeoIntentError("principal worktree differs from trusted derivation")
+    elif any(value is not None for value in (principal_context, principal_request_ref, principal_admission_guard)):
+        raise CeoIntentError("principal admission context cannot authorize another schema")
     _require_workspace(intent, Path(workspace_root) if workspace_root else None)
     fingerprint = intent_fingerprint(intent)
     intent_id = intent["intent_id"]
@@ -895,10 +1438,27 @@ def submit_intent(
 
     existing = runtime.store.find_event_by_command_id(command_id)
     if existing is not None:
+        if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
+            from control_plane.project_execution_admission import require_same_source
+            require_same_source(runtime, existing["job_id"], project_execution_source)
         return _receipt_from_event(
-            runtime, existing, intent_id=intent_id, fingerprint=fingerprint
+            runtime,
+            existing,
+            intent_id=intent_id,
+            fingerprint=fingerprint,
+            requested_frontier_alias=intent.get("frontier_model_alias"),
+            dialogue_source=dialogue_source,
+            frontier_selection=frontier_selection,
         )
+    effective_dialogue_source = (
+        None if dialogue_source is _DIALOGUE_SOURCE_UNSET else dialogue_source
+    )
+    if require_dialogue_source and effective_dialogue_source is None:
+        raise CeoIntentError("trusted host dialogue source is unavailable")
 
+    effective_selection = (
+        None if frontier_selection is _FRONTIER_SELECTION_UNSET else frontier_selection
+    )
     contract = intent["execution_contract"]
     try:
         if intent["schema"] == INTENT_SCHEMA_V2:
@@ -908,27 +1468,71 @@ def submit_intent(
                 command_id=command_id,
                 workspace_root=workspace_root,
                 execution_binding=execution_binding,
+                dialogue_source=effective_dialogue_source,
+                frontier_selection=effective_selection,
+                _fresh_conversation_source=fresh_conversation_source,
+                _project_execution_source=(None if project_execution_source is _PROJECT_EXECUTION_SOURCE_UNSET
+                    else project_execution_source),
             )
         else:
+            if effective_selection is not None:
+                raise StateConflict("frontier selection requires a strict v2 intent")
             if execution_binding is not None:
                 raise StateConflict("v1 CEO intent cannot carry a host execution binding")
-            job = runtime.jobs.create_job(
-                intent["objective"],
-                department=intent["department"],
-                priority=intent["priority"],
-                authority_level=contract.get("authority_level", "A0"),
-                branch=contract.get("branch"),
-                worktree=contract.get("worktree"),
-                constraints=contract.get("constraints"),
-                attempt_limit=contract.get("attempt_limit", 10),
-                # The REQUEST's authorities travel unchanged; the policy inside
-                # create_job is the adjudicator.
-                requested_authorities=contract["requested_authorities"],
-                allowed_write_paths=contract.get("allowed_write_paths"),
-                validation_commands=contract.get("validation_commands"),
-                command_id=command_id,
-                provenance=_provenance(intent, fingerprint),
-            )
+            if effective_dialogue_source is not None:
+                raise StateConflict("v1 CEO intent cannot carry a host dialogue source")
+            if intent["schema"] in {INTENT_SCHEMA_SERVICE, INTENT_SCHEMA_PRINCIPAL}:
+                # Each schema keeps its own ceiling and admission preconditions.
+                # The narrow service tier remains unchanged. The seat is EXPLICIT:
+                # ``coo`` is the one seat that skips the typed-executive-
+                # provenance gate, and a service intent must never be seated
+                # above it.  No role, no host binding, no dialogue source.
+                if intent["schema"] == INTENT_SCHEMA_SERVICE:
+                    _require_service_ceiling(contract)
+                else:
+                    _require_principal_contract(intent)
+                def principal_commit_fence():
+                    _run_principal_guard(intent, principal_admission_guard)
+
+                job = runtime.jobs.create_job(
+                    intent["objective"],
+                    department=intent["department"],
+                    priority=intent["priority"],
+                    authority_level=contract.get("authority_level", "A0"),
+                    branch=contract.get("branch"),
+                    worktree=contract.get("worktree"),
+                    constraints=contract.get("constraints"),
+                    attempt_limit=contract.get("attempt_limit", 10),
+                    # The REQUEST's authorities travel unchanged; the policy
+                    # inside create_job is the adjudicator.
+                    requested_authorities=contract["requested_authorities"],
+                    allowed_write_paths=contract.get("allowed_write_paths"),
+                    validation_commands=contract.get("validation_commands"),
+                    command_id=command_id,
+                    provenance=_provenance(intent, fingerprint, principal_request_ref=principal_request_ref),
+                    **({"_principal_commit_guard": principal_commit_fence}
+                       if intent["schema"] == INTENT_SCHEMA_PRINCIPAL else {}),
+                    owner_seat="coo",
+                    escalation_target="coo",
+                )
+            else:
+                job = runtime.jobs.create_job(
+                    intent["objective"],
+                    department=intent["department"],
+                    priority=intent["priority"],
+                    authority_level=contract.get("authority_level", "A0"),
+                    branch=contract.get("branch"),
+                    worktree=contract.get("worktree"),
+                    constraints=contract.get("constraints"),
+                    attempt_limit=contract.get("attempt_limit", 10),
+                    # The REQUEST's authorities travel unchanged; the policy inside
+                    # create_job is the adjudicator.
+                    requested_authorities=contract["requested_authorities"],
+                    allowed_write_paths=contract.get("allowed_write_paths"),
+                    validation_commands=contract.get("validation_commands"),
+                    command_id=command_id,
+                    provenance=_provenance(intent, fingerprint),
+                )
     except StateConflict as exc:
         # ``RuntimeStore.transaction`` converts the UNIQUE-index rejection into
         # StateConflict, so a lost concurrency race and an authority denial
@@ -937,18 +1541,29 @@ def submit_intent(
         # the winner's receipt; otherwise the refusal is real and is re-raised.
         settled = runtime.store.find_event_by_command_id(command_id)
         if settled is not None:
+            if project_execution_source is not _PROJECT_EXECUTION_SOURCE_UNSET:
+                from control_plane.project_execution_admission import require_same_source
+                require_same_source(runtime, settled["job_id"], project_execution_source)
             return _receipt_from_event(
-                runtime, settled, intent_id=intent_id, fingerprint=fingerprint
+                runtime,
+                settled,
+                intent_id=intent_id,
+                fingerprint=fingerprint,
+                requested_frontier_alias=intent.get("frontier_model_alias"),
+                dialogue_source=dialogue_source,
+                frontier_selection=frontier_selection,
             )
         raise CeoIntentError(str(exc)) from exc
 
     created = runtime.store.find_event_by_command_id(command_id)
+    _notify_fresh_admission(fresh_admission_observer,job,command_id,created)
     return build_receipt(
         job,
         intent=intent,
         fingerprint=fingerprint,
         duplicate=False,
         created_at_ms=int((created or {}).get("created_at_ms") or 0),
+        principal_request_ref=principal_request_ref,
     )
 
 
@@ -963,7 +1578,12 @@ def resolve_intent(runtime: Any, intent_id: str) -> dict[str, Any]:
     event = runtime.store.find_event_by_command_id(command_id_for(resolved))
     if event is None:
         raise CeoIntentError(f"no accepted CEO intent named {resolved!r}")
-    receipt = _receipt_from_event(runtime, event, intent_id=resolved, fingerprint=None)
+    receipt = _receipt_from_event(
+        runtime,
+        event,
+        intent_id=resolved,
+        fingerprint=None,
+    )
     # A read-back is not a second acceptance; ``duplicate`` describes submission.
     receipt["duplicate"] = False
     return receipt
@@ -971,13 +1591,18 @@ def resolve_intent(runtime: Any, intent_id: str) -> dict[str, Any]:
 
 __all__ = [
     "COMMAND_ID_PREFIX",
+    "CeoIntentConflict",
     "CeoIntentError",
     "FORBIDDEN_PROGRAMS",
     "INTENT_ID_RE",
     "INTENT_SCHEMA",
+    "INTENT_SCHEMA_SERVICE",
+    "INTENT_SCHEMA_PRINCIPAL",
     "INTENT_SCHEMA_V2",
     "MAX_ENVELOPE_BYTES",
     "RECEIPT_SCHEMA",
+    "RECEIPT_SCHEMA_SERVICE",
+    "RECEIPT_SCHEMA_PRINCIPAL",
     "RECEIPT_SCHEMA_V2",
     "SHA_RE",
     "build_receipt",

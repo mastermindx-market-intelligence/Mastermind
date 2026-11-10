@@ -1,0 +1,48 @@
+{
+  "schema": "mastermind.physical_resource_policy.v1",
+  "production_armed": false,
+  "qualification": "UNQUALIFIED",
+  "policy_revision": null,
+  "authority_receipt": null,
+  "qualification_evidence": [],
+  "canonical_runtime": {
+    "runtime_id": null,
+    "host_id": null,
+    "boot_id": null,
+    "endpoint": null,
+    "database_identity": null,
+    "schema_identity": null
+  },
+  "physical_pools": [],
+  "allowed_callers": [],
+  "profiles": [],
+  "windows": {
+    "cpu_window_ms": null,
+    "io_window_ms": null,
+    "normalization_evidence": null
+  },
+  "limits": {
+    "cpu_budget_us": null,
+    "cpu_protected_us": null,
+    "memory_budget_bytes": null,
+    "memory_protected_bytes": null,
+    "internal_protected_bytes": null,
+    "external_protected_bytes": null,
+    "io_budget_bytes": null,
+    "io_protected_bytes": null,
+    "max_heavy_phases": null
+  },
+  "freshness": {
+    "sample_max_age_ms": null,
+    "sample_cadence_ms": null,
+    "decision_to_effect_max_ms": null
+  },
+  "waits": {
+    "service_request_max_ms": null,
+    "database_lock_max_ms": null
+  },
+  "recovery": {
+    "reservation_horizon_ms": null,
+    "reconciliation_interval_ms": null
+  }
+}

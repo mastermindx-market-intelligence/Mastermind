@@ -1,0 +1,14 @@
+{
+  "protected_commit": "c1fe757e34112dd2d1969241526932f5b81b453b",
+  "source": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext",
+  "preimages": {
+    "fabric_task.py": "ca2eda17c76fb7af899501c40f2fa0450391079612d6d56c7d138eb2914624c2",
+    "run_observation_delivery.py": "479e6c50947f6961c1cb6e50fec0e8390c0eaf824ac455b24c2b06b9d7d33d92"
+  },
+  "unchanged_dependencies": {
+    "artifact_delivery.py": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
+    "artifact_production.py": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
+    "pool_ledger.py": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e"
+  }
+}

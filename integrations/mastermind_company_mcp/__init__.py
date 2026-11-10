@@ -5,6 +5,20 @@ from integrations.mastermind_company_mcp.adapter import (
     DialogueBinding,
     DialogueBindingResolver,
 )
+from integrations.mastermind_company_mcp.consultation import (
+    COMPANY_CONSULTATION_CAPABILITY,
+    COMPANY_CONSULTATION_ERROR_CODES,
+    COMPANY_CONSULTATION_RESULT_SCHEMA,
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
+    COMPANY_CONSULTATION_SERVER_NAME,
+    COMPANY_CONSULTATION_SERVER_VERSION,
+    COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
+    COMPANY_CONSULTATION_TOOL_SPECS,
+    CompanyConsultationGateway,
+    CompanyConsultationToolError,
+    CompanyConsultationToolSpec,
+    validate_company_consultation_tool_arguments,
+)
 from integrations.mastermind_company_mcp.schemas import (
     RESULT_SCHEMA,
     SCHEMA_SNAPSHOT_SHA256,
@@ -24,7 +38,18 @@ from integrations.mastermind_company_mcp.schemas import (
 )
 
 __all__ = [
+    "COMPANY_CONSULTATION_CAPABILITY",
+    "COMPANY_CONSULTATION_ERROR_CODES",
+    "COMPANY_CONSULTATION_RESULT_SCHEMA",
+    "COMPANY_CONSULTATION_SERVER_IDENTITY",
+    "COMPANY_CONSULTATION_SERVER_NAME",
+    "COMPANY_CONSULTATION_SERVER_VERSION",
+    "COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST",
+    "COMPANY_CONSULTATION_TOOL_SPECS",
     "CompanyDialogueGateway",
+    "CompanyConsultationGateway",
+    "CompanyConsultationToolError",
+    "CompanyConsultationToolSpec",
     "DialogueBinding",
     "DialogueBindingResolver",
     "GatewayError",
@@ -42,4 +67,5 @@ __all__ = [
     "tool_schema_digest",
     "tool_schema_snapshot",
     "validate_tool_arguments",
+    "validate_company_consultation_tool_arguments",
 ]

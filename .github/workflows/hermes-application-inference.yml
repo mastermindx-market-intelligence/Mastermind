@@ -1,0 +1,482 @@
+name: Hermes APPLICATION inference contract
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/hermes_application_fabric/**'
+      - 'integrations/hermes_runtime/**'
+      - 'integrations/session_bridge/hermes_native.py'
+      - 'ops/executive_os/release_manifest.py'
+      - 'ops/executive_os/capacity_host_artifacts.py'
+      - 'ops/executive_os/install.sh'
+      - 'tests/test_hermes_attended_sources.py'
+      - 'tests/test_hermes_attended_source_projection.py'
+      - 'tests/test_hermes_primary_application_host.py'
+      - 'tests/test_hermes_primary_application_tunnel.py'
+      - 'tests/test_hermes_primary_session_return.py'
+      - 'tests/application_tunnel_ci/**'
+      - 'ops/executive_os/application_tunnel_control.py'
+      - 'ops/executive_os/os_tunnel_entry.py'
+      - '.github/workflows/hermes-application-inference.yml'
+      - '.github/workflows/ci.yml'
+      - 'tests/integration/test_fabric_*_cross_pool_auto.py'
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [master]
+    paths:
+      - 'integrations/hermes_application_fabric/**'
+      - 'integrations/hermes_runtime/**'
+      - 'integrations/session_bridge/hermes_native.py'
+      - 'ops/executive_os/release_manifest.py'
+      - 'ops/executive_os/capacity_host_artifacts.py'
+      - 'ops/executive_os/install.sh'
+      - 'tests/test_hermes_attended_sources.py'
+      - 'tests/test_hermes_attended_source_projection.py'
+      - 'tests/test_hermes_primary_application_host.py'
+      - 'tests/test_hermes_primary_application_tunnel.py'
+      - 'tests/test_hermes_primary_session_return.py'
+      - 'tests/application_tunnel_ci/**'
+      - 'ops/executive_os/application_tunnel_control.py'
+      - 'ops/executive_os/os_tunnel_entry.py'
+      - '.github/workflows/hermes-application-inference.yml'
+      - '.github/workflows/ci.yml'
+      - 'tests/integration/test_fabric_*_cross_pool_auto.py'
+
+permissions:
+  contents: read
+
+jobs:
+  studio-preflight-observation:
+    name: Disposable Studio preflight observation with original assertions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Acquire the original immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify event source and original fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+      - name: Install original fixture dependencies
+        run: python -m pip install --disable-pip-version-check -e '.[dev]'
+      - name: Compare unchanged baseline, observed case and original discovery context
+        run: >-
+          python -B integrations/hermes_application_fabric/qualification/diagnose_studio_fixture.py
+          --mode all --output "$RUNNER_TEMP/hermes-studio-launch-observation"
+      - name: Retain bounded fixture-only observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-studio-launch-observation
+          path: ${{ runner.temp }}/hermes-studio-launch-observation/**/result.json
+          if-no-files-found: error
+  paired-application-composition:
+    name: Current paired APPLICATION text, AUTO and native tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+      - name: Install incumbent paired dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -e '.[dev]'
+          npm ci --prefix app/mastermind_os
+      - name: Read the incumbent paired gate and exact owner pin
+        id: paired-inputs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, os, re, yaml
+          workflow = yaml.safe_load(Path('.github/workflows/ci.yml').read_text())
+          steps = workflow['jobs']['pytest_shards']['steps']
+          owner = next(s for s in steps if s.get('name') == 'Checkout paired Brain production owner fixture')['with']
+          gate = next(s for s in steps if s.get('name') == 'Verify actual Brain Fabric and production inference composition')
+          assert owner['repository'] == 'mastermindx-market-intelligence/macro'
+          assert owner['path'] == '.ci-production-macro'
+          assert re.fullmatch(r'[0-9a-f]{40}', owner['ref'])
+          assert all(value == '1' for value in gate['env'].values())
+          Path(os.environ['RUNNER_TEMP'], 'paired-application-gate.json').write_text(json.dumps(gate))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('macro_ref=' + owner['ref'] + '\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: ${{ steps.paired-inputs.outputs.macro_ref }}
+          path: .ci-production-macro
+          sparse-checkout: |
+            engine
+            lib
+            config
+            tests
+            research/earnings_intelligence/e3/gold
+            ops/launchd
+            scripts
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Execute the existing paired composition gate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, os, subprocess
+          gate = json.loads(Path(os.environ['RUNNER_TEMP'], 'paired-application-gate.json').read_text())
+          subprocess.run(['bash', '-euo', 'pipefail', '-c', gate['run']],
+                         env={**os.environ, **gate['env']}, check=True)
+          PY
+  attended-gateway-contract:
+    name: Hermes attended gateway with original admission and role coexistence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
+          path: .ci-hermes-gateway-native
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 25ba92bb52120fae550b54c29f82929c0b77d37b
+          path: .ci-hermes-application-owner
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install exact native lock and declared validator
+        run: |
+          python -m pip install --disable-pip-version-check 'uv==0.13.5'
+          uv sync --project .ci-hermes-gateway-native --locked --no-default-groups --group dev --python 3.14
+          uv pip install --python .ci-hermes-gateway-native/.venv/bin/python 'jsonschema==4.26.0' 'PyYAML==6.0.3'
+      - name: Prepare exact isolated native patch fixture
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, subprocess, tarfile
+          root = Path.cwd()
+          package = root / 'integrations/hermes_application_fabric'
+          native = root / '.ci-hermes-gateway-native'
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          fixture = temporary / 'hermes-gateway-patched'
+          fixture.mkdir()
+          patch = package / 'hermes_core/hermes-2bd378ed-host-bound.patch'
+          contract = json.loads((patch.with_suffix('.json')).read_text())
+          assert contract['hermes'] == '2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19'
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == contract['patch_sha256']
+          archive = temporary / 'hermes-gateway-source.tar'
+          with archive.open('wb') as output:
+              subprocess.run(['git', '-c', 'gc.auto=0', '-C', str(native), 'archive', '--format=tar', 'HEAD'],
+                             stdout=output, check=True)
+          with tarfile.open(archive) as source:
+              source.extractall(fixture, filter='data')
+          for relative, expected in contract['preimages'].items():
+              path = fixture / relative
+              assert not path.exists() if expected is None else hashlib.sha256(path.read_bytes()).hexdigest() == expected
+          subprocess.run(['git', '-c', 'gc.auto=0', '-C', str(fixture), 'apply', '--check', str(patch)], check=True)
+          subprocess.run(['git', '-c', 'gc.auto=0', '-C', str(fixture), 'apply', str(patch)], check=True)
+          files = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                   for path in package.rglob('*') if path.is_file() and '__pycache__' not in path.parts}
+          (temporary / 'hermes-gateway-manifest.json').write_text(json.dumps({
+              'candidate': os.environ['GITHUB_SHA'], 'files': files,
+              'core_files': contract['core_files']}))
+          PY
+      - name: Qualify actual resolver, projection, native tools and original recovery
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-attended-gateway-home
+          PYTHONPATH: ${{ runner.temp }}/hermes-gateway-patched
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-gateway-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_gateway.py
+          --adapter-root . --owner-root .ci-hermes-application-owner
+          --hermes-root .ci-hermes-gateway-native
+          --hermes-fixture "$RUNNER_TEMP/hermes-gateway-patched"
+          --candidate "$GITHUB_SHA" --manifest "$RUNNER_TEMP/hermes-gateway-manifest.json"
+      - name: Verify native package snapshots and same-distribution multi-home installation
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-attended-gateway-home
+          PYTHONPATH: ${{ runner.temp }}/hermes-gateway-patched
+        run: >-
+          .ci-hermes-gateway-native/.venv/bin/python -B -m pytest -q --tb=short --noconftest -o addopts=
+          "$RUNNER_TEMP/hermes-gateway-patched/tests/pm/test_buildable_multi_home.py"
+          "$RUNNER_TEMP/hermes-gateway-patched/tests/pm/test_member_selection.py"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Install locked native TUI dependencies and build its Ink renderer
+        working-directory: ${{ runner.temp }}/hermes-gateway-patched
+        run: |
+          npm ci --ignore-scripts --workspace ui-tui --workspace ui-tui/packages/hermes-ink --include-workspace-root
+          npm run build:ink --workspace ui-tui
+      - name: Verify managed Fabric model selection through the native picker
+        working-directory: ${{ runner.temp }}/hermes-gateway-patched
+        run: >-
+          npm run test --workspace ui-tui --
+          src/__tests__/modelPickerHostBound.test.tsx
+          src/__tests__/modelPicker.test.ts
+  native-original-owner:
+    name: Hermes native conversation through APPLICATION handler and Broker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+          path: .ci-hermes-native
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: a577dbbf605474f97bbafa4ceeb0daf841292421
+          path: .ci-hermes-application-owner
+          sparse-checkout: |
+            engine
+            lib
+            config
+            tests
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Checkout committed Hermes support in the current Macro contribution
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 12efe39a6b6e2f6d19f3a9893f978c55d4656681
+          path: .ci-hermes-current-application-owner
+          sparse-checkout: |
+            engine
+            lib
+            config
+            tests
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - name: Checkout committed attended AUTO composition
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 25ba92bb52120fae550b54c29f82929c0b77d37b
+          path: .ci-hermes-composed-application-owner
+          sparse-checkout: |
+            engine
+            lib
+            config
+            tests
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install exact native lock and declared overrides
+        run: |
+          python -m pip install --disable-pip-version-check 'uv==0.13.5'
+          uv sync --project .ci-hermes-native --locked --no-default-groups --python 3.14
+          uv pip install --python .ci-hermes-native/.venv/bin/python 'jsonschema==4.26.0' 'PyYAML==6.0.3' 'pytest==9.2.0'
+      - name: Verify committed source fixture boundaries
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/verify_source_materialization.py
+      - name: Qualify committed current support without applying the historical proposal
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-current-owner-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-current-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
+          --current-owner-source
+      - name: Qualify committed attended fixed AUTO and exact source through the original Broker
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-composed-owner-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-composed-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
+          --composed-owner-source
+      - name: Qualify the exact source-support proposal without overriding support flags
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-source-support-native-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
+          --source-support-proposal
+      - name: Verify actual native tool history, owner limits and unknown effects
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-original-owner-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: >-
+          .ci-hermes-native/.venv/bin/python -B
+          integrations/hermes_application_fabric/qualification/qualify_application_owner.py
+          --adapter-root . --macro-root .ci-hermes-application-owner
+          --native-owner-root . --hermes-root .ci-hermes-native
+  original-tunnel-owner:
+    name: Hermes aliases through original tunnel custody
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Qualify original and successor in isolated Linux root fixture
+        run: |
+          set -euo pipefail
+          hermes_transport_source="$(mktemp -d "${RUNNER_TEMP}/hermes-transport-source.XXXXXX")"
+          trap 'rm -rf "$hermes_transport_source"' EXIT
+          git archive --format=tar HEAD | tar -x -C "$hermes_transport_source"
+          chmod 0755 "$hermes_transport_source"
+          docker build --file tests/application_tunnel_ci/Dockerfile --tag hermes-transport:${{ github.sha }} tests/application_tunnel_ci
+          docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=${hermes_transport_source},dst=/repo,readonly" hermes-transport:${{ github.sha }}
+  pinned-native-contract:
+    name: Hermes pinned v0.23 primary and tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+          path: .ci-hermes-native
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 25ba92bb52120fae550b54c29f82929c0b77d37b
+          path: .ci-hermes-application-owner
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /engine/fabric_inference_client.py
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install exact native lock and declared overrides
+        run: |
+          python -m pip install --disable-pip-version-check 'uv==0.13.5'
+          uv sync --project .ci-hermes-native --locked --no-default-groups --python 3.14
+          uv pip install --python .ci-hermes-native/.venv/bin/python 'jsonschema==4.26.0'
+      - name: Qualify current native ABI without an external provider
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-primary-fixture
+          PYTHONPATH: .ci-hermes-native
+          HERMES_STARTUP_WARMUP_TIMEOUT: '0'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os
+          root = Path.cwd()
+          files = {str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+                   for path in (root / 'integrations/hermes_application_fabric').rglob('*')
+                   if path.is_file() and '__pycache__' not in path.parts}
+          (Path(os.environ['RUNNER_TEMP']) / 'hermes-primary-manifest.json').write_text(
+              json.dumps({'candidate': os.environ['GITHUB_SHA'], 'files': files}))
+          PY
+          .ci-hermes-native/.venv/bin/python -B integrations/hermes_application_fabric/qualification/qualify_installed.py \
+            --adapter-root . --owner-root .ci-hermes-application-owner --hermes-root .ci-hermes-native \
+            --candidate "$GITHUB_SHA" --manifest "$RUNNER_TEMP/hermes-primary-manifest.json" \
+            --hermes-sha 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+  native-host-contract:
+    name: Hermes primary native host composition
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install host fixture dependencies
+        run: python -m pip install --disable-pip-version-check -e '.[dev]' 'jsonschema==4.26.0'
+      - name: Verify native admission, source custody and output fences
+        run: >-
+          python -B -m pytest -q --tb=short --noconftest -o addopts=
+          tests/test_hermes_primary_application_host.py
+          tests/test_hermes_primary_session_return.py
+          tests/test_hermes_attended_sources.py
+          tests/test_hermes_attended_source_projection.py
+  original-owner-contract:
+    name: Hermes APPLICATION offline contract (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Reuse the repository's existing read-only Macro checkout capability.
+      # No provider credentials, installed Hermes profile, or runtime grants.
+      - name: Checkout exact APPLICATION client evidence
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 25ba92bb52120fae550b54c29f82929c0b77d37b
+          path: .ci-hermes-application-owner
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /engine/fabric_inference_client.py
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install qualified JSON validator
+        run: python -m pip install --disable-pip-version-check 'jsonschema==4.26.0'
+      - name: Run bounded no-external-network contract suite
+        run: >-
+          python -B integrations/hermes_application_fabric/qualification/qualify_offline.py
+          --owner-root .ci-hermes-application-owner
+

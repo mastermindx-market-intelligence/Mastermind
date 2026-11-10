@@ -1,0 +1,82 @@
+{
+  "authorship": {
+    "author_ref": "person:c0-worker",
+    "independent_reviewer_ref": "person:sol"
+  },
+  "capability_policy": {
+    "allowed_capability_ids": [
+      "read_frozen_extract"
+    ],
+    "allowed_tool_schema_digests": [
+      "sha256:d6082861ca88c8053e1af896404ea1f1fda1a15ffc6639f57d72182d779e14a0"
+    ],
+    "forbidden_capability_ids": [
+      "execute_shell",
+      "network_fetch",
+      "search_repo",
+      "write_file"
+    ],
+    "profile_digest": "sha256:a54272329eb124008c153334bf825ac88c15083e022746fd8161f27f0fd15cc0",
+    "profile_id": "read_only_extract_reviewer"
+  },
+  "corpus_revision": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9",
+  "effect_policy": {
+    "allowed_operation_refs": [],
+    "mode": "NO_EFFECT_ONLY"
+  },
+  "execution_policy": {
+    "allowed_degradations": [],
+    "fresh_process_required": true,
+    "fresh_session_required": true,
+    "fresh_workspace_required": true,
+    "max_elapsed_ms": 300000,
+    "max_tool_calls": 20,
+    "network_allowlist": [],
+    "network_policy": "DENY_ALL",
+    "resume_allowed": false
+  },
+  "expected_contract": {
+    "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/expected.json",
+    "digest": "sha256:2c1098380e916f8e7e354ae834ed29dae72b7f6c76d8246d8dc19f7a1cb2b4f3"
+  },
+  "input_fixture": {
+    "artifact_ref": "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/input.json",
+    "digest": "sha256:ef776fcee866e45d4b9313a6e787f5dc17d53b0772580c038e5d092d59de8db6"
+  },
+  "objective": "Answer a grounded factual question about a frozen extract naming the canonical owner and truthful state of the Agent Evaluation fresh runner.",
+  "privacy": {
+    "classification": "PUBLIC_SAFE",
+    "model_visible_artifact_refs": [
+      "git:mastermindx-market-intelligence/Mastermind@ba3a421918231bf9df451d80b6abafc5c90a00c9#corpus/agent_eval/scenarios/current_source_comprehension/fresh_runner_canonical_owner/v1/fixtures/input.json"
+    ],
+    "retention_class": "BOUNDED"
+  },
+  "risk_tier": "LOW",
+  "scenario_digest": "sha256:7600ee4ebeb6bb4f14abd9ecc3fa746786b4fd176c12d9ec429ad8c1058ea4c6",
+  "scenario_family": "mastermind.current_source_comprehension.v1",
+  "scenario_id": "scenario:current_source_comprehension:fresh_runner_canonical_owner",
+  "scenario_version": 1,
+  "schema": "mastermind.agent_evaluation_scenario.v1",
+  "scoring_policy": {
+    "optional_scorers": [],
+    "required_dimensions": [
+      "cleanup_integrity",
+      "configuration_integrity",
+      "effect_integrity",
+      "source_integrity"
+    ],
+    "required_scorers": [
+      "mastermind.technical_integrity.v1"
+    ]
+  },
+  "source_policy": {
+    "allowlist_artifacts": [],
+    "denylist_refs": [],
+    "solution_refs_hidden": []
+  },
+  "supersedes": null,
+  "temporal": {
+    "authored_at": "2026-09-01T00:30:00Z",
+    "cutoff_at": "2026-09-01T00:00:00Z"
+  }
+}

@@ -6,6 +6,9 @@ import importlib
 import pytest
 
 from control_plane.executive_orchestration_principal import digest
+from control_plane.executive_delegation_identity import (
+    ExecutiveDelegationIdentityError,
+)
 from control_plane.executive_runtime import Job, JobStatus
 
 
@@ -28,6 +31,36 @@ def _job(
         "role": role,
     }
     lineage: dict[str, object] = {}
+    if role == "aggregation":
+        parent_job_id = None
+        root_job_id = job_id
+        provenance.update(
+            creator="ceo_intent",
+            parent_job_id=parent_job_id,
+            root_job_id=root_job_id,
+        )
+        return Job(
+            job_id=job_id,
+            objective="Aggregate the bounded Executive child results.",
+            department="executive-infrastructure",
+            priority=9,
+            status=JobStatus.QUEUED,
+            assigned_worker_id=None,
+            assigned_quota_class=None,
+            authority_level="A0",
+            branch=None,
+            worktree=None,
+            checkpoint=None,
+            result=None,
+            created_at="2026-08-29T00:00:00Z",
+            updated_at="2026-08-29T00:00:00Z",
+            parent_job_id=parent_job_id,
+            root_job_id=root_job_id,
+            depth=0,
+            orchestration_role=role,
+            orchestration_provenance=provenance,
+            orchestration_provenance_digest=digest(provenance),
+        )
     if role in {"work", "review", "repair"}:
         lineage.update(
             plan_attempt_id="ATT-001",
@@ -95,6 +128,15 @@ def _replace_provenance(job: Job, **updates: object) -> Job:
         orchestration_provenance=provenance,
         orchestration_provenance_digest=digest(provenance),
     )
+
+
+def _parented_aggregation_job(depth: int) -> Job:
+    job = dataclasses.replace(
+        _job(job_id="JOB-001", role="aggregation"),
+        parent_job_id="JOB-002",
+        depth=depth,
+    )
+    return _replace_provenance(job, parent_job_id=job.parent_job_id)
 
 
 def _remove_provenance_key(job: Job, key: str) -> Job:
@@ -182,6 +224,49 @@ def test_projected_identifiers_are_valid_dialogue_v2_parent_identity() -> None:
     assert parent["session_ref"] == "asd-session-exec-job-123"
 
 
+def test_canonical_aggregation_root_projects_to_stable_company_identity() -> None:
+    identity = _identity_module().derive_delegation_identity(
+        _job(job_id="JOB-001", role="aggregation")
+    )
+
+    assert dataclasses.asdict(identity) == {
+        "job_id": "JOB-001",
+        "root_job_id": "JOB-001",
+        "operation_key": "exec-job-001",
+        "session_ref": "asd-session-exec-job-001",
+    }
+
+
+@pytest.mark.parametrize(
+    "invalid_job",
+    [
+        pytest.param(
+            lambda: _parented_aggregation_job(depth=1),
+            id="aggregation-depth-1-root",
+        ),
+        pytest.param(
+            lambda: _parented_aggregation_job(depth=0),
+            id="aggregation-parented-root",
+        ),
+        pytest.param(
+            lambda: _replace_provenance(
+                _job(job_id="JOB-001", role="aggregation"), creator="coo_cycle"
+            ),
+            id="aggregation-wrong-creator",
+        ),
+        pytest.param(
+            lambda: dataclasses.replace(
+                _job(job_id="JOB-001", role="aggregation"), plan_digest="b" * 64
+            ),
+            id="aggregation-malformed-child-lineage",
+        ),
+    ],
+)
+def test_malformed_aggregation_root_is_refused(invalid_job) -> None:
+    with pytest.raises(ExecutiveDelegationIdentityError):
+        _identity_module().derive_delegation_identity(invalid_job())
+
+
 def test_runtime_round_boundaries_remain_projectable() -> None:
     module = _identity_module()
 
@@ -196,7 +281,6 @@ def test_runtime_round_boundaries_remain_projectable() -> None:
     "invalid_job",
     [
         pytest.param(lambda: _job(role=None), id="legacy-role-null"),
-        pytest.param(lambda: _job(role="aggregation"), id="aggregation-root"),
         pytest.param(lambda: _job(role="foreign"), id="unknown-role"),
         pytest.param(lambda: _job(parent_job_id=None), id="missing-parent"),
         pytest.param(
@@ -392,3 +476,104 @@ def test_non_runtime_job_is_refused() -> None:
 
     with pytest.raises(module.ExecutiveDelegationIdentityError):
         module.derive_delegation_identity(object())
+
+def _nested_job(
+    parent: Job, *, job_id: str = "JOB-234", role: str = "work"
+) -> Job:
+    child = _job(
+        job_id=job_id,
+        root_job_id=parent.root_job_id,
+        parent_job_id=parent.job_id,
+        role=role,
+    )
+    return dataclasses.replace(child, depth=2)
+
+
+@pytest.mark.parametrize("role", ["work", "review", "repair"])
+def test_nested_child_projects_conserved_root_parent_identity(role: str) -> None:
+    module = _identity_module()
+    parent = _job(job_id="JOB-123", role="work")
+    child = _nested_job(parent, role=role)
+
+    identity = module.derive_nested_delegation_identity(child, parent)
+
+    assert dataclasses.asdict(identity) == {
+        "job_id": "JOB-234",
+        "parent_job_id": "JOB-123",
+        "root_job_id": "JOB-001",
+        "operation_key": "exec-job-234",
+        "session_ref": "asd-session-exec-job-234",
+    }
+
+
+def test_v1_projection_still_refuses_indirect_child() -> None:
+    module = _identity_module()
+    parent = _job(job_id="JOB-123", role="work")
+    child = _nested_job(parent)
+
+    with pytest.raises(ExecutiveDelegationIdentityError, match="direct root child"):
+        module.derive_delegation_identity(child)
+
+
+@pytest.mark.parametrize(
+    "mutation,match",
+    [
+        (lambda child, parent: (dataclasses.replace(child, depth=1), parent), "depth-2 child"),
+        (lambda child, parent: (dataclasses.replace(child, depth=3), parent), "depth-2 child"),
+        (lambda child, parent: (dataclasses.replace(child, parent_job_id="JOB-999"), parent), "depth-2 child"),
+        (lambda child, parent: (dataclasses.replace(child, root_job_id="JOB-999"), parent), "depth-2 child"),
+        (lambda child, parent: (dataclasses.replace(child, orchestration_role="plan"), parent), "depth-2 child"),
+        (lambda child, parent: (child, _job(job_id="JOB-123", role="review")), "direct-root work Job"),
+    ],
+)
+def test_nested_lineage_refuses_depth_parent_root_or_role_drift(mutation, match: str) -> None:
+    module = _identity_module()
+    parent = _job(job_id="JOB-123", role="work")
+    child = _nested_job(parent)
+    bad_child, bad_parent = mutation(child, parent)
+
+    with pytest.raises(ExecutiveDelegationIdentityError, match=match):
+        module.derive_nested_delegation_identity(bad_child, bad_parent)
+
+
+def test_nested_lineage_refuses_child_provenance_parent_transplant() -> None:
+    module = _identity_module()
+    parent = _job(job_id="JOB-123", role="work")
+    child = _nested_job(parent)
+    transplanted = _replace_provenance(child, parent_job_id="JOB-999")
+
+    with pytest.raises(ExecutiveDelegationIdentityError, match="provenance identity"):
+        module.derive_nested_delegation_identity(transplanted, parent)
+
+
+def test_nested_lineage_refuses_parent_provenance_drift() -> None:
+    module = _identity_module()
+    parent = _replace_provenance(
+        _job(job_id="JOB-123", role="work"), root_job_id="JOB-999"
+    )
+    child = _nested_job(parent)
+
+    with pytest.raises(ExecutiveDelegationIdentityError):
+        module.derive_nested_delegation_identity(child, parent)
+
+
+@pytest.mark.parametrize("role,field", [("review", "reviews_job_id"), ("repair", "supersedes_job_id")])
+@pytest.mark.parametrize("target", ["self", "root", "parent"])
+def test_nested_revision_rejects_known_nonsibling_target(role, field, target):
+    # Runtime requires a sibling target: executive_runtime.py:14532-14539,
+    # and _assert_orchestration_lineage_for_create:10222-10257 at #1263.
+    parent = _job(job_id="JOB-123", role="work")
+    child = _nested_job(parent, role=role)
+    target_id = {"self": child.job_id, "root": child.root_job_id, "parent": parent.job_id}[target]
+    child = dataclasses.replace(child, **{field: target_id})
+    with pytest.raises(ExecutiveDelegationIdentityError):
+        _identity_module().derive_nested_delegation_identity(child, parent)
+
+@pytest.mark.parametrize("role,field", [("review", "reviews_job_id"), ("repair", "supersedes_job_id")])
+def test_nested_revision_keeps_potential_sibling_target_projectable(role, field):
+    parent = _job(job_id="JOB-123", role="work")
+    child = dataclasses.replace(_nested_job(parent, role=role), **{field: "JOB-122"})
+    identity = _identity_module().derive_nested_delegation_identity(child, parent)
+    assert identity.parent_job_id == parent.job_id
+    assert identity.root_job_id == parent.root_job_id
+    # Existence/status/actual sibling scope remain Runtime's responsibility.

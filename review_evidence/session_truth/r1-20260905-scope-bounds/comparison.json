@@ -1,0 +1,106 @@
+{
+  "status": "PASS",
+  "clock1": "2026-09-05T05:35:09Z",
+  "clock2": "2026-09-06T06:35:09Z",
+  "clocks_are_explicit_inputs_not_elapsed_time": true,
+  "semantic_hash_clock1": "sha256:ff8b51824ef92747217208e0f2cc7e43399ef8b9230450c6cc7c6a2149e5b5d1",
+  "semantic_hash_clock2": "sha256:ff8b51824ef92747217208e0f2cc7e43399ef8b9230450c6cc7c6a2149e5b5d1",
+  "projections_equal": true,
+  "raw_receipts_equal": false,
+  "differing_semantic_leaves": [],
+  "admission": {
+    "blocking_codes": [
+      "COMPLETION_OWNER_EVIDENCE_UNKNOWN"
+    ],
+    "mode": "DIALOGUE_ONLY",
+    "modification_safe": false,
+    "optional_sources_unavailable": [
+      "executive",
+      "identities"
+    ],
+    "refusal_codes": [],
+    "required_sources_unavailable": [],
+    "warning_codes": [
+      "SLACK_TRANSPORT_WITHOUT_ACK",
+      "UNKNOWN_SEAT_IDENTITY"
+    ]
+  },
+  "findings": [
+    {
+      "canonical_owner": "declared_completion_owner",
+      "code": "COMPLETION_OWNER_EVIDENCE_UNKNOWN",
+      "details": {
+        "reason": "exact_reciprocal_completion_owner_unavailable"
+      },
+      "modification_consequence": "requested_modification_blocked",
+      "repair_owner": "declared_completion_owner",
+      "severity": "BLOCKING",
+      "source_a": {
+        "completion": null,
+        "owner_evidence": []
+      },
+      "source_b": {
+        "linear_status": "Done"
+      },
+      "subject": "MAS-228"
+    },
+    {
+      "canonical_owner": "declared_completion_owner",
+      "code": "COMPLETION_OWNER_EVIDENCE_UNKNOWN",
+      "details": {
+        "reason": "owner_proof_state_unclassified"
+      },
+      "modification_consequence": "requested_modification_blocked",
+      "repair_owner": "declared_completion_owner",
+      "severity": "BLOCKING",
+      "source_a": {
+        "completion": "acceptance-required"
+      },
+      "source_b": {
+        "proof_state": null
+      },
+      "subject": "mastermindx-market-intelligence/Mastermind#169"
+    },
+    {
+      "canonical_owner": "runtime_session",
+      "code": "SLACK_TRANSPORT_WITHOUT_ACK",
+      "details": {},
+      "modification_consequence": "repair_debt_visible",
+      "repair_owner": "slack",
+      "severity": "WARNING",
+      "source_a": {
+        "operation_key": "session-truth-r1-project-watch-20260827-sol-001"
+      },
+      "source_b": {
+        "acked": false
+      },
+      "subject": "C0BSBM78V1N@1788585143.654139"
+    },
+    {
+      "canonical_owner": "identity_registry",
+      "code": "UNKNOWN_SEAT_IDENTITY",
+      "details": {},
+      "modification_consequence": "repair_debt_visible",
+      "repair_owner": "identity_registry",
+      "severity": "WARNING",
+      "source_a": {
+        "sender_id": "U0BRGTF1H26"
+      },
+      "source_b": null,
+      "subject": "U0BRGTF1H26"
+    },
+    {
+      "canonical_owner": "identity_registry",
+      "code": "UNKNOWN_SEAT_IDENTITY",
+      "details": {},
+      "modification_consequence": "repair_debt_visible",
+      "repair_owner": "identity_registry",
+      "severity": "WARNING",
+      "source_a": {
+        "target_principal_id": "U0BT20ZL77C"
+      },
+      "source_b": null,
+      "subject": "U0BT20ZL77C"
+    }
+  ]
+}

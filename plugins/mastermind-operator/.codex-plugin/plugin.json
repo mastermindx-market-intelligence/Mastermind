@@ -1,0 +1,19 @@
+{
+  "name": "mastermind-operator",
+  "version": "0.1.0",
+  "description": "Governed operator workflows for receiving one bound commission, returning progress, escalating a decision, and finishing one operation without generic Slack or lifecycle authority.",
+  "author": {
+    "name": "Mastermind-X"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mastermind Operator",
+    "shortDescription": "Bound operator and company-dialogue workflows",
+    "longDescription": "Receive one already-bound operation, return progress or a decision request, and finish the operation through the governed company-dialogue lifecycle without generic Slack or runtime authority.",
+    "developerName": "Mastermind-X",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ]
+  }
+}

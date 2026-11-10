@@ -1,0 +1,63 @@
+{
+  "schema": "soxx.htf_turn_vs_armed.frozen.v15",
+  "date": "2026-10-11",
+  "predeclared_before_outcomes": true,
+  "mission": "Test whether a completed 3H MACD histogram and Stoch RSI recovery condition PLUS confirmed 15/30/60m price pivot improves entry quality vs the original 3H extreme merely remaining armed, with same exits, source and fixed risk",
+  "universe": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD"
+  ],
+  "entries": [
+    [
+      "3h_60fast",
+      60,
+      "fast"
+    ],
+    [
+      "3h_30fast",
+      30,
+      "fast"
+    ],
+    [
+      "3h_15fast",
+      15,
+      "fast"
+    ]
+  ],
+  "parent": "3h_medium MACD8/21/5, Stoch RSI14, severe prior negative histogram RMS>=2 and oversold K<=20; one episode per histogram lobe",
+  "parent_state": {
+    "armed": "Completed parent extreme has occurred; no positive turning required",
+    "turn": "Latest completed 3H histogram remains negative but is increasing; completed 3H Stoch K rising and K>=D; does not use a still-open parent candle"
+  },
+  "lower": "Original confirmed price pivot (two bars left and one right), RSI14 near pivot<=45, improving histogram, Stoch K>=D, next observed opening fill",
+  "max_arm_expiry_RTH_hours": 26,
+  "initial_stop_pct": 1.5,
+  "partial_profit": {
+    "fraction": 0.25,
+    "price_gain_pct": 2
+  },
+  "exit_policies": [
+    "time52",
+    "structural_cycle"
+  ],
+  "max_hold_RTH_hours": 52,
+  "matched_metrics": [
+    "shared_parent_episodes",
+    "conditional_admission_rate",
+    "win_rate_mean_net_each_timing",
+    "entry_lag_RTH_hours",
+    "price_advantage",
+    "skipped_armed_winners",
+    "paired same-episode return change",
+    "return per original opportunity including skipped=0"
+  ],
+  "source": "Terminal 15-minute regular-session 2025-06-16 to 2026-10-09; source vendor basis not historically qualified, no BOATS",
+  "venue_execution": "OHLC next-open model, 5 bps side costs, conservative stop-first, no bid/ask marketability",
+  "precommit_falsifier": "Report turning requirement as inferior when it misses winning earlier entries or lowers opportunity-adjusted return. No retune threshold.",
+  "no_parameter_search": true,
+  "research_only": true,
+  "no_live_trades": true,
+  "source_rights_claim": false
+}

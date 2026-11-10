@@ -1,0 +1,12 @@
+{
+  "schema": "mastermind.fresh_sol_eval_manifest/v1",
+  "entries": [
+    {
+      "run_id": "1cdaa1b19b584d50ba012dc3910637eb",
+      "arm": "control-1.0.0",
+      "scenario_id": "S2",
+      "relative_path": "runs/control-1.0.0/S2/1cdaa1b19b584d50ba012dc3910637eb.md",
+      "artifact_sha256": "f8c9ce3900c051599ddeac715f848c58c7b243aae60262bb377212c0b527c481"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+/* AT27 uses existing shell art directions and gutters. Dark: quiet panel
+   luminance and even hairlines. Light: white panel material and firmer control
+   borders on the shell's cool canvas. No parallel palette or accent stripe. */
+.accepted-direction {
+  container: accepted-direction / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+  color: var(--text);
+}
+.accepted-direction__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.accepted-direction button { min-height: 44px; }
+.accepted-direction :is(button, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.accepted-direction:lang(zh) :is(h2, h3, h4, button, summary) { letter-spacing: normal; text-transform: none; }
+.accepted-direction h2, .accepted-direction h3, .accepted-direction h4 { margin: 0; }
+.accepted-direction p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+.accepted-direction__heading p, .accepted-direction__history > p { color: var(--muted); }
+.accepted-direction__current, .accepted-direction__previous {
+  padding: var(--sp-5);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--panel);
+  min-width: 0;
+}
+.shell[data-theme="light"] .accepted-direction__current,
+.shell[data-theme="light"] .accepted-direction__previous { border-color: var(--control-border); }
+.accepted-direction__answer { font-size: 1.1rem; line-height: 1.5; }
+.accepted-direction__history-body { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--sp-4); align-items: start; }
+.accepted-direction__history ol { padding: 0; list-style: none; display: grid; gap: var(--sp-2); }
+.accepted-direction__history li button {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 44px;
+  text-align: start;
+  white-space: normal;
+}
+.accepted-direction__history li button span { overflow-wrap: anywhere; min-width: 0; }
+.accepted-direction time { font-variant-numeric: tabular-nums; flex: none; }
+.accepted-direction__sources { margin: var(--sp-3) 0; }
+.accepted-direction__sources summary { min-height: 44px; cursor: pointer; align-content: center; }
+.accepted-direction__sources dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); gap: var(--sp-2) var(--sp-3); }
+.accepted-direction__sources dt { color: var(--muted); }
+.accepted-direction__sources dd { margin: 0; overflow-wrap: anywhere; }
+.accepted-direction code { overflow-wrap: anywhere; word-break: break-word; }
+.accepted-direction__conversation { align-self: flex-start; min-height: 44px; }
+@container accepted-direction (max-width: 720px) {
+  .accepted-direction__history-body { grid-template-columns: minmax(0, 1fr); }
+  .accepted-direction__heading { flex-direction: column; }
+  .accepted-direction__history li button { flex-direction: column; }
+  .accepted-direction__sources dl { grid-template-columns: minmax(0, 1fr); }
+  .accepted-direction__current, .accepted-direction__previous { padding: var(--sp-4); }
+  .accepted-direction__conversation { width: 100%; }
+}

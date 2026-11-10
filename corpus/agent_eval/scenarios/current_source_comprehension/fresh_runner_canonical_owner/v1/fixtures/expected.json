@@ -1,0 +1,4 @@
+{
+  "answer": "Mastermind PR #162 owns the fresh runner; its truthful state is NOT_BUILT; no replacement runner is authorized.",
+  "rationale": "The extract names PR #162 as the carrier, states its truthful state is NOT_BUILT because it has no scripts/ohf/fresh_sol_eval.py yet, and explicitly forbids a replacement runner -- later implementation must stay on that same carrier."
+}

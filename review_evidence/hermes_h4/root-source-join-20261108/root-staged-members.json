@@ -1,0 +1,82 @@
+[
+  {
+    "actual_bytes": 3250577,
+    "all_staged_hashes_match": true,
+    "inventory_keys": [
+      "baseline_code_files",
+      "deployment_rule",
+      "excluded_comment_only_edges",
+      "excluded_historical_importer",
+      "external_owners",
+      "files",
+      "native_code_files",
+      "new_code_files",
+      "qualified_pure_yaml",
+      "schema",
+      "source_status",
+      "stable_ext"
+    ],
+    "members": 107,
+    "variant": "default"
+  },
+  {
+    "actual_bytes": 3523596,
+    "all_staged_hashes_match": true,
+    "inventory_keys": [
+      "baseline_code_files",
+      "deployment_rule",
+      "excluded_comment_only_edges",
+      "excluded_historical_importer",
+      "external_owners",
+      "files",
+      "native_code_files",
+      "new_code_files",
+      "qualified_pure_yaml",
+      "schema",
+      "source_status",
+      "stable_ext"
+    ],
+    "members": 116,
+    "variant": "provider-minimum"
+  },
+  {
+    "actual_bytes": 3849998,
+    "all_staged_hashes_match": true,
+    "inventory_keys": [
+      "baseline_code_files",
+      "deployment_rule",
+      "excluded_comment_only_edges",
+      "excluded_historical_importer",
+      "external_owners",
+      "files",
+      "native_code_files",
+      "new_code_files",
+      "qualified_pure_yaml",
+      "schema",
+      "source_status",
+      "stable_ext"
+    ],
+    "members": 121,
+    "variant": "provider116"
+  },
+  {
+    "actual_bytes": 3897616,
+    "all_staged_hashes_match": true,
+    "inventory_keys": [
+      "baseline_code_files",
+      "deployment_rule",
+      "excluded_comment_only_edges",
+      "excluded_historical_importer",
+      "external_owners",
+      "files",
+      "native_code_files",
+      "new_code_files",
+      "qualified_pure_yaml",
+      "schema",
+      "source_status",
+      "stable_ext"
+    ],
+    "members": 121,
+    "variant": "full"
+  }
+]

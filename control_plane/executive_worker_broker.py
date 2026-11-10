@@ -3,9 +3,11 @@
 The broker is deliberately smaller than a scheduler or control plane.  It runs
 as the dedicated Codex worker account, accepts requests only from the configured
 Executive control UID over a Unix-domain socket, and exposes five typed
-operations around :class:`CodexWorkerAdapter`:
+operations around :class:`CodexWorkerAdapter` plus one optional, requestless
+capacity observation owned by the existing Capacity evidence adapter:
 
-``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``.
+``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``;
+``capacity-observe/v1`` is read-only and available only while the broker is idle.
 
 There is no generic command or shell endpoint.  Validation argv must be frozen
 in the start request and is matched byte-for-byte before execution.  The
@@ -46,33 +48,34 @@ from control_plane.executive_ambient_process import (
     NullAmbientClassifier,
 )
 from control_plane.codex_worker import (
-    ArtifactReceipt,
-    BinaryAttestation,
-    CancelReceipt,
-    CodexWorkerAdapter,
-    CollectionReceipt,
     GitPreflightFailed,
     GitPreflightTimeout,
     ISOLATION_MANIFEST_SCHEMA_VERSION,
-    LaunchSpec,
     LaunchValidationStageError,
     ProcessIdentityError,
-    ProcessRef,
-    ValidationReceipt,
-    WorkerResult,
-    WorkerRunStatus,
+)
+from control_plane.worker_adapter import (
+    AdapterBindingError,
+    WorkerExecutionAdapter,
+    adapter_descriptor,
+    bind_reviewed_adapter,
 )
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
 )
 from control_plane.executive_orchestration_result import RawRoleResultObservation
+from control_plane.visible_turn_projection import TurnKey
 from control_plane.operator_harness_contract import (
+    CHATGPT_GUI_RESOURCE_ID,
+    ATTENTION_TURN_INSTRUCTION,
+    AttentionTurnObservation,
     CandidateResult,
     EventCursor,
     LaunchComparison,
     LaunchDecision,
     NormalizedEvent,
+    ObservedCapabilityIdentity,
     ObservedHarnessAttestation,
     OperationId,
     ProcessGenerationRef,
@@ -87,27 +90,57 @@ from control_plane.operator_harness_contract import (
     SessionStartObservation,
     TurnRef,
     TurnStartObservation,
+    compare_launch,
 )
 from control_plane.operator_harness_wire import (
+    CONTINUATION_OPERATION_PREFIX,
     OperatorHarnessWireError,
+    RetainedPlainInputEvidence,
     event_cursor as wire_event_cursor,
     launch_comparison as wire_launch_comparison,
     operation_id as wire_operation_id,
+    observed_harness_attestation as wire_observed_harness_attestation,
     process_identity_observation as wire_process_identity_observation,
     process_generation_ref as wire_process_generation_ref,
     requested_execution_profile as wire_requested_execution_profile,
+    retained_plain_input_evidence as wire_retained_plain_input_evidence,
     session_epoch_ref as wire_session_epoch_ref,
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
     turn_ref as wire_turn_ref,
+)
+from control_plane.operator_materialization_receipt import (
+    MATERIALIZATION_STATUS_SCHEMA,
+    OperatorMaterializationReceipt,
+    OperatorMaterializationReceiptError,
+    build_operator_materialization_receipt,
+    persist_operator_materialization_receipt,
+    read_operator_materialization_receipt,
+    requested_profile_digest,
+    validate_materialization_request,
+)
+from control_plane.worker_execution_contract import (
+    _freeze as _freeze_worker_execution_value,
+    ArtifactReceipt,
+    BinaryAttestation,
+    CancelReceipt,
+    CollectionReceipt,
+    OrchestrationLaunchSpec,
+    ValidationReceipt,
+    validate_subscription_canary_claim,
+    validate_orchestration_grant_digest,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
+    WorkerResult,
+    WorkerRunStatus,
 )
 from control_plane.worker_browser_b1 import (
     BrowserReviewReceipt,
     BrowserReviewError,
     browser_review_receipt,
 )
-
-
 BROKER_REQUEST_SCHEMA_VERSION = "mastermind.executive_worker_broker_request/v1"
 BROKER_RESPONSE_SCHEMA_VERSION = "mastermind.executive_worker_broker_response/v1"
 UID_SWEEP_SCHEMA_VERSION = "mastermind.executive_uid_sweep/v2"
@@ -144,10 +177,16 @@ _OHF_OPERATIONS = frozenset(
     {
         "ohf-validate",
         "ohf-identity",
+        "ohf-materialization-status",
         "ohf-start",
         "ohf-resume",
         "ohf-begin-turn",
+        "ohf-deliver-attention",
         "ohf-collect-turn",
+        "ohf-observe-turn",
+        "ohf-observer-enroll",
+        "ohf-observer-status",
+        "ohf-observer-revoke",
         "ohf-interrupt",
         "ohf-stop",
         "ohf-cancel",
@@ -156,7 +195,9 @@ _OHF_OPERATIONS = frozenset(
     }
 )
 _ALLOWED_OPERATIONS = frozenset(
-    {"start", "status", "collect", "cancel", "validate", "autonomy-canary"}
+    {"start", "status", "collect", "cancel", "validate", "autonomy-canary",
+     "interactive-canary", "capacity-observe/v1", "assignment-seal-prepare",
+     "assignment-seal-commit", "assignment-seal-finalize"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -164,6 +205,7 @@ _MAX_VALIDATION_COMMANDS = 32
 _MAX_VALIDATION_ARGS = 128
 _MAX_VALIDATION_BYTES = 64 * 1024
 _MAX_HISTORY = 32
+_CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 _SHELL_EXECUTABLES = frozenset(
     {
         "/bin/bash",
@@ -177,6 +219,13 @@ _SHELL_EXECUTABLES = frozenset(
         "/usr/bin/env",
     }
 )
+_SUBSCRIPTION_CANARY_OBSERVATION_FIELDS = frozenset({
+    "schema", "execution_mode", "run_id", "job_id", "worker_id", "quota_class",
+    "fence_generation", "capacity_generation", "capacity_state", "held_attempt_id",
+    "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model",
+    "realm_config_sha256", "realm_generation", "catalog_digest", "issued_at_ms",
+    "expires_at_ms", "observation_digest",
+})
 
 
 class WorkerBrokerError(RuntimeError):
@@ -193,6 +242,22 @@ class BrokerProtocolError(WorkerBrokerError):
 
 class BrokerStateError(WorkerBrokerError):
     """A typed operation is invalid for the broker's current state."""
+
+
+class BrokerRunNotFound(BrokerStateError):
+    """The exact run has no record at this canonical broker owner."""
+
+
+class WorkerAdapterNotImplementedError(WorkerBrokerError):
+    """A reviewed adapter is not implemented for broker execution."""
+
+
+class BrokerPreSubmitError(WorkerBrokerError):
+    """The current-writer attention operation refused before provider I/O."""
+
+
+class BrokerEffectUnknownError(WorkerBrokerError):
+    """Provider I/O may have begun; the attention operation must not be resent."""
 
 
 class DedicatedUIDError(WorkerBrokerError):
@@ -390,6 +455,8 @@ class OperatorAdapter(Protocol):
 
     def begin_turn(self, **kwargs: Any) -> Any: ...
 
+    def deliver_attention(self, **kwargs: Any) -> AttentionTurnObservation: ...
+
     def read_events(self, cursor: EventCursor, *, timeout_seconds: float) -> Any: ...
 
     def collect_candidate_result(self, turn: TurnRef) -> Any: ...
@@ -414,7 +481,9 @@ class OperatorAttemptResource(Protocol):
 
     def stop(self) -> None: ...
 
-    def seal_after_uid_sweep(self, sweep: UIDSweepReceipt) -> BrowserReviewReceipt: ...
+    def seal_after_uid_sweep(
+        self, sweep: UIDSweepReceipt
+    ) -> BrowserReviewReceipt | None: ...
 
 
 OperatorAdapterFactory = Callable[
@@ -439,7 +508,10 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, UIDSweepReceipt):
         return _jsonable(value.to_dict())
     if dataclasses.is_dataclass(value):
-        return _jsonable(dataclasses.asdict(value))
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
     if isinstance(value, enum.Enum):
         return value.value
     if isinstance(value, Path):
@@ -816,8 +888,15 @@ class BrokerPolicy:
     allowed_supplementary_gids: frozenset[int] = frozenset()
     require_secret_canary: bool = True
     max_request_bytes: int = _MAX_REQUEST_BYTES
+    # Source-only opt-in. Existing installed entrypoints leave this disabled.
+    # It does not admit an attended provider or weaken ordinary start policy.
+    require_assignment_seal: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.require_assignment_seal) is not bool:
+            raise WorkerBrokerError("assignment seal policy must be boolean")
+        if self.require_assignment_seal and self.allowed_supplementary_gids:
+            raise WorkerBrokerError("assignment sealing requires an isolated primary group")
         if int(self.control_uid) <= 0:
             raise WorkerBrokerError("control UID must be a non-root service principal")
         if int(self.worker_uid) <= 0 or int(self.worker_uid) == int(self.control_uid):
@@ -860,17 +939,33 @@ class BrokerPolicy:
 
 @dataclasses.dataclass
 class _BrokerRun:
-    spec: LaunchSpec
-    process_ref: ProcessRef
+    spec: WorkerLaunchSpec
+    process_ref: WorkerProcessRef
     validation_commands: tuple[tuple[str, ...], ...]
     launch_attestation: Any = None
     collected_receipt: Any = None
     cancel_receipt: Any = None
     validation_receipts: dict[tuple[str, ...], Any] = dataclasses.field(default_factory=dict)
+    collection_task: asyncio.Task[
+        tuple[CollectionReceipt, UIDSweepReceipt]
+    ] | None = None
+    validation_tasks: dict[
+        tuple[str, ...],
+        tuple[
+            float,
+            asyncio.Task[tuple[ValidationReceipt, UIDSweepReceipt]],
+        ],
+    ] = dataclasses.field(default_factory=dict)
     terminal_error: str | None = None
-    collecting: bool = False
     cancelling: bool = False
     terminal_sweep_task: asyncio.Task[UIDSweepReceipt] | None = None
+    assignment_snapshot: dict[str, Any] | None = None
+    assignment_commit_digest: str | None = None
+    assignment_commit_task: asyncio.Task[dict[str, Any]] | None = None
+    assignment_receipt: dict[str, Any] | None = None
+    assignment_cancel_task: asyncio.Task[dict[str, Any]] | None = None
+    assignment_cancel_reason: str | None = None
+    assignment_retention_digest: str | None = None
 
 
 @dataclasses.dataclass
@@ -882,8 +977,17 @@ class _BrokerOperatorRun:
     epoch: SessionEpochRef
     generation: ProcessGenerationRef
     provider_session_id: str
+    materialization_receipt: OperatorMaterializationReceipt | None = None
     resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
+    # Transient begin-turn marks for the retained plain-input digest
+    # observation: the exact immutable TurnRef accepted at ohf-begin-turn under
+    # the continuation prefix, bound to the generation that accepted it.  This
+    # is process-local observation selection only, never ACK authority, and it
+    # dies with the run instead of any durable store.
+    retained_plain_turns: dict[TurnRef, ProcessGenerationRef] = dataclasses.field(
+        default_factory=dict
+    )
     terminal_error: str | None = None
     busy: bool = False
 
@@ -945,7 +1049,6 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "run_dir",
         "prompt",
         "result_schema_path",
-        "codex_home",
         "authorities",
         "authority",
         "model",
@@ -968,16 +1071,40 @@ _LAUNCH_SPEC_FIELDS = frozenset(
         "shared_run_gid",
         "secret_canary_verdict",
         "require_secret_canary",
+        "subscription_canary_claim",
+        "effective_grant_digest",
+    }
+)
+_PROVIDER_OWNED_LAUNCH_FIELDS = frozenset(
+    {
+        "codex_home",
+        "provider_home",
+        "claude_home",
+        "credential_path",
+        "api_key",
+        "token",
+        "provider_session_id",
     }
 )
 
 
-def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
+def _launch_spec_from_wire(value: Any, policy: BrokerPolicy) -> WorkerLaunchSpec:
     if not isinstance(value, dict):
         raise BrokerProtocolError("launch_spec must be an object")
+    provider_owned = set(value).intersection(_PROVIDER_OWNED_LAUNCH_FIELDS)
+    if provider_owned:
+        raise BrokerProtocolError(
+            f"launch_spec includes provider-owned fields: {sorted(provider_owned)}"
+        )
     unknown = set(value) - _LAUNCH_SPEC_FIELDS
     if unknown:
         raise BrokerProtocolError(f"launch_spec has unknown fields: {sorted(unknown)}")
+    try:
+        if "effective_grant_digest" in value:
+            validate_orchestration_grant_digest(value["effective_grant_digest"])
+        validate_subscription_canary_claim(value.get("subscription_canary_claim", {}))
+    except WorkerRecoveryContractError as exc:
+        raise BrokerProtocolError(str(exc)) from exc
     required = {
         "run_id",
         "job_id",
@@ -986,7 +1113,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
         "run_dir",
         "prompt",
         "result_schema_path",
-        "codex_home",
         "expected_base_sha",
     }
     missing = required - set(value)
@@ -1016,11 +1142,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
     workspace = _resolve_child(value["workspace_path"], policy.workspace_root, field="workspace_path")
     run_dir = _resolve_child(value["run_dir"], policy.run_root, field="run_dir")
     schema = _resolve_child(value["result_schema_path"], run_dir, field="result_schema_path")
-    if not isinstance(value["codex_home"], str):
-        raise BrokerProtocolError("launch_spec CODEX_HOME must be an absolute path string")
-    provider_home = Path(value["codex_home"]).resolve(strict=True)
-    if provider_home != Path(policy.provider_home).resolve(strict=True):
-        raise BrokerProtocolError("launch_spec CODEX_HOME is not the dedicated provider home")
     authorities = value.get("authorities", [])
     artifacts = value.get("allowed_artifact_paths", [])
     isolation = value.get("isolation_roots", [])
@@ -1147,7 +1268,6 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
         "run_dir": run_dir,
         "prompt": value["prompt"],
         "result_schema_path": schema,
-        "codex_home": provider_home,
         "authorities": tuple(authorities),
         "authority": value.get("authority"),
         "worker_user": policy.worker_user,
@@ -1175,7 +1295,36 @@ def _launch_spec(value: Any, policy: BrokerPolicy) -> LaunchSpec:
     ):
         if optional in value:
             keyword[optional] = value[optional]
-    return LaunchSpec(**keyword)
+    keyword["subscription_canary_claim"] = validate_subscription_canary_claim(
+        value.get("subscription_canary_claim", {}),
+    )
+    # The authenticated control owns the sealed grant and its semantic binding.
+    # Retain that provenance in recovery material without widening legacy specs
+    # or letting the worker preempt the supervisor-owned launch attestation.
+    if "effective_grant_digest" in value:
+        return OrchestrationLaunchSpec(
+            **keyword, effective_grant_digest=value["effective_grant_digest"]
+        )
+    return WorkerLaunchSpec(**keyword)
+
+
+def _subscription_canary_observation_from_wire(value: Any) -> dict[str, Any]:
+    """Parse only the closed claim schema into a dict ready for sealing.
+
+    The 21-field schema is owned by the broker-admission module; we mirror it
+    here so the wire cannot smuggle in unknown keys before the typed
+    admission refuses them.  The seal step still re-validates types, hashes,
+    freshness and exact launch-spec identity.
+    """
+
+    if not isinstance(value, dict) or set(value) != _SUBSCRIPTION_CANARY_OBSERVATION_FIELDS:
+        raise BrokerProtocolError(
+            "subscription canary observation is not the closed claim schema"
+        )
+    try:
+        return dict(validate_subscription_canary_claim(value))
+    except WorkerRecoveryContractError as exc:
+        raise BrokerProtocolError(str(exc)) from exc
 
 
 def get_peer_credentials(peer_socket: socket.socket) -> PeerCredentials:
@@ -1241,33 +1390,143 @@ def activate_launchd_socket(name: str) -> socket.socket:
 
 
 class ExecutiveWorkerBroker:
-    """One-worker, one-active-job typed adapter broker."""
+    """One-worker, one-active-job typed adapter broker.
+
+    An explicitly armed Operator Harness-only broker binds no flat adapter.
+    Its installed entrypoint supplies the attested binary and rich factory;
+    flat execution and validation remain unavailable on that broker.
+    """
 
     def __init__(
         self,
-        adapter: CodexWorkerAdapter,
+        adapter: WorkerExecutionAdapter | None,
         policy: BrokerPolicy,
         sweeper: ResidualSweeper,
         *,
+        adapter_id: str | None = "codex-cli",
+        operator_binary_attestation: BinaryAttestation | None = None,
+        validation_adapter: WorkerExecutionAdapter | None = None,
+        validation_adapter_id: str | None = None,
         peer_resolver: Callable[[socket.socket], PeerCredentials] = get_peer_credentials,
         operator_adapter_factory: OperatorAdapterFactory | None = None,
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
+        native_realm_guard: Callable[[], None] | None = None,
         autonomy_canary_factory: Callable[
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
+        subscription_realm_owner: Any | None = None,
+        capacity_observer: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
-        self.adapter = adapter
+        self._operator_only = adapter is None
+        self._operator_binary_attestation = operator_binary_attestation
+        if self._operator_only:
+            if (adapter_id is not None or validation_adapter is not None
+                    or validation_adapter_id is not None):
+                raise WorkerBrokerError(
+                    "operator-only broker cannot bind a flat or validation adapter"
+                )
+            if (operator_harness_armed is not True
+                    or not callable(operator_adapter_factory)
+                    or not isinstance(operator_binary_attestation, BinaryAttestation)
+                    or not isinstance(operator_binary_attestation.sha256, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", operator_binary_attestation.sha256) is None
+                    or not isinstance(operator_binary_attestation.version, str)
+                    or not operator_binary_attestation.version.strip()):
+                raise WorkerBrokerError(
+                    "operator-only broker requires armed factory and typed binary attestation"
+                )
+            self.adapter = None
+            self.adapter_id = None
+            self.validation_adapter = None
+            self.validation_adapter_id = None
+        else:
+            if operator_binary_attestation is not None:
+                raise WorkerBrokerError(
+                    "flat broker binary identity must remain on its reviewed adapter"
+                )
+            try:
+                descriptor = bind_reviewed_adapter(adapter, adapter_id)
+            except AdapterBindingError as exc:
+                raise WorkerBrokerError(str(exc)) from exc
+            except Exception as exc:
+                raise WorkerBrokerError(
+                    f"worker adapter {adapter_id!r} failed to bind"
+                ) from exc
+            self.adapter = adapter
+            self.adapter_id = descriptor.adapter_id
+            if validation_adapter is None:
+                if validation_adapter_id not in (None, self.adapter_id):
+                    raise WorkerBrokerError(
+                        "validation adapter identity was supplied without an adapter"
+                    )
+                if self.adapter_id == "claude-code":
+                    raise WorkerBrokerError(
+                        "Claude broker requires the reviewed common validation adapter"
+                    )
+                validation_descriptor = descriptor
+                validation_adapter = adapter
+            else:
+                if not isinstance(validation_adapter_id, str) or not validation_adapter_id:
+                    raise WorkerBrokerError(
+                        "validation adapter requires one exact reviewed identity"
+                    )
+                try:
+                    validation_descriptor = bind_reviewed_adapter(
+                        validation_adapter, validation_adapter_id
+                    )
+                except AdapterBindingError as exc:
+                    raise WorkerBrokerError(str(exc)) from exc
+                except Exception as exc:
+                    raise WorkerBrokerError(
+                        f"validation adapter {validation_adapter_id!r} failed to bind"
+                    ) from exc
+                if self.adapter_id == "codex-cli" and (
+                    validation_adapter is not adapter
+                    or validation_descriptor.adapter_id != self.adapter_id
+                ):
+                    raise WorkerBrokerError(
+                        "Codex broker validation must remain on its primary reviewed adapter"
+                    )
+                if self.adapter_id == "claude-code" and (
+                    validation_descriptor.adapter_id != "codex-cli"
+                ):
+                    raise WorkerBrokerError(
+                        "Claude broker validation requires the reviewed common Codex sandbox"
+                    )
+            self.validation_adapter = validation_adapter
+            self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
+        if policy.require_assignment_seal and self._operator_only:
+            raise WorkerBrokerError("assignment sealing needs the original flat broker")
         self.peer_resolver = peer_resolver
         self.operator_adapter_factory = operator_adapter_factory
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
+        # Consume the incumbent host-owned native-realm check. Do not invent a
+        # second provider identity, credential source, or Operator arm.
+        if self.adapter_id == "claude-code":
+            if self.operator_harness_armed or not callable(native_realm_guard):
+                raise WorkerBrokerError("flat Claude requires native realm guard")
+        elif native_realm_guard is not None:
+            raise WorkerBrokerError("native realm guard requires flat Claude")
+        self.native_realm_guard = native_realm_guard
         self.autonomy_canary_factory = autonomy_canary_factory
+        if subscription_realm_owner is not None:
+            from control_plane.codex_provider_realm import SubscriptionRealmOwner
+
+            if not isinstance(subscription_realm_owner, SubscriptionRealmOwner):
+                raise WorkerBrokerError(
+                    "subscription_realm_owner must be a SubscriptionRealmOwner"
+                )
+        self.subscription_realm_owner = subscription_realm_owner
+        if capacity_observer is not None and not callable(capacity_observer):
+            raise WorkerBrokerError("capacity observer must be callable")
+        self.capacity_observer = capacity_observer
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1291,9 +1550,11 @@ class ExecutiveWorkerBroker:
                 ProcessGenerationRef,
                 ReconcileObservation,
                 BrowserReviewReceipt | None,
+                Any,  # Original bounded observer registry; no adapter/process.
             ],
         ] = OrderedDict()
         self._operator_session_attempts: OrderedDict[str, str] = OrderedDict()
+        self._observer_refusals: list[tuple[Any, str]] = []
         self._state_lock = asyncio.Lock()
         self._starting = False
         self._validation_busy = False
@@ -1301,6 +1562,24 @@ class ExecutiveWorkerBroker:
         self._quarantined_reason: str | None = None
         self.startup_sweep: UIDSweepReceipt | None = None
         self.last_sweep: UIDSweepReceipt | None = None
+
+    def _require_current_native_realm(self) -> None:
+        """Recheck the existing host realm immediately before native flat admission.
+
+        A revoked realm is quarantined against later starts; cancellation and
+        collection remain available for any previously admitted process.
+        """
+        if self.adapter_id != "claude-code":
+            return
+        if self._quarantined_reason == "native_realm_refused":
+            raise BrokerStateError("native realm refused")
+        try:
+            if not callable(self.native_realm_guard):
+                raise RuntimeError("native realm guard unavailable")
+            self.native_realm_guard()
+        except Exception:
+            self._quarantined_reason = "native_realm_refused"
+            raise BrokerStateError("native realm refused") from None
 
     def _require_current_autonomy(self) -> None:
         """Revalidate current arm authority without exposing receipt diagnostics."""
@@ -1321,13 +1600,23 @@ class ExecutiveWorkerBroker:
 
         if self.startup_sweep is not None:
             return self.startup_sweep
+        if self._quarantined_reason is not None:
+            raise BrokerStateError("worker startup requires original-owner reconciliation")
+        self._require_current_native_realm()
         self._require_current_autonomy()
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
         observed_groups = set(os.getgroups()) - {self.policy.worker_gid}
         if observed_groups != set(self.policy.allowed_supplementary_gids):
             raise DedicatedUIDError("worker broker supplementary groups differ from policy")
-        self.startup_sweep = self.sweeper.sweep("broker_startup")
+        if self.policy.require_assignment_seal:
+            # Neither an empty store nor a UID sweep reconciles an original
+            # Runtime/Fabric effect after restart. The authenticated recovery
+            # producer is not composed yet; do not enable this source branch.
+            self._quarantined_reason = "original assignment reconciliation producer unavailable"
+            raise BrokerStateError(self._quarantined_reason)
+        sweep = self.sweeper.sweep("broker_startup")
+        self.startup_sweep = sweep
         self.last_sweep = self.startup_sweep
         return self.startup_sweep
 
@@ -1346,7 +1635,7 @@ class ExecutiveWorkerBroker:
         try:
             return self._runs[run_id]
         except KeyError as exc:
-            raise BrokerStateError(f"run {run_id!r} is unknown to this broker") from exc
+            raise BrokerRunNotFound(f"run {run_id!r} is unknown to this broker") from exc
 
     def _authorize_peer(self, peer: PeerCredentials) -> None:
         if int(peer.uid) != int(self.policy.control_uid):
@@ -1370,7 +1659,7 @@ class ExecutiveWorkerBroker:
         payload = request.get("payload")
         if not isinstance(payload, dict):
             raise BrokerProtocolError("payload must be an object")
-        result = await self._dispatch(str(operation), payload)
+        result = await self._dispatch(str(operation), payload, peer=peer)
         return {
             "schema_version": BROKER_RESPONSE_SCHEMA_VERSION,
             "request_id": request_id,
@@ -1379,7 +1668,19 @@ class ExecutiveWorkerBroker:
             "result": _jsonable(result),
         }
 
-    async def _dispatch(self, operation: str, payload: dict[str, Any]) -> Any:
+    def _require_flat_adapter(self) -> None:
+        if self._operator_only:
+            raise BrokerStateError("operator-only broker refuses flat worker operations")
+
+    async def _dispatch(
+        self,
+        operation: str,
+        payload: dict[str, Any],
+        *,
+        peer: PeerCredentials | None = None,
+    ) -> Any:
+        if operation == "capacity-observe/v1":
+            return await self._capacity_observe(payload)
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1390,20 +1691,40 @@ class ExecutiveWorkerBroker:
             return await self._cancel(payload)
         if operation == "validate":
             return await self._validate(payload)
+        if operation == "assignment-seal-prepare":
+            return await self._assignment_seal_prepare(payload)
+        if operation == "assignment-seal-commit":
+            return await self._assignment_seal_commit(payload)
+        if operation == "assignment-seal-finalize":
+            return await self._assignment_seal_finalize(payload)
         if operation == "autonomy-canary":
             return await self._autonomy_canary(payload)
+        if operation == "interactive-canary":
+            if peer is None:
+                raise PeerAuthorizationError(
+                    "interactive subscription canary requires an authenticated Unix peer"
+                )
+            return await self._interactive_canary(payload, peer=peer)
         if operation == "ohf-validate":
             return await self._ohf_validate(payload)
         if operation == "ohf-identity":
             return await self._ohf_identity(payload)
+        if operation == "ohf-materialization-status":
+            return await self._ohf_materialization_status(payload)
         if operation == "ohf-start":
             return await self._ohf_start(payload, resume=False)
         if operation == "ohf-resume":
             return await self._ohf_start(payload, resume=True)
         if operation == "ohf-begin-turn":
             return await self._ohf_begin_turn(payload)
+        if operation == "ohf-deliver-attention":
+            return await self._ohf_deliver_attention(payload)
         if operation == "ohf-collect-turn":
             return await self._ohf_collect_turn(payload)
+        if operation in {"ohf-observer-enroll", "ohf-observer-status", "ohf-observer-revoke"}:
+            return await self._ohf_observer_lifecycle(operation, payload)
+        if operation == "ohf-observe-turn":
+            return await self._ohf_observe_turn(payload)
         if operation == "ohf-interrupt":
             return await self._ohf_interrupt(payload)
         if operation == "ohf-stop":
@@ -1415,6 +1736,38 @@ class ExecutiveWorkerBroker:
         if operation == "ohf-reconcile-absence":
             return await self._ohf_reconcile_absence(payload)
         raise AssertionError(operation)  # pragma: no cover
+
+    async def _capacity_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return one trusted, requestless Capacity observation while idle.
+
+        The callback is construction-owned and accepts no caller payload.  The
+        broker contributes only its existing peer/worker admission and the
+        same state lock used by modifying operations; it does not sample, rank,
+        persist, reserve, retry, or choose another host.
+        """
+
+        if payload:
+            raise BrokerProtocolError("capacity-observe/v1 payload must be empty")
+        observer = self.capacity_observer
+        if observer is None:
+            raise BrokerStateError("capacity observer is not configured")
+        self._require_current_autonomy()
+        async with self._state_lock:
+            # Waiting for the shared lock may outlive the pre-lock authority.
+            # Revalidate before the first observer read, not after its result.
+            self._require_current_autonomy()
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError("capacity observation requires an idle broker")
+            observed = observer()
+            if not isinstance(observed, Mapping):
+                raise BrokerStateError("capacity observer returned an invalid projection")
+            return dict(observed)
 
     async def _autonomy_canary(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Issue one fixed, non-provider boot canary while the broker is idle."""
@@ -1466,6 +1819,140 @@ class ExecutiveWorkerBroker:
         finally:
             async with self._state_lock:
                 self._validation_busy = False
+
+    async def _interactive_canary(
+        self, payload: dict[str, Any], *, peer: PeerCredentials,
+    ) -> dict[str, Any]:
+        """Launch one interactive subscription canary through the typed
+        broker seam.  The claim observation travels only over the kernel-
+        authenticated Control-UID Unix peer; this operation must not call
+        ``_require_current_autonomy`` and must not widen autonomous broker
+        execution.
+        """
+
+        if self.subscription_realm_owner is None:
+            raise BrokerStateError(
+                "interactive subscription canary is not configured for this worker"
+            )
+        self._require_flat_adapter()
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for interactive canary execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for interactive canary execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is not False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow interactive canary execution"
+                )
+        if set(payload) != {"launch_spec", "subscription_canary_observation"}:
+            raise BrokerProtocolError(
+                "interactive-canary payload fields are invalid"
+            )
+        spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
+        if spec.authorities != ("READ",) or spec.authority is not None:
+            raise BrokerProtocolError(
+                "interactive subscription canary requires READ-only job authority"
+            )
+        observation = _subscription_canary_observation_from_wire(
+            payload["subscription_canary_observation"]
+        )
+        if dict(spec.subscription_canary_claim) != observation:
+            raise BrokerProtocolError(
+                "subscription canary observation differs from the launch specification"
+            )
+        async with self._state_lock:
+            if self._quarantined_reason is not None:
+                raise BrokerStateError(
+                    f"worker broker is quarantined: {self._quarantined_reason}"
+                )
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError(
+                    "the worker broker already has active work"
+                )
+            if spec.run_id in self._runs:
+                raise BrokerStateError("run_id cannot be reused")
+            self._starting = True
+        try:
+            started = False
+            admission: Any = None
+            from control_plane.subscription_canary_admission import (
+                seal_broker_subscription_canary_admission,
+            )
+
+            admission = seal_broker_subscription_canary_admission(
+                observation,
+                realm_owner=self.subscription_realm_owner,
+                peer=peer,
+                spec=spec,
+            )
+            start_canary = getattr(self.adapter, "start_subscription_canary", None)
+            if not callable(start_canary):
+                raise BrokerStateError(
+                    "adapter does not implement interactive subscription canary launch"
+                )
+            process_ref = await start_canary(spec, admission)
+            attestation_reader = getattr(self.adapter, "launch_attestation", None)
+            attestation = (
+                attestation_reader(process_ref)
+                if callable(attestation_reader)
+                else None
+            )
+            started = True
+        except Exception:
+            await self._handle_canary_start_failure()
+            raise
+        finally:
+            async with self._state_lock:
+                if started:
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=(),
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
+                self._starting = False
+        return {
+            "adapter_id": self.adapter_id,
+            "process_ref": process_ref,
+            "launch_attestation": attestation,
+            "subscription_canary_observation_digest": admission.observation_digest,
+            "subscription_canary_binding_id": admission.binding_id,
+            "subscription_canary_model": admission.model,
+            "startup_sweep": self.startup_sweep,
+        }
+
+    async def _handle_canary_start_failure(self) -> None:
+        """Sweep the dedicated worker UID on canary launch failure, mirroring
+        the production start-failure cleanup so an interactive canary cannot
+        leave residual processes behind.
+        """
+
+        try:
+            self.last_sweep = await asyncio.to_thread(
+                self.sweeper.sweep, "canary_start_failed",
+            )
+        except Exception as sweep_exc:
+            async with self._state_lock:
+                self._quarantined_reason = (
+                    f"canary start cleanup failed: {type(sweep_exc).__name__}"
+                )
 
     def _operator_factory(
         self, requested: RequestedExecutionProfile
@@ -1548,7 +2035,8 @@ class ExecutiveWorkerBroker:
     async def _ohf_identity(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload:
             raise BrokerProtocolError("ohf-identity payload must be empty")
-        binary = getattr(self.adapter, "binary", None)
+        binary = (self._operator_binary_attestation if self._operator_only
+                  else getattr(self.adapter, "binary", None))
         if binary is None:
             raise BrokerStateError("worker binary attestation is unavailable")
         return {
@@ -1558,10 +2046,15 @@ class ExecutiveWorkerBroker:
             "operator_harness_armed": self.operator_harness_armed,
         }
 
-    async def _ohf_start(
+    def _materialization_request(
         self, payload: dict[str, Any], *, resume: bool
-    ) -> dict[str, Any]:
-        self._require_current_autonomy()
+    ) -> tuple[
+        OperationId,
+        RequestedExecutionProfile,
+        SessionEpochRef,
+        ProcessGenerationRef,
+        ProviderSessionHandoff | None,
+    ]:
         expected = {"operation_id", "requested", "epoch", "generation"}
         if resume:
             expected.add("provider_session")
@@ -1589,6 +2082,187 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError("OHF session identities do not match the broker")
         if handoff is not None and handoff.worker_id != self.policy.worker_id:
             raise BrokerProtocolError("OHF resume handoff does not match the broker")
+        try:
+            validate_materialization_request(
+                operation_command_id=operation.command_id,
+                operation_kind="resume_session" if resume else "start_session",
+                attempt_id=epoch.attempt_id,
+                worker_id=epoch.worker_id,
+                session_epoch_id=epoch.session_epoch_id,
+                process_generation_id=generation.process_generation_id,
+                generation_number=generation.generation_number,
+                expected_provider_session_id=(
+                    handoff.provider_session_id if handoff is not None else None
+                ),
+            )
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerProtocolError(
+                "OHF materialization identity is invalid"
+            ) from exc
+        return operation, requested, epoch, generation, handoff
+
+    @staticmethod
+    def _receipt_matches_request(
+        receipt: OperatorMaterializationReceipt,
+        *,
+        operation: OperationId,
+        requested: RequestedExecutionProfile,
+        epoch: SessionEpochRef,
+        generation: ProcessGenerationRef,
+        handoff: ProviderSessionHandoff | None,
+    ) -> bool:
+        try:
+            observed = wire_observed_harness_attestation(
+                receipt.observed_attestation
+            )
+        except OperatorHarnessWireError:
+            return False
+        return (
+            receipt.operation_command_id == operation.command_id
+            and receipt.operation_kind
+            == ("resume_session" if handoff is not None else "start_session")
+            and receipt.attempt_id == epoch.attempt_id
+            and receipt.worker_id == epoch.worker_id
+            and receipt.session_epoch_id == epoch.session_epoch_id
+            and receipt.process_generation_id == generation.process_generation_id
+            and receipt.generation_number == generation.generation_number
+            and receipt.requested_profile_digest
+            == requested_profile_digest(operator_to_wire(requested))
+            and compare_launch(requested, observed).decision is LaunchDecision.ALLOW
+            and (
+                handoff is None
+                or receipt.provider_session_id == handoff.provider_session_id
+            )
+        )
+
+    def _materialization_result(
+        self, receipt: OperatorMaterializationReceipt
+    ) -> dict[str, Any]:
+        observation = SessionStartObservation(
+            receipt.provider_session_id,
+            ProcessIdentityObservation(**receipt.process_identity),
+        )
+        return {
+            "observation": operator_to_wire(observation),
+            "attestation": receipt.observed_attestation,
+            "process_credentials": receipt.process_credentials,
+            "provider_home": {
+                "provider_home_identity": receipt.provider_home_identity,
+            },
+            "startup_sweep": self.startup_sweep,
+            "materialization_receipt": receipt.to_dict(),
+        }
+
+    async def _ohf_materialization_status(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        resume = "provider_session" in payload
+        operation, requested, epoch, generation, handoff = (
+            self._materialization_request(payload, resume=resume)
+        )
+        # Status is one atomic classification over the durable receipt and the
+        # process-local effect state.  Holding the existing state lock across
+        # the bounded read prevents a start/quarantine/terminal transition
+        # from being flattened into stale ABSENT or restart-only evidence.
+        async with self._state_lock:
+            read_conflict = False
+            try:
+                receipt = await asyncio.to_thread(
+                    read_operator_materialization_receipt,
+                    self.policy.run_root,
+                    operation.command_id,
+                    expected_owner_uid=self.policy.worker_uid,
+                )
+            except OperatorMaterializationReceiptError:
+                read_conflict = True
+                receipt = None
+            state = self._operator_run
+            terminal = self._operator_terminal.get(
+                generation.process_generation_id
+            )
+            effect_conflict = (
+                self._starting
+                or self._quarantined_reason is not None
+                or terminal is not None
+            )
+            if receipt is None:
+                if read_conflict or effect_conflict or state is not None:
+                    status = "CONFLICT"
+                else:
+                    status = "ABSENT"
+            elif effect_conflict or not self._receipt_matches_request(
+                receipt,
+                operation=operation,
+                requested=requested,
+                epoch=epoch,
+                generation=generation,
+                handoff=handoff,
+            ):
+                status = "CONFLICT"
+            elif state is None:
+                status = "RECEIPT_ONLY_AFTER_RESTART"
+            elif (
+                state.generation == generation
+                and state.materialization_receipt == receipt
+            ):
+                status = "RECEIPT_CURRENT_IN_LIVE_BROKER"
+            else:
+                status = "CONFLICT"
+        return {
+            "schema_version": MATERIALIZATION_STATUS_SCHEMA,
+            "status": status,
+            "receipt": (
+                receipt.to_dict()
+                if status
+                in {
+                    "RECEIPT_CURRENT_IN_LIVE_BROKER",
+                    "RECEIPT_ONLY_AFTER_RESTART",
+                }
+                else None
+            ),
+        }
+
+    async def _ohf_start(
+        self, payload: dict[str, Any], *, resume: bool
+    ) -> dict[str, Any]:
+        self._require_current_autonomy()
+        operation, requested, epoch, generation, handoff = (
+            self._materialization_request(payload, resume=resume)
+        )
+        try:
+            existing = await asyncio.to_thread(
+                read_operator_materialization_receipt,
+                self.policy.run_root,
+                operation.command_id,
+                expected_owner_uid=self.policy.worker_uid,
+            )
+        except OperatorMaterializationReceiptError as exc:
+            raise BrokerStateError(
+                "operator materialization receipt is unreadable"
+            ) from exc
+        if existing is not None:
+            if not self._receipt_matches_request(
+                existing,
+                operation=operation,
+                requested=requested,
+                epoch=epoch,
+                generation=generation,
+                handoff=handoff,
+            ):
+                raise BrokerStateError(
+                    "operator materialization receipt conflicts with the request"
+                )
+            async with self._state_lock:
+                state = self._operator_run
+                if state is None:
+                    raise BrokerStateError(
+                        "operator materialization is receipt-only after broker restart"
+                    )
+                if state.materialization_receipt != existing:
+                    raise BrokerStateError(
+                        "operator materialization receipt conflicts with live broker state"
+                    )
+            return self._materialization_result(existing)
         async with self._state_lock:
             if self._quarantined_reason is not None:
                 raise BrokerStateError(
@@ -1614,6 +2288,7 @@ class ExecutiveWorkerBroker:
         adapter: OperatorAdapter | None = None
         resource: OperatorAttemptResource | None = None
         state: _BrokerOperatorRun | None = None
+        provider_dispatch_committed = False
         try:
             adapter, prompts, workspace = self._operator_factory(requested)
             if self.operator_resource_factory is not None:
@@ -1641,6 +2316,10 @@ class ExecutiveWorkerBroker:
                     epoch=epoch,
                     generation=generation,
                 )
+            # From this assignment onward no caller may infer that an adapter
+            # exception means "no provider effect".  The provider has no native
+            # idempotency key, so missing durable evidence is EFFECT_UNKNOWN.
+            provider_dispatch_committed = True
             if resume:
                 assert handoff is not None
                 observation = await self._operator_call(
@@ -1689,12 +2368,51 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator start returned untyped attestation or principal evidence"
                 )
+            try:
+                receipt = build_operator_materialization_receipt(
+                    operation_command_id=operation.command_id,
+                    operation_kind=(
+                        "resume_session" if handoff is not None else "start_session"
+                    ),
+                    attempt_id=epoch.attempt_id,
+                    worker_id=epoch.worker_id,
+                    session_epoch_id=epoch.session_epoch_id,
+                    process_generation_id=generation.process_generation_id,
+                    generation_number=generation.generation_number,
+                    requested_profile_digest=requested_profile_digest(
+                        operator_to_wire(requested)
+                    ),
+                    provider_session_id=provider_session_id,
+                    process_identity=operator_to_wire(observation.process),
+                    observed_attestation=operator_to_wire(observed),
+                    process_credentials=operator_to_wire(credentials),
+                    provider_home_identity=operator_to_wire(provider_home)[
+                        "provider_home_identity"
+                    ],
+                    created_at=_utc_now(),
+                )
+                receipt = await asyncio.to_thread(
+                    persist_operator_materialization_receipt,
+                    self.policy.run_root,
+                    receipt,
+                    expected_owner_uid=self.policy.worker_uid,
+                )
+            except OperatorMaterializationReceiptError as exc:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator materialization effect unknown"
+                    )
+                raise BrokerStateError(
+                    "operator materialization receipt persistence failed; "
+                    "provider effect is unknown"
+                ) from exc
             state = _BrokerOperatorRun(
                 adapter=adapter,
                 requested=requested,
                 epoch=epoch,
                 generation=generation,
                 provider_session_id=provider_session_id,
+                materialization_receipt=receipt,
                 resource=resource,
                 prompts=prompts,
             )
@@ -1704,15 +2422,20 @@ class ExecutiveWorkerBroker:
                 self._operator_session_attempts.move_to_end(provider_session_id)
                 while len(self._operator_session_attempts) > 64:
                     self._operator_session_attempts.popitem(last=False)
-            return {
-                "observation": operator_to_wire(observation),
-                "attestation": operator_to_wire(observed),
-                "process_credentials": operator_to_wire(credentials),
-                "provider_home": operator_to_wire(provider_home),
-                "startup_sweep": self.startup_sweep,
-            }
-        except Exception:
-            if adapter is not None and state is None:
+            return self._materialization_result(receipt)
+        except BaseException as exc:
+            if provider_dispatch_committed and state is None:
+                async with self._state_lock:
+                    self._quarantined_reason = (
+                        "operator materialization effect unknown"
+                    )
+                if not isinstance(exc, Exception):
+                    raise
+                raise BrokerStateError(
+                    "operator materialization provider dispatch has no durable "
+                    "receipt; provider effect is unknown"
+                ) from exc
+            if adapter is not None and state is None and isinstance(exc, Exception):
                 try:
                     if resource is not None:
                         await self._operator_call(
@@ -1808,6 +2531,316 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
                 )
+            if (operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
+                    and observation.acknowledged is True
+                    and type(observation.provider_native_turn_id) is str
+                    and bool(observation.provider_native_turn_id)):
+                # Marked only after this ohf-begin-turn succeeded, for the
+                # existing operation id, under the immutable TurnRef and the
+                # current generation.  The prefix selects the bounded digest
+                # observation at collect; it never grants ACK authority.
+                state.retained_plain_turns[turn] = state.generation
+            return {"observation": operator_to_wire(observation)}
+        finally:
+            await self._operator_release_busy(state)
+
+    async def _ohf_observer_lifecycle(self, operation, payload):
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        if any(not isinstance(v, str) or not 1 <= len(v) <= 256 for v in payload.values()):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        binding = {name: payload[name] for name in binding_fields}
+        identity = (
+            payload["attempt"], payload["epoch"], payload["generation"], payload["turn"],
+        )
+        async with self._state_lock:
+            active = self._operator_run
+            same_active = active is not None and (
+                payload["attempt"] == active.epoch.attempt_id
+                and payload["epoch"] == active.epoch.session_epoch_id
+                and payload["generation"] == active.generation.process_generation_id
+            )
+            if not same_active:
+                if operation == "ohf-observer-enroll":
+                    raise BrokerStateError("UNKNOWN_GENERATION")
+                # Historical reconciliation uses the original registry already
+                # retained by the bounded terminal receipt owner. A different
+                # active run cannot replace or authorize this exact old binding.
+                terminal = self._operator_terminal.get(payload["generation"])
+                projection = terminal[3] if terminal is not None else None
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None,
+                            "turn_key": None, "grant_generation": None}
+                try:
+                    if operation == "ohf-observer-revoke":
+                        return projection.revoke_observer_by_binding(identity, **binding)
+                    return projection.observer_status_by_binding(identity, **binding)
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    raise BrokerStateError(
+                        code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
+                        else "GRANT_INVALIDATED"
+                    ) from None
+            if (operation == "ohf-observer-enroll" and release_profile
+                    and getattr(active.adapter, "supports_progress_metadata", False) is not True):
+                raise BrokerStateError("CONTENT_UNAVAILABLE")
+            state = active.adapter._generations.get(payload["generation"])
+            native = state.turns.get(payload["turn"]) if state else None
+            if not native:
+                raise BrokerStateError("TURN_NOT_BOUND")
+            key = TurnKey(payload["attempt"], payload["epoch"], payload["generation"],
+                          active.generation.generation_number, active.generation.worker_id,
+                          payload["turn"], native)
+            try:
+                if operation == "ohf-observer-enroll":
+                    turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
+                    result = active.adapter.mint_observer_grant(turn, binding=binding,
+                        **({"progress_metadata": True} if release_profile else {}))
+                    return result
+                projection = getattr(active.adapter, "visible_turn_projection", None)
+                if projection is None:
+                    return {"status": "ABSENT", "reader_grant": None, "turn_key": None, "grant_generation": None}
+                method = projection.revoke_observer if operation == "ohf-observer-revoke" else projection.observer_status
+                return method(key, **binding)
+            except Exception as exc:
+                code = getattr(exc, "code", None)
+                raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
+
+    async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
+        expected = {
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+            "cursor",
+            "max_items",
+        }
+        binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
+        binding = {name: payload[name] for name in binding_fields if name in payload}
+        if set(payload) not in (expected, expected | binding_fields):
+            raise BrokerStateError("ohf-observe-turn payload fields are invalid")
+        identity_fields = (
+            "attempt",
+            "epoch",
+            "generation",
+            "turn",
+            "reader_grant",
+        )
+        if any(
+            not isinstance(payload[field], str) or not payload[field]
+            for field in identity_fields
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        async with self._state_lock:
+            active = self._operator_run
+            if active is None:
+                self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+                raise BrokerStateError("UNKNOWN_GENERATION")
+            generation_number = active.generation.generation_number
+            worker_id = active.generation.worker_id
+        if (
+            payload["attempt"] != active.epoch.attempt_id
+            or payload["epoch"] != active.epoch.session_epoch_id
+            or payload["generation"] != active.generation.process_generation_id
+            or generation_number != active.generation.generation_number
+            or worker_id != active.generation.worker_id
+        ):
+            self._observer_refusals.append((None, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        native_turn = None
+        projection = getattr(active.adapter, "visible_turn_projection", None)
+        if projection is None:
+            self._observer_refusals.append((None, "UNKNOWN_GENERATION"))
+            raise BrokerStateError("UNKNOWN_GENERATION")
+        if not projection.check_observer_binding(payload["reader_grant"], binding):
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
+        grant_key = projection.check_grant(payload["reader_grant"])
+        if grant_key is None:
+            self._observer_refusals.append((None, "READER_REVOKED"))
+            raise BrokerStateError("READER_REVOKED")
+        exact_local = None
+        generation_state = active.adapter._generations.get(
+            active.generation.process_generation_id
+        )
+        if generation_state is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        for local_turn, candidate_native in generation_state.turns.items():
+            if (
+                local_turn == payload["turn"]
+                and candidate_native
+                and candidate_native == grant_key.native_turn_id
+            ):
+                exact_local = local_turn
+                native_turn = candidate_native
+                break
+        if exact_local is None or native_turn is None:
+            self._observer_refusals.append((None, "TURN_NOT_BOUND"))
+            raise BrokerStateError("TURN_NOT_BOUND")
+        expected_key = TurnKey(
+            active.epoch.attempt_id,
+            active.epoch.session_epoch_id,
+            active.generation.process_generation_id,
+            active.generation.generation_number,
+            active.generation.worker_id,
+            exact_local,
+            native_turn,
+        )
+        if grant_key != expected_key:
+            self._observer_refusals.append((grant_key, "GENERATION_INVALID"))
+            raise BrokerStateError("GENERATION_INVALID")
+        try:
+            result = projection.read(
+                expected_key,
+                reader_grant=payload["reader_grant"],
+                cursor=payload["cursor"],
+                max_items=payload["max_items"],
+            )
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            if not isinstance(code, str):
+                raise
+            self._observer_refusals.append((expected_key, code))
+            raise BrokerStateError(code) from None
+        return {
+            "items": [
+                {
+                    "source_item_id": item.source_item_id,
+                    "source_sequence": item.source_sequence,
+                    "publication_sequence": item.publication_sequence,
+                    "state": item.state,
+                    "text": item.text,
+                    "byte_length": item.byte_length,
+                    "truncated": False,
+                    "gap": None,
+                }
+                for item in result.items
+            ],
+            "next_cursor": result.next_cursor,
+            "gaps": [
+                {
+                    "from_publication_sequence": gap.from_publication_sequence,
+                    "to_publication_sequence": gap.to_publication_sequence,
+                    "reason": gap.reason,
+                }
+                for gap in result.gaps
+            ],
+            "terminal": result.terminal,
+            "publication_epoch": result.publication_epoch,
+            "retained_scope": list(result.retained_scope),
+            "resync_required": result.resync_required,
+        }
+
+    async def _ohf_deliver_attention(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Send one bounded nudge through the already-owned current writer."""
+
+        expected = {
+            "generation",
+            "attempt_id",
+            "binding_id",
+            "binding_generation",
+            "provider_session_id",
+            "nudge_id",
+            "opaque_ids",
+            "instruction",
+            "completion_timeout_seconds",
+        }
+        if set(payload) != expected:
+            raise BrokerPreSubmitError(
+                "ohf-deliver-attention payload fields are invalid"
+            )
+        try:
+            self._require_current_autonomy()
+            generation = wire_process_generation_ref(payload["generation"])
+        except (WorkerBrokerError, OperatorHarnessWireError) as exc:
+            raise BrokerPreSubmitError(
+                "current operator generation is unavailable"
+            ) from exc
+
+        attempt_id = payload["attempt_id"]
+        binding_id = payload["binding_id"]
+        binding_generation = payload["binding_generation"]
+        provider_session_id = payload["provider_session_id"]
+        nudge_id = payload["nudge_id"]
+        opaque_ids = payload["opaque_ids"]
+        instruction = payload["instruction"]
+        timeout = payload["completion_timeout_seconds"]
+        if (
+            not isinstance(attempt_id, str)
+            or _ID_RE.fullmatch(attempt_id) is None
+            or not isinstance(binding_id, str)
+            or _ID_RE.fullmatch(binding_id) is None
+            or type(binding_generation) is not int
+            or binding_generation < 1
+            or not isinstance(provider_session_id, str)
+            or _ID_RE.fullmatch(provider_session_id) is None
+            or not isinstance(nudge_id, str)
+            or _ID_RE.fullmatch(nudge_id) is None
+            or not isinstance(opaque_ids, list)
+            or not 1 <= len(opaque_ids) <= 32
+            or any(
+                not isinstance(item, str) or _ID_RE.fullmatch(item) is None
+                for item in opaque_ids
+            )
+            or instruction != ATTENTION_TURN_INSTRUCTION
+            or isinstance(timeout, bool)
+            or not isinstance(timeout, (int, float))
+            or not 0.1 <= float(timeout) <= 300.0
+        ):
+            raise BrokerPreSubmitError(
+                "attention request is outside the closed current-writer contract"
+            )
+
+        try:
+            state = await self._operator_state(generation)
+        except BrokerStateError as exc:
+            raise BrokerPreSubmitError(str(exc)) from exc
+        try:
+            if (
+                state.epoch.attempt_id != attempt_id
+                or state.provider_session_id != provider_session_id
+            ):
+                raise BrokerPreSubmitError(
+                    "attention request is outside the active Attempt writer"
+                )
+            try:
+                observation = await asyncio.to_thread(
+                    state.adapter.deliver_attention,
+                    generation=generation,
+                    attempt_id=attempt_id,
+                    binding_id=binding_id,
+                    binding_generation=binding_generation,
+                    provider_session_id=provider_session_id,
+                    nudge_id=nudge_id,
+                    opaque_ids=tuple(opaque_ids),
+                    instruction=instruction,
+                    completion_timeout_seconds=float(timeout),
+                )
+            except Exception as exc:
+                effect_unknown = getattr(exc, "effect_unknown", None)
+                if effect_unknown is not False:
+                    raise BrokerEffectUnknownError(
+                        "attention provider write has unknown effect"
+                    ) from exc
+                raise BrokerPreSubmitError(
+                    "attention refused before provider submission"
+                ) from exc
+            if not isinstance(observation, AttentionTurnObservation):
+                raise BrokerEffectUnknownError(
+                    "attention provider returned an untyped observation"
+                )
             return {"observation": operator_to_wire(observation)}
         finally:
             await self._operator_release_busy(state)
@@ -1879,14 +2912,56 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator collection returned untyped or oversized evidence"
                 )
-            return {
+            response = {
                 "events": operator_to_wire(events),
                 "cursor": operator_to_wire(next_cursor),
                 "candidate": operator_to_wire(candidate),
                 "raw_role_result": operator_to_wire(raw),
             }
+            if state.retained_plain_turns.get(turn) == state.generation:
+                # The accepted collector runs only for a turn marked at
+                # begin-turn; ordinary turns never incur an additional raw
+                # read.  Absence stays an explicit unavailable value.
+                response["retained_plain_input_evidence"] = (
+                    await self._retained_plain_input_evidence(state, turn)
+                )
+            return response
         finally:
             await self._operator_release_busy(state)
+
+    async def _retained_plain_input_evidence(
+        self, state: _BrokerOperatorRun, turn: TurnRef
+    ) -> dict[str, Any] | None:
+        """Reuse only the accepted extractor for one marked turn.
+
+        The only accepted producer is the adapter's own
+        ``collect_retained_plain_text_evidence``; a no-supported-method adapter,
+        an unsupported build or input, or any extraction refusal is the
+        explicit unavailable ``None``.  The optional emitted value must pass
+        the closed digest-only wire codec, so the
+        transport can never carry a prompt, an expected text, a caller build
+        attestation, an acceptance boolean, or ACK authority.
+        """
+
+        collector = getattr(
+            state.adapter, "collect_retained_plain_text_evidence", None
+        )
+        if not callable(collector):
+            return None
+        try:
+            evidence = await self._operator_call(
+                "retained plain input evidence", collector, turn
+            )
+        except WorkerBrokerError:
+            return None
+        if not isinstance(evidence, RetainedPlainInputEvidence):
+            return None
+        try:
+            encoded = operator_to_wire(evidence)
+            wire_retained_plain_input_evidence(encoded)
+        except OperatorHarnessWireError:
+            return None
+        return encoded
 
     async def _ohf_interrupt(self, payload: dict[str, Any]) -> dict[str, Any]:
         if set(payload) != {"operation_id", "turn"}:
@@ -1945,10 +3020,14 @@ class ExecutiveWorkerBroker:
         artifact_receipt: BrowserReviewReceipt | None = None,
     ) -> None:
         async with self._state_lock:
+            projection = getattr(state.adapter, "visible_turn_projection", None)
+            if projection is not None:
+                projection.retire_generation(state.generation.process_generation_id)
             self._operator_terminal[state.generation.process_generation_id] = (
                 state.generation,
                 observation,
                 artifact_receipt,
+                projection,
             )
             self._operator_terminal.move_to_end(
                 state.generation.process_generation_id
@@ -2016,28 +3095,70 @@ class ExecutiveWorkerBroker:
                     state.resource.seal_after_uid_sweep,
                     sweep,
                 )
-                if not isinstance(artifact_receipt, BrowserReviewReceipt):
-                    raise BrokerStateError(
-                        "browser resource returned an untyped artifact receipt"
+                if artifact_receipt is None:
+                    # Only the explicitly requested and materialized GUI contract
+                    # is artifact-free. A missing browser receipt is not success.
+                    capability = getattr(state.resource, "observed_capability", None)
+                    required_resources = tuple(
+                        item for item in state.requested.capabilities.required
+                        if item.kind == "resource"
                     )
-                try:
-                    artifact_receipt = browser_review_receipt(
-                        artifact_receipt.to_wire()
-                    )
-                except BrowserReviewError as exc:
-                    raise BrokerStateError(
-                        "browser resource returned an invalid closed artifact receipt"
-                    ) from exc
-                if (
-                    artifact_receipt.attempt_id != state.epoch.attempt_id
-                    or artifact_receipt.session_epoch_id
-                    != state.epoch.session_epoch_id
-                    or artifact_receipt.process_generation_id
-                    != state.generation.process_generation_id
-                ):
-                    raise BrokerStateError(
-                        "browser receipt generation identity drifted"
-                    )
+                    receipt = state.materialization_receipt
+                    observed_resources = ()
+                    if receipt is not None:
+                        try:
+                            attestation = wire_observed_harness_attestation(
+                                receipt.observed_attestation
+                            )
+                        except OperatorHarnessWireError as exc:
+                            raise BrokerStateError(
+                                "operator resource lacks validated artifact-free admission"
+                            ) from exc
+                        observed_resources = tuple(
+                            item for item in attestation.capabilities
+                            if item.kind == "resource"
+                        )
+                    if (
+                        not isinstance(capability, ObservedCapabilityIdentity)
+                        or capability.kind != "resource"
+                        or capability.name != CHATGPT_GUI_RESOURCE_ID
+                        or not isinstance(capability.resource_contract_digest, str)
+                        or re.fullmatch(r"[0-9a-f]{64}", capability.resource_contract_digest) is None
+                        or len(required_resources) != 1
+                        or required_resources[0].name != capability.name
+                        or required_resources[0].resource_contract_digest
+                        != capability.resource_contract_digest
+                        or observed_resources != (capability,)
+                        or receipt is None
+                        or receipt.requested_profile_digest
+                        != requested_profile_digest(operator_to_wire(state.requested))
+                    ):
+                        raise BrokerStateError(
+                            "operator resource lacks validated artifact-free admission"
+                        )
+                else:
+                    if not isinstance(artifact_receipt, BrowserReviewReceipt):
+                        raise BrokerStateError(
+                            "operator resource returned an untyped artifact receipt"
+                        )
+                    try:
+                        artifact_receipt = browser_review_receipt(
+                            artifact_receipt.to_wire()
+                        )
+                    except BrowserReviewError as exc:
+                        raise BrokerStateError(
+                            "browser resource returned an invalid closed artifact receipt"
+                        ) from exc
+                    if (
+                        artifact_receipt.attempt_id != state.epoch.attempt_id
+                        or artifact_receipt.session_epoch_id
+                        != state.epoch.session_epoch_id
+                        or artifact_receipt.process_generation_id
+                        != state.generation.process_generation_id
+                    ):
+                        raise BrokerStateError(
+                            "browser receipt generation identity drifted"
+                        )
             await self._remember_operator_terminal(
                 state, observation, artifact_receipt
             )
@@ -2129,7 +3250,7 @@ class ExecutiveWorkerBroker:
                 generation.process_generation_id
             )
         if terminal_receipt is not None:
-            terminal_generation, terminal, artifact_receipt = terminal_receipt
+            terminal_generation, terminal, artifact_receipt, _projection = terminal_receipt
             if terminal_generation != generation:
                 raise BrokerProtocolError(
                     "operator terminal generation identity drifted"
@@ -2250,11 +3371,44 @@ class ExecutiveWorkerBroker:
         }
 
     async def _start(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
+        descriptor = adapter_descriptor(self.adapter_id)
+        if not descriptor.implemented:
+            raise WorkerAdapterNotImplementedError(
+                f"worker adapter {descriptor.adapter_id!r} is not implemented "
+                "for broker execution"
+            )
+        binding = getattr(self.adapter, "binding", None)
+        if binding is not None:
+            if getattr(binding, "implementation_state", None) == "SPEC_ONLY":
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "is SPEC_ONLY for broker execution"
+                )
+            if getattr(binding, "autonomous_allowed", None) is False:
+                raise WorkerAdapterNotImplementedError(
+                    f"worker adapter {descriptor.adapter_id!r} catalog binding "
+                    "does not allow autonomous broker execution"
+                )
         self._require_current_autonomy()
         if set(payload) != {"launch_spec", "validation_commands"}:
             raise BrokerProtocolError("start payload fields are invalid")
-        spec = _launch_spec(payload["launch_spec"], self.policy)
+        spec = _launch_spec_from_wire(payload["launch_spec"], self.policy)
+        # Ordinary autonomous broker start must refuse any spec carrying a
+        # subscription canary claim; only the interactive-canary operation
+        # may carry one.  An empty mapping (default factory) is fine because
+        # it normalizes to a frozen empty mapping.
+        if spec.subscription_canary_claim:
+            raise BrokerProtocolError(
+                "ordinary broker start refuses a subscription canary claim; "
+                "only the interactive-canary operation may carry one"
+            )
         commands = _validation_commands(payload["validation_commands"])
+        if self.policy.require_assignment_seal:
+            if commands:
+                raise BrokerProtocolError("finite assignment seal branch does not admit validation effects")
+            if self.startup_sweep is None:
+                raise BrokerStateError("assignment startup qualification has not completed")
         async with self._state_lock:
             if self._quarantined_reason is not None:
                 raise BrokerStateError(f"worker broker is quarantined: {self._quarantined_reason}")
@@ -2268,11 +3422,16 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError("the worker broker already has active work")
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
+            # Same host-owned identity check at every new START, not merely
+            # construction; do not gate post-revocation cancel/collect.
+            self._require_current_native_realm()
             self._starting = True
+        started = False
         try:
             process_ref = await self.adapter.start(spec)
             attestation_reader = getattr(self.adapter, "launch_attestation", None)
             attestation = attestation_reader(process_ref) if callable(attestation_reader) else None
+            started = True
         except Exception:
             try:
                 self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "start_failed")
@@ -2282,23 +3441,26 @@ class ExecutiveWorkerBroker:
             raise
         finally:
             async with self._state_lock:
+                if started:
+                    # Publish before releasing admission, in the original finalizer.
+                    state = _BrokerRun(
+                        spec=spec,
+                        process_ref=process_ref,
+                        validation_commands=commands,
+                        launch_attestation=attestation,
+                    )
+                    self._remember(spec.run_id, state)
+                    self._active_run_id = spec.run_id
                 self._starting = False
-        async with self._state_lock:
-            state = _BrokerRun(
-                spec=spec,
-                process_ref=process_ref,
-                validation_commands=commands,
-                launch_attestation=attestation,
-            )
-            self._remember(spec.run_id, state)
-            self._active_run_id = spec.run_id
         return {
+            "adapter_id": self.adapter_id,
             "process_ref": process_ref,
             "launch_attestation": attestation,
             "startup_sweep": self.startup_sweep,
         }
 
     async def _status(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) - {"run_id", "fresh_uid_sweep"}:
             raise BrokerProtocolError("status payload fields are invalid")
         run_id = payload.get("run_id")
@@ -2335,6 +3497,7 @@ class ExecutiveWorkerBroker:
                 if status_sweep is not None:
                     self.last_sweep = status_sweep
                 result: dict[str, Any] = {
+                    "adapter_id": self.adapter_id,
                     "broker_pid": os.getpid(),
                     "worker_uid": os.geteuid(),
                     "worker_gid": os.getegid(),
@@ -2378,7 +3541,17 @@ class ExecutiveWorkerBroker:
                 "status": status,
                 "process_ref": state.process_ref,
                 "terminal_error": state.terminal_error,
-                "validated_commands": [list(command) for command in state.validation_receipts],
+                "collection_busy": (
+                    state.collection_task is not None
+                    and not state.collection_task.done()
+                ),
+                "validation_busy": any(
+                    not task.done()
+                    for _timeout, task in state.validation_tasks.values()
+                ),
+                "validated_commands": [
+                    list(command) for command in state.validation_receipts
+                ],
             }
         return result
 
@@ -2407,36 +3580,75 @@ class ExecutiveWorkerBroker:
             self.last_sweep = receipt
         return receipt
 
+    async def _collect_transaction(
+        self, state: _BrokerRun
+    ) -> tuple[CollectionReceipt, UIDSweepReceipt]:
+        """Own one collection effect independently of any one socket caller."""
+
+        receipt = await self.adapter.collect_result(state.process_ref)
+        async with self._state_lock:
+            if (
+                state.collected_receipt is not None
+                and state.collected_receipt != receipt
+            ):
+                state.terminal_error = (
+                    "replayed collection differs from the accepted receipt"
+                )
+                raise BrokerStateError(state.terminal_error)
+            state.collected_receipt = receipt
+        sweep = await self._terminal_sweep(state, reason="run_terminal")
+        async with self._state_lock:
+            if self._active_run_id == state.spec.run_id and not self.policy.require_assignment_seal:
+                self._active_run_id = None
+        if sweep.found_residuals:
+            async with self._state_lock:
+                state.terminal_error = (
+                    "worker left a detached same-UID process after collection"
+                )
+            raise BrokerStateError(state.terminal_error)
+        return receipt, sweep
+
     async def _collect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id"}:
             raise BrokerProtocolError("collect payload fields are invalid")
         async with self._state_lock:
             state = self._run(payload["run_id"])
-            if self._active_run_id != state.spec.run_id:
-                raise BrokerStateError("only the active run can be collected")
-            if state.collecting:
-                raise BrokerStateError("collection is already in progress")
-            state.collecting = True
-        try:
-            receipt = await self.adapter.collect_result(state.process_ref)
-            async with self._state_lock:
-                state.collected_receipt = receipt
-            sweep = await self._terminal_sweep(state, reason="run_terminal")
-            async with self._state_lock:
-                if self._active_run_id == state.spec.run_id:
-                    self._active_run_id = None
-            if sweep.found_residuals:
-                async with self._state_lock:
-                    state.terminal_error = (
-                        "worker left a detached same-UID process after collection"
-                    )
-                raise BrokerStateError(state.terminal_error)
-            return {"collection": receipt, "uid_sweep": sweep}
-        finally:
-            async with self._state_lock:
-                state.collecting = False
+            task = state.collection_task
+            if task is None:
+                if self._active_run_id != state.spec.run_id:
+                    raise BrokerStateError("only the active run can be collected")
+                task = asyncio.create_task(
+                    self._collect_transaction(state),
+                    name=f"executive-worker-collect-{state.spec.run_id}",
+                )
+                state.collection_task = task
+        receipt, sweep = await asyncio.shield(task)
+        return {"collection": receipt, "uid_sweep": sweep}
 
     async def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.policy.require_assignment_seal:
+            return await self._cancel_unshielded(payload)
+        if (set(payload) != {"run_id", "reason"} or type(payload["reason"]) is not str
+                or not payload["reason"].strip() or len(payload["reason"]) > 500):
+            raise BrokerProtocolError("cancel payload fields are invalid")
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            if state.assignment_snapshot is not None or self._active_run_id != state.spec.run_id:
+                raise BrokerStateError("original assignment seal owner holds terminal settlement")
+            if state.assignment_cancel_task is not None:
+                if state.assignment_cancel_reason != payload["reason"]:
+                    raise BrokerStateError("original cancellation request cannot be changed")
+                task = state.assignment_cancel_task
+            else:
+                task = asyncio.create_task(self._cancel_unshielded(dict(payload)),
+                                           name=f"assignment-cancel-{state.spec.run_id}")
+                state.assignment_cancel_task = task
+                state.assignment_cancel_reason = payload["reason"]
+        return await asyncio.shield(task)
+
+    async def _cancel_unshielded(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
         if set(payload) != {"run_id", "reason"}:
             raise BrokerProtocolError("cancel payload fields are invalid")
         reason = payload.get("reason")
@@ -2444,6 +3656,8 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError("cancel reason is invalid")
         async with self._state_lock:
             state = self._run(payload["run_id"])
+            if self.policy.require_assignment_seal and state.assignment_snapshot is not None:
+                raise BrokerStateError("original assignment seal owner already holds terminal settlement")
             if self._active_run_id != state.spec.run_id:
                 raise BrokerStateError("only the active run can be cancelled")
             if state.cancelling:
@@ -2462,7 +3676,7 @@ class ExecutiveWorkerBroker:
                 state.cancelling = False
         sweep = await self._terminal_sweep(state, reason="run_terminal")
         async with self._state_lock:
-            if self._active_run_id == state.spec.run_id:
+            if self._active_run_id == state.spec.run_id and not self.policy.require_assignment_seal:
                 self._active_run_id = None
         if adapter_error is not None:
             async with self._state_lock:
@@ -2472,44 +3686,136 @@ class ExecutiveWorkerBroker:
             raise BrokerStateError(state.terminal_error) from adapter_error
         return {"cancellation": receipt, "uid_sweep": sweep}
 
-    async def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if set(payload) != {"run_id", "argv", "timeout_seconds"}:
-            raise BrokerProtocolError("validate payload fields are invalid")
-        commands = _validation_commands([payload["argv"]])
-        command = commands[0]
-        timeout = payload.get("timeout_seconds")
-        if not isinstance(timeout, (int, float)) or not 0.1 <= float(timeout) <= 3600:
-            raise BrokerProtocolError("validation timeout is outside the safe range")
+    async def _assignment_seal_prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import canonical, digest, observe_roots
+
+        if not self.policy.require_assignment_seal or set(payload) != {"run_id"}:
+            raise BrokerProtocolError("assignment seal preparation is not admitted")
         async with self._state_lock:
-            if (
-                self._active_run_id is not None
-                or self._operator_run is not None
-                or self._starting
-                or self._validation_busy
-                or self._status_sweep_busy
-            ):
-                raise BrokerStateError("validation is serialized after worker collection")
             state = self._run(payload["run_id"])
-            if state.collected_receipt is None:
-                raise BrokerStateError("validation requires a collected worker result")
-            if command not in state.validation_commands:
-                raise BrokerProtocolError("validation argv was not frozen in the start request")
-            if command in state.validation_receipts:
-                raise BrokerStateError("validation argv has already been executed")
-            self._validation_busy = True
+            if state.assignment_snapshot is not None:
+                return {"snapshot": json.loads(canonical(state.assignment_snapshot)),
+                        "snapshot_sha256": digest(state.assignment_snapshot)}
+            if (self._active_run_id != state.spec.run_id or state.cancelling
+                    or (state.assignment_cancel_task is not None and (
+                        not state.assignment_cancel_task.done() or state.assignment_cancel_task.cancelled()
+                        or state.assignment_cancel_task.exception() is not None))
+                    or state.terminal_error is not None or state.collected_receipt is None
+                    or state.collection_task is None or not state.collection_task.done()
+                    or state.collection_task.cancelled() or state.collection_task.exception() is not None
+                    or state.terminal_sweep_task is None or not state.terminal_sweep_task.done()
+                    or state.terminal_sweep_task.cancelled() or state.terminal_sweep_task.exception() is not None
+                    or state.validation_commands or self._validation_busy):
+                raise BrokerStateError("original terminal collection and cleanup must settle before seal")
+            sweep = state.terminal_sweep_task.result()
+            if not uid_sweep_receipt_is_passing(_jsonable(sweep)):
+                raise BrokerStateError("original terminal cleanup does not prove dedicated UID quiescence")
+            # This read stays under the original state lock. Cancellation and
+            # another start cannot interleave before the phase is frozen.
+            paths = observe_roots({"workspace": state.spec.workspace_path,
+                                   "run": state.spec.run_dir}, self.policy,
+                                  state.spec.isolation_manifest)
+            state.assignment_snapshot = {
+                "schema_version": "mastermind.worker_assignment_seal_prepare/v1",
+                "run_id": state.spec.run_id, "job_id": state.spec.job_id,
+                "worker_id": state.spec.worker_id,
+                "effective_grant_digest": getattr(state.spec, "effective_grant_digest", None),
+                "process_ref": _jsonable(state.process_ref),
+                "paths": paths, "uid_sweep": _jsonable(sweep),
+            }
+            return {"snapshot": json.loads(canonical(state.assignment_snapshot)),
+                    "snapshot_sha256": digest(state.assignment_snapshot)}
+
+    async def _assignment_seal_transaction(self, state: _BrokerRun, seal: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import digest, verify_control_seal
+
+        snapshot = state.assignment_snapshot
+        assert snapshot is not None
+        denial = await asyncio.to_thread(verify_control_seal, snapshot, seal, self.policy)
+        receipt = {"schema_version": "mastermind.worker_assignment_seal_commit/v1",
+                   "snapshot": snapshot, "snapshot_sha256": digest(snapshot),
+                   "control_seal": seal, "worker_denial": denial}
+        # This is only the worker's observation. Keep exclusion until the
+        # authenticated Control owner acknowledges its own durable retention.
+        async with self._state_lock:
+            if self._active_run_id != state.spec.run_id:
+                raise BrokerStateError("original assignment no longer owns admission")
+            state.assignment_receipt = receipt
+        return receipt
+
+    async def _assignment_seal_commit(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import canonical, digest
+
+        if (not self.policy.require_assignment_seal
+                or set(payload) != {"run_id", "snapshot_sha256", "seal"}):
+            raise BrokerProtocolError("assignment seal commit is not admitted")
+        supplied = json.loads(canonical(payload))
+        async with self._state_lock:
+            state = self._run(supplied["run_id"])
+            if (state.assignment_snapshot is None
+                    or supplied["snapshot_sha256"] != digest(state.assignment_snapshot)):
+                raise BrokerStateError("original prepared assignment differs")
+            commit_digest = digest(supplied)
+            if state.assignment_commit_task is not None:
+                if state.assignment_commit_digest != commit_digest:
+                    raise BrokerStateError("original seal commit cannot be changed")
+                task = state.assignment_commit_task
+            else:
+                if self._active_run_id != state.spec.run_id:
+                    raise BrokerStateError("only the original active assignment may commit")
+                task = asyncio.create_task(self._assignment_seal_transaction(state, supplied["seal"]),
+                                           name=f"assignment-seal-{state.spec.run_id}")
+                state.assignment_commit_digest = commit_digest
+                state.assignment_commit_task = task
+        return json.loads(canonical(await asyncio.shield(task)))
+
+    async def _assignment_seal_finalize(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import control_retention_record, digest
+
+        if (not self.policy.require_assignment_seal or set(payload) != {
+                "run_id", "observation_sha256", "retention_sha256"}):
+            raise BrokerProtocolError("assignment retention acknowledgement is not admitted")
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            task = state.assignment_commit_task
+            if (task is None or not task.done() or task.cancelled()
+                    or task.exception() is not None or state.assignment_receipt is None):
+                raise BrokerStateError("original worker denial observation is not complete")
+            observed = digest(state.assignment_receipt)
+            retained = digest(control_retention_record(state.assignment_receipt))
+            if payload["observation_sha256"] != observed or payload["retention_sha256"] != retained:
+                raise BrokerStateError("Control retention does not bind the original observation")
+            if state.assignment_retention_digest is None:
+                if self._active_run_id != state.spec.run_id:
+                    raise BrokerStateError("original assignment no longer owns admission")
+                state.assignment_retention_digest = retained
+                self._active_run_id = None
+            return {"run_id": state.spec.run_id, "observation_sha256": observed,
+                    "retention_sha256": retained}
+
+    async def _validation_transaction(
+        self,
+        state: _BrokerRun,
+        command: tuple[str, ...],
+        timeout: float,
+    ) -> tuple[ValidationReceipt, UIDSweepReceipt]:
+        """Own one frozen validation effect independently of socket callers."""
+
         try:
             adapter_error: Exception | None = None
-            receipt: Any = None
+            receipt: ValidationReceipt | None = None
             try:
-                receipt = await self.adapter.run_validation_argv(
+                receipt = await self.validation_adapter.run_validation_argv(
                     state.spec,
                     command,
-                    timeout_seconds=float(timeout),
+                    timeout_seconds=timeout,
                 )
             except Exception as exc:
                 adapter_error = exc
             try:
-                sweep = await asyncio.to_thread(self.sweeper.sweep, "validation_terminal")
+                sweep = await asyncio.to_thread(
+                    self.sweeper.sweep, "validation_terminal"
+                )
             except Exception as exc:
                 async with self._state_lock:
                     self._quarantined_reason = (
@@ -2527,19 +3833,90 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(state.terminal_error) from adapter_error
             if sweep.found_residuals:
                 async with self._state_lock:
-                    state.terminal_error = "validation left a detached same-UID process"
+                    state.terminal_error = (
+                        "validation left a detached same-UID process"
+                    )
                 raise BrokerStateError(state.terminal_error)
+            if not isinstance(receipt, ValidationReceipt):
+                raise BrokerStateError(
+                    "worker adapter returned an invalid validation receipt"
+                )
             async with self._state_lock:
+                existing = state.validation_receipts.get(command)
+                if existing is not None and existing != receipt:
+                    state.terminal_error = (
+                        "replayed validation differs from the accepted receipt"
+                    )
+                    raise BrokerStateError(state.terminal_error)
                 state.validation_receipts[command] = receipt
-            return {"validation": receipt, "uid_sweep": sweep}
+            return receipt, sweep
         finally:
             async with self._state_lock:
                 self._validation_busy = False
+
+    async def _validate(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._require_flat_adapter()
+        if set(payload) != {"run_id", "argv", "timeout_seconds"}:
+            raise BrokerProtocolError("validate payload fields are invalid")
+        commands = _validation_commands([payload["argv"]])
+        command = commands[0]
+        raw_timeout = payload.get("timeout_seconds")
+        if (
+            not isinstance(raw_timeout, (int, float))
+            or not 0.1 <= float(raw_timeout) <= 3600
+        ):
+            raise BrokerProtocolError("validation timeout is outside the safe range")
+        timeout = float(raw_timeout)
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            existing = state.validation_tasks.get(command)
+            if existing is not None:
+                accepted_timeout, task = existing
+                if timeout != accepted_timeout:
+                    raise BrokerProtocolError(
+                        "validation replay timeout differs from the accepted operation"
+                    )
+            else:
+                if (
+                    self._active_run_id is not None
+                    or self._operator_run is not None
+                    or self._starting
+                    or self._validation_busy
+                    or self._status_sweep_busy
+                ):
+                    raise BrokerStateError(
+                        "validation is serialized after worker collection"
+                    )
+                if state.collected_receipt is None:
+                    raise BrokerStateError(
+                        "validation requires a collected worker result"
+                    )
+                if command not in state.validation_commands:
+                    raise BrokerProtocolError(
+                        "validation argv was not frozen in the start request"
+                    )
+                if command in state.validation_receipts:
+                    raise BrokerStateError(
+                        "validation receipt exists without its replay operation"
+                    )
+                self._validation_busy = True
+                task = asyncio.create_task(
+                    self._validation_transaction(state, command, timeout),
+                    name=(
+                        "executive-worker-validate-"
+                        f"{state.spec.run_id}-{len(state.validation_tasks) + 1}"
+                    ),
+                )
+                state.validation_tasks[command] = (timeout, task)
+        receipt, sweep = await asyncio.shield(task)
+        return {"validation": receipt, "uid_sweep": sweep}
 
     async def shutdown(self) -> None:
         """Cancel an active run, then prove the dedicated UID is quiescent."""
 
         async with self._state_lock:
+            if self.policy.require_assignment_seal:
+                self._quarantined_reason = "broker shutdown"
             active_run_id = self._active_run_id
             operator = self._operator_run
         if active_run_id is not None:
@@ -2565,6 +3942,19 @@ class ExecutiveWorkerBroker:
                 )
             except WorkerBrokerError:
                 pass
+        if self.policy.require_assignment_seal:
+            # Shielded operations outlive disconnected callers. Drain their
+            # original owners before the final sweep; never cancel a to_thread
+            # observation and report its physical work stopped.
+            async with self._state_lock:
+                owned = [task for run in self._runs.values() for task in (
+                    run.assignment_cancel_task, run.collection_task,
+                    run.assignment_commit_task, run.terminal_sweep_task,
+                ) if task is not None]
+            outcomes = await asyncio.gather(*(asyncio.shield(task) for task in owned),
+                                            return_exceptions=True)
+            if any(isinstance(value, BaseException) for value in outcomes):
+                raise BrokerStateError("original assignment shutdown settlement failed")
         self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "broker_shutdown")
 
     async def _write_interrupted_envelope(
@@ -2754,10 +4144,18 @@ class ExecutiveWorkerBroker:
                 await self._write_interrupted_envelope(
                     writer, request_id, operation, exc
                 )
+            if isinstance(exc, _CLIENT_GONE):
+                return
             raise
         finally:
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except _CLIENT_GONE:
+                # A vanished control process is normal after an operation has
+                # become broker-owned. Never let socket teardown mask the
+                # operation result or a caller cancellation.
+                pass
 
     async def serve(self, activated_socket: socket.socket) -> None:
         """Run forever on one launchd-owned Unix listener."""
@@ -2802,12 +4200,18 @@ class WorkerBrokerClient:
         *,
         timeout_seconds: float = 30.0,
         max_response_bytes: int = 4 * 1024 * 1024,
+        expected_peer_uid: int | None = None,
     ) -> None:
         self.socket_path = Path(socket_path)
         if not self.socket_path.is_absolute():
             raise WorkerBrokerError("worker broker socket path must be absolute")
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = int(max_response_bytes)
+        if expected_peer_uid is not None and (
+            type(expected_peer_uid) is not int or expected_peer_uid < 0
+        ):
+            raise ValueError("expected broker peer UID must be a nonnegative integer")
+        self.expected_peer_uid = expected_peer_uid
         if not 0.1 <= self.timeout_seconds <= 3600:
             raise WorkerBrokerError("worker broker client timeout is outside the safe range")
         if not 1024 <= self.max_response_bytes <= 16 * 1024 * 1024:
@@ -2819,8 +4223,12 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
+        before_write=None,
     ) -> dict[str, Any]:
-        if operation not in _ALLOWED_OPERATIONS:
+        # Bridge-only read: this does not add the operation to the ordinary
+        # Worker Broker server or grant a generic request-supplied data source.
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation", "native-fabric-status"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {
@@ -2842,6 +4250,29 @@ class WorkerBrokerClient:
                 limit=self.max_response_bytes,
             )
             try:
+                # Authenticate the service before sending prompts or grant-bound
+                # requests. The optional check preserves existing clients while
+                # allowing a fixed cross-principal bridge to bind both peers.
+                if self.expected_peer_uid is not None:
+                    peer = writer.get_extra_info("socket")
+                    if peer is None or get_peer_credentials(peer).uid != self.expected_peer_uid:
+                        raise PeerAuthorizationError("broker peer UID differs from trusted binding")
+                from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+                try:
+                    require_start_transmission(operation, json.loads(encoded)["payload"],
+                                               foreground_start_receipt)
+                except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
+                if before_write is not None:
+                    try:
+                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                                or not callable(before_write)
+                                or before_write(operation, json.loads(encoded)["payload"]) is not None):
+                            raise ValueError("invalid local foreground guard")
+                    except Exception:
+                        from control_plane.remote_worker_transport import TransportError, TransportEffect
+                        raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()
@@ -2953,6 +4384,7 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        before_write=None,
     ) -> dict[str, Any]:
         """Synchronous startup/reconciliation seam; never call from a running loop."""
 
@@ -2960,7 +4392,8 @@ class WorkerBrokerClient:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(
-                self.request(operation, payload, timeout_seconds=timeout_seconds)
+                self.request(operation, payload, timeout_seconds=timeout_seconds,
+                             **({"before_write": before_write} if before_write is not None else {}))
             )
         raise WorkerBrokerError("request_sync cannot run inside an active event loop")
 
@@ -2979,11 +4412,11 @@ def _binary_from_json(value: Any) -> BinaryAttestation:
         raise BrokerProtocolError("remote binary attestation is invalid") from exc
 
 
-def _process_ref_from_json(value: Any) -> ProcessRef:
+def _process_ref_from_json(value: Any) -> WorkerProcessRef:
     raw = _mapping(value, field="process reference").copy()
     raw["binary"] = _binary_from_json(raw.get("binary"))
     try:
-        return ProcessRef(**raw)
+        return WorkerProcessRef(**raw)
     except (TypeError, ValueError) as exc:
         raise BrokerProtocolError("remote process reference is invalid") from exc
 
@@ -3037,43 +4470,83 @@ def _uid_sweep_from_json(value: Any) -> dict[str, Any]:
     return raw
 
 
-def _launch_spec_to_json(spec: LaunchSpec) -> dict[str, Any]:
-    return _jsonable(dataclasses.asdict(spec))
+def _launch_spec_to_json(spec: WorkerLaunchSpec) -> dict[str, Any]:
+    serialized = _jsonable(spec)
+    if not isinstance(serialized, dict):  # pragma: no cover - dataclass invariant
+        raise BrokerProtocolError("worker launch spec did not serialize to an object")
+    # Mixed-version compatibility: ordinary Control hosts serialize a launch
+    # spec without a canary claim.  An empty mapping would re-introduce the
+    # field on every byte-stable wire payload, so strip it whenever the claim
+    # is empty.  A canary payload always carries the closed schema so the
+    # worker side keeps receiving it.
+    if not spec.subscription_canary_claim:
+        serialized.pop("subscription_canary_claim", None)
+    return serialized
 
 
 class RemoteCodexWorkerAdapter:
-    """Control-side Codex adapter facade backed by the distinct-UID broker."""
+    """Control-side fixed-identity adapter facade backed by the worker broker."""
+
+    adapter_id = "codex-cli"
 
     def __init__(
         self,
         client: WorkerBrokerClient,
         *,
         validation_commands_for_spec: (
-            Callable[[LaunchSpec], Sequence[Sequence[str]]] | None
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
         ) = None,
     ) -> None:
         self.client = client
         self.validation_commands_for_spec = validation_commands_for_spec or (lambda _spec: ())
-        self._refs: dict[str, ProcessRef] = {}
+        self._refs: dict[str, WorkerProcessRef] = {}
         self._attestations: dict[str, Mapping[str, Any]] = {}
-        self._specs: dict[str, LaunchSpec] = {}
+        self._specs: dict[str, WorkerLaunchSpec] = {}
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
         self.startup_uid_sweep: Mapping[str, Any] | None = None
         self.inspector = _UnavailableRemoteInspector()
 
-    async def start(self, spec: LaunchSpec) -> ProcessRef:
-        commands = [list(command) for command in self.validation_commands_for_spec(spec)]
-        result = await self.client.request(
-            "start",
-            {
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        is_canary = bool(spec.subscription_canary_claim)
+        if is_canary:
+            try:
+                validate_subscription_canary_claim(spec.subscription_canary_claim)
+            except WorkerRecoveryContractError as exc:
+                raise BrokerProtocolError(str(exc)) from exc
+        if is_canary:
+            operation = "interactive-canary"
+            payload = {
+                    "launch_spec": _launch_spec_to_json(spec),
+                    "subscription_canary_observation": dict(spec.subscription_canary_claim),
+                }
+        else:
+            operation = "start"
+            payload = {
                 "launch_spec": _launch_spec_to_json(spec),
-                "validation_commands": commands,
-            },
-        )
+                "validation_commands": [
+                    list(command)
+                    for command in self.validation_commands_for_spec(spec)
+                ],
+            }
+        result = await self.client.request(operation, payload)
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote broker adapter identity does not match facade")
         process_ref = _process_ref_from_json(result.get("process_ref"))
         if process_ref.run_id != spec.run_id:
             raise BrokerProtocolError("remote process run_id does not match LaunchSpec")
         attestation = _mapping(result.get("launch_attestation"), field="launch attestation")
+        if is_canary:
+            claim = spec.subscription_canary_claim
+            expected = {
+                "subscription_canary_observation_digest": claim["observation_digest"],
+                "subscription_canary_binding_id": claim["binding_id"],
+                "subscription_canary_model": claim["model"],
+            }
+            for field, value in expected.items():
+                if result.get(field) != value or attestation.get(field) != value:
+                    raise BrokerProtocolError(
+                        "remote subscription canary receipt does not match LaunchSpec"
+                    )
         startup_sweep = _uid_sweep_from_json(result.get("startup_sweep"))
         self._refs[spec.run_id] = process_ref
         self._attestations[spec.run_id] = attestation
@@ -3081,12 +4554,63 @@ class RemoteCodexWorkerAdapter:
         self.startup_uid_sweep = startup_sweep
         return process_ref
 
-    def launch_attestation(self, ref: ProcessRef) -> Mapping[str, Any]:
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        """Rebind one exact broker-owned run without invoking provider start."""
+
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError(
+                "remote recovery adapter identity changed"
+            )
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError(
+                "remote recovery launch specification changed"
+            )
+        ref = binding.process_ref
+        existing = self._refs.get(ref.run_id)
+        if existing is not None:
+            if existing == ref and self._specs.get(ref.run_id) == spec:
+                return ref
+            raise BrokerStateError(
+                "remote run is already bound to another execution"
+            )
+        result = self.client.request_sync(
+            "status",
+            {"run_id": ref.run_id},
+        )
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote recovery adapter identity does not match facade")
+        run = _mapping(result.get("run"), field="run status")
+        observed = _process_ref_from_json(run.get("process_ref"))
+        if observed != ref:
+            raise BrokerProtocolError(
+                "remote recovery status changed immutable process identity"
+            )
+        status = run.get("status")
+        allowed = {
+            item.value for item in WorkerRunStatus
+        } | {"COLLECTED", "ERROR"}
+        if status not in allowed:
+            raise BrokerProtocolError(
+                "remote recovery status is invalid"
+            )
+        self._refs[ref.run_id] = ref
+        self._specs[ref.run_id] = spec
+        return ref
+
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         return self._attestations[ref.run_id]
 
-    def uid_sweep_receipt(self, ref: ProcessRef) -> Mapping[str, Any]:
+    def uid_sweep_receipt(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
         """Return the last validated per-run broker sweep for durable persistence."""
 
         if self._refs.get(ref.run_id) != ref or ref.run_id not in self._uid_sweeps:
@@ -3104,7 +4628,7 @@ class RemoteCodexWorkerAdapter:
             )
             terminal_sweep = _uid_sweep_from_json(cancelled.get("uid_sweep"))
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
         status = await self.client.request("status", {"fresh_uid_sweep": True})
         sweep = _uid_sweep_from_json(status.get("status_sweep"))
@@ -3122,10 +4646,12 @@ class RemoteCodexWorkerAdapter:
         self._uid_sweeps[run_id] = combined
         return combined
 
-    async def status(self, ref: ProcessRef) -> WorkerRunStatus:
+    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request("status", {"run_id": ref.run_id})
+        if result.get("adapter_id") != self.adapter_id:
+            raise BrokerProtocolError("remote status adapter identity does not match facade")
         run = _mapping(result.get("run"), field="run status")
         value = run.get("status")
         aliases = {
@@ -3139,7 +4665,7 @@ class RemoteCodexWorkerAdapter:
         except ValueError as exc:
             raise BrokerProtocolError("remote worker status is invalid") from exc
 
-    async def collect_result(self, ref: ProcessRef) -> CollectionReceipt:
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         spec = self._specs[ref.run_id]
@@ -3150,6 +4676,14 @@ class RemoteCodexWorkerAdapter:
             + max(60.0, float(spec.cancel_grace_seconds) + 30.0),
         )
         receipt = _collection_from_json(result.get("collection"))
+        # A correctly bound transport/process envelope cannot relabel its result.
+        # Validate attribution before accepting data or updating sweep evidence.
+        if (
+            receipt.result.job_id != spec.job_id
+            or receipt.result.run_id != spec.run_id
+            or receipt.result.worker_id != spec.worker_id
+        ):
+            raise BrokerProtocolError("remote collection result identity differs from bound LaunchSpec")
         collected_ref = receipt.process_ref
         immutable_ref = dataclasses.replace(
             collected_ref,
@@ -3167,7 +4701,7 @@ class RemoteCodexWorkerAdapter:
         self._uid_sweeps[ref.run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
         return receipt
 
-    async def cancel(self, ref: ProcessRef, reason: str) -> CancelReceipt:
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
         if self._refs.get(ref.run_id) != ref:
             raise BrokerStateError("unknown or altered remote ProcessRef")
         result = await self.client.request(
@@ -3179,7 +4713,7 @@ class RemoteCodexWorkerAdapter:
 
     async def run_validation_argv(
         self,
-        spec: LaunchSpec,
+        spec: WorkerLaunchSpec,
         argv: Sequence[str],
         *,
         timeout_seconds: float = 300.0,
@@ -3199,11 +4733,30 @@ class RemoteCodexWorkerAdapter:
         return _validation_from_json(result.get("validation"))
 
 
+class RemoteClaudeWorkerAdapter(RemoteCodexWorkerAdapter):
+    """Control-side native Claude facade with immutable broker identity."""
+
+    adapter_id = "claude-code"
+
+
 class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
-    def __init__(self, client: WorkerBrokerClient) -> None:
+    def __init__(
+        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None,
+        expected_adapter_id: str = "codex-cli",
+    ) -> None:
+        if expected_worker_uid is not None and (
+            type(expected_worker_uid) is not int or expected_worker_uid <= 0
+        ):
+            raise ValueError("expected worker UID must be a positive integer")
+        if type(expected_adapter_id) is not str or expected_adapter_id not in {
+            "codex-cli", "claude-code",
+        }:
+            raise ValueError("expected worker adapter must be a supported identity")
         self.client = client
+        self.expected_worker_uid = expected_worker_uid
+        self.expected_adapter_id = expected_adapter_id
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
 
     def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
@@ -3217,21 +4770,38 @@ class RemoteWorkerProcessController:
     def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
         """Synchronous counterpart used by restart/control recovery seams."""
 
+        # The supervisor grants this path only to a wholly unbound claim.
+        # An exact missing record needs no cancellation; generic errors do not
+        # grant absence. A retained run still receives one canonical cancel.
+        missing = False
         try:
-            result = self.client.request_sync(
-                "cancel",
-                {"run_id": run_id, "reason": "ambiguous control-side start response"},
-            )
-            self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            status = self.client.request_sync("status", {"run_id": run_id})
         except RemoteBrokerError as exc:
-            if exc.code != "BrokerStateError":
+            if exc.code != "BrokerRunNotFound":
                 raise
+            missing = True
+        if not missing:
+            if (
+                not isinstance(status, Mapping)
+                or not isinstance(status.get("run"), Mapping)
+                or status["run"].get("run_id") != run_id
+            ):
+                raise BrokerProtocolError("unbound cleanup exact run status is malformed")
+            try:
+                result = self.client.request_sync(
+                    "cancel",
+                    {"run_id": run_id, "reason": "ambiguous control-side start response"},
+                )
+                self._uid_sweeps[run_id] = _uid_sweep_from_json(result.get("uid_sweep"))
+            except RemoteBrokerError as exc:
+                if exc.code != "BrokerRunNotFound":
+                    raise
         if not self._fresh_overall_absence(run_id):
             raise BrokerStateError("ambiguous start cleanup did not prove broker absence")
         return self._uid_sweeps[run_id]
 
     @staticmethod
-    def _matches_attempt(process: ProcessRef, attempt: Any) -> bool:
+    def _matches_attempt(process: WorkerProcessRef, attempt: Any) -> bool:
         metadata = getattr(attempt, "launch_metadata", None)
         if not isinstance(metadata, dict):
             return False
@@ -3262,42 +4832,85 @@ class RemoteWorkerProcessController:
             and attestation.get("launch_nonce") == process.launch_nonce
         )
 
-    def _fresh_overall_absence(self, run_id: str) -> bool:
+    def _fresh_overall_absence(
+        self, attempt_or_run_id: Any, *, require_current_broker_startup: bool = False
+    ) -> bool:
+        run_id = getattr(attempt_or_run_id, "attempt_id", attempt_or_run_id)
+        if require_current_broker_startup and self.expected_worker_uid is None:
+            return False
         try:
             status = self.client.request_sync(
                 "status", {"fresh_uid_sweep": True}
             )
-        except (WorkerBrokerError, OSError):
-            return False
-        try:
+            if not isinstance(status, Mapping):
+                return False
             sweep = _uid_sweep_from_json(status.get("status_sweep"))
-        except BrokerProtocolError:
+        except (WorkerBrokerError, OSError):
             return False
         absent = (
             status.get("active_run_id") is None
+            and status.get("active_operator_attempt_id") is None
+            and status.get("active_operator_generation_id") is None
             and status.get("starting") is False
             and status.get("validation_busy") is False
             and status.get("status_sweep_busy") is False
             and status.get("quarantined_reason") is None
         )
-        if absent:
-            # Restart reconciliation needs both facts: the terminal sweep that
-            # killed residual same-UID descendants and the subsequent fresh
-            # idle sweep that closes the race before fence rotation. Preserve
-            # the former inside the latter across repeated absence checks.
-            previous = self._uid_sweeps.get(run_id)
-            preceding = None
-            if isinstance(previous, Mapping):
-                candidate = previous.get("preceding_terminal_sweep")
-                if isinstance(candidate, Mapping):
-                    preceding = dict(candidate)
-                elif previous.get("reason") != "status_absence":
-                    preceding = dict(previous)
-            combined = dict(sweep)
-            if preceding is not None:
-                combined["preceding_terminal_sweep"] = preceding
-            self._uid_sweeps[run_id] = combined
-        return absent
+        if not absent:
+            return False
+        if self.expected_worker_uid is not None:
+            if not {
+                "adapter_id", "broker_pid", "worker_uid", "active_run_id",
+                "active_operator_attempt_id", "active_operator_generation_id",
+                "starting", "validation_busy", "status_sweep_busy",
+                "quarantined_reason", "status_sweep",
+            }.issubset(status):
+                return False
+            broker_pid = status.get("broker_pid")
+            if (
+                status.get("adapter_id") != self.expected_adapter_id
+                or not _positive_pid(broker_pid)
+                or type(status.get("worker_uid")) is not int
+                or status["worker_uid"] != self.expected_worker_uid
+                or sweep.get("reason") != "status_absence"
+                or sweep.get("worker_uid") != self.expected_worker_uid
+                or sweep.get("broker_pid") != broker_pid
+            ):
+                return False
+        startup = None
+        if require_current_broker_startup:
+            try:
+                startup = _uid_sweep_from_json(status.get("startup_sweep"))
+                started = dt.datetime.fromisoformat(attempt_or_run_id.started_at)
+                startup_at = dt.datetime.fromisoformat(startup["observed_at"])
+                observed = dt.datetime.fromisoformat(sweep["observed_at"])
+                if (
+                    any(value.utcoffset() is None for value in (started, startup_at, observed))
+                    or not started < startup_at <= observed
+                    or startup.get("reason") != "broker_startup"
+                    or startup.get("worker_uid") != self.expected_worker_uid
+                    or startup.get("broker_pid") != broker_pid
+                ):
+                    return False
+            except (WorkerBrokerError, AttributeError, KeyError, TypeError, ValueError):
+                return False
+        # Keep the proof from this same overall status. A terminal run sweep
+        # and a replacement broker's startup sweep have distinct meanings.
+        previous = self._uid_sweeps.get(run_id)
+        preceding = None
+        if isinstance(previous, Mapping):
+            candidate = previous.get("preceding_terminal_sweep")
+            if isinstance(candidate, Mapping):
+                preceding = dict(candidate)
+            elif previous.get("reason") != "status_absence":
+                preceding = dict(previous)
+        combined = dict(sweep)
+        if preceding is not None:
+            combined["preceding_terminal_sweep"] = preceding
+        if startup is not None:
+            combined["preceding_broker_startup_sweep"] = startup
+        self._uid_sweeps[run_id] = combined
+        return True
 
     def presence(self, attempt: Any):
         from control_plane.executive_supervisor import ProcessPresence
@@ -3305,12 +4918,14 @@ class RemoteWorkerProcessController:
         try:
             status = self.client.request_sync("status", {"run_id": attempt.attempt_id})
         except RemoteBrokerError as exc:
-            if exc.code == "BrokerStateError" and self._fresh_overall_absence(
-                attempt.attempt_id
+            if exc.code == "BrokerRunNotFound" and self._fresh_overall_absence(
+                attempt, require_current_broker_startup=True
             ):
-                return ProcessPresence.ABSENT
+                return ProcessPresence.MISSING
             return ProcessPresence.UNKNOWN
         except (WorkerBrokerError, OSError):
+            return ProcessPresence.UNKNOWN
+        if not isinstance(status, Mapping):
             return ProcessPresence.UNKNOWN
         run = status.get("run")
         if not isinstance(run, dict):
@@ -3321,22 +4936,32 @@ class RemoteWorkerProcessController:
             return ProcessPresence.UNKNOWN
         if not self._matches_attempt(process, attempt):
             return ProcessPresence.UNKNOWN
-        if run.get("status") in {"STARTING", "RUNNING", "CANCELLING"}:
+        run_status = run.get("status")
+        if run_status in {"STARTING", "RUNNING", "CANCELLING"}:
             return ProcessPresence.LIVE
-        if self._fresh_overall_absence(attempt.attempt_id):
+        if (
+            run.get("collection_busy") is True
+            or run.get("validation_busy") is True
+        ):
+            # The original provider process is terminal, but the persistent
+            # worker broker still owns this run's exact collection/validation
+            # operation and replay task. This is neither a live Attempt process
+            # nor ambiguous identity, and it may not pass a global UID sweep yet.
+            return ProcessPresence.TERMINAL_OWNED
+        if self._fresh_overall_absence(attempt):
             return ProcessPresence.ABSENT
         return ProcessPresence.UNKNOWN
 
     def absence_verified(self, attempt: Any) -> bool:
         from control_plane.executive_supervisor import ProcessPresence
 
-        return self.presence(attempt) is ProcessPresence.ABSENT
+        return self.presence(attempt) in {ProcessPresence.ABSENT, ProcessPresence.MISSING}
 
     def terminate(self, attempt: Any) -> None:
         from control_plane.executive_supervisor import ProcessPresence
 
         presence = self.presence(attempt)
-        if presence is ProcessPresence.ABSENT:
+        if presence in {ProcessPresence.ABSENT, ProcessPresence.MISSING}:
             return
         if presence is not ProcessPresence.LIVE:
             raise BrokerStateError("remote process identity is ambiguous; refusing cancellation")
@@ -3347,6 +4972,383 @@ class RemoteWorkerProcessController:
         self._uid_sweeps[attempt.attempt_id] = _uid_sweep_from_json(
             result.get("uid_sweep")
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class RemoteWorkerBrokerEndpoint:
+    """One fixed transport endpoint for an Executive-selected worker identity."""
+
+    worker_id: str
+    client: WorkerBrokerClient
+    worker_user: str
+    worker_uid: int
+    worker_gid: int
+    secret_canary_verdict: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    # Fixed by trusted endpoint construction, never a broker request selector.
+    # Keep the legacy default without making native Claude use the Codex facade.
+    adapter_id: str = "codex-cli"
+
+    def __post_init__(self) -> None:
+        if type(self.adapter_id) is not str or self.adapter_id not in (
+            "codex-cli", "claude-code"
+        ):
+            raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
+        worker_id = str(self.worker_id or "").strip()
+        worker_user = str(self.worker_user or "").strip()
+        if not _ID_RE.fullmatch(worker_id):
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_id")
+        if not worker_user or any(character.isspace() for character in worker_user):
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_user")
+        if type(self.worker_uid) is not int or self.worker_uid <= 0:
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_uid")
+        if type(self.worker_gid) is not int or self.worker_gid <= 0:
+            raise WorkerBrokerError("remote worker endpoint has invalid worker_gid")
+        if not isinstance(self.secret_canary_verdict, Mapping):
+            raise WorkerBrokerError("remote worker endpoint canary verdict must be a mapping")
+        object.__setattr__(self, "worker_id", worker_id)
+        object.__setattr__(self, "worker_user", worker_user)
+        object.__setattr__(
+            self,
+            "secret_canary_verdict",
+            _freeze_worker_execution_value(self.secret_canary_verdict),
+        )
+
+    def bind_launch_spec(self, spec: WorkerLaunchSpec) -> WorkerLaunchSpec:
+        if spec.worker_id != self.worker_id:
+            raise BrokerStateError("LaunchSpec worker differs from broker endpoint")
+        return dataclasses.replace(
+            spec,
+            worker_user=self.worker_user,
+            expected_worker_uid=self.worker_uid,
+            expected_worker_gid=self.worker_gid,
+            secret_canary_verdict=self.secret_canary_verdict,
+        )
+
+
+class _RemoteWorkerBrokerFleetProcessController:
+    """Restart-only synchronous routing through durable Attempt.worker_id.
+
+    This facade owns no durable carrier state.  It remembers only the worker
+    identity observed from the current durable Attempt during one control
+    process so the subsequent synchronous unbound-run cleanup cannot switch
+    carriers after restart.
+    """
+
+    def __init__(self, fleet: "RemoteWorkerBrokerFleet") -> None:
+        self._fleet = fleet
+        self._observed_workers: dict[str, str] = {}
+
+    def _bind_attempt(self, attempt: Any) -> tuple[str, str]:
+        run_id = getattr(attempt, "attempt_id", None)
+        worker_id = getattr(attempt, "worker_id", None)
+        if not isinstance(run_id, str) or not _ID_RE.fullmatch(run_id):
+            raise BrokerStateError("restart attempt has invalid run identity")
+        if not isinstance(worker_id, str) or not _ID_RE.fullmatch(worker_id):
+            raise BrokerStateError("restart attempt has invalid persisted worker identity")
+        # Resolve the configured carrier before recording the observation.  A
+        # missing worker remains a typed refusal and never creates a binding.
+        self._fleet._controller_for_worker(worker_id)
+        existing = self._observed_workers.get(run_id)
+        if existing is not None and existing != worker_id:
+            raise BrokerStateError(
+                "restart run is already bound to another worker broker carrier"
+            )
+        self._observed_workers[run_id] = worker_id
+        return run_id, worker_id
+
+    def _worker_for_observed_run(self, run_id: str) -> str:
+        if not isinstance(run_id, str) or not _ID_RE.fullmatch(run_id):
+            raise BrokerStateError("restart cleanup has invalid run identity")
+        try:
+            return self._observed_workers[run_id]
+        except KeyError as exc:
+            raise BrokerStateError(
+                "restart cleanup has no persisted worker observation"
+            ) from exc
+
+    def presence(self, attempt: Any):
+        _run_id, worker_id = self._bind_attempt(attempt)
+        return self._fleet._controller_for_worker(worker_id).presence(attempt)
+
+    def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        worker_id = self._worker_for_observed_run(run_id)
+        controller = self._fleet._controller_for_worker(worker_id)
+        cleanup = getattr(controller, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise BrokerStateError(
+                "bound worker process controller cannot reconcile ambiguous start"
+            )
+        value = cleanup(run_id)
+        if not isinstance(value, Mapping):
+            raise BrokerProtocolError(
+                "bound worker process controller returned invalid cleanup receipt"
+            )
+        return value
+
+    def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
+        if isinstance(attempt_or_run_id, str):
+            run_id = attempt_or_run_id
+            worker_id = self._worker_for_observed_run(run_id)
+        else:
+            run_id, worker_id = self._bind_attempt(attempt_or_run_id)
+        controller = self._fleet._controller_for_worker(worker_id)
+        reader = getattr(controller, "uid_sweep_receipt", None)
+        if not callable(reader):
+            raise BrokerStateError(
+                "bound worker process controller has no UID sweep receipt"
+            )
+        value = reader(attempt_or_run_id)
+        if not isinstance(value, Mapping):
+            raise BrokerProtocolError(
+                "bound worker process controller returned invalid UID sweep receipt"
+            )
+        return value
+
+    def absence_verified(self, attempt: Any) -> bool:
+        _run_id, worker_id = self._bind_attempt(attempt)
+        return bool(
+            self._fleet._controller_for_worker(worker_id).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Any) -> None:
+        _run_id, worker_id = self._bind_attempt(attempt)
+        self._fleet._controller_for_worker(worker_id).terminate(attempt)
+
+
+class RemoteWorkerBrokerFleet:
+    """Exact worker-id transport binding with no provider selection or failover.
+
+    Executive Runtime selects and persists ``Attempt.worker_id`` before this
+    object is consulted.  The fleet only maps that exact identity to one fixed
+    broker carrier.  It binds ``run_id -> worker_id`` before invoking ``start``
+    and retains the binding after any exception so ambiguous effects can only be
+    reconciled on the same carrier.
+    """
+
+    @property
+    def adapter_id(self) -> str:
+        """Immutable identity of the transport facade, never a provider label."""
+
+        return "remote-worker-broker-fleet"
+
+    def __init__(
+        self,
+        endpoints: Sequence[RemoteWorkerBrokerEndpoint],
+        *,
+        validation_commands_for_spec: (
+            Callable[[WorkerLaunchSpec], Sequence[Sequence[str]]] | None
+        ) = None,
+        adapter_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
+        controller_factory: Callable[[RemoteWorkerBrokerEndpoint], Any] | None = None,
+    ) -> None:
+        rows = tuple(endpoints)
+        if not rows:
+            raise WorkerBrokerError("remote worker broker fleet requires endpoints")
+        worker_ids = tuple(row.worker_id for row in rows)
+        if len(worker_ids) != len(set(worker_ids)):
+            raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
+        validation_resolver = validation_commands_for_spec or (lambda _spec: ())
+        if adapter_factory is None:
+            def adapter_factory(row: RemoteWorkerBrokerEndpoint) -> RemoteCodexWorkerAdapter:
+                if row.adapter_id == "codex-cli":
+                    facade = RemoteCodexWorkerAdapter
+                elif row.adapter_id == "claude-code":
+                    facade = RemoteClaudeWorkerAdapter
+                else:
+                    raise WorkerBrokerError("remote worker endpoint has unsupported adapter_id")
+                return facade(
+                    row.client,
+                    validation_commands_for_spec=validation_resolver,
+                )
+        if controller_factory is None:
+            controller_factory = lambda row: RemoteWorkerProcessController(row.client)
+        self._endpoints = {row.worker_id: row for row in rows}
+        self._adapters = {row.worker_id: adapter_factory(row) for row in rows}
+        self._controllers = {row.worker_id: controller_factory(row) for row in rows}
+        self._process_controller = _RemoteWorkerBrokerFleetProcessController(self)
+        self._run_workers: dict[str, str] = {}
+        self._source_specs: dict[str, WorkerLaunchSpec] = {}
+        self._bound_specs: dict[str, WorkerLaunchSpec] = {}
+        self.inspector = _UnavailableRemoteInspector()
+
+    @property
+    def process_controller(self) -> _RemoteWorkerBrokerFleetProcessController:
+        """Synchronous restart facade; adapter cleanup remains asynchronous."""
+
+        return self._process_controller
+
+    @property
+    def worker_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._endpoints))
+
+    def _endpoint_for_worker(self, worker_id: str) -> RemoteWorkerBrokerEndpoint:
+        try:
+            return self._endpoints[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
+
+    def _adapter_for_worker(self, worker_id: str) -> Any:
+        try:
+            return self._adapters[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("selected worker has no configured broker endpoint") from exc
+
+    def _controller_for_worker(self, worker_id: str) -> Any:
+        try:
+            return self._controllers[str(worker_id)]
+        except KeyError as exc:
+            raise BrokerStateError("persisted worker has no configured broker endpoint") from exc
+
+    def _worker_for_run(self, run_id: str) -> str:
+        try:
+            return self._run_workers[str(run_id)]
+        except KeyError as exc:
+            raise BrokerStateError("run has no bound worker broker carrier") from exc
+
+    def _adapter_for_ref(self, ref: WorkerProcessRef) -> Any:
+        return self._adapter_for_worker(self._worker_for_run(ref.run_id))
+
+    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        if spec.run_id in self._run_workers:
+            raise BrokerStateError("run is already bound to a worker broker carrier")
+        endpoint = self._endpoint_for_worker(spec.worker_id)
+        adapter = self._adapter_for_worker(spec.worker_id)
+        bound_spec = endpoint.bind_launch_spec(spec)
+        self._run_workers[spec.run_id] = spec.worker_id
+        self._source_specs[spec.run_id] = spec
+        self._bound_specs[spec.run_id] = bound_spec
+        return await adapter.start(bound_spec)
+
+    def reattach(
+        self,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+    ) -> WorkerProcessRef:
+        """Recover one exact persisted run on its original worker carrier only."""
+
+        if not isinstance(spec, WorkerLaunchSpec):
+            raise TypeError("spec must be WorkerLaunchSpec")
+        if not isinstance(binding, WorkerRecoveryBinding):
+            raise TypeError("binding must be WorkerRecoveryBinding")
+        if binding.adapter_id != self.adapter_id:
+            raise BrokerStateError("fleet recovery adapter identity changed")
+        try:
+            recovered_spec = binding.recover_launch_spec(type(spec))
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+        if recovered_spec != spec:
+            raise BrokerStateError("fleet recovery launch specification changed")
+
+        endpoint = self._endpoint_for_worker(spec.worker_id)
+        delegate = self._adapter_for_worker(spec.worker_id)
+        reattach = getattr(delegate, "reattach", None)
+        if not callable(reattach):
+            raise BrokerStateError(
+                "bound worker adapter cannot recover existing execution"
+            )
+        delegate_adapter_id = getattr(delegate, "adapter_id", None)
+        if not isinstance(delegate_adapter_id, str) or not delegate_adapter_id.strip():
+            raise BrokerStateError("bound worker recovery adapter identity is invalid")
+
+        bound_spec = endpoint.bind_launch_spec(spec)
+        prompt_path = binding.launch_spec.get("prompt_path")
+        if not isinstance(prompt_path, str) or not prompt_path:
+            raise BrokerStateError("fleet recovery prompt path is invalid")
+        try:
+            delegate_binding = WorkerRecoveryBinding.bind(
+                adapter_id=delegate_adapter_id,
+                spec=bound_spec,
+                process_ref=binding.process_ref,
+                prompt_path=prompt_path,
+            )
+        except WorkerRecoveryContractError as exc:
+            raise BrokerStateError(str(exc)) from exc
+
+        existing_worker = self._run_workers.get(spec.run_id)
+        if existing_worker is not None and (
+            existing_worker != spec.worker_id
+            or self._source_specs.get(spec.run_id) != spec
+            or self._bound_specs.get(spec.run_id) != bound_spec
+        ):
+            raise BrokerStateError("run is already bound to another worker broker carrier")
+
+        # Bind before delegate I/O so any ambiguous recovery remains fenced to
+        # the exact persisted worker/carrier.  There is no fallback selection.
+        self._run_workers[spec.run_id] = spec.worker_id
+        self._source_specs[spec.run_id] = spec
+        self._bound_specs[spec.run_id] = bound_spec
+
+        recovered_ref = reattach(bound_spec, delegate_binding)
+        if recovered_ref != binding.process_ref:
+            raise BrokerProtocolError(
+                "bound worker recovery changed immutable process identity"
+            )
+        return recovered_ref
+
+    def launch_attestation(self, ref: WorkerProcessRef) -> Mapping[str, Any]:
+        adapter = self._adapter_for_ref(ref)
+        reader = getattr(adapter, "launch_attestation", None)
+        if not callable(reader):
+            raise BrokerStateError("bound worker adapter has no launch attestation")
+        return reader(ref)
+
+    def uid_sweep_receipt(self, subject: Any) -> Mapping[str, Any]:
+        if isinstance(subject, WorkerProcessRef):
+            delegate = self._adapter_for_ref(subject)
+        else:
+            worker_id = getattr(subject, "worker_id", None)
+            if not isinstance(worker_id, str):
+                raise BrokerStateError("UID sweep subject has no worker identity")
+            delegate = self._controller_for_worker(worker_id)
+        reader = getattr(delegate, "uid_sweep_receipt", None)
+        if not callable(reader):
+            raise BrokerStateError("bound worker carrier has no UID sweep receipt")
+        return reader(subject)
+
+    async def cleanup_unbound_run(self, run_id: str) -> Mapping[str, Any]:
+        adapter = self._adapter_for_worker(self._worker_for_run(run_id))
+        cleanup = getattr(adapter, "cleanup_unbound_run", None)
+        if not callable(cleanup):
+            raise BrokerStateError("bound worker adapter cannot reconcile ambiguous start")
+        return await cleanup(run_id)
+
+    async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:
+        return await self._adapter_for_ref(ref).status(ref)
+
+    async def collect_result(self, ref: WorkerProcessRef) -> CollectionReceipt:
+        return await self._adapter_for_ref(ref).collect_result(ref)
+
+    async def cancel(self, ref: WorkerProcessRef, reason: str) -> CancelReceipt:
+        return await self._adapter_for_ref(ref).cancel(ref, reason)
+
+    async def run_validation_argv(
+        self,
+        spec: WorkerLaunchSpec,
+        argv: Sequence[str],
+        *,
+        timeout_seconds: float = 300.0,
+    ) -> ValidationReceipt:
+        worker_id = self._worker_for_run(spec.run_id)
+        if worker_id != spec.worker_id:
+            raise BrokerStateError("LaunchSpec worker differs from bound broker carrier")
+        if self._source_specs.get(spec.run_id) != spec:
+            raise BrokerStateError("LaunchSpec differs from the spec bound at start")
+        return await self._adapter_for_worker(worker_id).run_validation_argv(
+            self._bound_specs[spec.run_id],
+            argv,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def presence(self, attempt: Any):
+        return self._controller_for_worker(attempt.worker_id).presence(attempt)
+
+    def absence_verified(self, attempt: Any) -> bool:
+        return bool(
+            self._controller_for_worker(attempt.worker_id).absence_verified(attempt)
+        )
+
+    def terminate(self, attempt: Any) -> None:
+        self._controller_for_worker(attempt.worker_id).terminate(attempt)
 
 
 class _UnavailableRemoteInspector:
@@ -3372,15 +5374,21 @@ __all__ = [
     "UID_SWEEP_SCHEMA_VERSION",
     "uid_sweep_receipt_is_passing",
     "BrokerPolicy",
+    "BrokerEffectUnknownError",
+    "BrokerPreSubmitError",
     "BrokerProtocolError",
     "BrokerStateError",
+    "BrokerRunNotFound",
     "DedicatedUIDError",
     "DedicatedUIDSweeper",
     "ExecutiveWorkerBroker",
     "PeerAuthorizationError",
     "PeerCredentials",
     "RemoteBrokerError",
+    "RemoteClaudeWorkerAdapter",
     "RemoteCodexWorkerAdapter",
+    "RemoteWorkerBrokerEndpoint",
+    "RemoteWorkerBrokerFleet",
     "RemoteWorkerProcessController",
     "UIDSweepReceipt",
     "WorkerBrokerClient",

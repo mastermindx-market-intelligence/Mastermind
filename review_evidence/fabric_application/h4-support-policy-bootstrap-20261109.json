@@ -1,0 +1,104 @@
+{
+  "behavior": "Initialize only the exact absent target policy from validated hash-bound source under the existing admission lock; atomically refuse any concurrently appearing target without overwrite.",
+  "deployment": {
+    "generation_selected": false,
+    "provider_or_worker_retry": false,
+    "rebuild_from_actual_protected_source_required": true,
+    "runtime_installed": false
+  },
+  "focused_regressions": {
+    "cases": 16,
+    "execution": "fresh subprocess against the actual composed126-member stage",
+    "integrated_test": "test_fleet_launch_repair_initializes_only_absent_idle_policy",
+    "isolated_log_sha256": "861763cd10673f22d4464a84de3587b605c142f46a7382425c8f0c4af18aac62"
+  },
+  "frontier": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166#issuecomment-6741087375",
+  "preservation": {
+    "broker_and_remote_sub": true,
+    "existing_admission_lock_and_active_run_guards": true,
+    "inspect_run_ast": true,
+    "original_native43_profile": true,
+    "policy_cas_and_legacy_call_mode": true,
+    "post_ensure_policy_helpers_ast_count": 16,
+    "raw_candidate": true
+  },
+  "qualified_at": "2026-11-09T14:45:39.282684+00:00",
+  "schema": "h4.native_support_policy_bootstrap_source_qualification.v1",
+  "source_delta": {
+    "against_source_head": "e70643e12bc889b8d800d36b97c986b60d1412f9",
+    "application_after_manifest_sha256": "ed5de7829d0aef3e6a306a93ba8779cf80164e5b96e6faf2d083ed7b584099d0",
+    "files": {
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": {
+        "bytes": 160374,
+        "sha256": "9bd5491f93c7adfd3131d851d556a66fd1e6bef5ef8e0192091879d5cf5f7f27"
+      },
+      "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/composition.json": {
+        "bytes": 3333,
+        "sha256": "243c8b9b06e902025b544b27947a11b36adc41365e9fc3c507923da3d2c54ff8"
+      },
+      "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch": {
+        "bytes": 1611,
+        "sha256": "e0cf432e6e702a8b7c85d80bc72c14f3e92c6889729f3e4a22edd0bed69873bc"
+      },
+      "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch": {
+        "bytes": 19793,
+        "sha256": "49c144233015e802552a2f66d7a6ecf4b70e9a5f1d6897c0bc22959957162754"
+      },
+      "ops/native_fabric/quota_continuity/tests/support_policy_bootstrap_cases.py": {
+        "bytes": 9659,
+        "sha256": "bf3558406a59c4907d6c196cfef2c54fb28a8e23fcfab1ef56b859e6dc9d8fef"
+      },
+      "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": {
+        "bytes": 100170,
+        "sha256": "6b4c8ec630b107355ea384fa20e072b0f6dbddd1771468cec4e1b05e6cebd1e9"
+      }
+    },
+    "observed_at": "2026-11-09T14:11:06.654410+00:00",
+    "original_native43_unchanged": true,
+    "production_installed": false,
+    "raw_candidate_unchanged": true,
+    "record_sha256": "243c8b9b06e902025b544b27947a11b36adc41365e9fc3c507923da3d2c54ff8",
+    "schema": "h4.support_bootstrap_source_delta.v1",
+    "source_repository_edited": false,
+    "target_members": {
+      "ext/fabric_task.py": "d25596efdf68f2334722916702ee7e97ecbe76f9269f37734d274de6d301a94f",
+      "ext/support_bundle.py": "1c99fed809912561bad0d378412ef8a9ba4fba2da20659be91d50e35faab3d59"
+    }
+  },
+  "source_parent": "e70643e12bc889b8d800d36b97c986b60d1412f9",
+  "status": "SOURCE_QUALIFIED_PROTECTED_RELEASE_AND_REAL_PATH_ACCEPTANCE_REQUIRED",
+  "transition_proof": {
+    "case_union_exact": true,
+    "composed_build": {
+      "build_log_sha256": "b9ebb865f1e2ed3216ff8ce3bed596aa3c7742d8bd3df3e95097eadf41f7f5d8",
+      "builder_sha256": "9bd5491f93c7adfd3131d851d556a66fd1e6bef5ef8e0192091879d5cf5f7f27",
+      "bytes": 4060244,
+      "completed_at": "2026-11-09T14:39:47.068574+00:00",
+      "exit_code": 0,
+      "inventory_sha256": "74c0735bb086f2147d83c73b4be85b3f9ca9196e1a1837b65c388fcf85a3cb50",
+      "manifest_sha256": "9c46eb830a7df22a123b86a4e595cbabfa15c7e80f861a7f0d7fae18026cbbca",
+      "members": {
+        "ext/fabric_task.py": "d25596efdf68f2334722916702ee7e97ecbe76f9269f37734d274de6d301a94f",
+        "ext/lease_broker.py": "cd1537c409fa9f6c8d99a453747e355998980e03352c1ffb4c66fc447fb79d74",
+        "ext/remote_sub.sh": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195",
+        "ext/support_bundle.py": "1c99fed809912561bad0d378412ef8a9ba4fba2da20659be91d50e35faab3d59"
+      },
+      "native_files": 126,
+      "runtime_installed": false
+    },
+    "count_correction": "319 XML summary total was superseded by the exact310 testcase identities; no additional test execution",
+    "distinct_cases": 310,
+    "errors": 0,
+    "failures": 0,
+    "first_junit_sha256": "55505829d89b3ab8860a934e8423f9552fac90ceb9ce7409d890580133c10e88",
+    "first_pass": 200,
+    "production_installation": false,
+    "retry_junit_sha256": "7c411eab19315d1c869a2486d03b73876987bd4547373591ea57b275dcf33639",
+    "schema": "h4.support_bootstrap_combined_transition_proof.v1",
+    "setup_retry_pass": 110,
+    "skipped": 0,
+    "source_bytes_changed_between_runs": false,
+    "source_head": "e70643e12bc889b8d800d36b97c986b60d1412f9",
+    "verified_at": "2026-11-09T14:45:39.282684+00:00"
+  }
+}

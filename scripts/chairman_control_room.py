@@ -63,8 +63,9 @@ repair, 2026-08-22)
   map — a request path is only ever used as a dict LOOKUP key, never
   concatenated into a filesystem path, so path traversal has no code path to
   reach;
-* ``POST /api/open`` accepts only a ``binding_id`` — never a URL, argv, path,
-  or profile from the browser; the actual navigation argv is built entirely
+* ``POST /api/open`` accepts a ``binding_id`` plus an optional closed
+  ``target_surface`` discriminator — never a URL, argv, path, session id, or
+  profile from the browser; the actual navigation argv is built entirely
   server-side by :mod:`integrations.chairman_surfaces`.
 
 Usage
@@ -76,19 +77,22 @@ Usage
 from __future__ import annotations
 
 import argparse
+import copy
 import http.server
 import ipaddress
 import json
 import os
 import secrets
 import signal
+import socket
+import socketserver
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -99,10 +103,12 @@ if os.fspath(_REPO_ROOT) not in sys.path:
 
 from control_plane import ceo_boot_packet  # noqa: E402  (after sys.path bootstrap)
 from control_plane import chairman_control_room as ccr  # noqa: E402
-from control_plane import executive_inbox  # noqa: E402
 from control_plane import surface_bindings as sb  # noqa: E402
 from integrations.chairman_surfaces import capability, chatgpt, contract  # noqa: E402
 from integrations.chairman_surfaces import runner as surfaces_runner  # noqa: E402
+
+# Reuse the compositor's optional-owner fence, including absent Steward.
+autonomy_projection = ccr.autonomy_control_room_projection
 
 #: Default static asset directory (Wave C's private, non-public UI).
 DEFAULT_STATIC_DIR = _REPO_ROOT / "app" / "static" / "chairman_control"
@@ -110,11 +116,22 @@ DEFAULT_STATIC_DIR = _REPO_ROOT / "app" / "static" / "chairman_control"
 #: Default ephemeral loopback port.
 DEFAULT_PORT = 8787
 
+#: Isolated Claude Code runtime used only for CLI -> Desktop session handoff.
+#: Keeping it outside ~/.local/bin preserves the independently attested
+#: Executive Claude worker runtime.
+DEFAULT_CLAUDE_DESKTOP_CLI = "~/.local/share/mastermind/claude-desktop-bridge-install/.local/bin/claude"
+
 #: Host is hard-coded, never a flag — see module docstring / architecture §8.2.
 HOST = "127.0.0.1"
 
 #: Every Host header value this server accepts (with or without ``:<port>``).
 _ALLOWED_HOSTNAMES = ("127.0.0.1", "localhost")
+
+#: Hostname the in-process workspace Control Room (AF_UNIX) requires on its
+#: ``Host`` header. The Origin it advertises is the matching origin so the
+#: existing browser-origin nonce gate keeps its token-only contract intact.
+UNIX_CONTROL_ROOM_HOST = "workspace-control-room.invalid"
+UNIX_CONTROL_ROOM_ORIGIN = "http://workspace-control-room.invalid"
 
 #: Bound applied to a POST JSON body before it is even parsed.
 _MAX_BODY_BYTES = 64 * 1024
@@ -137,7 +154,237 @@ _CSP = (
 # ---------------------------------------------------------------------------
 
 def _utc_now_z() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    # A rounded-down source reference can predate its elapsed anchor by
+    # almost a second. Preserve precision for the finite validity contract.
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+_VALIDITY_PROFILE = "b5.darwin-chrome-paired-v1"
+_VALIDITY_DISCREPANCY_MS = 8
+_VALIDITY_RESERVE_MS = 16
+_VALIDITY_BRACKET_MS = 1
+_VALIDITY_MAX_PROOFS = 8192
+_VALIDITY_COMPONENTS = ("card", "decision_current", "dispatch", "owed_open_age")
+
+
+def _source_clock_sample() -> tuple[int, int, int, int] | None:
+    """Darwin continuous raw clock only; ordinary monotonic is not a fallback.
+
+    Sampling order is Mlo/Wlo/Mhi/Whi with integer nanosecond conversion.
+    This capability cannot certify an arbitrary browser or the Q premise.
+    """
+    if sys.platform != "darwin" or not hasattr(time, "CLOCK_MONOTONIC_RAW"):
+        return None
+    try:
+        if not 0 < time.clock_getres(time.CLOCK_MONOTONIC_RAW) <= 0.001:
+            return None
+        return (time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW) // 1000000,
+                time.time_ns() // 1000000,
+                time.clock_gettime_ns(time.CLOCK_MONOTONIC_RAW) // 1000000,
+                time.time_ns() // 1000000)
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def _valid_clock_sample(sample: Any) -> bool:
+    return (isinstance(sample, (tuple, list)) and len(sample) == 4
+            and all(type(v) is int and 0 <= v < 2**53 for v in sample)
+            and 0 <= sample[2] - sample[0] <= _VALIDITY_BRACKET_MS
+            and 0 <= sample[3] - sample[1] <= _VALIDITY_BRACKET_MS)
+
+
+def _source_elapsed(anchor: Any, current: Any, previous: Any = None) -> int | None:
+    if not _valid_clock_sample(anchor) or not _valid_clock_sample(current):
+        return None
+    if any(z < a for z, a in zip(current, anchor)):
+        return None
+    if previous is not None:
+        if not _valid_clock_sample(previous) or any(z < p for z, p in zip(current, previous)):
+            return None
+        if _source_elapsed(previous, current) is None:
+            return None
+    dm, dw = current[2] - anchor[0], current[3] - anchor[1]
+    if dm < 0 or dw < 0 or abs(dm - dw) > _VALIDITY_DISCREPANCY_MS:
+        return None
+    return dm
+
+
+def _sample_source_clock(config: ServerConfig) -> Any:
+    try:
+        sample = config.validity_sample_fn()
+    except Exception:  # a failed capability never aborts the read-only document
+        return None
+    return tuple(sample) if _valid_clock_sample(sample) else None
+
+
+def _browser_qualification_context() -> None:
+    """No installed launcher is qualified at this generic HTTP boundary.
+
+    Neither Darwin nor client metadata identifies a supported browser target.
+    A trusted hermetic test may replace this seam after inspecting its owned
+    launcher. No request/header/query/CLI boolean enables it in the product.
+    """
+    return None
+
+
+def _source_remaining(bound: dict[str, Any], sample: Any, config: ServerConfig) -> int | None:
+    if bound.get("invalid") or bound.get("clock_id") != id(config.validity_sample_fn):
+        bound["invalid"] = True
+        return None
+    budget = bound.get("budget")
+    elapsed = _source_elapsed(bound.get("anchor"), sample, bound.get("previous"))
+    if type(budget) is not int or not 0 <= budget <= 176400000 or elapsed is None:
+        bound["invalid"] = True
+        return None
+    bound["previous"] = sample
+    # This is one reserve for the original anchored stage, not one debit per
+    # render/GET. A valid exhausted budget stays zero, never a new STALE fact.
+    return max(0, budget - elapsed - _VALIDITY_RESERVE_MS)
+
+
+def _publish_source_validity(config: ServerConfig, doc: dict[str, Any], anchor: Any, sample: Any) -> None:
+    """Publish beside the existing cache under its existing generation lock."""
+    if autonomy_projection is None:
+        return
+    # Retain anchored proof bounds in the existing cache for its lifetime.
+    # Omission or an intervening different proof cannot forget expiry/poison.
+    # Only the current document selects which bounds are exposed or usable.
+    bounds = config.state_cache.setdefault("source_validity_bounds", {})
+    if config.state_cache.get("source_validity_exhausted"):
+        return
+    autonomy = doc.get("autonomy") or {}
+    reference = autonomy_projection._parse_iso8601(doc.get("generated_at"))
+    reference_ms = ((reference - datetime(1970, 1, 1, tzinfo=timezone.utc)) // timedelta(milliseconds=1)
+                    if reference is not None else None)
+    reference_matches = (_valid_clock_sample(anchor) and _valid_clock_sample(sample)
+                         and reference_ms is not None and anchor[1] - 1 <= reference_ms <= sample[3])
+    for card in autonomy.get("responsibilities", ()):
+        key = (card.get("responsibility_ref"), card.get("root_job_id"))
+        for name in _VALIDITY_COMPONENTS:
+            meta = (card.get("validity") or {}).get(name, {})
+            matching = (reference_matches and meta.get("schema") == autonomy_projection.VALIDITY_SCHEMA
+                        and meta.get("policy") == autonomy_projection.VALIDITY_POLICY
+                        and meta.get("qualified_at") == autonomy.get("generated_at")
+                        and meta.get("qualified_at") == doc.get("generated_at")
+                        and isinstance(meta.get("proof_ref"), str) and len(meta["proof_ref"]) == 64)
+            bound = {"meta": meta, "budget": meta.get("valid_for_ms"), "anchor": anchor,
+                     "previous": anchor, "clock_id": id(config.validity_sample_fn), "invalid": not matching}
+            current_remaining = _source_remaining(bound, sample, config)
+            proof_key = (*key, name, meta.get("proof_ref"))
+            prior = bounds.get(proof_key)
+            if prior is None and len(bounds) >= _VALIDITY_MAX_PROOFS:
+                # Bounded memory without evicting evidence and accidentally
+                # granting the same proof a new deadline. Facts still serve.
+                config.state_cache["source_validity_exhausted"] = True
+                for retained in bounds.values():
+                    retained["invalid"] = True
+                return
+            if prior:
+                prior_remaining = _source_remaining(prior, sample, config)
+                # Same proof keeps its old anchor/expired/refused state. New
+                # publication time and reference rollback cannot renew it.
+                if prior_remaining is None or (current_remaining is not None and prior_remaining <= current_remaining):
+                    bound = dict(prior, meta=meta)
+            bounds[proof_key] = bound
+
+
+def _source_validity_snapshot(config: ServerConfig, sample: Any) -> dict[str, Any]:
+    """Caller holds state_lock; returned data never aliases cached source facts."""
+    cards = []
+    bounds = config.state_cache.get("source_validity_bounds", {})
+    autonomy = (config.state_cache.get("doc") or {}).get("autonomy") or {}
+    for card in autonomy.get("responsibilities", ()):
+        ref, root = card.get("responsibility_ref"), card.get("root_job_id")
+        components = {}
+        for name in _VALIDITY_COMPONENTS:
+            proof = ((card.get("validity") or {}).get(name) or {}).get("proof_ref")
+            bound = bounds.get((ref, root, name, proof))
+            if bound is None:
+                continue
+            remaining = _source_remaining(bound, sample, config)
+            meta = bound["meta"]
+            components[name] = {"proof_ref": meta.get("proof_ref"),
+                                "qualified_at": meta.get("qualified_at"),
+                                "remaining_ms": remaining,
+                                "state": "unqualified" if remaining is None else "current" if remaining > 0 else "expired"}
+        if components:
+            cards.append({"responsibility_ref": ref, "root_job_id": root, "components": components})
+    return {"schema": "mastermind.control_room_source_validity.v1", "profile": _VALIDITY_PROFILE,
+            "browser_qualification": _browser_qualification_context(),
+            "publication_seq": config.state_published_seq, "cards": cards}
+
+
+class _FrozenTarget(dict):
+    """Private immutable dict-compatible value for the existing provider API."""
+
+    def _refuse(self, *args, **kwargs):
+        raise TypeError("the checked navigation target is immutable")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _refuse
+
+
+def _freeze_target(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _FrozenTarget({key: _freeze_target(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_target(item) for item in value)
+    return value
+
+
+_OWED_CONTEXT_KEYS = frozenset({"schema", "publication_seq", "responsibility_ref", "root_job_id",
+                                "proof_ref", "binding_fingerprint", "owed_seat"})
+
+
+def _owed_context_shape(context: Any) -> bool:
+    return (isinstance(context, dict) and set(context) == _OWED_CONTEXT_KEYS
+            and context.get("schema") == "mastermind.owed_navigation.v1"
+            and type(context.get("publication_seq")) is int and context["publication_seq"] > 0
+            and all(isinstance(context.get(key), str) and 0 < len(context[key]) <= 512
+                    for key in _OWED_CONTEXT_KEYS - {"publication_seq"}))
+
+
+def _owed_handoff_current(config: ServerConfig, context: dict[str, Any], binding: dict[str, Any],
+                          current_bindings: list[dict[str, Any]]) -> bool:
+    """Compare at handoff, after the binding read, with no await or queue.
+
+    The file owner has no conditional-write primitive. This guards the exact
+    loaded immutable target and current publication; it is not an atomic
+    lease over future filesystem/provider changes. The provider still owns
+    its validation and effect. No composition lock spans that provider call.
+    """
+    if autonomy_projection is None or not _owed_context_shape(context):
+        return False
+    candidates = [row for row in current_bindings
+                  if row.get("work_ref") == context["responsibility_ref"]
+                  and row.get("role") == context["owed_seat"]]
+    if len(candidates) != 1 or candidates[0] != binding:
+        return False
+    fingerprint = autonomy_projection.binding_fingerprint(binding)
+    with config.state_lock:
+        if context["publication_seq"] != config.state_published_seq:
+            return False
+        key = (context["responsibility_ref"], context["root_job_id"])
+        bound = config.state_cache.get("source_validity_bounds", {}).get((*key, "owed_open_age", context["proof_ref"]))
+        if bound is None:
+            return False
+        meta = bound["meta"]
+        cards = ((config.state_cache.get("doc") or {}).get("autonomy") or {}).get("responsibilities", ())
+        card = next((c for c in cards if (c.get("responsibility_ref"), c.get("root_job_id")) == key), None)
+        if (card is None or ((card.get("validity") or {}).get("owed_open_age") or {}) != meta
+                or card.get("is_actionable") is not True
+                or card.get("runtime_root_state") != "RESOLVED"
+                or meta.get("proof_ref") != context["proof_ref"]
+                or meta.get("binding_id") != binding.get("binding_id")
+                or meta.get("binding_fingerprint") != context["binding_fingerprint"]
+                or fingerprint != context["binding_fingerprint"]
+                or binding.get("work_ref") != key[0] or binding.get("role") != context["owed_seat"]
+                or meta.get("owed_seat") != context["owed_seat"]
+                or (card.get("owed_turn") or {}).get("seat") != context["owed_seat"]):
+            return False
+        # Sample last, after all mutable reads and comparison work. A delayed
+        # request cannot use the budget that existed when its button rendered.
+        remaining = _source_remaining(bound, _sample_source_clock(config), config)
+        return remaining is not None and remaining > 0
 
 
 #: Default output cap for the cwd-supporting branch of :func:`default_runner`
@@ -152,8 +399,8 @@ _DEFAULT_CWD_RUNNER_MAX_BYTES = 65536
 #: organizational data (measured 112,569 bytes in Wave D live proof — see
 #: the fix commission) and must never be silently truncated before
 #: ``json.loads`` sees it. 4 MiB is a generous multiple of that measured
-#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` itself is
-#: NOT touched — its 64 KiB cap stays exactly as-is for every adapter call,
+#: size, not a guess; ``integrations/chairman_surfaces/runner.py`` keeps its
+#: 64 KiB cap exactly as-is for every non-PTY adapter call,
 #: whose outputs are tiny (osascript/open exit codes and short strings) by
 #: design.
 _REFRESH_BUILDS_MAX_OUTPUT_BYTES = 4 * 1024 * 1024
@@ -189,10 +436,10 @@ def default_runner(
     ever needs to widen it on this branch too.
 
     Only ``/api/refresh-builds`` (invoking Macro's active-build compiler
-    script) needs a working directory, and ``run_argv`` has no ``cwd``
-    parameter — that module is outside this packet's edit scope (see the
-    build commission's OWNED FILES). This branch reuses ``run_argv``'s own
-    argv-validation gate (:func:`integrations.chairman_surfaces.runner.
+    script) needs a captured-output working directory, and ``run_argv`` has
+    no ``cwd`` parameter. (The separate Desktop handoff uses
+    ``surfaces_runner.run_argv_pty`` directly.) This branch reuses
+    ``run_argv``'s own argv-validation gate (:func:`integrations.chairman_surfaces.runner.
     _validate_argv`) and reproduces its exact safety properties (``shell=
     False``, never raising on subprocess failure), but takes an explicit
     ``max_bytes`` output cap (default matches ``run_argv``'s own 64 KiB;
@@ -277,15 +524,27 @@ class ServerConfig:
     port: int
     static_dir: Path = DEFAULT_STATIC_DIR
     runner: Callable[..., dict] = default_runner
+    claude_desktop_handoff_runner: Callable[..., dict] = surfaces_runner.run_argv_pty
     now_fn: Callable[[], str] = _utc_now_z
     open_binding_fn: Callable[..., dict] = contract.open_binding
+    #: Server-only elapsed source validity; no fallback and no browser authority.
+    validity_sample_fn: Callable[[], Any] = _source_clock_sample
     #: Overrides for the ``claude_code``/``codex`` native-existence-gate
     #: session-store roots (Sol review 5000169412 blocker 2) — ``None`` (the
     #: production default) means each adapter uses its own real default
     #: (``~/.claude/projects`` / ``~/.codex/sessions``). Tests inject a
     #: ``tmp_path`` here instead.
     claude_projects_dir: str | None = None
+    #: Separate interactive Claude CLI path for exact CLI -> Desktop handoff.
+    #: This is intentionally distinct from Executive's provider-worker binary.
+    claude_desktop_cli: str | None = None
     codex_sessions_dir: str | None = None
+    #: CAP-C1: optional path to a placement-selection facts document,
+    #: passed straight through to ``ccr.build_control_room``'s own
+    #: ``placement_selection_path`` parameter. ``None`` (the default) means
+    #: no ``placement_selection`` section is composed at all — see
+    #: ``control_plane.chairman_control_room._read_placement_selection``.
+    placement_selection_path: str | Path | None = None
     #: Overrides for the ``chatgpt`` adapter's managed-browser environment
     #: store roots (Sol architecture correction, MAS-113, 2026-08-22) —
     #: ``None`` (the production default) means the adapter's own real default
@@ -334,6 +593,10 @@ class ServerConfig:
     #: gate early. The envelope's ``refresh_in_flight`` key stays a bool,
     #: derived as ``count > 0`` in :func:`_cached_state_snapshot`.
     state_refreshes_in_flight: int = 0
+    # Hosted lifecycle drains actual refresh handles before retiring owners.
+    state_refresh_threads: set = field(default_factory=set)
+    state_stopping: bool = False
+    workspace_refresh_on_read: bool = True
     #: Cache max-age (seconds, monotonic clock) before a GET kicks a
     #: background recompose. CLI flag ``--state-ttl``.
     state_ttl: float = 120.0
@@ -351,6 +614,22 @@ class ServerConfig:
     #: ``None``. Cleared on the next successful recompose. Never raised into
     #: a serving thread — surfaced only in the ``/api/state`` envelope.
     state_refresh_error: str | None = None
+    #: Trusted installed source join (parent-injected before start): given the
+    #: composition's ``generated_at``, returns the canonical
+    #: ``mastermind.chairman_control_room.v1`` document built from
+    #: pre-acquired bounded inputs. Called ONLY from ``_compose_state_doc``
+    #: within the existing off-demand refresh/publication bracket. A
+    #: configured callback that fails is never answered with the legacy
+    #: gather — the failure propagates to the existing refresh-error path and
+    #: the last good composition (or explicit unavailability) stands. The
+    #: default ``None`` keeps the exact standalone legacy behavior.
+    #: A supplied live snapshot is a detached keyword input for that attempt;
+    #: omission preserves the one-argument installed callback contract.
+    compose_inputs: Callable[..., dict[str, Any]] | None = None
+    #: Serializes binding read/modify/save transactions sharing this owner.
+    #: Separate from publication; never held across provider work or responses.
+    #: This is not a cross-process lock for independent file writers.
+    bindings_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -358,21 +637,16 @@ class ServerConfig:
 # ---------------------------------------------------------------------------
 
 def _compose_state_doc(
-    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT
+    config: ServerConfig, *, timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
 ) -> dict[str, Any]:
     """Fresh ``mastermind.chairman_control_room.v1`` document for ``/api/state``.
 
-    No live-active-builds cache -> a plain, un-duplicated call to
-    :func:`control_plane.chairman_control_room.build_control_room` (the
-    common case; zero gather-layer duplication).
-
-    A live cache present (from a prior ``/api/refresh-builds``) -> hand it to
-    :func:`control_plane.chairman_control_room.compose_control_room` IN PLACE
-    of a fresh active-builds file read (frozen spec: "passes it INTO the
-    composition in place of the artifact read"). ``build_control_room``
-    exposes no injection point for this (and ``chairman_control_room.py`` is
-    out of this packet's edit scope), so :func:`_compose_with_live_active_builds`
-    replicates that function's own gather-layer sequencing for this one path.
+    The common artifact path and the process-memory live-cache path both call
+    :func:`control_plane.chairman_control_room.build_control_room`.  The
+    latter passes its validated active-build snapshot through the builder's
+    explicit snapshot seam, retaining the one canonical gather sequence for
+    dispatch evidence and every other source.
 
     ``timeout`` defaults to ``ceo_boot_packet.DEFAULT_TIMEOUT`` (60s) — the
     library default, unchanged, and exactly what every existing caller
@@ -382,95 +656,45 @@ def _compose_state_doc(
     cost now runs off the request path, so it can afford to wait out the
     real host's measured 94-206s brief cost rather than the 60s bound that
     always timed out on the request path (F1/F2).
+
+    A trusted ``ServerConfig.compose_inputs`` callback (installed source
+    join, injected by the parent before start) is honored here FIRST: it
+    receives this composition's ``generated_at`` and returns the canonical
+    document from pre-acquired bounded inputs, so the legacy gather below is
+    never entered while it is configured.  Its failure is this composition's
+    failure — there is no fallback to the legacy source-root gather, the
+    exception reaches the existing refresh-error path, and an empty/default
+    document is never substituted for a configured source.
     """
     generated_at = config.now_fn()
-    live_active_builds = config.live_cache.get("active_builds")
-    if live_active_builds is None:
-        return ccr.build_control_room(
-            repo_root=config.repo_root,
-            macro_root_flag=config.macro_root,
-            environ=os.environ,
-            now=generated_at,
-            timeout=timeout,
-            bindings_path=config.bindings_path,
-        )
-    return _compose_with_live_active_builds(config, live_active_builds, generated_at, timeout=timeout)
-
-
-def _compose_with_live_active_builds(
-    config: ServerConfig,
-    live_active_builds: dict[str, Any],
-    generated_at: str,
-    *,
-    timeout: float = ceo_boot_packet.DEFAULT_TIMEOUT,
-) -> dict[str, Any]:
-    root = config.repo_root
-
-    packet: dict[str, Any] | None = None
-    packet_failure: str | None = None
-    try:
-        packet = ceo_boot_packet.build_packet(
-            repo_root=root, macro_root_flag=config.macro_root, environ=os.environ,
-            now=generated_at, timeout=timeout,
-        )
-    except Exception as exc:  # noqa: BLE001 — gather layer never raises
-        packet_failure = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-
-    inbox: dict[str, Any] | None = None
-    inbox_failure: str | None = None
-    try:
-        inbox = executive_inbox.build_inbox(
-            repo_root=root, boot_packet=packet, environ=os.environ,
-            now=generated_at, timeout=timeout,
-        )
-    except Exception as exc:  # noqa: BLE001 — gather layer never raises
-        inbox_failure = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
-
-    # Same macro-root preference ccr.build_control_room itself uses: reuse the
-    # packet's own reported root first, fall back to Macro's own ladder
-    # function only when the packet gave us nothing (receipt: chairman_
-    # control_room.py build_control_room(), "Resolve the Macro root exactly
-    # like the packet does").
-    macro_root_resolved: str | None = None
-    if isinstance(packet, dict):
-        macro = packet.get("macro")
-        if isinstance(macro, dict):
-            macro_root_resolved = macro.get("root")
-    if not macro_root_resolved:
-        resolved, _via, _candidates = ceo_boot_packet.resolve_macro_root(
-            config.macro_root, os.environ, root
-        )
-        if resolved is not None:
-            macro_root_resolved = os.fspath(resolved)
-
-    agent_os_state, agent_os_state_failure = ccr._read_agent_os_state(macro_root_resolved)
-    runtime_jobs, runtime_jobs_failure = ccr._read_runtime_jobs(root)
-    bindings, binding_problems = sb.load_bindings(config.bindings_path)
-
-    doc = ccr.compose_control_room(
-        inbox=inbox,
-        boot_packet=packet,
-        active_builds=live_active_builds,
-        agent_os_state=agent_os_state,
-        runtime_jobs=runtime_jobs,
-        bindings=bindings,
-        binding_problems=binding_problems,
-        generated_at=generated_at,
-    )
-
-    extra_degraded: list[str] = []
-    if packet_failure:
-        extra_degraded.append(f"boot_packet: unavailable — {packet_failure}")
-    if inbox_failure:
-        extra_degraded.append(f"executive_inbox: unavailable — {inbox_failure}")
-    if agent_os_state_failure:
-        extra_degraded.append(f"agent_os_state: {agent_os_state_failure}")
-    if runtime_jobs_failure:
-        extra_degraded.append(f"executive_runtime: {runtime_jobs_failure}")
-    if extra_degraded:
-        doc = dict(doc)
-        doc["degraded"] = sorted(list(doc["degraded"]) + extra_degraded)
-    return doc
+    snapshot_kwargs: dict[str, Any] = {}
+    with config.state_lock:
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            if "active_builds" in config.live_cache:
+                snapshot_kwargs["active_builds_snapshot"] = copy.deepcopy(config.live_cache["active_builds"])
+        else:
+            snapshot_kwargs["active_builds_snapshot"] = copy.deepcopy(active_builds_snapshot)
+    if config.compose_inputs is not None:
+        doc = config.compose_inputs(generated_at, **snapshot_kwargs)
+        if (not isinstance(doc, dict)
+                or doc.get("schema") != ccr.SCHEMA):
+            raise ValueError("configured compose_inputs returned a non-canonical document")
+        return doc
+    build_kwargs: dict[str, Any] = {
+        "repo_root": config.repo_root,
+        "macro_root_flag": config.macro_root,
+        "environ": os.environ,
+        "now": generated_at,
+        "timeout": timeout,
+        "bindings_path": config.bindings_path,
+        "placement_selection_path": config.placement_selection_path,
+    }
+    # Absence means the cold artifact path remains the caller's source.  A
+    # present cache key, including an explicitly unavailable/malformed value,
+    # is a supplied source state and must reach the canonical builder without
+    # a second artifact read.
+    build_kwargs.update(snapshot_kwargs)
+    return ccr.build_control_room(**build_kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +706,10 @@ def _compose_with_live_active_builds(
 # calls them, through the existing ``_compose_state_doc`` seam.
 # ---------------------------------------------------------------------------
 
-def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int:
+def _reserve_composition(
+    config: ServerConfig, *, explicit: bool = False,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> int:
     """Reserve the next composition generation, under ``state_lock``, and
     count one more composition as in flight (H1 repair, Sol review
     5000983751 Blocker 2).
@@ -497,7 +724,15 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
     the floor a background composition may never publish (or record an
     error) below.
     """
+    if active_builds_snapshot is not ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED and not explicit:
+        raise ValueError("live snapshot requires an explicit composition")
     with config.state_lock:
+        if config.state_stopping:
+            raise RuntimeError("control room owner is stopping")
+        if active_builds_snapshot is not ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            # Retained input and its explicit floor advance atomically. Failed
+            # publication keeps this input, but never reports a successful refresh.
+            config.live_cache["active_builds"] = copy.deepcopy(active_builds_snapshot)
         config.state_compose_seq += 1
         gen = config.state_compose_seq
         if explicit:
@@ -507,11 +742,37 @@ def _reserve_composition(config: ServerConfig, *, explicit: bool = False) -> int
 
 
 def _refresh_state_cache(
-    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True
-) -> None:
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> bool:
+    thread = threading.current_thread()
+    with config.state_lock:
+        config.state_refresh_threads.add(thread)
+        stopping = config.state_stopping
+        if stopping:
+            config.state_refreshes_in_flight -= 1
+    try:
+        if not stopping:
+            return _refresh_state_cache_impl(
+                config, timeout=timeout, generation=generation,
+                include_capabilities=include_capabilities,
+                active_builds_snapshot=active_builds_snapshot,
+            )
+        return False
+    finally:
+        with config.state_lock:
+            config.state_refresh_threads.discard(thread)
+
+
+def _refresh_state_cache_impl(
+    config: ServerConfig, *, timeout: float, generation: int, include_capabilities: bool = True,
+    active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+) -> bool:
     """Compose a fresh doc (+ capability census, when requested) for
     ``generation`` and, unless a newer generation has already published,
-    atomically swap the cache.
+    atomically swap the cache. Return True only when this exact generation
+    publishes; failure, supersession and owner retirement cannot report success.
+    An explicit snapshot remains attached to this attempt through composition.
 
     Never raises into the caller (startup pre-compose runs this inline on
     the main thread; every other call runs on a daemon background thread or
@@ -524,7 +785,7 @@ def _refresh_state_cache(
     calling this; this function always decrements it on the way out.
 
     Superseded gating (H1 repair, Sol review 5000983751 Blocker 2): a
-    generation is superseded when it is strictly below
+    generation is superseded when the owner is stopping or it is strictly below
     :attr:`ServerConfig.state_explicit_floor` (an explicit recompose was
     reserved after this one started) OR at/below
     :attr:`ServerConfig.state_published_seq` (a newer generation — explicit
@@ -540,15 +801,23 @@ def _refresh_state_cache(
     recomposes doc + census together, "alongside" each other in the same
     cache entry, per the frozen spec.
     """
+    # Anchor before _compose_state_doc captures its source reference or gathers.
+    qualification_anchor = _sample_source_clock(config)
     try:
-        doc = _compose_state_doc(config, timeout=timeout)
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            doc = _compose_state_doc(config, timeout=timeout)
+        else:
+            doc = _compose_state_doc(
+                config, timeout=timeout, active_builds_snapshot=active_builds_snapshot,
+            )
         capabilities = capability.census(runner=config.runner) if include_capabilities else None
     except Exception as exc:  # noqa: BLE001 — never raise into a serving thread
         detail = f"{exc.__class__.__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
         with config.state_lock:
             config.state_refreshes_in_flight -= 1
             superseded = (
-                generation < config.state_explicit_floor or generation <= config.state_published_seq
+                config.state_stopping or generation < config.state_explicit_floor
+                or generation <= config.state_published_seq
             )
             if not superseded:
                 config.state_refresh_error = "state refresh failed; serving last good composition"
@@ -562,15 +831,17 @@ def _refresh_state_cache(
             )
         else:
             print(f"state refresh failed: {detail}", flush=True)
-        return
+        return False
 
     composed_at = config.now_fn()
     with config.state_lock:
         config.state_refreshes_in_flight -= 1
-        superseded = generation < config.state_explicit_floor or generation <= config.state_published_seq
+        superseded = (config.state_stopping or generation < config.state_explicit_floor
+                      or generation <= config.state_published_seq)
         published = config.state_published_seq
         floor = config.state_explicit_floor
         if not superseded:
+            _publish_source_validity(config, doc, qualification_anchor, _sample_source_clock(config))
             config.state_cache["doc"] = doc
             if include_capabilities:
                 config.state_cache["capabilities"] = capabilities
@@ -584,6 +855,7 @@ def _refresh_state_cache(
             f"explicit_floor={floor})",
             flush=True,
         )
+    return not superseded
 
 
 def _precompose_initial_state(config: ServerConfig) -> None:
@@ -620,7 +892,7 @@ def _maybe_start_background_refresh(config: ServerConfig) -> None:
         composed_monotonic = config.state_cache.get("composed_monotonic")
         age = None if composed_monotonic is None else time.monotonic() - composed_monotonic
         is_stale = age is None or age > config.state_ttl
-        if not is_stale or config.state_refreshes_in_flight:
+        if config.state_stopping or not is_stale or config.state_refreshes_in_flight:
             return
         config.state_compose_seq += 1
         gen = config.state_compose_seq
@@ -633,7 +905,18 @@ def _maybe_start_background_refresh(config: ServerConfig) -> None:
         },
         daemon=True,
     )
-    thread.start()
+    with config.state_lock:
+        if config.state_stopping:
+            config.state_refreshes_in_flight -= 1
+            return
+        config.state_refresh_threads.add(thread)
+        # Start under the same lock so shutdown never misses a reserved handle.
+        try:
+            thread.start()
+        except BaseException:
+            config.state_refresh_threads.discard(thread)
+            config.state_refreshes_in_flight -= 1
+            raise
 
 
 def _ensure_capabilities_cached(config: ServerConfig) -> None:
@@ -686,6 +969,7 @@ def _cached_state_snapshot(config: ServerConfig) -> dict[str, Any]:
             "composed_at": config.state_cache.get("composed_at"),
             "refresh_in_flight": config.state_refreshes_in_flight > 0,
             "state_refresh_error": config.state_refresh_error,
+            "source_validity": _source_validity_snapshot(config, _sample_source_clock(config)),
         }
 
 
@@ -769,6 +1053,265 @@ def _codex_sessions() -> list[dict[str, Any]]:
         if len(entries) >= _DISCOVER_CAP:
             break
     return entries[:_DISCOVER_CAP]
+
+
+@dataclass(frozen=True)
+class OpenBindingResult:
+    """Separate owner preconditions from an actual provider's outcome."""
+    outcome: dict[str, Any]
+    source_precondition_failed: bool = False
+
+
+_NO_OWED_CONTEXT = object()
+
+
+def _owed_open_refusal_result() -> OpenBindingResult:
+    return OpenBindingResult(
+        {"ok": False, "verified": False, "failure_kind": "source_precondition_failed",
+         "detail": "The owed action needs a current read; its source or exact target changed.",
+         "next_action": "read_current_state"},
+        source_precondition_failed=True,
+    )
+
+
+def open_surface(config: ServerConfig, *, binding_id: str,
+                 target_surface: str | None = None,
+                 owed_context: Any = _NO_OWED_CONTEXT,
+                 before_effect: Callable[[], None] | None = None) -> OpenBindingResult:
+    """Open the checked target through this exact existing Control Room owner.
+
+    The trusted caller owns admission. Provider work runs outside owner locks;
+    only unchanged original rows receive later verification metadata. Explicit
+    malformed owed context never falls back to ordinary Open. A provider's
+    exception or outcome is not reclassified as a pre-dispatch refusal.
+    before_effect is a trusted transport callback, never a request field. It
+    rechecks admission after source reads. Owed validity is sampled again
+    after that callback, before the provider. Once admitted, ordinary
+    verification metadata stays part of the same work.
+    """
+    if not isinstance(binding_id, str) or not binding_id:
+        raise ValueError("binding_id: required (non-empty string)")
+    if target_surface is not None and (
+        type(target_surface) is not str or target_surface not in {"default", "desktop"}
+    ):
+        raise ValueError("target_surface: must be 'default' or 'desktop'")
+    owed_route = owed_context is not _NO_OWED_CONTEXT
+    if owed_route and not _owed_context_shape(owed_context):
+        return _owed_open_refusal_result()
+
+    open_fn = config.open_binding_fn
+    provider_runner = config.runner
+    provider_options = dict(claude_projects_dir=config.claude_projects_dir,
+                            claude_desktop_cli=config.claude_desktop_cli,
+                            claude_desktop_handoff_runner=config.claude_desktop_handoff_runner,
+                            target_surface=target_surface,
+                            codex_sessions_dir=config.codex_sessions_dir,
+                            mlx_profiles_root=config.mlx_profiles_root,
+                            gologin_profiles_root=config.gologin_profiles_root)
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        doc, problems = sb.load_bindings(bindings_path)
+        binding = next(
+            (row for row in (doc or {}).get("bindings", [])
+             if isinstance(row, dict) and row.get("binding_id") == binding_id),
+            None,
+        )
+        binding_preimage = copy.deepcopy(binding)
+    if doc is None:
+        if owed_route:
+            return _owed_open_refusal_result()
+        if problems:
+            outcome = contract.refused(
+                "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
+            )
+        else:
+            outcome = contract.refused(
+                "unknown", binding_id, "not_found", "no bindings file is present"
+            )
+        return OpenBindingResult(outcome)
+
+    if binding is None:
+        if owed_route:
+            return _owed_open_refusal_result()
+        outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
+        return OpenBindingResult(outcome)
+
+    binding = _freeze_target(binding)
+    if owed_route:
+        if not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
+            return _owed_open_refusal_result()
+    if before_effect is not None:
+        before_effect()
+        # Admission may perform blocking permission work. Its successful
+        # return cannot renew an owed source's finite validity or publication.
+        if owed_route and not _owed_handoff_current(config, owed_context, binding, doc["bindings"]):
+            return _owed_open_refusal_result()
+    outcome = open_fn(binding, provider_runner, **provider_options)
+    # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
+    # blocker 2): a mere Terminal-launch ACK must never advance this —
+    # only an outcome that PROVED the provider-native session/tab exists
+    # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
+    # (chatgpt / claude_desktop / cursor_agent — no proven local read
+    # surface) stays BOUND_UNVERIFIED and leaves the bindings file
+    # byte-unchanged.
+    if not owed_route and outcome.get("ok") and outcome.get("verified"):
+        try:
+            with config.bindings_lock:
+                if config.bindings_path == bindings_path:
+                    current_doc, _problems = sb.load_bindings(bindings_path)
+                    if current_doc is not None:
+                        matches = [
+                            row for row in current_doc["bindings"]
+                            if isinstance(row, dict) and row.get("binding_id") == binding_id
+                        ]
+                        # A changed/removed/restamped row receives no evidence
+                        # for the old target. Preserve all concurrent siblings.
+                        if len(matches) == 1 and matches[0] == binding_preimage:
+                            matches[0]["last_verified_at"] = config.now_fn()
+                            sb.save_bindings(current_doc, bindings_path)
+        except Exception:
+            # Navigation already returned success. Metadata failure must not
+            # conceal that effect, leak a locator or invite a second Open.
+            outcome = dict(outcome, detail=(
+                "Open completed; the verification timestamp update could not be confirmed. "
+                "Do not repeat Open solely to update this timestamp."
+            ))
+    return OpenBindingResult(outcome)
+
+
+def bind_surface(config: ServerConfig, *, work_ref: str, role: str, provider: str,
+                 locator: dict[str, Any], seat_ref: str | None = None,
+                 before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Apply one complete binding transaction on the existing file owner.
+
+    A trusted before_effect callback runs inside that transaction immediately
+    before the write. It may refuse admission without splitting the lock.
+    """
+    if not isinstance(work_ref, str) or not isinstance(role, str) or not isinstance(provider, str):
+        raise ValueError("work_ref, role, and provider must be strings")
+    if not isinstance(locator, dict):
+        raise ValueError("locator must be an object")
+    if seat_ref is not None and not isinstance(seat_ref, str):
+        raise ValueError("seat_ref must be a string or null")
+
+    # sb._PROVIDER_LOCATOR_KIND is the same module's own provider->kind
+    # map — reused, not re-derived, so a new provider added there never
+    # needs a matching edit here. An unknown provider maps to itself,
+    # which validate_bindings_document then names as a "must be one of"
+    # problem — never a crash.
+    locator_kind = sb._PROVIDER_LOCATOR_KIND.get(provider, provider)
+    binding = sb.new_binding(
+        work_ref=work_ref, role=role, provider=provider, locator_kind=locator_kind,
+        locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
+    )
+
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        existing_doc, load_problems = sb.load_bindings(bindings_path)
+        if existing_doc is None and load_problems:
+            outcome = {"ok": False, "problems": load_problems}
+        else:
+            if existing_doc is None:
+                existing_doc = {"schema": sb.SCHEMA, "bindings": []}
+            new_doc = {
+                "schema": existing_doc.get("schema", sb.SCHEMA),
+                "bindings": list(existing_doc.get("bindings", [])) + [binding],
+            }
+            problems = sb.validate_bindings_document(new_doc)
+            if problems:
+                outcome = {"ok": False, "problems": problems}
+            else:
+                if before_effect is not None:
+                    before_effect()
+                sb.save_bindings(new_doc, bindings_path)
+                outcome = {"ok": True, "binding_id": binding["binding_id"]}
+    return outcome
+
+
+def unbind_surface(config: ServerConfig, *, binding_id: str,
+                   before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Remove a binding through the same complete read/modify/write transaction.
+
+    The trusted before_effect callback runs immediately before the write.
+    """
+    if not isinstance(binding_id, str) or not binding_id:
+        raise ValueError("binding_id: required (non-empty string)")
+
+    with config.bindings_lock:
+        bindings_path = config.bindings_path
+        doc, _problems = sb.load_bindings(bindings_path)
+        outcome = {"ok": False}
+        if doc is not None:
+            rows = doc.get("bindings", [])
+            remaining = [
+                row for row in rows
+                if not (isinstance(row, dict) and row.get("binding_id") == binding_id)
+            ]
+            if len(remaining) != len(rows):
+                new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
+                if before_effect is not None:
+                    before_effect()
+                sb.save_bindings(new_doc, bindings_path)
+                outcome = {"ok": True}
+    return outcome
+
+
+def refresh_builds(config: ServerConfig, *,
+                   before_effect: Callable[[], None] | None = None) -> dict[str, Any]:
+    """Run the existing active-build refresh on this exact Control Room owner.
+
+    The calling transport owns authentication and request validation. This
+    operation accepts no caller-selected root, command or replacement cache.
+    A false publication result may still retain the accepted live input; it
+    must not be interpreted as a no-effect receipt or automatic retry advice.
+    A trusted before_effect callback runs once before the compiler; admission
+    is not repeated halfway through accepted input and publication work.
+    """
+    macro_root = config.macro_root
+    if not macro_root:
+        return {"ok": False, "detail": "no macro root resolved"}
+
+    script_path = Path(macro_root) / "scripts" / "build_project_active_build_map.py"
+    if not script_path.is_file():
+        return {"ok": False, "detail": "--json-stdout seam not present at macro root"}
+
+    argv = [sys.executable, str(script_path), "--json-stdout"]
+    # Preserve the existing compiler's explicit 4 MiB JSON-output budget.
+    if before_effect is not None:
+        before_effect()
+    result = config.runner(
+        argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root,
+        max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES,
+    )
+    if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
+        stderr_tail = ""
+        if isinstance(result, dict):
+            stderr_tail = (result.get("stderr") or "")[-2000:]
+        detail = f"build_project_active_build_map.py failed: {stderr_tail}".rstrip(": ")
+        return {"ok": False, "detail": detail}
+
+    stdout = result.get("stdout") or ""
+    try:
+        parsed = json.loads(stdout)
+    except ValueError:
+        return {"ok": False, "detail": "stdout was not valid JSON"}
+    if not isinstance(parsed, dict) or parsed.get("schema") != "project_active_builds.v1":
+        return {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}
+
+    # Retain the detached input and reserve its explicit floor atomically.
+    # Recompose synchronously so success describes this exact publication,
+    # while old background work cannot overwrite the accepted generation.
+    try:
+        gen = _reserve_composition(config, explicit=True, active_builds_snapshot=parsed)
+    except RuntimeError:
+        return {"ok": False, "detail": "control room is stopping"}
+    published = _refresh_state_cache(
+        config, timeout=config.compose_timeout, generation=gen,
+        include_capabilities=True, active_builds_snapshot=parsed,
+    )
+    if not published:
+        return {"ok": False, "detail": "refreshed builds were not published by this request"}
+    return {"ok": True, "collected_at": parsed.get("collected_at")}
 
 
 def _discover_document(config: ServerConfig) -> dict[str, Any]:
@@ -881,6 +1424,14 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
 
     def _loopback_and_host_ok(self) -> bool:
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
+        if isinstance(self.server, UnixControlRoomServer):
+            # The peer uid was already proven in ``UnixControlRoomServer.verify_request``;
+            # we only need the matching Host header so the request reaches the
+            # closed unix origin advertised by the hosted room.
+            if self.headers.get("Host") != UNIX_CONTROL_ROOM_HOST:
+                self._forbidden("Host header not allowed")
+                return False
+            return True
         if not _client_is_loopback(self.client_address[0]):
             self._forbidden("client address is not loopback")
             return False
@@ -988,8 +1539,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         cheap dict lookup, not part of the composition cache).
         """
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        _ensure_capabilities_cached(config)
-        _maybe_start_background_refresh(config)
+        if config.workspace_refresh_on_read:
+            _ensure_capabilities_cached(config)
+            _maybe_start_background_refresh(config)
         snapshot = _cached_state_snapshot(config)
         body = {
             "control_room": snapshot["doc"],
@@ -998,6 +1550,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             "composed_at": snapshot["composed_at"],
             "refresh_in_flight": snapshot["refresh_in_flight"],
             "state_refresh_error": snapshot["state_refresh_error"],
+            "source_validity": snapshot["source_validity"],
         }
         self._send_json(200, body, no_store=True)
 
@@ -1027,55 +1580,31 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         data, err = self._read_json_body()
         if err:
             return self._bad_request(err)
-        unknown = _unknown_key(data, {"binding_id"})
+        unknown = _unknown_key(data, {"binding_id", "owed_context", "target_surface"})
         if unknown is not None:
             return self._bad_request(f"unknown key: {unknown!r}")
         binding_id = data.get("binding_id")
         if not isinstance(binding_id, str) or not binding_id:
             return self._bad_request("binding_id: required (non-empty string)")
+        target_surface = data.get("target_surface")
+        if target_surface is not None and (
+            type(target_surface) is not str or target_surface not in {"default", "desktop"}
+        ):
+            return self._bad_request("target_surface: must be 'default' or 'desktop'")
+        owed_route = "owed_context" in data
+        if owed_route and not _owed_context_shape(data["owed_context"]):
+            return self._owed_open_refused()
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        doc, problems = sb.load_bindings(config.bindings_path)
-        if doc is None:
-            if problems:
-                outcome = contract.refused(
-                    "unknown", binding_id, "invalid_binding", "the bindings file failed validation"
-                )
-            else:
-                outcome = contract.refused(
-                    "unknown", binding_id, "not_found", "no bindings file is present"
-                )
-            return self._send_json(200, outcome, no_store=True)
-
-        binding = next(
-            (row for row in doc.get("bindings", []) if isinstance(row, dict) and row.get("binding_id") == binding_id),
-            None,
+        result = open_surface(
+            config, binding_id=binding_id, target_surface=target_surface,
+            owed_context=data["owed_context"] if owed_route else _NO_OWED_CONTEXT,
         )
-        if binding is None:
-            outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
-            return self._send_json(200, outcome, no_store=True)
+        self._send_json(409 if result.source_precondition_failed else 200,
+                        result.outcome, no_store=True)
 
-        outcome = config.open_binding_fn(
-            binding, config.runner,
-            claude_projects_dir=config.claude_projects_dir,
-            codex_sessions_dir=config.codex_sessions_dir,
-            mlx_profiles_root=config.mlx_profiles_root,
-            gologin_profiles_root=config.gologin_profiles_root,
-        )
-        # last_verified_at / VERIFIED_OPENABLE law (Sol review 5000169412,
-        # blocker 2): a mere Terminal-launch ACK must never advance this —
-        # only an outcome that PROVED the provider-native session/tab exists
-        # (contract.OpenOutcome.verified=True) may. `ok=True, verified=False`
-        # (chatgpt / claude_desktop / cursor_agent — no proven local read
-        # surface) stays BOUND_UNVERIFIED and leaves the bindings file
-        # byte-unchanged.
-        if outcome.get("ok") and outcome.get("verified"):
-            now = config.now_fn()
-            for row in doc["bindings"]:
-                if isinstance(row, dict) and row.get("binding_id") == binding_id:
-                    row["last_verified_at"] = now
-            sb.save_bindings(doc, config.bindings_path)
-        self._send_json(200, outcome, no_store=True)
+    def _owed_open_refused(self) -> None:
+        self._send_json(409, _owed_open_refusal_result().outcome, no_store=True)
 
     _BIND_ALLOWED_KEYS = frozenset({"work_ref", "role", "provider", "seat_ref", "locator"})
 
@@ -1101,33 +1630,9 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("seat_ref must be a string or null")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        # sb._PROVIDER_LOCATOR_KIND is the same module's own provider->kind
-        # map — reused, not re-derived, so a new provider added there never
-        # needs a matching edit here. An unknown provider maps to itself,
-        # which validate_bindings_document then names as a "must be one of"
-        # problem — never a crash.
-        locator_kind = sb._PROVIDER_LOCATOR_KIND.get(provider, provider)
-        binding = sb.new_binding(
-            work_ref=work_ref, role=role, provider=provider, locator_kind=locator_kind,
-            locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
-        )
-
-        existing_doc, load_problems = sb.load_bindings(config.bindings_path)
-        if existing_doc is None and load_problems:
-            return self._send_json(200, {"ok": False, "problems": load_problems}, no_store=True)
-        if existing_doc is None:
-            existing_doc = {"schema": sb.SCHEMA, "bindings": []}
-
-        new_doc = {
-            "schema": existing_doc.get("schema", sb.SCHEMA),
-            "bindings": list(existing_doc.get("bindings", [])) + [binding],
-        }
-        problems = sb.validate_bindings_document(new_doc)
-        if problems:
-            return self._send_json(200, {"ok": False, "problems": problems}, no_store=True)
-
-        sb.save_bindings(new_doc, config.bindings_path)
-        self._send_json(200, {"ok": True, "binding_id": binding["binding_id"]}, no_store=True)
+        outcome = bind_surface(config, work_ref=work_ref, role=role, provider=provider,
+                               locator=locator, seat_ref=seat_ref)
+        self._send_json(200, outcome, no_store=True)
 
     def _handle_unbind(self) -> None:
         data, err = self._read_json_body()
@@ -1141,18 +1646,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("binding_id: required (non-empty string)")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        doc, _problems = sb.load_bindings(config.bindings_path)
-        if doc is None:
-            return self._send_json(200, {"ok": False}, no_store=True)
-
-        rows = doc.get("bindings", [])
-        remaining = [r for r in rows if not (isinstance(r, dict) and r.get("binding_id") == binding_id)]
-        if len(remaining) == len(rows):
-            return self._send_json(200, {"ok": False}, no_store=True)
-
-        new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
-        sb.save_bindings(new_doc, config.bindings_path)
-        self._send_json(200, {"ok": True}, no_store=True)
+        self._send_json(200, unbind_surface(config, binding_id=binding_id), no_store=True)
 
     def _handle_refresh_builds(self) -> None:
         data, err = self._read_json_body()
@@ -1163,61 +1657,7 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request(f"unknown key: {unknown!r}")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        macro_root = config.macro_root
-        if not macro_root:
-            return self._send_json(200, {"ok": False, "detail": "no macro root resolved"}, no_store=True)
-
-        script_path = Path(macro_root) / "scripts" / "build_project_active_build_map.py"
-        if not script_path.is_file():
-            return self._send_json(
-                200,
-                {"ok": False, "detail": "--json-stdout seam not present at macro root"},
-                no_store=True,
-            )
-
-        argv = [sys.executable, str(script_path), "--json-stdout"]
-        # 4 MiB, not the runner's default 64 KiB — the real project_active_
-        # builds.v1 document is real organizational data (Wave D live proof:
-        # 112,569 bytes) and must never be silently truncated below valid
-        # JSON. See _REFRESH_BUILDS_MAX_OUTPUT_BYTES's docstring.
-        result = config.runner(
-            argv, timeout=_REFRESH_BUILDS_TIMEOUT, cwd=macro_root, max_bytes=_REFRESH_BUILDS_MAX_OUTPUT_BYTES
-        )
-
-        if not isinstance(result, dict) or result.get("timed_out") or result.get("code") != 0:
-            stderr_tail = ""
-            if isinstance(result, dict):
-                stderr_tail = (result.get("stderr") or "")[-2000:]
-            detail = f"build_project_active_build_map.py failed: {stderr_tail}".rstrip(": ")
-            return self._send_json(200, {"ok": False, "detail": detail}, no_store=True)
-
-        stdout = result.get("stdout") or ""
-        try:
-            parsed = json.loads(stdout)
-        except ValueError:
-            return self._send_json(200, {"ok": False, "detail": "stdout was not valid JSON"}, no_store=True)
-        if not isinstance(parsed, dict) or parsed.get("schema") != "project_active_builds.v1":
-            return self._send_json(
-                200, {"ok": False, "detail": "stdout schema was not project_active_builds.v1"}, no_store=True
-            )
-
-        config.live_cache["active_builds"] = parsed
-        # H0 hardening (2026-08-22): GET /api/state now serves a cache, not
-        # a fresh composition per request — but this ONE write path (a live
-        # active-builds refresh) must still be visible on the very next GET,
-        # not eventually-consistent up to state_ttl. Recompose synchronously
-        # here, once, rather than leaving the cache stamped with whatever
-        # was true before this refresh. refresh-builds is already an
-        # explicit, infrequent, user-initiated action with its own 180s
-        # subprocess timeout; this costs the same gather-layer time GET
-        # /api/state used to pay on every request, but only for this action.
-        # H1 repair (Sol review 5000983751 Blocker 2): reserve this as an
-        # EXPLICIT generation — it raises state_explicit_floor, so an older
-        # background recompose that finishes after this one may never
-        # overwrite it.
-        gen = _reserve_composition(config, explicit=True)
-        _refresh_state_cache(config, timeout=config.compose_timeout, generation=gen, include_capabilities=True)
-        self._send_json(200, {"ok": True, "collected_at": parsed.get("collected_at")}, no_store=True)
+        self._send_json(200, refresh_builds(config), no_store=True)
 
 
 class ControlRoomServer(http.server.ThreadingHTTPServer):
@@ -1232,6 +1672,73 @@ class ControlRoomServer(http.server.ThreadingHTTPServer):
         # accepting requests via serve_forever(). Never reached from
         # --check (run_check never constructs this class).
         _precompose_initial_state(config)
+
+
+class UnixControlRoomServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Adopted-listener AF_UNIX stream server for the in-process Control Room.
+
+    The adopted listener is a launchd-activated, owner/mode-restricted
+    ``/var/run/mastermind-executive/workspace-control-room.sock``. This server
+    binds nothing itself, never unlinks the socket path, and refuses any
+    request whose peer uid is not in the closed allowlist *before* the handler
+    is ever constructed — i.e. before any byte of the request is read.
+    """
+
+    daemon_threads = True
+
+    def __init__(self, listener, handler_cls, config, *,
+                 allowed_peer_uids, peer_uid_fn) -> None:
+        family = getattr(listener, "family", None)
+        sock_type = getattr(listener, "type", None)
+        if family != socket.AF_UNIX or sock_type != socket.SOCK_STREAM:
+            raise ValueError("control room unix listener refused")
+        if type(allowed_peer_uids) is not frozenset and not isinstance(allowed_peer_uids, (frozenset, tuple, list)):
+            raise ValueError("control room unix listener refused")
+        normalized = frozenset(allowed_peer_uids)
+        if (len(normalized) == 0
+                or any((type(item) is not int or item is True or item is False) for item in normalized)):
+            raise ValueError("control room unix listener refused")
+        if not callable(peer_uid_fn):
+            raise ValueError("control room unix listener refused")
+        self.config = config
+        self._allowed_peer_uids = normalized
+        self._peer_uid_fn = peer_uid_fn
+        # Base ctor binds a placeholder socket we don't want. Use
+        # bind_and_activate=False and adopt the launched listener manually.
+        address = listener.getsockname()
+        socketserver.UnixStreamServer.__init__(
+            self, address, handler_cls, bind_and_activate=False)
+        # Close the placeholder at the Python level so the socket object's
+        # finalizer does not close the same descriptor number a second time
+        # (possibly after the kernel has reused it for another file in another
+        # thread). An os.close(fileno()) here is wrong.
+        self.socket.close()
+        self.socket = listener
+        self.server_address = listener.getsockname()
+        # Same H0 hardening as ControlRoomServer: compose before serve_forever.
+        _precompose_initial_state(config)
+
+    def get_request(self):
+        conn, _ = self.socket.accept()
+        try:
+            conn.setblocking(True)
+        except OSError:
+            pass
+        return conn, ("unix-peer", 0)
+
+    def verify_request(self, request, client_address):
+        try:
+            peer_uid = self._peer_uid_fn(request)
+        except Exception:
+            # Any unexpected peer-credential error (OSError or otherwise) must
+            # refuse this connection. Letting it escape into serve_forever
+            # would kill the room thread and the whole listener with it.
+            return False
+        if type(peer_uid) is not int or peer_uid is True or peer_uid is False:
+            return False
+        if peer_uid not in self._allowed_peer_uids:
+            return False
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -1259,6 +1766,41 @@ def run_check(config: ServerConfig) -> int:
             len(attention.get("chairman", [])), len(attention.get("ceo", [])), len(attention.get("coo", []))
         )
     )
+    # CAP-C1 (reviewer m-9; addendum B): one line when a placement_selection
+    # section is actually present; a degraded marker when the flag was
+    # given but the section came back None (the failure detail itself
+    # lives in the `degraded` list printed below, never repeated here). No
+    # line at all when the flag was never given — this stays exactly as
+    # quiet as every other never-asked-for optional feature. For
+    # state=selected the line also names the no-commitment discriminator
+    # (addendum B: selection creates no reservation/Job/Attempt/Worker/
+    # RuntimeBinding/provider effect); for tie_abstained it names every
+    # tied id (addendum A: C1 has no tie-breaker authority, so an exact tie
+    # always abstains); every other non-selected state names its exclusion
+    # count.
+    placement_selection = doc.get("placement_selection")
+    if placement_selection is not None:
+        state = placement_selection.get("state")
+        selected = placement_selection.get("selected")
+        selected_mode = placement_selection.get("selected_mode")
+        tied = placement_selection.get("tied_worker_ids") or []
+        exclusions = placement_selection.get("exclusions") or []
+        if state == "selected" and selected is not None:
+            # Mode wave: names the winning mode AND the strengthened
+            # no-commitment string — selecting a fresh lane still creates
+            # no session, no reservation, nothing.
+            detail = (
+                f"selected={selected.get('worker_id')} mode={selected_mode} "
+                "commitment=none (no session created or committed; no reservation/"
+                "worker/attempt/runtime-binding/provider effect)"
+            )
+        elif state == "tie_abstained":
+            detail = f"tied={','.join(tied)}"
+        else:
+            detail = f"exclusions={len(exclusions)}"
+        print(f"placement_selection: state={state} {detail}")
+    elif config.placement_selection_path:
+        print("placement_selection: degraded (see degraded list)")
     if doc["degraded"]:
         print("degraded:")
         for entry in doc["degraded"]:
@@ -1287,6 +1829,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", default=None, help="Mastermind checkout root (default: this repo)")
     parser.add_argument("--macro-root", default=None, help="Macro checkout root (default: auto-resolved)")
     parser.add_argument("--bindings-path", default=None, help="surface_bindings.json path (default: platform default)")
+    parser.add_argument(
+        "--claude-desktop-cli", default=DEFAULT_CLAUDE_DESKTOP_CLI,
+        help="isolated Claude Code CLI used for exact session handoff into Claude Desktop",
+    )
+    parser.add_argument(
+        "--placement-selection", default=None,
+        help="CAP-C1: path to a placement-selection facts document (default: no placement_selection "
+             "section composed)",
+    )
     parser.add_argument("--open", action="store_true", help="open the Control Room URL after startup")
     parser.add_argument("--check", action="store_true", help="build one document + capability census, print, exit 0")
     parser.add_argument(
@@ -1306,11 +1857,16 @@ def _build_config(args: argparse.Namespace) -> ServerConfig:
     repo_root = Path(args.repo_root).resolve() if args.repo_root else _REPO_ROOT
     macro_root = _resolve_macro_root_simple(args.macro_root, os.environ, repo_root)
     bindings_path = Path(args.bindings_path).expanduser() if args.bindings_path else None
+    placement_selection_path = (
+        Path(args.placement_selection).expanduser() if args.placement_selection else None
+    )
     token = secrets.token_urlsafe(32)
     return ServerConfig(
         repo_root=repo_root,
         macro_root=macro_root,
         bindings_path=bindings_path,
+        claude_desktop_cli=(str(Path(args.claude_desktop_cli).expanduser()) if args.claude_desktop_cli else None),
+        placement_selection_path=placement_selection_path,
         token=token,
         origin=f"http://{HOST}:{args.port}",
         port=args.port,

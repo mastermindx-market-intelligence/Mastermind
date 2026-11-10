@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="5" skipped="0" tests="10" time="0.213" timestamp="2026-10-14T02:19:26.681095-07:00" hostname="m2studio"><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_generated_packet_uses_distinct_tool_output_and_one_terminal_line" time="0.009"><failure message="assert 'seal --tool-output --packet ' in 'FABRIC_ARTIFACT_REQUEST_V1 {&quot;body_sha256&quot;:&quot;5f2ab774c4eb8097f156f7ed1a6ec04b806bed3e87ea9683d9d27ff7ddb0ff88&quot;,&quot;names&quot;:...pletion fail even if the model exits0. No descendants, retries or old-worker replay are authorized by this contract.\n'">test_tool_framing.py:68: in test_generated_packet_uses_distinct_tool_output_and_one_terminal_line
+    assert 'seal --tool-output --packet ' in encoded
+E   assert 'seal --tool-output --packet ' in 'FABRIC_ARTIFACT_REQUEST_V1 {"body_sha256":"5f2ab774c4eb8097f156f7ed1a6ec04b806bed3e87ea9683d9d27ff7ddb0ff88","names":...pletion fail even if the model exits0. No descendants, retries or old-worker replay are authorized by this contract.\n'</failure></testcase><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_actual_helper_tool_transcript_plus_final_answer_is_unambiguous" time="0.004"><failure message="SystemExit: 2">test_tool_framing.py:76: in test_actual_helper_tool_transcript_plus_final_answer_is_unambiguous
+    diagnostic = run_seal(tmp_path, monkeypatch, capsys, tool_output=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test_tool_framing.py:61: in run_seal
+    subject.main()
+artifact_production.base.py:386: in main
+    args=parser.parse_args()
+         ^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2012: in parse_args
+    self.error(msg)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2785: in error
+    self.exit(2, _('%(prog)s: error: %(message)s\n') % args)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2772: in exit
+    _sys.exit(status)
+E   SystemExit: 2</failure></testcase><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_legacy_seal_output_remains_byte_compatible" time="0.002" /><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_tool_mode_preserves_binding_and_observation_refusals[bind]" time="0.001"><failure message="SystemExit: 2">test_tool_framing.py:95: in test_tool_mode_preserves_binding_and_observation_refusals
+    run_seal(tmp_path, monkeypatch, capsys, tool_output=True, refuse=refuse)
+test_tool_framing.py:61: in run_seal
+    subject.main()
+artifact_production.base.py:386: in main
+    args=parser.parse_args()
+         ^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2012: in parse_args
+    self.error(msg)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2785: in error
+    self.exit(2, _('%(prog)s: error: %(message)s\n') % args)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2772: in exit
+    _sys.exit(status)
+E   SystemExit: 2</failure></testcase><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_tool_mode_preserves_binding_and_observation_refusals[observe]" time="0.002"><failure message="SystemExit: 2">test_tool_framing.py:95: in test_tool_mode_preserves_binding_and_observation_refusals
+    run_seal(tmp_path, monkeypatch, capsys, tool_output=True, refuse=refuse)
+test_tool_framing.py:61: in run_seal
+    subject.main()
+artifact_production.base.py:386: in main
+    args=parser.parse_args()
+         ^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2012: in parse_args
+    self.error(msg)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2785: in error
+    self.exit(2, _('%(prog)s: error: %(message)s\n') % args)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2772: in exit
+    _sys.exit(status)
+E   SystemExit: 2</failure></testcase><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_tool_diagnostic_alone_is_not_terminal_evidence" time="0.000" /><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_two_terminal_lines_still_refuse_identical_or_conflicting[False]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_two_terminal_lines_still_refuse_identical_or_conflicting[True]" time="0.000" /><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_tool_diagnostic_cannot_mask_wrong_terminal_scope_or_file_digest" time="0.001" /><testcase classname="integrations.session_bridge.artifact_tool_framing.test_tool_framing" name="test_packet_body_cannot_inject_the_new_reserved_marker" time="0.000"><failure message="Failed: DID NOT RAISE ValueError">test_tool_framing.py:133: in test_packet_body_cannot_inject_the_new_reserved_marker
+    with pytest.raises(ValueError, match='artifact_contract_reserved_marker'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ValueError</failure></testcase></testsuite></testsuites>

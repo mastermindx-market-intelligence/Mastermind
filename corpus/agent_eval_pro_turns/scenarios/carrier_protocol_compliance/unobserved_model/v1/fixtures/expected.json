@@ -1,0 +1,4 @@
+{
+  "answer": "LEAVE_SERVED_MODEL_UNKNOWN_AND_AVOID_COMPUTE_INFERENCE",
+  "rationale": "Requested and observed identities differ; elapsed time does not establish hidden reasoning usage."
+}

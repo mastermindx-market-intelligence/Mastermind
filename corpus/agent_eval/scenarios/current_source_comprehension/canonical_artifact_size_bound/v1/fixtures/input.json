@@ -1,0 +1,6 @@
+{
+  "extract": "The binding V1 implementation constant is:\n\nMAX_CANONICAL_ARTIFACT_BYTES = 4 * 1024 * 1024\n\nRequired behavior:\n\n- use file metadata to reject a regular file larger than the limit before reading it into memory;\n- after canonical serialization, reject a newly built document whose exact UTF-8 canonical byte length exceeds the same limit;\n- the limit includes the final own-digest field for persisted artifacts;\n- == 4 MiB is permitted; > 4 MiB is refused;\n- refusal is a structured contract/resource error with no temporary or final artifact path created.",
+  "question": "What is the exact integer number of bytes MAX_CANONICAL_ARTIFACT_BYTES equals, and is a canonical document whose exact UTF-8 byte length equals that many bytes accepted or refused?",
+  "source_doc": "docs/superpowers/plans/2026-08-31-agent-evaluation-r0.md",
+  "source_section": "§5.7 Exact canonical artifact size bound"
+}

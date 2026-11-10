@@ -1,0 +1,302 @@
+#!/bin/bash
+# Credential-free host preparation for the private A2 Agent Relay.
+#
+# This source-owned entry point creates or verifies only the fixed service
+# principal, non-secret prerequisite directories and disabled launchd override.
+# It refuses a loaded Relay and never enrolls a token,
+# writes Relay configuration or a plist, or loads and starts a service.
+set -euo pipefail
+umask 077
+
+SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
+CONFIG_ROOT="$SYSTEM_ROOT/config"
+RUNTIME_ROOT="/var/db/mastermind-agent-relay"
+# This shared relay directory is the live Unix-socket prerequisite.
+# Persistent parent survives /var/run cleanup; UID457 cannot create it under root-owned /var/db.
+SOCKET_ROOT="/var/db/mastermind-agent-relay/socket"
+RELAY_HOME="$RUNTIME_ROOT/home"
+TOKEN_PATH="$CONFIG_ROOT/agent-relay.token"
+CONFIG_PATH="$CONFIG_ROOT/agent-relay.json"
+PLIST_PATH="/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist"
+
+RELAY_LABEL="com.mastermind.executive.agent-relay"
+
+RELAY_USER="_mastermind_agent_relay"
+RELAY_GROUP="_mastermind_agent_relay"
+RELAY_UID="457"
+RELAY_GID="457"
+# POSIX directory permission mode (not an account/group identity).
+# Enforced by preflight, install, enrollment and negative mode tests.
+PARENT_DIRECTORY_PERMISSION_MODE=710
+EXEC_USER="_mastermind_exec"
+EXEC_UID="450"
+EXEC_GID="450"
+
+RELEASE_ROOT=""
+SOCKET_ONLY_UPGRADE=false
+
+usage() {
+  /bin/echo "usage: $0 --release-root /Library/Application\\ Support/MastermindExecutive/releases/<40hex> [--ensure-enrolled-socket-parent]" >&2
+  exit 64
+}
+
+refuse() {
+  /bin/echo "A2 Agent Relay host preparation refused: $1" >&2
+  exit 65
+}
+
+if [ "$(/usr/bin/uname -s)" != "Darwin" ]; then
+  /bin/echo "prepare-a2-agent-relay-host.sh supports macOS only" >&2
+  exit 69
+fi
+
+case "$#" in
+  2) ;;
+  3)
+    [ "$3" = "--ensure-enrolled-socket-parent" ] || usage
+    SOCKET_ONLY_UPGRADE=true
+    ;;
+  *) usage ;;
+esac
+[ "$1" = "--release-root" ] || usage
+RELEASE_ROOT="$2"
+case "$RELEASE_ROOT" in
+  "$SYSTEM_ROOT"/releases/*) ;;
+  *) refuse "release root must be beneath the reviewed releases root" ;;
+esac
+RELEASE_SHA="${RELEASE_ROOT##*/}"
+case "$RELEASE_SHA" in
+  ''|*[!0-9a-f]*) refuse "release root must end in one full 40-character lowercase hexadecimal SHA" ;;
+esac
+[ "${#RELEASE_SHA}" -eq 40 ] || {
+  refuse "release root must end in one full 40-character lowercase hexadecimal SHA"
+}
+[ "$(/usr/bin/id -u)" -eq 0 ] || {
+  /bin/echo "prepare-a2-agent-relay-host.sh must run as root" >&2
+  exit 77
+}
+
+[ -d "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ] || {
+  refuse "release root is unavailable or is a symlink"
+}
+[ "$(/usr/bin/stat -f '%u:%g' "$RELEASE_ROOT")" = "0:0" ] || {
+  refuse "release root is not root:wheel"
+}
+RELEASE_MODE="$(/usr/bin/stat -f '%Lp' "$RELEASE_ROOT")"
+[ "$((8#$RELEASE_MODE & 8#022))" -eq 0 ] || {
+  refuse "release root is writable by group or other"
+}
+case "$(/usr/bin/stat -f '%Sp' "$RELEASE_ROOT")" in
+  *+) refuse "release root has a filesystem ACL" ;;
+esac
+
+read_attribute() {
+  local record="$1" attribute="$2"
+  /usr/bin/dscl . -read "$record" "$attribute" 2>/dev/null \
+    | /usr/bin/awk -v key="$attribute" '
+        NR == 1 {
+          prefix=key ":"
+          native_prefix="dsAttrTypeNative:" key ":"
+          if (index($0, prefix) == 1) {
+            # canonical attribute spelling
+          } else if (index($0, native_prefix) == 1) {
+            prefix=native_prefix
+          } else {
+            exit 65
+          }
+          value=substr($0, length(prefix) + 1)
+          sub(/^[[:space:]]*/, "", value)
+          next
+        }
+        {value=value " " $0}
+        END {
+          if (NR == 0) exit 65
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+          print value
+        }
+      '
+}
+
+numeric_owners() {
+  local record_type="$1" attribute="$2" numeric="$3"
+  /usr/bin/dscl . -list "/$record_type" "$attribute" \
+    | /usr/bin/awk -v numeric="$numeric" '$NF == numeric {print $1}' \
+    | /usr/bin/sort -u | /usr/bin/tr '\n' ' ' | /usr/bin/sed 's/[[:space:]]*$//'
+}
+
+ensure_numeric_unused() {
+  local record_type="$1" attribute="$2" numeric="$3" expected="$4" owners
+  owners="$(numeric_owners "$record_type" "$attribute" "$numeric")"
+  if [ -n "$owners" ] && [ "$owners" != "$expected" ]; then
+    refuse "$attribute $numeric has an unexpected owner set"
+  fi
+}
+
+assert_exec_identity() {
+  [ "$(read_attribute "/Users/$EXEC_USER" UniqueID)" = "$EXEC_UID" ] \
+    && [ "$(read_attribute "/Users/$EXEC_USER" PrimaryGroupID)" = "$EXEC_GID" ] \
+    || refuse "the canonical Executive principal is unavailable"
+}
+
+ensure_group() {
+  ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
+  if /usr/bin/dscl . -read "/Groups/$RELAY_GROUP" >/dev/null 2>&1; then
+    [ "$(read_attribute "/Groups/$RELAY_GROUP" PrimaryGroupID)" = "$RELAY_GID" ] \
+      && [ "$(read_attribute "/Groups/$RELAY_GROUP" RealName)" = "$RELAY_GROUP service group" ] \
+      && [ "$(read_attribute "/Groups/$RELAY_GROUP" GroupMembership)" = "$EXEC_USER" ] \
+      || refuse "existing Relay group differs from the reviewed identity"
+  else
+    /usr/bin/dscl . -create "/Groups/$RELAY_GROUP"
+    /usr/bin/dscl . -create "/Groups/$RELAY_GROUP" PrimaryGroupID "$RELAY_GID"
+    /usr/bin/dscl . -create "/Groups/$RELAY_GROUP" RealName "$RELAY_GROUP service group"
+    /usr/bin/dscl . -create "/Groups/$RELAY_GROUP" GeneratedUID "$(/usr/bin/uuidgen)"
+    /usr/sbin/dseditgroup -o edit -a "$EXEC_USER" -t user "$RELAY_GROUP"
+    [ "$(read_attribute "/Groups/$RELAY_GROUP" GroupMembership)" = "$EXEC_USER" ] \
+      || refuse "Relay group membership could not be established"
+  fi
+}
+
+ensure_user() {
+  ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
+  if /usr/bin/dscl . -read "/Users/$RELAY_USER" >/dev/null 2>&1; then
+    [ "$(read_attribute "/Users/$RELAY_USER" UniqueID)" = "$RELAY_UID" ] \
+      && [ "$(read_attribute "/Users/$RELAY_USER" PrimaryGroupID)" = "$RELAY_GID" ] \
+      && [ "$(read_attribute "/Users/$RELAY_USER" RealName)" = "$RELAY_USER service account" ] \
+      && [ "$(read_attribute "/Users/$RELAY_USER" NFSHomeDirectory)" = "$RELAY_HOME" ] \
+      && [ "$(read_attribute "/Users/$RELAY_USER" UserShell)" = "/usr/bin/false" ] \
+      && [ "$(read_attribute "/Users/$RELAY_USER" IsHidden)" = "1" ] \
+      && [ "$(read_attribute "/Users/$RELAY_USER" Password)" = "*" ] \
+      || refuse "existing Relay user differs from the reviewed identity"
+  else
+    /usr/bin/dscl . -create "/Users/$RELAY_USER"
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" UniqueID "$RELAY_UID"
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" PrimaryGroupID "$RELAY_GID"
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" RealName "$RELAY_USER service account"
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" NFSHomeDirectory "$RELAY_HOME"
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" UserShell /usr/bin/false
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" IsHidden 1
+    /usr/bin/dscl . -create "/Users/$RELAY_USER" Password '*'
+  fi
+  /usr/bin/pwpolicy -n /Local/Default -u "$RELAY_USER" -disableuser >/dev/null 2>&1 \
+    || refuse "Relay service-account authentication could not be disabled"
+  if /usr/bin/dscl . -authonly "$RELAY_USER" "$(/usr/bin/uuidgen)" >/dev/null 2>&1; then
+    refuse "Relay service account unexpectedly accepted authentication"
+  fi
+}
+
+assert_not_member() {
+  local group="$1" membership status=0
+  membership="$(LC_ALL=C LANG=C /usr/sbin/dseditgroup -o checkmember -m "$RELAY_USER" "$group" 2>&1)" \
+    || status=$?
+  [ "$status" -eq 67 ] \
+    && [ "$membership" = "no $RELAY_USER is NOT a member of $group" ] \
+    || refuse "Relay service account isolation could not be proven"
+}
+
+ensure_directory() {
+  local path="$1" owner="$2" group="$3" uid="$4" gid="$5" mode="$6"
+  preflight_directory "$path" "$uid" "$gid" "$mode"
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    /usr/bin/install -d -o "$owner" -g "$group" -m "$mode" "$path"
+    [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "$uid:$gid:$mode" ] \
+      || refuse "created prerequisite directory differs from the reviewed identity"
+  fi
+  # Recheck the newly created inode including native ACL state.
+  preflight_directory "$path" "$uid" "$gid" "$mode"
+}
+
+preflight_directory() {
+  local path="$1" uid="$2" gid="$3" mode="$4"
+  if [ -e "$path" ] || [ -L "$path" ]; then
+    [ -d "$path" ] && [ ! -L "$path" ] \
+      && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "$uid:$gid:$mode" ] \
+      || refuse "existing prerequisite directory differs from the reviewed identity"
+    case "$(/usr/bin/stat -f '%Sp' "$path")" in
+      *+) refuse "existing prerequisite directory has a filesystem ACL" ;;
+    esac
+  fi
+}
+
+assert_relay_unloaded() {
+  local status=0
+  /bin/launchctl print "system/$RELAY_LABEL" >/dev/null 2>&1 || status=$?
+  [ "$status" -eq 113 ] || refuse "Agent Relay must be proven unloaded before enrollment"
+}
+
+
+# In-place upgrade for an already-enrolled host. Only the one fixed durable
+# socket directory may be created. No disable, account, token or service effect.
+if [ "$SOCKET_ONLY_UPGRADE" = true ]; then
+  assert_exec_identity
+  [ "$(read_attribute "/Groups/$RELAY_GROUP" PrimaryGroupID)" = "$RELAY_GID" ] \
+    && [ "$(read_attribute "/Groups/$RELAY_GROUP" GroupMembership)" = "$EXEC_USER" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" UniqueID)" = "$RELAY_UID" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" PrimaryGroupID)" = "$RELAY_GID" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" NFSHomeDirectory)" = "$RELAY_HOME" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" UserShell)" = "/usr/bin/false" ] \
+    || refuse "enrolled principal identity differs from the reviewed host"
+  for contract in "$SYSTEM_ROOT:0:0:755" "$CONFIG_ROOT:0:0:755" \
+                  "$RUNTIME_ROOT:0:0:711" "$RELAY_HOME:$RELAY_UID:$RELAY_GID:700"; do
+    target="${contract%%:*}"
+    expected="${contract#*:}"
+    [ -d "$target" ] && [ ! -L "$target" ] \
+      && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$target")" = "$expected" ] \
+      || refuse "enrolled directory differs from reviewed identity"
+    case "$(/usr/bin/stat -f '%Sp' "$target")" in
+      *+) refuse "enrolled directory has a filesystem ACL" ;;
+    esac
+  done
+  for contract in "$TOKEN_PATH:$RELAY_UID:$RELAY_GID:400" \
+                  "$CONFIG_PATH:$RELAY_UID:$RELAY_GID:400" \
+                  "$PLIST_PATH:0:0:644"; do
+    target="${contract%%:*}"
+    expected="${contract#*:}"
+    [ -f "$target" ] && [ ! -L "$target" ] \
+      && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$target")" = "$expected" ] \
+      || refuse "enrolled file metadata differs from reviewed identity"
+    case "$(/usr/bin/stat -f '%Sp' "$target")" in
+      *+) refuse "enrolled file has a filesystem ACL" ;;
+    esac
+  done
+  preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
+  ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
+  /bin/echo "A2 persistent socket directory ready; no service or enrollment effect"
+  exit 0
+fi
+
+assert_exec_identity
+for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do
+  [ ! -e "$reserved" ] && [ ! -L "$reserved" ] \
+    || refuse "existing enrollment or service artifact must be reconciled first"
+done
+assert_relay_unloaded
+preflight_directory "$SYSTEM_ROOT" 0 0 755
+preflight_directory "$CONFIG_ROOT" 0 0 755
+preflight_directory "$RUNTIME_ROOT" 0 0 711
+preflight_directory "$RELAY_HOME" "$RELAY_UID" "$RELAY_GID" 700
+preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
+ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
+ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
+
+# Installed reviewed control/worker configs must exist before host mutation.
+# The canonical global transaction records any uncertain disable; this script
+# never retries that effect. Reconcile its exact marker through the same owner.
+/bin/bash "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" \
+  a2-disable-prepare --expected-sha "$RELEASE_SHA"
+
+ensure_group
+ensure_user
+for forbidden_group in _mastermind_exec _mastermind_worker _mastermind_ops \
+  _mastermind_codex_01 _mastermind_codex_02 _mastermind_codex_03; do
+  assert_not_member "$forbidden_group"
+done
+
+ensure_directory "$SYSTEM_ROOT" root wheel 0 0 755
+ensure_directory "$CONFIG_ROOT" root wheel 0 0 755
+ensure_directory "$RUNTIME_ROOT" root wheel 0 0 711
+ensure_directory "$RELAY_HOME" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 700
+ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
+
+assert_relay_unloaded
+
+/bin/echo "A2 Agent Relay host preparation complete: exact principal, directories and disabled unloaded Relay"

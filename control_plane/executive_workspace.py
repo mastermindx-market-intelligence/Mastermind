@@ -1,36 +1,73 @@
-"""Credential-free per-job Git workspace preparation for Executive OS.
+"""Git workspace custody for Executive workers and trusted attended sessions.
 
-The supervisor, not the model process, owns workspace creation.  A local clone
-copies Git metadata instead of linking to the administrative repository, checks
-out one immutable base commit, creates one task branch, and removes every
-remote before the worker starts.
+The supervisor, not the model process, owns workspace creation. Untrusted workers
+receive private credentialless clones with distinct Git metadata. Trusted attended
+Web/host sessions may instead receive linked worktrees that share only the source
+repository object store and remain bound to one explicit operation.
 """
 from __future__ import annotations
 
 import dataclasses
 import datetime as dt
+import hashlib
+import json
 import os
 import re
+import selectors
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path, PurePosixPath
 from typing import Callable, Mapping, Sequence
 
+from common.commission_ref import CommissionRef
+
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_LINKED_OPERATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
+_LINKED_LANE_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_EXACT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_CANONICAL_COMMISSION_REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+_CANONICAL_COMMISSION_REMOTE_URL = (
+    "https://github.com/mastermindx-market-intelligence/Mastermind.git"
+)
+_COMMISSION_ACQUISITION_REMOTE = "mastermind-commission-acquisition"
+_COMMISSION_ACQUISITION_DIR = ".commission-acquisition"
+LINKED_WORKTREE_LOCK_PREFIX = "mastermind-linked-worktree:v1"
 LAUNCH_CLEAN_STATUS_ARGS = (
     "status",
     "--porcelain=v1",
     "-z",
-    "--untracked-files=all",
+    "--untracked-files=no",
 )
 LAUNCH_CLEAN_UNTRACKED_ARGS = ("ls-files", "--others", "-z")
 
 
 class WorkspaceError(RuntimeError):
     """A job workspace could not be prepared without sharing authority."""
+
+
+class LinkedWorkspaceReleaseEffectUnknown(WorkspaceError):
+    """The original native release may have changed files or custody metadata."""
+
+    def __init__(self, message: str, *, phase: str, operation_id: str | None,
+                 workspace_path: str, head_sha: str, branch: str,
+                 lock_restoration: str):
+        super().__init__(message)
+        self.details = {
+            "code": "LINKED_WORKSPACE_RELEASE_EFFECT_UNKNOWN",
+            "release_phase": phase,
+            "operation_id": operation_id,
+            "workspace_path": workspace_path,
+            "head_sha": head_sha,
+            "branch": branch,
+            "lock_restoration": lock_restoration,
+            "retry_authorized": False,
+        }
 
 
 class GitHandoffError(WorkspaceError):
@@ -57,7 +94,10 @@ class AssignmentSealError(WorkspaceError):
 #
 # STATE C — TERMINAL_SEALED
 #   workspace root becomes control-private 0700
-#   worker traversal revoked; forensic/control observation only
+#   worker traversal revoked; ordinary callers may observe only
+#   The project allocator below may perform the explicit C→A→B handoff only
+#   from canonical native terminal artifacts, with service quiescence/lock and
+#   exact original Git/index evidence. It does not repair arbitrary workspaces.
 CONTROL_CONSTRUCTION = "CONTROL_CONSTRUCTION"
 SHARED_HANDOFF = "SHARED_HANDOFF"
 TERMINAL_SEALED = "TERMINAL_SEALED"
@@ -220,6 +260,87 @@ class WorkspaceReceipt:
         return dataclasses.asdict(self)
 
 
+@dataclasses.dataclass(frozen=True)
+class CommissionDependencyLimits:
+    max_objects: int
+    max_metadata_bytes: int
+    max_uncompressed_bytes: int
+    max_pack_bytes: int
+    max_cpu_seconds: int = 15
+
+    def __post_init__(self) -> None:
+        values = (
+            self.max_objects,
+            self.max_metadata_bytes,
+            self.max_uncompressed_bytes,
+            self.max_pack_bytes,
+            self.max_cpu_seconds,
+        )
+        if any(type(value) is not int or value <= 0 for value in values):
+            raise WorkspaceError("commission dependency limits must be positive integers")
+
+
+@dataclasses.dataclass(frozen=True)
+class CommissionDependencyPlan:
+    source_repository: str | Path
+    commission_ref: CommissionRef
+    limits: CommissionDependencyLimits
+    acquire_missing_from_canonical: bool = False
+
+    def __post_init__(self) -> None:
+        if type(self.commission_ref) is not CommissionRef:
+            raise WorkspaceError("commission dependency requires canonical CommissionRef")
+        if type(self.limits) is not CommissionDependencyLimits:
+            raise WorkspaceError("commission dependency requires exact limits")
+        if type(self.acquire_missing_from_canonical) is not bool:
+            raise WorkspaceError("commission acquisition flag must be boolean")
+        if (
+            self.acquire_missing_from_canonical
+            and self.commission_ref.repository != _CANONICAL_COMMISSION_REPOSITORY
+        ):
+            raise WorkspaceError("commission acquisition repository is not canonical")
+
+
+@dataclasses.dataclass(frozen=True)
+class LinkedWorkspaceReceipt:
+    """Custody receipt for a trusted same-principal linked Git worktree.
+
+    Executive workers still require a private credentialless clone. Attended
+    Web/host sessions may share only the administrative Git object store.
+    """
+
+    source_repository: str
+    workspace_root: str
+    workspace_path: str
+    operation_id: str
+    lane: str
+    base_sha: str
+    head_sha: str
+    branch: str
+    common_git_dir: str
+    lock_reason: str
+    reused: bool
+
+    def to_dict(self) -> dict[str, object]:
+        return dataclasses.asdict(self)
+
+
+@dataclasses.dataclass(frozen=True)
+class LinkedWorkspaceReleaseReceipt:
+    source_repository: str
+    workspace_path: str
+    state: str
+    head_sha: str
+    branch: str
+    dirty: bool
+    recoverability: str
+    removed: bool
+    reason: str
+
+    def to_dict(self) -> dict[str, object]:
+        return dataclasses.asdict(self)
+
+
 def _seal_identity(path: Path, info: os.stat_result) -> dict[str, object]:
     return {
         "path": str(path),
@@ -236,6 +357,7 @@ def seal_control_owned_paths(
     paths: dict[str, str | Path],
     *,
     control_uid: int | None = None,
+    expected_identities: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Remove worker traversal at control-owned assignment boundaries.
 
@@ -244,6 +366,10 @@ def seal_control_owned_paths(
     control-owned assignment root makes every descendant unreachable to the
     worker principal.  Every requested boundary is attempted even if another
     fails; successful revocations are never rolled back.
+
+    A remote owner may bind this effect to its retained pre-seal snapshot.
+    That snapshot is an exact filesystem precondition, not caller authority
+    or proof that worker admission/process cleanup is held.
     """
 
     if not paths or any(
@@ -255,6 +381,21 @@ def seal_control_owned_paths(
     canonical_values = [Path(value).resolve(strict=False) for value in paths.values()]
     if len(canonical_values) != len(set(canonical_values)):
         raise AssignmentSealError("assignment seal paths must be distinct")
+
+    expected: dict[str, dict[str, object]] | None = None
+    if expected_identities is not None:
+        fields = {"path", "device", "inode", "mode", "uid", "gid", "mtime_ns"}
+        if not isinstance(expected_identities, Mapping) or set(expected_identities) != set(paths):
+            raise AssignmentSealError("assignment seal snapshot labels differ")
+        expected = {}
+        for label, value in expected_identities.items():
+            if (not isinstance(value, Mapping) or set(value) != fields
+                    or type(value["path"]) is not str
+                    or value["path"] != str(Path(paths[label]).resolve(strict=False))
+                    or any(type(value[key]) is not int or value[key] < 0
+                           for key in fields - {"path"})):
+                raise AssignmentSealError("assignment seal snapshot is malformed")
+            expected[label] = dict(value)
 
     sealed: dict[str, dict[str, object]] = {}
     errors: list[str] = []
@@ -275,6 +416,11 @@ def seal_control_owned_paths(
                     f"{label} boundary is not a control-owned protected directory"
                 )
             before_identity = _seal_identity(path.resolve(strict=True), before)
+            if expected is not None and before_identity != expected[label]:
+                raise AssignmentSealError(f"{label} boundary differs from original snapshot")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (before.st_dev, before.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while opening")
             os.fchmod(descriptor, 0o700)
             os.fsync(descriptor)
             after = os.fstat(descriptor)
@@ -285,6 +431,9 @@ def seal_control_owned_paths(
                 for field in stable_fields
             ) or after_identity["mode"] != 0o700:
                 raise AssignmentSealError(f"{label} boundary did not seal to mode 0700")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (after.st_dev, after.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while sealing")
             sealed[label] = {
                 "before": before_identity,
                 "after": after_identity,
@@ -327,7 +476,10 @@ def _git_env(home: Path) -> dict[str, str]:
     }
 
 
-def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
+def _run(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str],
+    timeout_seconds: int = 60,
+) -> str:
     try:
         completed = subprocess.run(
             list(argv),
@@ -337,7 +489,7 @@ def _run(argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]) -> str:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=60,
+            timeout=timeout_seconds,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
@@ -368,6 +520,134 @@ def _run_bytes(
         ).strip()[-1000:]
         raise WorkspaceError(f"workspace command failed ({completed.returncode}): {detail}")
     return completed.stdout
+
+
+def _run_bytes_with_input(
+    argv: Sequence[str],
+    *,
+    cwd: Path | None,
+    env: dict[str, str],
+    input_bytes: bytes,
+) -> bytes:
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=str(cwd) if cwd is not None else None,
+            env=env,
+            input=input_bytes,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).decode(
+            "utf-8", errors="replace"
+        ).strip()[-1000:]
+        raise WorkspaceError(f"workspace command failed ({completed.returncode}): {detail}")
+    return completed.stdout
+
+
+def _run_bounded_bytes_with_input(
+    argv: Sequence[str],
+    *,
+    cwd: Path | None,
+    env: dict[str, str],
+    input_bytes: bytes,
+    max_stdout_bytes: int,
+    bytes_limit_message: str,
+    max_stdout_lines: int | None = None,
+    lines_limit_message: str | None = None,
+) -> bytes:
+    if type(max_stdout_bytes) is not int or max_stdout_bytes <= 0:
+        raise WorkspaceError("bounded command requires a positive stdout byte limit")
+    if max_stdout_lines is not None and (
+        type(max_stdout_lines) is not int or max_stdout_lines <= 0
+    ):
+        raise WorkspaceError("bounded command requires a positive stdout line limit")
+
+    with tempfile.TemporaryFile() as input_file, tempfile.TemporaryFile() as stderr_file:
+        input_file.write(input_bytes)
+        input_file.seek(0)
+        try:
+            process = subprocess.Popen(
+                list(argv),
+                cwd=str(cwd) if cwd is not None else None,
+                env=env,
+                stdin=input_file,
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+            )
+        except OSError as exc:
+            raise WorkspaceError(
+                f"workspace command could not run: {argv[0]}: {exc}"
+            ) from exc
+        if process.stdout is None:  # pragma: no cover - subprocess contract
+            process.kill()
+            process.wait()
+            raise WorkspaceError("workspace command stdout is unavailable")
+
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        deadline = time.monotonic() + 60
+        output = bytearray()
+        line_count = 0
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    process.kill()
+                    process.wait()
+                    raise WorkspaceError(f"workspace command timed out: {argv[0]}")
+                events = selector.select(remaining)
+                if not events:
+                    if process.poll() is not None:
+                        break
+                    continue
+                read_size = min(64 * 1024, max_stdout_bytes - len(output) + 1)
+                chunk = os.read(process.stdout.fileno(), max(1, read_size))
+                if not chunk:
+                    break
+                line_count += chunk.count(b"\n")
+                if (
+                    max_stdout_lines is not None
+                    and line_count > max_stdout_lines
+                ):
+                    process.kill()
+                    process.wait()
+                    raise WorkspaceError(
+                        lines_limit_message or bytes_limit_message
+                    )
+                output.extend(chunk)
+                if len(output) > max_stdout_bytes:
+                    process.kill()
+                    process.wait()
+                    raise WorkspaceError(bytes_limit_message)
+            try:
+                returncode = process.wait(
+                    timeout=max(0.1, deadline - time.monotonic())
+                )
+            except subprocess.TimeoutExpired as exc:
+                process.kill()
+                process.wait()
+                raise WorkspaceError(
+                    f"workspace command timed out: {argv[0]}"
+                ) from exc
+        finally:
+            selector.close()
+            process.stdout.close()
+
+        if returncode != 0:
+            stderr_file.seek(0)
+            detail = stderr_file.read()[-1000:].decode(
+                "utf-8", errors="replace"
+            ).strip()
+            raise WorkspaceError(
+                f"workspace command failed ({returncode}): {detail}"
+            )
+        return bytes(output)
 
 
 def _share_symlink_with_group(path: Path, *, shared_gid: int) -> None:
@@ -440,6 +720,933 @@ def _discard_partial_workspace(destination: Path) -> None:
         pass
 
 
+def _commission_acquisition_identity(
+    *, job_id: str, base_sha: str, ref: CommissionRef
+) -> bytes:
+    return (
+        "mastermind.executive_commission_acquisition/v1\n"
+        f"job_id={job_id}\n"
+        f"base_sha={base_sha}\n"
+        f"repository={ref.repository}\n"
+        f"commit={ref.commit}\n"
+        f"path={ref.path}\n"
+        f"content_sha256={ref.content_sha256}\n"
+    ).encode("utf-8")
+
+
+def _require_private_control_directory(path: Path, *, label: str) -> None:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError(f"{label} could not be observed") from exc
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) & 0o077
+    ):
+        raise WorkspaceError(f"{label} is not control-owned and private")
+
+
+def _acquisition_operation_path(root: Path, *, job_id: str) -> Path:
+    return root / _COMMISSION_ACQUISITION_DIR / job_id.lower()
+
+
+def _cleanup_acquisition_operation(operation_path: Path) -> None:
+    parent = operation_path.parent
+    try:
+        if operation_path.is_symlink() or operation_path.is_file():
+            operation_path.unlink()
+        elif operation_path.is_dir():
+            shutil.rmtree(operation_path, ignore_errors=True)
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        # A synchronous cleanup failure is caught by the caller before
+        # SHARED_HANDOFF.  Crash leftovers are reconciled on the same identity
+        # at the beginning of the next preparation.
+        pass
+
+
+def _reconcile_stale_acquisition(
+    root: Path,
+    destination: Path,
+    *,
+    job_id: str,
+    base_sha: str,
+    ref: CommissionRef,
+) -> None:
+    operation_path = _acquisition_operation_path(root, job_id=job_id)
+    if not os.path.lexists(operation_path):
+        return
+    acquisition_root = operation_path.parent
+    _require_private_control_directory(
+        acquisition_root, label="commission acquisition root"
+    )
+    _require_private_control_directory(
+        operation_path, label="commission acquisition operation"
+    )
+    identity_path = operation_path / "identity"
+    try:
+        observed = identity_path.read_bytes()
+    except OSError as exc:
+        raise WorkspaceError(
+            "commission acquisition crash identity is unavailable"
+        ) from exc
+    expected = _commission_acquisition_identity(
+        job_id=job_id, base_sha=base_sha, ref=ref
+    )
+    if observed != expected:
+        raise WorkspaceError("commission acquisition crash identity drifted")
+
+    expected_destination = root / job_id.lower()
+    if destination != expected_destination or destination.parent != root:
+        raise WorkspaceError(
+            "commission acquisition crash workspace is not the exact direct child"
+        )
+    _require_private_control_directory(
+        root, label="commission acquisition workspace root"
+    )
+
+    # The acquisition operation is removed before STATE B begins.  Therefore a
+    # matching leftover proves any same-name destination is still a partial
+    # STATE A construction from this exact operation, not a handed-off worker
+    # workspace.  Refuse ambiguous path types/ownership rather than deleting.
+    if os.path.lexists(destination):
+        if destination.is_symlink() or not destination.is_dir():
+            raise WorkspaceError(
+                "commission acquisition crash left an ambiguous workspace path"
+            )
+        info = destination.lstat()
+        if info.st_uid != os.geteuid():
+            raise WorkspaceError(
+                "commission acquisition crash workspace is not control-owned"
+            )
+        shutil.rmtree(destination)
+    _cleanup_acquisition_operation(operation_path)
+
+
+def _canonical_commission_remote_url(ref: CommissionRef) -> str:
+    if ref.repository != _CANONICAL_COMMISSION_REPOSITORY:
+        raise WorkspaceError("commission acquisition repository is not canonical")
+    return _CANONICAL_COMMISSION_REMOTE_URL
+
+
+def _require_canonical_commission_source_scope(
+    source: Path,
+    *,
+    base_sha: str,
+    ref: CommissionRef,
+    limits: CommissionDependencyLimits,
+    env: dict[str, str],
+) -> None:
+    """Prove canonical acquisition adds only one regular commission file."""
+
+    read_env = git_observation_env(env)
+    read_env["GIT_NO_LAZY_FETCH"] = "1"
+    read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+
+    parent_bytes = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-list",
+            "--parents",
+            "--max-count=1",
+            ref.commit,
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=1 << 10,
+        bytes_limit_message="canonical commission parent evidence exceeds limit",
+        max_stdout_lines=1,
+        lines_limit_message="canonical commission parent evidence is malformed",
+    )
+    try:
+        parent_fields = parent_bytes.decode("ascii", errors="strict").split()
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError(
+            "canonical commission parent evidence is malformed"
+        ) from exc
+    if parent_fields != [ref.commit, base_sha]:
+        raise WorkspaceError(
+            "canonical commission commit must be a direct child of assigned base"
+        )
+
+    changed_bytes = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--no-renames",
+            base_sha,
+            ref.commit,
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=limits.max_metadata_bytes,
+        bytes_limit_message="canonical commission source scope exceeds limit",
+        max_stdout_lines=2,
+        lines_limit_message="canonical commission source scope exceeds limit",
+    )
+    try:
+        changed_paths = [
+            line
+            for line in changed_bytes.decode("utf-8", errors="strict").splitlines()
+            if line
+        ]
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError(
+            "canonical commission source scope is malformed"
+        ) from exc
+    if changed_paths != [ref.path]:
+        raise WorkspaceError(
+            "canonical commission source scope contains unexpected paths"
+        )
+
+    tree_bytes = _run_bounded_bytes_with_input(
+        ["git", "-C", str(source), "ls-tree", ref.commit, "--", ref.path],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=1 << 10,
+        bytes_limit_message="canonical commission tree evidence exceeds limit",
+        max_stdout_lines=1,
+        lines_limit_message="canonical commission tree evidence is malformed",
+    )
+    try:
+        metadata, separator, raw_path = tree_bytes.rstrip(b"\n").partition(b"\t")
+        mode, kind, _object_id = metadata.split()
+        tree_path = raw_path.decode("utf-8", errors="strict")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise WorkspaceError(
+            "canonical commission tree evidence is malformed"
+        ) from exc
+    if (
+        separator != b"\t"
+        or mode != b"100644"
+        or kind != b"blob"
+        or tree_path != ref.path
+    ):
+        raise WorkspaceError(
+            "canonical commission path must be a regular file"
+        )
+
+
+def _commission_delta_locally_complete(
+    source: Path,
+    *,
+    base_sha: str,
+    ref: CommissionRef,
+    limits: CommissionDependencyLimits,
+    env: dict[str, str],
+) -> bool:
+    read_env = git_observation_env(env)
+    read_env["GIT_NO_LAZY_FETCH"] = "1"
+    read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    status_code, resolved_commit, _stderr = _run_status(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"{ref.commit}^{{commit}}",
+        ],
+        cwd=None,
+        env=read_env,
+    )
+    if status_code == 1:
+        return False
+    if status_code != 0:
+        raise WorkspaceError(
+            "commission dependency local object state is unreadable"
+        )
+    if resolved_commit != ref.commit:
+        raise WorkspaceError("commission dependency commit identity drifted")
+    raw = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-list",
+            "--objects",
+            "--no-object-names",
+            "--missing=print",
+            ref.commit,
+            f"^{base_sha}",
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=limits.max_metadata_bytes,
+        bytes_limit_message="commission dependency metadata exceeds limit",
+        max_stdout_lines=limits.max_objects,
+        lines_limit_message="commission dependency object count exceeds limit",
+    )
+    try:
+        lines = raw.decode("ascii", errors="strict").splitlines()
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError("commission dependency object metadata is malformed") from exc
+    return not any(line.startswith("?") for line in lines)
+
+
+def _run_canonical_acquisition_fetch(
+    quarantine: Path,
+    *,
+    remote_url: str,
+    ref: CommissionRef,
+    limits: CommissionDependencyLimits,
+    env: dict[str, str],
+) -> None:
+    # Do not use preexec_fn here: this function is called from asyncio.to_thread
+    # in the production service, and preexec_fn is unsafe in a multithreaded
+    # parent.  POSIX sh applies native rlimits in the child before exec instead.
+    file_block_bytes = 1 << 9
+    file_blocks = max(
+        1, (limits.max_pack_bytes + file_block_bytes - 1) // file_block_bytes
+    )
+    shell = (
+        'ulimit -f "$1" || exit 97; '
+        'ulimit -t "$2" || exit 98; '
+        'ulimit -n 64 || exit 99; '
+        'shift 2; exec "$@"'
+    )
+    command = [
+        "/bin/sh",
+        "-c",
+        shell,
+        "mastermind-commission-acquisition",
+        str(file_blocks),
+        str(limits.max_cpu_seconds),
+        "git",
+        "-C",
+        str(quarantine),
+        "-c",
+        "protocol.version=2",
+        "-c",
+        "http.followRedirects=false",
+        "-c",
+        "http.proxy=",
+        "-c",
+        "http.maxRequests=1",
+        "-c",
+        "fetch.unpackLimit=1",
+        "-c",
+        "fetch.writeCommitGraph=false",
+        "-c",
+        "fetch.recurseSubmodules=false",
+        "-c",
+        "maintenance.auto=false",
+        "-c",
+        "gc.auto=0",
+        "-c",
+        "transfer.fsckObjects=true",
+        "-c",
+        "fetch.fsckObjects=true",
+        "fetch",
+        "--quiet",
+        "--no-tags",
+        "--no-write-fetch-head",
+        f"--filter=blob:limit={limits.max_uncompressed_bytes}",
+        _COMMISSION_ACQUISITION_REMOTE,
+        ref.commit,
+    ]
+    fetch_env = dict(env)
+    fetch_env["GIT_NO_LAZY_FETCH"] = "1"
+    fetch_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    for proxy_name in (
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ):
+        fetch_env.pop(proxy_name, None)
+    # remote_url is persisted only in the temporary named remote; it is passed
+    # here solely to make the fixed-source binding visible to tests/review.
+    if not remote_url:
+        raise WorkspaceError("commission acquisition remote is unavailable")
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        try:
+            process = subprocess.Popen(
+                command,
+                cwd=None,
+                env=fetch_env,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_file,
+                stderr=stderr_file,
+                start_new_session=True,
+            )
+            process.wait(timeout=min(60, max(10, limits.max_cpu_seconds + 15)))
+        except subprocess.TimeoutExpired as exc:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait()
+            raise WorkspaceError("commission acquisition fetch timed out") from exc
+        except OSError as exc:
+            raise WorkspaceError("commission acquisition fetch could not start") from exc
+        if process.returncode != 0:
+            stderr_file.seek(0)
+            detail = stderr_file.read()[-1000:].decode(
+                "utf-8", errors="replace"
+            ).strip()
+            raise WorkspaceError(
+                f"commission acquisition fetch failed ({process.returncode}): {detail}"
+            )
+
+
+def _acquire_commission_quarantine(
+    source: Path,
+    root: Path,
+    *,
+    job_id: str,
+    base_sha: str,
+    plan: CommissionDependencyPlan,
+    env: dict[str, str],
+) -> tuple[Path, Path]:
+    ref = plan.commission_ref
+    limits = plan.limits
+    remote_url = _canonical_commission_remote_url(ref)
+    acquisition_root = root / _COMMISSION_ACQUISITION_DIR
+    if os.path.lexists(acquisition_root):
+        _require_private_control_directory(
+            acquisition_root, label="commission acquisition root"
+        )
+    else:
+        acquisition_root.mkdir(mode=stat.S_IRWXU)
+        _require_private_control_directory(
+            acquisition_root, label="commission acquisition root"
+        )
+    operation_path = _acquisition_operation_path(root, job_id=job_id)
+    if os.path.lexists(operation_path):
+        raise WorkspaceError("commission acquisition operation was not reconciled")
+    operation_path.mkdir(mode=stat.S_IRWXU)
+    identity_path = operation_path / "identity"
+    identity_path.write_bytes(
+        _commission_acquisition_identity(
+            job_id=job_id, base_sha=base_sha, ref=ref
+        )
+    )
+    identity_path.chmod(0o600)
+    quarantine = operation_path / "repository.git"
+
+    try:
+        _run(
+            [
+                "git",
+                "clone",
+                "--bare",
+                "--local",
+                "--no-hardlinks",
+                str(source),
+                str(quarantine),
+            ],
+            cwd=None,
+            env=env,
+        )
+        for remote in [
+            value for value in _run(
+                ["git", "-C", str(quarantine), "remote"], cwd=None, env=env
+            ).splitlines()
+            if value
+        ]:
+            _run(
+                ["git", "-C", str(quarantine), "remote", "remove", remote],
+                cwd=None,
+                env=env,
+            )
+        if _run(["git", "-C", str(quarantine), "remote"], cwd=None, env=env):
+            raise WorkspaceError("commission acquisition seed retained a remote")
+
+        read_env = git_observation_env(env)
+        read_env["GIT_NO_LAZY_FETCH"] = "1"
+        read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+        resolved_base = _run(
+            ["git", "-C", str(quarantine), "rev-parse", "--verify", f"{base_sha}^{{commit}}"],
+            cwd=None,
+            env=read_env,
+        )
+        if resolved_base != base_sha:
+            raise WorkspaceError("commission acquisition base identity drifted")
+
+        config_path = quarantine / "config"
+        config_preimage = config_path.read_bytes()
+        config_mode = stat.S_IMODE(config_path.lstat().st_mode)
+        refs_before = _run(
+            ["git", "-C", str(quarantine), "for-each-ref", "--format=%(refname) %(objectname)"],
+            cwd=None,
+            env=read_env,
+        )
+        pack_dir = quarantine / "objects" / "pack"
+        before_pack_files = (
+            {path.name for path in pack_dir.iterdir()} if pack_dir.is_dir() else set()
+        )
+
+        _run(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "remote",
+                "add",
+                _COMMISSION_ACQUISITION_REMOTE,
+                remote_url,
+            ],
+            cwd=None,
+            env=env,
+        )
+        try:
+            _run_canonical_acquisition_fetch(
+                quarantine,
+                remote_url=remote_url,
+                ref=ref,
+                limits=limits,
+                env=env,
+            )
+        finally:
+            # Restore the exact pre-acquisition config bytes even if Git added
+            # promisor/filter keys or the fetch failed.
+            config_path.write_bytes(config_preimage)
+            config_path.chmod(config_mode)
+
+        if config_path.read_bytes() != config_preimage:
+            raise WorkspaceError("commission acquisition config was not restored")
+        if _run(["git", "-C", str(quarantine), "remote"], cwd=None, env=read_env):
+            raise WorkspaceError("commission acquisition retained a remote")
+        if (quarantine / "FETCH_HEAD").exists():
+            raise WorkspaceError("commission acquisition wrote FETCH_HEAD")
+        refs_after = _run(
+            ["git", "-C", str(quarantine), "for-each-ref", "--format=%(refname) %(objectname)"],
+            cwd=None,
+            env=read_env,
+        )
+        if refs_after != refs_before:
+            raise WorkspaceError("commission acquisition changed quarantine refs")
+
+        after_pack_files = (
+            {path.name for path in pack_dir.iterdir()} if pack_dir.is_dir() else set()
+        )
+        new_names = after_pack_files - before_pack_files
+        new_pack_paths = [
+            pack_dir / name for name in new_names if name.endswith(".pack")
+        ]
+        if sum(path.stat().st_size for path in new_pack_paths) > limits.max_pack_bytes:
+            raise WorkspaceError("commission acquisition pack exceeds limit")
+        new_index_paths = [
+            pack_dir / name
+            for name in new_names
+            if name.endswith((".idx", ".rev", ".bitmap"))
+        ]
+        if sum(path.stat().st_size for path in new_index_paths) > limits.max_metadata_bytes:
+            raise WorkspaceError("commission acquisition metadata exceeds limit")
+
+        resolved_commit = _run(
+            ["git", "-C", str(quarantine), "rev-parse", "--verify", f"{ref.commit}^{{commit}}"],
+            cwd=None,
+            env=read_env,
+        )
+        if resolved_commit != ref.commit:
+            raise WorkspaceError("commission acquisition commit identity drifted")
+        try:
+            _run(
+                ["git", "-C", str(quarantine), "merge-base", "--is-ancestor", base_sha, ref.commit],
+                cwd=None,
+                env=read_env,
+            )
+        except WorkspaceError as exc:
+            raise WorkspaceError(
+                "commission acquisition commit does not descend from assigned base"
+            ) from exc
+
+        raw_delta = _run_bounded_bytes_with_input(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "rev-list",
+                "--objects",
+                "--no-object-names",
+                "--missing=print",
+                ref.commit,
+                f"^{base_sha}",
+            ],
+            cwd=None,
+            env=read_env,
+            input_bytes=b"",
+            max_stdout_bytes=limits.max_metadata_bytes,
+            bytes_limit_message="commission acquisition metadata exceeds limit",
+            max_stdout_lines=limits.max_objects,
+            lines_limit_message="commission acquisition object count exceeds limit",
+        )
+        try:
+            delta_lines = raw_delta.decode("ascii", errors="strict").splitlines()
+        except UnicodeDecodeError as exc:
+            raise WorkspaceError("commission acquisition object metadata is malformed") from exc
+        if any(line.startswith("?") for line in delta_lines):
+            raise WorkspaceError("commission acquisition closure is incomplete")
+        object_ids = [line for line in delta_lines if line]
+        object_evidence = _run_bytes_with_input(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "cat-file",
+                "--batch-check=%(objectname) %(objectsize)",
+            ],
+            cwd=None,
+            env=read_env,
+            input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+        ).decode("ascii", errors="strict")
+        total_uncompressed = 0
+        for line in object_evidence.splitlines():
+            fields = line.split()
+            if len(fields) != 2 or not fields[1].isdigit():
+                raise WorkspaceError(
+                    "commission acquisition object evidence is malformed"
+                )
+            total_uncompressed += int(fields[1])
+        if total_uncompressed > limits.max_uncompressed_bytes:
+            raise WorkspaceError("commission acquisition bytes exceed limit")
+
+        # A trusted local seed may itself be a partial clone.  Successful
+        # acquisition must become an ordinary local object store before it can
+        # feed SHARED_HANDOFF, so scrub every promisor marker, not only markers
+        # created by this fetch.  The no-lazy fsck below proves that removing
+        # those promises did not hide a missing object in C's reachable graph.
+        all_promisor = (
+            list(pack_dir.glob("*.promisor")) if pack_dir.is_dir() else []
+        )
+        for marker in all_promisor:
+            marker.unlink()
+        if any(pack_dir.glob("*.promisor")):
+            raise WorkspaceError("commission acquisition retained promisor markers")
+        promisor_config_status, promisor_config, _promisor_error = _run_status(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "config",
+                "--get-regexp",
+                r"^remote\..*\.(promisor|partialclonefilter)$",
+            ],
+            cwd=None,
+            env=read_env,
+        )
+        if promisor_config_status not in {0, 1}:
+            raise WorkspaceError("commission acquisition promisor config is unreadable")
+        if promisor_config_status == 0 or promisor_config:
+            raise WorkspaceError("commission acquisition retained promisor config")
+
+        # Re-run the exact delta walk only after every promisor marker/config
+        # is gone and lazy fetching is disabled.
+        closed_delta = _run_bounded_bytes_with_input(
+            [
+                "git",
+                "-C",
+                str(quarantine),
+                "rev-list",
+                "--objects",
+                "--no-object-names",
+                "--missing=print",
+                ref.commit,
+                f"^{base_sha}",
+            ],
+            cwd=None,
+            env=read_env,
+            input_bytes=b"",
+            max_stdout_bytes=limits.max_metadata_bytes,
+            bytes_limit_message="commission acquisition metadata exceeds limit",
+            max_stdout_lines=limits.max_objects,
+            lines_limit_message="commission acquisition object count exceeds limit",
+        )
+        if any(line.startswith(b"?") for line in closed_delta.splitlines()):
+            raise WorkspaceError("commission acquisition closure is incomplete after scrub")
+        try:
+            _run(
+                [
+                    "git",
+                    "-C",
+                    str(quarantine),
+                    "fsck",
+                    "--connectivity-only",
+                    "--no-dangling",
+                    ref.commit,
+                ],
+                cwd=None,
+                env=read_env,
+            )
+        except WorkspaceError as exc:
+            raise WorkspaceError(
+                "commission acquisition connectivity is incomplete after scrub"
+            ) from exc
+        return quarantine, operation_path
+    except BaseException:
+        _cleanup_acquisition_operation(operation_path)
+        raise
+
+
+def _prepare_commission_dependency(
+    destination: Path,
+    *,
+    base_sha: str,
+    plan: CommissionDependencyPlan,
+    env: dict[str, str],
+) -> None:
+    source = Path(plan.source_repository).expanduser().resolve()
+    if not source.is_dir():
+        raise WorkspaceError("commission dependency source is unavailable")
+    ref = plan.commission_ref
+    limits = plan.limits
+    read_env = git_observation_env(env)
+    read_env["GIT_NO_LAZY_FETCH"] = "1"
+    read_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+
+    resolved_commit = _run(
+        ["git", "-C", str(source), "rev-parse", "--verify", f"{ref.commit}^{{commit}}"],
+        cwd=None,
+        env=read_env,
+    )
+    if resolved_commit != ref.commit:
+        raise WorkspaceError("commission dependency commit identity drifted")
+    try:
+        _run(
+            ["git", "-C", str(source), "merge-base", "--is-ancestor", base_sha, ref.commit],
+            cwd=None,
+            env=read_env,
+        )
+    except WorkspaceError as exc:
+        raise WorkspaceError(
+            "commission dependency commit does not descend from assigned base"
+        ) from exc
+    blob_spec = f"{ref.commit}:{ref.path}"
+    if _run(
+        ["git", "-C", str(source), "cat-file", "-t", blob_spec],
+        cwd=None,
+        env=read_env,
+    ) != "blob":
+        raise WorkspaceError("commission dependency path is not a blob")
+    raw_blob_size = _run(
+        ["git", "-C", str(source), "cat-file", "-s", blob_spec],
+        cwd=None,
+        env=read_env,
+    )
+    try:
+        blob_size = int(raw_blob_size)
+    except ValueError as exc:
+        raise WorkspaceError("commission dependency blob size is malformed") from exc
+    if blob_size < 1 or blob_size > limits.max_uncompressed_bytes:
+        raise WorkspaceError("commission dependency bytes exceed limit")
+    content = _run_bytes(
+        ["git", "-C", str(source), "cat-file", "blob", blob_spec],
+        cwd=None,
+        env=read_env,
+    )
+    if hashlib.sha256(content).hexdigest() != ref.content_sha256:
+        raise WorkspaceError("commission dependency digest differs from CommissionRef")
+
+    raw_objects = _run_bounded_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-list",
+            "--objects",
+            "--no-object-names",
+            ref.commit,
+            f"^{base_sha}",
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=b"",
+        max_stdout_bytes=limits.max_metadata_bytes,
+        bytes_limit_message="commission dependency metadata exceeds limit",
+        max_stdout_lines=limits.max_objects,
+        lines_limit_message="commission dependency object count exceeds limit",
+    )
+    try:
+        object_ids = tuple(
+            line for line in raw_objects.decode("ascii", errors="strict").splitlines()
+            if line
+        )
+    except UnicodeDecodeError as exc:
+        raise WorkspaceError("commission dependency object metadata is malformed") from exc
+    if not object_ids:
+        return
+
+    check = _run_bytes_with_input(
+        [
+            "git",
+            "-C",
+            str(source),
+            "cat-file",
+            "--batch-check=%(objectname) %(objectsize)",
+        ],
+        cwd=None,
+        env=read_env,
+        input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+    ).decode("ascii", errors="strict")
+    total = 0
+    for line in check.splitlines():
+        fields = line.split()
+        if len(fields) != 2 or not fields[1].isdigit():
+            raise WorkspaceError("commission dependency object evidence is malformed")
+        total += int(fields[1])
+    if total > limits.max_uncompressed_bytes:
+        raise WorkspaceError("commission dependency bytes exceed limit")
+
+    refs_before = _run(
+        ["git", "-C", str(destination), "for-each-ref", "--format=%(refname) %(objectname)"],
+        cwd=None,
+        env=read_env,
+    )
+    pack = _run_bounded_bytes_with_input(
+        ["git", "-C", str(source), "pack-objects", "--stdout"],
+        cwd=None,
+        env=read_env,
+        input_bytes=("\n".join(object_ids) + "\n").encode("ascii"),
+        max_stdout_bytes=limits.max_pack_bytes,
+        bytes_limit_message="commission dependency pack exceeds limit",
+    )
+    _run_bytes_with_input(
+        ["git", "-C", str(destination), "index-pack", "--stdin"],
+        cwd=None,
+        env=env,
+        input_bytes=pack,
+    )
+    try:
+        _run(
+            [
+                "git",
+                "-C",
+                str(destination),
+                "fsck",
+                "--connectivity-only",
+                "--no-dangling",
+                ref.commit,
+            ],
+            cwd=None,
+            env=read_env,
+        )
+    except WorkspaceError as exc:
+        raise WorkspaceError(
+            "prepared commission connectivity is incomplete"
+        ) from exc
+    prepared = _run_bytes(
+        ["git", "-C", str(destination), "cat-file", "blob", blob_spec],
+        cwd=None,
+        env=read_env,
+    )
+    if hashlib.sha256(prepared).hexdigest() != ref.content_sha256:
+        raise WorkspaceError("prepared commission bytes differ from CommissionRef")
+    refs_after = _run(
+        ["git", "-C", str(destination), "for-each-ref", "--format=%(refname) %(objectname)"],
+        cwd=None,
+        env=read_env,
+    )
+    if refs_after != refs_before:
+        raise WorkspaceError("commission preparation changed destination refs")
+
+
+def _pinned_sparse_directories(
+    source: Path,
+    base_sha: str,
+    *,
+    env: dict[str, str],
+    required_paths: Sequence[PurePosixPath] = (),
+) -> tuple[str, ...] | None:
+    """Read the existing repository profile from the exact admitted commit.
+
+    No caller checkout/config file supplies policy. Missing or explicitly disabled
+    profiles retain legacy materialization; malformed present profiles fail closed.
+    This is construction policy, never an active-workspace cleanup/retrofit API.
+    """
+    profile_path = "config/sparse_worktree.json"
+    entry = _run_bytes(
+        ["git", "ls-tree", "-z", base_sha, "--", profile_path], cwd=source, env=env
+    )
+    if not entry:
+        return None
+    try:
+        metadata, name = entry.rstrip(b"\x00").split(b"\t", 1)
+        mode, kind, oid = metadata.decode("ascii").split()
+        if name != profile_path.encode() or mode != "100644" or kind != "blob":
+            raise ValueError("profile must be a regular tracked file")
+        size = int(_run(["git", "cat-file", "-s", oid], cwd=source, env=env))
+        if not 0 < size <= 65536:
+            raise ValueError("profile exceeds its 64 KiB bound")
+        raw = _run_bytes(["git", "cat-file", "blob", oid], cwd=source, env=env)
+        if len(raw) != size:
+            raise ValueError("profile size changed")
+
+        def unique_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate profile key")
+                result[key] = value
+            return result
+
+        policy = json.loads(raw, object_pairs_hook=unique_pairs)
+        if type(policy) is not dict or type(policy.get("enabled")) is not bool:
+            raise ValueError("enabled must be a boolean")
+        if any(key not in {"enabled", "exclude_dirs"} and not key.startswith("_") for key in policy):
+            raise ValueError("unknown profile field")
+        excluded = policy.get("exclude_dirs")
+        if type(excluded) is not list or len(excluded) > 128:
+            raise ValueError("exclude_dirs must be a bounded list")
+        if any(
+            not isinstance(name, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.-]{1,255}", name)
+            or name in {".", "..", ".git"}
+            for name in excluded
+        ) or len(set(excluded)) != len(excluded):
+            raise ValueError("exclude_dirs must contain unique safe top-level names")
+    except (ValueError, TypeError, UnicodeError) as exc:
+        raise WorkspaceError(f"invalid pinned sparse profile: {exc}") from exc
+    if not policy["enabled"]:
+        return None
+    raw_dirs = _run_bytes(
+        ["git", "ls-tree", "-d", "--name-only", "-z", base_sha], cwd=source, env=env
+    )
+    try:
+        directories = [value.decode("utf-8") for value in raw_dirs.split(b"\x00") if value]
+    except UnicodeError as exc:
+        raise WorkspaceError("sparse directory names must be UTF-8") from exc
+    if len(directories) > 4096 or any(
+        not re.fullmatch(r"[A-Za-z0-9_.-]{1,255}", name) for name in directories
+    ):
+        raise WorkspaceError("sparse directory list is unsupported or exceeds its bound")
+    # A granted write target must not be hidden. Include its existing top-level
+    # tree before sharing DAC permissions; no worker gains additional write rights.
+    required_roots = {path.parts[0] for path in required_paths}
+    return tuple(sorted(name for name in directories if name not in excluded or name in required_roots))
+
+
+def _configure_new_sparse_workspace(
+    destination: Path, directories: tuple[str, ...] | None, *, env: dict[str, str]
+) -> None:
+    if directories is None:
+        return
+    _run_bytes_with_input(
+        ["git", "sparse-checkout", "set", "--cone", "--stdin"],
+        cwd=destination,
+        env=env,
+        input_bytes="".join(name + "\n" for name in directories).encode("utf-8"),
+    )
+
+
 def prepare_credentialless_clone(
     source_repository: str | Path,
     workspace_root: str | Path,
@@ -449,6 +1656,7 @@ def prepare_credentialless_clone(
     branch: str | None = None,
     shared_gid: int | None = None,
     shared_write_paths: Sequence[str] = (),
+    commission_dependency: CommissionDependencyPlan | None = None,
 ) -> WorkspaceReceipt:
     """Create one independent, no-remote clone beneath ``workspace_root``.
 
@@ -460,6 +1668,8 @@ def prepare_credentialless_clone(
         raise WorkspaceError("job_id is unsafe for a workspace name")
     if shared_write_paths and shared_gid is None:
         raise WorkspaceError("shared_write_paths requires shared_gid")
+    if commission_dependency is not None and type(commission_dependency) is not CommissionDependencyPlan:
+        raise WorkspaceError("commission dependency plan is invalid")
     normalized_write_paths: list[PurePosixPath] = []
     for raw in shared_write_paths:
         if (
@@ -489,29 +1699,64 @@ def prepare_credentialless_clone(
     if not source.is_dir():
         raise WorkspaceError(f"source repository is not a directory: {source}")
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    destination = (root / safe_job_id.lower()).resolve()
+    destination = root / safe_job_id.lower()
     if destination.parent != root:
         raise WorkspaceError("workspace destination escaped its assigned root")
-    if destination.exists():
-        raise WorkspaceError(f"workspace already exists: {destination}")
 
     selected_branch = branch or f"codex/job-{safe_job_id.lower()}"
     # STATE A — CONTROL_CONSTRUCTION: mutating Git is allowed. Do not wrap
     # clone/checkout/switch/remote-remove in the read-only observation env.
     env = _git_env(root / ".supervisor-home")
-    _run(["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"], cwd=None, env=env)
-    resolved_base = _run(
-        ["git", "-C", str(source), "rev-parse", "--verify", f"{base_sha}^{{commit}}"],
+    _run(
+        ["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"],
         cwd=None,
         env=env,
     )
-    _run(["git", "check-ref-format", "--branch", selected_branch], cwd=source, env=env)
+    resolved_base = _run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "rev-parse",
+            "--verify",
+            f"{base_sha}^{{commit}}",
+        ],
+        cwd=None,
+        env=env,
+    )
+    if (
+        commission_dependency is not None
+        and commission_dependency.acquire_missing_from_canonical
+    ):
+        _reconcile_stale_acquisition(
+            root,
+            destination,
+            job_id=safe_job_id,
+            base_sha=resolved_base,
+            ref=commission_dependency.commission_ref,
+        )
+    if os.path.lexists(destination):
+        raise WorkspaceError(f"workspace already exists: {destination}")
+    _run(
+        ["git", "check-ref-format", "--branch", selected_branch],
+        cwd=source,
+        env=env,
+    )
+    sparse_directories = _pinned_sparse_directories(
+        source, resolved_base, env=env, required_paths=normalized_write_paths
+    )
+    acquisition_operation: Path | None = None
     try:
         _run(
             ["git", "clone", "--local", "--no-hardlinks", "--no-checkout", str(source), str(destination)],
             cwd=None,
             env=env,
         )
+        if sparse_directories is not None:
+            # The cloned HEAD can differ from the admitted base. Bind only this
+            # new, private HEAD before sparse setup can materialize any files.
+            _run(["git", "update-ref", "--no-deref", "HEAD", resolved_base], cwd=destination, env=env)
+            _configure_new_sparse_workspace(destination, sparse_directories, env=env)
         _run(["git", "checkout", "--detach", resolved_base], cwd=destination, env=env)
         _run(["git", "switch", "-c", selected_branch], cwd=destination, env=env)
         remotes = _run(["git", "remote"], cwd=destination, env=env).splitlines()
@@ -523,6 +1768,65 @@ def prepare_credentialless_clone(
         git_dir = destination / ".git"
         if actual_base != resolved_base or remaining or not git_dir.is_dir():
             raise WorkspaceError("prepared workspace failed its exact-SHA, no-remote self-check")
+        if commission_dependency is not None:
+            dependency_plan = commission_dependency
+            if commission_dependency.acquire_missing_from_canonical:
+                dependency_source = Path(
+                    commission_dependency.source_repository
+                ).expanduser().resolve()
+                if not dependency_source.is_dir():
+                    raise WorkspaceError(
+                        "commission dependency source is unavailable"
+                    )
+                if not _commission_delta_locally_complete(
+                    dependency_source,
+                    base_sha=resolved_base,
+                    ref=commission_dependency.commission_ref,
+                    limits=commission_dependency.limits,
+                    env=env,
+                ):
+                    quarantine, acquisition_operation = (
+                        _acquire_commission_quarantine(
+                            dependency_source,
+                            root,
+                            job_id=safe_job_id,
+                            base_sha=resolved_base,
+                            plan=commission_dependency,
+                            env=env,
+                        )
+                    )
+                    dependency_plan = CommissionDependencyPlan(
+                        source_repository=quarantine,
+                        commission_ref=commission_dependency.commission_ref,
+                        limits=commission_dependency.limits,
+                    )
+            if commission_dependency.acquire_missing_from_canonical:
+                _require_canonical_commission_source_scope(
+                    Path(dependency_plan.source_repository)
+                    .expanduser()
+                    .resolve(),
+                    base_sha=resolved_base,
+                    ref=commission_dependency.commission_ref,
+                    limits=commission_dependency.limits,
+                    env=env,
+                )
+            _prepare_commission_dependency(
+                destination,
+                base_sha=resolved_base,
+                plan=dependency_plan,
+                env=env,
+            )
+            if (
+                _run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=destination,
+                    env=env,
+                )
+                != resolved_base
+            ):
+                raise WorkspaceError("commission preparation moved workspace HEAD")
+            if _run(["git", "remote"], cwd=destination, env=env):
+                raise WorkspaceError("commission preparation introduced a remote")
         if shared_gid is not None:
             for current_root, directory_names, file_names in os.walk(
                 destination, topdown=True, followlinks=False
@@ -595,10 +1899,24 @@ def prepare_credentialless_clone(
                 shared_gid=int(shared_gid),
             )
         workspace_info = destination.lstat()
+        if acquisition_operation is not None:
+            # The private acquisition marker remains authoritative until every
+            # workspace handoff postcondition has passed.  A process death
+            # before this commit point can therefore reconcile and rebuild the
+            # same Job instead of leaving an unclassified existing workspace.
+            _cleanup_acquisition_operation(acquisition_operation)
+            if os.path.lexists(acquisition_operation):
+                raise WorkspaceError(
+                    "commission acquisition cleanup did not complete"
+                )
+            acquisition_operation = None
     except BaseException:
         # Any failure past this point leaves a half-written clone that
         # would block every later attempt for this job ID.  Discard it
-        # and re-raise the real cause unchanged.
+        # and re-raise the real cause unchanged.  Acquisition remains
+        # private control state until every handoff postcondition passes.
+        if acquisition_operation is not None:
+            _cleanup_acquisition_operation(acquisition_operation)
         _discard_partial_workspace(destination)
         raise
     return WorkspaceReceipt(
@@ -612,3 +1930,1313 @@ def prepare_credentialless_clone(
         workspace_gid=workspace_info.st_gid,
         workspace_mode=stat.S_IMODE(workspace_info.st_mode),
     )
+
+
+def _common_git_dir(repository: Path, *, env: dict[str, str]) -> Path:
+    raw = _run(
+        ["git", "-C", str(repository), "rev-parse", "--git-common-dir"],
+        cwd=None,
+        env=env,
+    )
+    path = Path(raw)
+    if not path.is_absolute():
+        path = repository / path
+    return path.resolve()
+
+
+def _worktree_records(source: Path, *, env: dict[str, str]) -> list[dict[str, str]]:
+    """Parse ``git worktree list --porcelain`` without inventing new state."""
+
+    output = _run(
+        ["git", "-C", str(source), "worktree", "list", "--porcelain"],
+        cwd=None,
+        env=env,
+    )
+    records: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in [*output.splitlines(), ""]:
+        if not line:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        key, separator, value = line.partition(" ")
+        current[key] = value if separator else ""
+    return records
+
+
+def _worktree_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    wanted = str(destination.resolve())
+    for record in _worktree_records(source, env=env):
+        raw = record.get("worktree")
+        if raw and str(Path(raw).resolve()) == wanted:
+            return record
+    return None
+
+
+
+def _registered_linked_worktree_status_record(
+    source: Path, destination: Path, *, env: dict[str, str]
+) -> dict[str, str] | None:
+    """Verify ONE locked linked-worktree registration without enumerating the fleet.
+
+    Status reads run on hosts with thousands of other worktrees; repository-wide
+    `git worktree list --porcelain` may exceed the publisher's bounded precheck.
+    Git's own .git -> common/worktrees/<id> -> gitdir reciprocal registration and
+    the exact managed lock are sufficient for this *read-only* status lookup.
+    This read-only lookup is not release authority. Release independently binds
+    the original target, native selection, cleanliness and recoverability;
+    acquisition retains its existing enumeration. No registry is created here.
+    """
+    try:
+        dot_git = destination / ".git"
+        if dot_git.is_symlink() or not dot_git.is_file():
+            return None
+        if dot_git.stat().st_size > 4096:
+            return None
+        pointer = dot_git.read_text(encoding="utf-8")
+        if not pointer.startswith("gitdir: ") or pointer.count("\n") > 1:
+            return None
+        value = pointer[len("gitdir: "):].strip()
+        if not value or any(c in value for c in "\r\n\x00"):
+            return None
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            return None
+
+        common = _common_git_dir(source, env=env)
+        common_worktrees = common / "worktrees"
+        if common_worktrees.is_symlink():
+            return None
+        owner_dir = common_worktrees.resolve(strict=True)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != owner_dir or not admin.is_dir():
+            return None
+
+        backref, lock = admin / "gitdir", admin / "locked"
+        if (backref.is_symlink() or lock.is_symlink()
+                or not backref.is_file() or not lock.is_file()
+                or backref.stat().st_size > 4096 or lock.stat().st_size > 2048):
+            return None
+        back = backref.read_text(encoding="utf-8").strip()
+        if (not Path(back).is_absolute() or any(c in back for c in "\r\n\x00")
+                or Path(back).resolve(strict=True) != dot_git.resolve(strict=True)):
+            return None
+        reason = lock.read_text(encoding="utf-8").strip()
+        if ("\n" in reason or "\r" in reason
+                or not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")):
+            return None
+        return {"worktree": str(destination.resolve()), "locked": reason}
+    except (OSError, UnicodeError, RuntimeError, ValueError):
+        return None
+
+
+def _run_status(
+    argv: Sequence[str], *, cwd: Path | None, env: dict[str, str]
+) -> tuple[int, str, str]:
+    """Run a bounded Git predicate where exit 1 can be meaningful."""
+
+    try:
+        completed = subprocess.run(
+            list(argv),
+            cwd=str(cwd) if cwd is not None else None,
+            env=env,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise WorkspaceError(f"workspace command could not run: {argv[0]}: {exc}") from exc
+    return completed.returncode, completed.stdout.strip(), completed.stderr.strip()
+
+
+def _managed_linked_lock_reason(*, operation_id: str, lane: str, base_sha: str) -> str:
+    return (
+        f"{LINKED_WORKTREE_LOCK_PREFIX} operation={operation_id} "
+        f"lane={lane} base={base_sha}"
+    )
+
+
+def _lock_value(reason: str, key: str) -> str | None:
+    marker = f"{key}="
+    for token in reason.split():
+        if token.startswith(marker):
+            return token[len(marker) :]
+    return None
+
+
+def _require_linked_identity(
+    source: Path,
+    destination: Path,
+    *,
+    env: dict[str, str],
+    expected_lock_reason: str | None = None,
+    status_direct_registration: bool = False,
+) -> tuple[dict[str, str], str, str, Path]:
+    record = (
+        _registered_linked_worktree_status_record(source, destination, env=env)
+        if status_direct_registration
+        else _worktree_record(source, destination, env=env)
+    )
+    if record is None:
+        raise WorkspaceError("workspace is not registered to the source repository")
+    reason = record.get("locked", "")
+    if not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX):
+        raise WorkspaceError("workspace is not a managed linked worktree")
+    if expected_lock_reason is not None and reason != expected_lock_reason:
+        raise WorkspaceError("workspace lock identity does not match the requested operation")
+    if not destination.is_dir():
+        raise WorkspaceError("registered linked workspace path is unavailable")
+    dot_git = destination / ".git"
+    if not dot_git.is_file():
+        raise WorkspaceError("linked workspace must use a worktree .git file")
+    source_common = _common_git_dir(source, env=env)
+    destination_common = _common_git_dir(destination, env=env)
+    if destination_common != source_common:
+        raise WorkspaceError("linked workspace does not share the source Git common directory")
+    head = _run(["git", "-C", str(destination), "rev-parse", "HEAD"], cwd=None, env=env)
+    branch = _run(
+        ["git", "-C", str(destination), "branch", "--show-current"], cwd=None, env=env
+    )
+    return record, head, branch, destination_common
+
+
+def prepare_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    *,
+    operation_id: str,
+    lane: str,
+    base_sha: str,
+    branch: str,
+    workspace_name: str | None = None,
+) -> LinkedWorkspaceReceipt:
+    """Acquire one low-storage linked worktree for a trusted attended session.
+
+    The function is idempotent for the same operation/path/branch/base identity.
+    It never removes remotes or changes shared repository configuration.  It is
+    therefore only for the same authenticated OS principal as the source owner;
+    untrusted Executive workers must continue to use ``prepare_credentialless_clone``.
+    """
+
+    operation = str(operation_id).strip()
+    selected_lane = str(lane).strip().lower()
+    selected_base = str(base_sha).strip().lower()
+    selected_branch = str(branch).strip()
+    name = str(workspace_name or operation).strip().lower()
+    if not _LINKED_OPERATION_RE.fullmatch(operation):
+        raise WorkspaceError("operation_id is unsafe for linked workspace custody")
+    if not _LINKED_LANE_RE.fullmatch(selected_lane):
+        raise WorkspaceError("lane is unsafe for linked workspace custody")
+    if not _LINKED_OPERATION_RE.fullmatch(name):
+        raise WorkspaceError("workspace_name is unsafe for linked workspace custody")
+    if not _EXACT_SHA_RE.fullmatch(selected_base):
+        raise WorkspaceError("base_sha must be an exact 40-character lowercase commit SHA")
+
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    if not source.is_dir():
+        raise WorkspaceError(f"source repository is not a directory: {source}")
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    lane_root = (root / selected_lane).resolve()
+    if lane_root.parent != root:
+        raise WorkspaceError("linked workspace lane escaped its assigned root")
+    lane_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination = (lane_root / name).resolve()
+    if destination.parent != lane_root:
+        raise WorkspaceError("linked workspace destination escaped its assigned lane")
+
+    env = _git_env(root / ".control-home")
+    _run(["git", "-C", str(source), "rev-parse", "--is-inside-work-tree"], cwd=None, env=env)
+    resolved_base = _run(
+        ["git", "-C", str(source), "rev-parse", "--verify", f"{selected_base}^{{commit}}"],
+        cwd=None,
+        env=env,
+    ).lower()
+    if resolved_base != selected_base:
+        raise WorkspaceError("base_sha did not resolve to the exact requested commit")
+    _run(["git", "check-ref-format", "--branch", selected_branch], cwd=source, env=env)
+    expected_lock = _managed_linked_lock_reason(
+        operation_id=operation, lane=selected_lane, base_sha=resolved_base
+    )
+
+    if destination.exists():
+        _, head, actual_branch, common = _require_linked_identity(
+            source, destination, env=env, expected_lock_reason=expected_lock
+        )
+        if actual_branch != selected_branch:
+            raise WorkspaceError("existing linked workspace branch does not match the operation")
+        return LinkedWorkspaceReceipt(
+            source_repository=str(source),
+            workspace_root=str(root),
+            workspace_path=str(destination),
+            operation_id=operation,
+            lane=selected_lane,
+            base_sha=resolved_base,
+            head_sha=head,
+            branch=actual_branch,
+            common_git_dir=str(common),
+            lock_reason=expected_lock,
+            reused=True,
+        )
+
+    branch_code, existing_branch, _ = _run_status(
+        ["git", "-C", str(source), "rev-parse", "--verify", "--quiet", f"refs/heads/{selected_branch}"],
+        cwd=None,
+        env=env,
+    )
+    if branch_code == 0 and existing_branch:
+        raise WorkspaceError("linked workspace branch already exists without its bound workspace")
+    if branch_code not in {0, 1}:
+        raise WorkspaceError("could not determine whether the linked workspace branch exists")
+
+    sparse_directories = _pinned_sparse_directories(source, resolved_base, env=env)
+    if sparse_directories is not None:
+        code, enrolled, _ = _run_status(
+            ["git", "-C", str(source), "config", "--bool", "--get", "extensions.worktreeConfig"],
+            cwd=None, env=env,
+        )
+        if code != 0 or enrolled.strip() != "true":
+            raise WorkspaceError("source worktreeConfig enrollment is required for sparse creation")
+
+    created = False
+    try:
+        _run(
+            [
+                "git",
+                "-C",
+                str(source),
+                "worktree",
+                "add",
+                "--no-checkout",
+                "--lock",
+                "--reason",
+                expected_lock,
+                "-b",
+                selected_branch,
+                str(destination),
+                resolved_base,
+            ],
+            cwd=None,
+            env=env,
+        )
+        created = True
+        _configure_new_sparse_workspace(destination, sparse_directories, env=env)
+        # Hydrate the admitted HEAD without detaching its operation-bound branch.
+        # A large sparse index on an occupied host can exceed the normal 60s
+        # Git read limit. Extend only this new-worktree hydration to a finite
+        # 240s budget; reads, identity checks and other Git calls keep 60s.
+        # Failed hydration still follows the existing exact-branch cleanup.
+        _run(["git", "read-tree", "-mu", "HEAD"], cwd=destination, env=env,
+             timeout_seconds=240)
+        _, head, actual_branch, common = _require_linked_identity(
+            source, destination, env=env, expected_lock_reason=expected_lock
+        )
+        if head.lower() != resolved_base or actual_branch != selected_branch:
+            raise WorkspaceError("linked workspace failed its exact base/branch self-check")
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: _run_bytes(
+                ["git", *arguments],
+                cwd=destination,
+                env=git_observation_env(env),
+            )
+        )
+        if cleanliness.dirty:
+            raise WorkspaceError("linked workspace was not clean immediately after acquisition")
+    except BaseException:
+        if created:
+            _run_status(
+                ["git", "-C", str(source), "worktree", "unlock", str(destination)],
+                cwd=None,
+                env=env,
+            )
+            _run_status(
+                ["git", "-C", str(source), "worktree", "remove", "--force", str(destination)],
+                cwd=None,
+                env=env,
+            )
+            branch_code, branch_head, _ = _run_status(
+                ["git", "-C", str(source), "rev-parse", f"refs/heads/{selected_branch}"],
+                cwd=None,
+                env=env,
+            )
+            if branch_code == 0 and branch_head.lower() == resolved_base:
+                _run_status(
+                    ["git", "-C", str(source), "branch", "-D", selected_branch],
+                    cwd=None,
+                    env=env,
+                )
+        raise
+
+    return LinkedWorkspaceReceipt(
+        source_repository=str(source),
+        workspace_root=str(root),
+        workspace_path=str(destination),
+        operation_id=operation,
+        lane=selected_lane,
+        base_sha=resolved_base,
+        head_sha=head,
+        branch=actual_branch,
+        common_git_dir=str(common),
+        lock_reason=expected_lock,
+        reused=False,
+    )
+
+
+def inspect_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    workspace_path: str | Path,
+    *,
+    expected_operation_id: str | None = None,
+    status_direct_registration: bool = False,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
+) -> LinkedWorkspaceReleaseReceipt:
+    """Classify whether a managed linked worktree can be removed without data loss."""
+
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    destination = Path(workspace_path).expanduser().resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as exc:
+        raise WorkspaceError("workspace is outside the managed linked-worktree root") from exc
+    if destination == root:
+        raise WorkspaceError("managed workspace may not be the workspace root itself")
+    env = _git_env(root / ".control-home")
+    record, head, branch, _ = _require_linked_identity(
+        source, destination, env=env,
+        status_direct_registration=status_direct_registration,
+    )
+    lock_reason = record.get("locked", "")
+    if expected_operation_id is not None:
+        observed_operation = _lock_value(lock_reason, "operation")
+        if observed_operation != expected_operation_id:
+            raise WorkspaceError("workspace operation identity does not match the release request")
+    base = _lock_value(lock_reason, "base") or ""
+    if published_branch is not None and published_pull_request is not None:
+        raise WorkspaceError("publication evidence selectors are mutually exclusive")
+    declared_publication_branch: str | None = None
+    if published_branch is not None:
+        if (
+            type(published_branch) is not str
+            or not published_branch
+            or published_branch != published_branch.strip()
+            or len(published_branch) > 256
+            or published_branch.startswith(("-", "/", ".", "refs/"))
+            or published_branch.endswith(("/", ".", ".lock"))
+            or ".." in published_branch
+            or "//" in published_branch
+            or "@{" in published_branch
+            or any(
+                character.isspace()
+                or ord(character) < 32
+                or ord(character) == 127
+                or character in "\\~^:?*["
+                for character in published_branch
+            )
+        ):
+            raise WorkspaceError("published branch is invalid")
+        declared_publication_branch = published_branch
+    if published_pull_request is not None and (
+        type(published_pull_request) is not int
+        or published_pull_request < 1
+        or published_pull_request > 2_147_483_647
+    ):
+        raise WorkspaceError("published pull request is invalid")
+    cleanliness = observe_launch_cleanliness(
+        lambda arguments: _run_bytes(
+            ["git", *arguments], cwd=destination, env=git_observation_env(env)
+        )
+    )
+    if cleanliness.dirty:
+        return LinkedWorkspaceReleaseReceipt(
+            source_repository=str(source),
+            workspace_path=str(destination),
+            state="PRESERVED_DIRTY",
+            head_sha=head,
+            branch=branch,
+            dirty=True,
+            recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
+            removed=False,
+            reason=(
+                "tracked or untracked workspace changes are present; "
+                f"tracked_changes={'present' if cleanliness.status else 'absent'}; "
+                f"all_untracked={'present' if cleanliness.all_untracked else 'absent'} "
+                "(including ignored files). Ordinary git status may hide ignored files. "
+                "Inspect git ls-files --others -z; retain needed source and evidence, "
+                "and remove only verified disposable outputs before requesting release. "
+                "No files were removed."
+            ),
+        )
+
+    if head.lower() == base.lower():
+        recoverability = "UNCHANGED_FROM_ACQUIRED_BASE"
+    else:
+        ancestor_code, _, _ = _run_status(
+            [
+                "git",
+                "-C",
+                str(source),
+                "merge-base",
+                "--is-ancestor",
+                head,
+                "refs/remotes/origin/master",
+            ],
+            cwd=None,
+            env=env,
+        )
+        remote_head = ""
+        if branch:
+            remote_code, remote_value, _ = _run_status(
+                ["git", "-C", str(source), "rev-parse", f"refs/remotes/origin/{branch}"],
+                cwd=None,
+                env=env,
+            )
+            if remote_code == 0:
+                remote_head = remote_value
+        declared_remote_head = ""
+        if declared_publication_branch is not None:
+            declared_code, declared_value, _ = _run_status(
+                [
+                    "git",
+                    "-C",
+                    str(source),
+                    "rev-parse",
+                    f"refs/remotes/origin/{declared_publication_branch}",
+                ],
+                cwd=None,
+                env=env,
+            )
+            if declared_code == 0:
+                declared_remote_head = declared_value
+        pull_remote_head = ""
+        if published_pull_request is not None:
+            pull_ref = f"refs/pull/{published_pull_request}/head"
+            pull_code, pull_value, _ = _run_status(
+                ["git", "-C", str(source), "ls-remote", "--refs", "origin", pull_ref],
+                cwd=None,
+                env=env,
+            )
+            rows = pull_value.splitlines() if pull_code == 0 else []
+            if len(rows) == 1:
+                observed_sha, separator, observed_ref = rows[0].partition("\t")
+                if (
+                    separator
+                    and observed_ref == pull_ref
+                    and _EXACT_SHA_RE.fullmatch(observed_sha)
+                ):
+                    pull_remote_head = observed_sha
+        if ancestor_code == 0:
+            recoverability = "HEAD_REACHABLE_FROM_ORIGIN_MASTER"
+        elif remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_ORIGIN_BRANCH"
+        elif declared_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_DECLARED_ORIGIN_BRANCH"
+        elif pull_remote_head.lower() == head.lower():
+            recoverability = "HEAD_PUBLISHED_TO_PULL_REQUEST_REF"
+        else:
+            return LinkedWorkspaceReleaseReceipt(
+                source_repository=str(source),
+                workspace_path=str(destination),
+                state="PRESERVED_UNPUBLISHED",
+                head_sha=head,
+                branch=branch,
+                dirty=False,
+                recoverability="LOCAL_HEAD_NOT_RECOVERABLE_FROM_OBSERVED_ORIGIN_REFS",
+                removed=False,
+                reason="clean workspace has commits not observed on admitted origin publication refs",
+            )
+
+    return LinkedWorkspaceReleaseReceipt(
+        source_repository=str(source),
+        workspace_path=str(destination),
+        state="RELEASABLE",
+        head_sha=head,
+        branch=branch,
+        dirty=False,
+        recoverability=recoverability,
+        removed=False,
+        reason="workspace is clean and its HEAD is recoverable without this checkout",
+    )
+
+
+def _release_file_fingerprint(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _release_metadata_file(
+    path: Path, *, limit: int = 4096, allow_absent: bool = False,
+) -> tuple[bytes, tuple[int, ...]] | None:
+    """Bound one stable regular-file read; absence never follows a symlink."""
+    descriptor = -1
+    try:
+        try:
+            descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                                 | getattr(os, "O_NONBLOCK", 0))
+        except FileNotFoundError:
+            if not allow_absent:
+                raise
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            raise WorkspaceError("release metadata is present but cannot be opened")
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise WorkspaceError("release metadata is not a bounded regular file")
+        raw = os.read(descriptor, limit + 1)
+        after = os.fstat(descriptor)
+        fingerprint = _release_file_fingerprint(before)
+        if (len(raw) != before.st_size or len(raw) > limit
+                or _release_file_fingerprint(after) != fingerprint
+                or _release_file_fingerprint(path.lstat()) != fingerprint):
+            raise WorkspaceError("release metadata changed during observation")
+        return raw, fingerprint
+    except (OSError, ValueError) as exc:
+        raise WorkspaceError(f"release metadata is unavailable: {path.name}") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _release_directory_identity(path: Path) -> tuple[int, int]:
+    try:
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise WorkspaceError("release directory is not an original real directory")
+        return info.st_dev, info.st_ino
+    except OSError as exc:
+        raise WorkspaceError("release directory identity is unavailable") from exc
+
+
+def _release_native_suffix_matches(path: str, destination: str) -> bool:
+    # Git first selects a unique suffix, then falls back to canonical paths.
+    # Conservatively include case-insensitive matches on every platform. Keep
+    # raw spelling: normalizing // or dot components changes Git's predicate.
+    path, destination = path.casefold(), destination.casefold()
+    start = len(path) - len(destination)
+    return (start >= 0 and path.endswith(destination)
+            and (start == 0 or path[start - 1] == "/"))
+
+
+def _release_unique_native_selection(common: Path, destination: Path, admin: Path) -> None:
+    """Qualify Git's target in its existing registry without peer HEAD/prune reads."""
+    registry = common / "worktrees"
+    before = _release_directory_identity(registry)
+    try:
+        with os.scandir(registry) as entries:
+            names = []
+            for entry in entries:
+                names.append(entry.name)
+                if len(names) > 32768:
+                    raise WorkspaceError("release registration census exceeds its bound")
+        names.sort()
+        records = []
+        main = str(common)
+        if main.endswith("/.git"):
+            main = main[:-5]
+        matches = [None] if _release_native_suffix_matches(main, str(destination)) else []
+        for name in names:
+            peer = registry / name
+            identity = _release_directory_identity(peer)
+            observed = _release_metadata_file(peer / "gitdir", allow_absent=True)
+            records.append((peer, identity, observed))
+            if observed is None or not observed[0]:
+                continue  # Git omits a provably missing or empty gitdir.
+            raw = observed[0].decode("utf-8").rstrip(" \t\r\n\v\f")
+            if (not raw.startswith("/") or any(ord(c) < 32 for c in raw)
+                    or "\x7f" in raw):
+                raise WorkspaceError("release registration has an unqualified native path")
+            native = raw[:-5] if raw.endswith("/.git") else raw
+            if _release_native_suffix_matches(native, str(destination)):
+                matches.append(peer)
+        # Detect additions, replacements and in-place record edits during the
+        # census. A later fresh census may admit unrelated registrations; this
+        # observation does not claim a global lock or another registry.
+        with os.scandir(registry) as entries:
+            after_names = sorted(entry.name for entry in entries)
+        if after_names != names or _release_directory_identity(registry) != before:
+            raise WorkspaceError("release registration membership changed")
+        for peer, identity, observed in records:
+            if _release_directory_identity(peer) != identity:
+                raise WorkspaceError("release administrative directory changed")
+            try:
+                current = _release_file_fingerprint((peer / "gitdir").lstat())
+            except FileNotFoundError:
+                current = None
+            if current != (None if observed is None else observed[1]):
+                raise WorkspaceError("release registration record changed")
+        if matches != [admin]:
+            raise WorkspaceError("release target is not Git's unique original registration")
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise WorkspaceError("release registration census is unavailable") from exc
+
+
+@dataclasses.dataclass(frozen=True)
+class _LinkedReleaseIdentity:
+    workspace: str
+    directory: tuple[int, int]
+    common: str
+    common_directory: tuple[int, int]
+    admin: str
+    admin_directory: tuple[int, int]
+    gitfile: tuple[bytes, tuple[int, ...]]
+    backref: tuple[bytes, tuple[int, ...]]
+    commondir: tuple[bytes, tuple[int, ...]]
+    head_file: tuple[bytes, tuple[int, ...]]
+    head: str
+    branch: str
+    lock: tuple[bytes, tuple[int, ...]] | None = dataclasses.field(compare=False)
+
+
+def _linked_release_identity(
+    source: Path, destination: Path, *, env: dict[str, str], allow_unlocked: bool = False,
+) -> _LinkedReleaseIdentity:
+    """Capture one full original release target, not a read-only status permit."""
+    try:
+        directory = _release_directory_identity(destination)
+        gitfile = _release_metadata_file(destination / ".git")
+        pointer = gitfile[0].decode("utf-8")
+        if (not pointer.startswith("gitdir: ") or pointer.count("\n") > 1
+                or any(c in pointer for c in "\r\x00")):
+            raise WorkspaceError("release target has an invalid Git pointer")
+        value = pointer[len("gitdir: "):].strip()
+        if not value:
+            raise WorkspaceError("release target has an empty Git pointer")
+        raw_admin = Path(value)
+        if not raw_admin.is_absolute():
+            raw_admin = destination / raw_admin
+        if raw_admin.is_symlink():
+            raise WorkspaceError("release administrative pointer is a symlink")
+        common = _common_git_dir(source, env=env)
+        common_identity = _release_directory_identity(common)
+        registry = common / "worktrees"
+        _release_directory_identity(registry)
+        admin = raw_admin.resolve(strict=True)
+        if admin.parent != registry:
+            raise WorkspaceError("release target is outside its original Git registry")
+        admin_identity = _release_directory_identity(admin)
+        backref = _release_metadata_file(admin / "gitdir")
+        # Exact spelling guarantees the native unique-suffix branch wins; do
+        # not infer authority from a peer's canonical-path fallback.
+        if backref[0].decode("utf-8").rstrip("\n") != str(destination / ".git"):
+            raise WorkspaceError("release target lacks its exact reciprocal registration")
+        commondir = _release_metadata_file(admin / "commondir")
+        head_file = _release_metadata_file(admin / "HEAD")
+        lock = _release_metadata_file(admin / "locked", limit=2048, allow_absent=True)
+        if not allow_unlocked:
+            reason = "" if lock is None else lock[0].decode("utf-8").strip()
+            if (not reason.startswith(LINKED_WORKTREE_LOCK_PREFIX + " ")
+                    or "\n" in reason or "\r" in reason):
+                raise WorkspaceError("release target lacks its original managed custody lock")
+        if _common_git_dir(destination, env=env) != common:
+            raise WorkspaceError("release target Git common directory changed")
+        head = _run(["git", "-C", str(destination), "rev-parse", "HEAD"], cwd=None, env=env)
+        branch = _run(["git", "-C", str(destination), "branch", "--show-current"], cwd=None, env=env)
+        if head != _run(["git", "-C", str(destination), "rev-parse", "HEAD"], cwd=None, env=env):
+            raise WorkspaceError("release target HEAD changed during observation")
+        _release_unique_native_selection(common, destination, admin)
+        for path, observed in [(destination / ".git", gitfile), (admin / "gitdir", backref),
+                               (admin / "commondir", commondir), (admin / "HEAD", head_file)]:
+            if _release_file_fingerprint(path.lstat()) != observed[1]:
+                raise WorkspaceError("release target registration changed during observation")
+        if (_release_directory_identity(destination) != directory
+                or _release_directory_identity(common) != common_identity
+                or _release_directory_identity(admin) != admin_identity):
+            raise WorkspaceError("release target directory changed during observation")
+        return _LinkedReleaseIdentity(str(destination), directory, str(common), common_identity,
+            str(admin), admin_identity, gitfile, backref, commondir, head_file, head, branch, lock)
+    except (OSError, UnicodeError, ValueError, RuntimeError) as exc:
+        if isinstance(exc, WorkspaceError):
+            raise
+        raise WorkspaceError("release target identity is unavailable") from exc
+
+
+def _same_linked_release_target(
+    original: _LinkedReleaseIdentity, current: _LinkedReleaseIdentity, *, unlocked: bool,
+) -> None:
+    if current != original:
+        raise WorkspaceError("release target identity changed; preserve the original workspace")
+    if (unlocked and current.lock is not None) or (not unlocked and current.lock != original.lock):
+        raise WorkspaceError("release custody lock changed")
+
+
+def _restore_original_release_lock(
+    source: Path, destination: Path, original: _LinkedReleaseIdentity, *, env: dict[str, str],
+) -> str:
+    """Never put the captured lock onto a replacement or newly owned target."""
+    try:
+        current = _linked_release_identity(source, destination, env=env, allow_unlocked=True)
+        if current != original:
+            return "TARGET_CHANGED_NOT_TOUCHED"
+        if current.lock is not None:
+            return "PRESENT_LOCK_NOT_CHANGED"
+        reason = original.lock[0].decode("utf-8").strip()
+        _run(["git", "-C", str(source), "worktree", "lock", "--reason", reason, str(destination)],
+             cwd=None, env=env)
+        restored = _linked_release_identity(source, destination, env=env, allow_unlocked=True)
+        if (restored != original or restored.lock is None
+                or restored.lock[0].decode("utf-8").strip() != reason):
+            return "RESTORATION_UNVERIFIED"
+        return "ORIGINAL_LOCK_RESTORED"
+    except BaseException:
+        return "ORIGINAL_TARGET_OR_RESTORATION_UNVERIFIED"
+
+
+def _release_path_absent(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return True
+    return False
+
+
+def release_linked_worktree(
+    source_repository: str | Path,
+    workspace_root: str | Path,
+    workspace_path: str | Path,
+    *,
+    expected_operation_id: str | None = None,
+    published_branch: str | None = None,
+    published_pull_request: int | None = None,
+) -> LinkedWorkspaceReleaseReceipt:
+    """Release one original, recoverable target through canonical non-force Git.
+
+    Caller-owned completion/live-writer fences still apply. Target observations
+    do not create atomic exclusion, and native Git may still enumerate worktrees.
+    """
+    source = Path(source_repository).expanduser().resolve()
+    root = Path(workspace_root).expanduser().resolve()
+    destination = Path(workspace_path).expanduser().resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as exc:
+        raise WorkspaceError("workspace is outside the managed linked-worktree root") from exc
+    if destination == root:
+        raise WorkspaceError("managed workspace may not be the workspace root itself")
+    env = _git_env(root / ".control-home")
+    original = _linked_release_identity(source, destination, env=env)
+    inspection = inspect_linked_worktree(
+        source, root, destination, expected_operation_id=expected_operation_id,
+        status_direct_registration=True,
+        published_branch=published_branch, published_pull_request=published_pull_request,
+    )
+    if inspection.state != "RELEASABLE":
+        return inspection
+    if inspection.head_sha != original.head or inspection.branch != original.branch:
+        raise WorkspaceError("release target changed during recoverability inspection")
+    cleanliness = observe_launch_cleanliness(
+        lambda arguments: _run_bytes(["git", *arguments], cwd=destination, env=git_observation_env(env))
+    )
+    if cleanliness.dirty:
+        return dataclasses.replace(inspection, state="PRESERVED_DIRTY", dirty=True,
+            recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
+            reason="new tracked or untracked changes appeared before release; no files removed")
+    _same_linked_release_target(original,
+        _linked_release_identity(source, destination, env=env), unlocked=False)
+    phase = "unlock"
+    try:
+        # Uncertainty starts BEFORE invoking the first mutating native command.
+        _run(["git", "-C", str(source), "worktree", "unlock", str(destination)], cwd=None, env=env)
+        phase = "verify_original_unlocked_target"
+        current = _linked_release_identity(source, destination, env=env, allow_unlocked=True)
+        _same_linked_release_target(original, current, unlocked=True)
+        cleanliness = observe_launch_cleanliness(
+            lambda arguments: _run_bytes(["git", *arguments], cwd=destination, env=git_observation_env(env))
+        )
+        if cleanliness.dirty:
+            raise WorkspaceError("workspace changed after unlock; removal was not attempted")
+        _same_linked_release_target(original,
+            _linked_release_identity(source, destination, env=env, allow_unlocked=True), unlocked=True)
+        phase = "remove"
+        _run(["git", "-C", str(source), "worktree", "remove", str(destination)], cwd=None, env=env)
+        phase = "verify_removal"
+        if not _release_path_absent(destination) or not _release_path_absent(Path(original.admin)):
+            raise WorkspaceError("native removal did not prove the original target fully absent")
+    except BaseException as exc:
+        restoration = _restore_original_release_lock(source, destination, original, env=env)
+        reason = original.lock[0].decode("utf-8").strip()
+        raise LinkedWorkspaceReleaseEffectUnknown(
+            f"original release requires reconciliation after {phase}: {exc}",
+            phase=phase, operation_id=expected_operation_id or _lock_value(reason, "operation"),
+            workspace_path=str(destination), head_sha=original.head, branch=original.branch,
+            lock_restoration=restoration,
+        ) from exc
+    return dataclasses.replace(inspection, state="REMOVED", removed=True,
+        reason="clean recoverable linked worktree removed; branch/ref history retained")
+
+
+# This capability is local to the allocator's actual return. Persisted DTOs and
+# coincident paths cannot manufacture same-call allocation completion.
+_CREATED_CHILD_CLONE = object()
+
+
+@dataclasses.dataclass(frozen=True)
+class _CreatedChildClone:
+    receipt: WorkspaceReceipt
+    identity: dict[str, object]
+    _origin: object
+
+
+def child_workspace_directory_identity(path: Path) -> dict[str, int]:
+    """Stable directory custody; never pin mutable timestamps as live identity."""
+    path = Path(path)
+    try:
+        canonical = path.resolve(strict=True)
+        info = path.lstat()
+    except OSError as exc:
+        raise WorkspaceError("child workspace directory is unavailable") from exc
+    if not path.is_absolute() or canonical != path:
+        raise WorkspaceError("child workspace directory is not canonical")
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        raise WorkspaceError("child workspace is not a real directory")
+    return dict(device=info.st_dev, inode=info.st_ino, uid=info.st_uid,
+                gid=info.st_gid, mode=stat.S_IMODE(info.st_mode))
+
+
+def _child_git_file_identity(path: Path) -> dict[str, object]:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        raise WorkspaceError("child Git metadata is unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+            raise WorkspaceError("child Git metadata is not a single regular file")
+        h = hashlib.sha256()
+        while block := os.read(fd, 1024 * 1024):
+            h.update(block)
+        after = os.fstat(fd)
+        stable = lambda i: (i.st_dev,i.st_ino,i.st_uid,i.st_gid,i.st_mode,i.st_nlink,
+                            i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+        if stable(before) != stable(after) or stable(before) != stable(path.lstat()):
+            raise WorkspaceError("child Git metadata changed during identity read")
+        return dict(device=before.st_dev, inode=before.st_ino, uid=before.st_uid,
+                    gid=before.st_gid, mode=stat.S_IMODE(before.st_mode),
+                    size=before.st_size, sha256=h.hexdigest())
+    finally:
+        os.close(fd)
+
+
+def _child_clone_identity(workspace: Path) -> dict[str, object]:
+    env = git_observation_env({
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "HOME": str(workspace.parent / ".supervisor-home"),
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+    })
+    return {"workspace": child_workspace_directory_identity(workspace),
+            "git": child_workspace_directory_identity(workspace / '.git'),
+            "git_files": {name: _child_git_file_identity(workspace / '.git' / name)
+                          for name in ('config', 'index', 'HEAD')},
+            "head": _run(['git', '-C', str(workspace), 'rev-parse', '--verify', 'HEAD^{commit}'], cwd=None, env=env),
+            "status": _run(['git', '-C', str(workspace), 'status', '--porcelain=v1', '--untracked-files=all'], cwd=None, env=env)}
+
+
+def verify_child_clone_identity(workspace: Path, expected: dict, *, control_uid: int, shared_gid: int) -> None:
+    if (type(expected) is not dict or set(expected) != {"workspace", "git", "git_files", "head", "status"}
+            or expected["status"] != ""
+            or expected != _child_clone_identity(workspace)):
+        raise WorkspaceError("child workspace allocator identity changed")
+    validate_shared_git_handoff(workspace, control_uid=control_uid, shared_gid=shared_gid)
+
+
+def is_created_child_clone(value: object) -> bool:
+    return type(value) is _CreatedChildClone and value._origin is _CREATED_CHILD_CLONE
+
+
+def create_readonly_child_clone(source_repository: Path, workspace_root: Path, *,
+                                job_id: str, base_sha: str, branch: str,
+                                shared_gid: int) -> _CreatedChildClone:
+    """Actual existing allocator, no remote acquisition or write-path grant."""
+    receipt = prepare_credentialless_clone(source_repository, workspace_root,
+        job_id=job_id, base_sha=base_sha, branch=branch, shared_gid=shared_gid,
+        shared_write_paths=(), commission_dependency=None)
+    workspace = Path(receipt.workspace_path)
+    expected = _child_clone_identity(workspace)
+    if expected["head"] != base_sha:
+        raise WorkspaceError("child clone did not resolve the assigned source commit")
+    verify_child_clone_identity(workspace, expected, control_uid=os.geteuid(), shared_gid=shared_gid)
+    return _CreatedChildClone(receipt, expected, _CREATED_CHILD_CLONE)
+
+
+# Project code snapshots are transformations of canonical sealed artifact receipts.
+# They use this allocator's existing isolated Git object/index owner, not a second
+# result store or publication path. The caller must retain the service workspace
+# lock and prove that no active attempt owns the workspace before every effect.
+_PROJECT_SNAPSHOT_SCHEMA = "mastermind.project_artifact_snapshot.v1"
+_PROJECT_SNAPSHOT_AUTHOR = "Mastermind workspace service <workspace-snapshot@mastermind.invalid>"
+_PROJECT_SNAPSHOT_DATE = "946684800 +0000"
+PROJECT_WORKSPACE_MAX_TERMINALS = 64
+PROJECT_WORKSPACE_MAX_SNAPSHOTS = 32
+
+
+def _project_git(workspace: Path, *arguments: str, data: bytes = b"",
+                 index: Path | None = None, mutate: bool = False,
+                 limit: int = 1024 * 1024) -> bytes:
+    env = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": "/var/empty",
+        "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "TZ": "UTC",
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+        "GIT_AUTHOR_NAME": "Mastermind workspace service",
+        "GIT_AUTHOR_EMAIL": "workspace-snapshot@mastermind.invalid",
+        "GIT_COMMITTER_NAME": "Mastermind workspace service",
+        "GIT_COMMITTER_EMAIL": "workspace-snapshot@mastermind.invalid",
+        "GIT_AUTHOR_DATE": _PROJECT_SNAPSHOT_DATE,
+        "GIT_COMMITTER_DATE": _PROJECT_SNAPSHOT_DATE,
+    }
+    if not mutate:
+        env = git_observation_env(env)
+    if index is not None:
+        env["GIT_INDEX_FILE"] = str(index)
+    return _run_bounded_bytes_with_input(
+        ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+         "-c", "diff.autoRefreshIndex=false", *arguments],
+        cwd=workspace, env=env, input_bytes=data, max_stdout_bytes=limit,
+        bytes_limit_message="project workspace Git observation exceeds its bound")
+
+
+def _project_object(workspace: Path, kind: str, oid: str, *, limit: int) -> bytes:
+    if kind not in {"commit", "tree", "blob"} or _EXACT_SHA_RE.fullmatch(oid) is None:
+        raise WorkspaceError("project Git object address is invalid")
+    raw = _project_git(workspace, "cat-file", kind, oid, limit=limit)
+    address = hashlib.sha1(kind.encode() + b" " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    if address != oid:
+        raise WorkspaceError("project Git object content does not match its address")
+    return raw
+
+
+def _project_tree_path(workspace: Path, commit: str, path: str) -> None:
+    parents = ["", *(str(parent) for parent in PurePosixPath(path).parents if str(parent) != ".")]
+    for parent in parents:
+        expression = commit + (":" + parent if parent else "^{tree}")
+        tree = _project_git(workspace, "rev-parse", expression).decode().strip()
+        _project_object(workspace, "tree", tree, limit=1024 * 1024)
+
+
+def _project_manifest(terminal: Mapping[str, object]) -> list[dict[str, object]]:
+    from control_plane.worker_execution_contract import (
+        MAX_ARTIFACTS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_TOTAL_BYTES,
+    )
+    manifest = terminal.get("artifacts")
+    if type(manifest) is not list or len(manifest) > MAX_ARTIFACTS:
+        raise WorkspaceError("project artifact manifest is unavailable")
+    seen, total = set(), 0
+    for item in manifest:
+        if (type(item) is not dict or set(item) != {"path", "sha256", "size"}
+                or type(item["path"]) is not str or not item["path"]
+                or "\\" in item["path"] or any(ord(c) < 32 for c in item["path"])
+                or type(item["sha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) is None
+                or type(item["size"]) is not int or not 0 <= item["size"] <= MAX_ARTIFACT_BYTES):
+            raise WorkspaceError("project artifact manifest is invalid")
+        path = PurePosixPath(item["path"])
+        if (path.is_absolute() or path.as_posix() != item["path"]
+                or any(part in {"", ".", "..", ".git", ".codex"} for part in path.parts)
+                or any(part == ".env" or part.startswith(".env.") for part in path.parts)
+                or item["path"] == "config.toml" or item["path"] in seen):
+            raise WorkspaceError("project artifact path is unsafe")
+        seen.add(item["path"])
+        total += item["size"]
+    if total > MAX_ARTIFACT_TOTAL_BYTES:
+        raise WorkspaceError("project artifact total exceeds its bound")
+    return sorted(manifest, key=lambda item: item["path"])
+
+
+def _project_file(workspace: Path, item: Mapping[str, object]) -> tuple[bytes, int]:
+    """Read one exact single-link artifact without following any path component."""
+    descriptor = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        parts = PurePosixPath(str(item["path"])).parts
+        for part in parts[:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor)
+        try:
+            before = os.fstat(child)
+            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                    or before.st_size != item["size"]):
+                raise WorkspaceError("project artifact identity or size changed")
+            chunks, remaining = [], int(item["size"]) + 1
+            while remaining:
+                chunk = os.read(child, min(remaining, 1024 * 1024))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            data = b"".join(chunks)
+            after = os.fstat(child)
+            stable = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_size", "st_mtime_ns", "st_ctime_ns")
+            if (any(getattr(before, key) != getattr(after, key) for key in stable)
+                    or len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]):
+                raise WorkspaceError("project artifact bytes changed after collection")
+            return data, 0o100755 if before.st_mode & 0o111 else 0o100644
+        finally:
+            os.close(child)
+    finally:
+        os.close(descriptor)
+
+
+def _project_snapshot_message(root_job_id: str, terminal: Mapping[str, object]) -> bytes:
+    manifest = _project_manifest(terminal)
+    value = dict(schema=_PROJECT_SNAPSHOT_SCHEMA, root_job_id=root_job_id,
+                 job_id=terminal["job_id"], attempt_id=terminal["attempt_id"],
+                 terminal_receipt_sha256=terminal["terminal_receipt_sha256"],
+                 artifacts_sha256=hashlib.sha256(json.dumps(
+                     manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest())
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+
+
+def _project_workspace_identity(workspace: Path, branch: str) -> dict[str, object]:
+    if not workspace.is_absolute() or workspace.resolve(strict=True) != workspace:
+        raise WorkspaceError("project workspace path is not canonical")
+    info = workspace.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o007):
+        raise WorkspaceError("project workspace is not control owned")
+    for relative, directory in ((".git", True), (".git/HEAD", False), (".git/config", False),
+                                (".git/index", False)):
+        node = (workspace / relative).lstat()
+        if (stat.S_ISLNK(node.st_mode) or node.st_uid != os.geteuid()
+                or stat.S_IMODE(node.st_mode) & 0o027
+                or (not stat.S_ISDIR(node.st_mode) if directory
+                    else not stat.S_ISREG(node.st_mode) or node.st_nlink != 1)):
+            raise WorkspaceError("project workspace Git custody changed")
+    if (os.path.lexists(workspace / ".git/index.lock")
+            or _project_git(workspace, "remote").strip()
+            or _project_git(workspace, "symbolic-ref", "--short", "HEAD").decode().strip() != branch):
+        raise WorkspaceError("project workspace branch or credentialless custody changed")
+    return {"path": str(workspace), "device": info.st_dev, "inode": info.st_ino,
+            "uid": info.st_uid, "gid": info.st_gid}
+
+
+def _project_changed_paths(workspace: Path, base: str, *, index: Path | None = None) -> set[str]:
+    # status refreshes only its in-memory stat cache under GIT_OPTIONAL_LOCKS=0.
+    # git diff's autoRefreshIndex can rewrite the real index even with that env.
+    if _project_git(workspace, "rev-parse", "HEAD").decode().strip() != base:
+        raise WorkspaceError("project workspace HEAD changed while observing files")
+    tracked = _project_git(workspace, *LAUNCH_CLEAN_STATUS_ARGS, index=index)
+    untracked = _project_git(workspace, *LAUNCH_CLEAN_UNTRACKED_ARGS, index=index)
+    try:
+        paths = {part.decode("utf-8", "strict") for part in untracked.split(b"\0") if part}
+        records = iter(tracked.split(b"\0"))
+        for record in records:
+            if not record:
+                continue
+            if len(record) < 4 or record[2:3] != b" ":
+                raise ValueError()
+            paths.add(record[3:].decode("utf-8", "strict"))
+            if b"R" in record[:2] or b"C" in record[:2]:
+                paths.add(next(records).decode("utf-8", "strict"))
+        return paths
+    except (UnicodeError, ValueError, StopIteration) as exc:
+        raise WorkspaceError("project workspace has a noncanonical path") from exc
+
+
+def inspect_project_workspace_revision(
+    workspace: str | Path, *, branch: str, root_job_id: str, base_sha: str,
+    terminals: Sequence[Mapping[str, object]], require_clean: bool = True,
+) -> dict[str, object]:
+    """Verify every service snapshot from the immutable root base to actual HEAD.
+
+    Each commit is reconstructed against a canonical terminal manifest. A model
+    commit, unexplained file, deletion, mode change, merge, or rewritten ancestry
+    cannot become a continuation source.
+    """
+    workspace = Path(workspace)
+    identity = _project_workspace_identity(workspace, branch)
+    if _EXACT_SHA_RE.fullmatch(base_sha) is None or len(terminals) > PROJECT_WORKSPACE_MAX_TERMINALS:
+        raise WorkspaceError("project workspace base or terminal bound is invalid")
+    head = _project_git(workspace, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+    indexed = {item["terminal_receipt_sha256"]: item for item in terminals}
+    if len(indexed) != len(terminals):
+        raise WorkspaceError("project workspace terminal identities are ambiguous")
+    cursor, consumed = head, []
+    while cursor != base_sha:
+        if len(consumed) >= PROJECT_WORKSPACE_MAX_SNAPSHOTS:
+            raise WorkspaceError("project snapshot ancestry exceeds its bound")
+        raw = _project_object(workspace, "commit", cursor, limit=65536)
+        try:
+            headers, message = raw.split(b"\n\n", 1)
+            rows = headers.decode("ascii").splitlines()
+            if (len(rows) != 4 or not rows[0].startswith("tree ") or not rows[1].startswith("parent ")
+                    or rows[2] != "author " + _PROJECT_SNAPSHOT_AUTHOR + " " + _PROJECT_SNAPSHOT_DATE
+                    or rows[3] != "committer " + _PROJECT_SNAPSHOT_AUTHOR + " " + _PROJECT_SNAPSHOT_DATE):
+                raise ValueError()
+            tree, parent = rows[0][5:], rows[1][7:]
+            parsed = json.loads(message)
+            terminal = indexed[parsed["terminal_receipt_sha256"]]
+            if (message != _project_snapshot_message(root_job_id, terminal)
+                    or terminal["base_sha"] != parent or terminal["head_sha"] != parent
+                    or terminal["role"] not in {"work", "repair"} or not _project_manifest(terminal)):
+                raise ValueError()
+        except (ValueError, KeyError, UnicodeError, TypeError) as exc:
+            raise WorkspaceError("project snapshot is not a canonical sealed transformation") from exc
+        fields = _project_git(workspace, "diff-tree", "--no-commit-id", "--raw", "-r", "-z",
+                              "--no-renames", parent, cursor).split(b"\0")
+        if fields[-1:] != [b""] or (len(fields) - 1) % 2:
+            raise WorkspaceError("project snapshot diff is invalid")
+        manifest = {item["path"]: item for item in _project_manifest(terminal)}
+        observed = set()
+        for offset in range(0, len(fields) - 1, 2):
+            try:
+                old_mode, new_mode, old_oid, new_oid, change = fields[offset].decode("ascii")[1:].split()
+                path = fields[offset + 1].decode("utf-8", "strict")
+                item = manifest[path]
+                if (path in observed or change not in {"A", "M"}
+                        or old_mode not in {"000000", "100644", "100755"}
+                        or new_mode != ("100644" if old_mode == "000000" else old_mode)):
+                    raise ValueError()
+                _project_tree_path(workspace, cursor, path)
+                data = _project_object(workspace, "blob", new_oid, limit=8 * 1024 * 1024 + 1)
+                if len(data) != item["size"] or hashlib.sha256(data).hexdigest() != item["sha256"]:
+                    raise ValueError()
+            except (ValueError, KeyError, UnicodeError) as exc:
+                raise WorkspaceError("project snapshot content differs from sealed artifacts") from exc
+            observed.add(path)
+        if observed != set(manifest):
+            raise WorkspaceError("project snapshot does not contain exactly its sealed artifacts")
+        consumed.append(terminal["terminal_receipt_sha256"])
+        cursor = parent
+    # Even an empty ancestry must resolve the admitted original commit.
+    if _project_git(workspace, "rev-parse", "--verify", base_sha + "^{commit}").decode().strip() != base_sha:
+        raise WorkspaceError("project original base is unavailable")
+    if require_clean and observe_launch_cleanliness(lambda args: _project_git(workspace, *args)).dirty:
+        raise WorkspaceError("project workspace has unsealed or uncommitted changes")
+    _project_object(workspace, "commit", base_sha, limit=1024 * 1024)
+    tree = _project_git(workspace, "rev-parse", head + "^{tree}").decode().strip()
+    _project_object(workspace, "tree", tree, limit=1024 * 1024)
+    return dict(workspace_identity=identity, root_base_sha=base_sha, commit=head, tree=tree,
+                snapshot_terminal_digests=list(reversed(consumed)))
+
+
+def prepare_project_workspace_handoff(
+    workspace: str | Path, *, branch: str, root_job_id: str, base_sha: str,
+    terminals: Sequence[Mapping[str, object]], shared_gid: int,
+    current: Callable[[], None],
+) -> dict[str, object]:
+    """Transform one original sealed result and reopen the exact next handoff.
+
+    The immutable terminal receipt is the operation identity. An interrupted
+    update-ref/index handoff is reconciled against that same deterministic
+    commit and exact files; a different or unexplained effect is refused.
+    """
+    workspace = Path(workspace)
+    current()
+    observed = inspect_project_workspace_revision(workspace, branch=branch, root_job_id=root_job_id,
+        base_sha=base_sha, terminals=terminals, require_clean=False)
+    head = str(observed["commit"])
+    consumed = set(observed["snapshot_terminal_digests"])
+    index_matches_head = not _project_git(workspace, "diff-index", "--cached", "--raw",
+                                         "-z", "--no-renames", head, "--")
+    needs_index_reconcile = False
+    if not index_matches_head:
+        if not consumed:
+            raise WorkspaceError("project workspace index has an unexplained change")
+        parent = _project_git(workspace, "rev-parse", head + "^").decode().strip()
+        if _project_git(workspace, "diff-index", "--cached", "--raw", "-z", "--no-renames", parent, "--"):
+            raise WorkspaceError("project workspace index is not the original interrupted parent")
+        needs_index_reconcile = True
+    changes = _project_changed_paths(workspace, head) if index_matches_head else set()
+    pending = [item for item in terminals if _project_manifest(item)
+               and item["terminal_receipt_sha256"] not in consumed]
+    if len(pending) > 1:
+        raise WorkspaceError("project has ambiguous unapplied sealed artifacts")
+    selected = pending[0] if pending else None
+    if selected is not None and (needs_index_reconcile or selected["base_sha"] != head or selected["head_sha"] != head
+            or selected["role"] not in {"work", "repair"}):
+        raise WorkspaceError("project artifact does not descend from the current snapshot")
+    manifest = _project_manifest(selected) if selected is not None else []
+    if changes != {item["path"] for item in manifest}:
+        raise WorkspaceError("project workspace contains unsealed, missing or ambiguous files")
+    if not needs_index_reconcile:
+        clean = observe_launch_cleanliness(lambda args: _project_git(workspace, *args))
+        if clean.dirty and not changes:
+            raise WorkspaceError("project workspace index has an unexplained change")
+    info = workspace.lstat()
+    if stat.S_IMODE(info.st_mode) != 0o700:
+        if selected is not None or needs_index_reconcile:
+            raise WorkspaceError("project snapshot requires the original terminal seal")
+        validate_shared_git_handoff(workspace, control_uid=os.geteuid(), shared_gid=shared_gid)
+        return inspect_project_workspace_revision(workspace, branch=branch, root_job_id=root_job_id,
+            base_sha=base_sha, terminals=terminals)
+    seals = [item for item in terminals if all(
+        item["workspace_identity"].get(key) == value
+        for key, value in observed["workspace_identity"].items())]
+    if not seals:
+        raise WorkspaceError("project workspace has no matching canonical terminal seal")
+    current()
+    # Temporary index belongs to the existing isolated Git allocator. It is
+    # neither a new durable operation record nor a publication artifact.
+    fd, index_name = tempfile.mkstemp(prefix="project-snapshot-", dir=workspace / ".git")
+    os.close(fd)
+    index = Path(index_name)
+    index.unlink()
+    try:
+        _project_git(workspace, "read-tree", head, index=index, mutate=True)
+        if needs_index_reconcile:
+            # An added artifact can look deleted/untracked through the old
+            # parent index. Compare against this exact recognized HEAD index,
+            # preserving every working file. Unknown index trees were refused.
+            if observe_launch_cleanliness(lambda args: _project_git(workspace, *args, index=index)).dirty:
+                raise WorkspaceError("interrupted project snapshot files no longer match its exact tree")
+        if selected is not None:
+            for item in manifest:
+                data, mode = _project_file(workspace, item)
+                old = _project_git(workspace, "ls-tree", head, "--", ":(literal)" + str(item["path"])).decode().strip()
+                expected_mode = int(old.split(" ", 1)[0], 8) if old else 0o100644
+                if mode != expected_mode or expected_mode not in {0o100644, 0o100755}:
+                    raise WorkspaceError("project artifact changes an unsealed file mode")
+                blob = _project_git(workspace, "hash-object", "-w", "--stdin", data=data, mutate=True).strip()
+                entry = f"{mode:o} ".encode() + blob + b"\t" + str(item["path"]).encode() + b"\0"
+                _project_git(workspace, "update-index", "-z", "--index-info", data=entry, index=index, mutate=True)
+            tree = _project_git(workspace, "write-tree", index=index, mutate=True).decode().strip()
+            commit = _project_git(workspace, "commit-tree", tree, "-p", head,
+                data=_project_snapshot_message(root_job_id, selected), mutate=True).decode().strip()
+            # Re-prove source bytes and actual quiescence immediately before CAS.
+            current()
+            if _project_changed_paths(workspace, head) != {item["path"] for item in manifest}:
+                raise WorkspaceError("project artifact paths changed before adoption")
+            for item in manifest:
+                _project_file(workspace, item)
+            _project_git(workspace, "update-ref", "refs/heads/" + branch, commit, head, mutate=True)
+            head = commit
+        elif not needs_index_reconcile:
+            # No artifact change: reopen only a matching sealed native terminal.
+            current()
+        os.chown(index, -1, int(shared_gid))
+        os.chmod(index, 0o640)
+        with index.open("rb") as handle:
+            os.fsync(handle.fileno())
+        current()
+        os.replace(index, workspace / ".git/index")
+        # A newly created loose object/ref is readable through the existing
+        # worker group, never writable by it. No source file grant is changed.
+        for directory in (workspace / ".git/objects", workspace / ".git/refs"):
+            for parent, dirs, files in os.walk(directory, followlinks=False):
+                for path in [Path(parent), *(Path(parent) / name for name in dirs + files)]:
+                    node = path.lstat()
+                    if stat.S_ISLNK(node.st_mode) or node.st_uid != os.geteuid():
+                        raise WorkspaceError("project snapshot Git object custody changed")
+                    os.chown(path, -1, int(shared_gid))
+                    os.chmod(path, 0o750 if stat.S_ISDIR(node.st_mode) else 0o640)
+        final = inspect_project_workspace_revision(workspace, branch=branch, root_job_id=root_job_id,
+            base_sha=base_sha, terminals=terminals)
+        current()
+        os.chmod(workspace, 0o750)
+        validate_shared_git_handoff(workspace, control_uid=os.geteuid(), shared_gid=shared_gid)
+        return final
+    finally:
+        if os.path.lexists(index):
+            index.unlink()

@@ -1,0 +1,63 @@
+{
+  "schema": "mastermind.session_truth_task7_acquisition_notes.v1",
+  "observations_sealed_at": "2026-09-05T05:35:09Z",
+  "source_read_window_utc": "2026-09-05T05:27:49Z through 2026-09-05T05:35:09Z",
+  "github": {
+    "commands": [
+      "gh pr view 169 --repo mastermindx-market-intelligence/Mastermind --json number,state,isDraft,headRefOid,baseRefOid,mergeCommit,statusCheckRollup,body,url",
+      "gh pr view 170 --repo mastermindx-market-intelligence/Mastermind --json number,state,isDraft,headRefOid,baseRefOid,mergeCommit,statusCheckRollup,body,url"
+    ],
+    "normalization": "Exact owner metadata only. PR baseRefOid is GitHub historical PR base identity, not current protected master. PR170 mergeCommit is null. Green checks describe published1b30ad4d only, not local repaired source."
+  },
+  "linear": {
+    "commands": [
+      "linear_get_issue MAS-177 includeRelations=true",
+      "linear_get_issue MAS-228 includeRelations=true"
+    ],
+    "normalization": "MAS177 workstream from exact project key. MAS228 exact parent MAS177 retained. No typed github_relations or completion owner metadata returned; attachment URLs and prose do not fabricate those fields."
+  },
+  "slack": {
+    "commands": [
+      "slack_read_thread C0BSBM78V1N/1787876752.102929 limit50 complete",
+      "slack_list_channel_members C0BSBM78V1N limit30 ids_only complete"
+    ],
+    "normalization": "Latest exact Sol CONTINUE message1788585143.654139 selected as visibility-only metadata. Bot attribution identifies senderU0BRGTF1H26; addressed watcherU0BT20ZL77C. No later consumed ACK in complete thread. delivered=true does not prove runtime acknowledgement. No message bodies stored. 18channelmembers do not widen action scope."
+  },
+  "executive": {
+    "probe": "os.lstat on exact source-declared socket paths; no connect or privileged read",
+    "paths": [
+      {
+        "path": "/var/run/mastermind-executive/control.sock",
+        "result": "ABSENT"
+      },
+      {
+        "path": "/var/run/mastermind-executive/ceo-ingress.sock",
+        "result": "ABSENT"
+      },
+      {
+        "path": "/var/run/mastermind-executive/worker.sock",
+        "result": "ABSENT"
+      },
+      {
+        "path": "/var/run/mastermind-dialogue-observation/dialogue-observation.sock",
+        "result": "ABSENT"
+      }
+    ],
+    "interpretation": "Existing production read ingress unavailable. No database-absence claim; root-owned config/database remains unread under pending H0."
+  },
+  "identities": {
+    "available": false,
+    "reason": "No canonical Executive RuntimeBinding/current-writer read ingress; no provider/account inferred from Slack identity or native task labels."
+  },
+  "proof_scope": {
+    "operation_key": "session-truth-r1-project-watch-20260827-sol-001",
+    "purpose": "Scope the existing R1 project dialogue for exact current receiver/ACK facts. Proof/repair carrier itself remains session-truth-r1-scope-bounds-repair-20260905-runtime-continuity-001."
+  },
+  "effects": {
+    "owner_reads": "read-only",
+    "preparing_artifacts": "private local files",
+    "runtime": false,
+    "provider": false,
+    "host_privilege": false
+  }
+}

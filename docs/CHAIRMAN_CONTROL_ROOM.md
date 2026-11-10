@@ -105,6 +105,9 @@ python3 scripts/mas115_setup.py prepare-disposable
 python3 scripts/mas115_setup.py credential --vendor multilogin
 python3 scripts/mas115_setup.py configure-canary-port --vendor multilogin
 python3 scripts/mas115_setup.py run-canary --vendor multilogin
+python3 scripts/mas115_setup.py bootstrap-peer-lifecycle
+python3 scripts/mas115_setup.py create-peer-profile --vendor multilogin
+python3 scripts/mas115_setup.py rollback-peer-profile --vendor multilogin
 ```
 
 The ordered journey is:
@@ -160,6 +163,178 @@ The ordered journey is:
    The v2 receipt includes a separate cleanup proof: stop acknowledged (or no
    start needed), exact-profile process count returned to zero, and all other
    managed-profile process counts unchanged.
+
+   **Existing-estate first-rollout bootstrap.** Installations that already have
+   the exact private v3 Multilogin Mimic anchor from before the peer lifecycle
+   was introduced run `bootstrap-peer-lifecycle` once before item 6. The setup
+   coordinator requires healthy three-seat bindings, freshly re-identifies the
+   exact anchor as a non-Chairman local profile, proves it stopped, and requires
+   the distinct phrase `BOOTSTRAP THE EXISTING DISPOSABLE PEER LIFECYCLE`.
+   Only after that phrase, it opens the exact anchor and canonical surface-
+   bindings files read-only with `O_NOFOLLOW`, parses and validates their bytes
+   through those same retained descriptors, and repeats the fresh stopped/non-
+   Chairman reduced local-census proof. It then passes a private, non-copyable,
+   non-serializable, one-use capability binding the exact bytes, digests,
+   security tuples, operation, source generation, census digest, and minting
+   process to one fixed-coordinate local-file seam. The seam reads no
+   credential, constructs no HTTP client, invokes no vendor command, creates no
+   profile or account, and never starts a browser; ordinary peer creation
+   remains the separate item-6 ceremony.
+
+   Under the single exclusive control-room parent lock, the seam atomically
+   consumes that capability, compares both named paths to the still-open
+   descriptors, re-reads and validates their exact bytes and security, and
+   requires an equal fresh reduced-census digest before any fence, state, or
+   witness effect. It closes both retained descriptors on every success,
+   refusal, or exception. Reuse, process transfer, source replacement, a wrong
+   operation or generation, or a changed census is a closed refusal.
+
+   The seam O_EXCL-creates one private, self-bound bootstrap fence at
+   `PEER_BOOTSTRAP_FENCE_PATH` in `PENDING` before it may create the existing v5
+   lifecycle genesis. That closed fence binds the exact bootstrap and peer
+   operations, source/lifecycle generation, fixed anchor/state/witness/peer-
+   provision coordinate digests, and the anchor document plus device/inode
+   identity; it contains no raw profile/folder identity or filesystem path.
+   `PENDING` may recover only the exact witness/state crash prefix under the
+   same already-held parent lock. After genesis is mutually bound, the same
+   fence inode is durably CAS-rewritten to `COMPLETE` with the exact state and
+   witness document digests and device/inode identities. An exact `COMPLETE`
+   replay is read-only. With that fence present, any missing, replaced,
+   malformed, hardlinked, symlinked, stale-generation, or otherwise mismatched
+   anchor/state/witness is terminally refused and is never re-armed. The direct
+   secret-owning vendor helper exposes no bootstrap command or redirectable
+   bootstrap coordinate.
+
+6. `create-peer-profile` (REALM1-C1, Mastermind #385) creates the one missing
+   stopped disposable Multilogin **peer** profile alongside the existing
+   anchor (`profile_A`) disposable profile, so a second automation-owned
+   non-seat browser can exist without ever touching a Chairman seat. It is
+   `BUILT_NOT_PROVEN / PRODUCTION_INERT`: no profile has been created live by
+   this wave; every repository test is hermetic. The command re-runs the same
+   local three-seat exclusion as `prepare-disposable`, then reaches the same
+   narrow secret-owning helper, which never binds or self-tests the fixed
+   loopback origin — this operation never launches a browser, so the fixed
+   port is irrelevant to it. At most ONE create request is ever dispatched,
+   and only after an intent sidecar is committed to disk first; an ambiguous
+   or lost vendor response is never a reason to dispatch again. The peer's
+   deterministic name (`peer_profile_name`) is derived from the operation key
+   plus the folder/anchor-profile identity, so the same inputs always
+   resolve to the same name — this is what makes reconciliation possible
+   without ever storing a raw vendor identity. **The vendor response never
+   decides the effect** — exactly one read-only folder census after dispatch
+   does, checking identity (folder/browser-core/OS/name), non-ownership, and
+   a positive stopped-state proof before the peer provision is written.
+   Two documented vendor silences are designed around rather than resolved:
+   the create-success HTTP status is 201 in Multilogin's own Postman example
+   but 200 in its help-article prose, so **200/201** are the exact
+   acknowledgement statuses while every other 2xx remains ambiguous but may
+   still contribute binding response-identity evidence (never load-bearing —
+   read-back still decides); and no
+   error-body shape is documented for a 4xx/5xx create/remove response, so
+   any non-exact response is treated as ambiguous, never as a definitive
+   failure permitting a retry. When the vendor *does* acknowledge exactly,
+   the acknowledged id must also equal the id the read-back census returns;
+   a disagreement is `CREATE_EFFECT_UNKNOWN`, because adopting the census row
+   would leave the acknowledged profile untracked in the approved folder and
+   unreachable by rollback. All three durable lifecycle coordinates are
+   fixed constants (`PEER_PROVISION_PATH`, `PEER_INTENT_PATH`, and
+   `PEER_GENESIS_WITNESS_PATH`); the helper CLI deliberately exposes no flag
+   that could redirect any of them.
+
+   **Intent sidecar lifecycle.** The sidecar is a closed, source-generation-
+   pinned state machine written with an exclusive durable create claim before
+   dispatch. Only the invocation that receives `CREATED_THIS_CALL` may send the
+   create request; an exact existing claim is reconciliation-only. Every state
+   transition rewrites the already-open no-follow descriptor for the exact
+   claimed inode, whose device/inode identity is embedded in the closed v5
+   lifecycle document. Trusted setup first O_EXCL-creates a separate closed
+   genesis witness in `PENDING`, then O_EXCL-creates the self-bound
+   `INITIALIZED` lifecycle inode, and finally CAS-rewrites that same witness
+   inode to `BOUND`. The two records mutually bind each other's device/inode
+   identity plus the fixed state/provision coordinates, source generation,
+   lifecycle generation, folder, anchor, and peer name. Only setup may recover
+   the two bounded crash windows: `PENDING` with no state, or `PENDING` with one
+   exact matching `INITIALIZED` state. A missing or replaced witness, a state
+   without its older witness, or a `BOUND` witness without its exact state is
+   never treated as virgin initialization; resetting the whole private
+   directory is an explicit out-of-band administrative ceremony, not an
+   automatic runtime path.
+
+   Every later state transition durably syncs the already-open no-follow
+   descriptor and its private parent, then proves the state, witness, provision,
+   leaf, and parent paths still name the original regular, single-link,
+   owner-only objects. A symlink, hardlink, foreign inode, parent or leaf path
+   replacement, malformed state/witness, stale source generation, or
+   contradictory state/witness/provision set detected before transport handoff
+   therefore refuses without touching the raced entry or reaching a vendor
+   effect. Invalidation after transport entry prevents final PASS and every
+   second dispatch, but conservatively reports effect-unknown because transport
+   entry is the first-dispatch boundary. The provision commit is bound to the exact
+   descriptor snapshot created by this invocation; it is never accepted by
+   reopening a byte-identical replacement at the same path. A crash after the
+   provision inode is created but before that inode is bound into the lifecycle
+   record therefore remains a fail-closed HOLD: a later invocation will not
+   adopt even byte-identical provision bytes merely to recover automatically.
+
+   The sidecar is never deleted automatically. An exact pre-effect `401`/`403`
+   advances it to the inert `CREATE_AUTH_REJECTED` tombstone; the next separately
+   authorized create may atomically re-arm that same exact inode. This avoids a
+   final check-to-unlink race and keeps crash/re-entry behavior deterministic.
+   A safely observed response profile id is committed before read-back and stays
+   binding even when the surrounding response prose or envelope is ambiguous.
+   While the owner response is still unsettled, a concurrent invocation may
+   census for reconciliation but cannot adopt a different matching profile; it
+   returns `CREATE_EFFECT_UNKNOWN` until the durable response identity and the
+   census identity can be proved to be the same profile.
+   All Multilogin profile UUIDs are canonicalized at ingestion, so response,
+   census, state, provision, and rollback identity cannot diverge by case.
+7. `rollback-peer-profile` removes **only** the exact stopped, unowned,
+   operation-created peer profile — proven by the conjunction of the exact peer
+   provision file, the matching create-intent sidecar, and one fresh fixed-path
+   negative ownership-release receipt, never by the provision alone. The
+   receipt uses a closed schema and binds the protected source generation,
+   lifecycle generation, peer/provision digests and exact provision inode,
+   the PF-1 and INSTALL1 operation keys, `active=false` for both owners, a
+   bounded UTC observation/expiry window, and one nonce digest. Missing,
+   malformed, duplicate-key, positive, stale, future, or identity-mismatched
+   receipts refuse before Keychain/client construction and are loaded once for
+   the pre-secret gate, then loaded and revalidated again with a fresh clock
+   immediately before the remove claim. The production reader has one fixed private path; only tests may
+   inject a keyword-only loader. This wave exposes no receipt writer and creates
+   no ownership registry—the separate #359 host operation owns that proof.
+
+   **Removal is a trash move, not a deletion.** Multilogin's deletion law is
+   two-stage: an ordinary remove sends the profile to the Trash, where it
+   remains restorable and **may still consume a plan slot**; permanent
+   deletion is a separate, irreversible action taken from inside the Trash.
+   This command dispatches only the reversible form (`permanently: false`),
+   and "absence" is proven against the same **active** folder census
+   (`Profile Search(is_removed=false)`) used by create, immediately after the
+   one remove dispatch. Absence from that active census therefore proves the
+   profile left the active folder and nothing more: `ROLLBACK_VERIFIED` is
+   **not** evidence of permanent deletion or of capacity release, and the
+   receipt says so in its own `removal_disposition` /
+   `removal_disposition_detail` fields rather than leaving it to the reader.
+   Permanent deletion *is* reachable on the same documented endpoint via
+   `permanently: true`, and #385 does not authorize it — so the boundary is
+   structural, not prose: setting that constant makes the module refuse to
+   import, naming the `DECISION_REQUEST / PERMANENT_DELETE_BOUNDARY` ruling
+   that would be required first. Like create, it
+   re-runs the local three-seat exclusion and never binds the loopback
+   origin. A wrong id, a replaced identity, a still-running or still-locked
+   profile, or a profile this operation did not create all refuse before any
+   remove request is ever sent. The durable `REMOVE_DISPATCHED` transition is
+   committed before the one external request; a lost response or concurrent
+   rerun reconciles that phase and never dispatches a second remove. There is no
+   generic "remove by search"
+   surface, only this one exact-id path. `profile_A` and every enrolled
+   Chairman-seat profile/binding are structurally unreachable by either
+   command. Neither operation has a public generic `--confirmed` bypass: the
+   setup coordinator verifies the operation-specific human phrase and invokes
+   distinct in-process create and rollback capabilities. The create/remove HTTP
+   bodies are built entirely from
+   `folder_id`/the deterministic peer name (create) or the peer's own id
+   (remove), and neither command ever writes to the anchor provision file.
 
 The supported Multilogin run path is the documented v2 exact-profile launcher
 with `automation_type=selenium`, followed by a closed W3C WebDriver subset:
@@ -342,3 +517,102 @@ real-seat proof remains after Sol accepts the disposable receipts.
   anomaly is escalated to Sol in the PR #110 thread. Any genuinely live
   duplicate FABLE-00 dispatch must reconcile through Sol, not adopt this
   branch.
+
+
+## B5 source expiry and owed navigation (source implementation)
+
+This slice preserves the existing Control Room, owners, source acquisition and
+Inbox route. It adds finite presentation permission beside the canonical
+Autonomy facts. It does not qualify the installed service or a Business app,
+and it does not admit Executive intent, dispatch, repair or retry work.
+
+The canonical mapper emits four independent `mastermind.autonomy_validity.v1`
+components per responsibility: `card`, `decision_current`, `dispatch` and
+`owed_open_age`. Each names its exact contributing source receipts, stable
+proof identity, qualification reference and integer `valid_for_ms`, or an
+explicit unqualified reason. The mapper uses its existing inclusive 48-hour
+freshness and one-hour future tolerance. At exactly 48 hours a source can still
+say CURRENT while its remaining presentation budget is zero. The UI must then
+withdraw current permission; it must not invent a STALE owner event. Dispatch
+uses the validated W3C source observation timestamp where supplied. Binding
+observation age is independent of `last_verified_at` and binds the complete
+canonical target, including locator and verification stamp.
+
+The generation cache publishes `source_validity` alongside the existing HTTP
+state envelope, under the existing composition lock and sequence. Its source
+anchor precedes the gather. The GET budget subtracts gather, publication and
+cache residence. Per-proof bounds stay in that existing process cache across
+omitted cards and intervening proofs; a later publication or reference-clock
+rollback cannot renew an expired or poisoned proof. Only the current document
+selects which retained bounds may appear in a response or authorize navigation.
+No extra source gather, persistent store or lifecycle authority is introduced.
+Each server/page accounting map is bounded to 8,192 proof components. If it
+fills, that cache/page lifetime becomes unqualified; it does not evict a bound
+and silently renew old evidence. Canonical facts remain readable. This
+conservative resource limit and the lack of an installed launcher qualification
+must be considered before any later operational release.
+
+The conditional `b5.darwin-chrome-paired-v1` profile uses D=8 ms discrepancy,
+U=16 ms reserve at each independent server/browser stage, H=1 ms bracket width
+and the stated Q=4 ms undercount premise. Samples synchronously read
+Mlo/Wlo/Mhi/Whi, floor each endpoint to integer milliseconds, and compare the
+outward elapsed/wall deltas against both the original anchor and the previous
+sample. Remaining duration is `max(0, budget - elapsed - 16)` after all checks.
+The reserve is charged once for the anchored stage, not repeatedly per render.
+The server selects Darwin `CLOCK_MONOTONIC_RAW` through integer nanoseconds;
+unsupported or failed capability never falls back to ordinary monotonic time.
+The browser requires finite `performance.now()` below 2^40 ms, safe-integer
+`Date.now()`, a compatible time origin and the qualified launcher boundary.
+These observations cannot prove the Q premise or detect arbitrary mutually
+masking clocks. No repaint during JavaScript or host suspension is claimed.
+
+**The generic HTTP server currently supplies no browser qualification.** A UA,
+version hint, profile label, webdriver flag or matching clock samples is not
+an authenticated browser/launcher binding. Consequently production browser
+positive permission remains disabled at this boundary; server-qualified age
+and dated source details remain readable. The isolated actual-page test may
+supply the narrowly named `owned_test_fixture` context only after verifying
+its own Chrome revision and launch configuration outside the page. No public
+query, header, CLI option or client boolean enables that test context in the
+product. Installed launcher qualification remains a separate release concern.
+
+The page keeps the original request anchor through transport, parsing, render
+and retention. Its single expiry timer is fenced to the accepted page state.
+Every component render and owed action also samples its remaining duration,
+so a late timer is not permission to act. Hidden/pagehide/freeze and resume or
+BFCache uncertainty withdraw permission and fence outstanding state reads.
+Returning to visibility uses the existing bounded read path. Same-proof
+minimums survive omitted components; a newly qualified different proof can
+restore only the components that independently qualify. Detail retains the
+recorded source facts. Unknown current decision counts display an unknown
+value rather than an all-clear zero. A fresh Chairman decision can remain
+visible while dispatch or owed navigation is unqualified or EFFECT_UNKNOWN.
+The global Inbox and general Surfaces address book retain their separate
+contracts.
+
+Autonomy owed Open requires the existing actionability, hold, dispatch,
+capability and unique-target guards plus current card, dispatch and
+`owed_open_age` permission. It submits `/api/open` with a closed
+`mastermind.owed_navigation.v1` context: exact publication sequence,
+responsibility/root, owed proof, binding fingerprint and seat. The server
+fresh-loads the canonical bindings, re-establishes uniqueness, matches the
+current document's selected proof, and samples age after all mutable reads.
+Mismatch returns 409 `source_precondition_failed`, `verified:false` and
+`next_action:read_current_state`, with no provider call or binding write. The
+provider receives the exact immutable checked target; no composition lock
+spans its call. This is a comparison at handoff, not a lease over later
+filesystem/provider changes. Scoped verified navigation intentionally does
+not persist `last_verified_at`, because the binding owner offers no conditional
+write and a completed provider result must not overwrite a concurrent target.
+The unscoped address-book endpoint keeps its existing behavior.
+
+Tests exercise actual mapper/compositor/cache/HTTP data, independent expiry,
+same-proof omission and rollback, current-publication/old-proof refusal,
+newly ambiguous targets, expiry during binding reads, immutable fake provider
+targets, no-write outcomes and late page callbacks. Deterministic clock and
+lifecycle injection is separate from actual Chrome observation. The optional
+actual-page run uses an owned ephemeral profile, default background/BFCache
+behavior, real clocks, three viewports and verified teardown. An unobserved
+visibility or BFCache leg is reported as unobserved. A skipped browser test
+is not browser proof, and source/CI success is not installed or production
+acceptance.
