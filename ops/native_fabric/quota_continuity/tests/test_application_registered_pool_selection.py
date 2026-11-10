@@ -8,6 +8,9 @@ performs no effect.
 import copy
 import hashlib
 import json
+import os
+import stat
+import tempfile
 from pathlib import Path
 import sqlite3
 import sys
@@ -89,6 +92,7 @@ class RegisteredPoolFixture(NativeApplicationFixture):
         self.policy_path = self.directory / "pools.yaml"
         self.policy_path.write_text(json.dumps(_policy_document()))
         self.ledger_path = self.directory / "ledger.jsonl"
+        self.ledger_path.touch(mode=0o600)
         self.ledger_path.write_text("")
         for module, name, value in ((pick, "POOLS_YAML", str(self.policy_path)),
                                     (pool_ledger, "LEDGER_PATH", str(self.ledger_path))):
@@ -556,13 +560,46 @@ class RegisteredPoolSelectionTests(RegisteredPoolFixture):
     def test_selection_quality_is_read_strict_from_the_owner_ledger(self):
         # A truncated ledger row is not an empty quality sample: the strict
         # reader refuses, and the whole selection refuses before any lease.
+        self.ledger_path.touch(mode=0o600)
+        self.ledger_path.write_text("")
         self.ledger_path.write_text('{"pool":"go"}')
         with self.assertRaises(ApplicationSelectionRefused):
             self.select("cursor")
+        self.ledger_path.touch(mode=0o600)
         self.ledger_path.write_text("")
         self.assertEqual(self.select("cursor")["identity"]["pool"], "cursor")
         self.assert_no_effect()
 
+
+
+class LedgerPermissionFenceTests(unittest.TestCase):
+    """Creating private fixtures must not weaken existing ledger/lock refusal."""
+
+    def test_existing_writable_files_are_refused_without_normalizing_mode(self):
+        cases = (("ledger", os.O_RDWR | os.O_CREAT | os.O_APPEND, "a+"),
+                 ("lock", os.O_RDWR | os.O_CREAT, "r+"))
+        for kind, flags, mode in cases:
+            for unsafe_mode in (0o620, 0o602, 0o664, 0o666):
+                with self.subTest(kind=kind, unsafe_mode=oct(unsafe_mode)):
+                    with tempfile.TemporaryDirectory() as directory:
+                        path = Path(directory) / kind
+                        original = b"retained untrusted fixture bytes\n"
+                        path.write_bytes(original)
+                        path.chmod(unsafe_mode)
+                        with self.assertRaisesRegex(ValueError, "unsafe ledger or lock file"):
+                            with pool_ledger._strict_open(str(path), flags, mode):
+                                pass
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), unsafe_mode)
+                        self.assertEqual(path.read_bytes(), original)
+
+    def test_new_strict_files_remain_private(self):
+        for kind, flags, mode in (("ledger", os.O_RDWR | os.O_CREAT | os.O_APPEND, "a+"),
+                                  ("lock", os.O_RDWR | os.O_CREAT, "r+")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / kind
+                with pool_ledger._strict_open(str(path), flags, mode):
+                    pass
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode) & 0o077, 0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -191,6 +191,7 @@ fn main() {
             auth::host_observation::read_host_observation,
             auth::read_fabric_catalog,
             auth::read_fabric_status,
+            auth::read_t3_attempt_fleet,
             auth::read_result,
             auth::read_mission_result,
             auth::read_result_references,

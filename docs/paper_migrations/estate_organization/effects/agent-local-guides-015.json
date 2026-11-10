@@ -1,0 +1,2650 @@
+{
+  "schema": "paper.estate.receipts.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "observed_at": "2026-11-09T11:52:30.837Z",
+  "note": "Compact canonical receipts: exact call arguments, response result, effect state, identities and drift snapshots. No replay.",
+  "count": 48,
+  "operations": [
+    {
+      "operation_id": "peo-20261109-c1-source-links-010",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "updates": [
+          {
+            "nodeId": "GW-0",
+            "html": "AI-worker continuation · source checkpoint baf6737<br/>https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/README.md"
+          },
+          {
+            "nodeId": "G8-0",
+            "html": "Recoverable checkpoint · 10 local guides verified; rollout continues · copy URL<br/>https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/CHECKPOINT.md"
+          }
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "nodeId": "GW-0"
+          },
+          {
+            "nodeId": "G8-0"
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-source-links-010-finish",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "nodeIds": [
+          "GW-0",
+          "G8-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-page",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "1ea6759311e41e29cfc03560f6c5d7c8f9ad9ac4e2f8ff4808d0dbc2c0167c8e",
+      "after_snapshot": "4e9f65a478a37fc46650755a47a8f128b4a6bf626544fa89397521ba0b63723c",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-4-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-header",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "root_node_p-4-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Design Foundations and Archetypes · Migrated References</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y2EJJ05SE2NCVBHKSE2BX8<br/>PAGE_ID: p-4-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "4e9f65a478a37fc46650755a47a8f128b4a6bf626544fa89397521ba0b63723c",
+      "after_snapshot": "7d4334e4d9d0f3e206a02acd9f21723e9bb746c851c10a410171d9b97818403b",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DI-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1DJ-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1DK-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1DL-0",
+            "name": "Design Foundations a…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1DM-0",
+            "name": "FILE_ID: 01M6Y2EJJ05…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-route-1",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "1DI-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2EJJ05SE2NCVBHKSE2BX8 · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7d4334e4d9d0f3e206a02acd9f21723e9bb746c851c10a410171d9b97818403b",
+      "after_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DO-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-route-2",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "1DI-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SOURCE_SELECTION</b> — Read applicable family source; no current build selection is inferred here<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "after_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DQ-0",
+            "name": "READ_NEXT 2 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-route-3",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "1DI-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | REUSE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · REUSE</b> — Inspect reusable component and archetype rules<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2EJJ05SE2NCVBHKSE2BX8 · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "after_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DS-0",
+            "name": "READ_NEXT 3 | REUSE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-route-4",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "1DI-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 4 | PROPOSAL\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>04 · PROPOSAL</b> — Inspect proposed CAGR period and recovery<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2EJJ05SE2NCVBHKSE2BX8 · PAGE_ID: p-3-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2EJJ05SE2NCVBHKSE2BX8/p-3-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "after_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DU-0",
+            "name": "READ_NEXT 4 | PROPOSAL",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-qualification",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "1DI-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "after_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DW-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-footer",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "targetNodeId": "1DI-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "after_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1DY-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-page-first",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "order": [
+          "p-4-0",
+          "p-1-0",
+          "p-3-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "f4705387b38e7ec14f08eec896f6f120ac931373afef7c0688744e5c4f21ebe4",
+      "after_snapshot": "3419a98b325d67f5c16f4109a7467025baf58330093e7e56eed9e94605939abe",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Archetype Starters · Governed",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "Proposed · CAGR period and recovery",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "01 · Design Foundations · Components & Archetype Rules",
+            "icon": "design",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-11-finish",
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "nodeIds": [
+          "1DI-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3419a98b325d67f5c16f4109a7467025baf58330093e7e56eed9e94605939abe",
+      "after_snapshot": "3419a98b325d67f5c16f4109a7467025baf58330093e7e56eed9e94605939abe",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+          "name": "Design Foundations and Archetypes · Migrated References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-page",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "10b42468d9612b46dd50a6409abeb2311cd147bf67642350479837a8b8975dad",
+      "after_snapshot": "6712b7d482d334df1ec75033a386d1469bcf28062ca2dc515568aff8cb407f3b",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-2-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-header",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "targetNodeId": "root_node_p-2-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Legacy Navigation and Entry Designs · Reference</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y2T8WVHR3AS82TSSCNN6YS<br/>PAGE_ID: p-2-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "6712b7d482d334df1ec75033a386d1469bcf28062ca2dc515568aff8cb407f3b",
+      "after_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "GT-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "GU-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "GV-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "GW-0",
+            "name": "Legacy Navigation an…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "GX-0",
+            "name": "FILE_ID: 01M6Y2T8WVH…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-route-1",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "targetNodeId": "GT-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2T8WVHR3AS82TSSCNN6YS · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2T8WVHR3AS82TSSCNN6YS/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "after_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "GZ-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-route-2",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "targetNodeId": "GT-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SOURCE_SELECTION</b> — Read applicable family source; no current build selection is inferred here<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "after_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "H1-0",
+            "name": "READ_NEXT 2 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-qualification",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "targetNodeId": "GT-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Retained F03 product-navigation, Options-entry and returned-reference designs; this is not the operational estate directory.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "after_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "H3-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-footer",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "targetNodeId": "GT-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "after_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "H5-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-page-first",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "order": [
+          "p-2-0",
+          "p-1-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15c1b81156586b984498cf0f7b02fa8f65b3551a83cf5a58cb636ed98b887ae5",
+      "after_snapshot": "e8a913fe29b48d091bb3a7981088fa910c05951343a050f295c4e86390459a52",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Reference · F03 product navigation & entry designs",
+            "icon": "design",
+            "isActive": true
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-12-finish",
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "nodeIds": [
+          "GT-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "e8a913fe29b48d091bb3a7981088fa910c05951343a050f295c4e86390459a52",
+      "after_snapshot": "e8a913fe29b48d091bb3a7981088fa910c05951343a050f295c4e86390459a52",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2T8WVHR3AS82TSSCNN6YS"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+          "name": "Legacy Navigation and Entry Designs · Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-page",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "80ce7e82d2b3e850c769367aa1544c107ed9310ee041fabcb1a6483761fc76e3",
+      "after_snapshot": "62a002833729fc2edb40cdf8626d6799365e31acf9af2f76282feda81466c1f2",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "pageId": "p-9-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-header",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "root_node_p-9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Market Guide · Scores &amp; Contextual Help</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M32XYWDYSFTNDZVJKQ5QHT33<br/>PAGE_ID: p-9-0<br/>FILE_ROLES: working_design<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "62a002833729fc2edb40cdf8626d6799365e31acf9af2f76282feda81466c1f2",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4H7-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "4H8-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "4H9-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "4HA-0",
+            "name": "Market Guide · Score…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "4HB-0",
+            "name": "FILE_ID: 01M32XYWDYS…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-route-1",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "4H7-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M32XYWDYSFTNDZVJKQ5QHT33 · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4HD-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-route-2",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "4H7-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SOURCE_SELECTION</b> — Read applicable family source; no current build selection is inferred here<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4HF-0",
+            "name": "READ_NEXT 2 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-route-3",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "4H7-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | STATES\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · STATES</b> — Search and recovery scope<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M32XYWDYSFTNDZVJKQ5QHT33 · PAGE_ID: p-4-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-4-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4HH-0",
+            "name": "READ_NEXT 3 | STATES",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-route-4",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "4H7-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 4 | RISK_RADAR\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>04 · RISK_RADAR</b> — Inspect Risk Radar contextual help<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M32XYWDYSFTNDZVJKQ5QHT33 · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M32XYWDYSFTNDZVJKQ5QHT33/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4HJ-0",
+            "name": "READ_NEXT 4 | RISK_RADAR",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-qualification",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "4H7-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Reuse start, search/recovery p-4-0 and Risk Radar p-6-0. Recorded R14 does not supersede the complete eight-variant baseline.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4HL-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-footer",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "targetNodeId": "4H7-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "createdNodes": [
+          {
+            "id": "4HN-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-page-first",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "order": [
+          "p-9-0",
+          "p-1-0",
+          "p-2-0",
+          "p-3-0",
+          "p-4-0",
+          "p-6-0",
+          "p-8-0",
+          "p-7-0",
+          "p-5-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "78b7151dbb206b97c7ac47313e76e98b812540fa0b1207c20016149bd61168fc",
+      "after_snapshot": "4d53238ae536d2d904f5b9be87bb850500f19530f02842cec2ee467948de634a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-9-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "00 · R14 · Market Guide · Start here",
+            "icon": "arrow",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "01 · Score Reading · Themes + Locales",
+            "icon": null,
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "02 · Contextual Help + Visual Explanations",
+            "icon": null,
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "03 · Search, Aliases + Recovery",
+            "icon": null,
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-6-0",
+            "name": "04 · Risk Radar Full Guide · Themes + Locales",
+            "icon": null,
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-8-0",
+            "name": "Proposed · Guide return clarity",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "divider",
+            "id": "p-7-0"
+          },
+          {
+            "type": "page",
+            "id": "p-5-0",
+            "name": "REF · Guide Baseline · Themes + Locales",
+            "icon": null,
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-13-finish",
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+        "nodeIds": [
+          "4H7-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "4d53238ae536d2d904f5b9be87bb850500f19530f02842cec2ee467948de634a",
+      "after_snapshot": "4d53238ae536d2d904f5b9be87bb850500f19530f02842cec2ee467948de634a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M32XYWDYSFTNDZVJKQ5QHT33"
+      },
+      "result": {
+        "file": {
+          "id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+          "name": "Market Guide · Scores & Contextual Help"
+        },
+        "contentHash": {
+          "tokens": "ba3cae48"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-page",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7a8d38065acbc0c96a6fe7d1a228e61e32a2d3df61b22a29e286b88280d7f654",
+      "after_snapshot": "9ebf7e1dfb107b70c9c26a276b489a594a89f8ca9d6d7ed03c3ce9ca26da30ac",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-2-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-header",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "targetNodeId": "root_node_p-2-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Shared Market · Research and Reading References</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y2Z642VN20X8WDSWV07M0M<br/>PAGE_ID: p-2-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "9ebf7e1dfb107b70c9c26a276b489a594a89f8ca9d6d7ed03c3ce9ca26da30ac",
+      "after_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "29O-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "29P-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "29Q-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "29R-0",
+            "name": "Shared Market · Rese…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "29S-0",
+            "name": "FILE_ID: 01M6Y2Z642V…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-route-1",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "targetNodeId": "29O-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2Z642VN20X8WDSWV07M0M · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2Z642VN20X8WDSWV07M0M/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "after_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "29U-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-route-2",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "targetNodeId": "29O-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SOURCE_SELECTION</b> — Read applicable family source; no current build selection is inferred here<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "after_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "29W-0",
+            "name": "READ_NEXT 2 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-qualification",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "targetNodeId": "29O-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "after_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "29Y-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-footer",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "targetNodeId": "29O-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "after_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2A0-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-page-first",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "order": [
+          "p-2-0",
+          "p-1-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a4c8f3d139452399861ae73b4894728a0e32a0c8b91067253f0b2a4b174fbe7",
+      "after_snapshot": "64cb121f9964dc86c6ee536b99afb8e60e108efd62d34aec2eb85ddb6fe388b3",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Shared Market · Prepared Research + Reading · Reference",
+            "icon": "design",
+            "isActive": true
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-14-finish",
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "nodeIds": [
+          "29O-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "64cb121f9964dc86c6ee536b99afb8e60e108efd62d34aec2eb85ddb6fe388b3",
+      "after_snapshot": "64cb121f9964dc86c6ee536b99afb8e60e108efd62d34aec2eb85ddb6fe388b3",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2Z642VN20X8WDSWV07M0M"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2Z642VN20X8WDSWV07M0M",
+          "name": "Shared Market · Research and Reading References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-page",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7373edfbc60cc257f3eb10090e3c3583e0b871f2a4586eb5b7559966b6b57311",
+      "after_snapshot": "eabfa40d23da9e90448b3a7c7ad7aae12668f605e69ab98950573a331b9663e4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-3-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-header",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "targetNodeId": "root_node_p-3-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Shared Market · Search and Comparison</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y31C449F02KGRNPGK94Q8D<br/>PAGE_ID: p-3-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "eabfa40d23da9e90448b3a7c7ad7aae12668f605e69ab98950573a331b9663e4",
+      "after_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1FO-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1FP-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1FQ-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1FR-0",
+            "name": "Shared Market · Sear…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1FS-0",
+            "name": "FILE_ID: 01M6Y31C449…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-route-1",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "targetNodeId": "1FO-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y31C449F02KGRNPGK94Q8D · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y31C449F02KGRNPGK94Q8D/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "after_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1FU-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-route-2",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "targetNodeId": "1FO-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | BUILD_READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · BUILD_READ</b> — Inspect R42 compact search/source contract<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y31C449F02KGRNPGK94Q8D · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y31C449F02KGRNPGK94Q8D/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "after_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1FW-0",
+            "name": "READ_NEXT 2 | BUILD_READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-qualification",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "targetNodeId": "1FO-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "after_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1FY-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-footer",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "targetNodeId": "1FO-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "after_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1G0-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-page-first",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "order": [
+          "p-3-0",
+          "p-1-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "15f174184b1499df589b629f0e21c37beb60113d9265f793e9563a0cb1707d46",
+      "after_snapshot": "62f7b99e891904c88101d455816856bfc566a20b5f548e5fac886a636f333e8d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Shared Market · Search + Comparison · Reference",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "R42 · Compact search and source contract",
+            "icon": "blueprint",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-15-finish",
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "nodeIds": [
+          "1FO-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "62f7b99e891904c88101d455816856bfc566a20b5f548e5fac886a636f333e8d",
+      "after_snapshot": "62f7b99e891904c88101d455816856bfc566a20b5f548e5fac886a636f333e8d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y31C449F02KGRNPGK94Q8D"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y31C449F02KGRNPGK94Q8D",
+          "name": "Shared Market · Search and Comparison"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-reader-recipe-01",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "updates": [
+          {
+            "nodeId": "HR-0",
+            "html": "<b>1 · Find the entry.</b> If the page is unknown, call get_basic_info with fileId to read its explicit page list. Find AGENT README. The user-active page may be an archive; it does not select your source.<br/><b>2 · Read a bounded guide.</b> Request the exact guide page. Use find_nodes with fileId, nodeId: agent_entry.node_id, textValue: * when that node is known; otherwise use its explicit pageId. Do not run an unscoped whole-file text scan.<br/><b>3 · Follow the assigned route.</b> Read the exact destination page's returned artboards, then the relevant contract or product board. Use get_jsx on verified product board IDs for UI extraction; an empty page-root JSX is not proof of an empty page.<br/><b>4 · Use result.</b> Confirm returned file/page IDs. document.basic_info can describe another user-active page. document.snapshot_sha256 is only a mutation drift guard, not a revision, permission or writer lock."
+          }
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "nodeId": "HR-0"
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-reader-recipe-finish",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "nodeIds": [
+          "HR-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "text": "OK"
+      }
+    }
+  ],
+  "completed_local_guides": [
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-9-0",
+      "board_id": "HBU-0",
+      "node_id": "HD9-0",
+      "kind": "reused_guidance_page",
+      "steps": [
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "route-5",
+        "qualification",
+        "footer",
+        "guide-first",
+        "page-label",
+        "finish"
+      ],
+      "proof": {
+        "exact_jsx": true,
+        "preserved_original_nodes": 42,
+        "screenshot": "visually verified; no clipping or overlap"
+      }
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "3L1-0",
+      "board_id": "3L1-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4,
+        "consumer_probe": "Reached saved-case proposal and retained behavior, without adopting R4 by date; wording refined to preserve revision scope."
+      }
+    },
+    {
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "52A-0",
+      "board_id": "52A-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    },
+    {
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "5G9-0",
+      "board_id": "5G9-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1
+      }
+    },
+    {
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "2ZU-0",
+      "board_id": "2ZU-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4
+      }
+    },
+    {
+      "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "HK-0",
+      "board_id": "HK-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    },
+    {
+      "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "1O6-0",
+      "board_id": "1O6-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4
+      }
+    },
+    {
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-6-0",
+      "node_id": "43A-0",
+      "board_id": "43A-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 5
+      }
+    },
+    {
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "2R5-0",
+      "board_id": "2R5-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1
+      }
+    },
+    {
+      "file_id": "01M312VSDSZFVT45674GDVJVZN",
+      "steps": [
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "guide-first",
+        "page-label",
+        "finish"
+      ],
+      "kind": "reused_guidance_page",
+      "page_id": "p-9-0",
+      "board_id": "47Q-0",
+      "node_id": "AOC-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 11,
+        "preserved_original_nodes": 72,
+        "screenshot": "Visually verified dark guide; no clipping or overlap."
+      }
+    },
+    {
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-4-0",
+      "node_id": "1DI-0",
+      "board_id": "1DI-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 3
+      }
+    },
+    {
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "GT-0",
+      "board_id": "GT-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1
+      }
+    },
+    {
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-9-0",
+      "node_id": "4H7-0",
+      "board_id": "4H7-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 8
+      }
+    },
+    {
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "29O-0",
+      "board_id": "29O-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1
+      }
+    },
+    {
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "1FO-0",
+      "board_id": "1FO-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    }
+  ]
+}

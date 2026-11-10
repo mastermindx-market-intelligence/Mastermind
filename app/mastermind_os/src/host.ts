@@ -1246,6 +1246,7 @@ export async function createNativeClient(
       | "read_resource_capacity"
       | "read_model_configuration"
       | "read_capacity_fabric"
+      | "read_t3_attempt_fleet"
       | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
@@ -1513,6 +1514,13 @@ export async function createNativeClient(
     },
     readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
     readCapacityFabric: ({ signal }) => read("read_capacity_fabric", signal),
+    readT3AttemptFleet: ({ attemptId, signal }) => {
+      // Same wire attempt-id grammar (run ids contain `/`) as the composed host
+      // and the shared contract; refuse before any native command is issued.
+      if (!validT3AttemptId(attemptId))
+        return Promise.reject(new Error("T3_ATTEMPT_SELECTION_INVALID"));
+      return read("read_t3_attempt_fleet", signal, { selection: { attempt_id: attemptId } });
+    },
     readHostObservation: request => {
       const selection=hostObservationPublicSelection(request);
       return selection ? read("read_host_observation",request.signal,{selection})
