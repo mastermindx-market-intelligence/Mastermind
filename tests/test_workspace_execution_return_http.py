@@ -65,12 +65,14 @@ def _seed_parents(connection, events):
         " last_seen_at_ms, created_at_ms, updated_at_ms) VALUES(?,?,?,?,?,?,?)",
         (_WORKER, _QUOTA, "AVAILABLE", "fabric", _NOW_MS, _NOW_MS, _NOW_MS))
     for job_id in sorted({e.get("job_id") for e in events} - {None}):
+        # The jobs_root_contract trigger requires a non-empty root_job_id;
+        # these fixtures' jobs are their own roots (no parent chain).
         connection.execute(
-            "INSERT INTO jobs(job_id, objective, department, status, authority_level,"
-            " constraints_json, requested_authorities_json, authority_policy_hash,"
-            " available_at_ms, created_at_ms, updated_at_ms)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (job_id, "fixture objective", "fixture", "QUEUED", "CONTROL",
+            "INSERT INTO jobs(job_id, root_job_id, objective, department, status,"
+            " authority_level, constraints_json, requested_authorities_json,"
+            " authority_policy_hash, available_at_ms, created_at_ms, updated_at_ms)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            (job_id, job_id, "fixture objective", "fixture", "QUEUED", "CONTROL",
              "{}", "[]", _HASH64, _NOW_MS, _NOW_MS, _NOW_MS))
     for attempt_id, job_id in sorted(
             {(e.get("attempt_id"), e.get("job_id")) for e in events} - {(None, None)}):
