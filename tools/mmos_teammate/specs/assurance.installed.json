@@ -1,0 +1,27 @@
+{
+  "paperclip_base": "http://127.0.0.1:3100",
+  "company_id": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "agent_id": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+  "agent_name": "Assurance",
+  "agent_dir": "~/.mastermind/t3-team/teammates/assurance",
+  "carrier_install_dir": "~/.mastermind/t3-team/carrier",
+  "python_bin": "/opt/homebrew/bin/python3.12",
+  "adapter_timeout_sec": 1500,
+  "issue_url_template": "http://127.0.0.1:3100/MAS/issues/{identifier}",
+  "t3": {
+    "t3_bin": "~/.mastermind/t3-team-server/bin/t3",
+    "home": "~/.mastermind/t3-team/home",
+    "port": 3780,
+    "cwd": "~/.mastermind/t3-team/team-project"
+  },
+  "binding": {
+    "environmentId": "043d9de9-6b15-4588-9c63-2a3166813dd5",
+    "projectId": "b5bddd3e-ea79-40dd-b010-d3e3e626a21a",
+    "providerInstanceId": "assurance",
+    "primaryThreadId": "mcp:a44620b7-5d95-4c68-ae3e-c53bd1eb24c5"
+  },
+  "teammates": {
+    "Assurance": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+    "Design Lead": "ca4929d5-a725-4f62-a9c5-d3c66a281e30"
+  }
+}

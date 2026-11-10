@@ -107,8 +107,11 @@ Carries over, unchanged in value:
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
 | T3 Team view | Teammate list and work cards. **No fork first:** the stock T3 client already shows a roster when each teammate is one pinned, titled thread in a "Team" project | investigation (T3i) accepted 2026-11-10 at trunk `c7dd3ef4d`; see section 13 and `T3_TEAM_VIEW_OPTIONS.md`. **Closed with no fork 2026-11-10** (T7 verdict: fork needed for nothing; section 14) |
 | T7 team roster | Two real teammates (Assurance, Design Lead) set up on the team server as pinned threads, checked in a headless browser, with the eight open questions answered | **accepted 2026-11-10** at trunk `e1b338021` (39 tests in the principal's run; see `T7_TEAM_ROSTER.md` and section 14) |
-| T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
-| T4b governed coding job | DONE_WHEN 10: a task that needs code becomes one governed coding job through the socket door and the L1 engine | after T45 |
+| T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | **accepted 2026-11-10** at trunk `d690165a7` (all eight items with live evidence, attack pass held; see `T45_MILESTONE_LOOP.md`) |
+| T1w native window | The Mastermind window opens on a teammate's conversation on the team server, shows work live, survives a server restart | **accepted 2026-11-10** at trunk `f9457a0f5`; paired to the team server by the principal (section 15) |
+| CO cut-over | The two installed Paperclip agents run through the carrier into their Team conversations | **done by the principal 2026-11-10** (section 15); tool `tools/mmos_teammate/cutover_installed.py` |
+| T4b governed coding job | DONE_WHEN 10: a task that needs code becomes one governed coding job through the socket door and the L1 engine | next |
+| T8 the window people open | The installed Mastermind app opens on Team with no login; typing from the window; short names | next |
 | L9 module platform | Land what exists (dev instance script, module, template), runbook, close | closing |
 | L8 window | Land the locked window with a configurable origin, runbook, close | closing |
 | L4 socket door | Listener, wiring, attack, close | closing |
@@ -442,3 +445,68 @@ be added without a restart. This answers the open item from T45's brief.
 **What T7 did not do.** It wrote nothing to Paperclip. The installed Assurance and Design
 Lead agents still run on Hermes. Binding each installed agent to the thread above is the
 cut-over, one agent at a time, after T45 returns with the carrier.
+
+## 15. Amendment, 2026-11-10 20:55 UTC: both real teammates are cut over; the loop runs on the installed app
+
+**What is true now** (each line read back from the installed Paperclip on port 3100 and the
+team server on port 3780, not from a report)
+
+| Item | State |
+| --- | --- |
+| Assurance | wakes through the carrier into its Team conversation since 20:32 UTC. Old run setup saved privately beside its home; `rollback` puts it back |
+| Design Lead | same, since 20:44 UTC |
+| Old wake owner | the timer was already off for both; the run command is replaced, not added to. Every wake below produced exactly one run in the company's run list |
+| Window | the dev build of the Mastermind window, paired once to the team server, opens on a teammate by name: `tools/mmos_team_server/open_team_window.sh <instance-id>` |
+
+**What ran, on the installed app**
+
+| DONE_WHEN | Proof | Result |
+| --- | --- | --- |
+| 5 and 6: one wake, one run, one answer, one output | MAS-5, assigned to Assurance: a review of the cut-over tool itself | one run (2 min), one comment, document "Review of the teammate move tool", one request to the board. The work was visible live in the window. Four of its five findings were real defects and are fixed |
+| 8: one "Needs you" item cleared by its action | accepting MAS-5 | issue done, "Needs you" 8 to 7, no further run |
+| 7: one routine, window closed | routine "Check the teammate move tool against open review findings", one trigger for one minute | MAS-6 created at 20:41:00, one run, one answer (all four fixes confirmed, the fifth correctly left), trigger off and routine paused five seconds after it fired. Accepting it: 8 to 7 again |
+| Two teammates on one task | MAS-7, assigned to Design Lead: names that fit the Team list, and the three changes that matter most | three runs and no more: Design Lead worked and asked Assurance (MAS-8), Assurance answered, Design Lead was woken with the answer and finished. Document "Names for the Team list". Its request to the board is **left open on purpose** as a real item for the Chairman |
+
+Evidence: `~/.mastermind/mmos_evidence/cutover-assurance-20261110/` (LEDGER.md) and
+`~/.mastermind/mmos_evidence/t1w-team-20261110/`.
+
+**What changed in the carrier for the real app**
+
+- The T3 command line now gets the team server's port and never the Paperclip run token.
+- The task message carries a link to the issue page. The link comes from carrier settings
+  only and must be a loopback address.
+- The task message tells the teammate whom it can ask and how. Names come from carrier
+  settings. A teammate that was itself asked is not told this, so asks do not chain. The
+  example quoted back unchanged is not taken as an ask.
+
+**Rules added**
+
+- `cutover-preimage.json` in a teammate's home holds the agent's old run command and
+  environment. It is private (0600), never printed, never copied into evidence or the repo.
+- A cut-over is one agent per spec and refuses while the agent has open work, a live run or
+  a timer that is on. It looks again right before the change. Paperclip has no conditional
+  update, so this narrows the gap and does not close it.
+- The carrier file is shared by all moved teammates. Re-running `apply` for one teammate
+  updates it for all.
+
+**DONE_WHEN, honestly**
+
+| # | State |
+| --- | --- |
+| 1 | The dev build opens on Team with no login prompt. The Chairman's installed app is not switched yet (lane T8) |
+| 2 | Live text and tool activity seen for carrier-sent work. Typing from the window against the team server is not tested yet (lane T8) |
+| 3 | Not done. Needs the linked-environment switch in the Chairman's T3 Code app, which is his to make or order |
+| 4 | Two real teammates with different charters and tool limits. Account rotation proven on test teammates only |
+| 5, 6, 7, 8 | Done on the installed app, above |
+| 9 | Not checked yet |
+| 10 | Not started (lane T4b) |
+
+**Next**
+
+1. T8: build the window people actually open so it lands on Team with no login, make typing
+   work there, and apply Design Lead's short names (`Assurance — quality`,
+   `Design Lead — product`) in the roster spec and the live titles together.
+2. T4b: the governed coding job.
+3. Team server hardening: its own Node, a packed build, a restart-after-reboot check.
+4. Check 9: an existing Hermes conversation still works.
+

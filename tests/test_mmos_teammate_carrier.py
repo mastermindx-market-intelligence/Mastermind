@@ -214,6 +214,20 @@ def test_issue_link_is_config_driven_and_loopback_only():
     assert "Issue page" not in wc.build_message("MAS-12", "t", "b", "pc-x-1")
 
 
+def test_ask_help_names_other_teammates_only():
+    roster = {"Assurance": "a-1", "Design Lead": "a-2", "bad`name\n": "a-3"}
+    text = wc.ask_help(roster, "a-1")
+    assert "Design Lead" in text and "Assurance" not in text and "bad" not in text
+    msg = wc.build_message("MAS-1", "t", "b", "pc-x-1", asking=text)
+    # the example quoted back by a teammate is never taken as a real ask
+    assert "```paperclip-ask" in msg and wc.parse_ask_block(msg) is None
+    real = msg.replace("<short title>", "Check the copy")
+    assert wc.parse_ask_block(real)["assignee"] == "Design Lead"
+    assert wc.ask_help({"Assurance": "a-1"}, "a-1") is None
+    assert wc.ask_help({}, "a-1") is None
+    assert "paperclip-ask" not in wc.build_message("MAS-1", "t", "b", "pc-x-1")
+
+
 def test_t3_cli_gets_the_port_and_never_the_run_token(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPERCLIP_API_KEY", "not-a-real-key")
     monkeypatch.setenv("PAPERCLIP_RUN_ID", "run-1")

@@ -87,6 +87,8 @@ def parse_ask_block(reply):
         desc_lines.append(line)
     if not closed or not assignee or not (title or "").strip():
         return None
+    if title.strip().startswith("<") and title.strip().endswith(">"):
+        return None  # the how-to-ask example quoted back, not a real ask
     return {"assignee": assignee, "title": title.strip(),
             "description": "\n".join(desc_lines).strip()}
 
@@ -168,11 +170,30 @@ def issue_link(template, identifier):
     return f"[{identifier}]({template.replace('{identifier}', identifier)})"
 
 
+def ask_help(roster, my_agent_id):
+    """One short paragraph telling a teammate whom it may ask and how. Names
+    come from carrier config only; the teammate itself is left out. None when
+    there is nobody else to ask."""
+    names = sorted(n for n, aid in (roster or {}).items()
+                   if aid != my_agent_id and re.fullmatch(r"[A-Za-z0-9 _-]{1,40}", n))
+    if not names:
+        return None
+    return (
+        "If part of this needs another teammate (" + ", ".join(names) + "), "
+        "end your reply with one block like this and nothing after it; the "
+        "work is handed over and you are woken with their answer:\n"
+        f"```{ASK_BLOCK}\nassignee: {names[0]}\ntitle: <short title>\n"
+        "description: <what you need back>\n```\n"
+        "Only ask when you cannot do that part yourself."
+    )
+
+
 def build_message(identifier: str, title: str, body: str, op: str,
-                  link: str = None) -> str:
+                  link: str = None, asking: str = None) -> str:
     body = (body or "").strip()
     where = (f"Issue page (the board accepts or declines the answer there): "
              f"{link}\n\n") if link else ""
+    how_to_ask = f"\n\n{asking}" if asking else ""
     return (
         f"[{op}]\n\n"
         f"You were woken for Paperclip issue {identifier}: {title}\n\n"
@@ -180,6 +201,7 @@ def build_message(identifier: str, title: str, body: str, op: str,
         f"{body}\n\n"
         "Do the task described above. Your reply to this message is posted as "
         "the issue comment and completes the issue."
+        f"{how_to_ask}"
     )
 
 
@@ -856,7 +878,11 @@ def run_carrier(pc, t3_factory, opts):
                 issue.get("identifier"), issue.get("title"),
                 issue.get("description"), op,
                 link=issue_link(opts.get("issue_url_template"),
-                                issue.get("identifier")))
+                                issue.get("identifier")),
+                # An asked teammate answers; it does not pass the ask on.
+                asking=None if ask_child_op(issue.get("description") or "")
+                else ask_help(opts.get("roster"),
+                              os.environ.get("PAPERCLIP_AGENT_ID")))
             log(f"sending {op} to thread {thread_id}")
             result = t3.send(message)
             reply = result.get("reply") or ""
