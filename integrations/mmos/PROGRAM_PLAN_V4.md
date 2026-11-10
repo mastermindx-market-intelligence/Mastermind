@@ -102,7 +102,8 @@ Carries over, unchanged in value:
 | Lane | Outcome | State |
 | --- | --- | --- |
 | T1 shared conversation | DONE_WHEN 1 to 3, in the dev bundle against an isolated T3 server, then paired to the real one by the principal | stage 1 accepted 2026-11-10 at trunk `6a2634bb6` (stock client signs in, opens one thread by URL, queues, survives a restart, two views; see `T1_SHARED_CONVERSATION_FINDINGS.md`). Stage 2 (the window) starts when L8 has returned |
-| T1s live answer text | Answer text shown while it is written for Claude-driver threads: a pinned T3 server patch that handles text deltas the way the Codex adapter already does, proven on the dev server | started 2026-11-10. See section 8 |
+| T1s live answer text | Claude-driver threads stream answer text the way Codex-driver threads already do | accepted 2026-11-10 at trunk `1bc6b7574` (patch sha256 `661566e1…5400`, 355 tests in the principal's run; see section 11) |
+| T6 team server | An always-on headless T3 server owned by Mastermind, separate from the Chairman's T3 Code app, that the window and the teammates use | started 2026-11-10. See section 11 |
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
 | T3 Team fork | Teammate list and work cards as a thin fork of the T3 web client | starts when T1 is proven |
 | T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
@@ -237,3 +238,48 @@ follows it; it is not part of the first milestone.
 **After the dev proofs, two acts stay with the principal:** pairing the Mastermind window
 to the real T3 server, and moving one installed Paperclip agent onto this path (the six
 steps in the T2 note), with its old heartbeat fenced first.
+
+## 11. Amendment, 2026-11-10 17:40 UTC: T1s accepted, the team gets its own T3 server
+
+**T1s accepted (trunk `1bc6b7574`).** The patch makes the Claude driver send answer text as
+it is written, into one item per message, the same way the Codex driver does. The
+principal reran the adapter and filter suites on pin plus patch: 355 passed. An attack
+found that the unpatched server writes the same text two or three times when a message
+mixes text and tools; the patch fixes that too.
+
+**"Live text" in T3 is paragraph by paragraph, by upstream design.** T3 has two settings
+for answer text: whole turn, or paragraph (the default). In paragraph mode the server
+releases text at a blank line, a list item, a closed code block or a heading, at most
+every 400 ms. That rule applies to every driver, Codex included. The proof prompt I
+pinned for T1s (count 1 to 40 on tight lines) has no such boundary, so it showed no
+change; the fault was my prompt, not the lane. With paragraphs the patched server grows
+the answer during the turn. We keep upstream's rule and add no third mode. DONE_WHEN 2
+now reads: thinking and tools live, answer text paragraph by paragraph.
+
+**Decision: the team runs on its own T3 server, not inside the Chairman's T3 Code app.**
+The facts that force it:
+
+1. The Chairman's server (port 3773) is a child of the T3 Code desktop app. When the app
+   quits, it stops. A routine with no window open cannot depend on it.
+2. The app is a vendor-signed, self-updating bundle. Our server patch cannot go into it
+   without breaking the signature and the updates. Port 3774 is not listening today.
+3. Adding a teammate means adding a provider instance to that server's settings, which
+   T2 did with the server stopped. Stopping the Chairman's server stops his work and this
+   program.
+
+So "the real server" in this plan now means the **team server**: headless, loopback only,
+kept alive by launchd, its own home directory and port, started from the same T3 release
+the Chairman runs. The Mastermind window pairs to it. Teammate threads live on it. The
+Chairman's T3 Code app is never restarted, reconfigured or patched by this program.
+Installing the team server is one act by the principal after lane T6 proves it in a dev
+root. The patched build is a switch on the team server, off until T6 shows that the stock
+and patched builds can share one home directory without harming state.
+
+**What this changes in DONE_WHEN 3** ("Code shows the same thread"): the T3 Code app shows
+a team thread only if it can add the team server as a second environment. T6 answers that
+from the source and a dev proof. If it cannot, team threads open in the Mastermind window
+and in a browser, and DONE_WHEN 3 is met there.
+
+**Offered upstream, not done:** the duplicate-text fix and the streaming patch are useful
+to T3 itself. Sending them upstream is a public act under the Chairman's name and waits
+for his word.
