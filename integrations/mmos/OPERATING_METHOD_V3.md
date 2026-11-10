@@ -77,6 +77,11 @@ uncommitted in dead checkouts.
   a canary is restarted in its own thread: it keeps what it read. A new task is for a thread
   that is looping, very long (300 items or more), or whose model is refusing. Before either,
   list same-title threads; someone else may already have restarted it.
+- A restart that changes nothing fails the same way. Lane L4 died twice on one generation of
+  about 17 minutes with no tool call (a whole module composed in one turn); each router restart
+  dropped it with nothing on disk. The third start named steps of at most 100 lines per tool
+  call with a commit and a push after each, and had a file pushed in three minutes. Writer
+  briefs now say this from the start: skeleton first, pushed inside ten minutes, then pieces.
 - Every `delegate_task` carries a unique `clientRequestId`. One writer per output: before any
   dispatch that follows an errored turn, list same-title children first.
 - Work is pushed to the lane branch on origin after every slice that passes its check, and at
