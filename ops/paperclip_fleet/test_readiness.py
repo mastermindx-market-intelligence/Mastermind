@@ -22,6 +22,11 @@ class ReadinessTests(unittest.TestCase):
         self.assertNotIn(r.CORE + "para-memory-files", selected)
         self.assertEqual(original, before)
 
+    def test_gateway_context_never_requests_secret_passthrough(self):
+        for key in r.PAPERCLIP_CLIENT_CONTEXT:
+            self.assertFalse(any(word in key for word in ("TOKEN", "KEY", "PASSWORD", "SECRET")))
+        self.assertIn("PAPERCLIP_RUN_ID", r.PAPERCLIP_CLIENT_CONTEXT)
+
     def test_beta_pins_are_not_activated_when_the_native_feature_is_disabled(self):
         resolved = [{"key": r.CORE + "paperclip", "versionId": "existing"}]
         self.assertEqual(r.assignment_selections(resolved, False), [r.CORE + "paperclip"])
