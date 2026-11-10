@@ -199,6 +199,11 @@ def test_package_is_unsigned_locked_verified_and_not_published():
         "./node_modules/.bin/tauri", "build", "--ci", "--no-sign", "--bundles", "app", "--", "--locked"
     ]
     assert runs.index(package) > next(i for i, run in enumerate(runs) if run.startswith("cargo test "))
+    seal = next(step for step in job["steps"]
+                if step.get("name") == "Ad-hoc seal the unsigned app and strictly verify")
+    assert runs.index(seal["run"]) == runs.index(package) + 1
+    assert '/usr/bin/codesign --force --deep --sign - --identifier com.mastermind.os "$bundle"' in seal["run"]
+    assert '/usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"' in seal["run"]
     verification = runs[-1]
     assert 'test -s "$bundle/Contents/Info.plist"' in verification
     assert 'test -x "$bundle/Contents/MacOS/mastermind-os"' in verification
