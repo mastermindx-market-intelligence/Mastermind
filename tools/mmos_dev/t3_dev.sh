@@ -78,7 +78,8 @@ cmd_start() {
   : > "$LOG_FILE"
   chmod 600 "$LOG_FILE"
   T3CODE_HOME="$HOME_DIR" T3CODE_PORT="$PORT" T3CODE_HOST=127.0.0.1 \
-    T3CODE_NO_BROWSER=1 nohup "$T3_BIN" serve </dev/null >> "$LOG_FILE" 2>&1 &
+    T3CODE_NO_BROWSER=1 T3CODE_LOG_WS_EVENTS="${T3CODE_LOG_WS_EVENTS:-0}" \
+    nohup "$T3_BIN" serve </dev/null >> "$LOG_FILE" 2>&1 &
   pid=$!
   echo "$pid" > "$PID_FILE"
   echo "$PORT" > "$PORT_FILE"
@@ -91,7 +92,13 @@ cmd_start() {
   done
   [ "$code" = "200" ] || { kill "$pid" 2>/dev/null; die "server not ready on :$PORT (last code $code)"; }
   # Capture the pairing credential into the 0600 access file; never print it.
-  grep -E '^(Connection string|Token|Pairing URL):' "$LOG_FILE" > "$ACCESS_FILE" || true
+  # The banner flushes shortly after the port answers; poll for it briefly.
+  i=0
+  while [ "$i" -lt 15 ]; do
+    grep -E '^(Connection string|Token|Pairing URL):' "$LOG_FILE" > "$ACCESS_FILE" || true
+    grep -q '^Pairing URL:' "$ACCESS_FILE" && break
+    i=$((i + 1)); sleep 1
+  done
   chmod 600 "$ACCESS_FILE"
   echo "STARTED pid=$pid port=$PORT home=$HOME_DIR"
   echo "pairing access saved to $ACCESS_FILE (mode 0600; not printed)"
