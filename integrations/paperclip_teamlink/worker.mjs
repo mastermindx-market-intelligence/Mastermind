@@ -31,10 +31,17 @@ const plugin = definePlugin({
       ctx.tools.register(declaration.name, declaration, (params, run) => perform(declaration, params, {
         kind: 'agent', companyId: run.companyId, agentId: run.agentId, runId: run.runId,
       }));
-      ctx.actions.register(declaration.name, (params, host) => perform(declaration, params, {
-        kind: host.actor.type === 'user' ? 'board' : host.actor.type,
-        companyId: host.companyId, userId: host.actor.userId, agentId: host.actor.agentId, runId: host.actor.runId,
-      }));
+      ctx.actions.register(declaration.name, (params, host) => {
+        // The native action route injects its authorized company scope into
+        // params. Validate that scope, then remove only that host-added field;
+        // agent tool input still follows the strict declared parameter schema.
+        if (params.companyId !== undefined && params.companyId !== host.companyId) return { error: 'COMPANY_SCOPE_MISMATCH' };
+        const { companyId: _companyScope, ...input } = params;
+        return perform(declaration, input, {
+          kind: host.actor.type === 'user' ? 'board' : host.actor.type,
+          companyId: host.companyId, userId: host.actor.userId, agentId: host.actor.agentId, runId: host.actor.runId,
+        });
+      });
     }
     ctx.events.on('issue.comment.created', async event => {
       if (!configuration.enabled) return;
