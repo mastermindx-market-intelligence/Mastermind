@@ -483,3 +483,83 @@ Editorial task states and evidence references are source claims, not runtime per
   ]
 }
 ```
+
+
+## Interrupted T3 harness extension - recovery 2026-11-10
+
+MISSION_COMPLETE: false. The current Chairman direction retains all earlier T3,
+Hermes and conditional Paperclip acceptance, and adds stronger orchestration,
+subagents, communication, durable goals, supported extended reasoning, native
+Chrome through the existing Mastermind extension, auxiliary vision, Peekaboo and
+hardened design skills. These requirements are not fulfilled by a source-only PR.
+
+The interrupted continuation left two unpublished commits (9b2c399fb196b6fb4e486bfaf511742f1a30746e
+closed skill-discovery repair and cfc8a899884a4c8b0b4ac878053ba2f0db67c375 protected-base
+composition) plus the candidate source now preserved alongside this checkpoint.
+The current recovery verified the same operation-bound workspace, descendant
+ancestry, no unmerged index entries, no matching active local source process and
+an unchanged native-qualification source fingerprint. It did not overwrite a
+live writer, restart T3, change a provider or spawn a substitute worker.
+
+### Preserved implementation and evidence
+
+- `integrations/session_bridge/t3_orchestration.py`: native-parent validation,
+  bounded child briefs, write-scope collision checks, original-child/run return
+  handling, explicit queue/steer/restart/cancel semantics and advertised reasoning
+  options. Existing native owners remain authoritative; client checks are not
+  atomic server admission or CAS.
+- `integrations/t3_harness/`: SDK-based stdio presentation of the installed
+  Mastermind browser bridge, exact project context, typed screenshot attachments
+  and fixed native Peekaboo launch. No new browser daemon or inference credentials.
+- Bundle builder, native MCP qualifier, owned-browser journey and reusable
+  orchestration/browser/desktop/vision/design skill references are preserved.
+- Fresh recovery tests: 72 passed in 6.70s, Studio PID 80043, exit 0. The exact
+  command and source hashes are in `docs/evidence/2026-11-10-t3-harness-recovery.json`.
+- Recovered real MCP protocol/native read-only receipt: PASS, eight recorded
+  checks including selected Chrome extension connection and the original
+  Peekaboo MCP/permissions round trip. Its source hashes match the recovered bytes.
+  This was disposable attribution, not a live T3 model consuming the tools.
+- Browser interaction proof remains PARTIAL: opening the owned fixture tab was
+  observed, but snapshot returned BROWSER_UNAVAILABLE; a subsequent original
+  accessibility read reported CDP_SESSION_REQUIRED. No click was proven. The
+  exact original profile/connection/request records are retained in the evidence.
+- Cleanup is owed for original fixture tab 1925952352. No close was attempted.
+  Recover that same tab through the original browser owner; do not open another
+  proof tab, replay actions, switch profiles or bypass its grants.
+- MiniMax auxiliary vision was not activated or qualified. Native model/tool
+  schema, privacy, credential custody and a bounded real image test remain owed.
+
+### Release and continuation boundary
+
+PR #2375 was converted to Draft and read back with autoMergeRequest=null before
+preserving the interrupted candidate. This is a deliberate recovery hold on this
+PR only, not a delivery claim or a new approval requirement. The original remote
+head was 336062e39625b4231553fd725af01931fa5df87c. Do not restore Ready/auto-merge
+until the current candidate has been reviewed and required checks are qualified.
+
+This conversation had a terminal Thinking failed after an already extensive
+implementation session. SESSION_RELIABILITY requires a fresh-context continuation,
+not another heavy execution phase in the failed predecessor. Its cause is unknown.
+The recovery only reconciles, verifies and durably preserves existing work.
+FINALIZATION_CLASSIFICATION: CHECKPOINTED_CONTINUATION once commit/push/readback
+of this checkpoint is observed; not completed at local file creation alone.
+
+### Exact next action for the fresh assigned implementation session
+
+Read this checkpoint and its evidence at the saved commit, reconcile the same
+operation/branch/workspace and PR head, then recover original Chrome tab 1925952352
+and its CDP_SESSION_REQUIRED boundary through the existing bridge. Finish the
+browser interaction/cleanup proof without replay. Review the preserved T3
+orchestration and stdio package, extend the SAME task tree with the current
+requested capability acceptance, and complete real selected T3 skill/tool loading,
+parent-child delegation, original-result consumption, goal/steering/compaction,
+reasoning-option and Peekaboo user-path proof. Qualify a bounded auxiliary-vision
+route only through its existing credential/capacity owner. Design needs responsive,
+keyboard, empty/error and visual checks. Preserve active T3/Capacity writers and
+prior Hermes/Paperclip gates. No code/runtime/CI success implies whole-mission
+acceptance, and no background executor is claimed by this checkpoint.
+
+DO_NOT_REDO: original accepted LH01/LH02/LH03/LH06/LH07 Paper boards, prior accepted
+source checks absent affected changes, existing native task/session/browser/desktop
+runtimes, or an already-dispatched original action. Do not duplicate #2374's now
+composed client, fork the project task store, or substitute the newest child reply.

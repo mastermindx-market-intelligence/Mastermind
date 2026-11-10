@@ -1,11 +1,15 @@
 ---
 name: mastermind-long-horizon
-description: Preserve a Mastermind project's full scope while executing dependency-ready tasks in T3, Claude Code, Codex, or Hermes. Use for multi-phase implementation, steering, compaction recovery, and evidence-backed completion; not for simple questions or planning-only assignments.
+description: Preserve complete project scope across T3, Claude Code, Codex, and Hermes. Use for long-horizon orchestration, native child delegation and communication, goal continuity, model-supported reasoning, Mastermind Chrome control, Peekaboo desktop or auxiliary vision, and real-interface design verification. Not for simple questions or planning-only assignments.
 ---
 
 # Long-horizon project execution
 
-For Hermes use `references/native-hermes.md`; for T3/Claude/Codex use `references/native-t3.md`. Load `references/continuity-patterns.md` only for steering, no-progress, evidence-freshness or always-on workflow detail.
+For Hermes use `references/native-hermes.md`; for T3/Claude/Codex use `references/native-t3.md`. Load only the matching additional reference:
+- `references/t3-orchestration.md` for child briefs, bounded fan-out, original returns, native messaging and supported reasoning options.
+- `references/browser-desktop-vision.md` for actual Mastermind Chrome, Peekaboo and auxiliary-vision workflows.
+- `references/design-verification.md` for original, responsive, accessible interface implementation and real consumer proof.
+- `references/continuity-patterns.md` for steering, no-progress, evidence freshness and always-on responsibilities.
 
 Use the existing runtime; keep the complete project in its existing GitHub plan. This skill is a workflow, not an admission grant, scheduler, task database, background worker, or replacement for bootstrap, ACTIVE_EXECUTION, delivery law, and current user instructions.
 
@@ -30,7 +34,7 @@ Use `integrations.session_bridge.project_task_context` as a read-only source pro
 
 Classify new input as a side question, refinement, added requirement, explicit scope replacement, pause or stop. Answer a side question without deleting the remaining plan. For a refinement, compare old/new source contracts and retain every unmentioned requirement. A new source contract invalidates affected downstream evidence, not accepted unrelated work. Changed implementation inputs also require re-verifying affected evidence even when the written task definition is unchanged. Record the current user's scope decision where needed; a decision reference by itself is not approval.
 
-Queue, steer and side-chat are distinct native operations. Discover the actual capability. In the inspected T3 CLI, `thread send` queues the next turn; never label that as live steering. A received/queued message is not evidence it was acted on. Preserve the original plan until the corresponding task change is observed.
+Queue, steer and side-chat are distinct native operations. Discover the actual capability. The ordinary T3 CLI `thread send` queues the next turn; the separately discovered native MCP `t3_thread_send` can expose explicit queue/steer/restart modes. Never label queueing as live steering or a queued stop instruction as native cancellation. A received/queued message is not evidence it was acted on. Preserve the original plan until the corresponding task change is observed.
 
 ## Resume without inventing continuity
 
@@ -43,6 +47,12 @@ Use the bounded frontier projection for native prompt delivery and the read-only
 Reuse T3/provider or Hermes continuation and native goals only when available, permitted and within the assigned budget. Do not add a competing Stop hook, queue, daemon or watcher. Native goal evaluation sees a transcript, not independently verified reality; put observed evidence in the transcript and still verify the parent outcome. Native goal counters may reset on resume, so they are not durable organizational spend controls.
 
 If task tools or goals are unavailable, use the source-plan view during the permitted foreground turn and state the limitation. Do not enable a disabled provider, change account/model, bypass managed policy, or silently install hooks. No tool availability is promised by this skill.
+
+## Use interactive tools without leaking scope
+
+Use the actually loaded `mmx_project_context` for exact-thread progress, `mmx_browser` for enrolled Chrome profiles, and native Peekaboo tools for the selected macOS application/window. The new stdio consumer reuses existing native owners; it creates no browser driver or desktop agent. Keep native thread/profile/snapshot identities separate and re-read after meaningful UI changes. Never use another provider, browser attachment or standalone desktop agent to bypass a denied or uncertain operation.
+
+Treat vision as a bounded observation. Verify the selected image and native model route before using an auxiliary backend. Preserve the original primary model and credential owners; do not inherit its API key into another tool. Do not claim a proposed MiniMax backend is live from vendor documentation alone. Read the detailed browser/desktop reference before real controls, and the design reference before interface acceptance.
 
 ## Close truthfully
 
