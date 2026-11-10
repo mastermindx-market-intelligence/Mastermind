@@ -21,8 +21,17 @@ RUN_DIR="$ROOT/run"
 LOG_FILE="$RUN_DIR/server.log"
 ENV_FILE="$ROOT/fabric.env"
 BIN_CONF="$ROOT/config/server-bin"
+CAP_CONF="$ROOT/config/log-cap"
 SCRATCH="$ROOT/scratch-project"
-CAP="${TEAM_SERVER_LOG_CAP:-52428800}"   # 50 MiB
+CAP=52428800   # 50 MiB default
+# launchd passes NO environment, so a cap set via TEAM_SERVER_LOG_CAP at
+# install time never reaches the runner; the root's own config file does.
+if [ -s "$CAP_CONF" ]; then
+  CAP=$(head -1 "$CAP_CONF")
+  case "$CAP" in ''|*[!0-9]*) CAP=52428800 ;; esac
+elif [ -n "${TEAM_SERVER_LOG_CAP:-}" ]; then
+  CAP="$TEAM_SERVER_LOG_CAP"
+fi
 
 mkdir -p "$RUN_DIR" "$SCRATCH" 2>/dev/null || true
 [ -f "$ENV_FILE" ] || { echo "server_runner: missing $ENV_FILE (seed the root first)" >&2; exit 78; }

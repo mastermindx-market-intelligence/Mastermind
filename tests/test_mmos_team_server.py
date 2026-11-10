@@ -11,6 +11,7 @@ import plistlib
 import re
 import socket
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -139,6 +140,57 @@ class TestLabelRefusals:
         assert r.returncode != 0
         assert "one label per root" in (r.stdout + r.stderr).lower()
 
+    def test_second_label_refused_even_with_plist_dir_override(self, tmp_path):
+        # Attack a4: hide the live root's plist from the override dir — the
+        # scan must still cover the REAL ~/Library/LaunchAgents (via HOME).
+        home = tmp_path / "fakehome"
+        real_la = home / "Library" / "LaunchAgents"
+        real_la.mkdir(parents=True)
+        other = real_la / "com.example.t6-real.plist"
+        root = tmp_path / "t3-team"
+        root.mkdir()
+        (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://example.internal/api\n")
+        (root / "fabric.env").chmod(0o600)
+        other.write_text(f"<string>{root}/bin/server_runner.sh</string>")
+        away = tmp_path / "away-LaunchAgents"
+        away.mkdir()
+        r = install(root, free_port(), "com.example.t6-sneaky", env_extra={
+            "HOME": str(home), "TEAM_SERVER_LAUNCHAGENTS_DIR": str(away)})
+        assert r.returncode != 0
+        assert "one label per root" in (r.stdout + r.stderr).lower()
+        assert not (away / "com.example.t6-sneaky.plist").exists()
+
+    def test_install_refused_when_home_lock_held(self, tmp_path, launchagents_dir):
+        # Attack a4: a live server holds <root>/run/home.lock across exec;
+        # install must refuse BEFORE mutating the root (pass-1 clobbered
+        # run/port on a live dev root).
+        root = tmp_path / "t3-team"
+        run = root / "run"
+        run.mkdir(parents=True)
+        (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
+        (root / "fabric.env").chmod(0o600)
+        (root / "run" / "port").write_text(str(free_port()))
+        holder = subprocess.Popen(
+            [sys.executable, "-c",
+             "import fcntl,sys,time\n"
+             "fd=open(sys.argv[1],'w')\n"
+             "fcntl.flock(fd,fcntl.LOCK_EX)\n"
+             "print('held',flush=True)\n"
+             "time.sleep(60)\n", str(run / "home.lock")],
+            stdout=subprocess.PIPE, text=True)
+        try:
+            assert holder.stdout.readline().strip() == "held"
+            r = install(root, free_port(), "com.example.t6-lockheld", env_extra={
+                "TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
+            assert r.returncode != 0
+            assert "home.lock held" in (r.stdout + r.stderr)
+            # the root was not mutated by the refused install
+            assert (root / "run" / "port").read_text() != ""
+            assert not (root / "bin").exists()
+        finally:
+            holder.terminate()
+            holder.wait(timeout=10)
+
 
 class TestInstallHygiene:
     def test_missing_fabric_env_refused(self, tmp_path, launchagents_dir):
@@ -182,6 +234,26 @@ class TestRunnerHygiene:
         assert SECRETISH.search(text)  # mentions credentials only to protect them
         # the runner must never echo env values
         assert "printenv" not in text and "echo $" not in text
+
+    def test_runner_truncates_log_over_config_cap(self, tmp_path):
+        # launchd passes no environment: the cap must also come from the
+        # root's config file, and the log must be truncated before the exec.
+        root = tmp_path / "root"
+        run = root / "run"
+        cfg = root / "config"
+        run.mkdir(parents=True)
+        cfg.mkdir(parents=True)
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        (cfg / "server-bin").write_text("/usr/bin/false\n")
+        (cfg / "log-cap").write_text("1024\n")
+        (run / "port").write_text(str(free_port()))
+        log = run / "server.log"
+        log.write_bytes(b"x" * 40960)
+        r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                           capture_output=True, text=True, timeout=30)
+        assert r.returncode == 1  # execve'd /usr/bin/false
+        assert log.stat().st_size == 0  # truncated at runner start
 
     def test_no_secrets_in_plist_template(self):
         text = TOOL.read_text()

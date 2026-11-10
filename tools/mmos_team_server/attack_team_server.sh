@@ -80,7 +80,9 @@ count_hits() {
     -e 'sk-[A-Za-z0-9_-]{16,}' \
     -e '(^|:)token=[A-Za-z0-9._/-]{8,}' \
     -e 'ANTHROPIC_AUTH_TOKEN=[^[:space:]@]{1,}' \
-    -e 'sk-ant-[A-Za-z0-9_-]{8,}' 2>/dev/null
+    -e 'sk-ant-[A-Za-z0-9_-]{8,}' \
+    -e '#token=[A-Za-z0-9._/-]{12,}' \
+    -e '^Token:[[:space:]]+[A-Za-z0-9._/-]{12,}' 2>/dev/null
 }
 # sum_site <label>  (content on stdin via file redirect or heredoc — never a
 # pipeline, so the variable assignments stay in this shell)
@@ -181,26 +183,44 @@ a2() {
     *" $tail_ip "*) : ;;
     *) [ -n "$tail_ip" ] && addrs="$addrs $tail_ip" ;;
   esac
-  n_addr=0; reachable=0; attempts=0
+  # Per-port loopback baseline (code + body sha): "reachable" means the SERVER
+  # ITSELF answered off-loopback with the same response it gives on 127.0.0.1.
+  # A TCP accept by some interceptor that is not our server counts separately.
+  for p in 3805 3806; do
+    eval "base_code_$p=\$(curl -s --noproxy '*' --connect-timeout 2 --max-time 5 \
+      -o '$TMP_PARENT/base.$p.body' -w '%{http_code}' http://127.0.0.1:$p/ 2>/dev/null)"
+    eval "base_sha_$p=\$(shasum -a 256 '$TMP_PARENT/base.$p.body' 2>/dev/null | cut -c1-12)"
+  done
+  n_addr=0; reachable=0; attempts=0; tcp_only=0
   for a in $addrs; do
     n_addr=$((n_addr + 1))
     for p in 3805 3806; do
       attempts=$((attempts + 1))
-      code=$(curl -s --noproxy '*' --connect-timeout 3 --max-time 5 \
-               -o /dev/null -w '%{http_code}' "http://$a:$p/" 2>/dev/null || echo 000)
-      if [ "$code" != "000" ]; then
-        reachable=$((reachable + 1))
-      elif perl -MIO::Socket::INET -e \
+      # curl's -w prints the code itself (000 on failure). Never append a
+      # second value: pass-1 bug `|| echo 000` produced "000\n000", which
+      # != "000" and false-positived every refused connect as reachable.
+      out=$(curl -s --noproxy '*' --connect-timeout 3 --max-time 5 \
+              -o "$TMP_PARENT/attack.body" -w '%{http_code}\n' "http://$a:$p/" 2>/dev/null)
+      code=$(printf '%s' "$out" | tail -n 1)
+      [ -n "$code" ] || code=000
+      sha=$(shasum -a 256 "$TMP_PARENT/attack.body" 2>/dev/null | cut -c1-12)
+      eval "_bc=\$base_code_$p"; eval "_bs=\$base_sha_$p"
+      if [ -n "$_bs" ] && [ "$code" = "$_bc" ] && [ "$sha" = "$_bs" ]; then
+        reachable=$((reachable + 1))   # full server response off-loopback
+      elif [ "$code" != "000" ] || perl -MIO::Socket::INET -e \
            '$s=IO::Socket::INET->new(PeerAddr=>$ARGV[0],PeerPort=>$ARGV[1],Proto=>"tcp",Timeout=>3);exit($s?0:1)' \
            "$a" "$p" 2>/dev/null; then
-        reachable=$((reachable + 1))   # TCP accepts even though HTTP failed
+        tcp_only=$((tcp_only + 1))     # answered by something else, not our server
       fi
     done
   done
   addr_list=$(echo $addrs | tr ' ' ',')
   if [ "$reachable" -gt 0 ]; then
     result 2 non-loopback-reach BYPASS \
-      "$reachable/$attempts connects accepted via $n_addr non-loopback addr(s) [$addr_list]"
+      "$reachable/$attempts full server responses (code+body == loopback baseline, sha3805=$base_sha_3805 sha3806=$base_sha_3806) via $n_addr addr(s) [$addr_list]"
+  elif [ "$tcp_only" -gt 0 ]; then
+    result 2 non-loopback-reach HELD \
+      "0/$attempts server responses; $tcp_only answered by a non-server interceptor via [$addr_list]; server itself unreachable off-loopback"
   else
     result 2 non-loopback-reach DEFEAT \
       "0/$attempts reachable via $n_addr non-loopback addr(s) [$addr_list] (HTTP+raw TCP both refused/unreachable)"
@@ -342,6 +362,10 @@ a5() {
            "$FILL_ROOT/scratch-project" "$FILL_ROOT/fakebin"
   printf 'DUMMY=1\n' > "$FILL_ROOT/fabric.env"
   chmod 600 "$FILL_ROOT/fabric.env"
+  # Small cap via the root's config file (launchd passes NO environment, so
+  # a TEAM_SERVER_LOG_CAP env at install time never reached the runner in
+  # pass 1; config/log-cap does).
+  printf '32768\n' > "$FILL_ROOT/config/log-cap"
   # Fake server: prints ~2KB per run then exits 1 -> KeepAlive crash loop.
   cat > "$FILL_ROOT/fakebin/crashy" <<'EOF'
 #!/bin/sh
@@ -351,7 +375,7 @@ EOF
   chmod 755 "$FILL_ROOT/fakebin/crashy"
   port=$(with_alarm 10 perl -MIO::Socket::INET -e \
     '$s=IO::Socket::INET->new(LocalAddr=>"127.0.0.1",LocalPort=>0,Proto=>"tcp",Listen=>1,ReuseAddr=>1);printf "%d",$s->sockport')
-  out=$(TEAM_SERVER_LAUNCHAGENTS_DIR="$LA_DIR" TEAM_SERVER_LOG_CAP=32768 \
+  out=$(TEAM_SERVER_LAUNCHAGENTS_DIR="$LA_DIR" \
         "$TEAM" install --root "$FILL_ROOT" --port "$port" \
         --label "$FILL_LABEL" --server-bin "$FILL_ROOT/fakebin/crashy" 2>&1)
   rc=$?
