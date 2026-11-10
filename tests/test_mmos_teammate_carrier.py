@@ -261,6 +261,20 @@ def test_choose_issue_takes_own_active_run_and_ignores_str_shape():
     assert [r["id"] for r in wc.choose_issue(rows, "run-9")][:1] == ["a"]
 
 
+def test_choose_issue_prefers_own_bound_issue_over_older_unbound():
+    # Observed live (MMO-11/12, 2026-11-10): the assignment wake is bound to
+    # the NEW issue, but an older unbound in_progress issue sorts first by
+    # updatedAt. The run must take the issue bound to IT, not the older one.
+    rows = [
+        {"id": "old", "status": "in_progress", "activeRun": None,
+         "updatedAt": "1"},
+        {"id": "bound", "status": "in_progress", "activeRun": {"id": "run-9"},
+         "updatedAt": "2"},
+    ]
+    order = [r["id"] for r in wc.choose_issue(rows, "run-9")]
+    assert order.index("bound") < order.index("old")
+
+
 def test_assignment_wake_run_does_the_work_on_own_active_run():
     # Item 1: the assignment wake binds the issue to THIS run before the
     # carrier starts (activeRun == pc.run_id). The carrier must do the work,

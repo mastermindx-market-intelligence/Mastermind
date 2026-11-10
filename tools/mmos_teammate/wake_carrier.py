@@ -92,8 +92,12 @@ def choose_issue(rows, my_run_id=None):
             return False
         active = active_run_id(row)
         return active is None or active == my_run_id
+
+    # The issue Paperclip bound to THIS run (assignment or repair wake) comes
+    # first — it is this run's to do. Everything else is oldest-first.
     return sorted([r for r in rows if eligible(r)],
-                  key=lambda r: r.get("updatedAt") or "")
+                  key=lambda r: (0 if active_run_id(r) == my_run_id else 1,
+                                 r.get("updatedAt") or ""))
 
 
 def scan_marker(messages, op):
