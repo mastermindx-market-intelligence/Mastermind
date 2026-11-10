@@ -4601,6 +4601,19 @@ class ExecutiveSupervisor:
         attempt = self.runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
         if attempt is None:  # pragma: no cover - FK and transaction invariants
             raise SupervisorError("terminal attempt disappeared")
+        # The terminal transaction invokes the synchronous optional hook.
+        # In this async path finish_job owns the await, after durable seal
+        # and attempt readback, before returning to its original caller.
+        # No detached task, second return owner or background retry is added.
+        return_seam = getattr(self.runtime.attempts, "_execution_return_seam", None)
+        deliver_return = getattr(return_seam, "deliver_async", None)
+        if callable(deliver_return):
+            try:
+                await deliver_return(job=job, status=attempt.status)
+            except Exception:
+                # Return failure cannot undo the terminal seal. The installed
+                # wiring retains its original intent for qualified readback.
+                pass
         return SupervisorReceipt(
             job=job,
             attempt=attempt,
