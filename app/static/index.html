@@ -18,6 +18,7 @@ try {
 
 <!-- 2. Design system (system/local fonts; no render-blocking third-party import) -->
 <link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="/portfolio-scenarios.css">
 
 <!-- 3. Page-local styles -->
 <style>
@@ -3022,6 +3023,10 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── SHADOW BOOKS (Policy A/B) ──────────────────────────────────────────── -->
+<div class="mm-section" data-mm-views="opportunities">
+  <div id="portfolio-scenario-lab"></div>
+</div>
+
 <div class="mm-section" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="shadow-books" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading shadow books…</span><span class="l-zh">加载影子组合中…</span></div>
@@ -10183,5 +10188,6 @@ document.addEventListener('visibilitychange', function() {
   }
 });
 </script>
+<script src="/portfolio-scenarios.js" defer></script>
 </body>
 </html>

@@ -20,7 +20,7 @@ def test_heavy_jobs_cancel_and_final_gate_keeps_aggregating():
     assert jobs["pr_fast"]["if"] == fan._REQUIRED_PR_FAST_IF
     assert jobs["pytest_shards"]["if"] == fan._REQUIRED_SHARDS_IF
     assert jobs["test"]["if"] == fan._REQUIRED_GATE_IF
-    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
 
 
 @pytest.mark.parametrize("job", ["pr_fast", "pytest_shards"])

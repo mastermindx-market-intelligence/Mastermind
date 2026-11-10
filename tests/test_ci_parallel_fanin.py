@@ -26,7 +26,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
         "push": {"branches": ["master"]},
         "workflow_dispatch": None,
     }
-    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pytest_shards", "test"}
+    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"}
     shards = data["jobs"]["pytest_shards"]
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
@@ -37,7 +37,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
     assert data["jobs"]["test"]["name"] == fan._REQUIRED_GATE_NAME
-    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
 
 
 def test_smoke_checkout_uses_the_full_shard_pinned_fixture_without_credentials():
@@ -143,7 +143,7 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             "index: [0, 1, 2, 3, 4, 5]",
             "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
-        ("needs: [pr_scope, pr_fast, pytest_shards]", "needs: []"),
+        ("needs: [pr_scope, pr_fast, pin_guards, pytest_shards]", "needs: []"),
         ("if: " + fan._REQUIRED_GATE_IF, "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
         ('if [ "$PR_SCOPE_STATUS" != success ]; then', "if [ \"$PR_SCOPE_STATUS\" = failure ]; then"),
@@ -615,14 +615,14 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
 # Only canonical plan execution is replaced with a recording stub; separate
 # tests above prove the real discovery plan's exact six-shard coverage.
 _GATE_PASS_CASES = [
-    ("pull_request", "full", ("success", "skipped", "success")),
-    ("pull_request", "fast", ("success", "success", "skipped")),
-    ("pull_request", "smoke", ("success", "success", "skipped")),
-    ("merge_group", "full", ("success", "skipped", "success")),
-    ("merge_group", "fast", ("success", "success", "skipped")),
-    ("merge_group", "smoke", ("success", "success", "skipped")),
-    ("push", "", ("skipped", "skipped", "success")),
-    ("workflow_dispatch", "", ("skipped", "skipped", "success")),
+    ("pull_request", "full", ("success", "skipped", "success", "success")),
+    ("pull_request", "fast", ("success", "success", "skipped", "success")),
+    ("pull_request", "smoke", ("success", "success", "skipped", "success")),
+    ("merge_group", "full", ("success", "skipped", "success", "success")),
+    ("merge_group", "fast", ("success", "success", "skipped", "success")),
+    ("merge_group", "smoke", ("success", "success", "skipped", "success")),
+    ("push", "", ("skipped", "skipped", "success", "success")),
+    ("workflow_dispatch", "", ("skipped", "skipped", "success", "success")),
 ]
 
 
@@ -649,6 +649,7 @@ def _run_exact_workflow_gate(tmp_path, event, mode, states, *, plan_exit=0):
             "PR_SCOPE_STATUS": states[0],
             "PR_FAST_STATUS": states[1],
             "SHARDS_STATUS": states[2],
+            "GUARDS_STATUS": states[3],
             "CI_GATE_TEST_CALLS": str(calls),
             "CI_GATE_TEST_PLAN_EXIT": str(plan_exit),
         }, capture_output=True, text=True, timeout=5,
@@ -668,7 +669,7 @@ def test_actual_shell_gate_accepts_only_the_complete_expected_path(
 @pytest.mark.parametrize("event,mode,states,field,bad_status", [
     (*case, field, bad_status)
     for case in _GATE_PASS_CASES
-    for field in range(3)
+    for field in range(4)
     for bad_status in ("success", "skipped", "failure", "cancelled", "", "unknown")
     if bad_status != case[2][field]
 ])
@@ -684,8 +685,8 @@ def test_actual_shell_gate_rejects_missing_failed_cancelled_or_wrong_job_states(
 
 @pytest.mark.parametrize("mode", ["", "HOLD", "FAST", "unqualified"])
 @pytest.mark.parametrize("states", [
-    ("success", "skipped", "success"),
-    ("success", "success", "skipped"),
+    ("success", "skipped", "success", "success"),
+    ("success", "success", "skipped", "success"),
 ])
 def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
     result, calls = _run_exact_workflow_gate(tmp_path, "pull_request", mode, states)
@@ -697,7 +698,7 @@ def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
 @pytest.mark.parametrize("mode", ["fast", "smoke"])
 def test_actual_shell_gate_never_uses_pr_fast_results_for_release(tmp_path, event, mode):
     result, calls = _run_exact_workflow_gate(
-        tmp_path, event, mode, ("success", "success", "skipped"),
+        tmp_path, event, mode, ("success", "success", "skipped", "success"),
     )
     assert result.returncode != 0
     assert calls == []
