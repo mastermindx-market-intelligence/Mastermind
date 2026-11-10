@@ -62,3 +62,13 @@ jobs:
           path: ${{ runner.temp }}/ci-profile/
           if-no-files-found: error
           retention-days: 30
+      # This job checks out a two-file sparse tree into the repository's shared
+      # runner workspace. Runners are persistent, so leaving that sparse state
+      # behind corrupts every later job that reuses the workspace (e.g. a deploy
+      # job that cannot see ops/). Restore a full tree on the way out.
+      - name: Restore the shared workspace to a full tree
+        if: always()
+        shell: bash
+        run: |
+          git sparse-checkout disable 2>/dev/null || true
+
