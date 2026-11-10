@@ -28,11 +28,18 @@ pub const PAIR_PATH: &str = "/pair";
 const POLL_INTERVAL: Duration = Duration::from_millis(750);
 /// Upper bound for the helper (node start-up, server probe, token mint).
 const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
-/// Upper bound for the page to leave `/pair` after we navigate to the minted
-/// address (token exchange plus the client's reload).
+/// Upper bound for the webview to report the blank page after we navigate to
+/// it, and for the page to leave `/pair` after the minted address is loaded
+/// (token exchange plus the client's reload).
 const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(45);
 /// Largest helper stdout we will even read.
 const MAX_HELPER_OUTPUT: usize = 8 * 1024;
+/// The inert page the watchdog loads between the pairing page and the minted
+/// address. The minted URL differs from `/pair` only by its fragment, and a
+/// fragment-only navigation is a *same-document* jump inside the SPA that
+/// never remounts the auto-submit effect — so the webview is first moved here,
+/// making the load of the minted address a real cross-document navigation.
+const BLANK_PAGE: &str = "about:blank";
 
 /// Two URLs are on the same origin (scheme, host, port).
 pub fn same_origin(a: &Url, b: &Url) -> bool {
@@ -73,6 +80,8 @@ pub enum PairingFailure {
     HelperOutput,
     /// The minted URL targets a different origin than the configured server.
     OriginMismatch,
+    /// A webview navigation the watchdog issued was refused.
+    LoadFailed,
     /// The pairing page never completed the exchange.
     ExchangeTimeout,
 }
@@ -85,6 +94,7 @@ impl PairingFailure {
             Self::HelperTimeout => "helper_timeout",
             Self::HelperOutput => "helper_output",
             Self::OriginMismatch => "origin_mismatch",
+            Self::LoadFailed => "load_failed",
             Self::ExchangeTimeout => "exchange_timeout",
         }
     }
@@ -228,21 +238,77 @@ pub fn log_pairing_done() {
 enum Phase {
     /// Watching for the server's pairing page.
     Armed,
+    /// A minted address exists and the webview was told to load the blank
+    /// page; waiting for that to commit before loading the address.
+    Blanking { pairing_url: Url, since: Instant },
     /// The minted address is loaded; waiting for the exchange to finish.
     Awaiting { since: Instant },
+}
+
+/// What one poll of the watchdog thread should do, decided purely from the
+/// phase, the URL the webview currently reports and the configured address.
+#[derive(Debug)]
+enum Decision {
+    /// Nothing to do this tick.
+    Wait,
+    /// The pairing page appeared: mint an address and blank the webview.
+    Mint,
+    /// The blank page is showing: load the minted address.
+    LoadMinted(Url),
+    /// The exchange finished: return the window to the configured address.
+    Landed,
+    /// The current phase outlived its budget.
+    TimedOut,
+}
+
+fn decide(phase: &Phase, current: Option<&Url>, original: &Url) -> Decision {
+    match phase {
+        Phase::Armed => {
+            if current.is_some_and(|url| needs_pairing(url, original)) {
+                Decision::Mint
+            } else {
+                Decision::Wait
+            }
+        }
+        Phase::Blanking { pairing_url, since } => {
+            if since.elapsed() > EXCHANGE_TIMEOUT {
+                return Decision::TimedOut;
+            }
+            if current.is_some_and(|url| url.scheme() == "about") {
+                Decision::LoadMinted(pairing_url.clone())
+            } else {
+                Decision::Wait
+            }
+        }
+        Phase::Awaiting { since } => {
+            if since.elapsed() > EXCHANGE_TIMEOUT {
+                return Decision::TimedOut;
+            }
+            let landed = current.is_some_and(|url| {
+                same_origin(url, original) && !is_pairing_page(url, original)
+            });
+            if landed {
+                Decision::Landed
+            } else {
+                Decision::Wait
+            }
+        }
+    }
 }
 
 /// Start the once-per-launch pairing watchdog for one shell window.
 ///
 /// Polls the webview's current URL (the unauthenticated redirect to `/pair`
 /// is a client-side history change, so no navigation event fires for it).
-/// When the pairing page appears, mints one address, loads it, and returns
-/// the window to the address it was configured with. Any terminal state ends
-/// the watchdog; nothing pairs twice in one launch.
+/// When the pairing page appears, mints one address, blanks the webview so
+/// the minted address is a cross-document load (see [`BLANK_PAGE`]), then
+/// returns the window to the address it was configured with. Any terminal
+/// state ends the watchdog; nothing pairs twice in one launch.
 pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, helper: PathBuf) {
     let window_label = window_label.to_string();
     std::thread::spawn(move || {
         use tauri::Manager;
+        let blank = Url::parse(BLANK_PAGE).expect("blank page url must parse");
         let mut phase = Phase::Armed;
         loop {
             std::thread::sleep(POLL_INTERVAL);
@@ -251,42 +317,36 @@ pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, 
                 None => continue,
             };
             let current = window.url().ok();
-            match phase {
-                Phase::Armed => {
-                    let needs = current
-                        .as_ref()
-                        .is_some_and(|url| needs_pairing(url, &original));
-                    if needs {
-                        phase = Phase::Awaiting {
-                            since: match run_pair_helper(&helper, &original) {
-                                Ok(pairing_url) => {
-                                    if window.navigate(pairing_url).is_err() {
-                                        log_pairing_failure(PairingFailure::ExchangeTimeout);
-                                        return;
-                                    }
-                                    Instant::now()
-                                }
-                                Err(failure) => {
-                                    fail(&window, failure);
-                                    return;
-                                }
-                            },
-                        };
+            match decide(&phase, current.as_ref(), &original) {
+                Decision::Wait => {}
+                Decision::Mint => match run_pair_helper(&helper, &original) {
+                    Ok(pairing_url) => {
+                        if window.navigate(blank.clone()).is_err() {
+                            fail(&window, PairingFailure::LoadFailed);
+                            return;
+                        }
+                        phase = Phase::Blanking { pairing_url, since: Instant::now() };
                     }
+                    Err(failure) => {
+                        fail(&window, failure);
+                        return;
+                    }
+                },
+                Decision::LoadMinted(pairing_url) => {
+                    if window.navigate(pairing_url).is_err() {
+                        fail(&window, PairingFailure::LoadFailed);
+                        return;
+                    }
+                    phase = Phase::Awaiting { since: Instant::now() };
                 }
-                Phase::Awaiting { since } => {
-                    let landed = current.as_ref().is_some_and(|url| {
-                        same_origin(url, &original) && !is_pairing_page(url, &original)
-                    });
-                    if landed {
-                        let _ = window.navigate(original.clone());
-                        log_pairing_done();
-                        return;
-                    }
-                    if since.elapsed() > EXCHANGE_TIMEOUT {
-                        fail(&window, PairingFailure::ExchangeTimeout);
-                        return;
-                    }
+                Decision::Landed => {
+                    let _ = window.navigate(original.clone());
+                    log_pairing_done();
+                    return;
+                }
+                Decision::TimedOut => {
+                    fail(&window, PairingFailure::ExchangeTimeout);
+                    return;
                 }
             }
         }
@@ -468,6 +528,7 @@ mod tests {
             PairingFailure::HelperTimeout,
             PairingFailure::HelperOutput,
             PairingFailure::OriginMismatch,
+            PairingFailure::LoadFailed,
             PairingFailure::ExchangeTimeout,
         ]
         .iter()
@@ -485,6 +546,95 @@ mod tests {
             assert!(!code.contains("token"), "{code}");
             assert!(!code.contains("http"), "{code}");
         }
+    }
+
+    /// The watchdog's whole per-tick state machine, without a window.
+    #[test]
+    fn decide_covers_the_full_watchdog_sequence() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let minted = url("http://127.0.0.1:3780/pair#token=synthetic0123456789");
+        let fresh = Instant::now();
+        let stale = Instant::now() - Duration::from_secs(3600);
+
+        // Armed: only our own tokenless pairing page triggers a mint.
+        assert!(matches!(
+            decide(&Phase::Armed, Some(&url("http://127.0.0.1:3780/thread-1")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&Phase::Armed, Some(&url("http://127.0.0.1:3780/pair#token=x")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&Phase::Armed, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Mint
+        ));
+        assert!(matches!(decide(&Phase::Armed, None, &original), Decision::Wait));
+
+        // Blanking: wait until the webview really reports the blank page, and
+        // never while it still shows the pairing page (the minted address must
+        // be a cross-document load, not a fragment-only jump).
+        let blanking = Phase::Blanking { pairing_url: minted.clone(), since: fresh };
+        assert!(matches!(
+            decide(&blanking, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Wait
+        ));
+        let blank = url("about:blank");
+        match decide(&blanking, Some(&blank), &original) {
+            Decision::LoadMinted(loaded) => assert_eq!(loaded, minted),
+            other => panic!("blank page must trigger loading the minted address, got {other:?}"),
+        }
+        assert!(matches!(
+            decide(
+                &Phase::Blanking { pairing_url: minted.clone(), since: stale },
+                Some(&blank),
+                &original
+            ),
+            Decision::TimedOut
+        ));
+
+        // Awaiting: only a same-origin non-pairing URL finishes; the minted
+        // address itself, its fragment-stripped form and other origins wait.
+        let awaiting = Phase::Awaiting { since: fresh };
+        assert!(matches!(
+            decide(&awaiting, Some(&minted), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3781/other")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&blank), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3780/")), &original),
+            Decision::Landed
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3780/env-1/thread-1")), &original),
+            Decision::Landed
+        ));
+        assert!(matches!(
+            decide(&Phase::Awaiting { since: stale }, Some(&minted), &original),
+            Decision::TimedOut
+        ));
+    }
+
+    #[test]
+    fn blank_page_url_is_inert_and_parseable() {
+        let blank = Url::parse(BLANK_PAGE).expect("blank url parses");
+        assert_eq!(blank.scheme(), "about");
+        assert_eq!(blank.path(), "blank");
+        // It can never be mistaken for the pairing page of any server.
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        assert!(!is_pairing_page(&blank, &original));
+        assert!(!same_origin(&blank, &original));
     }
 
     #[test]
