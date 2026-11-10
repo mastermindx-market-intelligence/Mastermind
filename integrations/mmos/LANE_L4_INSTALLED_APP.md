@@ -36,8 +36,8 @@ aborts.
 |---|---|---|---|
 | s1 | glm-5.3 | app logs/diagnostics, exact request+status (OBSERVED vs INFERRED) | `slice1-app-observation.md` |
 | s2 | deepseek-v4.1-flash | full path/method census @5420bb17+trunk vs Caddy allowlist (VPS read-only) | `slice2-path-census.md` |
-| s3 | gemini-4-argon (sub-lead, effort high, READ_ONLY) | session lifecycle + UI state map + fix design | `L4_EXECUTIVE_SESSION_DESIGN.md` |
-| s4 | grok-4.7 | installed-app driver capture: Projects/sign-in/Build details PNG+text | `projects-state.*`, `signin-state.*`, `build-details.*` |
+| s3 | gemini-4-argon (sub-lead, effort high, READ_ONLY) | session lifecycle + UI state map + fix design | `L4_EXECUTIVE_SESSION_DESIGN.md` — completed pre-redirect; designs (a)/(b) dropped, facts kept (see Redirect) |
+| s4 | grok-4.7 | installed-app driver capture: Projects/sign-in/Build details PNG+text | cancelled 2026-11-10 (app not running at probe time; no captures owed; none on disk) |
 | s5 | deepseek-v4.1-flash | 2nd independent investigator (V3 rule): source facts (persist/refresh/generation), live unauth edge probes, non-secret artifacts | `slice5-hypothesis-probes.md` |
 
 ## Desktop safety rules (principal, 2026-11-10 — binding on all GUI work)
@@ -86,6 +86,20 @@ aborts.
   emitted. Discriminator still open: live diagnostics phase
   (`AUTH_UNAVAILABLE` vs `HTTP_FAILURE 401/403` vs `NETWORK_FAILURE`).
 
+- **s5 ACCEPTED** (deepseek-v4.1-flash; 499-line artifact opened in full by
+  lead). Corroborates s1/s2 and settles the discriminators: no Executive
+  refresh path exists at 5420bb17 (`refresh_one` refuses Executive
+  auth.rs:806/811; `ensure_native_token` skips refresh 929-931; `start_restore`
+  restores only Acquisition+Content ~1009; expiry = clear-and-report 217-227);
+  tokens memory-only, no on-disk session store (Keychain: Acquisition/Content
+  refresh only); `dd45d111` appears nowhere in app source (generation =
+  process-local counters, auth.rs:45/203-212). Probes P1–P7 reproduce the
+  principal's numbers and add: **P4** any bearer on
+  `POST /os/executive/context` → 401 `authentication_required` (route SERVED;
+  the 403 is the uniform no-credential answer, not an outage); **P5** edge
+  aborts only for wrong-method/unknown-route shapes the app never sends. App
+  not running at probe time.
+
 ## Systemic finding (owner-ask material, evidence: slice2-path-census.md)
 
 The installed app issues 74 paths the fixed edge aborts by design. Even with
@@ -94,10 +108,58 @@ perfect auth, project-detail surfaces cannot load through
 a VPS change (hard boundary): this lane prepares the exact change +
 validation command for decision, never applies it.
 
-## Fix / land / install (to be filled)
+## Redirect (Chairman 2026-11-10 05:10 UTC) — outcome: LOCAL OPERATOR MODE
 
-- Writer: glm-5.3 (worktree branch); attacker: grok-4.7 (diff review, different model).
-- Tests: `App.projects-read-state.test.tsx` + Rust tests in `auth.rs`.
-- Land: merge trunk into lane, affected suites, non-force push `HEAD:feat/mmos-v1-integration-t3`.
-- Build/install per `INSTALL_RECEIPTS_AND_ROLLBACK.md` §5.1 (identity
-  `mmos-l4-installed-<date>-<shortsha>`), driver captures from the new build.
+OAuth repair and session-lifecycle work STOP; the root cause of the Projects
+string is settled (missing or rejected Acquisition token on an edge-ALLOWED
+read) and the new outcome removes it: on the M2 the native app reads/writes the
+local Executive over a Unix domain socket — no Auth0 sign-in, browser, or
+token. OAuth code stays in tree, unused in local mode.
+
+- **Contract with L8** (first landed commit, trunk):
+  `LOCAL_OPERATOR_CONTRACT.md` — config block
+  `local_operator:{socket_path, allowed_uids, operator_subject}` (off unless
+  present), socket path convention, app switch `MM_LOCAL_OPERATOR=1` (+ optional
+  `MM_LOCAL_OPERATOR_SOCKET`), dev bundle `com.mastermind.os.dev`.
+- **Design** (principal's decision; one design-attack child, then build unless
+  it reproduces a real break): Unix-socket listener in a NEW Executive module +
+  smallest `server.py` hook; kernel peer-uid admission + socket file mode;
+  socket requests attributed to the configured operator subject for OS
+  executive + workspace routes, no bearer; TCP listener byte-for-byte unchanged
+  (existing transport tests untouched). REJECTED IN ADVANCE: any
+  trust-loopback-TCP or trust-a-header rule — the public tunnel
+  (EdgeOne→Caddy→chisel) reaches `127.0.0.1:8443` with
+  `X-Forwarded-For 127.0.0.1`.
+- **Negative tests gate**: forged headers (XFF/Host/made-up local-operator
+  header) on TCP → exactly today's refusal; peer uid ∉ allowed_uids refused on
+  the socket; config block absent → no socket created; app switch off →
+  sign-in gate + OAuth flow as today (existing tests untouched, green).
+- **Owner gate (first hour)**: ONE read-only decision memo (gemini-4-argon) →
+  `LOCAL_OPERATOR_ACTIVATION_MEMO.md` — is the Executive MCP server separately
+  installable from the Control component refusing
+  `control_component_worker_live`; exact owner install/enable commands;
+  rollback; untouched list incl. hold #1893. No apply, no restart. Principal
+  takes it to the Chairman.
+- **Proof owed**: second Executive from lane code under the lead's own user at a
+  fresh dev root (not L1's scratch root, not production), socket enabled; app
+  built in local mode as `com.mastermind.os.dev`; text evidence under
+  `~/.mastermind/mmos_evidence/l4-20261110/local-operator/` (Projects read 200
+  over the socket with no token + the four negative tests).
+- **Shape**: writer+attacker on each half (Executive module; app transport),
+  different models, ≤2 rounds. Auth = CRITICAL row: changed files listed in the
+  final return under `CRITICAL FOR RC REVIEW`.
+- **Dropped**: OAuth refresh repair, session-lifecycle design (s3 designs a/b),
+  rebuild/reinstall of the Chairman's installed app (waits for the activation
+  decision). **Retained**: corrected incident record (flash worker); desktop
+  safety rules above unchanged.
+
+## Fix / land / install (local operator mode)
+
+- Executive half: writer glm-5.3, attacker grok-4.7. App half: writer glm-5.3,
+  attacker grok-4.7 (attacker differs from writer on each half). ≤2 rounds.
+- Tests: new Rust socket-module tests + existing `server.py` transport tests
+  untouched and green; app `App.projects-read-state.test.tsx` + new local-mode
+  tests, `npm run typecheck` + vitest in `app/mastermind_os`; `auth.rs` units.
+- Land: merge trunk into lane, affected suites, non-force push
+  `HEAD:feat/mmos-v1-integration-t3`. Proof build as `com.mastermind.os.dev`
+  per contract §4; NO install over the Chairman's app.
