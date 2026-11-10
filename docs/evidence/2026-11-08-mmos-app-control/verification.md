@@ -1,4 +1,129 @@
-# Mastermind OS app control — source qualification
+# Mastermind OS app control — release and live acceptance
+
+## Current status — 2026-11-09
+
+**PROVEN_LIVE** for the released app-control bridge and direct standard MCP
+consumer. The app-control release acceptance in the execution plan is satisfied.
+This is not an application-wide launch-readiness claim or a claim that every
+ChatGPT account has the optional Workbench tools installed.
+
+Before this change, a web session without computer use lacked a general semantic
+interface to the actual React app. After it, an authorized web tool consumer can
+inspect the signed-in app, navigate its existing routes, edit and activate observed
+controls, and verify the result through the original browser owner. The four tools
+are `mastermind_os_inspect`, `mastermind_os_navigate`, `mastermind_os_act` and
+`mastermind_os_check`.
+
+The accepted source is
+[`ed7991199ccf76027f7acccc283c539c175e7e16`](https://github.com/mastermindx-market-intelligence/Mastermind/commit/ed7991199ccf76027f7acccc283c539c175e7e16),
+tree `a157a30dcee098e43a694836b70047db6328e689`, merged through the protected native
+queue in [PR #2305](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2305)
+at `2026-11-09T02:54:58Z`. Required integrated CI
+[42548210214](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42548210214)
+and the Mastermind OS workflow
+[42548210279](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42548210279)
+succeeded. Full immutable identities, owner receipt locations and the safe call
+trace are in [`live-proof.json`](live-proof.json).
+
+### Actual release and consumer proof
+
+| Layer | Observed result |
+| --- | --- |
+| Accepted static build | Exact accepted source; 12-asset private-entry profile; bundle digest `3fd32f2af9315faddc5546ce2f34dc5c64877f730226cd059b7b2f10b84e8f43` |
+| Existing MCP gateway owner | Component update `COMPLETE`; sealed accepted release, configuration/plist after-images, dedicated UID 458 process and exact `127.0.0.1:8443` listener joined; transaction marker absent |
+| Existing public edge owner | Publication `FINAL`; new HTML, callback and assets verified; live configuration equals final configuration and startup autosave; existing relay preserved |
+| Actual authenticated consumer | Normal Auth0 sign-in in a new owned isolated Chrome 157 context, then the accepted adapter and actual 18-tool MCP catalogue in that same context |
+| Granular control | Today → Search → advanced Programs navigation; disclosure activation; React-controlled search fill, readback and restoration; theme dark → light → dark |
+| Staleness | Deliberate reuse of a consumed observation returned `REFUSED / STALE_OBSERVATION`; original field value remained unchanged |
+| Layout and readback | Desktop 1440×1000 and mobile 390×844 route/overflow checks passed with zero horizontal overflow; desktop restored |
+| Authentication withdrawal | Sign-out immediately returned `signed_out / AUTH_REQUIRED`, empty text, controls, routes and headings; independent inspection confirmed the same result |
+| Cleanup | Owned browser closed; no browser descendants remained; the original closed proof driver was terminated and its PID absence read back |
+| Durable launcher | Accepted 14-file source plus pinned dependencies copied to the original owner's durable runtime; 4,562 inventory objects matched by bytes/modes/link targets; actual 18-tool catalogue and canonical digest reverified |
+
+The live trace contains **26 MCP calls, including 18 app-tool calls**. Its sole
+tool error is the deliberate stale-observation refusal. Authentication used the
+normal account flow; no synthetic auth, copied cookies, personal-browser
+attachment, business SEND or provider launch was used. The test's temporary
+search value and theme were restored. The live browser used the accepted cache
+runtime; the later durable copy is byte/inventory-qualified and its actual
+catalogue was independently read back. It does not claim a second live-browser run.
+
+The [runbook](../../MASTERMIND_OS_APP_CONTROL.md#installed-c3--m2-launcher) contains
+the exact durable launcher, MCP initialization sequence and same-context login
+requirements. This is an attended process through an authorized host connection,
+not a new listener, browser pool or daemon.
+
+### Boundary findings and repairs
+
+The recurring problem was a mixture of missing app-level control, capability
+discovery gaps and mismatched installed state. A generic refusal did not identify
+which layer had failed.
+
+- The original unselected C3 backend already ran locally on `m2studio`.
+  `studio_select_host("m2")` requested an unconfigured optional remote route and
+  returned `NOT_APPLIED`; it was not a denial of the working original local path.
+- The managed GitHub connection's administrative-read restriction and its missing
+  exact-head merge input were real capability limits. The explicitly authorized
+  native principal qualified controls and used one exact-head protected queue
+  request. No self-approval, administrative bypass or direct merge was used.
+- An older component update retained a `START_DISPATCHED` marker. Its original
+  sealed reconciliation owner closed it as `ABORTED_UNCHANGED` with both installed
+  before-images restored and b4 still serving. The retained stop/start history was
+  preserved; this result does not imply that no historical dispatch occurred.
+- The old edge publisher understood the old asset profile. The coherent accepted
+  publisher, planner and asset closure handled the new profile on both hosts.
+  Validation was not weakened and no public MCP family was added.
+- The first edge prepare detected another application's concurrent HTTP/HTTPS
+  route update before writing intent. A fresh original-owner stage preserved that
+  change and completed publication; the refused first stage was not replayed.
+
+### Exact limits and future diagnostics
+
+The dormant C3 F0 Workbench channel was not migrated. Its optional 23-tool
+installed surface remains **NOT_INSTALLED**; the current fleet CLI provides no
+supported profile/workspace migration action. Direct standard MCP live acceptance
+does not depend on that channel.
+
+During live acceptance, `/workspace/programs/current` and
+`/workspace/work/current` returned HTTP 503. The UI displayed
+`SOURCE_UNAVAILABLE`; its generic producer copy is not proof that no producer or
+mission exists. The backend cause remains unqualified by that browser trace.
+Diagnosis belongs to the existing Workspace/CeoIngress/CCR owners. This evidence
+does not justify a new mission, grant, producer, guessed restart or arming change.
+Provider workflow execution was not exercised.
+
+Additional original-owner diagnostics confirmed the original Control, released
+gateway, worker and public tunnel processes were running. The exact installed b4
+Control status client (Git blob `8c820364adc9568fe9606d1983cf620bc6b5801e`) returned
+`ok: true`, `AWAITING_CANARY`, PID 96546, zero active dispatches and zero dispatch
+errors. Its [installed dispatch source](https://github.com/mastermindx-market-intelligence/Mastermind/blob/b4a5a8925c6c1412dac67ba296cf65ee81c4d4c8/control_plane/executive_service.py)
+permits ordinary Workspace reads in that state without worker arming. A stopped
+Control service is ruled out; arming is not a justified repair. The remaining
+proof is the original App-peer CeoIngress/Workspace response classification or an
+authorized CCR-owner diagnostic of publication, freshness and refresh errors.
+The generic status client does not expose those facts. An unrelated inventory
+encountered `PermissionError` at `application-tunnel/current`; that exact path was
+not retried or accessed through another identity.
+
+The original paid Fabric reservation and historical F2/issuer uncertainty retain
+their existing fences. The personal Chrome AppleScript JavaScript denial was not
+retried through CDP, copied cookies or another protocol. No Agent OS wave, Linear
+projection or Slack dialogue was marked complete by this source contribution.
+
+**Do not redo:** the accepted implementation, completed component update, final
+edge publication and successful live app-control journey. Future development
+sessions use the installed launcher and current observations. Any separate
+backend repair starts with the original owner and concrete current evidence.
+
+---
+
+## Historical source-qualification snapshot
+
+Everything below this heading records the earlier source and boundary observations.
+The current section above supersedes their pending-release/installed-consumer
+status and the assumption that Workbench activation is required for the direct
+path. Original manifests, fixture evidence, denials and uncertain effects retain
+their historical meaning; they are not rewritten as production proof.
 
 Operation: `mastermind-os-agent-control-20261108-c3`  
 Carrier: `sol/web-mastermind-os-agent-control-20261108-c3`  

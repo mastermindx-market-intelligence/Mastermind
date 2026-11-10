@@ -1,0 +1,20 @@
+{
+  "active": {
+    "generation": 3,
+    "reason": "NOT_ELIGIBLE",
+    "schema": "mastermind.native_work_authorization.v1",
+    "state": "INELIGIBLE"
+  },
+  "initial": {
+    "generation": 3,
+    "reason": "WORK_NOT_ESTABLISHED",
+    "schema": "mastermind.native_work_authorization.v1",
+    "state": "ELIGIBLE"
+  },
+  "refused": {
+    "generation": 3,
+    "reason": "AUTHORIZATION_REFUSED",
+    "schema": "mastermind.native_work_authorization.v1",
+    "state": "ADMIN_ACTION_REQUIRED"
+  }
+}

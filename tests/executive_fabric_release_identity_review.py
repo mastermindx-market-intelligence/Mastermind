@@ -7,6 +7,16 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Exact captured GLM-helper fixture: HTTPError(code=...) response statuses.
+    # No account/principal identity is masked; any byte drift exposes all sites.
+    'ops/native_fabric/quota_continuity/tests/fixtures/glm_helper_531198.py': {
+        'sha256': '531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2',
+        'sites': (
+            (1430, 46, 49, 'int', '503'),
+            (1438, 42, 45, 'int', '401'),
+            (1519, 38, 41, 'int', '502'),
+        ),
+    },
     # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
     # Exact reviewed preview source/site only; any byte drift re-exposes it.
     'ops/fleet_storage_cleanup/linux_cache_preview.py': {
@@ -24,7 +34,7 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {'sha256': 'a5af142fda4911f6dbe72896dd37df3b10d24be26fcff57da61a4ad636c4c14e', 'sites': [[469, 66, 69, 'int', '502'], [1689, 32, 37, 'int', '0o700'], [2040, 140, 143, 'int', '900'], [2042, 33, 36, 'int', '900'], [2105, 22, 25, 'int', '429'], [2293, 79, 82, 'int', '500'], [2371, 34, 37, 'int', '400'], [2386, 33, 36, 'int', '500'], [2406, 34, 37, 'int', '502'], [2753, 92, 95, 'int', '400'], [2760, 99, 102, 'int', '503'], [2763, 80, 83, 'int', '409'], [2795, 110, 113, 'int', '503'], [2801, 100, 103, 'int', '409'], [2808, 101, 104, 'int', '409'], [2824, 31, 34, 'int', '409'], [2824, 51, 54, 'int', '503'], [2832, 73, 76, 'int', '409'], [2836, 99, 102, 'int', '503'], [2941, 107, 110, 'int', '503'], [2950, 102, 105, 'int', '400'], [2971, 96, 99, 'int', '429'], [2981, 103, 106, 'int', '503'], [2998, 105, 108, 'int', '503'], [3036, 27, 30, 'int', '503'], [3041, 101, 104, 'int', '502'], [3049, 91, 94, 'int', '401'], [3053, 96, 99, 'int', '400'], [3075, 476, 479, 'int', '512'], [3079, 94, 97, 'int', '400'], [3090, 101, 104, 'int', '409'], [3092, 110, 113, 'int', '503'], [3103, 101, 104, 'int', '409'], [3111, 105, 108, 'int', '409'], [3114, 101, 104, 'int', '409'], [3117, 104, 107, 'int', '400'], [3127, 105, 108, 'int', '409'], [3137, 94, 97, 'int', '400'], [3153, 109, 112, 'int', '400'], [3156, 96, 99, 'int', '400'], [3169, 96, 99, 'int', '429'], [3179, 102, 105, 'int', '503'], [3187, 106, 109, 'int', '429'], [3218, 103, 106, 'int', '503'], [3229, 272, 275, 'int', '502'], [3323, 23, 26, 'int', '400'], [3396, 35, 38, 'int', '429'], [3425, 37, 40, 'int', '404'], [3456, 27, 30, 'int', '400'], [3459, 27, 30, 'int', '400'], [3462, 27, 30, 'int', '400'], [3468, 31, 34, 'int', '400'], [3475, 31, 34, 'int', '429']]},
-    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': '5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878', 'sites': [[1044, 60, 65, 'int', '0o700']]},
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': 'ea856eaa36351c2b93d48aab1a0544ffd88b67040ad19750a285f30fb473e5c4', 'sites': [[1057, 60, 65, 'int', '0o700']]},
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
         "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
         "sites": (
@@ -587,16 +597,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '93670
 # Integrated protected finite-retirement source is inspected with the same
 # exact studio UID, group and root-file permission AST token contexts; the
 # full postimage and all six source sites must remain an exact match.
-# Successor enrollment keeps these six reviewed literals and enclosing calls
-# unchanged; only intervening control flow moves five spans. The exact full
-# postimage was re-reviewed without adding an identity or numeric exception.
-REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': '1264fbc0a591aacf02fe2fe42b04b957752331154f2a11d22a33ec37330440d1',
+# Original-transaction recovery keeps these six literal tokens, their enclosing
+# owners and calls unchanged. Root re-reviewed the full recovery diff and these
+# exact moved spans; no identity/numeric exception or scanner rule is added.
+REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {'sha256': 'e8c812d6bc11a00a00db0fbb0bf4b60ff354c3b4ff9fcce18e3e11cebe45d0b0',
  'sites': ((349, 24, 27, 'int', '501'),
-           (6995, 35, 37, 'int', '80'),
-           (6996, 50, 55, 'int', '0o755'),
-           (7876, 41, 46, 'int', '0o644'),
-           (8662, 64, 69, 'int', '0o644'),
-           (10074, 41, 46, 'int', '0o644'))}
+           (7008, 35, 37, 'int', '80'),
+           (7009, 50, 55, 'int', '0o755'),
+           (7889, 41, 46, 'int', '0o644'),
+           (8689, 64, 69, 'int', '0o644'),
+           (10104, 41, 46, 'int', '0o644'))}
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
@@ -756,8 +766,9 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-# Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture function.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6592b76edb1d58dab83ef905de596919b58995c13e099d8ca9437b35b9b1a040', 'sites': ((3739, 68, 71, 'int', '503'), (3744, 69, 72, 'int', '503'), (3748, 67, 70, 'int', '503'))}
+# Primary/work-entry composition preserves these three complete fixture calls.
+# Root re-reviewed the material auth diff; only exact existing tokens qualify.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6ce90063ed44ef222e081019ad43d94e373c485f5a7ff63cb795fc99f44d56e6', 'sites': ((3782, 68, 71, 'int', '503'), (3787, 69, 72, 'int', '503'), (3791, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -874,9 +885,14 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
+# Re-pinned after the accepted manual-pool enumeration (xai, anthropic-oauth,
+# openai-codex) changed only this whole-file identity and moved the same two
+# reason-length tokens by nine lines (48->57, 271->280). Their enclosing
+# validation expressions are unchanged; no new identity site is qualified.
+# Previous source SHA 9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
-    "sha256": "9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976",
-    "sites": ((48, 65, 68, "int", "500"), (271, 60, 63, "int", "500")),
+    "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
+    "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),
 }
 
 # Hermes primary APPLICATION codec: fixed input-byte and conversation-count
@@ -1102,11 +1118,12 @@ REVIEWED_FILES["integrations/chairman_surfaces/web_sol_browser_protocol.py"] = {
 }
 
 # Content-continuation source union independently qualified at282140ec5,
-# exact final treee9b3984c (review6eb650a8). Only two synthetic600-second
+# original treee9b3984c (review6eb650a8), then primary-purpose and mode fixtures.
+# Root re-reviewed the final composition. Only two synthetic600-second
 # token lifetimes and six fixed HTTP400/403 response tokens are qualified.
 # No principal/UID/callee or arbitrary nearby literal is exempted; changed
 # bytes invalidate the whole pin, preserving the generic topology guard.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': 'cb629df9ba989ea38bc278acc938e4241ef03f6358e9c56de7b629f407fcdb11', 'sites': ((537, 58, 61, 'int', '600'), (538, 66, 69, 'int', '600'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs'] = {'sha256': '71b76671de68819ac6ed92a4d705800aed84b9d51cf46f3858f6f974788cb2cb', 'sites': ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))}
 REVIEWED_FILES['integrations/mastermind_workspace_app/native_authorization_identity.py'] = {'sha256': 'db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', 'sites': ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))}
 # Fixed explicit Memory owner source: closed Control helper dependency paths;
 # same private mkdir, turn/CPU/reference/HTTP bounds, incumbent TTL and full
@@ -1214,3 +1231,7 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Passive Paperclip asset document pagination: exact row-count bounds only.
+# No identity, permission or runtime topology change; any source drift restores D8.
+REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}

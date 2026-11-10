@@ -1,0 +1,130 @@
+{
+  "schema": "paper.estate.navigation_probe.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "date": "2026-11-09",
+  "method": "Separate reasoning consumer; read-only native navigation from file IDs. 12 paper_read calls plus one catalog read. No writes, GitHub source refresh, product runtime or release proof.",
+  "cases": [
+    {
+      "task": "Crypto saved-case identity",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "agent_page": "p-5-0",
+      "selected": {
+        "page_id": "p-4-0",
+        "board_id": "3IP-0",
+        "status": "proposed runtime amendment"
+      },
+      "retained": [
+        {
+          "page_id": "p-1-0",
+          "board_id": "QI-0",
+          "qualification": "exact seven-board R3 replacement scope"
+        },
+        {
+          "page_id": "p-2-0",
+          "board_ids": [
+            "Z1-0",
+            "251-0"
+          ],
+          "qualification": "preserve applicable behavior and each contract's revision scope"
+        }
+      ],
+      "outcome": "Correct path; no dead route; guide excluded from product UI.",
+      "finding": "R1/R2 route wording could imply reviving rejected R1 visuals.",
+      "correction_operation": "peo-20261109-c1-crypto-revision-scope-01",
+      "correction_readback": true
+    },
+    {
+      "task": "Commodities newer R4 overview source selection",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "agent_page": "p-3-0",
+      "selected": {
+        "page_id": "p-2-0",
+        "board_id": "4OS-0",
+        "status": "later candidate; adoption unestablished"
+      },
+      "retained": [
+        {
+          "page_id": "p-2-0",
+          "board_ids": [
+            "B9-0",
+            "4GX-0"
+          ],
+          "qualification": "recorded R2 navigation and interpretation requirements"
+        },
+        {
+          "page_id": "p-1-0",
+          "board_ids": [
+            "9F-0",
+            "AE-0"
+          ],
+          "qualification": "guide's retained obligations; not reread in this probe"
+        }
+      ],
+      "outcome": "Correct candidate/reference distinction; no dead route; guide excluded from product UI.",
+      "fixture_qualification": "Different dated fixture values are not evidence of lost behavior."
+    }
+  ],
+  "read_ledger": [
+    [
+      "get_basic_info",
+      "Crypto",
+      "file ID; page list"
+    ],
+    [
+      "get_basic_info",
+      "Commodities",
+      "file ID; page list"
+    ],
+    [
+      "find_nodes",
+      "Crypto",
+      "page p-5-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Commodities",
+      "page p-3-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Crypto",
+      "node 3IP-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Crypto",
+      "node QI-0; textValue *"
+    ],
+    [
+      "get_basic_info",
+      "Commodities",
+      "page p-2-0"
+    ],
+    [
+      "find_nodes",
+      "Crypto",
+      "node Z1-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Crypto",
+      "node 251-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Commodities",
+      "node B9-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Commodities",
+      "node 4GX-0; textValue *"
+    ],
+    [
+      "find_nodes",
+      "Commodities",
+      "node 4OS-0; textValue *"
+    ]
+  ],
+  "limitations": "Not a weaker-model benchmark or whole-estate product acceptance. Active page differed from useful starting page; requested result was used."
+}

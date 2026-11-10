@@ -1,0 +1,182 @@
+{
+  "schema": "mastermind.h4_native_ci_repair_evidence.v1",
+  "recorded_at": "2026-11-09T10:07:28.148987+00:00",
+  "pull_request": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2368",
+  "head_before_repair": "6653e2ccb13d640abd06946682801085927e8f6a",
+  "original_hosted_run": 42590143045,
+  "original_tested_merge": "1d1bb43c90911925001985464bb521b24b104bd4",
+  "original_hosted_failures": {
+    "129071140660": "Installed ASGI final census source_unavailable; hosted envelope does not expose the underlying native exception.",
+    "129071141171": "Six historical fixture setup failures; current native_go_entry successor is absent from the exact test-only manifest map."
+  },
+  "repair_files": {
+    "integrations/chairman_surfaces/_web_sol_native_host_impl.py": "1841355b44233e0b5404d34c909dbf7089408c43858d461935aef535adb88da0",
+    "tests/test_session_web_observation_installed_asgi.py": "1dd9c041f2950f905eda80126e280b0dfa1c0cdc1025cb52117da580c541ab46",
+    "tests/test_web_sol_transport_hardening.py": "adc0aeefa7664ee5a8349bbb5e2daf4c9d0b573626b9496767425b93afb331b6",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "ee9e73d1b8887568c6a039ecf8275a4a12b6c501ef101f9cb502d82899d3afa0"
+  },
+  "transport_fix": {
+    "cause": "Outer native pipe readiness can become stale after the action worker consumes a reply and releases the existing gate.",
+    "change": "Recheck zero-timeout pipe readiness while holding that gate; empty readiness continues, poll errors remain host_poll_failed.",
+    "preserved": [
+      "action timeout",
+      "partial frame bounds",
+      "unsolicited probe validation",
+      "clean EOF",
+      "socket cleanup",
+      "adapter_busy",
+      "permission and revision fences"
+    ],
+    "causal_limit": "Deterministic local scheduling proves the source race; sanitized hosted failure does not prove its exact interleaving."
+  },
+  "revocation_fixture": "Require two completed censuses and an event after actual atomic permission replacement; retain final empty census and no third native read.",
+  "historical_fixture_fix": {
+    "change": "Add two independently source-derived complete current/historical pairs; preserve all eight prior pairs and production validators.",
+    "proof": {
+      "receipt_sha256": "7b2137a95ddf22ac96fd6359af3086f02831790089d5fb0c46e89a4ca3a02ddc",
+      "data": {
+        "schema": "h4.historical_fixture_identity_proof.v1",
+        "observed_at": "2026-11-09T10:04:34.087371+00:00",
+        "current_source": "6653e2ccb13d640abd06946682801085927e8f6a",
+        "protected_entry_source": "bd91db1e999d2eef54b48fdf3614b94933185c3f",
+        "entry_path": "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+        "old_entry_sha256": "5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878",
+        "new_entry_sha256": "ea856eaa36351c2b93d48aab1a0544ffd88b67040ad19750a285f30fb473e5c4",
+        "builder_sha256": "2980d6bf7a1d144d5b543fe02c2ee09182bce937a2263a232803327c7f634cc1",
+        "test_before_sha256": "c34d4ebf700e0945058a8071b90ac6581ea603d997f8c81fd15d001ccefdb199",
+        "pairs": [
+          {
+            "kind": "application",
+            "manifest_sha256": "9ca3473bb1e311c35c4d59e5df274ac37065af53c45243d4489b13cb62c52ba0",
+            "members": 109,
+            "current_digest": "873bd5ec7ec1d46a1850202f12b76dd5dd09b4e43c9e01bdae5e689794ac0f1b",
+            "historical_digest": "3a85e0746bd228d6ebf4c0e57fea4e8e9c757449f2f6eb995cbb6694bc052d60",
+            "old_entry_current_digest": "89b83d634f90bad07bc44c75f0a7e6982d2ee356a2e74ac1ee65330fef129c3b",
+            "old_entry_historical_digest": "05cae94005dea8f568f79337520747d7b99c372bb880a5425fb13a888b75a273",
+            "only_delta_to_previous_accepted_pair": "ext/native_go_entry.py"
+          },
+          {
+            "kind": "http",
+            "manifest_sha256": "ea0d5ffa06c8df4526b877d8c71dbb8b9697fd4b8c85d3ab4a0bd218eeae92f8",
+            "members": 112,
+            "current_digest": "21abea132c329c159dfcb46069879ee90b8ca59bc450bd0ab0af9a227ac3d17d",
+            "historical_digest": "87b59355de02f14f90261608179f3f520722f01a43ca77376cf8b750f01a32d7",
+            "old_entry_current_digest": "4ede2629354c1ae4cba895bb3c90c20c3cd50be6861c7f5bc41a45546e7d1042",
+            "old_entry_historical_digest": "fe17a36022001450c0ca2dba1bb98b7a3a7247f1cc8fbb0eea7079b6103ff06e",
+            "only_delta_to_previous_accepted_pair": "ext/native_go_entry.py"
+          }
+        ],
+        "method": "Read materialized manifests; evaluate only original pure GLM inverse and literal host-pull preimages; independently reconstruct both prior frozen pairs by changing solely the exact source-bound entry digest"
+      }
+    },
+    "falsifiers": [
+      "foreign native_go_entry digest",
+      "partial host-pull preimage tuple",
+      "input immutability",
+      "both retained entry generations"
+    ]
+  },
+  "original_red": {
+    "receipt_sha256": "327638abb64dbe070ae6980fb90c0be3afdcd4357fbea36c7c5455f328e8c5cc",
+    "data": {
+      "schema": "h4.native_stale_readiness_regression.v1",
+      "phase": "original_implementation",
+      "started_at": "2026-11-09T09:50:47.880637+00:00",
+      "completed_at": "2026-11-09T09:50:50.042869+00:00",
+      "returncode": 1,
+      "implementation_sha256": "c8d756f2d627a44329eb14f058f4afd00106534745d8a0047d4b5ac620001426",
+      "log_sha256": "76f644d232d3213f48dd9137c3044b0b686c31814afffa9acc365c947fd87286",
+      "xml_sha256": "14630b0fb68563b8a0bc071cae17b27c60dbf76c93a76d9d56b0a35934cbfab8"
+    }
+  },
+  "focused_qualification": [
+    {
+      "cases": 26,
+      "receipt": {
+        "receipt_sha256": "74e381cde42e0ea82874d7a83223e6fa9f7ce340a01a954a73255cc0c7e62bf7",
+        "data": {
+          "schema": "h4.native_readiness_qualification.v1",
+          "phase": "fixed_implementation",
+          "started_at": "2026-11-09T09:56:49.267851+00:00",
+          "source_head": "6653e2ccb13d640abd06946682801085927e8f6a",
+          "file_sha256": {
+            "integrations/chairman_surfaces/_web_sol_native_host_impl.py": "1841355b44233e0b5404d34c909dbf7089408c43858d461935aef535adb88da0",
+            "tests/test_session_web_observation_installed_asgi.py": "1dd9c041f2950f905eda80126e280b0dfa1c0cdc1025cb52117da580c541ab46",
+            "tests/test_web_sol_transport_hardening.py": "a0f76bcb747f61b8bd46485b281be9be15be547888f196ab0a19ccc4a6a4b149"
+          },
+          "targets": [
+            "tests/test_web_sol_transport_hardening.py",
+            "tests/test_session_web_observation_installed_asgi.py",
+            "tests/test_web_sol_native_census.py::test_real_native_worker_collector_client_and_cli_vertical"
+          ],
+          "returncode": 0,
+          "completed_at": "2026-11-09T09:56:55.862096+00:00",
+          "log_sha256": "b52ce43f9a3abc50f29d9887b57129332ebcf809e2b21962d483b6ba77b638cf",
+          "xml_sha256": "dd613044ecfe9e1890ed49f1bbecac1389eaaa50b75ae17b61ce4b15a09a177d"
+        }
+      }
+    },
+    {
+      "cases": 1,
+      "receipt": {
+        "receipt_sha256": "9584abca8ab3c374a57bd6a34923121d87c341a9286a758231e178564deffaa3",
+        "data": {
+          "schema": "h4.native_readiness_qualification.v1",
+          "phase": "fixed_implementation",
+          "started_at": "2026-11-09T09:58:32.264685+00:00",
+          "source_head": "6653e2ccb13d640abd06946682801085927e8f6a",
+          "file_sha256": {
+            "integrations/chairman_surfaces/_web_sol_native_host_impl.py": "1841355b44233e0b5404d34c909dbf7089408c43858d461935aef535adb88da0",
+            "tests/test_session_web_observation_installed_asgi.py": "1dd9c041f2950f905eda80126e280b0dfa1c0cdc1025cb52117da580c541ab46",
+            "tests/test_web_sol_transport_hardening.py": "adc0aeefa7664ee5a8349bbb5e2daf4c9d0b573626b9496767425b93afb331b6"
+          },
+          "targets": [
+            "tests/test_web_sol_transport_hardening.py::test_host_fails_closed_when_readiness_recheck_fails"
+          ],
+          "returncode": 0,
+          "completed_at": "2026-11-09T09:58:33.951723+00:00",
+          "log_sha256": "ad53ab05d354fd1d9cc8ec829a12b33f0faaa880da385e693f5830972392f9f5",
+          "xml_sha256": "937e617c453fc95acc6d07a20b68aaa76d88140107225bb7bdc207ecc03405c6"
+        }
+      }
+    },
+    {
+      "cases": 10,
+      "receipt": {
+        "receipt_sha256": "73c09981c09c023ef21a827b8be97e41b2e41ff2c6c5a69c09effb7dffcf7ed2",
+        "data": {
+          "schema": "h4.native_readiness_qualification.v1",
+          "phase": "fixed_implementation",
+          "started_at": "2026-11-09T10:05:49.639518+00:00",
+          "source_head": "6653e2ccb13d640abd06946682801085927e8f6a",
+          "file_sha256": {
+            "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "2980d6bf7a1d144d5b543fe02c2ee09182bce937a2263a232803327c7f634cc1",
+            "ops/native_fabric/quota_continuity/candidate/native_go_entry.py": "ea856eaa36351c2b93d48aab1a0544ffd88b67040ad19750a285f30fb473e5c4",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "ee9e73d1b8887568c6a039ecf8275a4a12b6c501ef101f9cb502d82899d3afa0"
+          },
+          "targets": [
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_repaired_base_cannot_relabel_an_extended_namespace",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_sparse_preflight_cannot_relabel_a_different_complete_parent[application109]",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_sparse_preflight_cannot_relabel_a_different_complete_parent[http112]",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[application109]",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent[http112]",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_current_host_pull_epoch_refuses_extended_native_base",
+            "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py::test_extended_historical_fixture_preserves_exact_entry_generations"
+          ],
+          "returncode": 0,
+          "completed_at": "2026-11-09T10:05:50.949029+00:00",
+          "log_sha256": "22395c302c54e86926a83c9a57feb1fead0389d4b50d1b2090688b087daae598",
+          "xml_sha256": "4044d45c8d1fddfcbbf761a764d6f7f3a00aec1b5d76fc8944ec92146f4abcae"
+        }
+      }
+    }
+  ],
+  "release": {
+    "existing_native_auto_request_preserved": true,
+    "request_enabled_at": "2026-11-09T09:16:07Z",
+    "new_auto_request_performed": false,
+    "hosted_successor_qualification_required": true,
+    "production_selection_performed": false,
+    "acceptance_claimed": false
+  }
+}
