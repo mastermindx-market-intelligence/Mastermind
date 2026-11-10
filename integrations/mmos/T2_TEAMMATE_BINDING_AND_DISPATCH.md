@@ -89,7 +89,7 @@ never in argv, prompts, thread text, logs or evidence; a bogus configured
   run; it no-ops on the thread — recorded, not fixed here).
 - Issue-scoped assignment-automation wakes reliably no-op (they see their own
   `activeRun`); agent-scoped keyed wakes do the work. Not tested beyond that.
-- Adversarial attack pass: see the ATTACK section below.
+- Attack pass ran (below); the sub-second kill-mid-send window stayed untested.
 
 ## Moving ONE installed agent onto this path (exact steps)
 
@@ -112,8 +112,22 @@ never in argv, prompts, thread text, logs or evidence; a bogus configured
    issue one keyed on_demand wake and verify: one succeeded run, one thread
    turn, comment == thread answer, issue → in_review.
 
-## ATTACK (kimi-k3.1-pro adversarial pass)
+## ATTACK (kimi-k3.1-pro adversarial pass — evidence file 11)
 
-Attack child t2-attack-001 hunted a wake/kill/restart sequence that sends the
-task twice, posts the result twice, or leaks the token.
-<!-- ATTACK_RESULTS -->
+Child t2-attack-001 hunted wake/kill/restart sequences; every claim re-verified
+live by the principal before acceptance. **DOUBLE-SEND: no** — racing keyed
+wakes serialize at checkout (loser gets HTTP 409), crash-after-send reconciles
+with no resend; kill-mid-send (sub-second window) was missed 3× and stays
+**untested**. **TOKEN-LEAK: no** — 0 pattern hits across thread, comments,
+interactions, 18 run logs, 5 provider event logs. **DOUBLE-POST: yes,
+reproduced then fixed** (`3a28810dd`): kill the carrier between comment and
+status, let any later turn answer differently in the thread, re-wake →
+(1) `scan_marker` returned the *last* assistant text, so a changed reply
+bypassed the exact-text comment dedupe → second answer comment — fixed by
+binding the reply to the marker turn's T3 runId (verified live: marker and its
+answer share `ordinal:9`, the side message is `ordinal:10`); (2) re-POSTing the
+confirmation key from a later run is **409, not dedupe** in this build → failed
+run, release comment, todo reset, automation re-wake loop (3 release comments
+observed) — fixed by reading `interactions` and skipping an existing key. Fix
+replayed live against the exact attack end-state (MMO-7, run `0f800c69`):
+exit 0, no resend, comment/interaction/message counts unchanged (5/1/24).
