@@ -126,3 +126,46 @@ def assert_creation_capacity(jobs: Mapping[str, Mapping[str, Any]], coordinator_
             raise HierarchyError("new child exceeds ancestor depth grant")
         if len(descendant_ids(jobs, row["job_id"])) + 1 > grant["descendant_limit"]:
             raise HierarchyError("new child exceeds ancestor descendant allowance")
+
+
+def child_request_queue_wait(
+    root_ready: int,
+    fleet_ready: int,
+    *,
+    policy: Any,
+    root_ref: str,
+) -> dict[str, Any] | None:
+    """Ready-queue bound for the ``ChildExecutionRequest.v1`` lane.
+
+    Companion to :func:`assert_creation_capacity` for the child-request
+    admission lane (Rev 4 §S2 l.101–105): the same bounded-tree discip-
+    line, expressed as backpressure instead of a refusal.  A full queue
+    is *not* a hierarchy violation — the parent planner may retry later
+    with the same logical key — so this returns the precise wait reason
+    as data (or ``None`` when the request may be admitted) rather than
+    raising :class:`HierarchyError`.
+
+    ``policy`` is a
+    :class:`~control_plane.child_request_admission.ReadyQueuePolicy`;
+    it is accepted as an opaque mapping-typed object to keep this
+    module free of an import cycle with the admission module.
+    """
+
+    if int(root_ready) >= int(policy.root_limit):
+        return {
+            "reason": "CHILD_QUEUE_ROOT_READY_FULL",
+            "root_ref": str(root_ref),
+            "root_ready": int(root_ready),
+            "root_limit": int(policy.root_limit),
+            "fleet_ready": int(fleet_ready),
+            "fleet_limit": int(policy.fleet_limit),
+        }
+    if int(fleet_ready) >= int(policy.fleet_limit):
+        return {
+            "reason": "CHILD_QUEUE_FLEET_READY_FULL",
+            "fleet_ready": int(fleet_ready),
+            "fleet_limit": int(policy.fleet_limit),
+            "root_ready": int(root_ready),
+            "root_limit": int(policy.root_limit),
+        }
+    return None
