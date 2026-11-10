@@ -14,10 +14,13 @@ owner-issued placement receipt, accepted only from a path the fenced session
 cannot write (owner service-account channel). Refusal classes: missing binding,
 stale fence, provider substitution after reservation, unaccounted descendant.
 Runtime-multiplexed launches (for/while/until bodies, xargs/parallel/
-find -exec), interpreter one-liners and computed command words carrying
-wrapper tokens are refused as unaccounted/unobservable, and POSIX
-line-continuation splits are canonicalised so no constructed path escapes
-the gate.
+find -exec, brace groups and function bodies, trap programs, watch/timeout
+repeaters) are refused as unaccounted descendants. When a wrapper name is
+present, every interpreter invocation (python/perl/ruby/node/php/osascript/
+awk/jq — flags, script files and stdin programs alike), eval/source/. and
+every computed ($/backtick) word outside an assignment are refused as
+unobservable. POSIX line-continuation splits are canonicalised so no
+constructed path escapes the gate.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -238,20 +241,22 @@ _WRAPPER_NAME_RE = re.compile(
     r"(?:pool|sub\.sh|remote_sub\.sh|slot\.py)(?![A-Za-z0-9_.-])",
     re.I,
 )
-#: Interpreter invocations whose PROGRAM TEXT rides in the command itself
-#: (``python -c/-m``, ``perl/node/ruby/osascript -e``, ``php -r``): a launch
-#: assembled inside that text executes without a lexically observed wrapper
-#: invocation (REVIEW_2329 r2 N-3/C4-C5). Shell wrappers (bash/sh/zsh) are
-#: deliberately NOT listed — nested shells are the five-shapes scan's own
-#: territory and their text IS the command the gate judges.
-_INTERPRETER_EVAL_RE = re.compile(
+#: Interpreters execute a PROGRAM the guard cannot read: ``-c``/``-e``/``-p``
+#: one-liners, a script file, or a program fed on stdin. A wrapper name
+#: anywhere in the command therefore makes EVERY interpreter invocation
+#: unobservable — flag-independent by design (REVIEW_2329 r3 B-1): the r4
+#: allowlist missed ``-Sc``/``-we``/``-E``/``-p``/``--eval``/``-ne``/``-nr``
+#: and stdin-fed programs, each of which launched with zero binding checks.
+_INTERPRETER_WORD_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
-    r"(?:python[23]?(?:\.\d+)?|perl|ruby|node(?:js)?|osascript|php)\s+"
-    r"(?:[^;&|\n]*\s)?-[cemr]"
+    r"(?:python[23]?(?:\.\d+)?[a-z]?|perl(?:[0-9.]+)?|ruby(?:[0-9.]+)?"
+    r"|node(?:js)?|php(?:[0-9.]+)?|osascript|awk|gawk|mawk|nawk|jq)"
+    r"(?![A-Za-z0-9_.-])"
 )
 #: Loop bodies (for/while/until) execute their contents N times: one lexical
 #: launch inside one is N paid children under one binding's single attempt
-#: (REVIEW_2329 r2 N-2/C1).
+#: (REVIEW_2329 r3 M-A extends this to brace-body loops, function
+#: definitions, trap programs and repeaters, below).
 _LOOP_BODY_RE = re.compile(r"\bdo\b.*?\bdone\b", re.S)
 #: Batch executors that run their argument command once per input item
 #: (REVIEW_2329 r2 N-2/C2-C3, find -exec).
@@ -260,12 +265,24 @@ _BATCH_EXECUTOR_RE = re.compile(
     r"(?:xargs|parallel|find)\b[^;&|\n]*",
     re.I,
 )
-#: Prefix runners that only wrap a FOLLOWING command word, so an indirect
-#: word after them is still the launched command (``env X=1 $P run ...``).
-_RUNNER_WORDS = frozenset({
-    "env", "exec", "command", "builtin", "nohup", "setsid",
-    "stdbuf", "nice", "timeout",
-})
+#: Repeaters: the following command runs more than once (or, for
+#: ``timeout --foreground``, is a signal-forwarding wrapper the reviewer
+#: grouped with repeaters). One binding covers one attempt (REVIEW_2329 r3 M-A).
+_REPEATER_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?watch\b[^;&|\n]*"
+    r"|(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?timeout\s+"
+    r"(?:-[A-Za-z]*f[A-Za-z]*\b|--foreground\b)[^;&|\n]*",
+    re.I,
+)
+#: ``eval``/``source``/``.`` as a WORD anywhere in the text. Inside a
+#: nested shell (``bash -c 'eval "$X$Y"; pool run ...'``) these words follow
+#: a space after canonicalisation, so the separator-anchored
+#: ``_UNOBSERVABLE_ENV_RE`` never saw them (REVIEW_2329 r3 M-B). Applied
+#: wherever a wrapper name/launch is present.
+_UNOBSERVABLE_ANYWHERE_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?:eval|source)(?![A-Za-z0-9_.-])"
+    r"|(?:(?<=[\s;&|(`{])|^)\.(?=[\s;&|)`}]|$)"
+)
 
 def family(model: str) -> str:
     lowered = (model or "").strip().lower()
@@ -570,79 +587,129 @@ def launch_provider_token(command: str) -> str:
     return tokens[0][1] if tokens else ""
 
 
-def _indirect_command_word(canon: str) -> str | None:
-    """The first command word computed at runtime — ``$P`` / ``${P}`` in
-    ``P=pool; $P run ...`` (REVIEW_2329 r2 N-3/C6) — or None. Assignments,
-    shell keywords, options and prefix runners are skipped, so
-    ``env NAME=x pool ...``, ``echo $X`` and ``command -v y`` stay concrete;
-    an option-less ``timeout``/``nice`` operand (a duration/niceness) is an
-    argument, not the command."""
+def _computed_command_word(canon: str) -> str | None:
+    """The first shell word computed at runtime (``$P``, ``${P}``, ``$(...)``,
+    a backtick word) in a non-assignment position — or None.
+
+    Structural, not positional (REVIEW_2329 r3 B-1): the r4 scan skipped a
+    fixed runner vocabulary (``env``/``exec``/``time``/…), so any runner not
+    on that list — ``sudo``, ``caffeinate``, ``script``, ``strace``,
+    ``flock``, ``ssh host``, ``su -c``, a ``{ … }`` group — carried the
+    computed launch past the gate. The guard therefore treats EVERY
+    ``$``/backtick word outside an assignment as the command word it cannot
+    read. Conservative by design: with a wrapper name in the text, a computed
+    argument is refused too (documented over-refusal)."""
+
     for segment in re.split(r"[;&|\n()]", canon):
-        words = segment.split()
-        index = 0
-        operand_pending = False
-        while index < len(words):
-            word = words[index]
-            if word in _RUNNER_WORDS:
-                operand_pending = word in ("timeout", "nice")
-            elif word in _COMMAND_PREFIX_WORDS or word.startswith("-"):
-                pass
-            elif re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
-                pass
-            elif operand_pending and re.fullmatch(r"\d[\w.:+-]*", word):
-                operand_pending = False
-                index += 1
-                continue
-            else:
-                operand_pending = False
-                if word.startswith("$"):
-                    return word
-                break
-            index += 1
+        for word in segment.split():
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                continue  # an assignment: its value is not a command word
+            if word[0] in "$`":
+                return word
+            if word[0] in "<>" or re.match(r"\d*[<>]", word):
+                continue  # a redirection operator
     return None
+
+
+def _brace_group_spans(canon: str) -> list[tuple[int, int]]:
+    """Every ``{ … }`` group in ``canon`` as a span, nesting included.
+
+    A wrapper launch inside one is runtime-multiplexed or function-defined
+    (REVIEW_2329 r3 M-A): ``f() { pool run …; }; f; f``, ``for i in 1 2;
+    { … }``, ``for ((…)) { … }`` and ``{ $P run …; }`` all execute the
+    launch zero-or-many times, while one binding covers one attempt.
+    ``${NAME}`` parameter expansion is not a group and is skipped."""
+    spans: list[tuple[int, int]] = []
+    open_stack: list[int] = []
+    for index, char in enumerate(canon):
+        if char == "{":
+            if index and canon[index - 1] == "$":
+                continue
+            open_stack.append(index)
+        elif char == "}" and open_stack:
+            spans.append((open_stack.pop(), index + 1))
+    spans.extend((start, len(canon)) for start in open_stack)
+    return spans
 
 
 def _deny_computed_launch(canon: str) -> None:
     """Refuse launch-shaped text no lexically observed wrapper invocation
-    can cover (REVIEW_2329 r2 N-3): interpreter one-liners carrying wrapper
-    tokens (``python3 -c 'subprocess.run(["pool",...])'``, ``perl -e
-    'exec("pool",...)'``) and computed command words (``P=pool; $P run``).
-    Armed sessions only; a wrapper NAME must appear in the text, otherwise
-    the command is the documented arbitrary-process limit, not this gate's
-    fence. Conservative by design: an interpreter flag cluster containing
-    c/e/m/r plus a wrapper word anywhere in the same simple command is
-    denied even when innocent."""
+    can cover, structurally (REVIEW_2329 r3 B-1 / M-B).
+
+    Fires only when a wrapper NAME appears in the text: without one the
+    command is the documented arbitrary-process limit, not this gate's
+    fence. Given that token, the guard refuses
+
+    * EVERY interpreter invocation (``python*``, ``perl``, ``ruby``,
+      ``node*``, ``php``, ``osascript``, ``awk``, ``jq``) regardless of
+      flags, including a script file and a program fed on stdin
+      (``<<``, ``|``, bare ``-``) — the program text is unreadable, so
+      provider substitution, the identity projection and the one-attempt
+      law cannot be checked;
+    * ``eval``/``source``/``.`` as a word anywhere in the text (a nested
+      shell re-writes the environment outside lexical observation); and
+    * any computed (``$``/backtick) word in a non-assignment position.
+
+    Conservative over-refusal is accepted under armed placement; it is
+    documented in ``validate_execution_binding``."""
+
     if not _WRAPPER_NAME_RE.search(canon):
         return
-    if _INTERPRETER_EVAL_RE.search(canon):
+    if _INTERPRETER_WORD_RE.search(canon):
         deny(
             "Mastermind shared-placement guard: unobservable launch — an "
-            "interpreter one-liner (python -c/-m, perl/node/ruby/osascript "
-            "-e, php -r) carrying wrapper tokens constructs the launch at "
-            "runtime, so provider substitution, the identity projection "
-            "and the one-attempt law cannot be checked. Run the paid "
-            "launch as a plain command."
+            "interpreter (python/perl/ruby/node/php/osascript/awk/jq) runs a "
+            "program the guard cannot read, whether from a flag, a script "
+            "file or stdin, so a wrapper launch inside it cannot be checked "
+            "against the binding. Run the paid launch as a plain command."
         )
-    word = _indirect_command_word(canon)
+    if _UNOBSERVABLE_ANYWHERE_RE.search(canon):
+        deny(
+            "Mastermind shared-placement guard: unobservable launch "
+            "environment — eval/source/. can rewrite the child's POOL_* "
+            "identity and command text at runtime (including inside a "
+            "nested shell). Run the paid launch as a plain command."
+        )
+    word = _computed_command_word(canon)
     if word is not None:
         deny(
             "Mastermind shared-placement guard: unobservable launch — the "
-            f"command word {word!r} is computed at runtime, so the wrapper "
-            "invocation and any identity assignment around it cannot be "
-            "observed. Invoke the wrapper by its literal name."
+            f"word {word!r} is computed at runtime, so the command it "
+            "becomes, the wrapper invocation and any identity assignment "
+            "around it cannot be observed. Invoke the wrapper by its "
+            "literal name."
         )
 
 
 def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
     """True when a wrapper invocation sits inside a construct that executes
-    it N times at runtime: a for/while/until body (``do ... done``) or an
-    xargs/parallel/find -exec executor's argument tail (REVIEW_2329 r2
-    N-2). One binding covers exactly one attempt, so N runtime children
-    under one lexical launch are refused as unaccounted descendants."""
+    it zero-or-many times at runtime: a for/while/until body (``do … done``),
+    an xargs/parallel/find -exec executor's argument tail, any ``{ … }``
+    group or function body, a ``trap`` program, or a repeater (``watch``,
+    ``timeout --foreground``) (REVIEW_2329 r2 N-2, r3 M-A). One binding
+    covers exactly one attempt, so N runtime children under one lexical
+    launch are refused as unaccounted descendants."""
     spans = [match.span() for match in _LOOP_BODY_RE.finditer(canon)]
     spans += [match.span() for match in _BATCH_EXECUTOR_RE.finditer(canon)]
+    spans += [match.span() for match in _REPEATER_RE.finditer(canon)]
+    spans += _brace_group_spans(canon)
+    for match in re.finditer(r"(?<![A-Za-z0-9_.-])trap(?=\s)", canon):
+        end = re.compile(r"[;&|\n]").search(canon, match.end())
+        spans.append((match.start(), end.start() if end else len(canon)))
     return any(
         start <= offset < end for start, end in spans for offset in offsets
+    )
+
+
+def _deny_runtime_multiplexed() -> None:
+    deny(
+        "Mastermind shared-placement guard: runtime-multiplexed "
+        "launch — a for/while/until loop body, a brace group or function "
+        "body, a trap program, a watch/timeout repeater, or an "
+        "xargs/parallel/find -exec executor repeats this paid launch at "
+        "runtime, but the current binding covers exactly one attempt. Every "
+        "paid child must be admitted and claimed through the placement "
+        "authority before launch."
     )
 
 
@@ -754,8 +821,8 @@ def _receipt_channel_problem(path_text: str) -> str:
     """'' when the receipt can only have been produced by the placement owner.
 
     Trust basis (no signing authority exists by design): the owner runs as
-    its own service account (``_mastermind_exec``) and projects the receipt
-    into a path the fenced principal cannot write. The channel is defined
+    its own dedicated service account and projects the receipt into a path
+    the fenced principal cannot write. The channel is defined
     POSITIVELY, not just negatively (REVIEW_2329 r2 N-4): every component
     of both the literal and the resolved path must be owned by root or by a
     uid on the owner-projected allowlist (``_owner_uid_allowlist``;
@@ -860,11 +927,14 @@ def validate_execution_binding(command: str) -> None:
     repeated, heredoc bodies included, off-list modes refused) and every
     identity assignment form, with backslash-newline canonicalised as a
     POSIX join (empty string). Runtime-multiplexed launches (for/while/
-    until bodies, xargs/parallel/find -exec executors) are refused as
-    unaccounted descendants; interpreter one-liners and computed command
-    words carrying wrapper tokens are refused as unobservable
-    (conservative — an interpreter flag cluster c/e/m/r plus a wrapper
-    word in the same simple command is denied even when innocent).
+    until bodies, xargs/parallel/find -exec executors, any ``{ … }`` group
+    or function body, ``trap`` programs, ``watch``/``timeout
+    --foreground`` repeaters) are refused as unaccounted descendants.
+    Given a wrapper name in the text, EVERY interpreter invocation is
+    refused as unobservable regardless of flags or input channel (a script
+    file or a program on stdin counts), as are ``eval``/``source``/``.``
+    anywhere and any computed (``$``/backtick) word outside an assignment —
+    conservative over-refusal, documented here, preferred to a bypass.
     Scripts staged in an EARLIER command or a
     file and executed later, and environment injected by provider-side
     mechanisms outside the command, are not observed; eval/source/
@@ -1003,7 +1073,11 @@ def validate_execution_binding(command: str) -> None:
     if not command:
         launches: list[tuple[int, str, str, bool]] = []
     else:
-        if _UNOBSERVABLE_ENV_RE.search(_canonical_command(command)):
+        canon = _canonical_command(command)
+        if _UNOBSERVABLE_ENV_RE.search(canon) or (
+            _WRAPPER_NAME_RE.search(canon)
+            and _UNOBSERVABLE_ANYWHERE_RE.search(canon)
+        ):
             deny(
                 "Mastermind shared-placement guard: unobservable launch "
                 "environment — eval, source/., BASH_ENV/ENV or a computed "
@@ -1013,17 +1087,10 @@ def validate_execution_binding(command: str) -> None:
             )
         launches = _wrapper_invocations(command)
         if launches and _runtime_multiplexed(
-            _canonical_command(command),
+            canon,
             [offset for offset, _, _, _ in launches],
         ):
-            deny(
-                "Mastermind shared-placement guard: runtime-multiplexed "
-                "launch — a for/while/until loop body or an xargs/parallel/"
-                "find -exec executor repeats this paid launch at runtime, "
-                "but the current binding covers exactly one attempt. Every "
-                "paid child must be admitted and claimed through the "
-                "placement authority before launch."
-            )
+            _deny_runtime_multiplexed()
 
     # Server-derived projections: EVERY identity value the launched child
     # could receive must equal what the binding projects (canonical view of
@@ -1097,10 +1164,22 @@ def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
                 "wrapper source fed to a shell launches without a visible "
                 "wrapper invocation. Invoke the wrapper directly."
             )
-        # REVIEW_2329 r2 N-3: interpreter one-liners and computed command
-        # words carrying wrapper tokens never reach the wrapper scan, so
-        # they are refused here — BEFORE the no-launch early return that
-        # used to let an armed session launch with zero binding validation.
+        # REVIEW_2329 r3 M-A: a launch inside a brace group / function body,
+        # a trap program or a repeater runs zero-or-many times. Refuse it as
+        # runtime-multiplexed HERE, before the computed-word scan can
+        # reclassify the construct (a trap body typically carries `$$`, and
+        # a brace body is the same construct under another name). The gate
+        # repeats the same judgement inside validate_execution_binding.
+        span_launches = _wrapper_invocations(raw)
+        if span_launches and _runtime_multiplexed(
+            canon, [offset for offset, _, _, _ in span_launches]
+        ):
+            _deny_runtime_multiplexed()
+        # REVIEW_2329 r3 B-1 / M-B: interpreter programs, eval/source/.
+        # anywhere and computed words carrying a wrapper token never reach
+        # the wrapper scan, so they are refused here — BEFORE the no-launch
+        # early return that used to let an armed session launch with zero
+        # binding validation.
         _deny_computed_launch(canon)
     if not launches and not invocations:
         return

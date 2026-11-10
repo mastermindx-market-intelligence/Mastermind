@@ -1382,16 +1382,28 @@ def test_shared_placement_paid_launch_with_stale_fence_is_refused(
 
 
 @pytest.mark.parametrize(
-    "command",
+    "command, expected",
     [
-        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
-        "POOL_TASK_CLASS=code pool run grok bounded /tmp grok-4.6",
-        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
-        "POOL_TASK_CLASS=code python3 /opt/mastermind/ext/slot.py grok -- "
-        "grok -p bounded --output-format plain",
-        "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
-        "POOL_TASK_CLASS=code /opt/mastermind/ext/remote_sub.sh ubuntu2 grok "
-        "/tmp/packet.txt /home/ubuntu2/lanes/repo grok-4.6",
+        (
+            "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code pool run grok bounded /tmp grok-4.6",
+            "provider substitution",
+        ),
+        # REVIEW_2329 r3 B-1: an interpreter running the slot wrapper is
+        # refused WHOLESALE as unobservable — its program text cannot be
+        # read, so a substitution inside it is not this gate's to judge.
+        (
+            "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code python3 /opt/mastermind/ext/slot.py grok -- "
+            "grok -p bounded --output-format plain",
+            "unobservable launch",
+        ),
+        (
+            "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
+            "POOL_TASK_CLASS=code /opt/mastermind/ext/remote_sub.sh ubuntu2 grok "
+            "/tmp/packet.txt /home/ubuntu2/lanes/repo grok-4.6",
+            "provider substitution",
+        ),
     ],
     ids=["pool-run", "slot-py", "remote-sub"],
 )
@@ -1401,6 +1413,7 @@ def test_shared_placement_paid_launch_substituting_provider_is_refused(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     command: str,
+    expected: str,
 ) -> None:
     # The binding reserved pool glm / provider codex; the launch asks grok.
     _install(monkeypatch, tmp_path, _binding())
@@ -1408,8 +1421,9 @@ def test_shared_placement_paid_launch_substituting_provider_is_refused(
         _guard_launch(shared_placement, command)
     output = _emitted(capsys)
     assert output["permissionDecision"] == "deny"
-    assert "provider substitution" in output["permissionDecisionReason"]
-    assert "'grok'" in output["permissionDecisionReason"]
+    assert expected in output["permissionDecisionReason"]
+    if expected == "provider substitution":
+        assert "'grok'" in output["permissionDecisionReason"]
 
 
 # --- required refusal 4: unaccounted descendant --------------------------------
@@ -1806,7 +1820,7 @@ def test_m4_launch_tokens_must_equal_the_reserved_pool_exactly(
         "/opt/mastermind/ext/sub.sh glm_x task /tmp glm-5.3",
         '/opt/mastermind/ext/sub.sh "grok" task /tmp grok-4.6',
         "/opt/mastermind/ext/remote_sub.sh ubuntu2 application p /tmp m",
-        "python3 /opt/mastermind/ext/slot.py deepseek -- run",
+        "/opt/mastermind/ext/slot.py deepseek -- run",
         "/opt/mastermind/ext/remote_sub.sh ubuntu2",
     ],
     ids=["off-list", "near-miss", "quoted-mode", "remote-off-list", "slot-off-list",
@@ -1907,8 +1921,11 @@ def test_m1_canonical_identity_still_admits_faithful_launches(
         "env -i POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
         "POOL_TASK_CLASS=code pool run glm a /tmp glm-5.3",
         # Reads and bare re-exports of the inherited value change nothing.
-        'echo "$POOL_ORCHESTRATOR_ID ${POOL_PARENT_RUN_ID}"; '
-        "export POOL_ORCHESTRATOR_ID; pool run glm a /tmp glm-5.3",
+        # (A computed read such as `echo "$VAR"` is refused as an
+        # unobservable computed word per REVIEW_2329 r3 B-1, so the
+        # read-decoy here is a bare re-export of both projections.)
+        "export POOL_ORCHESTRATOR_ID; export POOL_PARENT_RUN_ID; "
+        "pool run glm a /tmp glm-5.3",
         # Quoted literal equal to the projection.
         "env \"POOL_ORCHESTRATOR_ID=root-orch-1\" pool run glm a /tmp glm-5.3",
     ):
@@ -2010,13 +2027,21 @@ def test_m3_every_wrapper_shape_is_enumerated_and_checked(
         "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
         "POOL_TASK_CLASS=code "
     )
-    for shape in shapes:  # each shape alone, matching: allowed
+    # Required shape 5 is a Python script: under shared placement the
+    # interpreter is refused WHOLESALE as unobservable (REVIEW_2329 r3
+    # B-1), so the direct-command allow/repeat legs use the other four.
+    direct = [shape for shape in shapes if not shape.startswith("python3 ")]
+    for shape in direct:  # each shape alone, matching: allowed
         _guard_launch(shared_placement, prefix + shape)
         assert capsys.readouterr().out == "", shape
-    for shape in shapes:  # repeated in one command: second is unaccounted
+    for shape in direct:  # repeated in one command: second is unaccounted
         with pytest.raises(SystemExit):
             _guard_launch(shared_placement, f"{prefix}{shape} && {shape}")
         assert "unaccounted descendant" in _emitted(capsys)["permissionDecisionReason"]
+    # The interpreter-hosted slot wrapper cannot be attributed at all.
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, prefix + "python3 /opt/x/slot.py glm -- run")
+    assert "unobservable launch" in _emitted(capsys)["permissionDecisionReason"]
     # A substituted launch anywhere in the command is found.
     with pytest.raises(SystemExit):
         _guard_launch(
@@ -2183,7 +2208,7 @@ def test_n1_continuation_split_launch_reaches_the_binding_gate(
         + "pool run glm a /tmp glm-5.3; done",
         # while/until bodies are the same runtime-multiplexing construct.
         "while read x; do " + _IDENTITY_PREFIX
-        + 'pool run glm "$x" /tmp glm-5.3; done',
+        + "pool run glm a /tmp glm-5.3; done",
         # N-2/C2: xargs runs the wrapped command once per input item.
         "printf 'a\\nb\\n' | xargs -I{} env " + _IDENTITY_PREFIX
         + "pool run glm {} /tmp glm-5.3",
@@ -2280,7 +2305,9 @@ def test_n3_computed_launch_refusal_stays_scoped_to_wrapper_tokens(
 ) -> None:
     # Without a wrapper NAME in the text, interpreter one-liners and
     # computed command words stay allowed (documented arbitrary-process
-    # limit); a wrapper run as a plain script argument stays observed.
+    # limit). An interpreter running a WRAPPER script does carry the name,
+    # so it is refused wholesale (REVIEW_2329 r3 B-1) — pinned by the r5
+    # interpreter tests below.
     _install(monkeypatch, tmp_path, _binding())
     monkeypatch.setenv("POOL_ORCHESTRATOR_ID", "root-orch-1")
     monkeypatch.setenv("POOL_PARENT_RUN_ID", "hermes-run-7")
@@ -2288,7 +2315,6 @@ def test_n3_computed_launch_refusal_stays_scoped_to_wrapper_tokens(
     for command in (
         "python3 -m pytest tests/test_provider_orchestrator_policy.py",
         "TOOL=ls; $TOOL -la /tmp",
-        "python3 /opt/mastermind/ext/slot.py glm -- run",
     ):
         guard.guard_bash(
             _payload(shared_placement, command), {"command": command}
@@ -2355,3 +2381,192 @@ def test_guard_module_stays_stdlib_only() -> None:
             assert node.level == 0, "relative imports break verbatim-copy deployment"
             roots.add(str(node.module).split(".")[0])
     assert roots and roots <= set(sys.stdlib_module_names) | {"__future__"}
+
+
+# --- rework r5: round-3 review findings (B-1, M-A, M-B) ----------------------
+#
+# The r3 reviewer's standing rule: a refusal that is a pattern ALLOWLIST over
+# an open shell grammar is not closed — one flag letter, an unlisted runner,
+# a stdin-fed program, a function body or a nested-shell eval restores the
+# original bypass, and for the interpreter class that means an armed session
+# launched with ZERO binding validation. These tests pin the STRUCTURAL
+# refusals: every interpreter when a wrapper name is present, every computed
+# word outside an assignment, every launch inside a brace group / function
+# body / trap program / repeater, and eval/source/. anywhere in the text.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-1 interpreter flags the r4 [cemr]-first-letter rule missed.
+        "python3 -Sc 'import os; os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -Bc 'import os; os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -Ic 'import os; os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "python3 -uc 'import os; os.system(\"pool run grok a /tmp grok-4.6\")'",
+        "perl -we 'exec(\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\")'",
+        "perl -E 'exec \"pool run grok a /tmp grok-4.6\"'",
+        "node -p 'require(\"child_process\").execSync(\"pool run grok a /tmp grok-4.6\")'",
+        "node --eval 'require(\"child_process\").execSync(\"pool run grok a /tmp grok-4.6\")'",
+        "ruby -ne 'exec \"pool run grok a /tmp grok-4.6\"'",
+        "php -nr 'system(\"pool run grok a /tmp grok-4.6\");'",
+        # B-1 programs fed on stdin: heredoc, pipe, bare `-`.
+        "python3 - <<'EOF'\nimport os\nos.system(\"pool run grok a /tmp grok-4.6\")\nEOF",
+        "python3 <<'EOF'\nimport os\nos.system(\"pool run grok a /tmp grok-4.6\")\nEOF",
+        "echo 'import os; os.system(\"pool run grok a /tmp grok-4.6\")' | python3",
+        # An interpreter running a wrapper SCRIPT is unreadable too.
+        "python3 /opt/mastermind/ext/slot.py grok -- run",
+    ],
+    ids=[
+        "py-Sc", "py-Bc", "py-Ic", "py-uc", "perl-we", "perl-E", "node-p",
+        "node-eval", "ruby-ne", "php-nr", "heredoc-dash",
+        "heredoc-bare", "pipe-stdin", "interpreter-slot-script",
+    ],
+)
+def test_r5_b1_every_interpreter_is_refused_with_a_wrapper_name(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "interpreter" in reason
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "time ",
+        "sudo ",
+        "sudo -n ",
+        "caffeinate ",
+        "script -q /dev/null ",
+        "strace -f ",
+        "flock /tmp/launch.lock ",
+        "ssh host ",
+        "su -c ",
+        "{ ",
+    ],
+    ids=["time", "sudo", "sudo-n", "caffeinate", "script", "strace", "flock",
+         "ssh-host", "su-c", "brace-group"],
+)
+def test_r5_b1_every_runner_carries_a_computed_word_past_the_gate(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    prefix: str,
+) -> None:
+    # The r4 refusal skipped a nine-word runner allowlist, so any other
+    # runner (or a brace group) carried `$P` past the gate. Every computed
+    # word outside an assignment is refused now.
+    command = (
+        "P=pool; { $P run grok a /tmp grok-4.6; }"
+        if prefix == "{ "
+        else "P=pool; " + prefix + "$P run grok a /tmp grok-4.6"
+    )
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "$P" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-A: a function defined once, called twice (or recursing).
+        _IDENTITY_PREFIX + "f(){ pool run glm a /tmp glm-5.3; }; f; f",
+        _IDENTITY_PREFIX + "function f { pool run glm a /tmp glm-5.3; }; f",
+        # M-A: bash brace-body loops, C-style arith header included.
+        _IDENTITY_PREFIX + "for i in 1 2; { pool run glm a /tmp glm-5.3; }",
+        _IDENTITY_PREFIX + "for ((i=0;i<2;i++)) { pool run glm a /tmp glm-5.3; }",
+        # M-A: a trap program fires on each delivered signal.
+        _IDENTITY_PREFIX
+        + "trap 'pool run glm a /tmp glm-5.3' USR1; kill -USR1 $$",
+        # M-A: repeaters.
+        _IDENTITY_PREFIX + "watch -n 60 pool run glm a /tmp glm-5.3",
+        _IDENTITY_PREFIX + "timeout --foreground 600 pool run glm a /tmp glm-5.3",
+        # An awk program is a brace group as well: refused by the same
+        # structural rule, one step earlier than the interpreter scan.
+        "awk 'BEGIN{system(\"pool run grok a /tmp grok-4.6\")}'",
+    ],
+    ids=["function-twice", "function-keyword", "brace-for", "brace-arith-for",
+         "trap", "watch", "timeout-foreground", "awk-brace-program"],
+)
+def test_r5_ma_function_brace_trap_and_repeater_launches_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-B: eval inside the nested shell that performs the launch — the
+        # separator-anchored regex never saw it after `-c '` canonicalisation.
+        "X='export POOL_ORCH' Y='ESTRATOR_ID=root-other' bash -c "
+        "'eval \"$X$Y\"; pool run glm a /tmp glm-5.3'",
+        "bash -c 'eval \"$X\"; pool run glm a /tmp glm-5.3'",
+        "sh -c '. ./env.sh; pool run glm a /tmp glm-5.3'",
+        "bash -c 'source ./env.sh; pool run glm a /tmp glm-5.3'",
+    ],
+    ids=["nested-eval-concat", "nested-eval", "nested-dot", "nested-source"],
+)
+def test_r5_mb_eval_source_dot_inside_a_nested_shell_is_unobservable(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch environment" in reason
+
+
+def test_r5_computed_assignment_does_not_refuse_a_faithful_launch(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The structural rule is scoped to NON-assignment words: a computed
+    # value assigned to a variable is not a command the gate must read, so
+    # the faithful launch around it still passes.
+    _install(monkeypatch, tmp_path, _binding())
+    for name, value in (
+        ("POOL_ORCHESTRATOR_ID", "root-orch-1"),
+        ("POOL_PARENT_RUN_ID", "hermes-run-7"),
+        ("POOL_TASK_CLASS", "code"),
+    ):
+        monkeypatch.setenv(name, value)
+    _guard_launch(
+        shared_placement,
+        "LABEL=$RANDOM; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3",
+    )
+    assert capsys.readouterr().out == ""
