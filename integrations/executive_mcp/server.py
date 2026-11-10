@@ -606,6 +606,10 @@ _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     # Composed from #2351: the signed read-only Capacity Fabric projection
     # shares the incumbent public credential/host fences and refuses queries.
     "/workspace/resources/fabric/current",
+    # T3 thread-list projection (L6 P2): fixed literal path, no caller
+    # selection — any query key is a 400 in the inner Workspace route.  Without
+    # this fence entry a mounted signed read 404s at the Executive transport.
+    "/workspace/resources/t3/threads/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
