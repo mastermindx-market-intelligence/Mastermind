@@ -4,8 +4,10 @@ Upstream: `https://github.com/pingdotgg/t3code`, MIT license (included).
 Pinned source: `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`.
 
 `t3-native.patch` is the completed `web-t3-cli-adapter-20261109-a1` native CLI
-candidate, adopted without changing its bytes. SHA-256:
-`6ce1853635819631d35353c5e6c2f4596931d3d57493d396d82e5b50901ccb0c`.
+candidate. Empty context lines are normalized for repository whitespace checks;
+the applied source is identical to the completed candidate. Original patch SHA-256:
+`6ce1853635819631d35353c5e6c2f4596931d3d57493d396d82e5b50901ccb0c`. Stored patch SHA-256:
+`74e107769c3b02cba635fd7f64e0ca13eaf1be5c6b5180f221d891df296fd956`.
 Original native coordinator: `mcp:5b3b360e-1842-4b27-b510-e38b9546941b`.
 The coordinator completed its task before this adoption. Its worktree is not
 modified or used as the installed runtime.

@@ -86,7 +86,7 @@ def package(source, built, output):
             raise ValueError('external artifact symlink')
     shutil.copy2(source / 'LICENSE', output / 'LICENSE.t3')
     manifest = {'upstreamCommit': '0770446869d247a8b28c27d7ed93f47f8ff0c1e4',
-                'patchSha256': '6ce1853635819631d35353c5e6c2f4596931d3d57493d396d82e5b50901ccb0c',
+                'patchSha256': '74e107769c3b02cba635fd7f64e0ca13eaf1be5c6b5180f221d891df296fd956',
                 'packages': sorted(metadata, key=lambda x: (x['name'], x.get('version') or ''))}
     (output / 'runtime-provenance.json').write_text(json.dumps(manifest, indent=2) + '\n')
     return {'runtimePackages': len(metadata), 'externalRoots': roots, 'output': str(output)}

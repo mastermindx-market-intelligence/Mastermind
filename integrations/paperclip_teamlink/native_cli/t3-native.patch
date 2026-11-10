@@ -470,18 +470,18 @@ index f182f708c4..5ee86fcd68 100644
 +          listTools: () => Effect.die("unexpected tools/list call"),
          }),
        );
- 
+
 diff --git a/apps/server/src/cli/thread.ts b/apps/server/src/cli/thread.ts
 index 80dfad018e..fa5d0cc504 100644
 --- a/apps/server/src/cli/thread.ts
 +++ b/apps/server/src/cli/thread.ts
 @@ -139,6 +139,7 @@ const reportThreadErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
- 
+
  const decodeFailureText = Schema.decodeUnknownOption(Schema.fromJsonString(OrchestratorMcpFailure));
  const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 +const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
  const printJson = (value: unknown) => Console.log(encodeJson(value));
- 
+
  const ToolResult = Schema.Struct({
 @@ -205,7 +206,7 @@ export type ThreadTools = ReturnType<typeof makeThreadTools>;
   */
@@ -504,7 +504,7 @@ index 80dfad018e..fa5d0cc504 100644
 @@ -765,6 +766,214 @@ const threadShowCommand = Command.make("show", {
    ),
  );
- 
+
 +/**
 + * `thread native` forwards one MCP tool call to the running server and prints
 + * its envelope verbatim. The allowlist is closed: secrets, auth, scheduling,
@@ -731,7 +731,7 @@ index 3887a0368b..e207a3eb83 100644
 @@ -122,6 +122,49 @@ describe("AcpMcpStdioBridge", () => {
      }),
    );
- 
+
 +  it.effect("mcpToolSession exposes tools/list results and forwards the cursor", () =>
 +    Effect.gen(function* () {
 +      const requests: Array<string> = [];
@@ -791,7 +791,7 @@ index 485f85e183..719ab18920 100644
 +    readonly cursor?: string;
 +  }) => Effect.Effect<unknown, AcpMcpBridgeError>;
  }
- 
+
  /**
 @@ -159,6 +163,8 @@ export const mcpToolSession = (
          request("tools/call", { name: tool, arguments: args }).pipe(
