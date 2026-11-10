@@ -102,14 +102,27 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
 /// prevent symlink substitution. Neither the path nor contents appear in errors.
 #[cfg(unix)]
 pub fn read_shell_url_file(path: &std::path::Path) -> Result<Url, ShellUrlFileRefusal> {
-    read_shell_url_file_for_uid(path, unsafe { libc::getuid() })
+    read_single_line_config_file(path).and_then(|line| parse_shell_url(&line).map_err(ShellUrlFileRefusal::Url))
+}
+
+/// Read one trimmed line from a user-private config file, applying every
+/// metadata check of [`read_shell_url_file`] to the file itself.
+///
+/// Shared by the address file (whose line must be a loopback http URL) and
+/// the pairing-helper file (whose line must be an absolute path), so both
+/// pass exactly the same regular-file/no-symlink/user-owned/0600 checks.
+#[cfg(unix)]
+pub fn read_single_line_config_file(
+    path: &std::path::Path,
+) -> Result<String, ShellUrlFileRefusal> {
+    read_single_line_config_file_for_uid(path, unsafe { libc::getuid() })
 }
 
 #[cfg(unix)]
-fn read_shell_url_file_for_uid(
+fn read_single_line_config_file_for_uid(
     path: &std::path::Path,
     current_uid: libc::uid_t,
-) -> Result<Url, ShellUrlFileRefusal> {
+) -> Result<String, ShellUrlFileRefusal> {
     use std::io::Read;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
@@ -150,7 +163,7 @@ fn read_shell_url_file_for_uid(
     if input.is_empty() || input.contains(['\r', '\n', '\0']) {
         return Err(ShellUrlFileRefusal::InvalidContents);
     }
-    parse_shell_url(input).map_err(ShellUrlFileRefusal::Url)
+    Ok(input.into())
 }
 
 /// Stable, input-free reasons the pairing file could not be used.
@@ -189,6 +202,136 @@ pub fn log_file_refusal(refusal: ShellUrlFileRefusal) {
         }
     }
     eprintln!("Mastermind OS shell mode: {code}; using the normal window.");
+}
+
+/// File inside a fixed shell config directory that carries the loopback address.
+pub const SHELL_URL_CONFIG_NAME: &str = "shell-url";
+/// File inside a fixed shell config directory that names the pairing helper.
+pub const PAIR_HELPER_CONFIG_NAME: &str = "pair-helper";
+
+/// The fixed per-user shell config directory for one bundle identifier.
+///
+/// A Finder/Dock launch has no environment, so when neither `MM_SHELL_URL`
+/// variable is set the window reads its address from a fixed file instead.
+/// The release bundle (`com.mastermind.os`) and every dev bundle read
+/// *different* trees, so a dev build can never pick up the release file:
+///
+/// - `com.mastermind.os`        → `~/.mastermind/window`
+/// - `com.mastermind.os.<rest>` → `~/.mastermind/mmos_dev/window-<rest-dashed>`
+///   (`com.mastermind.os.dev` → `window-dev`, `com.mastermind.os.dev.t8` →
+///   `window-dev-t8`)
+///
+/// An identifier outside that family maps to no directory at all (the normal
+/// window), and only `[A-Za-z0-9-]` survives the dash conversion so an
+/// identifier can never escape the dev root with `..` or a separator.
+pub fn fixed_config_dir(identifier: &str, home: &std::path::Path) -> Option<PathBuf> {
+    if identifier == "com.mastermind.os" {
+        return Some(home.join(".mastermind").join("window"));
+    }
+    let variant = identifier.strip_prefix("com.mastermind.os.")?;
+    let dashed = variant.replace('.', "-");
+    if dashed.is_empty()
+        || !dashed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return None;
+    }
+    Some(
+        home.join(".mastermind")
+            .join("mmos_dev")
+            .join(format!("window-{dashed}")),
+    )
+}
+
+/// Everything the shell window needs from the fixed per-user config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellConfig {
+    /// Directory the values came from, when one exists for this bundle.
+    pub dir: Option<PathBuf>,
+    /// Path to the pairing helper named by the config, when configured.
+    pub pair_helper: Option<PathBuf>,
+}
+
+/// Read the pairing-helper path from a fixed config directory.
+///
+/// The file passes the same checks as the address file (regular, no symlink,
+/// user-owned, 0600, single line) and its contents must be one absolute path.
+/// A missing file is not an error: it means unattended pairing is not
+/// configured and the window behaves exactly as it did before.
+pub fn read_pair_helper_file(path: &std::path::Path) -> Result<PathBuf, ShellUrlFileRefusal> {
+    let value = read_single_line_config_file(path)?;
+    if !value.starts_with('/') || value.contains("..") {
+        return Err(ShellUrlFileRefusal::InvalidContents);
+    }
+    Ok(PathBuf::from(value))
+}
+
+/// Resolve the shell settings for one bundle identifier from the environment
+/// and the fixed per-user config. Precedence: `MM_SHELL_URL_FILE`, then
+/// `MM_SHELL_URL`, then the fixed config file. A refused environment setting
+/// never falls through (existing behaviour); a missing fixed file leaves the
+/// normal window with no error.
+pub fn resolve_shell_settings(identifier: &str) -> (Option<Url>, ShellConfig) {
+    #[cfg(unix)]
+    if let Some(path) = std::env::var_os("MM_SHELL_URL_FILE").filter(|value| !value.is_empty()) {
+        return (
+            match read_shell_url_file(std::path::Path::new(&path)) {
+                Ok(url) => Some(url),
+                Err(refusal) => {
+                    log_file_refusal(refusal);
+                    None
+                }
+            },
+            helper_config(identifier),
+        );
+    }
+    if let Some(raw) = std::env::var("MM_SHELL_URL").ok().filter(|value| !value.is_empty()) {
+        return (
+            match parse_shell_url(&raw) {
+                Ok(url) => Some(url),
+                Err(refusal) => {
+                    log_refusal(refusal);
+                    None
+                }
+            },
+            helper_config(identifier),
+        );
+    }
+    let config = helper_config(identifier);
+    let url = config.dir.as_ref().map(|dir| {
+        match read_shell_url_file(&dir.join(SHELL_URL_CONFIG_NAME)) {
+            Ok(url) => Some(url),
+            Err(ShellUrlFileRefusal::Missing) => None,
+            Err(refusal) => {
+                log_file_refusal(refusal);
+                None
+            }
+        }
+    });
+    (url.flatten(), config)
+}
+
+fn helper_config(identifier: &str) -> ShellConfig {
+    let home = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from);
+    let Some(home) = home else {
+        return ShellConfig { dir: None, pair_helper: None };
+    };
+    let Some(dir) = fixed_config_dir(identifier, &home) else {
+        return ShellConfig { dir: None, pair_helper: None };
+    };
+    let pair_helper = match read_pair_helper_file(&dir.join(PAIR_HELPER_CONFIG_NAME)) {
+        Ok(path) => Some(path),
+        // Missing is normal: pairing is simply not configured.
+        Err(ShellUrlFileRefusal::Missing) => None,
+        Err(refusal) => {
+            log_file_refusal(refusal);
+            None
+        }
+    };
+    ShellConfig { dir: Some(dir), pair_helper }
 }
 
 /// Dev root: `MMOS_DEV_ROOT`, else `~/.mastermind/mmos_dev`.
@@ -596,15 +739,17 @@ mod tests {
         fn refusal_matrix_covers_every_required_case() {
             let dir = unique_temp_dir();
             let uid = current_uid();
+            let read_for_uid =
+                |path: &std::path::Path| read_single_line_config_file_for_uid(path, uid);
 
             let missing = dir.join("absent.txt");
             assert_eq!(
-                read_shell_url_file_for_uid(&missing, uid),
+                read_for_uid(&missing),
                 Err(ShellUrlFileRefusal::Missing)
             );
 
             assert_eq!(
-                read_shell_url_file_for_uid(&dir, uid),
+                read_for_uid(&dir),
                 Err(ShellUrlFileRefusal::NotRegularFile)
             );
 
@@ -612,7 +757,7 @@ mod tests {
             let link = dir.join("link.txt");
             std::os::unix::fs::symlink(&target, &link).expect("symlink");
             assert_eq!(
-                read_shell_url_file_for_uid(&link, uid),
+                read_for_uid(&link),
                 Err(ShellUrlFileRefusal::Unreadable),
                 "symlink must be refused (no-follow open)"
             );
@@ -625,7 +770,7 @@ mod tests {
                     mode,
                 );
                 assert_eq!(
-                    read_shell_url_file_for_uid(&path, uid),
+                    read_for_uid(&path),
                     Err(ShellUrlFileRefusal::WrongPermissions),
                     "mode {mode:o}"
                 );
@@ -633,14 +778,14 @@ mod tests {
 
             let owned = write_file(&dir, "owned.txt", "http://127.0.0.1/", 0o600);
             assert_eq!(
-                read_shell_url_file_for_uid(&owned, uid.wrapping_add(1)),
+                read_single_line_config_file_for_uid(&owned, uid.wrapping_add(1)),
                 Err(ShellUrlFileRefusal::WrongOwner),
                 "a file owned by someone else must be refused"
             );
 
             let empty = write_file(&dir, "empty.txt", "", 0o600);
             assert_eq!(
-                read_shell_url_file_for_uid(&empty, uid),
+                read_for_uid(&empty),
                 Err(ShellUrlFileRefusal::InvalidContents)
             );
             let multiline = write_file(
@@ -650,12 +795,12 @@ mod tests {
                 0o600,
             );
             assert_eq!(
-                read_shell_url_file_for_uid(&multiline, uid),
+                read_for_uid(&multiline),
                 Err(ShellUrlFileRefusal::InvalidContents)
             );
             let oversized = write_file(&dir, "big.txt", &"a".repeat(17 * 1024), 0o600);
             assert_eq!(
-                read_shell_url_file_for_uid(&oversized, uid),
+                read_for_uid(&oversized),
                 Err(ShellUrlFileRefusal::InvalidContents)
             );
 
@@ -670,10 +815,152 @@ mod tests {
             ] {
                 let path = write_file(&dir, &format!("url-{expected:?}.txt"), contents, 0o600);
                 assert_eq!(
-                    read_shell_url_file_for_uid(&path, uid),
+                    read_shell_url_file(&path),
                     Err(ShellUrlFileRefusal::Url(expected)),
                     "contents {expected:?}"
                 );
+            }
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn fixed_config_dir_separates_release_from_every_dev_bundle() {
+            let home = std::path::Path::new("/Users/test");
+            assert_eq!(
+                fixed_config_dir("com.mastermind.os", home),
+                Some(PathBuf::from("/Users/test/.mastermind/window"))
+            );
+            assert_eq!(
+                fixed_config_dir("com.mastermind.os.dev", home),
+                Some(PathBuf::from("/Users/test/.mastermind/mmos_dev/window-dev"))
+            );
+            assert_eq!(
+                fixed_config_dir("com.mastermind.os.dev.t8", home),
+                Some(PathBuf::from(
+                    "/Users/test/.mastermind/mmos_dev/window-dev-t8"
+                ))
+            );
+            // Unknown families and traversal attempts map to no directory.
+            assert_eq!(fixed_config_dir("com.example.other", home), None);
+            assert_eq!(fixed_config_dir("com.mastermind.os./../escape", home), None);
+            assert_eq!(fixed_config_dir("com.mastermind.os.", home), None);
+            assert_eq!(fixed_config_dir("", home), None);
+        }
+
+        #[test]
+        fn pair_helper_file_must_be_one_absolute_path() {
+            let dir = unique_temp_dir();
+            let good = write_file(
+                &dir,
+                "helper.txt",
+                "/Users/test/mastermind/tools/mmos_team_server/window_pair_helper.sh",
+                0o600,
+            );
+            assert_eq!(
+                read_pair_helper_file(&good),
+                Ok(PathBuf::from(
+                    "/Users/test/mastermind/tools/mmos_team_server/window_pair_helper.sh"
+                ))
+            );
+            for (name, contents) in [
+                ("relative.txt", "tools/window_pair_helper.sh"),
+                ("traversal.txt", "/Users/test/../root/x.sh"),
+                ("url.txt", "http://127.0.0.1:3796/"),
+            ] {
+                let path = write_file(&dir, name, contents, 0o600);
+                assert!(
+                    read_pair_helper_file(&path).is_err(),
+                    "{name} must be refused"
+                );
+            }
+            // A path with spaces is legitimate and must be accepted.
+            let spaced = write_file(&dir, "spaced.txt", "/opt/my tools/helper.sh", 0o600);
+            assert_eq!(
+                read_pair_helper_file(&spaced),
+                Ok(PathBuf::from("/opt/my tools/helper.sh"))
+            );
+            // Wrong mode is refused like the address file.
+            let loose = write_file(&dir, "loose.txt", "/bin/sh", 0o644);
+            assert_eq!(
+                read_pair_helper_file(&loose),
+                Err(ShellUrlFileRefusal::WrongPermissions)
+            );
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        /// A missing fixed address file must leave the normal window silently,
+        /// and environment settings must keep winning over the fixed file.
+        #[test]
+        fn resolve_prefers_environment_then_fixed_file() {
+            let dir = unique_temp_dir();
+            // Mirror the real layout the release/dev mapping produces.
+            let config_dir = dir.join(".mastermind").join("mmos_dev").join("window-dev");
+            fs::create_dir_all(&config_dir).expect("config dir");
+            write_file(
+                &config_dir,
+                SHELL_URL_CONFIG_NAME,
+                "http://127.0.0.1:3797/env/abc/thread-1",
+                0o600,
+            );
+            write_file(
+                &config_dir,
+                PAIR_HELPER_CONFIG_NAME,
+                "/Users/test/tools/window_pair_helper.sh",
+                0o600,
+            );
+
+            let previous_home = std::env::var_os("HOME");
+            std::env::set_var("HOME", &dir);
+            let identifier = "com.mastermind.os.dev";
+
+            // No environment, config present: the fixed file supplies the URL.
+            let (url, config) = resolve_shell_settings(identifier);
+            assert_eq!(
+                url.as_ref().map(|u| u.to_string()),
+                Some("http://127.0.0.1:3797/env/abc/thread-1".to_string())
+            );
+            assert_eq!(config.dir, Some(config_dir.clone()));
+            assert_eq!(
+                config.pair_helper,
+                Some(PathBuf::from("/Users/test/tools/window_pair_helper.sh"))
+            );
+
+            // MM_SHELL_URL wins over the fixed file; the helper config is
+            // still read (unattended pairing applies to any address source,
+            // gated by an origin check at mint time).
+            std::env::set_var("MM_SHELL_URL", "http://127.0.0.1:4000/from-env");
+            let (url, config) = resolve_shell_settings(identifier);
+            assert_eq!(
+                url.as_ref().map(|u| u.to_string()),
+                Some("http://127.0.0.1:4000/from-env".to_string())
+            );
+            assert_eq!(
+                config.pair_helper,
+                Some(PathBuf::from("/Users/test/tools/window_pair_helper.sh"))
+            );
+            std::env::remove_var("MM_SHELL_URL");
+
+            // MM_SHELL_URL_FILE wins over everything.
+            let env_file = write_file(&dir, "env-url.txt", "http://localhost:5000/", 0o600);
+            std::env::set_var("MM_SHELL_URL_FILE", &env_file);
+            let (url, _) = resolve_shell_settings(identifier);
+            assert_eq!(
+                url.as_ref().map(|u| u.to_string()),
+                Some("http://localhost:5000/".to_string())
+            );
+            std::env::remove_var("MM_SHELL_URL_FILE");
+
+            // Remove the config files: missing address means the normal window.
+            fs::remove_file(config_dir.join(SHELL_URL_CONFIG_NAME)).expect("remove url");
+            fs::remove_file(config_dir.join(PAIR_HELPER_CONFIG_NAME)).expect("remove helper");
+            let (url, config) = resolve_shell_settings(identifier);
+            assert_eq!(url, None);
+            assert_eq!(config.dir, Some(config_dir.clone()));
+            assert_eq!(config.pair_helper, None);
+
+            match previous_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
             }
             fs::remove_dir_all(&dir).ok();
         }
