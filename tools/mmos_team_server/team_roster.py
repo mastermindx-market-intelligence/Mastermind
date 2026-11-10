@@ -210,7 +210,12 @@ def tool_limits(spec, mate):
 
 
 def write_file_assets(spec, mate):
-    """Home dir, CLAUDE.md seed, CHARTER.md, tool-limits.json."""
+    """Home dir, CLAUDE.md seed, CHARTER.md, tool-limits.json.
+
+    CLAUDE.md is the teammate's live long-term memory: created only when
+    missing, never rewritten by apply (a rewrite would erase remembered
+    facts). CHARTER.md and tool-limits.json are config and follow the spec.
+    """
     home = teammate_home(spec, mate)
     os.makedirs(home, exist_ok=True)
     os.chmod(home, 0o700)
@@ -220,7 +225,9 @@ def write_file_assets(spec, mate):
             "they persist across conversations and server restarts. -->\n"
             "# {name} — memory\n\n").format(name=mate["name"])
     wrote = []
-    if write_if_changed(os.path.join(home, "CLAUDE.md"), seed, 0o600):
+    memory = os.path.join(home, "CLAUDE.md")
+    if not os.path.exists(memory):
+        write_if_changed(memory, seed, 0o600)
         wrote.append("CLAUDE.md")
     if write_if_changed(charter, mate["charter"], 0o600):
         wrote.append("CHARTER.md")

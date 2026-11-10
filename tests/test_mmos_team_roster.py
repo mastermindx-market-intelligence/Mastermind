@@ -189,3 +189,16 @@ class TestFileAssets:
         assert team_roster.write_file_assets(spec, mate) == []
         mate["charter"] = "# changed\n"
         assert team_roster.write_file_assets(spec, mate) == ["CHARTER.md"]
+
+    def test_memory_file_never_rewritten_by_apply(self, tmp_path):
+        # CLAUDE.md is the teammate's live long-term memory: once it exists,
+        # apply must leave it alone even though it differs from the seed.
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        memory = os.path.join(team_roster.teammate_home(spec, mate), "CLAUDE.md")
+        remembered = open(memory).read() + "- check-in word: MARLIN-77\n"
+        open(memory, "w").write(remembered)
+        wrote = team_roster.write_file_assets(spec, mate)
+        assert "CLAUDE.md" not in wrote
+        assert open(memory).read() == remembered
