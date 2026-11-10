@@ -7,6 +7,9 @@ team and the project shell; the principal may change the plan).
 This plan replaces the lane map and DONE_WHEN of the earlier mission handoff where
 they conflict. How the team works stays in `OPERATING_METHOD_V3.md`.
 
+**Superseded on 2026-11-10 by `PROGRAM_PLAN_V4.md`** for the shell, conversation and runtime
+decisions (2.1, 2.3, 2.4, 2.5, the lane table and DONE_WHEN). Sections 7 and 8a stay in force.
+
 ## 1. Why the plan changed
 
 A month of work produced almost nothing the Chairman can see. The causes are
