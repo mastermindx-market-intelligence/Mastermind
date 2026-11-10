@@ -1738,7 +1738,9 @@ def _build_profile_mcp_app(
     return guard
 
 
-def build_local_operator_mcp_app(settings: Any, *, local_operator_config: Any) -> Any:
+def build_local_operator_mcp_app(
+    settings: Any, *, local_operator_config: Any, workspace_programs: Any = None
+) -> Any:
     """Compose the socket-only local-operator app (L4) for the v3 profile.
 
     A SEPARATE app instance, served only on the local-operator Unix socket
@@ -1760,7 +1762,7 @@ def build_local_operator_mcp_app(settings: Any, *, local_operator_config: Any) -
         # The context payload names the serving profile; only v3 may carry it.
         raise ValueError("local operator socket requires the Web-CEO v3 profile")
     authenticator = LocalOperatorAuthenticator(local_operator_config)
-    return LocalOperatorApp(authenticator)
+    return LocalOperatorApp(authenticator, workspace_programs=workspace_programs)
 
 
 def build_release_control_mcp_app(settings: Any, *, audit_sink: Any) -> Any:

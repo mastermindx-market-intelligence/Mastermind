@@ -217,3 +217,100 @@ def test_operator_authenticator_attributes_by_digest_only():
     scope = auth.principal_scope()
     assert isinstance(scope, str) and scope and FAKE_SUBJECT not in scope
     assert scope == auth.principal_scope()  # deterministic: digest-derived only
+
+
+# --------------------------------------------------------------------------
+# (3) the admitted uid reads OS + workspace routes over the socket, no bearer
+
+
+def _socket_config(tmp_path):
+    from integrations.executive_mcp.local_operator import parse_local_operator_config
+    return parse_local_operator_config({
+        "socket_path": str(tmp_path / "l4.sock"),
+        "allowed_uids": [os.getuid()],
+        "operator_subject": FAKE_SUBJECT,
+    })
+
+
+def _socket_http(tmp_path, listener, method, path, body=b"{}", extra=b""):
+    async def client():
+        loop = asyncio.get_running_loop()
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(str(tmp_path / "l4.sock"))
+        conn.setblocking(False)
+        request = (f"{method} {path} HTTP/1.0\r\nHost: mcp.mastermind-x.com\r\n"
+                   f"Content-Length: {len(body)}\r\n{extra}"
+                   "Content-Type: application/json\r\n\r\n").encode() + body
+        await loop.sock_sendall(conn, request)
+        chunks = []
+        while True:
+            data = await loop.sock_recv(conn, 65536)
+            if not data:
+                break
+            chunks.append(data)
+        conn.close()
+        return b"".join(chunks)
+    return _run_with_listener(listener, client)
+
+
+def _response_json(raw: bytes):
+    head, _, payload = raw.partition(b"\r\n\r\n")
+    return head.split(b"\r\n", 1)[0], __import__("json").loads(payload)
+
+
+def test_allowed_uid_reads_os_and_workspace_routes_no_bearer(tmp_path):
+    """(3) same real uid: OS context + workspace read, attributed, no bearer."""
+    from types import SimpleNamespace
+    from integrations.executive_mcp.local_operator import LocalOperatorAuthenticator
+    from integrations.executive_mcp.server import build_local_operator_mcp_app
+
+    config = _socket_config(tmp_path)
+    seen = []
+
+    def provider(principal):
+        seen.append(principal.subject_digest)
+        return {"schema": "mastermind.workspace.programs.v1", "programs": []}
+
+    app = build_local_operator_mcp_app(
+        SimpleNamespace(read_from_ceo_ingress=True),
+        local_operator_config=config, workspace_programs=provider)
+    listener = LocalOperatorListener(config, app)
+    listener.bind()
+
+    async def journey():
+        loop = asyncio.get_running_loop()
+        responses = []
+        for method, path, body in (
+            ("POST", "/os/executive/context", b"{}"),
+            ("GET", "/workspace/programs/current", b""),
+        ):
+            conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            conn.connect(str(tmp_path / "l4.sock"))
+            conn.setblocking(False)
+            request = (f"{method} {path} HTTP/1.0\r\nHost: mcp.mastermind-x.com\r\n"
+                       f"Content-Length: {len(body)}\r\n\r\n").encode() + body
+            await loop.sock_sendall(conn, request)
+            chunks = []
+            while True:
+                data = await loop.sock_recv(conn, 65536)
+                if not data:
+                    break
+                chunks.append(data)
+            conn.close()
+            responses.append(b"".join(chunks))
+        return responses
+
+    raw_os, raw_ws = _run_with_listener(listener, journey)
+    status, payload = _response_json(raw_os)
+    assert status.startswith(b"HTTP/1.1 200")
+    assert payload["schema"] == "mastermind.os.executive.owner_context.v1"
+    assert payload["principal_scope"] == LocalOperatorAuthenticator(config).principal_scope()
+    assert FAKE_SUBJECT.encode() not in raw_os  # digest only, never the subject
+
+    raw = raw_ws
+    status, payload = _response_json(raw)
+    assert status.startswith(b"HTTP/1.1 200")
+    assert FAKE_SUBJECT.encode() not in raw
+    assert payload["programs"] == []
+    assert payload["principal_scope"] == LocalOperatorAuthenticator(config).principal_scope()
+    assert seen and seen[0] == LocalOperatorAuthenticator(config).subject_digest
