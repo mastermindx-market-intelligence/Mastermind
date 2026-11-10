@@ -1424,6 +1424,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
+    // T3 attempt context for the Code workbench (HC07): set from the Fleet
+    // catalog's exact-run inspect action, cleared by a fresh nav-rail Code
+    // entry. The id is a T3 run id (run ids contain "/"); activity-selection
+    // ids (WS:/JOB-/ATT-) are a different id space and are NOT joined here.
+    [codeAttemptId, setCodeAttemptId] = useState<string | null>(null),
     [active, setActive] = useState<View>(initialFreshConversation.open || !initialFreshConversation.valid ? "Conversations" : initialProjectJourney.open || !initialProjectJourney.valid ? "Projects" : initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
     [projectTab, setProjectTab] = useState<ProjectTab | null>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Overview" : null),
     [index, setIndex] = useState<ProgramIndex>({
@@ -5900,6 +5905,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         key={`fleet:${authRevision}`}
         host={window.MastermindMissionHost}
         locale={locale}
+        onOpenAttemptInCode={attemptId => { setCodeAttemptId(attemptId); setActive("Code"); }}
       />
       </details>
       </>
@@ -5922,7 +5928,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
   else if (active === "Code")
     // TD04 workbench surface: typed T3 thread projections with documented
     // deep links only. No embedded editor/terminal; no launch authority.
-    content = <CodeWorkspace locale={locale} host={window.MastermindMissionHost}/>;
+    content = <CodeWorkspace locale={locale} host={window.MastermindMissionHost} attemptId={codeAttemptId}/>;
   else if (active === "Conversation")
     content = (
       <>
@@ -6083,6 +6089,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                     setProjectTab(null);
                     if (x === "Projects") setCatalogueProject(null);
                     if (x === "Conversations") {freshDraftRef.current.hide();conversationNavigation.showList();}
+                    if (x === "Code") setCodeAttemptId(null);
                     setActive(x);
                     if (navigationOpen) closeNavigation();
                   }}
