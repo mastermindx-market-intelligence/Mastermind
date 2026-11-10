@@ -7019,3 +7019,219 @@ def test_r12_scanner_stays_fast_on_the_f1_f2_shapes(unit: str) -> None:
     started = time.perf_counter()
     guard.r6_names_wrapper(text)
     assert time.perf_counter() - started < 3.0, unit
+
+
+# --- r13 (re-check #8): a continuation assembled by quote removal ----------
+
+# Re-check #8 (distinct Opus, at r12; REVIEW8_GUARD_R12_OPUS_20261110.md)
+# BLOCKER: ``bash -c "po\\"'⏎'"ol run …"`` holds no construct on the RAW
+# bytes and names no wrapper by the quote-joined check (it reads po|ol), yet
+# THIS shell's quote removal concatenates the adjacent quoted pieces into the
+# one argument ``po\⏎ol run …`` and the admitted nested ``-c`` interpreter
+# joins the line continuation: ``pool run …``. r12 allowed it unjudged, the
+# gate never reached, in both sealed shells. r13 reads ``\⏎`` on the
+# quote-deleted, backslash-preserving view too and joins it before the
+# literal name check. In scope, the nested ``bash``/``sh -c`` body parses
+# (the lexer joins the continuation) to the bare launch ``pool run …`` and
+# REACHES THE BINDING GATE, where the text-regex cross-check cannot attribute
+# the launch (the text carries no wrapper invocation) and refuses it as an
+# unaccounted descendant — stricter than the honest spelling, which is
+# judged and may pass; ``zsh -c`` is not an admitted nested interpreter and
+# is refused structurally. Nothing is allowed unjudged any more. MINOR:
+# flag-combined ``python3 -Bmslot``.
+
+_R13_ARGS = "run glm a /tmp glm-5.3"  # the fixture binding reserves pool_ref glm
+#: (id, command, shells that RUN it (ground truth), origin)
+_R13_ESCAPES = [
+    ("r8-bash-dq-assembled-continuation", 'bash -c "po\\\\"\'\n\'"ol ' + _R13_ARGS + '"', "zsh bash",
+     "REVIEW8 #1"),
+    ("r8-sh-dq-assembled-continuation", 'sh -c "po\\\\"\'\n\'"ol ' + _R13_ARGS + '"', "zsh bash",
+     "REVIEW8 #1"),
+    ("r8-zsh-dq-assembled-continuation", 'zsh -c "po\\\\"\'\n\'"ol ' + _R13_ARGS + '"', "zsh bash",
+     "REVIEW8 #1"),
+    ("r8-bash-sq-assembled-continuation", "bash -c 'po\\'\"\n\"'ol " + _R13_ARGS + "'", "zsh bash",
+     "REVIEW8 #1"),
+    ("r8-sh-sq-assembled-continuation", "sh -c 'po\\'\"\n\"'ol " + _R13_ARGS + "'", "zsh bash",
+     "REVIEW8 #1"),
+    ("r8-bash-dq-assembled-sub-sh", 'bash -c "su\\\\"\'\n\'"b.sh glm-memory a"', "zsh bash", "REVIEW8 #1"),
+]
+
+
+def test_r13_sealed_shells_run_each_escape(tmp_path: Path) -> None:
+    """Ground truth for _R13_ESCAPES: each EXECUTES a fake wrapper in BOTH
+    sealed shells (the nested interpreter resolves from /usr/bin:/bin)."""
+    run = _r11_sealed_shells(tmp_path)
+    checked = 0
+    for row_id, command, shells, _origin in _R13_ESCAPES:
+        for shell_name in shells.split():
+            markers = run(command, shell_name)
+            assert markers, (row_id, shell_name, command)
+            checked += 1
+    assert checked == 2 * len(_R13_ESCAPES) == 12
+
+
+@pytest.mark.parametrize("row", _R13_ESCAPES, ids=[row[0] for row in _R13_ESCAPES])
+def test_r13_escape_is_invisible_to_the_raw_scan_and_the_r12_literal_view(row: tuple) -> None:
+    """Fail-before, pinned: the raw construct regex finds nothing and the
+    r12 quote-joined view (backslash deleted, newline kept) reads two words;
+    r13's quote-deleted view shows the continuation and joins the name."""
+    command = row[1]
+    assert guard._R12_CONSTRUCT_RE.search(command) is None, command
+    assert not guard._WRAPPER_NAME_RE.search(guard._r9_joined(command)), command
+    assert "\\\n" in guard._r12_unquoted_view(command)
+    assert guard.r12_constructs(command) == [guard._R13_ASSEMBLED_CONTINUATION], command
+    assert guard.r12_literal_names_wrapper(command), command
+    assert guard.r12_armed_in_scope(command)
+
+
+def _r13_honest_spelling(row: tuple) -> str:
+    """The same nested launch written plainly (``bash -c 'pool run …'``)."""
+    interpreter = row[1].split(" ", 1)[0]
+    body = "sub.sh glm-memory a" if "sub-sh" in row[0] else "pool " + _R13_ARGS
+    return interpreter + " -c '" + body + "'"
+
+
+@pytest.mark.parametrize("row", _R13_ESCAPES, ids=[row[0] for row in _R13_ESCAPES])
+def test_r13_escapes_reach_the_gate_exactly_like_the_honest_spelling(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    row: tuple,
+) -> None:
+    """Armed, bound and unbound, with and without the scanner: DENY. The
+    ``bash``/``sh -c`` rows are in scope (r13) and parse to one bare nested
+    launch that REACHES the binding gate, where the cross-check refuses the
+    launch the text cannot attribute (``unaccounted descendant``) or the
+    binding is missing; the ``zsh -c`` row is refused structurally (not an
+    admitted nested interpreter). r12 allowed every row with the gate
+    unreached (REVIEW8 #1). The honest spelling is judged like any launch."""
+    command = row[1]
+    honest = _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, _r13_honest_spelling(row))
+    with_scanner = _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+    _r12_scanner_off(monkeypatch)
+    without = _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command)
+    assert with_scanner == without
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = without
+    assert (bound, nobind) == ("deny", "deny"), (bound_reason, nobind_reason)
+    if row[1].startswith("zsh "):
+        assert (bound_gate, nobind_gate) == (False, False)
+        for reason in (bound_reason, nobind_reason):
+            assert "R12_SHELL_CONSTRUCT" in reason and "R6_NESTED_SHELL" in reason, reason
+            assert "assembled by quote removal" in reason, reason
+        assert honest[0][0] == honest[1][0] == "deny" and "R6_NESTED_SHELL" in honest[0][1]
+    else:
+        assert bound_gate and "unaccounted descendant" in bound_reason, bound_reason
+        assert nobind_gate and ("missing binding" in nobind_reason or "unaccounted descendant" in nobind_reason)
+        assert honest[0][2] and honest[1][2], honest  # judged through the gate
+        if "sub-sh" not in row[0]:
+            assert honest[0][0] == "allow", honest[0][1]
+        assert honest[1][0] == "deny" and "missing binding" in honest[1][1]
+
+
+@pytest.mark.parametrize("row_id", ["r8-bash-dq-assembled-continuation", "r8-bash-sq-assembled-continuation"])
+@pytest.mark.parametrize("bound", [True, False], ids=["bound", "unbound"])
+def test_r13_rows_through_the_real_hook_command_line(tmp_path: Path, row_id: str, bound: bool) -> None:
+    """Through the registered hook command line: the assembled row is DENIED
+    bound and unbound (r12: ALLOW, gate unreached — REVIEW8 #1); the honest
+    spelling is judged like any launch (bound ALLOW, unbound missing binding)."""
+    row = next(row for row in _R13_ESCAPES if row[0] == row_id)
+    elapsed, code, out = _r8_hook_cli(tmp_path, row[1], bound=bound, owner=bound)
+    assert code == 0 and out, out
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny", out[:300]
+    assert ("unaccounted descendant" in decision["permissionDecisionReason"]
+            or "missing binding" in decision["permissionDecisionReason"])
+    assert elapsed < 4.0, elapsed
+    elapsed, code, out = _r8_hook_cli(tmp_path, _r13_honest_spelling(row), bound=bound, owner=bound)
+    assert code == 0, out
+    if bound:
+        assert out == "", out[:300]
+    else:
+        assert "missing binding" in json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+#: Honest controls with backslashes and newlines inside quotes: no assembled
+#: continuation (the backslash is not immediately before a newline on the
+#: quote-deleted view), construct-free, armed ALLOW both, gate unreached.
+_R13_HONEST_CONTROLS = [
+    "git commit -m 'line1\nline2'",
+    'python3 script.py --flag "a\nb"',
+    "printf 'a\\nb' > /dev/null",
+    "echo 'back\\slash' > /dev/null",
+    'echo "tab\\there" > /dev/null',
+    "git commit -m 'trailing backslash \\\\ kept'",
+    "echo 'C:\\path\\to\\file'",
+]
+
+
+@pytest.mark.parametrize("command", _R13_HONEST_CONTROLS)
+def test_r13_quoted_backslashes_and_newlines_stay_out_of_scope(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    assert guard.r12_constructs(command) == [], command
+    assert not guard.r12_armed_in_scope(command), command
+    (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind, bound_gate, nobind_gate) == ("allow", "allow", False, False), (
+        bound_reason, nobind_reason
+    )
+
+
+def test_r13_accepted_over_refusal_backslash_before_a_newline_in_quotes(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """PINS AN ACCEPTED OVER-REFUSAL: a quoted backslash immediately before a
+    newline is read as an assembled continuation (the view cannot know which
+    quote removal a nested interpreter will see), so the two-line command is
+    judged and refused as a compound list. Rewrite it on one line."""
+    command = "echo 'a\\'\necho b"
+    assert guard.r12_constructs(command) == [guard._R13_ASSEMBLED_CONTINUATION]
+    (bound, reason, gate), (nobind, _, _) = _r7_both(
+        guard, shared_placement, monkeypatch, tmp_path, capsys, command
+    )
+    assert (bound, nobind, gate) == ("deny", "deny", False), reason
+    assert "R12_SHELL_CONSTRUCT" in reason
+
+
+def test_r13_slot_module_flag_combined_forms_are_literal_names() -> None:
+    """REVIEW8 #2 (MINOR): ``python3 -B -m slot`` spelt ``-Bmslot`` is the
+    same module name; the plain forms still read, the near-misses still do
+    not."""
+    for text in ("python3 -Bmslot glm -- run", "python3 -sBmslot glm", "python3 -umslot x",
+                 "python3 -OOmslot x", "python3 -Imslot x", "python3 -qmslot x",
+                 "python3 -m slot glm -- run", "python3 -mslot glm", "python3 -m pkg.slot x"):
+        assert guard.r12_literal_names_wrapper(text), text
+    for text in ("timeslot", "--timeslot", "python3 -m pytest", "slots", "slot_id", "python3 -B x"):
+        assert not guard.r12_literal_names_wrapper(text), text
+
+
+def test_r13_slot_module_flag_combined_is_in_scope_armed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    command = "python3 -Bmslot glm -- run"
+    assert guard.r12_armed_in_scope(command)
+    for verdict, reason, gate in _r7_both(guard, shared_placement, monkeypatch, tmp_path, capsys, command):
+        assert (verdict, gate) == ("deny", False), reason
+
+
+def test_r13_unquoted_view_is_linear() -> None:
+    import time as _time
+
+    for unit in ('"a\\\\"\'\n\'', "x\\\n", "'\\'\n", 'ab"c"'):
+        text = (unit * (_R8_CAP // len(unit) + 1))[:_R8_CAP]
+        started = _time.perf_counter()
+        guard.r12_constructs(text)
+        guard.r12_literal_names_wrapper(text)
+        assert _time.perf_counter() - started < 1.0, unit

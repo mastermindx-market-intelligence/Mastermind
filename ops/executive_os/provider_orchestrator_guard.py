@@ -30,6 +30,12 @@ is judged by that same ADMIT rule; only construct-free, literally unnamed
 text is out of scope (``r12_armed_in_scope``). The hidden-name scanner
 (``r6_names_wrapper``) is a secondary, widening-only reading there and the
 mechanism of the unarmed checks.
+r13 (re-check #8): one construct is invisible on the raw bytes — a line
+continuation THIS shell's quote removal assembles from adjacent quoted
+pieces and an admitted nested ``-c`` interpreter then joins — so ``\⏎`` is
+also read on the quote-deleted, backslash-preserving view
+(``_r12_unquoted_view``) and the literal name check joins it there first;
+the ``slot`` module check also reads flag-combined ``-Bmslot`` forms.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -4459,7 +4465,11 @@ def _r7_identity_values(parse: _R7Parse, name: str) -> tuple[list[str], list[str
 # command, arithmetic or process substitution, no glob/brace/tilde
 # expansion (zsh ``EXTENDED_GLOB`` ``#``/``^``/``~`` too), no history
 # expansion, no here-document body (a different quoting context), no line
-# continuation (a word joined across lines), no comment (whose model differs
+# continuation (a word joined across lines — read on the raw text AND, r13,
+# on the quote-deleted view, because ``"po\\"'⏎'"ol …"`` is construct-free
+# byte for byte yet this shell's quote removal hands a nested ``-c``
+# interpreter the single argument ``po\⏎ol …``, which it joins to ``pool …``;
+# re-check #8 BLOCKER), no comment (whose model differs
 # between shells), and no ``eval``/``source``/``alias``/``trap``/``coproc``/
 # ``repeat`` word. Its words are literal byte strings in every shell; the
 # literal check reads them all at once. What remains outside the rule (C11
@@ -4496,7 +4506,17 @@ _R12_CONSTRUCT_WORDS_RE = re.compile(
 #: ``python3 -m slot`` / ``-mslot`` / ``pkg.slot``: the module form of
 #: ``slot.py`` (Python resolves ``slot`` to ``slot.py`` on sys.path, the
 #: current directory first) — a literal name by resolution, not by bytes.
-_R12_SLOT_MODULE_RE = re.compile(r"(?:^|[^A-Za-z0-9_])m?slot(?![A-Za-z0-9_])", re.I)
+#: r13 (re-check #8 MINOR): the flag-combined forms ``-Bmslot`` / ``-sBmslot``
+#: / ``-OOmslot`` (``python3 -B -m slot``) are the same module name.
+_R12_SLOT_MODULE_RE = re.compile(
+    r"(?:(?:^|[^A-Za-z0-9_])m?|-[A-Za-z]*m)slot(?![A-Za-z0-9_])", re.I
+)
+#: r13: quote characters only (backslashes kept), see ``_r12_unquoted_view``.
+_R12_QUOTE_ONLY_RE = re.compile(r"[\"']")
+_R13_ASSEMBLED_CONTINUATION = (
+    "\\⏎ (line continuation assembled by quote removal from adjacent quoted "
+    "pieces, joined by a nested interpreter)"
+)
 _R12_CONSTRUCT_KINDS = {
     "$(": "$( (command substitution)", "$((": "$(( (arithmetic)",
     "${": "${ (parameter expansion)", "$[": "$[ (arithmetic)",
@@ -4560,10 +4580,19 @@ def _r12_construct_detail(text: str, index: int) -> str:
     return f"{char!r} (control character)"
 
 
+def _r12_unquoted_view(raw: str) -> str:
+    """r13: the text with the quote characters deleted and the backslashes
+    KEPT — the argument this shell's quote removal builds and hands to a
+    nested interpreter, where an emergent ``\\⏎`` (``"po\\\\"'⏎'"ol"``) is a
+    line continuation. Linear: one replace, one sub."""
+    return _R12_QUOTE_ONLY_RE.sub("", raw.replace('$"', '"'))
+
+
 def r12_constructs(raw: str, limit: int = 3) -> list[str]:
     """r12: the first ``limit`` distinct shell constructs in ``raw`` —
     quoted or not — as descriptions (``[]`` = construct-free). One linear
-    regex scan, plus the construct-word scan on the quote-joined text."""
+    regex scan, the r13 continuation scan on the quote-deleted view, plus
+    the construct-word scan on the quote-joined text."""
     kinds: list[str] = []
     for match in _R12_CONSTRUCT_RE.finditer(raw):
         kind = _r12_construct_detail(raw, match.start())
@@ -4571,6 +4600,10 @@ def r12_constructs(raw: str, limit: int = 3) -> list[str]:
             kinds.append(kind)
             if len(kinds) >= limit:
                 return kinds
+    if "\\\n" in _r12_unquoted_view(raw):
+        kinds.append(_R13_ASSEMBLED_CONTINUATION)
+        if len(kinds) >= limit:
+            return kinds
     word = _R12_CONSTRUCT_WORDS_RE.search(_r9_joined(raw))
     if word is not None:
         kinds.append(f"{word.group(0).lower()} (re-evaluating or grammar word)")
@@ -4580,9 +4613,10 @@ def r12_constructs(raw: str, limit: int = 3) -> list[str]:
 def r12_literal_names_wrapper(raw: str) -> bool:
     """r12: the LITERAL check — a wrapper name in the quote-joined text
     (``"``/``'``/``\\`` deleted: the word every shell builds from literal
-    pieces), glued to a short option, or seen by the launch regexes; also
-    the ``slot`` module name. Linear."""
-    plain = re.sub(r"[\"'\\]", "", raw.replace('$"', '"'))
+    pieces; r13: a ``\\⏎`` assembled by quote removal is joined FIRST, as a
+    nested interpreter would), glued to a short option, or seen by the
+    launch regexes; also the ``slot`` module name. Linear."""
+    plain = _r12_unquoted_view(raw).replace("\\\n", "").replace("\\", "")
     return bool(
         _WRAPPER_NAME_RE.search(_r8_dash_view(plain)) or _r8_glued_option(plain)
         or _R12_SLOT_MODULE_RE.search(plain)
