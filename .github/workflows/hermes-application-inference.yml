@@ -46,6 +46,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-application-inference-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   studio-preflight-observation:
     name: Disposable Studio preflight observation with original assertions

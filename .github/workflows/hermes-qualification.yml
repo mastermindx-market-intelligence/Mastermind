@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-qualification-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   inert-config-preflight:
     name: Hermes offline policy and negative tests
