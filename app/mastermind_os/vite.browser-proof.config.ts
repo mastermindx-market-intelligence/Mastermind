@@ -20,7 +20,7 @@ export default defineConfig({
     outDir: "dist-browser-proof",
     emptyOutDir: true,
     rollupOptions: {
-      input: ["browser-proof.html", "project-execution-proof.html"],
+      input: ["browser-proof.html", "project-execution-proof.html", "agent-control-proof.html"],
     },
   },
 });

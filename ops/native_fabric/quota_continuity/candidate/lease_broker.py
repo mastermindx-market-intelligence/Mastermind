@@ -168,7 +168,7 @@ def _application_time(value):
     return float(value)
 
 
-_APPLICATION_HTTP_POOLS = frozenset({"bailian"})
+_APPLICATION_HTTP_POOLS = frozenset({'bailian', 'glm'})
 _APPLICATION_HTTP_RECIPE_FIELDS = frozenset({
     "schema", "pool", "model", "driver_id", "realm_id", "provider", "protocol",
     "endpoint", "source_projection_sha256", "credential_owner",
@@ -185,6 +185,54 @@ def _application_digest(value):
     return value
 
 
+def _application_glm_http_recipe(recipe, *, pool, model):
+    """Validate the fixed original Z.AI coding-plan HTTP route."""
+    fixed = {
+        "schema": "mastermind.application_http_recipe.v1",
+        "pool": "glm",
+        "driver_id": "zai-coding-plan.chat-completions",
+        "realm_id": "zai-coding-plan",
+        "provider": "glm",
+        "protocol": "openai-chat",
+        "endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+        "credential_owner": "glm_keys.selected_account_key",
+    }
+    if (not isinstance(recipe, dict) or set(recipe) != _APPLICATION_HTTP_RECIPE_FIELDS
+            or pool != "glm" or model not in {"glm-5.3", "glm-5.3-flash"}
+            or recipe.get("model") != model
+            or any(type(recipe.get(key)) is not str or recipe[key] != value
+                   for key, value in fixed.items())):
+        raise ApplicationAdmissionError("invalid_transport_recipe")
+    _application_digest(recipe["source_projection_sha256"])
+    encoded = _application_json(recipe)
+    return encoded, hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _application_glm_http_release_guard(connection, http_template):
+    """Retain existing guards and bind GLM HTTP settlement in this owner."""
+    if (http_template.count("application_http_lease_release_v2") != 1
+            or http_template.count("'bailian'") != 1
+            or http_template.count("'http_responses_v1'") != 1):
+        raise ApplicationAdmissionError("invalid_glm_http_release_template")
+    sql = http_template.replace("application_http_lease_release_v2",
+                                "application_glm_http_lease_release_v4")
+    sql = sql.replace("'http_responses_v1'", "'http_chat_v1'")
+    sql, changed = re.subn(
+        r"OLD\.pool\s*=\s*'bailian'",
+        "OLD.pool='glm' AND EXISTS (SELECT 1 FROM application_turns glm_turn "
+        "WHERE glm_turn.lease_id=OLD.id AND glm_turn.transport_kind IS NULL)",
+        sql)
+    if changed != 1:
+        raise ApplicationAdmissionError("invalid_glm_http_release_template")
+    prior = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+        ("application_glm_http_lease_release_v4",)).fetchone()
+    def normalized(value):
+        return " ".join(value.replace("IF NOT EXISTS ", "").split())
+    if prior is not None and normalized(prior[0]) != normalized(sql):
+        raise ApplicationAdmissionError("unrecognized_glm_http_release_guard")
+    connection.execute(sql)
+
 def _application_http_recipe(recipe, *, pool, model):
     """Commit an owner-projected recipe; the fresh grant supplies authority.
 
@@ -192,6 +240,8 @@ def _application_http_recipe(recipe, *, pool, model):
     exact sealed H identity, and the same transaction compares its complete
     digest with the canonical grant before any account can be admitted.
     """
+    if pool == "glm":
+        return _application_glm_http_recipe(recipe, pool=pool, model=model)
     if (not isinstance(recipe, dict) or set(recipe) != _APPLICATION_HTTP_RECIPE_FIELDS
             or recipe["schema"] != "mastermind.application_http_recipe.v1"
             or not isinstance(pool, str) or pool not in _APPLICATION_HTTP_POOLS or recipe["pool"] != pool
@@ -466,7 +516,7 @@ def _application_receipt(receipt):
             or set(receipt) not in (fields, fields | _APPLICATION_HTTP_RECEIPT_FIELDS)):
         raise ApplicationAdmissionError("invalid_terminal_receipt")
     if "terminal_kind" in receipt:
-        if receipt["terminal_kind"] != "http_responses_v1":
+        if receipt['terminal_kind'] not in ('http_responses_v1', 'http_chat_v1'):
             raise ApplicationAdmissionError("invalid_terminal_receipt")
         for key in ("recipe_digest", "logical_payload_digest", "wire_body_digest"):
             _application_digest(receipt[key])
@@ -777,7 +827,7 @@ def _application_stored_terminal(request, turn):
         elif turn["pool"] in _APPLICATION_HTTP_POOLS:
             _, digest = _application_http_recipe(json.loads(turn["recipe_json"]),
                                                 pool=turn["pool"], model=turn["model"])
-            if (receipt.get("terminal_kind") != "http_responses_v1"
+            if (receipt.get("terminal_kind") != ('http_chat_v1' if turn['pool'] == 'glm' else 'http_responses_v1')
                     or digest != turn["recipe_digest"]
                     or receipt["recipe_digest"] != digest
                     or any(receipt[key] != request[key] for key in (
@@ -835,7 +885,7 @@ def _read_application_accounts(path):
                 raise ApplicationAdmissionError("invalid_application_grant")
             if not isinstance(grant.get("pool"), str):
                 raise ApplicationAdmissionError("invalid_application_grant")
-            native = grant.get("pool") in _APPLICATION_NATIVE_POOLS
+            native = (grant.get('pool') in _APPLICATION_NATIVE_POOLS and not (grant.get('pool') == 'glm' and 'transport_kind' not in grant))
             expected_fields = (_APPLICATION_NATIVE_GRANT_FIELDS if native else
                 _APPLICATION_GRANT_FIELDS | {"recipe_digest"} if grant.get("pool") in _APPLICATION_HTTP_POOLS
                 else _APPLICATION_GRANT_FIELDS)
@@ -874,7 +924,7 @@ def _read_application_accounts(path):
                         or len(grant[key]) > 512 or any(ord(c) < 32 for c in grant[key])):
                     raise ApplicationAdmissionError("invalid_application_grant")
             provider = document["providers"].get(grant["pool"])
-            if (not isinstance(provider, dict) or type(provider.get("enabled")) is not bool
+            if (not isinstance(provider, dict) or (type(provider.get('enabled')) is not bool and not (grant['pool'] == 'glm' and provider.get('enabled') == 'auto'))
                     or not isinstance(provider.get("accounts"), list)):
                 raise ApplicationAdmissionError("invalid_account_reference")
             for account in provider["accounts"]:
@@ -1669,6 +1719,7 @@ class Broker:
                                      AND instr(json_extract(r.terminal_receipt,'$.served_model'),char(0))=0))
                         THEN 0 ELSE 1 END ELSE 1 END=1))
             BEGIN SELECT RAISE(IGNORE); END""")
+        _application_glm_http_release_guard(conn, "CREATE TRIGGER IF NOT EXISTS application_http_lease_release_v2\n            BEFORE UPDATE OF state ON leases WHEN OLD.purpose='APPLICATION'\n            AND OLD.pool='bailian' AND OLD.state IN ('held','rented')\n            AND NEW.state NOT IN ('held','rented')\n            AND NOT EXISTS (\n                SELECT 1 FROM application_turns t WHERE t.lease_id=OLD.id\n                AND t.pool=OLD.pool AND t.account=OLD.account AND t.model=OLD.model\n                AND t.state='closed' AND json_valid(t.recipe_json)=1\n                AND length(t.recipe_digest)=64\n                AND t.recipe_digest NOT GLOB '*[^0-9a-f]*'\n                AND NOT EXISTS (\n                    SELECT 1 FROM application_requests r\n                    WHERE r.principal_id=t.principal_id AND r.turn_id=t.turn_id\n                    AND CASE WHEN r.state='terminal' AND json_valid(r.terminal_receipt)=1 THEN\n                        CASE WHEN json_extract(r.terminal_receipt,'$.terminal_kind')='http_responses_v1'\n                            AND (SELECT count(*) FROM json_each(r.terminal_receipt))=15\n                            AND NOT EXISTS (SELECT 1 FROM json_each(r.terminal_receipt) j\n                                WHERE j.key NOT IN ('dispatch_id','request_digest','lease_id','account','model',\n                                    'response_digest','status_code','completed_at','usage','terminal_kind',\n                                    'recipe_digest','logical_payload_digest','wire_body_digest','delivery_digest','served_model'))\n                            AND (SELECT count(*) FROM json_each(r.terminal_receipt,'$.usage'))=2\n                            AND NOT EXISTS (SELECT 1 FROM json_each(r.terminal_receipt,'$.usage') j\n                                WHERE j.key NOT IN ('input_tokens','output_tokens'))\n                            AND r.recipe_digest=t.recipe_digest\n                            AND json_extract(r.terminal_receipt,'$.recipe_digest')=r.recipe_digest\n                            AND length(r.logical_payload_digest)=64\n                            AND r.logical_payload_digest NOT GLOB '*[^0-9a-f]*'\n                            AND json_extract(r.terminal_receipt,'$.logical_payload_digest')=r.logical_payload_digest\n                            AND length(r.wire_body_digest)=64\n                            AND r.wire_body_digest NOT GLOB '*[^0-9a-f]*'\n                            AND json_extract(r.terminal_receipt,'$.wire_body_digest')=r.wire_body_digest\n                            AND (json_type(r.terminal_receipt,'$.delivery_digest')='null'\n                                 OR (json_type(r.terminal_receipt,'$.delivery_digest')='text'\n                                     AND length(json_extract(r.terminal_receipt,'$.delivery_digest'))=64\n                                     AND json_extract(r.terminal_receipt,'$.delivery_digest') NOT GLOB '*[^0-9a-f]*'))\n                            AND (json_type(r.terminal_receipt,'$.served_model')='null'\n                                 OR (json_type(r.terminal_receipt,'$.served_model')='text'\n                                     AND length(json_extract(r.terminal_receipt,'$.served_model')) BETWEEN 1 AND 256\n                                     AND instr(json_extract(r.terminal_receipt,'$.served_model'),char(0))=0))\n                        THEN 0 ELSE 1 END ELSE 1 END=1))\n            BEGIN SELECT RAISE(IGNORE); END")
         wcols = {r[1] for r in conn.execute("PRAGMA table_info(waiters)")}
         if "last_heartbeat" not in wcols:
             conn.execute("ALTER TABLE waiters ADD COLUMN last_heartbeat REAL")
@@ -3010,7 +3061,7 @@ class Broker:
         if not isinstance(pool, str) or pool not in ({"go"} | _APPLICATION_HTTP_POOLS | _APPLICATION_NATIVE_POOLS):
             raise ApplicationAdmissionError("unsupported_application_pool")
         recipe_json = recipe_digest = None
-        transport_kind = _APPLICATION_NATIVE_KIND if pool in _APPLICATION_NATIVE_POOLS else None
+        transport_kind = _APPLICATION_NATIVE_KIND if (pool in _APPLICATION_NATIVE_POOLS and not (pool == 'glm' and isinstance(application_recipe, dict) and application_recipe.get('schema') == 'mastermind.application_http_recipe.v1')) else None
         if pool in (_APPLICATION_HTTP_POOLS | _APPLICATION_NATIVE_POOLS):
             _application_id(expected_credential_ref)
             validator = _application_native_recipe if transport_kind else _application_http_recipe
@@ -3354,7 +3405,7 @@ class Broker:
             elif turn["transport_kind"] is not None:
                 raise ApplicationAdmissionError("unknown_transport_kind")
             elif turn["pool"] in _APPLICATION_HTTP_POOLS:
-                if (receipt.get("terminal_kind") != "http_responses_v1"
+                if (receipt.get("terminal_kind") != ('http_chat_v1' if turn['pool'] == 'glm' else 'http_responses_v1')
                         or receipt["recipe_digest"] != turn["recipe_digest"]
                         or any(receipt[key] != request[key] for key in (
                             "recipe_digest", "logical_payload_digest", "wire_body_digest"))):

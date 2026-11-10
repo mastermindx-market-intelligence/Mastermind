@@ -77,7 +77,9 @@ class BundleTests(unittest.TestCase):
         manifest.write_text(json.dumps(value), encoding="utf-8")
         for name in set(bundle.CONTROL_FILES) - set(old):
             (self.control / name).unlink()
-        shutil.rmtree(self.control / "ops")
+        for path in sorted(self.control.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
         (self.control / ".control-bundle.lock").unlink()
         self.assertEqual(set(bundle.verify(
             control_root=self.control, launcher=self.launcher)["files"]), set(old))

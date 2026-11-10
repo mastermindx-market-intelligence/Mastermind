@@ -47,7 +47,7 @@ async function setup(){
  const calls=(command:string)=>invoke.mock.calls.filter(([name])=>name===command);
  return{state,client,host:composed.host,view,calls,invoke,notify:(name:string,payload:unknown)=>{for(const listener of listeners.get(name)??[])listener({payload});}};
 }
-function newCard(){const browser=document.querySelector('.project-archive-browser');return browser?within(browser as HTMLElement).queryByText(workRef)?.closest('li')??null:null;}
+function newCard(){const browser=document.querySelector('.project-archive-browser');return browser?within(browser as HTMLElement).queryByText(workRef)?.closest('tr')??null:null;}
 async function projects(){fireEvent.click(screen.getByRole('button',{name:'Projects'}));await screen.findByText(actual.programs.control_room.work[0].work_ref);}
 
 describe('new canonical N project in the real mounted App',()=>{
@@ -62,8 +62,8 @@ describe('new canonical N project in the real mounted App',()=>{
   expect(new URLSearchParams(location.search).get('root_job_id')).toBe(rootJobId);
   const details=await screen.findByRole('button',{name:'Project details'});fireEvent.click(details);
   const panel=await screen.findByRole('region',{name:'Project details'});
-  fireEvent.click(within(panel).getByRole('button',{name:'Plan',exact:true}));
-  const planOwner=within(screen.getByRole('region',{name:'Inspect Plan',exact:true}));
+  fireEvent.click(within(panel).getByRole('button',{name:'Plan'}));
+  const planOwner=within(screen.getByRole('region',{name:'Inspect Plan'}));
   const objective=await planOwner.findByText((_text,node)=>node?.classList.contains('mm-project-plan__objective')===true && node.textContent===actual.selected_plan.plan.objective);
   expect(objective.textContent).toBe(actual.selected_plan.plan.objective);
   expect(e.calls('read_project_plan').at(-1)?.[1]).toEqual({selection:{work_ref:workRef}});

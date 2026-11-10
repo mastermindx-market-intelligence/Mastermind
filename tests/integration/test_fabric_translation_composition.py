@@ -23,22 +23,22 @@ from unittest.mock import patch
 
 from brain import translate
 
-# Forward fixture epoch: original APPLICATION carrier b955c82.
+# Forward fixture epoch: H4 GLM APPLICATION core d23c662b.
 # These exact blobs qualify its selected/native/HTTP and scoped-model paths.
 # Historical input fixtures and the full source validation remain unchanged.
 PINS = {
     "candidate/commission_deadline.py": "fade630ed75c1b93334a5711a6df7a554fbd24ee",
-    "candidate/go_shim.py": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
-    "candidate/lease_broker.py": "a4710c15842490f796b7482a63f993d1db6e937e",
-    "candidate/go_lease_gateway.py": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
-    "candidate/go_lease_capability.py": "38856700331b3fb3a7706a5745e23fb7b3d18cf0",
-    "candidate/application_http_transports.py": "c37181993a36da216c77778ebaeaae3ebe190a09",
+    "candidate/go_shim.py": "6a396f8fedc2f3d44604b07e5a09c3c3ba329579",
+    "candidate/lease_broker.py": "cbb135641aa9d9509714fdb3587f6f0088d5d65b",
+    "candidate/go_lease_gateway.py": "9666d2c10c6dd2044a0ea783c534b58b8fe52f34",
+    "candidate/go_lease_capability.py": "f6ffb1a43dd7a9a53f08e75dd410234a040ab50d",
+    "candidate/application_http_transports.py": "63e3d9820d205eac31e471a0e3ddc86c04524111",
     "candidate/provider_outcome.py": "981f35a01183e83fdb9f0b8a4175b290cdeb85f8",
     "candidate/quota_circuit.py": "1583a6ba773e56dbc3f295b65ffc08dea2d31d48",
     "source/model_tier.py": "96093c2747d2dda69b3f2255cb84e656355c87ea",
     "source/pool_status.py": "02922043357d63b4bcfa3791899df27a5c42be12",
     "source/application_http_transports.py.preimage": "a116d8c671594552dd5c14f46f91981cd7c15f43",
-    "rollout/application_http_realm_projection.py": "684c54d5c9d8dbdd5bc046d123af31d20fc99dd1",
+    "rollout/application_http_realm_projection.py": "7169aa188237ee40d62987d0b7520dc3c9990985",
     "tests/_offline_boundary.py": "e511ab65fe1cd30bf4d2addac6700ca43c3468da",
     "tests/test_go_application_handler_composition.py": "13ebd6bcee5167926807d7ccdc63bcabed0cf1b1",
     "tests/test_application_turn_admission.py": "4cc542888358bf6b46a1e78c581af5ef2f7178aa",

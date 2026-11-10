@@ -1,0 +1,28 @@
+{
+  "changed_members": [
+    "ext/native_plan_worker.py"
+  ],
+  "component_commit": "7efbbaa61abe9ec1efcde85dafcb70f7126646bd",
+  "component_descriptor_sha256": "3a6ca607c98ce8edd2f2d5ac2c86a080d344befc3ec4eeff659643a0934fa832",
+  "component_review_sha256": "d2853b9694ca2bceddaa9613558f76bfabcdba2d083ce61c25b3a559e8114da3",
+  "composer_change": "Only one closed profile branch and one CLI choice; exact byte inverse required by focused check",
+  "composer_preimage_sha256": "caa363ce4028304796506834ea4836a2a35bda15327a317e4a19db8f3d547f8f",
+  "default_or_existing_profiles_changed": false,
+  "held_source_inputs_imported": false,
+  "new_members": 0,
+  "parent_map_source": "Protected maintenance profile target, independently observed/adopted as Root native40; no current/runtime/store read performed here",
+  "parent_profile": "ops/native_fabric/provider_plans/maintenance_guard/profile.json",
+  "parent_profile_sha256": "211d244bc5b8f11556b517f8ae47ac9398bdb8e8a83f66d261b3d7a10b3aa653",
+  "preserved_members": 115,
+  "reference_is_not_action_time_currentness_or_grant": true,
+  "reference_selection": {
+    "generation": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+    "previous": "774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea",
+    "schema": "native-code-selection.v1",
+    "sequence": 40
+  },
+  "reference_selection_receipt_sha256": "d19f5c6adc1448f3b3e8ac0cc224f780562611e07d7fe99203da49144159c6d3",
+  "runtime_effects_performed": false,
+  "schema": "mastermind.current40_terminal_diagnostic_source_provenance.v1",
+  "source_base": "7efbbaa61abe9ec1efcde85dafcb70f7126646bd"
+}

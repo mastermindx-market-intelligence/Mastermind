@@ -460,6 +460,7 @@ CONTROL_COMPONENT_COMMANDS = frozenset(
         "plan-control-component",
         "apply-control-component",
         "reconcile-control-component",
+        "resume-control-component",
     }
 )
 # The retained preimages of this operation: the two installed plists and the
@@ -1399,6 +1400,14 @@ def _parser() -> argparse.ArgumentParser:
     component_reconcile.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
+    component_resume = sub.add_parser(
+        "resume-control-component",
+        help="Continue one retained source-only update before its first publication.",
+    )
+    for name, kind in (("--expected-sha", _exact_sha), ("--recovery-sha", _exact_sha),
+                       ("--plan-sha256", _exact_digest)):
+        component_resume.add_argument(name, type=kind, action=_StoreOnce, required=True)
+    component_resume.add_argument("--transaction-id", action=_StoreOnce, required=True)
     return parser
 
 
@@ -3609,6 +3618,9 @@ class ProductionArmHost(ProductionStatusHost):
         return tuple(sorted(signalled))
 
     def require_service_uids_quiescent(self) -> None:
+        self._require_service_uids_quiescent()
+
+    def _require_service_uids_quiescent(self, *, control_ambient: bool = False) -> None:
         # Reuse the worker owner's saved/real/effective UID projection and exact
         # Apple launchd attribution. Process names and argv never grant an
         # exception. This gate observes only; it never sweeps or signals.
@@ -3630,9 +3642,10 @@ class ProductionArmHost(ProductionStatusHost):
                 before = _ps_pids_for_uid(uid)
                 if not before:
                     continue
-                # The reviewed ambient exception belongs only to the dedicated
-                # worker principal. Control must remain entirely absent.
-                if uid != worker_uid:
+                # Arming retains its strict Control absence rule. The source-only
+                # component owner separately permits the same positively attested
+                # Apple ambient service for Control; no arbitrary process is exempt.
+                if uid != worker_uid and not control_ambient:
                     raise ArmAdmissionError("service_uid_process_live")
                 classifier = DarwinDistnotedClassifier()
                 ambient = classifier.classify(worker_uid=uid)
@@ -6653,7 +6666,15 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             return False
         raise GatewayPublicationError("gateway_studio_invalid")
 
-    def observe_studio(self, expected_sha: str) -> GatewayStudioEvidence:
+    def observe_studio(
+        self, expected_sha: str, *, predecessor_grant_sha256: str | None = None,
+    ) -> GatewayStudioEvidence:
+        """Observe the base seat or its exact qualified predecessor enrollment."""
+        if predecessor_grant_sha256 is not None and (
+            type(predecessor_grant_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", predecessor_grant_sha256) is None
+        ):
+            raise GatewayPublicationError("gateway_studio_invalid")
         from integrations.studio_direct_mcp import private_service
 
         home, studio_gid = self._studio_account_identity()
@@ -6726,8 +6747,9 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or sha256_bytes(agent_plist_raw) != manifest["plistHash"]
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
-        # The staged config is the one closed repository-workspace profile,
-        # WITHOUT the commission opt-in, on the fixed loopback port.
+        # Keep the closed repository-workspace profile on the fixed port.
+        # An enrolled successor retains only its already-qualified prior grant;
+        # observing that binding never changes or creates an enrollment.
         if (
             type(config) is not dict
             or config.get("accountLabel") != OS_GATEWAY_STUDIO_ACCOUNT
@@ -6738,12 +6760,23 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or config.get("cwd") != os.fspath(home)
             or config.get("repositoryWorkspaces")
             != {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
-            or "commissionPublication" in config
             or "fabricOnly" in config
             or type(config.get("gitPublish")) is not dict
             or config["gitPublish"].get("enabled") is not True
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
+
+        if "commissionPublication" in config:
+            commission = config["commissionPublication"]
+            if (
+                predecessor_grant_sha256 is None
+                or type(commission) is not dict
+                or set(commission) != {"enabled", "configurationDigest"}
+                or commission["enabled"] is not True
+                or type(commission["configurationDigest"]) is not str
+                or commission["configurationDigest"] != predecessor_grant_sha256
+            ):
+                raise GatewayPublicationError("gateway_studio_invalid")
 
         if observed.installed_file_hashes != files:
             raise GatewayPublicationError("gateway_studio_invalid")
@@ -7727,7 +7760,13 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         # The retained Studio definition is re-observed before every phase
         # write; drifted source, custody or running state never publishes.
         if (
-            self.observe_studio(transaction.expected_sha).definition_sha256
+            self.observe_studio(
+                transaction.expected_sha,
+                predecessor_grant_sha256=(
+                    manifest["gateway_prior_grant_sha256"]
+                    if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest) else None
+                ),
+            ).definition_sha256
             != manifest["gateway_studio_definition_sha256"]
         ):
             raise TransactionEffectUnknown()
@@ -7771,7 +7810,13 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         ):
             raise TransactionEffectUnknown()
         if (
-            self.observe_studio(transaction.expected_sha).definition_sha256
+            self.observe_studio(
+                transaction.expected_sha,
+                predecessor_grant_sha256=(
+                    manifest["gateway_prior_grant_sha256"]
+                    if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest) else None
+                ),
+            ).definition_sha256
             != manifest["gateway_studio_definition_sha256"]
         ):
             raise TransactionEffectUnknown()
@@ -8143,7 +8188,12 @@ def prepare_gateway_publication(
             host, request.expected_sha, prior_mcp_config)
     except Exception as exc:
         raise GatewayPublicationError("gateway_capability_profiles_invalid") from exc
-    studio = host.observe_studio(request.expected_sha)
+    studio = host.observe_studio(
+        request.expected_sha,
+        predecessor_grant_sha256=(
+            sha256_bytes(grant_bytes) if predecessor is not None else None
+        ),
+    )
     audit_directory = host.observe_gateway_audit_directory(
         studio_uid=studio.studio_uid, studio_gid=studio.studio_gid
     )
@@ -8264,6 +8314,8 @@ class ComponentUpdateRefused(RuntimeError):
 
 _COMPONENT_REFUSAL_CODES = frozenset(
     {
+        "control_component_recovery_origin_invalid",
+        "control_component_resume_identity_invalid",
         "control_component_release_seal_invalid",
         "control_component_target_release_not_staged",
         "control_component_admin_checkout_unavailable",
@@ -8614,6 +8666,18 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
         self._component_binding_input: tuple[str, str] | None = None
         self._component_binding_prior_raw: bytes = b""
         self._component_binding_prior_selector_present: bool = False
+
+    def require_service_uids_quiescent(self) -> None:
+        # Component source changes grant no execution authority. A positively
+        # attested Apple distnoted agent is ambient for either fixed principal.
+        self._require_service_uids_quiescent(control_ambient=True)
+
+    def _component_recovery_origin(self, recovery_sha: str) -> None:
+        expected = SYSTEM_ROOT / "releases" / recovery_sha
+        if (sys.platform != "darwin"
+                or Path(__file__).resolve(strict=True).parents[2] != expected):
+            raise _component_refusal("control_component_recovery_origin_invalid")
+        self._component_release_seal(recovery_sha, target=True)
 
     # -- fixed installed reads ------------------------------------------------
 
@@ -9614,14 +9678,17 @@ class ProductionControlComponentHost(ProductionCeoSubmitHost):
             raise TransactionEffectUnknown()
 
     def _recheck_component_preimages(
-        self, transaction: TransactionContext, observation: Mapping[str, Any]
+        self, transaction: TransactionContext, observation: Mapping[str, Any],
+        *, expected_phase: str = "LOCKED",
     ) -> None:
         """Every sealed preimage must still be exactly the sealed preimage."""
 
         self._recheck_component_bound(transaction)
         manifest = self._manifest()
+        if expected_phase not in {"LOCKED", "CONTROL_BOOTOUT_RECORDED"}:
+            raise TransactionEffectUnknown()
         expected = self._manifest_document(
-            transaction, "LOCKED", operation=CONTROL_COMPONENT_UPDATE
+            transaction, expected_phase, operation=CONTROL_COMPONENT_UPDATE
         )
         if manifest != expected:
             raise TransactionEffectUnknown()
@@ -10341,6 +10408,74 @@ def _component_incomplete(
     )
 
 
+def _finish_control_component_update(host, transaction, candidate) -> None:
+    """The original publications and start, after the stopped boundary is proven."""
+    host._persist_phase(transaction, "CONTROL_ABSENT_PROVEN")
+    if host._component_binding_metadata is not None:
+        # The ONE immutable binding publication.  It happens AFTER the
+        # stopped-boundary proof and BEFORE the Control configuration may
+        # name it, and it is published exactly once.
+        host._persist_phase(
+            transaction, "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED"
+        )
+        host._publish_component_binding(transaction)
+        host._persist_phase(transaction, "CONTROL_COMPONENT_BINDING_PROVEN")
+    # The bounded target publications and the validated receipt
+    # correlations.
+    host._replace_component_target(
+        transaction,
+        CONTROL_PLIST,
+        prior_field="component_prior_control_plist_sha256",
+        target_field="component_target_control_plist_sha256",
+        payload=candidate.control_plist_after,
+        phase="CONTROL_PLIST_REPLACED",
+    )
+    host._replace_component_target(
+        transaction,
+        WORKER_PLIST,
+        prior_field="component_prior_worker_plist_sha256",
+        target_field="component_target_worker_plist_sha256",
+        payload=candidate.worker_plist_after,
+        phase="WORKER_PLIST_REPLACED",
+    )
+    host._publish_control_component_config(transaction, candidate)
+    host._publish_control_component_receipts(transaction)
+    host._persist_phase(transaction, "AUTHORITY_RECEIPT_CORRELATED")
+    if host._component_mode_bound == _COMPONENT_OFFLINE_MODE:
+        # The incumbent stop left the Control explicitly disabled, so it
+        # must be enabled exactly once before it can be bootstrapped.
+        host._persist_phase(transaction, "CONTROL_ENABLE_RECORDED")
+        host._component_enable_control()
+        host._persist_phase(transaction, "CONTROL_ENABLED_PROVEN")
+    # One Control bootstrap of the VERIFIED new plist.
+    host._persist_phase(transaction, "CONTROL_BOOTSTRAP_RECORDED")
+    host._component_bootstrap_control()
+    # The wrapper-attested consumed-config proof: the live pid, the boot
+    # identity, the target release and the exact consumed configuration.
+    host.prove_control_admission_bound(
+        transaction.expected_sha, candidate.control_config_after_sha256
+    )
+    # The selected binding is requalified through the SAME qualified
+    # pinned read the Control's own loader uses: a binding that drifted
+    # after the publication prevents completion.
+    host._component_requalify_binding()
+    host._persist_phase(transaction, "CONTROL_COMPONENT_TARGETS_PROVEN")
+    receipt = _component_receipt_document(
+        transaction_id=transaction.transaction_id,
+        target_sha=transaction.expected_sha,
+        prior_sha=candidate.prior_sha,
+        candidate=candidate,
+        prior_seal=host._component_prior_seal,
+        target_seal=host._component_target_seal,
+        plan_sha256=host._component_plan_sha256,
+        observed_at=host._component_observed_at,
+        mode=host._component_mode_bound,
+    )
+    host.write_control_component_receipt(transaction, receipt)
+    host._persist_phase(transaction, "CONTROL_COMPONENT_RECEIPT_REPLACED")
+    host.complete_transaction(transaction)
+
+
 def execute_control_component_update(
     host: ProductionControlComponentHost,
     *,
@@ -10495,70 +10630,7 @@ def execute_control_component_update(
             ):
                 raise TransactionEffectUnknown()
         host._recheck_component_quiescence(transaction)
-        host._persist_phase(transaction, "CONTROL_ABSENT_PROVEN")
-        if host._component_binding_metadata is not None:
-            # The ONE immutable binding publication.  It happens AFTER the
-            # stopped-boundary proof and BEFORE the Control configuration may
-            # name it, and it is published exactly once.
-            host._persist_phase(
-                transaction, "CONTROL_COMPONENT_BINDING_PUBLICATION_STARTED"
-            )
-            host._publish_component_binding(transaction)
-            host._persist_phase(transaction, "CONTROL_COMPONENT_BINDING_PROVEN")
-        # The bounded target publications and the validated receipt
-        # correlations.
-        host._replace_component_target(
-            transaction,
-            CONTROL_PLIST,
-            prior_field="component_prior_control_plist_sha256",
-            target_field="component_target_control_plist_sha256",
-            payload=candidate.control_plist_after,
-            phase="CONTROL_PLIST_REPLACED",
-        )
-        host._replace_component_target(
-            transaction,
-            WORKER_PLIST,
-            prior_field="component_prior_worker_plist_sha256",
-            target_field="component_target_worker_plist_sha256",
-            payload=candidate.worker_plist_after,
-            phase="WORKER_PLIST_REPLACED",
-        )
-        host._publish_control_component_config(transaction, candidate)
-        host._publish_control_component_receipts(transaction)
-        host._persist_phase(transaction, "AUTHORITY_RECEIPT_CORRELATED")
-        if observation["mode"] == _COMPONENT_OFFLINE_MODE:
-            # The incumbent stop left the Control explicitly disabled, so it
-            # must be enabled exactly once before it can be bootstrapped.
-            host._persist_phase(transaction, "CONTROL_ENABLE_RECORDED")
-            host._component_enable_control()
-            host._persist_phase(transaction, "CONTROL_ENABLED_PROVEN")
-        # One Control bootstrap of the VERIFIED new plist.
-        host._persist_phase(transaction, "CONTROL_BOOTSTRAP_RECORDED")
-        host._component_bootstrap_control()
-        # The wrapper-attested consumed-config proof: the live pid, the boot
-        # identity, the target release and the exact consumed configuration.
-        host.prove_control_admission_bound(
-            target_sha, candidate.control_config_after_sha256
-        )
-        # The selected binding is requalified through the SAME qualified
-        # pinned read the Control's own loader uses: a binding that drifted
-        # after the publication prevents completion.
-        host._component_requalify_binding()
-        host._persist_phase(transaction, "CONTROL_COMPONENT_TARGETS_PROVEN")
-        receipt = _component_receipt_document(
-            transaction_id=transaction.transaction_id,
-            target_sha=target_sha,
-            prior_sha=candidate.prior_sha,
-            candidate=candidate,
-            prior_seal=observation["prior_seal"],
-            target_seal=observation["target_seal"],
-            plan_sha256=plan_sha256,
-            observed_at=host._component_observed_at,
-            mode=observation["mode"],
-        )
-        host.write_control_component_receipt(transaction, receipt)
-        host._persist_phase(transaction, "CONTROL_COMPONENT_RECEIPT_REPLACED")
-        host.complete_transaction(transaction)
+        _finish_control_component_update(host, transaction, candidate)
     except ComponentUpdateRefused as exc:
         # The marker exists: this refusal is NOT a zero-effect refusal.  The
         # original transaction and its preimages are retained and the phase
@@ -10577,6 +10649,157 @@ def execute_control_component_update(
         "transaction_id": transaction.transaction_id,
     }
 
+
+
+def resume_stopped_control_component_update(
+    host: ProductionControlComponentHost, *, target_sha: str,
+    recovery_sha: str, transaction_id: str, plan_sha256: str,
+) -> dict[str, Any]:
+    """Continue one source-only operation stopped before its first publication.
+
+    This explicit action is distinct from observe-only reconciliation. It joins
+    the retained plan and every original preimage, proves the recorded bootout
+    by current absence, and dispatches only the publications and bootstrap the
+    original operation has never attempted. A later phase cannot enter here.
+    """
+    from ops.executive_os import control_component_update as compiler
+
+    require_root_privilege(host.effective_uid())
+    if (_SHA_RE.fullmatch(target_sha) is None
+            or _SHA_RE.fullmatch(recovery_sha) is None
+            or re.fullmatch(r"autonomy-[0-9a-f]{12}", transaction_id) is None
+            or re.fullmatch(r"[0-9a-f]{64}", plan_sha256) is None):
+        raise _component_refusal("control_component_resume_identity_invalid")
+    host._component_recovery_origin(recovery_sha)
+    if not host._transaction_present():
+        raise _component_refusal("control_component_transaction_absent")
+    host._claim_transaction_owner()
+    try:
+        manifest = host._manifest()
+        if (manifest.get("operation") != CONTROL_COMPONENT_UPDATE
+                or manifest.get("transaction_id") != transaction_id
+                or manifest.get("expected_sha") != target_sha
+                or manifest.get("component_plan_sha256") != plan_sha256
+                or manifest.get("phase") != "CONTROL_BOOTOUT_RECORDED"
+                or manifest.get("component_mode") != _COMPONENT_LIVE_MODE
+                or "component_binding" in manifest
+                or not _COMPONENT_MANIFEST_FIELDS <= set(manifest)):
+            raise TransactionEffectUnknown()
+        archives = host._component_archives(manifest)
+        archive_fields = {
+            "prior-control.json": "prior_control_sha256",
+            "prior-worker.json": "prior_worker_sha256",
+            "prior-control-plist.plist": "component_prior_control_plist_sha256",
+            "prior-worker-plist.plist": "component_prior_worker_plist_sha256",
+            "prior-component-autonomy-receipt.json": "component_prior_autonomy_receipt_sha256",
+            "prior-component-ceo-submit-receipt.json": "component_prior_ceo_receipt_sha256",
+            "prior-component-receipt.json": "component_prior_component_receipt_sha256",
+        }
+        if any(sha256_bytes(archives[name]) != manifest[field]
+               for name, field in archive_fields.items()):
+            raise TransactionEffectUnknown()
+        current = host._configs()
+        if (current[4] != archives["prior-control.json"]
+                or current[5] != archives["prior-worker.json"]):
+            raise TransactionEffectUnknown()
+        prior = ConfigEvidence(
+            control=current[0], worker=current[1],
+            control_sha256=current[2], worker_sha256=current[3],
+            control_bytes=current[4], worker_bytes=current[5])
+        prior_plist = plistlib.loads(archives["prior-control-plist.plist"])
+        prior_sha = host._component_prior_release(prior_plist)
+        prior_seal = host._component_release_seal(prior_sha)
+        target_seal = host._component_release_seal(target_sha, target=True)
+        if (prior_seal != manifest["component_prior_release_seal_sha256"]
+                or target_seal != manifest["component_target_release_seal_sha256"]
+                or host._component_admin_checkout(target_sha) != target_sha):
+            raise TransactionEffectUnknown()
+        candidate = compiler.compile_candidate(
+            prior.control_bytes, archives["prior-control-plist.plist"],
+            archives["prior-worker-plist.plist"], target_sha=target_sha,
+            prior_sha=prior_sha, worker_config_sha256=prior.worker_sha256,
+            prior_release_root=os.fspath(SYSTEM_ROOT / "releases" / prior_sha),
+            target_release_root=os.fspath(SYSTEM_ROOT / "releases" / target_sha))
+        if (candidate.control_config_after_sha256 != manifest["target_control_sha256"]
+                or prior.worker_sha256 != manifest["target_worker_sha256"]
+                or candidate.control_plist_after_sha256 != manifest["component_target_control_plist_sha256"]
+                or candidate.worker_plist_after_sha256 != manifest["component_target_worker_plist_sha256"]):
+            raise TransactionEffectUnknown()
+        receipt_preimages = host._component_receipt_preimages()
+        bindings = (
+            ("authority_receipt", "autonomy", "prior-component-autonomy-receipt.json"),
+            ("ceo_submit_receipt", "ceo", "prior-component-ceo-submit-receipt.json"),
+            ("component_receipt", "component", "prior-component-receipt.json"),
+        )
+        for name, field, archive in bindings:
+            present, digest, raw = receipt_preimages[name]
+            if (present is not manifest["component_prior_" + field + "_receipt_present"]
+                    or digest != manifest["component_prior_" + field + "_receipt_sha256"]
+                    or raw != archives[archive]):
+                raise TransactionEffectUnknown()
+        authority, metadata = host._component_autonomy_receipt(
+            prior_sha, prior, receipt_preimages["authority_receipt"])
+        ceo = host._component_ceo_receipt(receipt_preimages["ceo_submit_receipt"])
+        target_authority = _encoded_json(correlate_component_authority_receipt(
+            authority, target_sha=target_sha, prior_control_sha256=prior.control_sha256,
+            target_control_sha256=candidate.control_config_after_sha256,
+            transaction_id=transaction_id))
+        target_ceo = (_encoded_json(correlate_component_ceo_receipt(
+            ceo, target_sha=target_sha, transaction_id=transaction_id))
+            if ceo is not None else b"")
+        receipt = _component_receipt_document(
+            transaction_id=transaction_id, target_sha=target_sha, prior_sha=prior_sha,
+            candidate=candidate, prior_seal=prior_seal, target_seal=target_seal,
+            plan_sha256=plan_sha256, observed_at=manifest["component_observed_at"],
+            mode=_COMPONENT_LIVE_MODE)
+        target_component = _encoded_json(receipt)
+        for raw, field in (
+            (target_authority, "component_target_autonomy_receipt_sha256"),
+            (target_ceo, "component_target_ceo_receipt_sha256"),
+            (target_component, "component_target_component_receipt_sha256"),
+        ):
+            if sha256_bytes(raw) != manifest[field]:
+                raise TransactionEffectUnknown()
+        transaction = TransactionContext(
+            transaction_id=transaction_id, expected_sha=target_sha,
+            prior_configs=prior,
+            candidates=CandidateConfigs(
+                control=json.loads(candidate.control_config_after),
+                worker=prior.worker, control_bytes=candidate.control_config_after,
+                worker_bytes=prior.worker_bytes,
+                control_sha256=candidate.control_config_after_sha256,
+                worker_sha256=prior.worker_sha256), admission=None)
+        host._active_transaction = transaction
+        host._component_candidate = candidate
+        host._component_plan_sha256 = plan_sha256
+        host._component_prior_seal = prior_seal
+        host._component_target_seal = target_seal
+        host._component_observed_at = manifest["component_observed_at"]
+        host._component_prior_archives = archives
+        host._component_autonomy_metadata = metadata
+        host._component_target_autonomy_bytes = target_authority
+        host._component_target_ceo_bytes = target_ceo
+        host._component_target_component_bytes = target_component
+        host._component_prior_receipt_presence = {
+            name: receipt_preimages[name][0] for name, _, _ in bindings}
+        host._component_mode_bound = _COMPONENT_LIVE_MODE
+        host._component_control_launchd_disabled = manifest["component_prior_control_launchd_disabled"]
+        host._component_worker_launchd_disabled = manifest["component_prior_worker_launchd_disabled"]
+        (host._component_interpreter_observed,
+         host._component_interpreter_budget) = host._component_interpreter_observation()
+        host._component_recheck_interpreter()
+        host._recheck_component_preimages(
+            transaction, {}, expected_phase="CONTROL_BOOTOUT_RECORDED")
+        host._recheck_component_quiescence(transaction)
+        _finish_control_component_update(host, transaction, candidate)
+    except ComponentUpdateRefused as exc:
+        raise _component_incomplete(host, transaction_id, exc) from exc
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
+    return {"ok": True, "outcome": "RESUMED", "target_sha": target_sha,
+            "transaction_id": transaction_id, "plan_sha256": plan_sha256}
 
 def reconcile_control_component_update(
     host: ProductionControlComponentHost, *, target_sha: str
@@ -11087,6 +11310,10 @@ def _run_control_component_command(
                     args, "hermes_role_metadata_read_sha256", None
                 ),
             )
+        elif args.command == "resume-control-component":
+            document = resume_stopped_control_component_update(
+                host, target_sha=args.expected_sha, recovery_sha=args.recovery_sha,
+                transaction_id=args.transaction_id, plan_sha256=args.plan_sha256)
         else:
             document = compiler.reconcile(host, target_sha=args.expected_sha)
     except compiler.ComponentError as exc:
@@ -11447,7 +11674,13 @@ def reconcile_gateway_publication(
     if bundle_digest != manifest["gateway_release_bundle_digest"]:
         raise TransactionEffectUnknown()
     if (
-        host.observe_studio(request.expected_sha).definition_sha256
+        host.observe_studio(
+            request.expected_sha,
+            predecessor_grant_sha256=(
+                manifest["gateway_prior_grant_sha256"]
+                if _GATEWAY_SUCCESSOR_FIELDS <= set(manifest) else None
+            ),
+        ).definition_sha256
         != manifest["gateway_studio_definition_sha256"]
     ):
         raise TransactionEffectUnknown()

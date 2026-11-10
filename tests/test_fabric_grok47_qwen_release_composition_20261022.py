@@ -78,13 +78,21 @@ def read_builder():
     return loaded
 
 
+
+def read_current_source_fixture():
+    file = NATIVE / "rollout/test_native_current_source.py"
+    spec = importlib.util.spec_from_file_location("grok_current_source_fixture", file)
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    return loaded
+
+
 def current_source_closure():
     """Bind current candidates separately from immutable historical overlays."""
     raw = (NATIVE / "rollout/native-manifest.json").read_bytes()
     # Current host-pull successor; historical overlay pins remain independent.
     assert digest(raw) == "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
-    manifest = json.loads(raw)
-    inventory = json.loads((NATIVE / "rollout/native-source-inventory.json").read_bytes())
+    manifest, inventory = read_current_source_fixture().expected_current_source_closure(NATIVE)
     assert len(manifest) == len(inventory["files"]) == 107
     assert set(manifest) == set(inventory["files"])
     for name, sha in manifest.items():
@@ -128,9 +136,10 @@ def test_rebuild_staged_manifest_is_exact(tmp_path):
         text=True, capture_output=True, timeout=25,
     )
     assert result.returncode == 0, result.stderr
-    for name in ("native-manifest.json", "native-source-inventory.json"):
-        assert (stage / name).read_bytes() == (NATIVE / "rollout" / name).read_bytes()
-    hashes = json.loads((stage / "native-manifest.json").read_text())
+    builder = read_builder()
+    hashes = read_current_source_fixture().verify_current_stage(
+        stage, NATIVE,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
     assert len(hashes) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
     for path, digest_value in hashes.items():
         assert digest((stage / "native-code-stage" / path).read_bytes()) == digest_value
@@ -395,3 +404,70 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
 # Runtime freshness and caller UTC behavior are qualified by the existing
 # guarded eligibility/outcome/not-before suites. Exact source digests above
 # bind those checked functions; string or identifier ordering is not gate proof.
+
+
+def _current_closure_fixture(root):
+    fixture = read_current_source_fixture()
+    for relative in (
+        "rollout/native-manifest.json", "rollout/native-source-inventory.json",
+        *("candidate/" + name for name in fixture.REVIEWED_CORE),
+    ):
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((NATIVE / relative).read_bytes())
+    return root
+
+
+def test_current_projection_preserves_all_other_historical_rows(tmp_path):
+    fixture = read_current_source_fixture()
+    native = _current_closure_fixture(tmp_path / "source")
+    baseline = json.loads((native / "rollout/native-manifest.json").read_bytes())
+    baseline_inventory = json.loads((native / "rollout/native-source-inventory.json").read_bytes())
+    manifest, inventory = fixture.expected_current_source_closure(native)
+    changed = {"ext/" + name for name in fixture.REVIEWED_CORE}
+    assert {name for name in manifest if manifest[name] != baseline[name]} == changed
+    assert {name for name in inventory["files"]
+            if inventory["files"][name] != baseline_inventory["files"][name]} == changed
+    assert len(manifest) == len(inventory["files"]) == 107
+
+
+def test_current_closure_refuses_changed_baseline_or_candidate(tmp_path):
+    fixture = read_current_source_fixture()
+    relatives = [
+        "rollout/native-manifest.json", "rollout/native-source-inventory.json",
+        *("candidate/" + name for name in fixture.REVIEWED_CORE),
+    ]
+    for index, relative in enumerate(relatives):
+        native = _current_closure_fixture(tmp_path / str(index))
+        target = native / relative
+        target.write_bytes(target.read_bytes() + b"\n# unqualified\n")
+        with pytest.raises(AssertionError):
+            fixture.expected_current_source_closure(native)
+
+
+def test_current_closure_refuses_symlinked_core_even_with_exact_bytes(tmp_path):
+    fixture = read_current_source_fixture()
+    for index, name in enumerate(fixture.REVIEWED_CORE):
+        native = _current_closure_fixture(tmp_path / str(index))
+        target = native / "candidate" / name
+        retained = native / ("retained-" + name)
+        target.rename(retained)
+        target.symlink_to(retained)
+        with pytest.raises(AssertionError, match="not regular"):
+            fixture.expected_current_source_closure(native)
+
+
+def test_current_stage_refuses_changed_emitted_records_before_payload_reads(tmp_path):
+    fixture = read_current_source_fixture()
+    native = _current_closure_fixture(tmp_path / "source")
+    records = fixture.expected_current_source_closure(native)
+    names = ("native-manifest.json", "native-source-inventory.json")
+    for index, changed in enumerate(names):
+        output = tmp_path / ("output-" + str(index))
+        output.mkdir()
+        for name, record in zip(names, records):
+            (output / name).write_bytes(fixture.canonical(record))
+        target = output / changed
+        target.write_bytes(target.read_bytes() + b" ")
+        with pytest.raises(AssertionError, match="source closure differs"):
+            fixture.verify_current_stage(output, native, set(records[0]))

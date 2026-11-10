@@ -11,12 +11,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from http.client import HTTP_PORT, HTTPS_PORT
 from pathlib import PurePosixPath
 import re
+from urllib.parse import urlsplit
 
 
 PLAYWRIGHT_MCP_VERSION = "0.0.79"
 WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST = "ea956fcbb62baedc543f0e8bf299b0a59bdaa30f7c5808faf1ca32a5e9094730"
+APP_CONTROL_TOOL_SCHEMA_DIGEST = "8ec730ca88103dc180f431d6b3c85c4f3fdd4f8dac9e2688ab0350933a29fd0c"
+APP_CONTROL_TOOLS = frozenset({"mastermind_os_inspect", "mastermind_os_check", "mastermind_os_navigate", "mastermind_os_act"})
+APP_CONTROL_READ_TOOLS = frozenset({"mastermind_os_inspect", "mastermind_os_check"})
 
 ALLOWED_BROWSER_TOOLS = frozenset(
     {
@@ -46,6 +51,40 @@ READ_ONLY_BROWSER_TOOLS = frozenset(
         "browser_wait_for",
     }
 )
+
+
+def browser_tools_for_digest(digest: str) -> frozenset[str]:
+    """Only the separately qualified app profile adds semantic tools."""
+    return ALLOWED_BROWSER_TOOLS | APP_CONTROL_TOOLS if digest == APP_CONTROL_TOOL_SCHEMA_DIGEST else ALLOWED_BROWSER_TOOLS
+
+
+def browser_read_tools_for_digest(digest: str) -> frozenset[str]:
+    return READ_ONLY_BROWSER_TOOLS | APP_CONTROL_READ_TOOLS if digest == APP_CONTROL_TOOL_SCHEMA_DIGEST else READ_ONLY_BROWSER_TOOLS
+
+
+def validate_app_control_origin(value: object) -> str:
+    """Owner-selected exact origin, never a model-selected URL or CDP endpoint."""
+    if type(value) is not str or len(value) > 512:
+        raise BrowserResourceError("app control origin is invalid")
+    try:
+        parsed = urlsplit(value)
+        host, port = parsed.hostname, parsed.port
+        if (not host or parsed.scheme not in {"https", "http"} or parsed.username is not None
+                or parsed.password is not None or parsed.path or parsed.query or parsed.fragment
+                or (parsed.scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"})
+                or (host != "::1" and re.fullmatch(r"[a-z0-9.-]+", host) is None)
+                or (port is not None and not 1 <= port <= 65535)):
+            raise ValueError()
+        authority = f"[{host}]" if ":" in host else host
+        if port is not None:
+            if port == (HTTPS_PORT if parsed.scheme == "https" else HTTP_PORT):
+                raise ValueError()
+            authority += f":{port}"
+        if value != f"{parsed.scheme}://{authority}":
+            raise ValueError()
+    except (TypeError, ValueError) as error:
+        raise BrowserResourceError("app control origin is invalid") from error
+    return value
 
 _REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 

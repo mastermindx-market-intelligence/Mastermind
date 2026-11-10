@@ -1,5 +1,16 @@
 # Paper portfolio audit and improvement — 8 November 2026
 
+## Source-export packaging for repository delivery
+
+The original Paper JSX exports are retained losslessly as inert Markdown evidence,
+not importable application modules. [Source export index](evidence/paper_portfolio_20261108/SOURCE_EXPORTS.md)
+maps every original filename to its archive, raw byte length and SHA-256. Historical
+filenames and hashes below and in captured JSON refer to the original raw exports;
+those captured records have not been rewritten. The archives preserve the raw payload
+bytes and distinguish their documentation envelope. No runtime identity, security
+scanner, source exclusion, design content or deployment hold changed.
+
+
 ## Current continuation status
 
 The Chairman authorized continuing autonomous improvements across Paper. This remains an active portfolio mission. The latest completed native phase is **D01 Today comparison basis**: three proposed boards add a captured-reading inspector, EN/ZH missing/read/save recovery states and a tablet quiet-comparison contract. The 17 original Shared Shell integration boards were preserved: two contain one intentional browser-scope copy correction each; 15 are byte-identical in visible JSX. Source critique was incorporated and final three-board exports and five screenshots verified. No runtime or public-route acceptance is claimed.
@@ -1749,7 +1760,7 @@ No application endpoint, account data, save, list mutation, alert, position, tra
 
 This amendment carries twelve native evidence artifacts under `docs/design/evidence/paper_portfolio_20261108/d23/`:
 
-- Four complete editable JSX exports: [flow](evidence/paper_portfolio_20261108/d23/saved-item-flow.jsx), [current states](evidence/paper_portfolio_20261108/d23/current-membership-states.jsx), [context transitions](evidence/paper_portfolio_20261108/d23/context-transitions.jsx), [builder map](evidence/paper_portfolio_20261108/d23/source-builder-map.jsx).
+- Four complete editable JSX exports: [flow](evidence/paper_portfolio_20261108/d23/saved-item-flow.jsx.md), [current states](evidence/paper_portfolio_20261108/d23/current-membership-states.jsx.md), [context transitions](evidence/paper_portfolio_20261108/d23/context-transitions.jsx.md), [builder map](evidence/paper_portfolio_20261108/d23/source-builder-map.jsx.md).
 - Four original final native JPEG captures with the corresponding basenames, plus `before-confirmed-save.jpg` and `before-monitor-reference.jpg`.
 - [Exact preserved native references](evidence/paper_portfolio_20261108/d23/preserved-native-references.json), containing the 22 original Watchlists exports and external Monitor export with their equality results.
 - [Native design and source evidence](evidence/paper_portfolio_20261108/d23/native-design-evidence.json), containing the exact operations, source blobs, visual/identity/sizing checks and remaining proof.
@@ -1796,7 +1807,7 @@ Before any mutation, fresh JSX reads showed replacement node IDs and style chang
 
 The final BU-0 export is **exactly equal to its before export with the five intended text substitutions**. Root inspected the 450×620 native after screenshot: headings, condition, amount, qualification and both actions remain visible without clipping. The text correction and scoped finish both returned **APPLIED_RESPONSE_OBSERVED**; there are **two distinct operations and zero unresolved effects**. Finish targeted BU-0 only. No extra tests were created for this reversible copy correction.
 
-Five native evidence files accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d24_catalyst/`: complete [before JSX](evidence/paper_portfolio_20261108/d24_catalyst/condition-before.jsx), [after JSX](evidence/paper_portfolio_20261108/d24_catalyst/condition-after.jsx), original before/after JPEG captures and the exact edit/source evidence JSON. The JPEG blobs were created directly from the original Paper base64; no reconstruction, independent local digest or decoded binary body readback is claimed while local execution is unavailable.
+Five native evidence files accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d24_catalyst/`: complete [before JSX](evidence/paper_portfolio_20261108/d24_catalyst/condition-before.jsx.md), [after JSX](evidence/paper_portfolio_20261108/d24_catalyst/condition-after.jsx.md), original before/after JPEG captures and the exact edit/source evidence JSON. The JPEG blobs were created directly from the original Paper base64; no reconstruction, independent local digest or decoded binary body readback is claimed while local execution is unavailable.
 
 ### Prior publication readback and continued work
 
@@ -1835,7 +1846,7 @@ A fresh pre-edit whole-board JSX read exactly matched the captured baseline. Pos
 
 There were **two distinct APPLIED_RESPONSE_OBSERVED operations and zero unknown effects**: the three-text update and finish scoped to `73-0`. No other native boards, warned original F03 content or runtime sources were mutated. No blanket whole-file preservation claim is made.
 
-Five artifacts accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d15_curve/`: [complete before JSX](evidence/paper_portfolio_20261108/d15_curve/curve-before.jsx), [complete after JSX](evidence/paper_portfolio_20261108/d15_curve/curve-after.jsx), original before/after native JPEGs and [operation/source evidence](evidence/paper_portfolio_20261108/d15_curve/curve-basis-evidence.json). Images are carried directly from the original Paper base64 into Git blobs, with path/blob readback; no independent local digest or decoded binary-body readback is claimed.
+Five artifacts accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d15_curve/`: [complete before JSX](evidence/paper_portfolio_20261108/d15_curve/curve-before.jsx.md), [complete after JSX](evidence/paper_portfolio_20261108/d15_curve/curve-after.jsx.md), original before/after native JPEGs and [operation/source evidence](evidence/paper_portfolio_20261108/d15_curve/curve-basis-evidence.json). Images are carried directly from the original Paper base64 into Git blobs, with path/blob readback; no independent local digest or decoded binary-body readback is claimed.
 
 [Macro PR #9578](https://github.com/mastermindx-market-intelligence/Macro/pull/9578) was freshly observed open, non-draft, at head `34a32ff08b9e8296863668440adb208feac126f2`, with **merge-blocked** and no auto-merge. Its controls and source were untouched. No endpoint, market data refresh, save, trade, alert, browser-production proof or deployment was exercised.
 
@@ -1892,7 +1903,7 @@ The new page contains **255 nodes** across three non-overlapping 1440×1200 boar
 
 There were **56 distinct APPLIED_RESPONSE_OBSERVED operations and zero unknown effects**, including specific-node finish operations and the three-leaf compact-state correction. Source code and production data were read only. No endpoints, live account actions, trades, saves, alert activation, deployments, runtime tests or production acceptance were exercised.
 
-Nine D18 evidence files accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d18_crypto/`: the three full new-board JSX exports, the eight-board original preservation corpus, the source/operation evidence JSON, three final native JPEGs and the original R4 Markets capture. The primary exports are [basis inspector](evidence/paper_portfolio_20261108/d18_crypto/relative-basis-inspector.jsx), [paired-history states](evidence/paper_portfolio_20261108/d18_crypto/paired-history-states.jsx) and [existing-owner contract](evidence/paper_portfolio_20261108/d18_crypto/existing-owner-window-contract.jsx). Original JPEG bytes are carried directly through Git blob creation and path/SHA readback; no independent local digest or decoded binary-body readback is claimed.
+Nine D18 evidence files accompany this amendment under `docs/design/evidence/paper_portfolio_20261108/d18_crypto/`: the three full new-board JSX exports, the eight-board original preservation corpus, the source/operation evidence JSON, three final native JPEGs and the original R4 Markets capture. The primary exports are [basis inspector](evidence/paper_portfolio_20261108/d18_crypto/relative-basis-inspector.jsx.md), [paired-history states](evidence/paper_portfolio_20261108/d18_crypto/paired-history-states.jsx.md) and [existing-owner contract](evidence/paper_portfolio_20261108/d18_crypto/existing-owner-window-contract.jsx.md). Original JPEG bytes are carried directly through Git blob creation and path/SHA readback; no independent local digest or decoded binary-body readback is claimed.
 
 ## Continuation — bounded reviews that preserve qualified work
 
