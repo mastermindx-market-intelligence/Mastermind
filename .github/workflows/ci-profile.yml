@@ -28,7 +28,7 @@ concurrency:
 jobs:
   profile:
     if: github.event_name == 'workflow_run' || github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 6
     steps:
       # workflow_run executes this protected default-branch revision, never the
@@ -38,10 +38,6 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /scripts/ci_run_profile.py
-            /scripts/ci_profile_capture.py
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
@@ -66,3 +62,13 @@ jobs:
           path: ${{ runner.temp }}/ci-profile/
           if-no-files-found: error
           retention-days: 30
+      # This job checks out a two-file sparse tree into the repository's shared
+      # runner workspace. Runners are persistent, so leaving that sparse state
+      # behind corrupts every later job that reuses the workspace (e.g. a deploy
+      # job that cannot see ops/). Restore a full tree on the way out.
+      - name: Restore the shared workspace to a full tree
+        if: always()
+        shell: bash
+        run: |
+          git sparse-checkout disable 2>/dev/null || true
+
