@@ -1,4 +1,4 @@
-"""Exact licensed12 and historical client output through the closed asset owners.
+"""Exact private-entry, Team and historical output through the closed owners.
 
 All files, manifests and HTTP applications here are disposable test fixtures.
 No installed path, public edge, service configuration or provider is touched.
@@ -23,6 +23,7 @@ CLIENT = NOIR + ["assets/SourceMarkdown-rich.js", "assets/SourceMarkdown-rich.cs
     "third-party/deepseek-client-dependency-NOTICES.txt", "third-party/deepseek-harness-LICENSE.txt"]
 LICENSED = NOIR + CLIENT[-2:]
 PRIVATE = LICENSED + ["assets/private-entry-image.jpg"]
+TEAM = PRIVATE + ["assets/CompanyWorkspace-team_js.js", "assets/CompanyWorkspace-team_css.css"]
 
 
 def make_dist(root: Path, names=CLIENT):
@@ -35,26 +36,29 @@ def make_dist(root: Path, names=CLIENT):
     return dist
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT])
-def test_five_exact_supported_layouts_and_mime_sets(names):
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT, TEAM])
+def test_six_exact_supported_layouts_and_mime_sets(names):
     mimes = os_asset_mimes(names)
     assert set(mimes) == set(names)
     assert mimes["index.html"] == "text/html; charset=utf-8"
     assert mimes["assets/index-js.js"] == "text/javascript; charset=utf-8"
     assert os_asset_mimes(reversed(names)) == mimes
-    if names == PRIVATE:
+    if names in (PRIVATE, TEAM):
         assert mimes["assets/private-entry-image.jpg"] == "image/jpeg"
         assert mimes["third-party/deepseek-harness-LICENSE.txt"] == "text/plain; charset=utf-8"
+    if names == TEAM:
+        assert mimes[TEAM[-2]] == "text/javascript; charset=utf-8"
+        assert mimes[TEAM[-1]] == "text/css; charset=utf-8"
     if names == CLIENT:
         assert mimes["assets/SourceMarkdown-rich.js"] == "text/javascript; charset=utf-8"
         assert mimes["assets/SourceMarkdown-rich.css"] == "text/css; charset=utf-8"
         assert mimes["third-party/deepseek-harness-LICENSE.txt"] == "text/plain; charset=utf-8"
 
 
-@pytest.mark.parametrize("removed", CLIENT)
-def test_every_required_member_is_required(removed):
+@pytest.mark.parametrize("names,removed", [(names, removed) for names in (CLIENT, TEAM) for removed in names])
+def test_every_required_member_is_required(names, removed):
     with pytest.raises(ValueError):
-        os_asset_mimes([name for name in CLIENT if name != removed])
+        os_asset_mimes([name for name in names if name != removed])
 
 
 @pytest.mark.parametrize("name", [
@@ -87,7 +91,7 @@ def test_partial_extra_duplicate_or_malformed_layout_refuses(names):
         os_asset_mimes(names)
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT])
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT, TEAM])
 def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     dist = make_dist(tmp_path, names)
     manifest = build_os_asset_manifest(tmp_path)
@@ -121,19 +125,21 @@ def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
 
 
 @pytest.mark.parametrize("fault", ["extra-directory", "missing-license", "extra-source-map", "symlink-license", "index-loads-lazy-chunk", "oversize-license", "empty-license"])
-def test_real_manifest_retains_closed_topology_reference_and_byte_fences(tmp_path, fault):
-    dist = make_dist(tmp_path)
+@pytest.mark.parametrize("names", [CLIENT, TEAM])
+def test_real_manifest_retains_closed_topology_reference_and_byte_fences(tmp_path, fault, names):
+    dist = make_dist(tmp_path, names)
+    lazy_js = TEAM[-2] if names == TEAM else CLIENT[9]
     if fault == "extra-directory":
         (dist / "private").mkdir()
     elif fault == "missing-license":
         (dist / CLIENT[-1]).unlink()
     elif fault == "extra-source-map":
-        (dist / "assets/SourceMarkdown-rich.js.map").write_text("private source")
+        (dist / (lazy_js + ".map")).write_text("private source")
     elif fault == "symlink-license":
         (dist / CLIENT[-1]).unlink()
         (dist / CLIENT[-1]).symlink_to(dist / CLIENT[-2])
     elif fault == "index-loads-lazy-chunk":
-        (dist / "index.html").write_text('<script src="/os/assets/SourceMarkdown-rich.js"></script><link href="/os/assets/index-css.css">')
+        (dist / "index.html").write_text(f'<script src="/os/{lazy_js}"></script><link href="/os/assets/index-css.css">')
     elif fault == "oversize-license":
         (dist / CLIENT[-1]).write_bytes(b"x" * (4 * 1024 * 1024 + 1))
     else:
@@ -142,7 +148,7 @@ def test_real_manifest_retains_closed_topology_reference_and_byte_fences(tmp_pat
         build_os_asset_manifest(tmp_path)
 
 
-@pytest.mark.parametrize("names", [CLIENT, PRIVATE])
+@pytest.mark.parametrize("names", [CLIENT, PRIVATE, TEAM])
 def test_captured_release_snapshot_uses_the_same_closed_owner(tmp_path, names):
     from ops.executive_os.os_release_assets import _capture_dist
     dist = make_dist(tmp_path, names)
@@ -154,7 +160,7 @@ def test_captured_release_snapshot_uses_the_same_closed_owner(tmp_path, names):
         "assets", "licenses", "licenses/fonts", "third-party"}
 
 
-@pytest.mark.parametrize("names", [CLIENT, PRIVATE])
+@pytest.mark.parametrize("names", [CLIENT, PRIVATE, TEAM])
 def test_static_http_owner_serves_new_bytes_without_expanding_dynamic_routes(tmp_path, names):
     import httpx
     from integrations.executive_mcp.server import OsStaticApp
@@ -178,6 +184,7 @@ def test_static_http_owner_serves_new_bytes_without_expanding_dynamic_routes(tmp
             assert (await client.get("/os/" + names[-1] + "?x=1")).status_code == 404
             assert (await client.get("/os/assets/SourceMarkdown-rich%2ejs")).status_code == 404
             assert (await client.get("/os/assets/private-entry-image%2ejpg")).status_code == 404
+            assert (await client.get("/os/assets/CompanyWorkspace-team_js%2ejs")).status_code == 404
             assert (await client.request("GET", "/os/" + names[-1], content=b"body")).status_code == 400
     asyncio.run(check())
 
@@ -238,3 +245,47 @@ def test_private_jpeg_mime_cannot_be_relabelled(tmp_path):
               ((dist / row["path"]).read_bytes(), row["mime"]) for row in manifest["files"]}
     with pytest.raises(ValueError):
         OsStaticApp(assets)
+
+
+@pytest.mark.parametrize("name", [
+    "assets/CompanyWorkspace-team_js.js.map", "assets/OtherFeature-team_js.js",
+    "assets/CompanyWorkspace-team_js.js?x=1", "assets/CompanyWorkspace-team_js.js#fragment",
+    "assets/../CompanyWorkspace-team_js.js", "assets/CompanyWorkspace-team_js%2ejs",
+    "/assets/CompanyWorkspace-team_js.js", "assets/CompanyWorkspace-.js",
+    "assets/CompanyWorkspace-team_js.js\n", "assets/CompanyWorkspace-team_js.js/extra",
+    "assets/CompanyWorkspace-team_js.css", None,
+])
+def test_team_chunk_names_remain_closed(name):
+    with pytest.raises(ValueError):
+        os_asset_mimes(TEAM[:-2] + [name, TEAM[-1]])
+
+
+@pytest.mark.parametrize("names", [
+    TEAM + [TEAM[-1]], TEAM + ["assets/CompanyWorkspace-second.js"],
+    TEAM[:-2] + [TEAM[-2], TEAM[-2]],
+    TEAM[:-2] + [TEAM[-2], "assets/CompanyWorkspace-second.js"],
+    LICENSED + TEAM[-2:], PRIVATE + CLIENT[9:11],
+    TEAM + CLIENT[9:11],
+])
+def test_team_partial_duplicate_and_wrong_chunk_families_refuse(names):
+    with pytest.raises(ValueError):
+        os_asset_mimes(names)
+
+
+@pytest.mark.parametrize("name", TEAM[-2:])
+def test_team_chunks_cannot_be_symlinks_or_relabelled(tmp_path, name):
+    from integrations.executive_mcp.server import OsStaticApp
+    dist = make_dist(tmp_path, TEAM)
+    manifest = build_os_asset_manifest(tmp_path)
+    target = next(row for row in manifest["files"] if row["path"] == name)
+    target["mime"] = "text/plain; charset=utf-8"
+    with pytest.raises(ValueError):
+        asset_routes(manifest)
+    assets = {("/os/" if row["path"] == "index.html" else "/os/" + row["path"]):
+              ((dist / row["path"]).read_bytes(), row["mime"]) for row in manifest["files"]}
+    with pytest.raises(ValueError):
+        OsStaticApp(assets)
+    (dist / name).unlink()
+    (dist / name).symlink_to(dist / "assets/index-js.js")
+    with pytest.raises(ValueError, match="OS assets cannot be symlinks"):
+        build_os_asset_manifest(tmp_path)

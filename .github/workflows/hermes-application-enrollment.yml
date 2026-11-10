@@ -40,6 +40,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-application-enrollment-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-application-enrollment:
     name: Hermes v9 and incumbent APPLICATION enrollment
