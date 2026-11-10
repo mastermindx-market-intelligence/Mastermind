@@ -918,6 +918,23 @@ def _normalise_constraints(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
     result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
+    if "native_memory" in raw:
+        # Public correlation on the existing Job, never source/dispatch authority.
+        # The protected Memory owner independently requires current Runtime,
+        # genuine Control peer and Linux recipient/source admission.
+        from common.native_memory_intent_contract import normalize_memory_runtime_intent
+        try:
+            result["native_memory"] = normalize_memory_runtime_intent(raw["native_memory"])
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            raise StateConflict("native Memory intent constraint is invalid") from None
+    if "native_memory_evaluation" in raw:
+        from common.memory_evaluation_contract import evaluation_intent
+        try:
+            if "native_memory" not in result:
+                raise ValueError()
+            result["native_memory_evaluation"] = evaluation_intent(raw["native_memory_evaluation"])
+        except (ValueError, TypeError):
+            raise StateConflict("native Memory evaluation constraint is invalid") from None
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
@@ -16660,37 +16677,21 @@ class JobRegistry:
         request: Any,
         *,
         policy: Any | None = None,
+        _principal_commit_guard: Callable[[], None] | None = None,
+        _receiving_command_id: str | None = None,
     ) -> Any:
-        """Admit one ``ChildExecutionRequest.v1`` idempotently (WO-13).
+        """Admit one bounded child request through the existing creation owner.
 
-        Exactly-once law: the admission is idempotent within
-        ``(root_ref, immediate_parent_run_ref, logical_child_key)``.  A
-        redelivery with the same ``request_digest`` returns the FIRST
-        admission's Job handle; the same triple with a different digest
-        raises :class:`StateConflict` carrying the
-        ``CHILD_REQUEST_DIGEST_CONFLICT`` code and never creates a second
-        Job.  Durability rides the existing ``events.command_id UNIQUE``
-        invariant: the command id is derived deterministically from the
-        triple, so two concurrent admissions of one triple are arbitrated
-        by the events table inside the losing transaction (its Job row
-        rolls back), and the loser reconciles to the surviving record.
+        The full idempotency triple and semantic digest identify the operation.
+        Replay precedes fresh authority and queue limits. Exact retained legacy
+        records keep their original command and Job; no alias is written.
 
-        Caller IDs are references, not credentials: the envelope's IDs
-        are recorded under the created event's ``provenance`` (which
-        changes no job column and confers no authority).  The admitted
-        Job is an ordinary root-level QUEUED Job carrying no worker,
-        provider or placement decision — the authenticated host still
-        selects placement through the incumbent claim path (OQ-9).
-
-        A full ready queue is backpressure, never a retry: when the
-        per-root cap (default 32) or the fleet cap (default 512, both
-        configurable via ``ReadyQueuePolicy``) is reached, a WAIT
-        outcome with the precise wait reason is returned to the parent
-        planner and nothing is created.  A replay always outranks the
-        caps so a retry after a lost response still recovers its
-        handle.
+        Fresh authority and ready counts are rechecked by create_job's existing
+        synchronous guard, under its writer transaction and before commit.
+        Request root/parent references remain provenance, never Job ancestry,
+        credentials, a worker selection or a placement commitment.
         """
-
+        from dataclasses import replace
         from control_plane.child_execution_contracts import (
             CHILD_EXECUTION_REQUEST_SCHEMA,
             ChildExecutionRequest,
@@ -16699,6 +16700,7 @@ class JobRegistry:
             AdmissionOutcome,
             ChildRequestAdmissionConflict,
             ReadyQueuePolicy,
+            _legacy_admission_command_id,
             admission_command_id,
             decide_admission,
             request_priority,
@@ -16709,7 +16711,13 @@ class JobRegistry:
             raise StateConflict(
                 "child request admission requires a ChildExecutionRequest.v1 envelope")
         resolved_policy = policy if policy is not None else ReadyQueuePolicy.from_env()
+        key = request.idempotency_key()
         command_id = admission_command_id(request)
+        legacy_command = _legacy_admission_command_id(key)
+        command_candidates = tuple(dict.fromkeys((command_id, legacy_command)))
+        if (_receiving_command_id is not None
+                and _receiving_command_id not in command_candidates):
+            raise StateConflict("child-request receiving command differs from its tuple")
         digest = request.request_digest
 
         def child_request_of(payload_json: Any) -> dict[str, Any] | None:
@@ -16725,35 +16733,63 @@ class JobRegistry:
                 return None
             return child_request
 
-        def existing_admission(connection: Any) -> tuple[str, str] | None:
-            row = connection.execute(
-                """
-                SELECT e.payload_json, j.job_id, j.status, j.current_attempt_id,
-                       j.cancel_requested_at_ms
-                FROM events e JOIN jobs j ON j.job_id = e.job_id
-                WHERE e.command_id=? AND e.event_type='JOB_CREATED'
-                """,
-                (command_id,),
-            ).fetchone()
-            if row is None:
-                return None
-            material = child_request_of(row["payload_json"])
-            if material is None:
-                raise StateConflict(
-                    "child-request command is owned by another semantic action")
-            if material.get("request_digest") is None:
-                raise StateConflict(
-                    "child-request admission record lost its request digest")
-            return (str(row["job_id"]), str(material["request_digest"]))
+        def existing_admission(connection: Any) -> tuple[str, str, str] | None:
+            matches = []
+            for candidate in command_candidates:
+                row = connection.execute(
+                    """
+                    SELECT e.payload_json, e.command_id, e.event_type,
+                           e.aggregate_type, e.aggregate_id, e.job_id,
+                           j.job_id AS retained_job_id
+                    FROM events e LEFT JOIN jobs j ON j.job_id = e.job_id
+                    WHERE e.command_id=?
+                    """,
+                    (candidate,),
+                ).fetchone()
+                if row is None:
+                    continue
+                material = child_request_of(row["payload_json"])
+                if (row["event_type"] != "JOB_CREATED"
+                        or row["aggregate_type"] != "job"
+                        or not row["retained_job_id"]
+                        or row["job_id"] != row["retained_job_id"]
+                        or row["aggregate_id"] != row["job_id"]
+                        or material is None
+                        or material.get("command_id") != candidate):
+                    raise StateConflict(
+                        "child-request command is owned by another semantic action")
+                stored_key = tuple(material.get(name) for name in (
+                    "root_ref", "immediate_parent_run_ref", "logical_child_key"))
+                stored_digest = material.get("request_digest")
+                if (any(type(part) is not str or not part.strip() for part in stored_key)
+                        or type(stored_digest) is not str or len(stored_digest) != 64
+                        or any(char not in "0123456789abcdef" for char in stored_digest)):
+                    raise StateConflict("child-request admission record lost its identity")
+                if candidate == legacy_command:
+                    if _legacy_admission_command_id(stored_key) != candidate:
+                        raise StateConflict("child-request retained tuple differs from its command")
+                if stored_key != key:
+                    if candidate == legacy_command and candidate != command_id:
+                        # A proven delimiter collision is another operation.
+                        # It still consumes capacity; never adopt or rewrite it.
+                        continue
+                    raise StateConflict("child-request retained tuple differs from its command")
+                matches.append((str(row["job_id"]), stored_digest, candidate))
+            if len(matches) > 1:
+                raise StateConflict("child-request has multiple retained command identities")
+            return matches[0] if matches else None
+
+        def replay(existing: tuple[str, str, str]) -> Any:
+            try:
+                outcome = decide_admission(
+                    request, existing=existing[:2], root_ready=0, fleet_ready=0,
+                    policy=resolved_policy)
+            except ChildRequestAdmissionConflict as exc:
+                raise StateConflict(str(exc)) from exc
+            return replace(outcome, command_id=existing[2])
 
         def ready_counts(connection: Any) -> tuple[int, int]:
-            """Ready = admitted, still QUEUED, never claimed, not cancelling.
-
-            Only this lane's Jobs are counted: the child-request ready
-            queue is its own bounded lane and never changes the bounds
-            of the incumbent orchestration queue.
-            """
-
+            """Count this lane's queued, unclaimed, non-cancelling Jobs."""
             root_ready = int(connection.execute(
                 """
                 SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id = e.job_id
@@ -16790,25 +16826,44 @@ class JobRegistry:
         }
         with self.store.read() as connection:
             existing = existing_admission(connection)
-            if existing is not None:
-                # Replay outranks the caps: no queue re-check may strand
-                # a redelivery of an already-admitted request.
-                try:
-                    return decide_admission(
-                        request, existing=existing, root_ready=0, fleet_ready=0,
-                        policy=resolved_policy)
-                except ChildRequestAdmissionConflict as exc:
-                    raise StateConflict(str(exc)) from exc
-            root_ready, fleet_ready = ready_counts(connection)
+        if existing is not None:
+            return replay(existing)
+
+        class _ReadyQueueWait(Exception):
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+        def recheck_admission():
+            # create_job already holds BEGIN IMMEDIATE. A fresh reader sees
+            # committed rows, excluding this transaction's pending Job on the
+            # second check. Other writers cannot take the remaining slot.
+            with self.store.read() as connection:
+                if existing_admission(connection) is not None:
+                    # A legacy record may have committed during the lock wait.
+                    # Reconcile it before fresh authority, just like the
+                    # incumbent canonical-command duplicate check.
+                    raise StateConflict("child request was already admitted")
+            if (_receiving_command_id == legacy_command
+                    and legacy_command != command_id):
+                raise StateConflict("legacy child-request command cannot create fresh work")
+            if _principal_commit_guard is not None:
+                if not callable(_principal_commit_guard):
+                    return _principal_commit_guard
+                result = _principal_commit_guard()
+                if result is not None:
+                    # Preserve create_job's existing synchronous/None contract,
+                    # including its coroutine close/refusal behavior.
+                    return result
+            with self.store.read() as connection:
+                root_ready, fleet_ready = ready_counts(connection)
             wait = child_request_queue_wait(
                 root_ready, fleet_ready,
                 policy=resolved_policy, root_ref=request.root_ref)
-        if wait is not None:
-            # Backpressure to the parent planner: one synchronous,
-            # precise decision.  Nothing is created; there is no retry.
-            return AdmissionOutcome(
-                state="WAIT", wait_reason=str(wait["reason"]),
-                wait_detail=wait, **common)
+            if wait is not None:
+                raise _ReadyQueueWait(AdmissionOutcome(
+                    state="WAIT", wait_reason=str(wait["reason"]),
+                    wait_detail=wait, **common))
+            return None
 
         provenance = {
             "child_request": {
@@ -16836,21 +16891,17 @@ class JobRegistry:
                 attempt_limit=1,
                 command_id=command_id,
                 provenance=provenance,
+                _principal_commit_guard=recheck_admission,
             )
+        except _ReadyQueueWait as exc:
+            return exc.outcome
         except StateConflict:
-            # The events UNIQUE arbitrates a concurrent duplicate of the
-            # same triple; reconcile against the surviving record rather
-            # than guessing.  Any other conflict propagates unchanged.
+            # Preserve the incumbent duplicate reconciliation after rollback.
             with self.store.read() as connection:
                 existing = existing_admission(connection)
             if existing is None:
                 raise
-            try:
-                return decide_admission(
-                    request, existing=existing, root_ready=0, fleet_ready=0,
-                    policy=resolved_policy)
-            except ChildRequestAdmissionConflict as exc:
-                raise StateConflict(str(exc)) from exc
+            return replay(existing)
         return AdmissionOutcome(state="ADMITTED", job_id=job.job_id, **common)
 
     def child_request_ready_queue(

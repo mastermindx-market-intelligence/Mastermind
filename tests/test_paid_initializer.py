@@ -429,7 +429,8 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
-def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request):
+@pytest.mark.parametrize('fixture_umask',[0o002,0o022])
+def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,fixture_umask):
     """Real FD/snapshot/Bash/getpath; trusted-platform metadata is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
@@ -445,7 +446,9 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    bootstrap=Path(sys.executable).with_name('python3')
+    # Canonicalize only the fixture directory. Keep python3's final selector
+    # symlink so the real owner still checks its image and alias identity.
+    bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
     monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
@@ -497,7 +500,10 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         return rawxattr(name,key,*args,**kwargs)
     with tempfile.TemporaryDirectory(prefix='.mmx-inert-init-',dir=account.pw_dir) as scratch:
         private.extend([str(v) for v in Path(scratch).parents]+[scratch])
-        lane=Path(scratch)/'lanes';(lane/'ext/lanes').mkdir(parents=True,mode=0o700)
+        lane=Path(scratch)/'lanes';previous_umask=os.umask(fixture_umask)
+        try:
+            for directory in (lane,lane/'ext',lane/'ext/lanes'):directory.mkdir(mode=0o700)
+        finally:os.umask(previous_umask)
         hook=lane/'ext/HOST_ENV.sh';config=Path(scratch)/'not-read.json'
         hook.write_text('export GLM_CONFIG='+str(config)+'\n');hook.chmod(0o600)
         c=commitment();c.update(lane_root=str(lane),account=dict(uid=os.getuid(),gid=os.getgid(),user=account.pw_name,home=account.pw_dir),
@@ -627,9 +633,20 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     # Census fallback advances exactly one additional historical member.
     assert sum(before[p]==current[p] for p in before)==59
+    core_successors = {
+        "ext/go_lease_capability.py": ("d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940", "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
+        "ext/go_lease_gateway.py": ("adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949", "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
+        "ext/lease_broker.py": ("0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+    }
     for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
-        assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
+        actual=hashlib.sha256(source.read_bytes()).hexdigest()
+        if name in core_successors:
+            predecessor,successor=core_successors[name]
+            assert current[name]==predecessor
+            assert actual==successor
+        else:
+            assert current[name]==actual
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
     source=(native/'rollout/native_install.py').read_text()
@@ -949,10 +966,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification adds two jobs, but full-mode H1 security checks and
-    # the required fan-in remain enforced by the canonical validator above.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards']
+    # PR qualification and early pin guards add three jobs; full-mode H1
+    # security checks and the required fan-in remain enforced by the validator.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
@@ -1083,3 +1100,4 @@ else:raise AssertionError('unmodeled writable file admitted')
     source='import sys\n'+_observer_metadata_fixture(definitions+'\n'+child_probe,exact=[*modeled.parents,modeled],prefixes=[],root_directories=[*modeled.parents,modeled,regular],root_files=[image])
     child=subprocess.run([sys.executable,'-I','-S','-B','-c',source,json.dumps(data)],capture_output=True,timeout=5)
     assert child.returncode==0 and not child.stdout and not child.stderr
+

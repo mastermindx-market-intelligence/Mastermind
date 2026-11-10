@@ -35,6 +35,18 @@ The recommended strategy is to finish one connected vertical outcome, then exten
 
 The Chairman gives Fable a meaningful objective in Mastermind OS and sees an understandable plan, current work, decisions that actually need attention, and the resulting product. Fable resolves strategy and cross-system questions. Opus domain owners decompose and integrate the work, using the paid Subagent Fabric for bounded tasks. Workers produce exact artifacts and evidence. Independent review challenges the result; the correct original parent consumes it. Corrections, failures, logout, interruption, quota pressure and session replacement preserve the same logical work and its effects.
 
+### 2026-11-09 Chairman product-direction amendment — AI authors the project goals
+
+**This is a required user-experience outcome for future Mastermind OS implementation, not a claim of runtime delivery or a retroactive amendment to historical accepted plan versions.** Detailed source for builders: [AI-led, intent-first project creation](../../docs/design/MASTERMIND_OS_AI_LED_PROJECT_INTAKE.md); visual contract: [Paper Mastermind OS — Projects & Evidence](https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-H-0), desktop `AT14` (`N8N-0`), mobile `AT14M` (`NBB-0`), desktop/mobile Master Plan `AT16/AT16M` (`NV9-0`/`O1V-0`). Chairman priority: *project goals, success criteria, DONE_WHEN and plans must be produced and maintained by AI; the user should not be asked to write them.*
+
+The user should be able to say “Our research is scattered—make it useful every week,” select an existing conversation, send a voice note or arrive with already-permitted context. **The AI** reconstructs the intent, determines what is known vs inferred, proposes the project name, desired outcome, observable success criteria, scope, tasks, dependencies and first safe next action, and continues the same project conversation over time. The human adjusts direction conversationally—e.g. “Do mobile first”—without filling a new-project specification form. This intentionally goes beyond Claude Code Projects' current selected-goal setup: the chief-of-staff-style project conversation is the inspiration, while **automatic goal/plan authoring is our required improvement**.
+
+**Hard UI prohibitions:** No required fields called “Your goal,” “Desired outcome,” “How will we know it is done?”, task breakdown or project-name/goal template; do not merely relabel such a mandatory field. A free-form conversation composer is still allowed. The default UI should reveal the *AI-produced* charter and a plain action to shape the project; files, voice and prior-chat selection are optional. If permitted context is unavailable, say so rather than suggesting access was granted. Ask only a focused question for genuinely blocking ambiguity or a reserved choice. Previously hidden Paper form-first variants are noncanonical and must not be restored.
+
+**Hard ownership separation:** AI-generated charter is a **proposal** with provenance, assumptions and plan version—not adoption, dispatch or execution. Use the existing Agent OS workstream/decision/handoff, GitHub plan tree and Executive/Capacity/Runtime admission; preserve live custody, revisions, denied or uncertain effects, authorizations and exact evidence. A plan can be maintained without burdening the user with forms; no project suggestion independently creates a runtime Job or changes permission.
+
+**P0 user-path falsifier:** On web and native, an authenticated user must be able to produce and revise a source-linked plan from a casual thought or an eligible existing conversation, with **zero mandatory manually authored goals or success conditions**, and then observe an authorized first task and later recover the original project with its outcomes. No such experience is accepted based only on Paper screenshots, component tests, a PR or CI. Record the real producer→planner→source readback→admission→consumer proof.
+
 The finished experience must support:
 
 - **A usable office:** persistent conversation, original answers, references, ordinary decisions and multiple concurrent programmes without forcing the Chairman to shuttle messages.
@@ -188,6 +200,8 @@ During the same release, prove an ordinary worker ruling is answered by the corr
 
 **Exit:** one connected trace demonstrates actual useful completion on authenticated web and native, including interruption and correction. A fixture demo or a composite set of unrelated receipts cannot close this gate.
 
+**Added product proof (2026-11-09):** exercise the AI-led project-intake journey in the same original project identity: one informal sentence or eligible prior conversation → AI-authored, source-linked proposed goal and DONE_WHEN → durable existing-plan readback → chat-steered revision → actually authorized execution → retained consumer-visible result and recovery. A form requiring the Chairman to supply goals fails the journey even when later execution succeeds. This does not replace H1–H8 or relax runtime grants.
+
 ### Stage 4 — Finish the remaining product, context and operations estate
 
 O3 completes Fleet/Capacity visibility, discoverable recent runs, owner/parent lineage, full retained result inspection, useful decision Inbox and source navigation. Planning/activity views distinguish declared plan, observed tool progress and proven result. Unavailable data must be explicit and actionable.
@@ -230,6 +244,7 @@ O3 should treat these as separate defects until proven:
 - Fleet/Capacity must be fed by authenticated, fresh producer data; a source-gap placeholder cannot look like an empty healthy fleet.
 - Fabric needs discoverable runs, exact inspection, preserved lineage beyond display caps and complete retained bytes before acceptance.
 - A live plan/progress stream must come from the qualified provider/owner and retain source/freshness; merged #1652 defaults do not prove installed telemetry.
+- **AI-led project entry must replace goal-first onboarding:** the current `app/mastermind_os/src/projects/NewProjectDraft.tsx` still renders “What would you like done?” and a required-style “Your goal” composition, which is the behavior the Chairman rejected on November 9. Builders must implement `docs/design/MASTERMIND_OS_AI_LED_PROJECT_INTAKE.md`, preserve the real creation/admission owner, and include an authenticated new-project/selected-conversation → AI-authored goals/plan → conversational revision → actual task/recovery witness. The linked Paper `AT14/AT14M/AT16/AT16M` mocks are design intent, not live consumer proof.
 
 For each key journey, verify keyboard/focus behavior, loading/empty/stale/error states, narrow and wide layouts, intended themes and languages, browser console/network health, session/logout transitions and native/web parity. Use the existing Paper design identity and contract when owed; an unbound or inaccessible design file is a specific evidence gap, not a reason to invent a replacement design system.
 

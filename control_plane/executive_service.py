@@ -6487,6 +6487,29 @@ class ExecutiveControlService:
                     )
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            from control_plane import protected_memory_evaluation_assignment as evaluation
+            if isinstance(parsed, dict) and parsed.get('schema') == evaluation.INGRESS:
+                if (not app_peer or not app_binding.principal_admission_armed
+                        or not callable(app_binding.principal_facts_factory)):
+                    await self._send_ceo_ingress_error(writer, 'peer_denied', 'evaluation ingress unavailable')
+                    return
+                try:
+                    if self._closing or self._service_state not in {'READY', 'AWAITING_CANARY'}:
+                        raise ValueError('evaluation unavailable')
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    supervisor = self._require_supervisor()
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(
+                        evaluation.assess_from_installed_app, connection, parsed, provider, supervisor)))
+                    if self._closing or self._ceo_ingress_app_binding is not app_binding:
+                        await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                        return
+                    await self._send_ceo_ingress_response(writer, result)
+                except evaluation.AssessmentCommitUnknown:
+                    await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                except Exception:
+                    await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
+                return
             from common import coo_agentos_context_contract as context_wire
             if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
@@ -6774,30 +6797,23 @@ class ExecutiveControlService:
                     or self._service_state != "READY"):
                 raise ValueError("selected-child admission is unavailable")
 
-        if action == "selected_child_admit":
-            # The child-request lane (WO-13): the host froze which
-            # ``ChildExecutionRequest.v1`` envelopes may be named; the
-            # frame names one by its frozen command.  Admission queues
-            # bounded work and selects nothing (OQ-9).
-            await self._handle_child_request_admit_frame(
-                writer, app_binding=app_binding,
-                require_current=require_current, command=command)
-            return
-
         try:
             require_current()
-            child = target.child_for(command)
+            child = (None if action == "selected_child_admit"
+                     else target.child_for(command))
         except Exception:
             await self._send_ceo_ingress_error(
                 writer, "ingress_unavailable",
                 "the selected-child target is unavailable",
             )
             return
-        if child is None:
+        if action != "selected_child_admit" and child is None:
             await self._send_ceo_ingress_error(
                 writer, "invalid_input", "selected-child command is not frozen"
             )
             return
+        root_job_id = (target.children[0].selection.root_job_id
+                       if action == "selected_child_admit" else child.selection.root_job_id)
         runtime = self._require_runtime()
         factory = app_binding.principal_facts_factory
         if not callable(factory):
@@ -6847,7 +6863,7 @@ class ExecutiveControlService:
                     or authority.work_ref != target.work_ref
                     or authority.capability_profile_digest != parsed["capability_profile_digest"]
                     or projection["mission"]["work_ref"] != target.work_ref
-                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or projection["mission"]["root_job_id"] != root_job_id
                     or source.for_principal(parsed["principal"], target.work_ref) != before):
                 raise ValueError("selected-child principal is not current")
             require_current()
@@ -6865,6 +6881,21 @@ class ExecutiveControlService:
                 "the selected-child principal is not current",
             )
             return
+        if action == "selected_child_admit":
+            def require_admission_current():
+                context, current_authority = require_read_current()
+                require_fresh_request()
+                provider.guard_dialogue(
+                    context=context, root_job_id=root_job_id,
+                    capability_profile_digest=current_authority.capability_profile_digest)
+                require_read_current()
+
+            await self._handle_child_request_admit_frame(
+                writer, app_binding=app_binding, runtime=runtime,
+                root_job_id=root_job_id, require_current=require_read_current,
+                require_fresh_request=require_admission_current, command=command)
+            return
+
         try:
             composition = target.new_composition(
                 service=self, runtime=runtime, loop=asyncio.get_running_loop(),
@@ -6907,75 +6938,90 @@ class ExecutiveControlService:
         writer: asyncio.StreamWriter,
         *,
         app_binding: CeoIngressAppBinding,
-        require_current: Callable[[], None],
+        runtime: Runtime,
+        root_job_id: str,
+        require_current: Callable[[], Any],
+        require_fresh_request: Callable[[], None],
         command: str,
     ) -> None:
-        """Admit one host-frozen ``ChildExecutionRequest.v1`` (WO-13).
-
-        The frame names a command the trusted host already froze into
-        the App binding's child-request material; the envelope itself
-        never travels through the model.  Admission is idempotent on
-        ``(root, immediate_parent, logical_child_key)`` + digest inside
-        the Runtime: a replay returns the first Job handle, a digest
-        mismatch is a precise conflict, a full ready queue returns a
-        precise wait reason.  Nothing here selects a worker, provider
-        or host — the host still selects (OQ-9).
-        """
-
+        """Admit one frozen request with incumbent read and fresh-effect proof."""
         from control_plane.child_execution_contracts import ChildExecutionRequest
         from control_plane.child_request_admission import (
             CHILD_REQUEST_DIGEST_CONFLICT,
+            _legacy_admission_command_id,
+            admission_command_id,
         )
 
-        material = app_binding.child_request_material
-        envelope = material.get(command) if type(material) is dict else None
-        if type(envelope) is not dict:
-            await self._send_ceo_ingress_error(
-                writer, "invalid_input", "selected-child command is not frozen")
-            return
+        def current_request():
+            material = app_binding.child_request_material
+            envelope = material.get(command) if type(material) is dict else None
+            if type(envelope) is not dict:
+                raise ValueError("selected-child command is not frozen")
+            # Capture the closed wire independently of its mutable host mapping.
+            return ChildExecutionRequest.from_dict(json.loads(json.dumps(envelope)))
+
         try:
-            request = ChildExecutionRequest.from_dict(dict(envelope))
+            request = current_request()
         except (TypeError, ValueError):
             await self._send_ceo_ingress_error(
                 writer, "invalid_input", "the child request envelope is invalid")
             return
-        try:
+        frozen_key, frozen_digest = request.idempotency_key(), request.request_digest
+
+        def require_material_current():
+            current = current_request()
+            if (current.idempotency_key() != frozen_key
+                    or current.request_digest != frozen_digest
+                    or current.root_ref != root_job_id
+                    or command not in {
+                        admission_command_id(current),
+                        _legacy_admission_command_id(current.idempotency_key()),
+                    }):
+                raise ValueError("the frozen child request changed")
+
+        def require_read_request():
+            require_material_current()
             require_current()
-            if (not app_binding.principal_admission_armed
-                    or self._service_state != "READY"):
-                raise ValueError("selected-child admission is unavailable")
+            require_material_current()
+
+        def require_fresh_admission():
+            require_material_current()
+            require_fresh_request()
+            require_material_current()
+
+        try:
+            require_read_request()
         except Exception:
             await self._send_ceo_ingress_error(
-                writer, "ingress_unavailable",
-                "the selected-child target is unavailable",
-            )
+                writer, "authority_refused", "the child request authority is unavailable")
             return
-        runtime = self._require_runtime()
         try:
-            outcome = runtime.jobs.admit_child_execution_request(request)
+            outcome = runtime.jobs.admit_child_execution_request(
+                request, _principal_commit_guard=require_fresh_admission,
+                _receiving_command_id=command)
         except StateConflict as exc:
-            message = str(exc)
-            if message.startswith(CHILD_REQUEST_DIGEST_CONFLICT):
-                # A conflict is precise and finite: the same logical key
-                # was admitted with a different digest.  Never a second
-                # Job, never a silent re-admission.
+            try:
+                require_read_request()
+            except Exception:
+                await self._send_ceo_ingress_error(
+                    writer, "internal_error", "the child request observation failed")
+                return
+            if str(exc).startswith(CHILD_REQUEST_DIGEST_CONFLICT):
                 await self._send_ceo_ingress_error(
                     writer, "conflict",
                     "the child request conflicts with its admitted digest")
                 return
             await self._send_ceo_ingress_error(
-                writer, "ingress_unavailable",
-                "the child request admission failed")
+                writer, "ingress_unavailable", "the child request admission failed")
             return
         except Exception:
             await self._send_ceo_ingress_error(
                 writer, "internal_error", "the child request admission failed")
             return
-        # A post-admission currentness refusal is not a no-effect
-        # receipt: the admission may have committed.  The caller keeps
-        # the original command and reconciles by resubmitting it.
+        # A post-commit observation refusal does not prove no effect.
+        # Keep the original command/Job for its owner's reconciliation.
         try:
-            require_current()
+            require_read_request()
         except Exception:
             await self._send_ceo_ingress_error(
                 writer, "internal_error", "the child request observation failed")

@@ -1,0 +1,255 @@
+{
+  "build": {
+    "argv": [
+      "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/macro-current-conflict-a5eed62a-20261108/macro-joint-py312-20261108/bin/python",
+      "-B",
+      "/Volumes/Mastermind/agent-workspaces/web/h4-native-runtime-compatibility-20261109/ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+      "--output",
+      "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-g-b3ad-6488-integration-20261109/r28-fleet43-canonical-patch-build",
+      "--include-provider-plan-application",
+      "--include-provider-plan-remote-placement",
+      "--include-provider-plan-maintenance-guard",
+      "--include-provider-plan-terminal-diagnostics",
+      "--include-provider-plan-memory-support",
+      "--include-provider-plan-fleet-launch-repair",
+      "--include-go-application",
+      "--include-application-http",
+      "--include-application-glm"
+    ],
+    "broker": {
+      "bytes": 221560,
+      "composition": {
+        "candidate_sha256": "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004",
+        "inherited": {
+          "inherited": {
+            "bytes": 213644,
+            "composition": {
+              "inherited": {
+                "bytes": 212133,
+                "composition_preimage_sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+                "composition_preimage_source": "rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+                "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
+                "patch_sha256": "1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b",
+                "sha256": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
+                "source": "rollout/provider_application/lease_broker.py.patch",
+                "source_kind": "verified_patch"
+              },
+              "patch_sha256": "e30b382205d35ad5a84336e9b2dfa09479bfc51fe6478ccedef06df7539d3960",
+              "patch_source": "rollout/provider_application/memory_support/lease_broker.py.forward.patch",
+              "preimage_sha256": "77648f14204d0f314b6ce5770f6c0d7e130cba5c197fa14c3b61c88ca462562b",
+              "schema": "native-exact-forward-patch.v1",
+              "successor_composition_sha256": "1b9460fdc0ab02a7f5daffae5822d697de727a1003011e42c53d69972659f6e7"
+            },
+            "composition_preimage_sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+            "composition_preimage_source": "rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+            "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
+            "patch_sha256": "1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b",
+            "sha256": "096ec38af9853d9e03b36a1251143755f62d9c3f738c899ed33afe81a963bb2b",
+            "source": "rollout/provider_application/lease_broker.py.patch",
+            "source_kind": "verified_patch"
+          },
+          "patch_sha256": "fe843e8010eee6d5b1c2af8452f3c2f119725511f1a40f4b9e5b04cb8c37d523",
+          "patch_source": "rollout/provider_application/fleet_launch_repair/lease_broker.py.forward.patch",
+          "preimage_sha256": "096ec38af9853d9e03b36a1251143755f62d9c3f738c899ed33afe81a963bb2b",
+          "schema": "native-exact-forward-patch.v1",
+          "successor_composition_sha256": "fdecc4a744d877fe66ee6ba5709b37de41ad6be3e1ef149be5e88fc2a7911976"
+        },
+        "preimage_sha256": "d6da96bb45792fc87da81e8065a80956325a2536b1fba11ca10ea21933df8d6c",
+        "schema": "mastermind.glm-native-core-source.v1"
+      },
+      "composition_preimage_sha256": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+      "composition_preimage_source": "rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+      "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
+      "patch_sha256": "1b412ede2621442f1a85f9e3033a4132a4f3bc47c19afe498345d7fb1b69878b",
+      "sha256": "cd1537c409fa9f6c8d99a453747e355998980e03352c1ffb4c66fc447fb79d74",
+      "source": "candidate/lease_broker.py",
+      "source_kind": "verified_patch"
+    },
+    "native_files": 126,
+    "native_manifest_sha256": "06c3b74bee5bfcf3a387eca7a1606f747aa895ecd5ccd96f058af148e2b3efa8",
+    "path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-g-b3ad-6488-integration-20261109/r28-fleet43-canonical-patch-build",
+    "source_inventory_sha256": "56e43daa9baf9e7eae450d324fefc30e8841d408f9bd59aa097f9fe63e152d4c",
+    "stdout": "{\"native_files\": 126, \"total_bytes\": 4058816, \"manifest_sha256\": \"06c3b74bee5bfcf3a387eca7a1606f747aa895ecd5ccd96f058af148e2b3efa8\", \"source_inventory_sha256\": \"56e43daa9baf9e7eae450d324fefc30e8841d408f9bd59aa097f9fe63e152d4c\"}"
+  },
+  "composed_members": {
+    "ext/fabric_task.py": {
+      "after": "c5536896f85db738f4d636dd37e81b44939716597544be559cd6b9abeb2b8826",
+      "before": "867b7ff8a450959e5a103e3050b688a5d0c13a56438f3627eaa79e43ee819c83",
+      "bytes": 126169,
+      "patch_sha256": "7f22987ec06db9d1244d5e8cc9622093a0cda9b8e6087582a21f90de4bfd3b05",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch"
+    },
+    "ext/lease_broker.py": {
+      "after": "d6da96bb45792fc87da81e8065a80956325a2536b1fba11ca10ea21933df8d6c",
+      "before": "096ec38af9853d9e03b36a1251143755f62d9c3f738c899ed33afe81a963bb2b",
+      "bytes": 215075,
+      "patch_sha256": "fe843e8010eee6d5b1c2af8452f3c2f119725511f1a40f4b9e5b04cb8c37d523",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/lease_broker.py.forward.patch"
+    },
+    "ext/remote_sub.sh": {
+      "after": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195",
+      "before": "8a8491882608f73db58b596b02bd37955eebcd4670bcb8bb2d2ac6a0fa659f63",
+      "bytes": 118429,
+      "patch_sha256": "7475b6d8284261a003818c2901d1abfe0affa716f5c2eaf221214ff3e6642a92",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/remote_sub.sh.forward.patch"
+    },
+    "ext/support_bundle.py": {
+      "after": "2e331a32f6915f6d4641a4385f9ec2bd23bf606c9b7d6ba54d8799eb5c5dcb3c",
+      "before": "8fc20a93e4c1b725064398217f8fab25917ad151558d461dc82daebb38920dca",
+      "bytes": 51723,
+      "patch_sha256": "531226b42bb777d1962ebce6f246c87a9273a67e6c61f0b60f14b16d90f5365c",
+      "patch_source": "rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch"
+    }
+  },
+  "composition_record_sha256": "fdecc4a744d877fe66ee6ba5709b37de41ad6be3e1ef149be5e88fc2a7911976",
+  "installed_control_upgraded": false,
+  "integrated_protected_dependency": "ff6d5ab67c3535056d69f603fac0d95c058baad8",
+  "live_application_accepted": false,
+  "native_predecessor_observation": {
+    "files": 119,
+    "generation": "7fa31c52045e38a8fdfb0a1a8906f376582a107bb3fcd77d1cd4477536016cb3",
+    "observed_at": "2026-11-09T07:58:53Z",
+    "pointer_sha256": "eb49544e6afc11ca437f922254069efb192a568246f25f57553e0117e4051a16",
+    "root_selected_it": false
+  },
+  "native_selection_performed": false,
+  "newer_protected_change": "GitHub native plugin and packaging locks; disjoint from this candidate and governing source",
+  "newer_protected_commit_observed": "3652d8907df1738de551dd3032b42aa2a2acb482",
+  "patch_format_repair": {
+    "builder_sha256": "2980d6bf7a1d144d5b543fe02c2ee09182bce937a2263a232803327c7f634cc1",
+    "composition_sha256": "fdecc4a744d877fe66ee6ba5709b37de41ad6be3e1ef149be5e88fc2a7911976",
+    "members": [
+      {
+        "after_patch_sha256": "7f22987ec06db9d1244d5e8cc9622093a0cda9b8e6087582a21f90de4bfd3b05",
+        "before_patch_sha256": "7f22987ec06db9d1244d5e8cc9622093a0cda9b8e6087582a21f90de4bfd3b05",
+        "blank_contexts_explicitly_replaced": 0,
+        "exact_old_and_new_context_preserved": true,
+        "member": "ext/fabric_task.py",
+        "output_sha256": "c5536896f85db738f4d636dd37e81b44939716597544be559cd6b9abeb2b8826"
+      },
+      {
+        "after_patch_sha256": "fe843e8010eee6d5b1c2af8452f3c2f119725511f1a40f4b9e5b04cb8c37d523",
+        "before_patch_sha256": "81319c11888ede9f6c7eab4afb7f18dcc953a18d79137103a1aad51a956127d0",
+        "blank_contexts_explicitly_replaced": 6,
+        "exact_old_and_new_context_preserved": true,
+        "member": "ext/lease_broker.py",
+        "output_sha256": "d6da96bb45792fc87da81e8065a80956325a2536b1fba11ca10ea21933df8d6c"
+      },
+      {
+        "after_patch_sha256": "7475b6d8284261a003818c2901d1abfe0affa716f5c2eaf221214ff3e6642a92",
+        "before_patch_sha256": "8c4561aa8705c21fb8314044834c3a73cbf02ec518f61ec0ae76e5180c3fa3ca",
+        "blank_contexts_explicitly_replaced": 1,
+        "exact_old_and_new_context_preserved": true,
+        "member": "ext/remote_sub.sh",
+        "output_sha256": "8e1076c3c877e92305050da52f6eccd3b8426ee26f6d024bc19509a0afc4c195"
+      },
+      {
+        "after_patch_sha256": "531226b42bb777d1962ebce6f246c87a9273a67e6c61f0b60f14b16d90f5365c",
+        "before_patch_sha256": "980cb32e604231382104ed30163a6d0369cd958a103120d39c09efa4b2b6c579",
+        "blank_contexts_explicitly_replaced": 6,
+        "exact_old_and_new_context_preserved": true,
+        "member": "ext/support_bundle.py",
+        "output_sha256": "2e331a32f6915f6d4641a4385f9ec2bd23bf606c9b7d6ba54d8799eb5c5dcb3c"
+      }
+    ],
+    "prior_composition_sha256": "37eaed39a07b00ca309c42b4ad0666fa42a2d374c1208acd9ae45077af0b85e1",
+    "reason": "Nested unified-diff blank context appeared as trailing whitespace to the outer staged diff.",
+    "runtime_bytes_changed": false,
+    "schema": "h4.unified_patch_format_repair.v1",
+    "strict_patch_owner_changed": false
+  },
+  "procedure_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "publication_performed": false,
+  "qualification": {
+    "accepted_control_cases": 57,
+    "accepted_unique_cases": 106,
+    "assertions": [
+      "Exact119/121/124/126 composition, byte inventory and source inverse",
+      "Each mixed predecessor/target refuses",
+      "Both original Go transactions commit, recover and reject stale CURRENT without writes",
+      "Postcommit recovery does not select twice",
+      "Installed74 reader validates native42 and native43 retained transitions with copied source removed",
+      "Each new dependency missing/changed refuses without native mutation",
+      "Original63 migrates only with exact CAS, existing lock and no bytecode cache",
+      "Old memberships cannot admit new runtime",
+      "Original APPLICATION publisher and task inspector preserved",
+      "Staged APPLICATION, memory and fleet behaviors pass"
+    ],
+    "initial_failures_retained": true,
+    "repairs": [
+      "Declared module-scoped source fixtures before the original installer audit guard; guard unchanged.",
+      "Preserved fleet and memory source provenance inside the existing GLM inventory composition; executable runtime bytes unchanged."
+    ],
+    "runs": [
+      {
+        "case_records": 109,
+        "junit_sha256": "5ca5e7ea2102377bd9d6528c180286f75b951e25717b6d63ef8f90444841dcb0",
+        "log_sha256": "32dd7284fd37cfd2bc96098a35e1c039ab6a5f4866d00c562266083a822d13a4",
+        "path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-g-b3ad-6488-integration-20261109/r28-fleet43-qualification",
+        "returncode": 1,
+        "source_hashes": {
+          "integrations/studio_direct_mcp/control_bundle.py": "9a1aa8d6d1057900ac0dfccfc5ddd9cd368d2228d99ebeca9b0cbffcea24b4fe",
+          "integrations/studio_direct_mcp/control_bundle_closure_test.py": "6614674c182177bdfcaf8299edc58c7321954844b1f6b762574061af3a79babd",
+          "integrations/studio_direct_mcp/private_service.py": "c75d0b013a5e22e70a2a3177d1f35631a85a7755f4816f1c96286eb26b22f35c",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "14b387316cff86065c63a48cf6aa9db02b3017767bdb6f72ab0d94c53faf1d6a",
+          "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "d3d66ba18d2b45578ea2e713fb9d19fab87f56b2b8bc737223bdb38eec0cc711",
+          "tests/test_native_launcher_successor_transition.py": "d6d559d4317409c7984903205c719a52889ba2ffd6b7d9a64d5125b4e7fe7c36"
+        }
+      },
+      {
+        "case_records": 49,
+        "junit_sha256": "2b255ebd6c9d3a22f61a33bc077438715293444fb3e543739e99088543320a26",
+        "log_sha256": "838bf345124d68a6fcdfa421a6b21a8546c1aa6d5abeb96cb7a14f094568360f",
+        "path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-g-b3ad-6488-integration-20261109/r28-fleet43-fixture-order-qualification",
+        "returncode": 1,
+        "source_hashes": {
+          "integrations/studio_direct_mcp/control_bundle.py": "9a1aa8d6d1057900ac0dfccfc5ddd9cd368d2228d99ebeca9b0cbffcea24b4fe",
+          "integrations/studio_direct_mcp/control_bundle_closure_test.py": "6614674c182177bdfcaf8299edc58c7321954844b1f6b762574061af3a79babd",
+          "integrations/studio_direct_mcp/private_service.py": "c75d0b013a5e22e70a2a3177d1f35631a85a7755f4816f1c96286eb26b22f35c",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "14b387316cff86065c63a48cf6aa9db02b3017767bdb6f72ab0d94c53faf1d6a",
+          "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "67b7f2f4c847384a0ff5542c0375d806ee297e30538897bb69911818c0a313ab",
+          "tests/test_native_launcher_successor_transition.py": "d6d559d4317409c7984903205c719a52889ba2ffd6b7d9a64d5125b4e7fe7c36"
+        }
+      },
+      {
+        "case_records": 7,
+        "junit_sha256": "cdd7bfb48265b70eda313626d97e7600d605613d13730248c0e96bbdb03a5abb",
+        "log_sha256": "83a1593c5b5783693fe3006d1f6597bcb4f3a5968f23b59481ee09a0477f910a",
+        "path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-g-b3ad-6488-integration-20261109/r28-fleet43-provenance-qualification",
+        "returncode": 0,
+        "source_hashes": {
+          "integrations/studio_direct_mcp/control_bundle.py": "9a1aa8d6d1057900ac0dfccfc5ddd9cd368d2228d99ebeca9b0cbffcea24b4fe",
+          "integrations/studio_direct_mcp/control_bundle_closure_test.py": "6614674c182177bdfcaf8299edc58c7321954844b1f6b762574061af3a79babd",
+          "integrations/studio_direct_mcp/private_service.py": "c75d0b013a5e22e70a2a3177d1f35631a85a7755f4816f1c96286eb26b22f35c",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "6526e963fc490e4c4719fad36967010be38e96b65d9965884177514971a4e102",
+          "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "3b873f34fb338946531e106c2a98ce49257d2ee83b98dcabce76fb22c92a0988",
+          "tests/test_native_launcher_successor_transition.py": "d6d559d4317409c7984903205c719a52889ba2ffd6b7d9a64d5125b4e7fe7c36"
+        }
+      },
+      {
+        "case_records": 9,
+        "junit_sha256": "8df8f1e4a22ed64d902cdf290528ef7060a1f108854badcfe708fb3851ae063c",
+        "log_sha256": "585ba42829657b9e2d56f8614be6c3365a8405474eed008559511ab50f2ffcfb",
+        "path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-g-b3ad-6488-integration-20261109/r28-fleet43-patch-format-qualification",
+        "returncode": 0,
+        "source_hashes": {
+          "integrations/studio_direct_mcp/control_bundle.py": "9a1aa8d6d1057900ac0dfccfc5ddd9cd368d2228d99ebeca9b0cbffcea24b4fe",
+          "integrations/studio_direct_mcp/control_bundle_closure_test.py": "6614674c182177bdfcaf8299edc58c7321954844b1f6b762574061af3a79babd",
+          "integrations/studio_direct_mcp/private_service.py": "c75d0b013a5e22e70a2a3177d1f35631a85a7755f4816f1c96286eb26b22f35c",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "2980d6bf7a1d144d5b543fe02c2ee09182bce937a2263a232803327c7f634cc1",
+          "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "3b873f34fb338946531e106c2a98ce49257d2ee83b98dcabce76fb22c92a0988",
+          "tests/test_native_launcher_successor_transition.py": "d6d559d4317409c7984903205c719a52889ba2ffd6b7d9a64d5125b4e7fe7c36"
+        }
+      }
+    ]
+  },
+  "qualified_at": "2026-11-09T08:46:06.379827+00:00",
+  "schema": "h4.native43_application_source_composition.v1",
+  "source_hashes": {
+    "integrations/studio_direct_mcp/control_bundle.py": "9a1aa8d6d1057900ac0dfccfc5ddd9cd368d2228d99ebeca9b0cbffcea24b4fe",
+    "integrations/studio_direct_mcp/private_service.py": "c75d0b013a5e22e70a2a3177d1f35631a85a7755f4816f1c96286eb26b22f35c",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "2980d6bf7a1d144d5b543fe02c2ee09182bce937a2263a232803327c7f634cc1"
+  },
+  "source_parent": "e9a3baa90d6f4307096d4ff57ef4fe8404c80dbd",
+  "status": "SOURCE_QUALIFIED_RELEASE_AND_LIVE_ACCEPTANCE_REQUIRED"
+}

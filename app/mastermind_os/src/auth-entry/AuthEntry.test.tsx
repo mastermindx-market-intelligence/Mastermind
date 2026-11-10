@@ -108,7 +108,7 @@ describe("AuthEntry", () => {
       expect(screen.getByText(expected.signed_out.body)).toBeTruthy();
       expect(screen.getByText(expected.storySubtitle)).toBeTruthy();
       expect(screen.getByText(expected.assurance)).toBeTruthy();
-      expect(screen.getByText(expected.browserNote)).toBeTruthy();
+      expect(screen.queryByText(expected.browserNote)).toBeNull();
       expect(screen.getByText(expected.lock)).toBeTruthy();
       expect(screen.getByText(expected.footer)).toBeTruthy();
 
@@ -212,7 +212,7 @@ describe("AuthEntry", () => {
     );
   });
 
-  it("error shows the supplied feedback, the browser note, and never claims workspace readiness", () => {
+  it("error shows supplied feedback without claiming a pending browser flow or workspace readiness", () => {
     const { container } = render(
       <AuthEntry
         {...entryProps({
@@ -229,7 +229,7 @@ describe("AuthEntry", () => {
     expect(
       screen.getByText("Session expired. Please sign in again."),
     ).toBeTruthy();
-    expect(screen.getByText(EXPECTED.en.browserNote)).toBeTruthy();
+    expect(screen.queryByText(EXPECTED.en.browserNote)).toBeNull();
     expect(screen.queryByText(EXPECTED.en.signed_out.heading)).toBeNull();
     expect(container.textContent).not.toMatch(/\bready\b/i);
   });

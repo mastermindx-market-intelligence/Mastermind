@@ -1,0 +1,149 @@
+{
+  "acceptance_limits": {
+    "account_forwarding": false,
+    "attended_primary_or_worker_proof": false,
+    "fresh_protected_stage_required": true,
+    "generation_publication": false,
+    "protected_delivery": false,
+    "realm_source_commit_metadata_follows_actual_head": true,
+    "runtime_selection": false,
+    "service_activation": false
+  },
+  "ci_race_repair": {
+    "failed_job": 128905176310,
+    "failed_run": 42537557275,
+    "failure": "fixture timeout could fire before subprocess ownership was captured",
+    "repair": "arm the existing50ms deadline only after the inert child is owned; retain delayed startup, kill/wait/reap and no-publication assertions",
+    "runtime_cancellation_code_changed": false
+  },
+  "composition": {
+    "complete_core_after_sha256": "52a13ceeec7ec38113230fd9e47addbe2115e093f30cf7b91ad8a2fd04e2edad",
+    "complete_core_before_sha256": "4dccdb9401e27a38bba9153de5f82a23d1169aa204bac847887f6c9bc31a73be",
+    "frozen_maintenance_records_changed": false,
+    "joined_worker_sha256": "9e450c6aab4c4a82b8f78b5706c7eaa7236241dba030a762b6257d3b0f8d11dc",
+    "new_flag": "--include-provider-plan-terminal-diagnostics",
+    "only_relative_payload_delta": "ext/native_plan_worker.py",
+    "original_component_parent_preserved": true,
+    "record_sha256": "623afa43937f3431ef3bf245b22b4497ad6e34afa9f42004238a84a85941ae83",
+    "supported_member_counts": [
+      116,
+      118,
+      121,
+      123
+    ]
+  },
+  "initial_test_findings": {
+    "failed_assertions": 4,
+    "final_delta_failures": 0,
+    "final_delta_tests": 34,
+    "production_code_modified_for_test_failures": false,
+    "receipt_sha256": "ec607e5446ecaaedc87d7ebc9dcdb03839cbb7bc8e283dc9923b49af8abbcc4d",
+    "resolved_by": [
+      "Assert current source HEAD in existing GLM realm metadata rather than a historical raw manifest hash.",
+      "Apply the original component inverse with its original Git patch grammar; retain the strict new forward-patch parser.",
+      "Assert HTTP/GLM transport hash failures at original installer._go_component."
+    ]
+  },
+  "installer_proof": {
+    "completed_replay_no_writes_or_selection": true,
+    "live_store_used": false,
+    "one_selection": true,
+    "owners": [
+      "prepare_go/apply_go/reconcile_go",
+      "prepare_retained_go/apply_retained_go/reconcile_retained_go"
+    ],
+    "postcommit_selection_and_receipt_recovery": true,
+    "source_fixture": "existing current_source -> source40 -> terminal_source; independently verified complete116 map",
+    "stale_current_refuses_before_any_write": true
+  },
+  "native_predecessor": {
+    "canonical_files_sha256": "5511104937c8bcf68a89558c510a88a7519de8b9958c7064fde20dfdf90c5f7a",
+    "complete_files": 116,
+    "current_sha256": "0c8da1220a4f1aefd43a7b3568a93eaedd2282a8b26812a572ea0d5f44a1d0cb",
+    "generation_observed": "5b5713e6870b688b1cc2f9978df9d7539159b25b291f5019853a293f905a5b3a",
+    "selected_by_this_operation": false,
+    "sequence_observed": 41
+  },
+  "qualification": [
+    {
+      "completed_at": "2026-11-09T00:49:28.015971+00:00",
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 40
+      },
+      "exit_code": 0,
+      "junit_sha256": "d1cdb8eb9abd6d796bb775d70fb9b928823d6fc59f1f1b65e3044fdd5730ec02",
+      "name": "query-and-paper",
+      "receipt_sha256": "d85771d6177aec4f4b81467f8e00837706152b41a6e4fe1fb9b2e8ef12c9107c",
+      "source_unchanged": true
+    },
+    {
+      "completed_at": "2026-11-09T01:21:09.408748+00:00",
+      "counts": {
+        "errors": 0,
+        "failures": 4,
+        "skipped": 0,
+        "tests": 216
+      },
+      "exit_code": 1,
+      "junit_sha256": "0d03e07ee2cb606936e8d8aacda317fa6028340395be77d264802f797078f848",
+      "name": "terminal-transitions",
+      "receipt_sha256": "a91d12b3e92052af1400a3ad3ecdda243cca4a4937471cf03ddc668ab0809f0f",
+      "source_unchanged": true
+    },
+    {
+      "completed_at": "2026-11-09T01:29:16.943216+00:00",
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 34
+      },
+      "exit_code": 0,
+      "junit_sha256": "775a7e65692196c1e4de2d8bd9c64b0eb0731928f4a88b064c8b7a88c5e583b0",
+      "name": "terminal-qualified",
+      "receipt_sha256": "3ba3f32ebb8f958efd7def3be375816eccbf7228c8f206ea97a4e3fb2a812198",
+      "source_unchanged": true
+    },
+    {
+      "completed_at": "2026-11-09T01:29:16.046339+00:00",
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 352
+      },
+      "exit_code": 0,
+      "junit_sha256": "366021ebf2503771fc5e18caccf1e9cdaca132d81304bf4a227ec810d6c836f1",
+      "name": "merge-contracts",
+      "receipt_sha256": "35195b0546a798292d257f77d15fbe991573c7848bdf6316b11e50ac0693df35",
+      "source_unchanged": true
+    }
+  ],
+  "recorded_at": "2026-11-09T01:33:31.713670+00:00",
+  "schema": "h4.native41-application-source-qualification.v1",
+  "source_head_sensitive_postcommit_checks": [
+    "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+    "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source",
+    "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+    "tests/test_ceo_submit_armed_composition.py::test_d8_template_topology_and_protected_defaults"
+  ],
+  "source_owner": {
+    "branch": "sol/web-hermes-glm-primary-application-completion-20261108",
+    "head": "b3ad2289ba998fa73faa04136aa9ce80d128086d",
+    "merge_parent": "64884182c82a17d604b7a03dbd5503a420e6f756",
+    "operation_id": "hermes-glm-primary-application-completion-20261108",
+    "publication_owner": "original Studio exact-HEAD publisher, nested merge contract"
+  },
+  "sources": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "9cae82f4a047979f0efce526ce64a641e4a101f84e9af3daa963f666152ea3f0",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/README.md": "8d89bc76d6a82487d473857297cfa897cee2f4556eb8415c0f9ffe7e6d5cbb8e",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/README.md": "ab09b9605e751c19823224bfa57f21173c240f39651054608e38a5f2fdc55f75",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/composition.json": "623afa43937f3431ef3bf245b22b4497ad6e34afa9f42004238a84a85941ae83",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/native_plan_worker.py.forward.patch": "eb35dd1385c947dab63c0c9601325b558443d902652d1494439f0f5b4fcff500",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "5b486be6d4a80f9cde1969991d71e004a571e29f449c92be3b7e29ad8bcee7fc",
+    "tests/test_hermes_owned_query_lifecycle.py": "e4d1423e6c38959d96f643b24229360b6bdc9e91b3d6f34f4e7330a1f96bacbf"
+  }
+}

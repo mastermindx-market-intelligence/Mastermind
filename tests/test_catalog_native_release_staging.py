@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 
 from tests.test_paid_release_archive_composition import _materialize
+from tests.test_glm_native_release_record_transition import expected_core_release_records
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,10 +40,13 @@ def test_current_installer_materializes_the_exact_new_catalog_readers(tmp_path):
     assert hashlib.sha256((release / NATIVE / "source/pool_ledger.py").read_bytes()).hexdigest() == PREIMAGE
     result = _materialize(release)
     assert result.returncode == 0, result.stderr
-    for name, raw in before.items():
+    expected = expected_core_release_records(release / NATIVE,
+        {name: raw for name, raw in before.items() if name != "native-preimages.json"})
+    expected["native-preimages.json"] = before["native-preimages.json"]
+    for name, raw in expected.items():
         assert (rollout / name).read_bytes() == raw
-    manifest = json.loads(before["native-manifest.json"])
-    inventory = json.loads(before["native-source-inventory.json"])
+    manifest = json.loads(expected["native-manifest.json"])
+    inventory = json.loads(expected["native-source-inventory.json"])
     assert len(manifest) == len(inventory["files"]) == 107
     for name, digest in manifest.items():
         path = rollout / "native-code-stage" / name

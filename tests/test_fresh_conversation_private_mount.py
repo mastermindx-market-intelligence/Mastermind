@@ -67,6 +67,13 @@ def test_real_private_kernel_peer_and_foreground_creation_mount(tmp_path, rsa_ke
                     code, retained = await post(app, operation, original_turn, token)
                     assert code == 200 and retained["ok"] and retained["data"]["state"] == "RECORDED"
                 assert adapters[0].begin_turn_calls == 2
+                # RECORDED is the retained reply, not completion of the original
+                # dispatch's stop/epoch/job retirement. Await that finite owner
+                # before testing that a duplicate creation adds no events.
+                original_dispatches = tuple(service._dispatch_tasks.values())
+                if original_dispatches:
+                    await asyncio.wait_for(asyncio.gather(*original_dispatches), 5)
+                assert not service._dispatch_errors
                 count = len(runtime.jobs.list_jobs())
                 before = runtime.events.list_events()
                 duplicate_trace = []

@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   runtime-acceptance:
     name: Hermes runtime acceptance

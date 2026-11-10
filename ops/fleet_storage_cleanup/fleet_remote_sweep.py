@@ -592,3 +592,56 @@ def main() -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
+
+def read_original_orch_result(registry_bytes, ssh_config_bytes, *, expected_module_sha,
+                              expected_storage_sha, expected_reader_sha, expected_driver_sha):
+    """Opt-in fixed original read only; no caller argv/operation/deadline/route.
+
+    Source pins and observed frames are comparisons, never dispatch authority.
+    The assigned Root still owns permission for each actual call. No retry here.
+    """
+    import selectors
+    import types
+    from ops.native_fabric.quota_continuity.rollout import ubuntu4_policy as policy
+    from ops.native_fabric.quota_continuity.rollout import orch_repair_read as reader
+    plan = policy.transport_plan(types.SimpleNamespace(SSH=SSH), registry_bytes, ssh_config_bytes,
+             kind='read-orch-repair-framed', operation_id=policy.ORCH_REPAIR_ORIGINAL_OPERATION,
+             expected_module_sha=expected_module_sha, expected_storage_sha=expected_storage_sha,
+             expected_reader_sha=expected_reader_sha, expected_driver_sha=expected_driver_sha)
+    raw, expired, overflow, process = b'', False, False, None
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(plan['argv'], stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while selector.get_map():
+                remaining = plan['timeout'] - (time.monotonic() - started)
+                if remaining <= 0 or not selector.select(remaining):
+                    expired = True
+                    break
+                chunk = os.read(process.stdout.fileno(), reader.FRAME_LIMIT + 1 - len(raw))
+                if not chunk:
+                    selector.unregister(process.stdout)
+                    break
+                raw += chunk
+                if len(raw) > reader.FRAME_LIMIT:
+                    overflow = True
+                    break
+            if not expired and not overflow:
+                try:
+                    process.wait(timeout=max(0, plan['timeout'] - (time.monotonic() - started)))
+                except subprocess.TimeoutExpired:
+                    expired = True
+    except OSError:
+        return reader.transport_observation(b'', plan['context'], returncode=None,
+                                             local_unavailable=True)
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+                process.wait()  # Reap OUR local read transport; never a remote cancellation.
+            process.stdout.close()
+    return reader.transport_observation(raw, plan['context'], returncode=process.returncode,
+                                        timed_out=expired, overflow=overflow)

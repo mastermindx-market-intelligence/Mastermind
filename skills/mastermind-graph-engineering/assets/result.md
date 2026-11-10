@@ -1,0 +1,13 @@
+# Integrated result to the immediate parent
+
+OUTCOME DELIVERED / REMAINING:
+EXACT SOURCE / ARTIFACT REVISIONS OR DIGESTS:
+VALIDATION ACTUALLY RUN / RESULT:
+CONSUMER BEHAVIOR PROVEN / UNPROVEN:
+CHILD RESULTS CONSUMED / OPEN DESCENDANTS:
+KNOWN EFFECTS / UNCERTAIN EFFECTS / ORIGINAL CARRIER:
+APPLICABLE REVIEW / RELEASE DISPOSITION:
+DECISION NEEDED / RECOMMENDATION / IMPACT:
+NEXT ACTION / RESOURCE IMPLICATION:
+
+Link decisive evidence; keep full logs at source. Delivery is not parent acceptance, queued work is not execution, and installed files are not observed runtime behavior.

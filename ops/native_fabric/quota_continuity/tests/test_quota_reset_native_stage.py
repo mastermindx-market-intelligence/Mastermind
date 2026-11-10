@@ -67,21 +67,35 @@ def test_complete_emitted_generation_preserves_exact_parent_and_source_provenanc
     original = dict(before)
     assert builder.before_quota_reset_recovery(before) == parent
     assert before == original
-    assert {name for name in parent if before[name] != parent[name]} == {
+    historical_before = builder.before_glm_application_core(before)
+    expected_core = {
+        "go_lease_capability.py": "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86",
+        "go_lease_gateway.py": "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193",
+        "lease_broker.py": "16526b57fec9e48bad952c930b76644fe8e1578ba9e952fa6847f089258113b7",
+    }
+    assert {name: actual["ext/" + name] for name in expected_core} == expected_core
+    assert {name for name in parent if historical_before[name] != parent[name]} == {
         "ext/" + name for name in builder.QUOTA_RESET_DIGESTS}
     for relative, digest in actual.items():
         raw = (output / "native-code-stage" / relative).read_bytes()
         assert builder.sha(raw) == digest == inventory["files"][relative]["sha256"]
         assert len(raw) == inventory["files"][relative]["bytes"]
+    dependencies = json.loads((output / "external-go-component/component.json").read_bytes())
     expected_preimages = {
         **builder.QUOTA_RESET_PREIMAGES, **builder.QUOTA_RESET_COMPOSED_PREIMAGES}
     for name in builder.QUOTA_RESET_PATCHES:
         row = inventory["files"]["ext/" + name]
-        assert row["composition"]["preimage_sha256"] == expected_preimages[name]
-        assert row["composition"]["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
+        composition = (dependencies["dependencies"][name]["composition"]["inherited"]
+                       if name == "lease_broker.py" else row["composition"])
+        assert composition["preimage_sha256"] == expected_preimages[name]
+        assert composition["patch_sha256"] == builder.QUOTA_RESET_PATCHES[name]
         assert row["source"] == "candidate/" + name
-    dependencies = json.loads((output / "external-go-component/component.json").read_bytes())
-    assert dependencies["dependencies"]["lease_broker.py"]["sha256"] == builder.QUOTA_RESET_COMPOSED_DIGESTS["lease_broker.py"]
+    expected_outer = {"schema":"mastermind.glm-native-core-source.v1","preimage_sha256":"79103739c4c46cae3988187aea591aa06209ac1bd38046f49b8699fd93c205d0","candidate_sha256":"b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"}
+    expected_inherited = {"schema":"native-exact-forward-patch.v1","preimage_sha256":"0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807","patch_source":"../grok47/quota_billing/lease_broker.py.patch","patch_sha256":"b4ef4980f85ef0cce64c6843c9c5d0d16abf0459fda8a438b474789d86c6f421"}
+    assert inventory["files"]["ext/lease_broker.py"]["composition"] == expected_outer
+    assert dependencies["dependencies"]["lease_broker.py"]["composition"] == dict(
+        expected_outer, inherited=expected_inherited)
+    assert dependencies["dependencies"]["lease_broker.py"]["sha256"] == "16526b57fec9e48bad952c930b76644fe8e1578ba9e952fa6847f089258113b7"
     assert dependencies["native_stage_dependencies"] == {
         name: actual["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
 
@@ -99,6 +113,7 @@ def test_original_installer_validates_actual_composed_broker_and_complete_artifa
 @pytest.mark.parametrize("replacement", ["preimage", "foreign"])
 def test_partial_or_foreign_cohort_refuses_without_mutating_manifest(stages, member, replacement):
     actual = base_manifest(stages.base)
+    actual = builder.before_glm_application_core(actual)
     actual["ext/" + member] = (builder.QUOTA_RESET_PREIMAGES[member]
                               if replacement == "preimage" else "0" * 64)
     before = dict(actual)
@@ -161,6 +176,9 @@ def copy_sources(tmp_path):
         shutil.copyfile(ROOT / "candidate" / name, root / "candidate" / name)
         suffix = ".patch" if name in builder.QUOTA_RESET_PATCHES else ""
         shutil.copyfile(ROOT.parent / "grok47/quota_billing" / (name + suffix), overlay / (name + suffix))
+    historical = Path("rollout/preimages/glm_application_core_5c3d/lease_broker.py")
+    (root / historical).parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / historical, root / historical)
     # Copied candidates are the reviewed maintenance-composed parent.
     # Establish that valid fixture before any intentional source mutation.
     builder.quota_reset_sources(root, composed_parent=True)
@@ -170,22 +188,27 @@ def copy_sources(tmp_path):
 @pytest.mark.parametrize("surface", ["preimage", "patch", "overlay"])
 def test_changed_reviewed_source_refuses_before_any_stage_write(tmp_path, surface):
     root, overlay = copy_sources(tmp_path)
-    target = {"preimage": root / "candidate/lease_broker.py",
+    target = {"preimage": root / "rollout/preimages/glm_application_core_5c3d/lease_broker.py",
               "patch": overlay / "pick.py.patch",
               "overlay": overlay / "quota_remote.py"}[surface]
     target.write_bytes(target.read_bytes() + b"\n# unqualified drift\n")
-    with pytest.raises(ValueError, match="quota reset source digest"):
+    expected = ("GLM native core source commitment differs" if surface == "preimage"
+                else "quota reset source digest")
+    with pytest.raises(ValueError, match=expected):
         builder.quota_reset_sources(root, composed_parent=True)
 
 
 @pytest.mark.parametrize("member", sorted(builder.QUOTA_RESET_DIGESTS))
 def test_exact_bytes_through_symlink_are_not_a_qualified_source(tmp_path, member):
     root, _ = copy_sources(tmp_path)
-    source = root / "candidate" / member
+    source = (root / "rollout/preimages/glm_application_core_5c3d" / member
+              if member == "lease_broker.py" else root / "candidate" / member)
     retained = source.with_suffix(".retained")
     source.rename(retained)
     source.symlink_to(retained)
-    with pytest.raises(ValueError, match="regular file"):
+    expected = ("GLM native core requires an explicit source file"
+                if member == "lease_broker.py" else "regular file")
+    with pytest.raises(ValueError, match=expected):
         builder.quota_reset_sources(root, composed_parent=True)
 
 
