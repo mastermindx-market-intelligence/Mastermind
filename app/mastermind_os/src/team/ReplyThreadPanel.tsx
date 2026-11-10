@@ -119,7 +119,12 @@ export function ReplyThreadPanel({
       className="mm-cv mm-cv-thread"
       aria-labelledby={`${uid}-heading`}
       onKeyDown={(event) => {
-        if (event.key === "Escape" && onClose) onClose();
+        // Escape closes the thread panel and stops here: the mounting owner
+        // restores focus to its trigger in onClose (adversarial note).
+        if (event.key === "Escape" && onClose) {
+          event.stopPropagation();
+          onClose();
+        }
       }}
     >
       <header className="mm-cv-thread-head">

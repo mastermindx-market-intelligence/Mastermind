@@ -5533,7 +5533,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 {key: "build", step: locale === "zh-CN" ? "02 · 构建" : "02 · Build", label: locale === "zh-CN" ? "工程进行中" : "Engineering working", state: "unknown"},
                 {key: "verify", step: locale === "zh-CN" ? "03 · 验证" : "03 · Verify", label: locale === "zh-CN" ? "等待结果" : "Awaiting result", state: "unknown"},
               ] satisfies DeliveryTrailStep[]}
-              onOpenCode={() => setActive("Code")}
+              onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}
             />
           </details>
         ) : null}
@@ -5922,7 +5922,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         conversationPanel={<HermesNativePanel key={`team-hermes:${authRevision}`} locale={locale}/>}
         delegatedTask={null}
         onOpenConversations={() => { setProjectTab(null); setActive("Conversations"); }}
-        onOpenCode={() => setActive("Code")}
+        onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}
       />
     );
   else if (active === "Code")
