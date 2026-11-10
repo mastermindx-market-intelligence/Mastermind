@@ -126,7 +126,12 @@ jobs:
 
       - name: Realize hash-locked environment
         # Every runner consumes the one prepare-lock artifact above.
-        run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
+        run: |
+          set -euo pipefail
+          env_parent="$(mktemp -d "${RUNNER_TEMP:?}/rwe-shadow.XXXXXX")"
+          env_dir="$env_parent/env"
+          printf 'MMX_RWE_SHADOW_ENV=%s\n' "$env_dir" >> "$GITHUB_ENV"
+          python scripts/rwe_env.py realize --dest "$env_dir"
 
       # Same owned directory and closed diagnostic schema as canonical CI.
       # The canonical shard already loads its fixed timing plugin; no plugin,
@@ -138,7 +143,7 @@ jobs:
           printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
 
       - name: Run canonical test shard inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}
+        run: python scripts/rwe_env.py gate --env "${MMX_RWE_SHADOW_ENV:?}" --shard-index ${{ matrix.index }}
 
       - name: Upload fixed test diagnostics
         if: always()
@@ -155,11 +160,11 @@ jobs:
           compression-level: 0
 
       - name: Upload receipt
-        if: always()
+        if: ${{ always() && env.MMX_RWE_SHADOW_ENV != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: rwe-receipt-linux-${{ matrix.index }}
-          path: /tmp/rwe-env/rwe_receipt.json
+          path: ${{ env.MMX_RWE_SHADOW_ENV }}/rwe_receipt.json
           if-no-files-found: warn
 
   shadow-gate:
