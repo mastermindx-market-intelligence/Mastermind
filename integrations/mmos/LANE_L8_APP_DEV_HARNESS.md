@@ -1,60 +1,78 @@
-# Lane L8 — agent test environment (app dev harness)
+# Lane L8 — native window and its dev environment (was: agent test environment)
 
-Lead: glm-5.3 (T3). Branch `t3/mmos-v2-l8`. Commissioned by the principal (Fable), 2026-11-10.
-Trunk: `origin/feat/mmos-v1-integration-t3`. Evidence: `~/.mastermind/mmos_evidence/l8-20261110/`.
+Lead: glm-5.3 (T3). Branch `t3/mmos-v2-l8`. Trunk: `origin/feat/mmos-v1-integration-t3`.
+Evidence: `~/.mastermind/mmos_evidence/l8-20261110/`.
 
-## Split (wave 1, 2026-11-10) — seam redraw declared
+**Re-scoped by the principal 2026-11-10** (delivered with D0's return; basis
+`integrations/mmos/PROGRAM_PLAN_V3.md` @ `46621f5ad`): Paperclip is the product shell; the Mac
+app becomes a thin native window that opens a local address and holds no product logic. Dropped
+from the old scope: fixture failure injection, proof-page extension, the standalone browser path
+(L9 owns the dev instance), the cold-agent acceptance test (L9's), and the APP_DEV_HARNESS runbook
+(replaced by a skill ≤100 lines). The old LOCAL_OPERATOR_CONTRACT discrepancy is closed — the
+contract landed on trunk with the same refresh.
 
-Incumbent read froze the split: `src/agent-control/` already implements the whole in-page half
-(inspect / act / navigate / check, stable refs, one-shot observation frames, secret filter;
-`control.ts` 359 lines) and `main.tsx:46` mounts `installAppControl` in the production entry.
-Original seam (c) "in-page half" therefore shrinks to a thin verb adapter; the real build work
-moves to the Rust socket half, the launcher, and logging. The principal's seams are otherwise kept.
+## Re-scoped outcome (return when 1–4 pass)
 
-| Slice | What | Shape / model | Wave |
+1. Land slice A (launcher, dev bundle identity `com.mastermind.os.dev`) and D0 (dev log). D0 landed.
+2. Shell mode: `MM_SHELL_URL` at launch → main window loads that address, no sign-in gate;
+   unset = today's behaviour byte-identical. Accept only `http://127.0.0.1[:port]` /
+   `http://localhost[:port]`; refuse anything else with a logged reason. Zero IPC for the loaded
+   origin. Tests for accept and refuse.
+3. Page verbs that work on whatever page the window shows: navigate, read page text or
+   accessibility tree, click, type, read console errors and failed requests, window-scoped capture.
+4. Proof: dev bundle in shell mode against a self-served local page (L9's launcher not on trunk
+   yet); one window-scoped capture + dev log excerpt. Default instance `:3100` — load and capture
+   only, no clicks, no typing.
+5. `skills/mmos-app-dev/SKILL.md` ≤100 lines; links to L9's module skill, does not duplicate it.
+
+## Slices
+
+| Slice | What | Model / shape | State |
 |---|---|---|---|
-| R1 | Reuse scan: DOM control+inspect of Tauri 2 webview on macOS, file logging, webview-only shot | two investigators: `glm-5.3` + `gemini-4-argon`, raw findings files | 1 |
-| A | `app/mastermind_os/tools/mmos_dev.py` — `up --fixture` / `down` / `status`, fake-proc tests | diff+test: `deepseek-v4.1-flash` | 1 |
-| D0 | Rust dev-log module + redaction (bearer-absence test) | diff+test: `deepseek-v4.1-flash` | 1 |
-| B | Unix-socket control channel, Rust half: feature gate, eval→agent-control bridge, IPC return, release-exclusion test | writer-attacker: writer + `grok-4.7` attacks (reproducing command per finding) | 2 (after R1) |
-| C | Page-side harness (C+E merged): verb dispatcher `window.MastermindHarnessVerb` (snapshot / click / type / select / check / wait-for / invoke), in-page JSONL log (same record kinds as D0), fixture failure-injection (programs_read), proof-loop tests. Serving the proof pages is in A; the DOM-driving doc is in F. | diff+test: `deepseek-v4.1-flash` | 1 (page side is not gated by R1 — only the Rust eval-return path is) |
-| D1 | Wire dev_log into real request/auth/native-failure paths (dev build only) | diff+test | 2 |
-| F | Runbook `integrations/mmos/APP_DEV_HARNESS.md` + `skills/mmos-app-dev/SKILL.md` | written last, from what actually works | 3 |
-| G | Cold-agent acceptance: fresh `deepseek-v4.1-flash`, runbook path only, fixture mode | fresh child, evidence under `l8-20261110/cold-agent/` | 3 |
+| R1 | Reuse scan: Rust→JS return path **without IPC**, WKWebView snapshot, socket listener choice | glm-5.3 + gemini-4-argon, two investigators | in flight |
+| A | `tools/mmos_dev.py` up/down/status, dev root, npm-dep handling | deepseek-v4.1-flash, diff+test | in flight (old brief incl. `--fixture`; on return keep the generic core — A2 replaces `--fixture` with `--url` shell-mode launch of the dev bundle) |
+| D0 | `dev_log.rs` JSONL logger + redaction | deepseek-v4.1-flash, diff+test | **landed** `0319f54b5` → lane; lead re-ran `cargo test dev_log`: 3 passed, 0 failed |
+| C | Page verbs via `install.ts`/`proof.tsx` + fixture failure injection | deepseek-v4.1-flash | **cancelled** (re-scope: surface dropped; verbs move to a native-injected bootstrap that works on any page) |
+| S1 | Shell mode: `parse_shell_url` + env-gated startup branch + refusal logging + no-remote-IPC guarantee + `tauri.conf.dev.json` overlay + minimal injected page bootstrap | deepseek-v4.1-flash, diff+test; then grok-4.7 attack pass on the diff | launching |
+| S2 | Full page-verb set + result transport (after R1 verdict + S1 landing; replaces S1's minimal bootstrap) | deepseek-v4.1-flash, diff+test | queued |
+| A2 | Launcher `up --url <addr>`: build + launch dev bundle in shell mode, background, pid discipline | deepseek-v4.1-flash, diff+test | queued (after A returns) |
+| S3 | `skills/mmos-app-dev/SKILL.md` | written last, from what works | queued |
+| Proof | Item 4 evidence under `l8-20261110/shell-proof/` | lead-held (desktop law) | queued |
 
-## Frozen decisions
+## Frozen decisions (carried + new)
 
-- Dev root: `~/.mastermind/mmos_dev/` — never `/Library/Application Support/MastermindExecutive`
-  (production, read-only for every agent), never `<checkout>/data/control_plane/` (the Executive's
-  per-checkout default = L1's scratch root: `control_plane/executive_runtime.py:323-324`), never `/tmp`.
-- Dev app identity: bundle id `com.mastermind.os.dev`, productName `Mastermind OS Dev`
-  (separate tauri config), window title carries DEV. Cannot be mistaken for the installed app.
-- Control socket: `<dev root>/control.sock`, mode 0600, JSON-lines protocol; compiled only under
-  cargo feature `dev-control` (Cargo.toml has no `[features]` section today — one is added);
-  a test proves the release build does not contain the listener.
-- Dev log: `<dev root>/app.log`, JSONL. Records: requests (method/path/status/error_code),
-  auth state transitions, native command failures. Redaction module with a bearer-absence test
-  (feed a bearer through the logger; assert no `Bearer `, no `eyJ`, no subject value in the file).
-  On by default in dev; release recommendation goes in the lane return, not switched on silently.
-- Fixture mode = one fixture system: the existing browser-proof pages + `browser-proof-command-fixture.ts`
-  + `vite.browser-proof.config.ts`. Browser front (vite serve) ships now; the dev Tauri front serves
-  the same pages as its frontendDist once slice B lands. No second fixture system.
-- `up` without `--fixture` (real dev Executive) returns a typed `NOT_IMPLEMENTED_YET` until lane L4
-  lands its local operator contract; nothing in this lane waits on L4.
-- Page-side verbs mount alongside `MastermindAppControl` in `install.ts`, inert until called: in-page
-  code is reachable only by code already running in the page, which already holds `MastermindAppControl`;
-  the gated remote surface is the Rust socket, not the in-page dispatcher. In native dev mode the socket
-  serves `logs`/`shot` Rust-side (dev_log file / WKWebView snapshot) before any eval; in browser fixture
-  mode `logs` returns the in-page JSONL buffer.
-- Desktop law (from the brief and L4's ledger): one GUI-driving child at a time; dev app launched
-  in background (`open -g` or equivalent); no global clicks/keystrokes; captures of the dev app's
-  own webview only, never the screen; no image to a vision model unless it is that webview render;
-  no GUI work to a GLM child; 20-minute GUI time box.
+- Dev root `~/.mastermind/mmos_dev/` (env `MMOS_DEV_ROOT` overrides for tests): never
+  `/Library/Application Support/MastermindExecutive`, never `<checkout>/data/control_plane/`
+  (the Executive per-checkout default = L1's scratch root, `control_plane/executive_runtime.py:324`),
+  never `/tmp`.
+- Dev identity: `tauri.conf.dev.json` as a **merge overlay** (`productName` "Mastermind OS Dev",
+  `identifier` `com.mastermind.os.dev`; deep-link scheme also `.dev` if the base carries one).
+- Shell URL gate: scheme exactly `http`; host exactly `127.0.0.1` or `localhost`
+  (case-insensitive); port free (explicit or default) — the boundary is loopback+cleartext-local,
+  not the number. Refuse https, `0.0.0.0`, `[::1]`, other hosts, `file:`, unparseable, userinfo —
+  refusal reason never embeds the raw input (userinfo could carry a secret).
+- No IPC for the shell origin: Tauri 2 grants remote origins nothing unless a capability has a
+  `remote` key; navigate the existing `main` window and a test asserts no `capabilities/*.json`
+  contains `remote`.
+- Page bootstrap is injected by the native side (`initialization_script`), not app frontend code:
+  in shell mode the loaded page is not ours and has no `MastermindAppControl`. S1 buffers verb
+  results on `window.__mmShell` until the transport lands (R1 question 3, now harder: no IPC).
+- CRITICAL-row surface (shell mode + remote-control): files listed under `CRITICAL FOR RC REVIEW`
+  in the lane return; S1's diff gets a grok-4.7 attack pass (reproducing command per finding).
+- Desktop law unchanged: one GUI-driving child at a time, background launch, webview-only
+  captures, no image to a vision model unless it is that webview render, no GLM GUI children,
+  20-minute box. Proof driving is lead-held.
 
-## Open / discrepancies
+## FLEET
 
-- Brief stated L4's first landed commit is `integrations/mmos/LOCAL_OPERATOR_CONTRACT.md` on trunk —
-  verified false (absent from trunk, L4 branch and worktree; only old evidence files
-  `docs/evidence/2026-10-13-mmos-fabric-discovery/M2_LOCAL_OPERATOR_20261017.*` match). Lane builds
-  against the fixture transport per the brief's own provision. Reported to principal in lane return.
-- Cold-agent run against the real dev Executive (second half of DONE_WHEN 6) deferred until L4 lands.
+| Model | Launched | Accepted | Rejected | Cancelled |
+|---|---|---|---|---|
+| deepseek-v4.1-flash | 3 (A, D0, C) | 1 (D0) | 0 | 1 (C, re-scope) |
+| glm-5.3 | 1 (R1a) | 0 | 0 | 0 |
+| gemini-4-argon | 1 (R1b) | 0 | 0 | 0 |
+
+## Notes
+
+- `build.rs` requires `MM_SOURCE_REVISION`/`MM_BUILD_IDENTITY` at compile time (D0 finding).
+- Trunk refresh `46621f5ad` brought `PROGRAM_PLAN_V3.md` and `LOCAL_OPERATOR_CONTRACT.md`.
+- Old DONE_WHEN 6 (cold-agent) transferred to L9 per PROGRAM_PLAN_V3 §5.
