@@ -1,186 +1,112 @@
 # Hermes gateway compatibility required by Paperclip
 
-Status: **prepared integration design; no Hermes core patch or new credential bridge deployed**.
+Status: implemented and qualified source candidate; live activation and consumer
+acceptance remain open. The original Product task exposed a concrete gap:
+Hermes received nonsecret Paperclip context and executed real tools, but its
+ordinary client-env filter removed the temporary API and runtime-tool tokens.
+The filter must remain intact.
 
-This is the remaining harness integration for the existing MastermindX Paperclip
-company. It does not authorize a new authentication service, a profile-wide
-credential relay, a provider change, or changes to active unowned source.
+## Implementation and owners
 
-## Evidence and qualification boundary
+The candidate is maintained at
+[integrations/paperclip_hermes](../../integrations/paperclip_hermes/README.md).
+Its builder renders a generic native extension against explicit source
+preimages; the Paperclip-specific plugin declares exact run context, issuer
+claims, expiry and credential destinations. Plugin registration contains no
+credential values and uses the existing per-profile plugin manager.
 
-Paperclip is the installed official npm release 2026.1106.0, source commit
-`d69631b01b9c658f80bf8bed389863dce82643e1`. Its `hermes_local` adapter injects a
-run-scoped `PAPERCLIP_API_KEY` and a separate `PAPERCLIP_RUNTIME_TOOLS_TOKEN`.
-The former is the original Paperclip run JWT; the latter authorizes runtime-tool
-access. A static agent key is not equivalent: Paperclip's secrets service requires
-an `agent_jwt` actor for run-scoped secret access.
+The private create parameter `launch_credentials_v1` is accepted only with
+`finite-launch-credentials-v1` advertised by the gateway. The local creation
+owner consumes it before policy and receipt projection. Existing private
+launch-key custody and staged publication hold the values; durable policy
+contains public fingerprints, expiry and context/declaration digests.
 
-Hermes source was inspected on M2 under
-`/Users/chriswong/.hermes/hermes-agent`, checkout
-`ba4ddf9945a213ede9dda016602a86591ed634f9`. This is a local commit not found by the
-public GitHub contents API for NousResearch/hermes-agent. The booted gateway
-reported `09ccb0db84968b92821568bb9adb78efbf0b5ff1`; source inspection of the newer
-checkout is not live-daemon proof. The existing gateway serves the root plus the
-13 named profiles. Read-only Product attachment to the existing owner succeeded;
-no gateway was restarted, replaced, or given a second owner.
+The finite executor binds profile, principal, session, instance, owner epoch,
+admission and generation. Existing local terminal dispatch supplies the
+credentials only inside a live tool scope. Native code-cell RPC may reuse its
+active outer dispatch; persistent code kernels receive no token environment.
+Unsupported remote/managed/background/delegated credential execution refuses.
+No managed-worker transport is claimed in this first release.
 
-The original consumer test is **MAS-2**, issue
-`4f8769dc-1c3f-41f7-bdec-08f137f551ef`. Its latest native retry is blocked on
-workspace validation before reaching a model. Repair and qualify this original
-path before applying a speculative core change against a different live revision.
+The incumbent SecretSource interface receives only configuration and home;
+its per-home fetch/cache cannot carry private client-run values or retire them
+with one admission. No second secret store, relay, memory provider or scheduler
+is introduced.
 
-## Current source behavior
+## Privacy and startup
 
-| Surface | Observed implementation | Consequence |
-| --- | --- | --- |
-| Managed instructions | HERMES_EPHEMERAL_SYSTEM_PROMPT is collected into session.create client_env and bound to the session. | Supported on a fresh compatible gateway session; not yet proven through MAS-2. |
-| Nonsecret run context | PAPERCLIP names are not in the built-in client allowlist; terminal.client_env_passthrough is the supported extension. | The readiness installer adds only explicitly named nonsecret context. |
-| API and runtime-tool credentials | agent/session_client_env.py rejects KEY and TOKEN names even when configured. | Both run credentials are lost by the ordinary client_env path. Preserve this generic filter. |
-| Resume | session.resume sends no fresh client_env. | A new Paperclip run can inherit stale prompt/run context. persistSession is now false. |
-| Profile binding | The private control handshake verifies the served home and mints a profile/instance-bound session ticket. | Reuse the existing multiplexer and individual Hermes profiles. |
-| Model selection | CLI model=auto is an explicit model; the profile default applies when model is absent. | Adapter model now matches the actual profile model. Adapter provider=auto omits --provider, preserving profile Capacity Fabric selection. |
+Enabled manifest metadata is read before plugin implementations can start a
+host. The first real ambient lookup freezes a metadata-only launch witness:
+native launch-home identity, binding, plugin owner/spec digest and exact secret
+names. Origin, marker or manifest drift refuses before another process starts.
+Removal follows the launch profile through native routing, not a child-profile
+override, and occurs before and after profile overlays. Native provider,
+ambient-provider and internal-runtime filtering remains in force.
 
-Source seams: `hermes_cli/gateway_chat.py`, `gateway_client.py`,
-`gateway/session_local_route.py`, `gateway/run_config_loaders.py`,
-`gateway/session_worker_construct.py`, and `agent/session_client_env.py`.
+Private values are excluded from prompts, ordinary client_env, static config,
+plugin-host/daemon environments, policies, receipts and shell snapshots.
+Redaction occurs before tool observers/middleware, canonical history/events,
+spill paths and logging, independently of the optional display toggle.
+Malformed private validation and pre-binding WebSocket logs do not echo payloads.
+Paperclip remains the token verifier and issuer-side expiry/revocation owner.
+The API JWT's 48-hour default is supported; the optional one-hour runtime token
+expires independently and cannot reappear from a copied context. The producer's
+persistent agent-identity private key is withheld from both launch payload and
+child seeds. This does not implement identity signing. Both forwarded and
+withheld names respect incumbent credential ownership. Origin-scoped metadata
+validation refuses reentrant child startup instead of skipping validation.
 
-No supported plugin hook was found that transports these private values across
-the closed session-create boundary. Profile secret sources, terminal backend
-providers, lifecycle hooks, and inference launch keys have different contracts.
-Do not disguise a Paperclip tool credential as an inference key.
+## Evidence
 
-## Existing custody to extend
+Baseline PR #2399 merged at
+`dee7a38a1e184e38cdcdd75889223d5b0ec27414`. The exact merged helper is installed;
+all 13 adapter configurations now read back quiet=true. The approved isolated
+workspace flag and original MAS-2 strategy were applied through their native
+owners. The previous approval boundary is resolved.
 
-Reuse `gateway/session_policy.py` and its `authority._local_launch_keys` owner.
-The current inference key remains private; durable policy holds only a reference
-and fingerprint. The managed-worker path reserves a worker, hydrates private
-bootstrap data, and sends it over the existing stdin pipe. Its stderr sink already
-scrubs exact secret values through `worker.secrets`.
+Original live run `c54dc873-bb58-465e-801b-98c352cf9e5b` reached glm-5.3,
+skill_view and terminal. Its API attempt lacked credentials and was refused
+before effect. The run was cancelled natively and the Hermes admission/session
+are terminal. Configured provider names and memory-recall logs do not prove the
+required Capacity Fabric receipt or memory marker.
 
-Add one typed Paperclip run member to this owner. Keep inference accessors
-`launch_key()` and `route_launch_key()` returning only inference credentials.
-No additional inbox, proxy, daemon, secret database, queue or watcher is needed.
+Hermes qualification starts at
+`ba4ddf9945a213ede9dda016602a86591ed634f9` and carries the actual installed
+source's 85 changed/new files. The native PM and `scripts/run_tests.sh` produced
+122 passes: 56 credential tests plus 66 existing plugin, CLI and contract
+checks. All 16 Mastermind Paperclip contract/readiness fixtures pass separately.
 
-### Proposed private wire field
+Native `scripts/check` remains failed on 3 footgun and 13 Ruff findings that
+reproduce identically on the installed baseline. The other 12 checks pass;
+health has zero blocking/advisory findings. This does not waive a release hold
+or authorize changing another owner's source. Exact hashes, generated-input
+reproduction, earlier compatibility results and baseline-only macOS fixture
+failures are in the
+[qualification record](evidence/2026-11-10-credential-qualification.json).
 
-A closed optional `paperclip_run_v1` object on fresh `session.create`:
+## Installed-source composition and release
 
-- version: 1
-- company_id, agent_id, run_id: canonical UUIDs
-- task_id: canonical UUID or null
-- api_url: validated intended HTTP(S) service endpoint
-- api_key: bounded secret string
-- api_expires_at: timestamp
-- runtime_tools: null, or a complete object containing token, expires_at, mcp_url
-  and only necessary existing endpoint metadata
+The installed tree contains other owners' tracked and untracked changes.
+A distinct composition artifact records exact preimages/postimages and carries
+those changes into qualification. The builder is not an installer. Do not
+overwrite, reset, stash or silently release unrelated changes.
 
-Do not accept arbitrary environment names or a generic secret dictionary.
-Reject partial runtime-tool grants.
+Fresh native active-work evidence supersedes stale PID observations. At
+04:34:02 UTC the gateway had eight active work units: four chats, one in-process
+cron job and three managed units. One unsafe cron is marked wedged. Native
+restart waiting may exclude wedged work and is not quiescence proof. There is no unconditional non-interrupting deferred
+patch/restart owner. Preserve current work and use the existing source custody,
+drain and guarded restart owners only when the finite cutover is ready.
 
-The gateway derives profile, principal, gateway instance/epoch, session,
-admission and worker generation from its existing authenticated context. The
-client cannot choose those server-side bindings. Paperclip remains issuer,
-signature verifier and authorization owner. Decoding its JWT for consistency
-and expiry checks must never be treated as signature verification.
+## Remaining actual-path acceptance
 
-### Client and closed protocol
+After safe activation, require running capability readback and the enabled
+plugin before setting `HERMES_REQUIRED_LAUNCH_BINDING=paperclip-run` on the
+existing Paperclip adapter. No token values go in configuration.
 
-1. In `hermes_cli/gateway_chat.py`, collect exactly the two credentials into a
-   private local object before connection/bootstrap. Do not place them in CLI
-   arguments or generic client_env.
-2. Strip them from daemon-start inheritance in
-   `hermes_cli/gateway_runtime_start.py`.
-3. Require an advertised capability before submitting the prompt. An older
-   gateway must return a bounded compatibility error rather than discard fields.
-4. Extend the canonical Pydantic contract, generated contracts, and
-   `session_policy.CREATE_FIELDS` explicitly.
-5. Initially allow only a fresh tool session and one finite admission. Reject
-   resume, branch inheritance and title-based existing-session attachment.
-6. Strip credentials before creation of `request_json` / `info.launch_request`
-   and the durable creation receipt.
-7. Ensure contract validation failures contain field/reason codes, never the
-   invalid secret value. The current generic ValidationError formatter needs an
-   explicit private-input projection.
-
-### Transactional staging and lifetime
-
-Use the incumbent staged-publication path: `StagedReceipt.on_create`,
-`commit_local_session` publication after insertion, and withdrawal on failed or
-losing transactions. Compose with existing prefill publication.
-
-Exact-create retries compare immutable run identity, endpoints, expiry,
-principal/profile and credential fingerprints. An overlapping request cannot
-replace the winner's grant.
-
-The current inference secret cleanup preserves resumable branches. Paperclip
-credentials need stricter lifetime inside the same custody owner:
-
-- Claim for the actual finite admission, not merely a session label.
-- Check expiry on admission, worker hydration and every tool-environment lookup.
-- Retire after terminal execution, cancellation, or unknown-execution fencing.
-- A viewer disconnect is not itself cancellation or permission to replay.
-- Expire unused grants on owner access; add no polling service.
-- Refuse another profile, another admission, branch or delegated-agent inheritance.
-- After owner restart, history remains readable, but missing private run
-  credentials fail closed. A new attempt remains Paperclip-owned.
-
-`gateway/session_finite.py` is a clean common execution wrapper; this design
-does not require editing dirty `gateway/run.py`.
-
-### Worker and tool scope
-
-Extend the existing closed managed-worker bootstrap validator and private frame
-in `gateway/session_managed_worker.py` and `agent/managed_worker.py`.
-Validate against the reserved worker's profile/session/generation. Register both
-tokens in the exact-value log scrubber before sending the frame.
-
-Bind an execution-local context that supplies only:
-
-- PAPERCLIP_API_KEY
-- PAPERCLIP_RUNTIME_TOOLS_TOKEN
-
-with their matching nonsecret run identity. Consume it in the existing local
-terminal and code-execution environment builders after generic filtering.
-Do not write daemon-global os.environ or the profile's persistent secret store.
-
-Scrub both exact values before tool results become canonical history or events.
-This protection must not depend on a user toggle such as security.redact_secrets.
-A profile-wide vault registry is not the run's custody or lifetime owner.
-
-## Source composition that must be preserved
-
-The read-only review found user-owned changes in:
-
-- tui_gateway/contracts/canonical_sessions.py
-- apps/shared/src/gateway-contract.generated.ts
-- apps/shared/src/gateway-contract.openrpc.json
-- gateway/session_authority.py
-- gateway/run_turn_runner.py
-- gateway/run.py
-
-The canonical contract changes observed concern correction contracts, separate
-from create fields, but must still be preserved. Prepare a future patch in an
-isolated owned source context and reconcile the actual current contract before
-deployment. Do not overwrite, reset, stash or silently release unrelated changes.
-No core patch is deployed by this readiness operation.
-
-## Required tests and actual consumer proof
-
-Use synthetic tokens and fake issuer/tool endpoints for source tests:
-
-1. Same-create idempotence; altered token/scope rejection; losing-transaction cleanup.
-2. Concurrent runs and profiles receive only their own credentials.
-3. No token in receipts, policies, launch requests, validation errors, history,
-   events, logs or diagnostics, including with optional generic redaction disabled.
-4. Expiry, cancellation, completion, unknown execution, branch, delegation and
-   owner restart refuse further use.
-5. In-process and managed-worker behavior match; wrong generation/profile is refused.
-6. Inference launch-key resume and route-change protections remain unchanged.
-7. Older gateway refusal occurs before the prompt reaches a model.
-
-Then qualify the actual running revision, two distinct Paperclip runs, exact
-profile/run/task binding, a real Capacity Fabric model receipt, a permitted
-runtime-tool call, ordinary task return, run-scoped secret behavior when actually
-needed, OMH write/read continuity and the intended original task disposition.
-Do not claim full integration from static tests, a CLI exit code or a model-only
-response. Keep MAS-2's original effects and approval dependency attached.
+Retry original MAS-2 once against the changed capability. Require authenticated
+same-issue return, a permitted runtime-tool call, actual Capacity Fabric route
+and accounting evidence, OMH marker write/read, a second run/profile and
+representative leadership skill materialization. Preserve the original task's
+scope and final disposition. Source merge, CLI success, tests and model output
+are separate from fleet acceptance.

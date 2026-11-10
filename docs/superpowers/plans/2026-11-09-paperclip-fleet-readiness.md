@@ -1,7 +1,8 @@
 # Paperclip fleet readiness — installed Hermes integration
 
 Operation: `paperclip-fleet-readiness-20261109`.
-Source branch: `sol/paperclip-fleet-readiness-20261109`.
+Baseline PR: #2399, merged at `dee7a38a1e184e38cdcdd75889223d5b0ec27414`.
+Continuation branch: `sol/web-paperclip-fleet-readiness-20261109`.
 Governing protected pin: Mastermind `ebc48690f20bb5c0554f91ec7cf2b4533f641f5a`,
 skillpack 1.0.1. The subsequently observed master
 `edc9f6293b54fb53795b32ea0fb8be9ed6047f97` changes only
@@ -25,7 +26,7 @@ routes inference through Capacity Fabric, performs authorized work, and returns
 durable verifiable results to the originating issue. The existing fleet remains
 recoverable across ordinary process restarts.
 
-**Current result: CONFIGURATION_VERIFIED_END_TO_END_HELD.** Installation,
+**Current result: CREDENTIAL_CANDIDATE_QUALIFIED_LIVE_ACCEPTANCE_OPEN.** Installation,
 configuration, a model response, CI, merge and consumer acceptance are different
 facts. The original model/tool/memory/task-return proof has not succeeded.
 
@@ -41,10 +42,12 @@ facts. The original model/tool/memory/task-return proof has not succeeded.
   holds. One original carrier per mutation; reconcile before retry.
 - No unrelated Slack/email messages, account changes, automatic hiring, external
   feedback, duplicate timers, queue, memory backend or credential relay.
-- This operation is GitHub-native source authoring; no shared host checkout is
-  modified. Hermes core has user-owned dirty source and is not overwritten.
-- The experimental-workspace action was explicitly rejected by automatic approval
-  review; its scope may not be replayed through another surface or a new task.
+- Continuation source is in the native acquired Mastermind workspace. Installed
+  Hermes has existing dirty source; only isolated qualification/composition
+  artifacts have been changed, with exact preimages preserved.
+- The Chairman explicitly approved the instance-wide experimental workspace
+  setting and continuation. That prior approval boundary is resolved; no repeat
+  approval is needed for the authorized work.
 
 ## Current task tree
 
@@ -53,8 +56,8 @@ facts. The original model/tool/memory/task-return proof has not succeeded.
 | P1 — qualify installed bridge | Configuration and source inspection complete | Exact instance, 13 profiles, installed adapter/runtime paths, live-source distinction and compatibility gaps recorded |
 | P2 — role capabilities | Baseline applied/read back; runtime proof pending | Role-aware AGENTS, native tools/MCP inventory, OMH, Capacity Fabric, single profile run, fresh context; six optional leadership skill entries await native materialization |
 | P3 — always-on service | Native service and ordinary restart proven | Version-pinned managed CLI, launchd startup/KeepAlive, fresh backup, zero-work cutover, new healthy PID and preserved data/config |
-| P4 — consumer proof | Exact approval boundary on original MAS-2 | Workspace correction needs an instance-wide experimental setting that automatic approval review rejected; gateway credential contract also requires actual-path qualification |
-| P5 — source delivery | Source-complete baseline with focused checks | Installer, canonical tests, operating guide, sanitized audit and compatibility design; PR/queue/CI/merge status belongs to the actual native GitHub record |
+| P4 — consumer proof | Original task reconciled; credential capability qualifying | Workspace setting approved/applied. Real model and tools reached; credentials absent. Canary cancelled natively. Tested private finite credential candidate awaits safe activation and actual consumer proof |
+| P5 — source delivery | Baseline merged; credential follow-up in owned source | PR #2399 merged through native controls; exact helper installed. Candidate source, tests, composition/evidence and updated operating guidance are being published through the same controls |
 
 A baseline source merge must not mark P4 or the parent mission accepted.
 
@@ -74,7 +77,8 @@ A baseline source merge must not mark P4 or the parent mission accepted.
   provider `auto` retains the profile provider; explicit adapter models match
   current profile selections. No model/provider enrollment was changed.
 - Each profile has `maxConcurrentRuns=1`; timer heartbeats remain disabled.
-  `persistSession=false` avoids stale run context on resume. Nonsecret
+  `persistSession=false` avoids stale run context on resume; `quiet=true` is read
+  back on all 13 to prevent prompt echo into failed-run output. Nonsecret
   Paperclip context uses native `terminal.client_env_passthrough`.
 - Existing generic secret-name filtering remains intact. No secret token was
   added to passthrough or a persistent profile credential store.
@@ -83,7 +87,8 @@ A baseline source merge must not mark P4 or the parent mission accepted.
   for three CEOs, six entries total. No fake runtime snapshot is fabricated.
 - `para-memory-files` removed from selected Paperclip skills; existing OMH is
   retained. Native Hermes disables `complain` and `suggestion-box`.
-- Both `enableBetaSkills` and `enableIsolatedWorkspaces` remain false.
+- `enableBetaSkills` remains false. Explicitly approved
+  `enableIsolatedWorkspaces=true` is applied and read back; other flags are unchanged.
 
 The one-shot installer attests entire native immutable skill inventories, refuses
 foreign links and custom instructions (including later operator additions to a
@@ -124,8 +129,9 @@ Preserve MAS-2, issue `4f8769dc-1c3f-41f7-bdec-08f137f551ef`, assigned to Produc
 
 The task asks for a real skill/file/tool check, exact nonsecret identity,
 Capacity Fabric/OMH provider names, memory marker
-`PAPERCLIP_PRODUCT_READY_20261109` and durable same-task return. No model
-result or memory marker was produced.
+`PAPERCLIP_PRODUCT_READY_20261109` and durable same-task return. A later native
+run reached the model and real skill/terminal tools; the memory marker and
+authenticated task return are not yet proven.
 
 - Initial native runs failed on the bundled-source versus immutable-version
   skill-link mismatch. The four links owned by this operation were corrected
@@ -136,7 +142,7 @@ result or memory marker was produced.
   inference or memory success is inferred.
 - Native retry `75c70f6e-58f3-444b-ae24-00fef35bbbc9` is terminal failed on
   workspace validation: the private non-Git task directory was inferred as a
-  Git worktree. MAS-2 is blocked, workspace
+  Git worktree. At that point MAS-2 was blocked on workspace
   `d9acdda2-21f5-4ad3-a79e-718d4191be53`, binding revision 2,
   `reuse_existing`, isolated-workspace mode, local environment
   `7addd6ae-551a-4193-977a-753501c54b77`.
@@ -147,8 +153,21 @@ result or memory marker was produced.
 - Automatic approval review rejected the one request to enable the instance-wide
   `enableIsolatedWorkspaces` setting because it changes future tasks/shared
   fleet behavior beyond one canary and required explicit authorization for that
-  scope. Readback remained false. No flag, workspace or replacement-task
-  workaround was applied.
+  scope. It remained false until the Chairman's explicit approval. The setting
+  was then enabled through its original native owner and read back, and MAS-2's
+  explicit project_primary strategy was saved. No replacement task was invented.
+- Retry request `22a758a5-58e7-4dc7-a710-bbe626dba021`, idempotency key
+  `cfa8faab-eeaa-5957-82b6-e63232a45627`, was issued once. Paperclip's own retries
+  reached run `c54dc873-bb58-465e-801b-98c352cf9e5b`, Hermes admission
+  `af54cf5555ac4510bf63bbb04c05b350`, Product session
+  `local-64a015ecc07c66472f1a33f260bdd4cc14a87e99fc5be1427545efecedd664ae`.
+  `skill_view` and terminal executed; missing temporary credentials caused
+  Paperclip to reject an empty-bearer request before effect.
+- The run was cancelled once through its correct native endpoint at
+  `2026-11-10T03:13:11.936Z`; admission is terminal/interrupted and the session
+  ended with cli_close. Product was read back idle. No canary remains running.
+- The separate paid Fabric census ended with provider_turn_limit and no usable
+  usage receipt. Its result was not consumed; retry/dispatch remain false.
 
 Older MAS-1 onboarding references a previous agent identity and was left intact.
 Do not blindly reassign it or create duplicate agents.
@@ -166,12 +185,36 @@ supported path. A static agent key does not provide full run-secret/runtime-tool
 parity; no alternate key was created.
 
 The [gateway design](../../../ops/paperclip_fleet/HERMES_GATEWAY_INTEGRATION.md)
-extends the incumbent private launch-secret custody and existing worker pipe,
-with expiry, profile/run/admission binding and mandatory redaction. It is
-prepared, not implemented or deployed. Preserve the user-owned canonical
-contract/generated files and gateway changes when composing any future patch.
-Qualify the actual original path after the workspace is unblocked before
-releasing speculative changes against a different running revision.
+is now implemented as a generic source extension plus a declarative Paperclip
+plugin in [integrations/paperclip_hermes](../../../integrations/paperclip_hermes/README.md).
+It extends incumbent local launch custody, publication and finite execution,
+with expiry, exact profile/run/admission binding and mandatory redaction.
+First support is local/in-process only; managed/remote/background/delegated
+credential execution refuses. No credential extension is installed yet.
+
+The actual installed-source composition preserves 85 changed/new source files.
+Qualification passes 122 native tests (56 focused credential tests plus
+66 existing plugin, CLI and contract checks). Both generated contract preimages
+were reproduced exactly from their unmodified canonical inputs, then regenerated
+with the extension. Six Paperclip edge-contract checks and ten readiness fixtures
+also pass. The overall native source check remains failed: 3 footgun findings and
+13 Ruff findings reproduce identically on the installed baseline. The other 12
+checks pass, including health with zero blocking/advisory findings. No baseline
+finding has been suppressed or unrelated source fixed.
+
+The producer contract is checked against the installed adapter: 48-hour API JWT,
+optional one-hour runtime token with independent expiry, UUID issuer identity,
+same-origin MCP URL, and separate persistent identity key withheld from private
+payload and child environments. Managed identity signing is not provided by this
+extension. The plugin does not replace provider, memory or lifecycle custody.
+
+Fresh native lifecycle evidence at 04:34:02 UTC observed PID 22139, instance
+`0b628416e12b45ca93ac7dcd7a299844`, epoch 7, source ba4ddf, with eight active work
+units: four chats, one in-process cron job and three managed units. One unsafe
+cron is marked wedged; native restart waiting may exclude it and cannot be used
+as evidence that all work has settled. This supersedes the old
+Hermes PID/boot observation. Native active work and installed-source custody are
+real release boundaries; no restart or live core overwrite has been performed.
 
 ## Source qualification and DO_NOT_REDO
 
@@ -183,6 +226,9 @@ releasing speculative changes against a different running revision.
   fits canonical test discovery and the existing source-proximate CI selector.
 - The post-restart audit is saved at
   [configuration evidence](../../../ops/paperclip_fleet/evidence/2026-11-10-configuration-qualification.json).
+- [Credential qualification](../../../ops/paperclip_fleet/evidence/2026-11-10-credential-qualification.json)
+  records exact candidate hashes, actual installed-source composition, native
+  test/check results, limitations and the safe activation frontier.
 - [Operating guide](../../../ops/paperclip_fleet/README.md) gives the exact scope,
   commands, recovery behavior and remaining acceptance.
 - Protected release uses native auto-merge/merge queue, required `test` and
@@ -193,22 +239,23 @@ releasing speculative changes against a different running revision.
 
 ## Next safe frontier / continuation
 
-1. Finish the current baseline's single Ready PR and normal protected source
-   delivery; consume its exact CI/queue/merge evidence without duplicate arming.
-2. Request the exact remaining user approval: enable the instance-wide
-   experimental isolated-workspace setting, acknowledging its future-task scope.
-   The automatic approval denial persists until explicitly resolved.
-3. If approved, fresh-read the original MAS-2 workspace/binding/environment,
-   apply the scoped project_primary correction through the same native owner,
-   read it back, and retry only the reconciled original task.
-4. Qualify current running Hermes context and private credential transfer.
-   Implement only the proven required compatibility delta in an owned source
-   context, preserving existing dirty source and active worker admission.
-5. Complete real Capacity Fabric, tools, OMH and same-issue return proof, then a
-   second run/profile and representative leadership/delegation/materialization
-   checks. Bind acceptance to actual receipts and task outcomes.
-6. Verify/save/read back each result and reassess the original parent acceptance.
-   Source delivery or an approval response alone does not complete the mission.
+1. Publish the qualified owned credential candidate, quiet-default
+   reproducibility and exact composition evidence through normal protected
+   source delivery. Preserve the disclosed baseline check failures and actual
+   hosted CI/release holds; source publication is not runtime activation.
+2. Re-read current native gateway identity, active work and source custody.
+   Preserve all live units. Engage native maintenance controls only when the
+   finite application is ready and current work can finish without interruption.
+3. Apply the composed extension through the incumbent source/lifecycle owners
+   with exact preimage checks, read back the running capability, then install
+   and enable the existing-registry Paperclip plugin and nonsecret launch marker.
+4. Retry the reconciled original MAS-2 once against the changed capability.
+   Complete authenticated same-issue return, runtime tools, actual Capacity
+   Fabric accounting/route evidence and durable OMH marker proof.
+5. Verify a second run/profile and representative leadership skill
+   materialization, preserve original task disposition and record actual outcomes.
+6. Save/read back each result and reassess the original parent acceptance.
+   Source delivery, green tests and maintenance preparation alone are insufficient.
 
-No durable background worker, future foreground wake or completed end-to-end
-fleet acceptance is claimed.
+No new daemon, lifecycle queue, background watcher or completed end-to-end fleet
+acceptance is claimed.

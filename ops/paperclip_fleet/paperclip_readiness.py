@@ -326,7 +326,7 @@ def configure_agent(aid, name, slug, apply):
         "agent": name, "profile": slug, "native_skills": len(native_paths),
         "instructions_ready": entry["content"] == intended, "managed_skills": rows,
         "max_concurrent_runs": a.get("runtimeConfig", {}).get("heartbeat", {}).get("maxConcurrentRuns"),
-        "hermes_command": config.get("command"),
+        "hermes_command": config.get("command"), "quiet": config.get("quiet") is True,
         "feedback_disabled": DISABLED_FEEDBACK.issubset(disabled_names(profile.get("skills", {}).get("disabled"))),
         "gateway_identity_context_ready": PAPERCLIP_CLIENT_CONTEXT.issubset(disabled_names(profile.get("terminal", {}).get("client_env_passthrough"))),
         "model_provider": "capacity-fabric", "memory_provider": "omh", "changes": [],
@@ -345,7 +345,7 @@ def configure_agent(aid, name, slug, apply):
     beta_enabled = request("/instance/settings/experimental").get("enableBetaSkills") is True
     sync["desiredSkills"] = assignment_selections(pinned, beta_enabled)
     adapter_changes = {"paperclipSkillSync": sync, "command": HERMES,
-                       "provider": "auto", "model": model_name, "persistSession": False}
+                       "provider": "auto", "model": model_name, "persistSession": False, "quiet": True}
     if any(config.get(k) != v for k, v in adapter_changes.items()):
         fresh = request(f"/agents/{aid}")
         if fresh.get("adapterConfig") != config:
@@ -369,7 +369,7 @@ def configure_agent(aid, name, slug, apply):
         result["changes"].append("hermes_profile_context")
     result.update(
         instructions_ready=True, max_concurrent_runs=1, hermes_command=HERMES,
-        feedback_disabled=True, gateway_identity_context_ready=True, model=model_name, provider_selection="profile", persist_session=False,
+        feedback_disabled=True, gateway_identity_context_ready=True, model=model_name, provider_selection="profile", persist_session=False, quiet=True,
         instruction_sha256=hashlib.sha256(intended.encode()).hexdigest(),
     )
     return result
