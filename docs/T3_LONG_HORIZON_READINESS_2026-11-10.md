@@ -75,6 +75,76 @@ Fable root and a delegated GLM child with all four Task tools present.
 Exact evidence: [2026-11-10-t3-task-tool-visibility.json](evidence/2026-11-10-t3-task-tool-visibility.json).
 Reproducible offline runtime proof: [qualify_t3_task_tools.py](../scripts/qualify_t3_task_tools.py).
 
+## Existing plugins and second installed repair
+
+A read of the same Fable initialization at 10:50:31.928Z, observed at
+11:00:31.135776Z, shows substantial integration already loaded:
+
+| Native MCP server | Observed condition |
+| --- | --- |
+| paper, desktop-commander, studio-direct, t3-code | Connected at Fable initialization |
+| mmx-browser | Failed at that initialization; known protocol defect subsequently repaired and actual configured Claude MCP health check reports Connected |
+| mastermind-executive | Needs authentication; installed endpoint is also backed by the wrong role profile for the loaded COO plugin |
+| linear-server | Needs authentication; ordinary native OAuth availability boundary, not a demonstrated source defect |
+
+Loaded plugins include `mastermind-executive` 0.2.0,
+`mastermind-workforce` 0.1.0-candidate.g61e97693f4bb.skills-only,
+and the agents-md, telemetry, privacy and plugin-authoring Claude plugins.
+A skills-only workforce package is not an admitted execution capability.
+
+### Browser transport repair reused from protected #2401
+
+The installed `~/.t3/mcp/mmx-browser/server.js` matched the exact broken
+preimage already qualified in merged #2401. Its response writer omitted
+`jsonrpc: "2.0"`. Reused the protected
+`scripts/t3_computer_use_setup.py::qualified_browser_server` and existing
+`apply_plan` receipt/backup owner for **only that file operation**. No new
+browser implementation, MCP entry, native tool, skill or credential was added.
+
+Preview digest `528c431c40247253af1c2b8ac13ff30ed901c569ddcf20862e6222b0706d43cf`
+was bound to the exact server, runtime descriptor and source helper. The
+operation saved the preimage, checked it immediately before atomic replacement,
+and read back the exact accepted successor. Node syntax validation passed.
+The runtime descriptor stayed byte-identical.
+
+- Before: `854c8397ea5b3547a1faa93e5af27eb071eefc64e9d4f2279695994414727faf`
+- After: `325366ad6a64c6e28204727ffa36344c34a3e5bc418047e55e87467dd950fdd9`
+- Existing-owner receipt:
+  `~/.t3/backups/computer-use/install-a5qewv79/receipt.json`
+- Receipt SHA-256:
+  `c206bd275f46fdee1121ff7dcb774abaa9df7aa7529d11e10b9dde2b65b7ec90`
+
+After installation, the existing Claude CLI's `mcp get mmx-browser` in the exact
+`fabric-unified-router` provider home reported **Connected**. This is actual
+configured client/transport acceptance. No model run, page action or agent
+restart was performed. The immutable installer receipt correctly retains its
+original `INSTALLED_NOT_CONSUMER_PROVEN` state; this later CLI health proof does
+not assert fresh T3 model consumption or browser-page acceptance.
+
+All #2401 profile identity, original tab, page-permission and uncertain-input
+boundaries remain intact. This repair must not be replayed.
+
+### Role-correct Executive enrollment is still required
+
+The three provider homes point to `http://127.0.0.1:8444/mcp`. The existing
+adapter and upstream listeners are present, but the installed upstream profile
+is `web_ceo_v3`. The loaded Executive plugin describes a separately enrolled
+`/mcp/coo` surface and forbids CEO fallback. Therefore clearing an auth cache or
+logging into the present endpoint would not qualify a Fable COO.
+
+The next permitted implementation uses the existing Executive/native integration
+carrier to reconcile the intended role/resource, native requester authority and
+tool catalogue, then enroll the correct endpoint under its existing custody.
+No CEO credential was copied, no profile changed, and no new authority granted.
+A historical README reference to #955 could not be refreshed and is not treated
+as a current verified hold.
+
+The Linear URL is the ordinary `https://mcp.linear.app/mcp`, and the exact
+provider's `claude mcp get linear-server` confirms Needs authentication.
+The existing `claude mcp login linear-server` control is available. No login,
+cache deletion or credential copying was performed. Linear is a projection and
+does not belong on the critical path for T3 task execution and parent return.
+
 ## Capability map and current source owners
 
 | Capability | Evidence and owner | Readiness |
@@ -88,7 +158,7 @@ Reproducible offline runtime proof: [qualify_t3_task_tools.py](../scripts/qualif
 | Original return and requester ACK | #2414/#2415/#2424 | API-principal ACK is distinct from native parent consumption |
 | Paperclip/Hermes ↔ T3 communication | #2419 Teamlink plugin; #2403 credential cutover; original MAS-4 | Implemented source; live original acceptance remains unrun |
 | Strict native lifecycle controls | Merged #2416; current installed CLI still exposes old commands | Built, not installed/proven on inspected app |
-| Browser/computer tools | Merged #2401, exact host-specific proofs and constraints | Partial; do not equate installed skills with fleet permission |
+| Browser/computer tools | Merged #2401; exact browser writer repaired here and configured Claude MCP health reports Connected | Transport restored; native T3 page/host permission proof remains separate |
 | Unattended remote T3 entry | Inspected T3 Connect/LAN off, background service absent | Not enabled; foreground sessions remain usable |
 
 These time-scoped findings do not transfer a writer, clear a release hold, revive
@@ -126,8 +196,9 @@ session happens to be newest.
 The original contribution is [PR #2431](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2431),
 targeting the existing #2367 router branch. #2367 remains open at its recorded
 head with its existing auto-merge configuration. No release hold or other writer
-was altered. The independent task-tool repair is installed and verified; whole
-harness acceptance remains incomplete.
+was altered. The task-tool repair is installed with live native adoption; the existing #2401
+browser protocol repair is also installed with a successful configured-client
+health check. Whole harness acceptance remains incomplete.
 
 The connected Chrome surface reached the actual T3 listener at
 `http://127.0.0.1:3773`. The rendered page requires a trusted pairing credential
@@ -166,7 +237,8 @@ or future execution commitment was created.
 2. **Installed native lifecycle:** use #2416's original package/install path,
    reconcile live writers and qualify real scope enforcement and descendant
    quiescence. Keep #2424's explicit refusal until the owning implementation exists.
-3. **Help and ancestry:** finish #2424's current project-help consumer and retain
+3. **Role, help and ancestry:** qualify the intended COO endpoint rather than the
+   currently installed Web CEO profile; finish #2424's current project-help consumer and retain
    original native callback/MCP binding through actual App/Control admission.
    A visible colleague or API credential is not native-origin proof.
 4. **Teamlink:** finish #2403/#2404 original installation/credential boundary,

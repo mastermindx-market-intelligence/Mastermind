@@ -362,5 +362,97 @@
       "state": "open unmerged; existing auto-merge preserved"
     },
     "future_execution_claimed": false
+  },
+  "native_integrations": {
+    "observed_at_utc": "2026-11-10T11:00:31.135776Z",
+    "init_utc": "2026-11-10T10:50:31.928Z",
+    "connected": [
+      "paper",
+      "desktop-commander",
+      "studio-direct",
+      "t3-code"
+    ],
+    "needs_auth": [
+      "linear-server",
+      "mastermind-executive"
+    ],
+    "failed_at_init": [
+      "mmx-browser"
+    ],
+    "loaded_plugins": [
+      {
+        "name": "mastermind-executive",
+        "version": "0.2.0"
+      },
+      {
+        "name": "mastermind-workforce",
+        "version": "0.1.0-candidate.g61e97693f4bb.skills-only"
+      },
+      {
+        "name": "cc-plugin-agents-md",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-telemetry",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-privacy",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-plugin-authoring",
+        "version": null
+      }
+    ],
+    "executive_diagnosis": {
+      "observed_at_utc": "2026-11-10T11:05:42.618711Z",
+      "current_endpoint": "http://127.0.0.1:8444/mcp",
+      "upstream_profile": "web_ceo_v3",
+      "upstream_release": "dd45d1112cb437d8a033ef314e5bf5b8f97a65bc",
+      "loaded_plugin_expected_endpoint": "/mcp/coo",
+      "ceo_fallback_permitted": false,
+      "listeners_present": true,
+      "role_correct_enrollment_proven": false,
+      "credentials_inspected": false,
+      "auth_attempted": false,
+      "historical_955_hold_refreshed": false
+    },
+    "linear_diagnosis": {
+      "endpoint": "https://mcp.linear.app/mcp",
+      "exact_provider_cli_health": "Needs authentication",
+      "login_control": "claude mcp login linear-server",
+      "auth_attempted": false,
+      "code_defect_proven": false,
+      "critical_path": false
+    }
+  },
+  "browser_transport_repair": {
+    "source_pr": 2401,
+    "source_pin": "76cca6bf0d4f54c1c4a732726a16c70dbe8ed679",
+    "source_helper": "scripts/t3_computer_use_setup.py::qualified_browser_server / apply_plan",
+    "scope": "one existing browser response writer; no other installer operations",
+    "verified_at_utc": "2026-11-10T11:07:42.392653Z",
+    "plan_sha256": "528c431c40247253af1c2b8ac13ff30ed901c569ddcf20862e6222b0706d43cf",
+    "path": "~/.t3/mcp/mmx-browser/server.js",
+    "before_sha256": "854c8397ea5b3547a1faa93e5af27eb071eefc64e9d4f2279695994414727faf",
+    "after_sha256": "325366ad6a64c6e28204727ffa36344c34a3e5bc418047e55e87467dd950fdd9",
+    "receipt": "~/.t3/backups/computer-use/install-a5qewv79/receipt.json",
+    "receipt_sha256": "c206bd275f46fdee1121ff7dcb774abaa9df7aa7529d11e10b9dde2b65b7ec90",
+    "immutable_install_receipt_state": "INSTALLED_NOT_CONSUMER_PROVEN",
+    "backup_verified": true,
+    "runtime_descriptor_unchanged": true,
+    "node_syntax_check_exit_code": 0,
+    "subsequent_configured_client_health": {
+      "provider_home": "~/.t3/providers/fabric-unified-router",
+      "command": "claude mcp get mmx-browser",
+      "status": "Connected",
+      "tool_receipt_pid": 18169
+    },
+    "model_launched": false,
+    "agent_restarted": false,
+    "browser_page_action": false,
+    "native_t3_consumer_proven": false,
+    "existing_profile_permission_unknown_effect_fences_preserved": true
   }
 }
