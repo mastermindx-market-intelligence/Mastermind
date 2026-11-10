@@ -42,9 +42,69 @@ MM_BUILD_IDENTITY="mmos-<lane-name>-$(date -u +%Y%m%d)-$(git rev-parse --short=8
   npm run tauri build   # from app/mastermind_os, with the pinned toolchain
 ```
 
-The two builds currently installed on m2studio followed exactly this shape
-(`mmos-persistent-login-20261109-3652d89`,
-`mmos-office-connection-06ef56a3-20261109-01a1a4bf`).
+The two builds installed on m2studio before the L3 install followed exactly this
+shape (`mmos-persistent-login-20261109-3652d89`,
+`mmos-office-connection-06ef56a3-20261109-01a1a4bf`). The current install is
+recorded in §1.1.
+
+### 1.1 Installed receipts ledger (m2studio)
+
+Read-only observation, 2026-11-10 (host `m2studio`). Each fact cites the
+command that produced it.
+
+| # | `build_identity` | `source_revision` | Origin branch | `receipt_digest` | State |
+|---|---|---|---|---|---|
+| 1 | `mmos-l3-install-20261110-5420bb17` | `5420bb1714cb99ef3e7fcaec766f3bd86af1b2de` | `t3/mmos-v2-l3` | `sha256:54c775aedf384b709604734a3d9dc1091495d01ebcc70f78570cbfa85d925671` | superseded by #2; kept as the rollback anchor |
+| 2 | `mmos-l3-install2-20261110-5420bb17` | `5420bb1714cb99ef3e7fcaec766f3bd86af1b2de` | `t3/mmos-v2-l3` | `sha256:d59b57eda2a87f059d32a6f9f9a8b68495931d10c4ff25e7e1fbcea59ce0515d` | **currently installed** at `~/Applications/Mastermind OS.app` |
+
+Install #2 facts (provenance `embedded_marker` for both identity fields):
+
+```sh
+env -u PYTHONPATH /opt/homebrew/bin/python3.12 scripts/mmos_installed_receipt.py \
+  --bundle "$HOME/Applications/Mastermind OS.app"
+```
+
+* `source_revision` = `5420bb1714cb99ef3e7fcaec766f3bd86af1b2de`,
+  `build_identity` = `mmos-l3-install2-20261110-5420bb17`,
+  executable sha256 `302bbf36ae55…`, digest
+  `sha256:d59b57edad…ce0515d`; app running from this exact bundle
+  (`from_this_bundle: true`) at observation.
+* Source commit is real and contained: `git cat-file -t 5420bb1714cb99ef…`
+  → `commit`; `git merge-base --is-ancestor 5420bb1714cb99ef… origin/t3/mmos-v2-l3`
+  → true (and it is the branch head: `git rev-parse origin/t3/mmos-v2-l3` →
+  `5420bb1714cb99ef3e7fcaec766f3bd86af1b2de`, a merge of `origin/master` into
+  `t3/mmos-l3-release-install`). It is also already on trunk
+  (`origin/feat/mmos-v1-integration-t3`); `origin/feat/mmos-v1-integration-t3..origin/t3/mmos-v2-l3`
+  is empty.
+
+**Rollback entry for install #2.** The replaced bundle (install #1) was
+preserved by the installer at
+`~/.mastermind/mmos_bundles/install-tmp-20261110T015848Z/Mastermind OS.app`,
+bytes-equal to the archived install #1 (same digest
+`sha256:54c775aedf384b709604734a3d9dc1091495d01ebcc70f78570cbfa85d925671`
+from `scripts/mmos_installed_receipt.py` on both). The deterministic rollback
+target is the install #1 archive; dry-run plan returns rc 0 with the archive
+digest check `PASS` and changes nothing:
+
+```sh
+env -u PYTHONPATH /opt/homebrew/bin/python3.12 scripts/mmos_rollback.py \
+  --bundle "$HOME/Applications/Mastermind OS.app" \
+  plan --to "$HOME/.mastermind/mmos_bundles/mmos-l3-install-20261110-5420bb17-5420bb1714cb"
+```
+
+`--execute` remains the §5 procedure with its HUMAN quit step (rc 4 while the
+app runs) and re-observation of digest
+`sha256:54c775aed…d925671`. Rolling further back to
+`mmos-login-repair-20261109-3652d89` (revision
+`3652d8907df1738de551dd3032b42aa2a2acb482`, digest
+`sha256:6e00eeaaf47f40a7506c0d38b4ae327e41d4c7e8dfdcc2a389fbf0432cd57721`) is
+the archive directory
+`~/.mastermind/mmos_bundles/mmos-login-repair-20261109-3652d89-3652d8907df1`;
+that bundle is also preserved at `install-tmp-20261110T015231Z` (replaced by
+install #1).
+
+No receipt row here proves a *user-path* action; §3 item 3 is still owed by the
+owning lane, and a receipt is not acceptance.
 
 ## 2. Taking an installed receipt
 
@@ -172,9 +232,17 @@ nothing — not even the snapshot. The full human runbook (launch, honest
 user-path checklist, rollback drill, #983 evidence) is
 `integrations/mmos/INSTALLED_ACCEPTANCE_SCRIPT.md`.
 
-## 6. PROPOSED (not applied): src-tauri `MM_RECEIPT` marker
+## 6. src-tauri `MM_RECEIPT` marker — LANDED at `6d5b2f737`
 
-src-tauri is integrator-owned; this lane did **not** edit it. The patch below
+**Status correction (2026-11-10):** this patch is not merely proposed — it
+landed in `app/mastermind_os/src-tauri/src/main.rs` at commit `6d5b2f737`
+(`grep -n MM_RECEIPT_MARKER app/mastermind_os/src-tauri/src/main.rs` →
+`install_marker` field, `MM_RECEIPT_MARKER` const), and the installed build
+`mmos-l3-install2-20261110-5420bb17` reports
+`provenance: embedded_marker` for both identity fields (§1.1). The original
+proposal text is kept below as the authoring record.
+
+At authoring time src-tauri was integrator-owned and this lane did **not** edit it. The patch below
 makes receipts deterministic (`embedded_marker`) and simultaneously exposes
 the marker through the running app's `readiness` payload (referencing the
 constant in `Readiness` guarantees the linker keeps the bytes in the

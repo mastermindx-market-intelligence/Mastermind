@@ -784,6 +784,14 @@ REVIEWED_FILES['control_plane/workspace_capacity_fabric.py'] = {'sha256': 'f4834
 # hash and whole-token span only; any drift restores the ordinary D8 guard.
 REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256': 'e75e39ac6eba0344f4a3133d3c875976d342b7db9b69e6010c6d29f0ffc8f1bf', 'sites': ((49, 19, 22, 'int', '900'),)}
 
+# 2026-11-09 MMOS L2 Team UI (NewGroupPanel): the 600-character room-purpose
+# textarea limit is a reviewed UI input bound, never an identity. The path
+# token "group" is what classifies the file as identity-shaped for D8, so only
+# this exact whole token is qualified. Exact whole-file hash and span only; any
+# byte drift restores the ordinary D8 guard. Not independent review or release
+# authority.
+REVIEWED_FILES['app/mastermind_os/src/team/NewGroupPanel.tsx'] = {'sha256': 'b84219e674c305e9d57571214e9c970c63508b774573b5d284d0bf8be869459d', 'sites': ((187, 25, 28, 'int', '600'),)}
+
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and

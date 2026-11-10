@@ -1,9 +1,9 @@
 /** Typed conversation continuity for the #2180 native Hermes path.
 
 Separates WHY a bot conversation is not progressing — viewer disconnected,
-gateway busy, model 429/quota, native terminal, or effect-unknown — instead of
-collapsing them into one "error". Each state names the exact permitted
-continuation, and the rules are closed:
+gateway busy, gateway stopped, model 429/quota, native terminal, or
+effect-unknown — instead of collapsing them into one "error". Each state names
+the exact permitted continuation, and the rules are closed:
 
   * an effect-unknown mutation is NEVER re-sent: the only continuation is the
     idempotent `recover` operation, which the port expands with the ORIGINAL
@@ -13,12 +13,16 @@ continuation, and the rules are closed:
   * a fresh `send` is legal only from `idle`;
   * stop/steer are not exposed by the native producer (the gateway owns
     prompt.cancel/prompt.steer_queued/session.interrupt; this port wires none
-    of them), so no state offers them.
+    of them), so no state offers them;
+  * a stopped gateway is a stopped gateway, even with a pending pointer: its
+    owner starts it, so this port offers only observation and never an
+    automatic restart, reconnect or remake (NM-06).
 */
 import type { AdmissionState, ContinuationFailureReason, NativeOperation, NativeView } from "./contract";
 import type { NativePendingOperation } from "./pending-pointer";
 
 export type GatewayBusyReason = "session_busy" | "prompt_pending" | "port_busy";
+export type GatewayStoppedReason = "gateway_not_running";
 export type ViewerDisconnectDetail = "host_interrupted" | "client_unavailable" | "platform_unavailable";
 export type ModelLimitedReason = "provider_rate_limit" | "provider_quota_limit";
 
@@ -28,6 +32,7 @@ export type BotContinuity =
   | { kind: "native_terminal"; sessionId: string; admissionId: string; outcome: string; failureReason?: ContinuationFailureReason }
   | { kind: "model_limited"; sessionId: string; admissionId: string; failureReason: ModelLimitedReason; retryPolicy: "never_auto" }
   | { kind: "gateway_busy"; sessionId: string | null; reason: GatewayBusyReason }
+  | { kind: "gateway_stopped"; reason: GatewayStoppedReason }
   | { kind: "viewer_disconnected"; sessionId: string | null; detail: ViewerDisconnectDetail }
   | { kind: "auth_changed" }
   | { kind: "effect_unknown"; pending: NativePendingOperation }
@@ -51,6 +56,10 @@ const busyCodes: Record<string, GatewayBusyReason> = {
   NATIVE_PROMPT_PENDING: "prompt_pending",
   NATIVE_BUSY: "port_busy",
 };
+const stoppedCodes: Record<string, GatewayStoppedReason> = {
+  NATIVE_GATEWAY_STOPPED: "gateway_not_running",
+  NATIVE_GATEWAY_NOT_RUNNING: "gateway_not_running",
+};
 const viewerCodes: Record<string, ViewerDisconnectDetail> = {
   NATIVE_CLIENT_INTERRUPTED: "host_interrupted",
   NATIVE_CLIENT_UNAVAILABLE: "client_unavailable",
@@ -62,6 +71,9 @@ const modelLimited: ReadonlySet<string> = new Set(["provider_rate_limit", "provi
 function fromError(code: string, pending: NativePendingOperation | null | undefined): BotContinuity {
   if (code in busyCodes) return { kind: "gateway_busy", sessionId: null, reason: busyCodes[code] };
   if (code in viewerCodes) return { kind: "viewer_disconnected", sessionId: null, detail: viewerCodes[code] };
+  // Stopped beats the pending fallback: a stopped gateway has nothing in
+  // flight to reconcile, so it is never effect-unknown (NM-06).
+  if (code in stoppedCodes) return { kind: "gateway_stopped", reason: stoppedCodes[code] };
   if (code === "AUTHENTICATION_CHANGED" || code === "NATIVE_AUTH_NOT_DISPATCHED") return { kind: "auth_changed" };
   if (pending) return { kind: "effect_unknown", pending };
   return { kind: "unclassified", code };
@@ -100,6 +112,9 @@ export function classifyContinuity(input: ContinuityInput): BotContinuity {
   if (view.state === "REFUSED") {
     if (view.code && view.code in busyCodes) {
       return { kind: "gateway_busy", sessionId: view.session?.id ?? null, reason: busyCodes[view.code] };
+    }
+    if (view.code && view.code in stoppedCodes) {
+      return { kind: "gateway_stopped", reason: stoppedCodes[view.code] };
     }
     return { kind: "unclassified", code: view.code ?? "REFUSED" };
   }
@@ -142,6 +157,11 @@ export function permittedContinuations(state: BotContinuity): Continuation[] {
         ? [{ operation: { operation: "read", sessionId: state.sessionId },
             why: "the gateway owns the turn; re-read when it clears instead of queueing another" }]
         : [{ operation: { operation: "status" }, why: "the port is busy; re-observe before any mutation" }];
+    case "gateway_stopped":
+      // The gateway has its own owner: observation only, never an automatic
+      // restart, reconnect or remake from this port.
+      return [{ operation: { operation: "status" },
+        why: "the gateway is stopped; its owner starts it — automatic gateway recovery is not offered here" }];
     case "viewer_disconnected":
       return state.sessionId
         ? [{ operation: { operation: "read", sessionId: state.sessionId },

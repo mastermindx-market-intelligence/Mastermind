@@ -191,6 +191,19 @@ def _json(obj) -> dict:
         return _json_transport_error("not_json")
 
 
+def _json_read(obj) -> dict:
+    """Keep a rejected read inside its existing typed-unavailable boundary.
+
+    The transport helper deliberately returns errors instead of raising. Read
+    handlers need to observe that refusal before their source-specific fallback;
+    modifying tools retain the original transport/uncertain-outcome contract.
+    """
+    result = _json(obj)
+    if result.get("is_error") is True:
+        raise ValueError("read payload unavailable")
+    return result
+
+
 def _mapping_field_checked(mapping, key):
     """Return one optional mapping field plus whether its persisted shape was invalid."""
     if mapping is None:
@@ -720,7 +733,7 @@ async def get_decision_matrix(args):
                 or not isinstance(payload.get("rows"), list)
                 or not isinstance(payload.get("synthesis"), dict)):
             raise TypeError("decision matrix payload is malformed")
-        return _json(payload)
+        return _json_read(payload)
     except Exception:  # noqa: BLE001
         return _json({
             "subject": subject,
@@ -760,7 +773,7 @@ async def get_divergences(args):
             raise TypeError("lens synthesis confluence is malformed")
         if not isinstance(divergences, list) or not isinstance(vetoes, list):
             raise TypeError("lens synthesis lists are malformed")
-        return _json({"divergences": divergences, "confluence": confluence, "vetoes": vetoes})
+        return _json_read({"divergences": divergences, "confluence": confluence, "vetoes": vetoes})
     except Exception:  # noqa: BLE001
         return _json({
             "subject": subject,
@@ -1037,7 +1050,7 @@ async def get_quote(args):
             raise TypeError("live quote result is not a mapping")
         if not any(v is not None for v in px.values()):
             return _ok("no live quotes returned for the requested tickers.")
-        return _json({
+        return _json_read({
             "quotes": px,
             "note": "Live 15-min delayed prices (Polygon). For marks/entry checks — not a signal.",
         })
@@ -1086,7 +1099,7 @@ async def get_daily_briefing(args):
                 payload["read_status"] = "partial"
                 payload["failed_sources"] = ["briefing"]
                 payload["note"] = "Published briefing evidence is incomplete; missing fields are unknown."
-            return _json(payload)
+            return _json_read(payload)
 
         # Missing publication permits a live briefing; a failed artifact remains visible.
         failed_sources = (["briefing"] if briefing_failed else []) + ["intake"]
@@ -1109,7 +1122,7 @@ async def get_daily_briefing(args):
         if briefing_failed:
             payload["read_status"] = "partial"
             payload["failed_sources"] = ["briefing"]
-        return _json(payload)
+        return _json_read(payload)
     except Exception:  # noqa: BLE001 - setup, composition and serialization share one boundary
         return _json({
             "as_of": None,
@@ -1255,7 +1268,7 @@ async def get_intake_candidates(args):
                 out["failed_sources"] = ["intake_salience"]
                 note_key = "salience_note" if "note" in out else "note"
                 out[note_key] = "Candidate queue is available; salience tiers did not complete."
-        return _json(out)
+        return _json_read(out)
     except Exception:  # noqa: BLE001 - setup, build and serialization share one boundary
         return _json({
             "read_status": "unavailable",
