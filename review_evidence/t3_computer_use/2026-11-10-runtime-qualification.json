@@ -128,19 +128,29 @@
       "screenshot": true,
       "advanced_cdp": true,
       "input_proof": false
+    },
+    "mini1_owner_ui": {
+      "state": "PAGE_CONTROL_GRANT_STILL_ABSENT",
+      "profile_browser_id": "27ad85b1aa0961c64b4de54179a5c0291dfe52c8be124a78276d9590e1af326e",
+      "options_page": "Observed exact installed extension Options URL in native window75",
+      "enable_action": "Background actionOnly click returned INTERNAL_SWIFT_ERROR: Accessibility action is not supported; effect unverifiable",
+      "reconciliation": "Fresh original-window observations show controls paused; same-owner status control_enabled=false; Chrome window census shows no new permission prompt",
+      "receipt": "/tmp/t3-mini1-enable-reconciliation.json",
+      "permission_denial_observed": false,
+      "replayed": false
     }
   },
   "fleet": {
     "mini1": "connected; page control/screenshot/download grants disabled",
     "ubuntu4": "offline",
     "m1": "enabled T3 capacity_fabric; no discovered MCP or new skills",
-    "ubuntu0": "enabled T3 capacity_fabric; no discovered MCP or new skills",
-    "ubuntu1": "enabled T3 capacity_fabric; no discovered MCP or new skills",
-    "ubuntu2": "enabled T3 capacity_fabric; no discovered MCP or new skills",
-    "ubuntu3": "enabled T3 capacity_fabric; no discovered MCP or new skills",
+    "ubuntu0": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "ubuntu1": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "ubuntu2": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "ubuntu3": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
     "reverse_transport_to_m2": "M1 existing m2-recovery SSH route proven with strict host keys and batch authentication; no credentials, aliases or provider configuration changed",
     "m1_sdk": "Existing official Python mcp 1.28.1 imports successfully under Python3.12.13",
-    "m1_native": "Complete exact cohort staged, signatures verified and4.9.8 version succeeds on macOS15.6.1; canonical installation and actual SDK/backend/T3 proof pending; older daemon preserved",
+    "m1_native": "Complete exact signed native cohort staged and startup-qualified; canonical placement and exact-descriptor SDK/backend permission qualification remain pending. Earlier sender permissions are not 4.9.8 session qualification. This task did not stop or restart the old daemon; exact PID51015 most recently observed absent.",
     "m1_native_dependency_recovery": {
       "initial_failure": "Original dyld crash: required @rpath/libswiftCompatibilitySpan.dylib absent from incomplete stage",
       "diagnosis": "Original crash and Mach-O strong dependency, no unchanged rerun",
@@ -194,5 +204,131 @@
     "initial_provider_recovery_observed": true,
     "thread_settled": false,
     "scope": "Existing M2 T3 preview, not new native/skill/MastermindChrome acceptance"
+  },
+  "linux_preview_qualification": {
+    "state": "CANDIDATE_PROJECT_SKILLS_AND_LOCAL_PREVIEWS_PROVEN_GLOBAL_INSTALL_PENDING",
+    "provider": "capacity_fabric",
+    "model": "deepseek-v4.1-flash",
+    "installed_t3_cli_sha256": "c3af0c4963d40fa887380371c6f7d7d41fcc014119a51a05482ba8f452642158",
+    "setup_owner": "Installed T3 0.1.7 browser setup; existing exact-command administrative grants",
+    "setup_result": "Vendor AppArmor setup applied and native owner readback succeeded on Ubuntu0 through Ubuntu3; real previews then succeeded",
+    "original_skill_sha256": "e8679056534318ddad29000ab699d97dfc65293f206992fab03881141f19db22",
+    "surfaces": [
+      {
+        "host": "ubuntu0",
+        "thread_id": "mcp:8bbbb1ca-23e3-4713-8f6a-bfc86faa18cd",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-final.json",
+        "receipt_sha256": "39bae09a33ab379d2db653dafe2824604bbc80a7a6ca3089f34775b49da6f030",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu0 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": false,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      },
+      {
+        "host": "ubuntu1",
+        "thread_id": "mcp:f5c5b98a-1edc-4585-9464-e24708579c48",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-read.json",
+        "receipt_sha256": "b1fd1043a166a9155f4aa5be56abfe337dcb64fbba3d8a8234dcd4dafbc5ce21",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu1 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": true,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      },
+      {
+        "host": "ubuntu2",
+        "thread_id": "mcp:4400b2cd-46fe-41aa-a7b0-fa281f23fc00",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-read.json",
+        "receipt_sha256": "8aa08b280cd7e7b10c6f7c16894297eef906545867f10988c5bcacb1762f125a",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu2 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": true,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      },
+      {
+        "host": "ubuntu3",
+        "thread_id": "mcp:8616cc0d-5f99-4d88-82da-075508462c4d",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-read.json",
+        "receipt_sha256": "a3a90fbc5d6c1513c2bab4824fc66c097c2c3427753335792e01fc5d52c6ed8d",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu3 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": true,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      }
+    ],
+    "ubuntu0_initial_gap": "Recovered incorrect target arguments; successful focus click was followed by typing with its prior snapshot reference. Final result and cleanup succeeded; this was not accepted as a fully grounded sequence.",
+    "revised_skill": {
+      "sha256": "eeadc98a23255cdcafa1502494778471dc3ae8db527626fa04d0ea6021551111",
+      "changes": [
+        "Click/type locator examples",
+        "Direct replacement typing with clear=true",
+        "Fresh snapshot after each successful input",
+        "Original-target error reconciliation",
+        "Existing Linux browser setup owner"
+      ],
+      "fresh_project": "/tmp/t3-preview-skill-revision-proof",
+      "thread_id": "mcp:e485cc38-c828-4672-94f6-a63d64414046",
+      "run_id": "run:thread:mcp%3Ae485cc38-c828-4672-94f6-a63d64414046:ordinal:1",
+      "state": "COMPLETED_AND_GROUNDED",
+      "receipt": "/tmp/t3-preview-skill-revision-proof/guided-preview-canonical.json",
+      "receipt_sha256": "1bae20b82ec8adf79e1cbbed5eaeb5a3a913817b2adb9831739a379f7daa2244",
+      "exact_run_items": 21,
+      "successful_inputs": 2,
+      "tool_errors": 0,
+      "result": "Verified: T3 guided preview revision eea",
+      "owned_preview_closed_and_absent": true
+    },
+    "limits": [
+      "Project-scoped candidate qualification, not permanent provider installation",
+      "No Linux fleet MCP transport was installed",
+      "Earlier M2 SSH authentication/trust boundaries remain",
+      "Broader thread settled flags remain false despite completed runs and no active run"
+    ],
+    "revised_candidate_cleanup": {
+      "state": "PROJECT_SKILL_REMOVED_READBACK",
+      "project_id": "8ca64050-6e39-4136-8580-c0962789e11e",
+      "receipt": "/tmp/t3-preview-skill-revision-proof/isolated-project-skill-cleanup.json",
+      "source_proof_sha256": "1bae20b82ec8adf79e1cbbed5eaeb5a3a913817b2adb9831739a379f7daa2244",
+      "removed_skill_sha256": "eeadc98a23255cdcafa1502494778471dc3ae8db527626fa04d0ea6021551111",
+      "recorded_at": "2026-11-10T06:08:08.635399+00:00",
+      "preserved": "Canonical T3 history and proof files"
+    }
+  },
+  "ci_infrastructure_4307344": {
+    "run_id": 42760363734,
+    "attempt": 1,
+    "source_head": "43073443e8ebb4e1260f4a7e7ecba0210bf36898",
+    "tested_merge_sha": "687125633c406e00243e506e1e581116d8509e3f",
+    "terminal_state": "failure",
+    "successful_shards": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "failed_prerequisites": [
+      {
+        "job_id": 129644635687,
+        "shard": 0,
+        "step": "Verify closed application transport in isolated root fixtures",
+        "cause": "APT noble-security index file size differs from signed metadata; mirror sync diagnostic; image build exit100 before fixture tests"
+      },
+      {
+        "job_id": 129644635630,
+        "shard": 2,
+        "step": "H1 required real Linux no-ACL positive journey",
+        "cause": "APT noble-updates universe index file size differs from signed metadata; mirror sync diagnostic; image build exit100 before fixture tests"
+      }
+    ],
+    "test_gate": "failed because required shards failed",
+    "source_repair_for_apt": "none",
+    "replayed": "no; actual skill-consumption findings require a new owned source head"
   }
 }

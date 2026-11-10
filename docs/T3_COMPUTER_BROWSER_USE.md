@@ -50,6 +50,16 @@ python3 scripts/t3_computer_use_setup.py verify --browser-skills-only
 
 This mode installs no browser transport and makes no runtime availability claim. A T3 execution host can consume an already enrolled fleet browser through the existing M2 MCP owner; it does not need a duplicate browser registry. A remote stdio connection requires a separately proven, existing authenticated route to that owner. Do not copy credentials, invent SSH aliases, expose a new listener, or infer reverse access from M2's outward SSH access. Upload inputs and produced artifacts belong to the browser MCP execution host, which may differ from the agent's working machine.
 
+### Linux development preview
+
+The installed T3 0.1.7 server uses its own managed Chrome Headless Shell and bundled Playwright. Its first preview use installs the pinned, hash-verified browser. Electron, a separate system Node runtime and a connection to M2 are unnecessary for this local preview route.
+
+Use the existing `t3 browser setup` command with the actual server's `--base-dir` to diagnose AppArmor, system-library and font prerequisites. On a non-root Linux session it reports any required administrative setup. Through an existing authorized administrator route, the same owner installs and loads its vendor AppArmor profile and installs missing libraries/fonts when needed. Keep the browser sandbox enabled; do not substitute an unrelated cached Chromium or replace this owner. A setup message does not prove a browser interaction.
+
+On Ubuntu0–3, the existing owner's sandbox setup was applied and read back. Fresh T3 Capacity Fabric sessions then loaded a project-scoped candidate browser skill, opened hidden previews, filled and verified the fixture, and closed their owned previews. These are actual local-browser and candidate-skill proofs. Permanent provider skill installation and fleet MCP connectivity remain separate.
+
+The browser skill now documents T3's action-specific fields: click/type use `locator`, while the generic `target` field belongs to drag. Replacement typing uses `clear: true` directly. Every successful input is followed by a fresh snapshot before the next input. This refinement addresses a recovered argument error and a stale-reference sequence observed in the first Ubuntu0 run; a fresh isolated run of the revised skill completed the same workflow with two grounded inputs and no tool errors.
+
 ## Capabilities and limits
 
 | Route | Qualified interface | Important boundary |

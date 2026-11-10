@@ -18,7 +18,25 @@ Do not create another CDP listener, browser launcher, profile clone, credential 
 
 For an authorized development URL, use `preview_open` and retain the returned preview identity. Use `t3_preview_list` or `preview_status` to recover an existing preview instead of opening duplicates. Read each tool's live schema; preview identifiers and fleet browser identifiers are not interchangeable.
 
-Use `preview_snapshot` to ground an interaction, then `preview_act` for the intended control. Use `preview_evaluate` for bounded application-state assertions when needed. Observe after each mutation, handle an expected dialog through `preview_dialog`, and use `preview_resize` to check the requested viewport. Close only this task's preview through `t3_preview_close` after saving the result. Keep unrelated previews and active development sessions intact.
+Use `preview_snapshot` to ground an interaction. For `preview_act` click and type actions, put the latest snapshot's reference in `locator`, formatted as `aria-ref=OBSERVED_REF`. The generic tool's `target` field is a drag destination. Supply the targeting fields for the selected action and retain the exact `tabId`.
+
+To replace an editable field, use `type` with its fresh `locator`, the intended `text`, and `clear: true`. This fills the identified control directly; omit a preliminary focus click. Replace these symbolic values with the current observation:
+
+```json
+{"action":"type","tabId":"OBSERVED_TAB_ID","locator":"aria-ref=FIELD_REF_FROM_LATEST_SNAPSHOT","text":"EXPECTED_VALUE","clear":true}
+```
+
+After every successful input, take a fresh `preview_snapshot` before the next input. This includes a click used only to focus a control. Verify the field value or page state and use references from that new snapshot:
+
+```json
+{"action":"click","tabId":"OBSERVED_TAB_ID","locator":"aria-ref=BUTTON_REF_FROM_NEW_SNAPSHOT"}
+```
+
+Take another snapshot and verify the intended result. For `Provide exactly one target`, check the action-specific targeting fields. For `requires an editable target`, first check that the field was supplied through `locator`; the message alone does not establish that the observed field is disabled or read-only. Observe the original field using a fresh snapshot and, if needed, a bounded read-only `preview_evaluate`. Once the original outcome is reconciled, correct the arguments and make one freshly grounded attempt. Do not guess a focus click, alter the field's editability, or use evaluation to perform the input. Preserve the no-replay rule for uncertain effects.
+
+Handle an expected dialog through `preview_dialog` and use `preview_resize` to check the requested viewport. Close only this task's preview through `t3_preview_close` after saving the result, then verify its absence with `t3_preview_list`. Keep unrelated previews and active development sessions intact.
+
+On Linux, T3's existing server preview uses its own managed, verified Chrome Headless Shell, installed on first use. Diagnose sandbox, system-library or font errors through the installed `t3 browser setup --base-dir ACTUAL_T3_HOME` owner. If it reports an administrative prerequisite, use the existing authorized administration route; preserve any actual refusal. Keep Chrome's sandbox enabled. Do not select an unrelated cached browser or create a replacement launcher to hide a dependency failure. Setup success and a working preview are separate checks.
 
 Preview input runs in its own browser surface and ordinarily needs no physical mouse takeover. It does not grant access to a fleet profile's authentication or native OS dialogs; use the route that owns those tasks.
 
