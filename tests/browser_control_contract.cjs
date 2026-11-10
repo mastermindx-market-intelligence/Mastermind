@@ -149,5 +149,51 @@ function fixture() {
     const tab={tab_id:5,url_fingerprint:hash("https://allowed.test/new")};
     await f.run(request("snapshot",tab));assert.equal((await f.run(request("close",tab))).effect,"APPLIED");
   }
+  for (const [message,category] of [
+    ["Cannot access contents of url https://allowed.test/private?secret=value", "ACCESS_REJECTED"],
+    ["Could not load file: browser_page.js", "SCRIPT_UNAVAILABLE"],
+    ["Extension context invalidated.", "CONTEXT_INVALIDATED"],
+    ["No frame with id 0 in tab 1", "DOCUMENT_UNAVAILABLE"],
+    ["unexpected failure with private data", "API_REJECTED"]
+  ]) {
+    const f=fixture();let calls=0;
+    f.api.scripting.executeScript=async()=>{calls++;throw Error(message);};
+    const result=await f.snapshot();
+    assert.equal(calls,1,"failed injection must not be replayed");
+    assert.equal(result.status,"BROWSER_UNAVAILABLE");assert.equal(result.effect,"NOT_APPLIED");
+    assert.deepEqual(result.data,{detail:{stage:"SCRIPT_INJECTION",api:"chrome.scripting.executeScript",category}});
+    assert.ok(!JSON.stringify(result).includes(message));assert.equal(f.state.effects.length,0);
+  }
+  {
+    const f=fixture();delete f.api.scripting;
+    const result=await f.snapshot();
+    assert.equal(result.data.detail.category,"API_UNAVAILABLE");assert.equal(result.effect,"NOT_APPLIED");
+  }
+  {
+    const f=fixture();let calls=0;
+    f.state.messageHook=()=>{calls++;throw Error("Could not establish connection. Receiving end does not exist.");};
+    const result=await f.snapshot();assert.equal(calls,1);
+    assert.equal(result.status,"BROWSER_UNAVAILABLE");assert.equal(result.effect,"NOT_APPLIED");
+    assert.deepEqual(result.data,{detail:{stage:"DOCUMENT_MESSAGE",api:"chrome.tabs.sendMessage",category:"RECEIVER_MISSING"}});
+    assert.equal(f.state.effects.length,0);
+  }
+  {
+    const f=fixture();await f.snapshot();let clicks=0;
+    f.state.messageHook=message=>{if(message.action==="click") {clicks++;throw Error("The message port closed before a response was received.");}};
+    const result=await f.run(request("click"));assert.equal(clicks,1);
+    assert.equal(result.status,"ACTION_EFFECT_UNKNOWN");assert.equal(result.effect,"EFFECT_UNKNOWN");
+    assert.equal(result.data.detail.category,"MESSAGE_PORT_CLOSED");
+  }
+  {
+    const f=fixture();f.state.sites.clear();
+    f.api.scripting.executeScript=()=>{throw Error("must not inject without permission");};
+    const result=await f.snapshot();assert.equal(result.status,"SITE_PERMISSION_REQUIRED");assert.equal(result.data,null);
+    assert.equal(f.state.effects.length,0);
+  }
+  {
+    const f=fixture();f.api.tabs.sendMessage=async()=>({ok:"malformed",code:"OK",effect:"NOT_APPLIED"});
+    const result=await f.snapshot();assert.equal(result.status,"PAGE_RESPONSE_INVALID");assert.equal(result.data,null);
+  }
   console.log("browser controller contract passed");
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
