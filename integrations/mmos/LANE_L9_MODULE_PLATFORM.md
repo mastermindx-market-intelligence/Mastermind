@@ -24,7 +24,7 @@ Facts held at start (from brief, not re-derived):
 | 2 | Module template + first module (`mastermind-core`) | lead + children | blocked on scout + item 1 |
 | 3 | Platform proof in dev instance | lead | blocked on item 2 |
 | 4 | Attack on item 3 | child grok-4.7 | blocked on item 3 |
-| 5 | Module map of old app (+ amendment columns) | child gemini-4-argon (high) | launched 2026-11-10; amendment = rework round |
+| 5 | Module map of old app (+ amendment columns) | child glm-5.3 (effort high) | running 2026-11-10, after route switch |
 | 6 | Run-failure notes (default instance, READ_ONLY) | child glm-5.3 | launched 2026-11-10 |
 | 7 | Dev skill `skills/mmos-module-dev/SKILL.md` | lead | blocked on item 3 |
 | 8 | Cold-agent test (deepseek-v4.1-flash) | lead + child | blocked on item 7 |
@@ -35,18 +35,10 @@ Facts held at start (from brief, not re-derived):
 | Time (UTC) | Model | Slice | Branch | Result |
 | --- | --- | --- | --- | --- |
 | launch | glm-5.3 | item 1 dev instance | t3/l9-dev-instance | pending |
-| launch | gemini-4.argon (effort high) | item 5 module map | t3/l9-module-map | pending |
-| ~07:00Z | gemini-4.argon (effort high) | item 5 module map — RETRY: first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a Gemini-side transport/schema failure, not a task denial, not a permission refusal). Same brief with amendment columns folded in from the start. | t3/l9-module-map | pending |
-| ~07:00Z | gemini-4.argon (effort high) | item 5 module map — RETRY: first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a Gemini-side transport/schema failure, not a task denial, not a permission refusal). Same brief with amendment columns folded in from the start. | t3/l9-module-map | pending |
-| ~07:00Z | gemini-4.argon (effort high) | item 5 module map — RETRY: first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a Gemini-side transport/schema failure, not a task denial, not a permission refusal). Same brief with amendment columns folded in from the start. | t3/l9-module-map | pending |
-| ~07:00Z | gemini-4.argon (effort high) | item 5 module map — RETRY: first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a Gemini-side transport/schema failure, not a task denial, not a permission refusal). Same brief with amendment columns folded in from the start. | t3/l9-module-map | pending |
-| ~07:00Z | gemini-4.argon (effort high) | item 5 module map — RETRY: first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a Gemini-side transport/schema failure, not a task denial, not a permission refusal). Same brief with amendment columns folded in from the start. | t3/l9-module-map | pending |
-| relaunch ~07:00Z | gemini-4.argon (effort high) | item 5 module map — first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a transport/schema failure at the Gemini provider, not a task denial). Same brief + amendment columns folded in from the start. | t3/l9-module-map | pending |
-| relaunch ~07:00Z | gemini-4.argon (effort high) | item 5 module map — first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a transport/schema failure at the Gemini provider, not a task denial). Same brief + amendment columns folded in from the start. | t3/l9-module-map | pending |
-| relaunch ~07:00Z | gemini-4.argon (effort high) | item 5 module map — first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a transport/schema failure at the Gemini provider, not a task denial). Same brief + amendment columns folded in from the start. | t3/l9-module-map | pending |
-| relaunch ~07:00Z | gemini-4.argon (effort high) | item 5 module map — first launch died on provider API 400 (`thought_signature` missing in functionCall parts; a transport/schema failure at the Gemini provider, not a task denial). Same brief + amendment columns folded in from the start. | t3/l9-module-map | pending |
-| relaunch 07:0x | gemini-4.argon (effort high) | item 5 module map (first launch died on provider API 400 `thought_signature` — transport failure, not a task denial; amendment columns folded in from the start) | t3/l9-module-map | pending |
-| relaunch 07:0x | gemini-4.argon (effort high) | item 5 module map (first launch died on provider API 400 `thought_signature` — transport failure, not a task denial; retry brief includes the amendment columns from the start) | t3/l9-module-map | pending |
+| launch | gemini-4-argon (effort high) | item 5 module map | t3/l9-module-map | DEAD: provider API 400, `thought_signature` missing in functionCall parts (Gemini-side transport/schema failure; not a task denial, not a permission refusal) |
+| ~07:00Z | gemini-4-argon (effort high) | item 5 module map, retry 1 (`0359ed93`, launched from an errored turn whose result was lost) | t3/l9-module-map | DEAD: identical provider API 400 |
+| ~07:16Z | gemini-4-argon (effort high) | item 5 module map, retry 2 (`02c856d3`) | t3/l9-module-map | DEAD: identical provider API 400 |
+| ~07:2xZ | glm-5.3 (effort high) | item 5 module map (`647e3c43`) — route switched after three identical transport failures on gemini-4-argon; that model's function-calling route is broken on capacity_fabric today. glm-5.3 is the method's co-designated model for census/statement outputs. Outage goes to the scoreboard in the next return. No partial branch was ever pushed by the dead children. | t3/l9-module-map | pending |
 | launch | glm-5.3 | item 6 run failure notes | t3/l9-run-failure-notes | pending |
 | launch | glm-5.3 | SDK scout (evidence only) | — | pending |
 
@@ -57,6 +49,9 @@ Facts held at start (from brief, not re-derived):
 - Guard suites to run on new source at integration: identity/registry suites
   (`tests/test_installed_source_git_identity.py`, `tests/test_project_source_installed_registry.py`
   and neighbours) — verified by lead at merge time; fix source, never the guard.
+- gemini-4-argon is UNUSABLE today for function-calling children on capacity_fabric
+  (3/3 transport failures, distinct request ids). Do not route children to it until the
+  provider route is fixed; use glm-5.3 (statement) or grok-4.7 (attack/diff) instead.
 
 ## Plan amendment merged 2026-11-10 (trunk `c0263d2d1`)
 
