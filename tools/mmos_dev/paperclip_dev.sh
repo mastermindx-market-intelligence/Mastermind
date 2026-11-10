@@ -20,8 +20,8 @@
 #     config would point the dev instance's embedded Postgres data dir at
 #     the DEFAULT instance's db/. This script therefore always writes a
 #     COMPLETE config.json with explicit absolute paths under the dev root.
-#   * `run` writes <instance-root>/runtime-info.json containing the live
-#     server pid; used (plus the pidfile) for stop/status.
+#   * This build's `run` does NOT write runtime-info.json; stop/status rely
+#     on the controller pidfile plus the port listener (see identity below).
 #   * Plugin install: POST <url>/api/plugins/install with
 #     {"packageName":"<abs dir>","isLocalPath":true}. local_trusted mode
 #     authenticates every request as an implicit instance-admin board actor,
@@ -31,11 +31,21 @@
 #     plugin's declared entrypoints; touching the worker entrypoint file
 #     triggers a debounced (500ms) worker restart. No server restart needed.
 #
-# DEFAULT-INSTANCE IDENTITY MARKER (used by the refusal)
-#   GET <url>/api/health returns databaseBackup.backupDir containing the
-#   owning instance's root path (the default instance answers with
-#   .../.paperclip/instances/default/data/backups). If the resolved target
-#   URL's health body contains "$HOME/.paperclip/", the script refuses.
+# INSTANCE IDENTITY (build 2026.1106.0)
+#   Refusal side: if the /api/health body at the target URL contains a path
+#   under "$HOME/.paperclip/", the script refuses — that is the default
+#   instance answering. Belt-and-braces only: the reserved-port checks above
+#   already keep us off 3100/3179.
+#   Positive side: this build's health body carries NO instance paths when
+#   database backup is disabled (no databaseBackup block; verified on the
+#   2026-11-10 dev boot — /api/health answered status:ok with the server
+#   banner holding the backup dir, not the health body). A path marker can
+#   prove "default" but never "dev". Positive dev identity is therefore
+#   argv-based: the process LISTENING on our config port was launched as
+#   `paperclipai run -d <DEV_HOME> -i <INSTANCE_ID>`, so its command line
+#   contains DEV_HOME (see listener_is_ours). That survives controller
+#   restarts and a pidfile wipe; a foreign instance rebinding our port shows
+#   a different argv and is refused as "unknown".
 #
 # BOUNDARIES ENFORCED (refusal = exit 3, before any mutation or HTTP write)
 #   - dev home must not be ~/.paperclip or anything under it
@@ -274,8 +284,12 @@ static_refusal_checks() {
   fi
 }
 
-# Health-identity verdict for a body: "default" | "dev" | "unknown".
-health_identity() {
+# Path-marker verdict for a health body: "default" | "dev" | "" (no marker).
+# NOTE: build 2026.1106.0's /api/health body carries NO instance paths when
+# database backup is disabled (no databaseBackup block), so a body path can
+# prove "default" (refusal) but usually NOT "dev". Positive dev identity
+# comes from listener_is_ours below.
+health_body_marker() {
   local body="$1"
   case "$body" in
     *"$DEFAULT_HOME/"*) echo "default" ; return ;;
@@ -283,22 +297,66 @@ health_identity() {
   case "$body" in
     *"$DEV_HOME/"*)     echo "dev" ; return ;;
   esac
-  echo "unknown"
+  echo ""
 }
 
-# GET <base>/api/health and refuse if it carries the default instance
-# identity. Prints the identity verdict ("down" when unreachable).
+# True when the /api/health body is a healthy Paperclip response.
+health_ok() { # $1=body
+  [ -n "$1" ] || return 1
+  case "$1" in
+    *'"status":"ok"'*|*'"status": "ok"'*) return 0 ;;
+  esac
+  return 1
+}
+
+# True when the process LISTENING on $port was launched for THIS dev home.
+# The server runs as: paperclipai run -d <DEV_HOME> -i <INSTANCE_ID>, so its
+# argv contains DEV_HOME. This is the positive dev identity in a build whose
+# health body carries no instance paths; it survives controller restarts and
+# pidfile wipes, and a foreign instance rebinding our port fails it.
+listener_is_ours() { # $1=port
+  local port="$1" pid cmd
+  pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+  [ -n "$pid" ] || return 1
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  [ -n "$cmd" ] || return 1
+  case "$cmd" in
+    *"$DEV_HOME"*) return 0 ;;
+  esac
+  return 1
+}
+
+# GET <base>/api/health, refuse on the default-instance path marker, and
+# print the identity verdict:
+#   "down"      nothing reachable on the port
+#   "dev"       ours: healthy body AND (dev path marker OR the listener on
+#               our port was launched with DEV_HOME in argv)
+#   "unhealthy" something answers but status is not ok
+#   "unknown"   healthy Paperclip answer we cannot prove is ours
 dynamic_identity_check() { # $1=base_url
-  local base="$1" body rc
+  local base="$1" body marker port
   if ! body="$(http_get "$base/api/health")"; then
     echo "down"
     return 0
   fi
-  rc="$(health_identity "$body")"
-  if [ "$rc" = "default" ]; then
-    die_refuse "URL $base answers /api/health with the default instance identity (marker: databaseBackup.backupDir under $DEFAULT_HOME/)."
+  marker="$(health_body_marker "$body")"
+  if [ "$marker" = "default" ]; then
+    die_refuse "URL $base answers /api/health with the default instance identity (path marker under $DEFAULT_HOME/)."
   fi
-  echo "$rc"
+  if [ "$marker" = "dev" ]; then
+    if health_ok "$body"; then echo "dev"; else echo "unhealthy"; fi
+    return 0
+  fi
+  if ! health_ok "$body"; then
+    echo "unhealthy"
+    return 0
+  fi
+  port="${base##*:}"
+  if listener_is_ours "$port"; then
+    echo "dev"
+    return 0
+  fi
+  echo "unknown"
 }
 
 # --------------------------------------------------------------------------- #
@@ -613,8 +671,8 @@ cmd_up() {
     print_info_block "$base" "healthy (identity: dev)" "${pid:-unknown (external)}"
     exit 0
   fi
-  if [ "$identity" = "unknown" ]; then
-    die 1 "port from $CONFIG_PATH is already serving a foreign/unknown Paperclip instance at $base; refusing to launch."
+  if [ "$identity" = "unknown" ] || [ "$identity" = "unhealthy" ]; then
+    die 1 "port from $CONFIG_PATH is already serving a foreign/unhealthy Paperclip instance at $base (identity: $identity); refusing to launch."
   fi
 
   # identity = down → launch
@@ -629,23 +687,24 @@ cmd_up() {
   local cli_pid=$!
   echo "$cli_pid" > "$PIDFILE"
 
-  local deadline=$(( SECONDS + START_TIMEOUT )) body
+  local deadline=$(( SECONDS + START_TIMEOUT )) verdict
   while :; do
+    verdict="$(dynamic_identity_check "$base" 2>/dev/null || echo down)"
+    if [ "$verdict" = "dev" ]; then
+      break
+    fi
     if ! kill -0 "$cli_pid" 2>/dev/null; then
       # CLI process gone. Known quirk: a start/wait path may report failure
-      # while the server still comes up; reconcile health before judging.
-      body="$(http_get "$base/api/health" || true)"
-      if [ "$(health_identity "$body")" = "dev" ]; then
+      # while the server still comes up; give health a moment, then judge.
+      sleep 3
+      verdict="$(dynamic_identity_check "$base" 2>/dev/null || echo down)"
+      if [ "$verdict" = "dev" ]; then
         break
       fi
       err "paperclipai run exited before the instance became healthy. Last log lines:"
       tail -n 30 "$SERVER_LOG" >&2 || true
       rm -f "$PIDFILE"
       die 1 "dev instance failed to start."
-    fi
-    body="$(http_get "$base/api/health" || true)"
-    if [ "$(health_identity "$body")" = "dev" ]; then
-      break
     fi
     [ "$SECONDS" -lt "$deadline" ] || {
       err "not healthy after ${START_TIMEOUT}s. Terminating the launched process; last log lines:"
