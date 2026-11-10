@@ -137,7 +137,7 @@
   "ci_dependency": {
     "prior_fixture": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
     "qualified_successor": "0c0521169260d87889da8a7711a90460982eefa2",
-    "owner_proof": "https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6757956429",
+    "owner_proof": "mastermindx-market-intelligence/macro#10740; issuecomment-6757956429",
     "whole_cohorts_preserved": true,
     "focused_tests_passed": 412,
     "consumer_change": ".github/workflows/ci.yml paired fixture ref only",
