@@ -265,3 +265,17 @@ def test_reply_already_commented_is_not_posted_twice():
                         comments={"is-1": [{"body": "fake answer"}]})
     assert run(pc2, t3) == 0
     assert [c for c in pc2.calls if c[0] == "comment"] == []
+
+
+def test_unexpected_exception_still_releases_the_issue():
+    # e.g. FileNotFoundError from a bad t3_bin: not a CarrierError, but the
+    # checked-out issue must not be left silently held.
+    class CrashingT3(FakeT3):
+        def messages(self, count=60):
+            raise FileNotFoundError("no such t3 binary")
+    pc = FakePaperclip(issues=one_issue())
+    with pytest.raises(FileNotFoundError):
+        run(pc, CrashingT3())
+    kinds = [c[0] for c in pc.calls]
+    assert "comment" in kinds  # release note posted
+    assert pc.issues["is-1"]["status"] == "todo"  # released, visible

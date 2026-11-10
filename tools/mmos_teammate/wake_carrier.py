@@ -185,10 +185,10 @@ class T3Thread:
     """
 
     def __init__(self, t3_bin: str, t3_home: str, thread_id: str, scratch_dir: str):
-        self._bin = t3_bin
-        self._home = t3_home
+        self._bin = os.path.expanduser(t3_bin)
+        self._home = os.path.expanduser(t3_home)
         self.thread_id = thread_id
-        self._cwd = scratch_dir
+        self._cwd = os.path.expanduser(scratch_dir)
 
     def _run(self, args, stdin_text=None):
         env = dict(os.environ)
@@ -310,9 +310,6 @@ def run_carrier(pc, t3_factory, opts):
         else:
             deliver(pc, issue, reply, crash_after)
         return 0
-    except CarrierError as exc:
-        release_issue(pc, issue["id"], str(exc))
-        raise
     except NeedsHuman:
         try:
             pc.add_comment(issue["id"],
@@ -320,6 +317,9 @@ def run_carrier(pc, t3_factory, opts):
                            "T3 thread; issue left in_progress")
         except CarrierError:
             pass
+        raise
+    except Exception as exc:  # noqa: BLE001 - ANY failure must release the issue
+        release_issue(pc, issue["id"], f"{type(exc).__name__}: {exc}")
         raise
 
 
@@ -381,6 +381,9 @@ def main() -> int:
         return 0
     except CarrierError as exc:
         log(f"carrier failure: {exc}")
+        return 1
+    except Exception as exc:  # noqa: BLE001 - unexpected crash: one clean line, exit 1
+        log(f"carrier crashed: {type(exc).__name__}: {exc}")
         return 1
 
 

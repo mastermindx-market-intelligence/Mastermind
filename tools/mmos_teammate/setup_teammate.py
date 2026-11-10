@@ -204,7 +204,7 @@ def start_primary_thread(spec):
 def write_carrier_config(spec, agent_dir):
     t3 = spec["t3"]
     cfg = {
-        "t3_bin": t3["t3_bin"],
+        "t3_bin": expand(t3["t3_bin"]),
         "t3_home": expand(t3["dev_home"]),
         "t3_cwd": expand(t3.get("t3_cwd") or "/tmp"),
         "pending_timeout_sec": int(spec.get("pending_timeout_sec", 600)),
