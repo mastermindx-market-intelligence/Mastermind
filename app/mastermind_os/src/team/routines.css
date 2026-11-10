@@ -99,8 +99,13 @@
   font-size: 16px;
   font-weight: 500;
 }
+/* The shell's global `dl` rule pairs dt/dd in two columns; these fact rows
+   wrap each pair in a div, so that 110px template would stuff a whole row
+   into the label column (parity find: rail notes wrapped 13px wide). Reset
+   it — rows stack full-width, each row's own flex handles label vs value. */
 .mm-routines-facts {
   display: grid;
+  grid-template-columns: none;
   gap: 8px;
   margin: 0;
 }
@@ -114,12 +119,17 @@
   font-size: 13px;
   flex-shrink: 0;
 }
+/* Long honest values (e.g. the not-projected note) must wrap inside the
+   remaining column: flex:1 + min-width:0 keeps short facts on one right-
+   aligned row while stopping the value collapsing to one character wide. */
 .mm-routines-fact dd {
   margin: 0;
   color: var(--noir-text-primary);
   font-size: 14px;
   text-align: right;
   overflow-wrap: anywhere;
+  flex: 1;
+  min-width: 0;
 }
 .mm-routines-unknown {
   color: var(--noir-text-secondary);

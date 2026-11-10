@@ -190,8 +190,12 @@
 .mm-cs .mm-chip[data-ready="unknown"] {
   color: var(--noir-text-secondary);
 }
+/* grid-template-columns: none resets the shell's global `dl` 110px template —
+   rows wrap each dt/dd pair in a div, so that template would collapse each
+   row into the label column. */
 .mm-cs-facts {
   display: grid;
+  grid-template-columns: none;
   gap: 8px;
   margin: 0;
 }
@@ -205,12 +209,16 @@
   font-size: 13px;
   flex-shrink: 0;
 }
+/* flex:1 + min-width:0 keeps short values on one right-aligned row while
+   long honest notes wrap in the remaining column, never one char wide. */
 .mm-cs-facts dd {
   margin: 0;
   color: var(--noir-text-primary);
   font-size: 14px;
   text-align: right;
   overflow-wrap: anywhere;
+  flex: 1;
+  min-width: 0;
 }
 .mm-cs-unknown {
   color: var(--noir-text-secondary);
@@ -244,6 +252,7 @@
 }
 .mm-cs-capabilities dl {
   display: grid;
+  grid-template-columns: none;
   gap: 6px;
   margin: 0;
 }
@@ -262,6 +271,8 @@
   font-size: 13px;
   text-align: right;
   overflow-wrap: anywhere;
+  flex: 1;
+  min-width: 0;
 }
 .mm-cs-capability[data-state="available"] {
   color: var(--noir-sage);

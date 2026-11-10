@@ -255,6 +255,42 @@ describe("L2 responsive contract — fixed slots and type at narrow widths", () 
     expect(label!.body).toContain("flex-shrink: 0");
   });
 
+  it("label/value fact rows never collapse a long honest value to one character wide (parity find: rail notes wrapped in a ~13px column)", () => {
+    // Two layers trap the value. (1) The shell's global `dl` rule applies a
+    // 110px/1fr two-column template; fact rows wrap each dt/dd pair in a div,
+    // so every row lands in the 110px label column — reset with
+    // grid-template-columns: none on the row list. (2) The frozen dt plus
+    // overflow-wrap:anywhere lets the dd shrink to min-content — one character
+    // per line; flex:1 + min-width:0 keeps the value in a real wrap column.
+    const guarded: Array<[path: string, selector: string]> = [
+      [CSS_FILES.routines, ".mm-routines-fact dd"],
+      [CSS_FILES.codeSettings, ".mm-cs-facts dd"],
+      [CSS_FILES.codeSettings, ".mm-cs-capabilities dd"],
+    ];
+    for (const [path, selector] of guarded) {
+      const block = blocks(path).find(
+        (b) => !b.media && b.selector === selector,
+      );
+      expect(block, `${path} ${selector}`).toBeTruthy();
+      expect(block!.body, `${path} ${selector}`).toContain("min-width: 0");
+      expect(block!.body, `${path} ${selector}`).toContain("flex: 1");
+    }
+    const templated: Array<[path: string, selector: string]> = [
+      [CSS_FILES.routines, ".mm-routines-facts"],
+      [CSS_FILES.codeSettings, ".mm-cs-facts"],
+      [CSS_FILES.codeSettings, ".mm-cs-capabilities dl"],
+    ];
+    for (const [path, selector] of templated) {
+      const block = blocks(path).find(
+        (b) => !b.media && b.selector === selector,
+      );
+      expect(block, `${path} ${selector}`).toBeTruthy();
+      expect(block!.body, `${path} ${selector}`).toContain(
+        "grid-template-columns: none",
+      );
+    }
+  });
+
   it("≤480px keeps every font size the lane ships at or above 11px (readable, no micro-type)", () => {
     for (const path of Object.values(CSS_FILES)) {
       for (const block of blocks(path)) {
