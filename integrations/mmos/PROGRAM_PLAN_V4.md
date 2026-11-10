@@ -101,7 +101,8 @@ Carries over, unchanged in value:
 
 | Lane | Outcome | State |
 | --- | --- | --- |
-| T1 shared conversation | DONE_WHEN 1 to 3, in the dev bundle against an isolated T3 server, then paired to the real one by the principal | starts now, critical path |
+| T1 shared conversation | DONE_WHEN 1 to 3, in the dev bundle against an isolated T3 server, then paired to the real one by the principal | stage 1 accepted 2026-11-10 at trunk `6a2634bb6` (stock client signs in, opens one thread by URL, queues, survives a restart, two views; see `T1_SHARED_CONVERSATION_FINDINGS.md`). Stage 2 (the window) starts when L8 has returned |
+| T1s live answer text | Answer text shown while it is written for Claude-driver threads: a pinned T3 server patch that handles text deltas the way the Codex adapter already does, proven on the dev server | started 2026-11-10. See section 8 |
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | starts when L9 has landed |
 | T3 Team fork | Teammate list and work cards as a thin fork of the T3 web client | starts when T1 is proven |
 | T4 work loop | DONE_WHEN 6 and 10, on TeamLink plus the engine from L1 | after T2 |
@@ -134,3 +135,24 @@ Carries over, unchanged in value:
 | Where does the teammate binding live without a new registry? | Two investigators read the Paperclip agent record, RuntimeBinding and the TeamLink plugin | T2 |
 | Which Paperclip adapter wakes a T3 thread with the least new code? | `process` or `http` adapter on a test agent in the dev instance, one wake, one return | T2 |
 | Does T3's server keep serving and scheduling with every window closed? | Headless serve, close the window, fire one schedule | T5 |
+
+## 8. Amendment, 2026-11-10 14:30 UTC: what "live text" means today
+
+T1 measured it and the principal checked the source at pin `0770446`. On T3 server 0.1.7,
+a thread on the Claude driver (every Capacity Fabric model, and Claude itself) shows
+thinking and tool activity live, but answer text only when a content block is complete:
+`ClaudeAdapterV2.ts` handles `thinking_delta` and has no branch for `text_delta`. The Codex
+adapter in the same source does stream answer text. A model that writes its answer as one
+block (`glm-5.3`) therefore shows the whole answer at the end of the turn; a model that
+alternates text and tools shows each part as it finishes, which is why long working
+sessions on T3 feel live.
+
+Consequences:
+
+- DONE_WHEN 2 is read as: live thinking and tool activity, and answer text at least part
+  by part. Text appearing while it is written is the target and is lane T1s, not a gate on
+  T1 stage 2, T2 or the Team fork.
+- The fix is a server patch carried the same way as the existing admission patch
+  (`integrations/t3/upstream_patches/`), proven on the dev server. Putting it into the T3
+  bundle the Chairman runs is a separate act and is not done by a lane.
+- It is not a reason to fork the web client and not a reason to change provider.
