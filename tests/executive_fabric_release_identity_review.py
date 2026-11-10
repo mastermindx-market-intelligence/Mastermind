@@ -655,7 +655,8 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Company route composition moves the existing control_room_action function
 # by five lines. Whole-function AST equality against 7ff2a1ac proves all eight
 # refusal operands unchanged; retain exactly those tokens and the new full hash.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5aefe400aa824d768b746b3a4b8575da1f67216faf3cc9ed5e3b30b1977f2a42', 'sites': ((933, 71, 74, 'int', '400'), (944, 71, 74, 'int', '403'), (952, 71, 74, 'int', '400'), (958, 79, 82, 'int', '400'), (967, 71, 74, 'int', '400'), (977, 71, 74, 'int', '403'), (982, 76, 79, 'int', '503'), (988, 71, 74, 'int', '403'))}
+# Estate composition self-check: unchanged existing guarded statements; no new exemptions.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '4ecb26e79fe43d48db25b0b61cfa0af4926b82df1a0e528ac6a56b701208cf30', 'sites': ((934, 71, 74, 'int', '400'), (945, 71, 74, 'int', '403'), (953, 71, 74, 'int', '400'), (959, 79, 82, 'int', '400'), (968, 71, 74, 'int', '400'), (978, 71, 74, 'int', '403'), (983, 76, 79, 'int', '503'), (989, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -668,10 +669,8 @@ REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
 # full W3 composition/source review2fcbe954 preserves that exact Constant.
 # Bind the reviewed W3 postimage, including retained-input evidence, only.
 # This is not a UID exemption or a scanner/defaults change.
-REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
-    'sha256': 'f6b94b81eec07354bf74ae6d589e76b43255604006b11cf7a7712a02fe513379',
-    'sites': ((190, 46, 49, 'int', '512'),),
-}
+# Estate composition self-check: unchanged existing guarded statements; no new exemptions.
+REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {'sha256': 'baac5f10115c8d0c896d358a7866b8e2f25f3fb4179169bab701451d0ca0a755', 'sites': ((190, 46, 49, 'int', '512'),)}
 
 # Frozen Portfolio mmtask source restored as reviewable data (P7.T5).
 # These are text display bounds, never UIDs. The payload's 500 Constant follows
@@ -727,7 +726,8 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # the trusted t3_attempt_fleet_source constructor guard adds four further
 # lines above the handler; the same four reviewed denial operands are
 # byte-identical and shift by four more lines.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
+# Estate composition self-check: unchanged existing guarded statements; no new exemptions.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '19e893ccdae506b958f13690acd62c98aab45f5b1d4025ab6fdb6a476e2f24f7', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -799,7 +799,8 @@ REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256
 # and PR #2351 capacity-fabric OS read (commit 3838b8b82) both insert lines above
 # the fixture; the three reviewed 503 operands are byte-identical at their merged
 # positions (3812/3817/3821). Only exact existing tokens qualify.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', 'sites': ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))}
+# Estate composition self-check: diagnostic test bytes match protected c065; repairs an already stale composite pin.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'e47ac442aff8fec4ad9beb1c8b0f726c981936165e65b38c5bf430f5bb6226cc', 'sites': ((3958, 68, 71, 'int', '503'), (3963, 69, 72, 'int', '503'), (3967, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',

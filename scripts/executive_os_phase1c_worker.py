@@ -856,8 +856,10 @@ def _build_broker(
 
     def operator_adapter_factory(workspace: Path, turn_input_loader, requested, *,
                                  planner_producer=None):
+        producer_options = {}
         if planner_producer is not None:
-            raise WorkerConfigError("native Codex planner producer custody is not qualified")
+            from control_plane.operator_materialization_receipt import planner_producer_selection
+            producer_options["planner_producer"] = planner_producer_selection(planner_producer)
         if native_account is not None:
             native_account.auth_metadata()
         profile = resolve_operator_profile(requested)
@@ -872,6 +874,7 @@ def _build_broker(
             native_helper_grant=profile.native_helper,
             network_policy=profile.network_policy,
             turn_input_loader=turn_input_loader,
+            **producer_options,
         )
 
     def operator_resource_factory(workspace, requested, epoch, generation):

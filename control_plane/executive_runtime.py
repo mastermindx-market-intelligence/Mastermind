@@ -22058,6 +22058,113 @@ def _ohf_process(process: ProcessIdentityObservation) -> tuple[int, int, str, st
     return pid, pgid, start, boot
 
 
+_TURN_INTENT_V1 = "mastermind.operator_harness_turn_intent/v1"
+_TURN_INTENT_V2 = "mastermind.operator_harness_turn_intent/v2"
+_TURN_APPLIED_V1 = "mastermind.operator_harness_turn_applied/v1"
+_TURN_APPLIED_V2 = "mastermind.operator_harness_turn_applied/v2"
+
+
+def _operator_turn_intent_payload(
+    *, turn: TurnRef, worker_id: str, provider_session_id: str,
+    planner_producer: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": _TURN_INTENT_V1,
+        "operation_kind": OperationKind.BEGIN_TURN.value,
+        "attempt_id": turn.attempt_id,
+        "session_epoch_id": turn.session_epoch_id,
+        "process_generation_id": turn.process_generation_id,
+        "worker_id": worker_id,
+        "provider_session_id": provider_session_id,
+        "turn_id": turn.turn_id,
+    }
+    if planner_producer is not None:
+        from control_plane.operator_materialization_receipt import planner_producer_selection
+        payload["schema_version"] = _TURN_INTENT_V2
+        payload["planner_producer"] = planner_producer_selection(
+            planner_producer, attempt_id=turn.attempt_id
+        )
+    return payload
+
+
+def _operator_turn_applied_payload(
+    *, intent: Mapping[str, Any], operation_id: OperationId, turn: TurnRef,
+    observation: TurnStartObservation | None,
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": _TURN_APPLIED_V1,
+        "operation_kind": OperationKind.BEGIN_TURN.value,
+        "attempt_id": turn.attempt_id,
+        "session_epoch_id": turn.session_epoch_id,
+        "process_generation_id": turn.process_generation_id,
+        "turn_id": turn.turn_id,
+        "provider_native_turn_id": (
+            None if observation is None else observation.provider_native_turn_id
+        ),
+        "acknowledged": True if observation is None else observation.acknowledged,
+    }
+    if payload["acknowledged"] is not True:
+        raise StateConflict("TX-5 provider did not acknowledge the turn")
+    if intent.get("schema_version") == _TURN_INTENT_V2:
+        from control_plane.operator_harness_wire import planner_turn_custody
+        if (observation is None
+                or type(observation.provider_native_turn_id) is not str
+                or not observation.provider_native_turn_id.strip()):
+            raise StateConflict("planner TX-5 requires its exact native request acknowledgment")
+        try:
+            proof = planner_turn_custody(
+                observation.planner_custody, producer=intent["planner_producer"],
+                operation_id=operation_id, turn=turn,
+                provider_session_id=intent["provider_session_id"],
+                provider_native_turn_id=observation.provider_native_turn_id,
+            )
+        except (TypeError, ValueError, KeyError) as exc:
+            raise StateConflict("planner TX-5 request acknowledgment differs") from exc
+        payload["schema_version"] = _TURN_APPLIED_V2
+        payload["planner_custody"] = proof
+    elif observation is not None and observation.planner_custody is not None:
+        raise StateConflict("legacy TX-5 cannot adopt planner request custody")
+    return payload
+
+
+def _validated_operator_turn_receipts(
+    *, intent: Mapping[str, Any], applied: Mapping[str, Any] | None = None,
+    operation_id: OperationId, turn: TurnRef, worker_id: str, provider_session_id: str,
+) -> None:
+    """Check closed original TX-5 evidence; no current grant or result is inferred.
+
+    Containment may read historical V1 as V1. Fresh Runtime writes separately
+    join V2 to the immutable Job producer and the actual sealed Attempt profile.
+    """
+    if (type(intent) is not dict
+            or intent.get("schema_version") not in {_TURN_INTENT_V1, _TURN_INTENT_V2}):
+        raise StateConflict("TX-5 INTENT schema is invalid")
+    try:
+        expected = _operator_turn_intent_payload(
+            turn=turn, worker_id=worker_id, provider_session_id=provider_session_id,
+            planner_producer=(intent.get("planner_producer")
+                              if intent["schema_version"] == _TURN_INTENT_V2 else None),
+        )
+    except (TypeError, ValueError) as exc:
+        raise StateConflict("TX-5 INTENT producer is invalid") from exc
+    if intent != expected:
+        raise StateConflict("TX-5 INTENT provenance mismatch")
+    if applied is None:
+        return
+    if type(applied) is not dict:
+        raise StateConflict("TX-5 APPLIED is malformed")
+    expected_applied = _operator_turn_applied_payload(
+        intent=intent, operation_id=operation_id, turn=turn,
+        observation=TurnStartObservation(
+            provider_native_turn_id=applied.get("provider_native_turn_id"),
+            acknowledged=applied.get("acknowledged"),
+            planner_custody=applied.get("planner_custody"),
+        ),
+    )
+    if applied != expected_applied:
+        raise StateConflict("TX-5 APPLIED provenance mismatch")
+
+
 class OperatorHarnessRegistry:
     """The sole durable OHF state-plane; it owns no provider or process calls."""
 
@@ -22110,6 +22217,113 @@ class OperatorHarnessRegistry:
         return connection.execute(
             "SELECT * FROM events WHERE command_id=?", (command_id,)
         ).fetchone()
+
+    def _turn_planner_producer(
+        self, connection: sqlite3.Connection, row: sqlite3.Row,
+    ) -> dict[str, Any] | None:
+        """Derive request custody from existing immutable owners, never a caller flag."""
+        job = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+        ).fetchone()
+        if job is None or job["orchestration_role"] != "plan":
+            return None
+        binding = _validated_planner_producer_binding(connection, job)
+        if binding is None:
+            return None
+        requested = _strict_canonical_json_loads(
+            str(row["requested_execution_profile_json"]), name="planner Attempt profile"
+        )
+        if (requested.get("provider"), requested.get("harness_kind")) != (
+            "openai-codex", "codex-app-server"
+        ):
+            return None
+        from control_plane.operator_materialization_receipt import planner_producer_selection
+        return planner_producer_selection({
+            "job_id": str(row["job_id"]), "attempt_id": str(row["attempt_id"]),
+            "planner_producer_binding": binding,
+            "planner_producer_binding_digest": orchestration_digest(binding),
+        })
+
+    def _require_turn_intent(
+        self, connection: sqlite3.Connection, *, row: sqlite3.Row,
+        turn: TurnRef, operation_id: OperationId, event: sqlite3.Row | None,
+        provider_session_id: str,
+    ) -> dict[str, Any]:
+        if (event is None or event["command_id"] != operation_id.command_id
+                or event["event_type"] != OperationReceiptKind.INTENT.value
+                or event["aggregate_type"] != "operator_operation"
+                or event["aggregate_id"] != operation_id.command_id
+                or any(event[key] != row[key] for key in (
+                    "attempt_id", "job_id", "worker_id", "quota_class"))):
+            raise StateConflict("TX-5 INTENT ownership differs")
+        intent = _strict_canonical_json_loads(str(event["payload_json"]), name="TX-5 INTENT")
+        _validated_operator_turn_receipts(
+            intent=intent, operation_id=operation_id, turn=turn,
+            worker_id=str(row["worker_id"]), provider_session_id=provider_session_id,
+        )
+        selected = self._turn_planner_producer(connection, row)
+        if selected is not None:
+            if (intent["schema_version"] != _TURN_INTENT_V2
+                    or intent.get("planner_producer") != selected):
+                raise StateConflict("bound Codex planner requires its original TX-5 request custody")
+            generation = connection.execute(
+                """SELECT g.generation_number,e.provider_session_id
+                   FROM process_generations g JOIN harness_session_epochs e
+                     ON e.session_epoch_id=g.session_epoch_id
+                   WHERE g.process_generation_id=?""",
+                (turn.process_generation_id,),
+            ).fetchone()
+            if (generation is None or int(generation[0]) != 1
+                    or generation["provider_session_id"] != provider_session_id):
+                raise StateConflict("planner request custody requires the original G1")
+        elif intent["schema_version"] != _TURN_INTENT_V1:
+            raise StateConflict("TX-5 request custody has no retained Codex producer")
+        return intent
+
+    def _require_planner_turn_dispatch(
+        self, connection: sqlite3.Connection, *, row: sqlite3.Row,
+        operation_id: OperationId, intent: Mapping[str, Any],
+    ) -> None:
+        if intent["schema_version"] != _TURN_INTENT_V2:
+            return
+        dispatch = self._event(connection, f"{operation_id.command_id}:dispatch")
+        unknown = self._event(connection, operation_receipt_command_id(
+            operation_id, OperationReceiptKind.EFFECT_UNKNOWN
+        ))
+        if (dispatch is None or unknown is not None
+                or dispatch["event_type"] != "OHF_PROVIDER_DISPATCH_COMMITTED"
+                or dispatch["aggregate_type"] != "operator_operation"
+                or dispatch["aggregate_id"] != operation_id.command_id
+                or any(dispatch[key] != row[key] for key in (
+                    "attempt_id", "job_id", "worker_id", "quota_class"))
+                or _json_loads(dispatch["payload_json"], fallback={}) != {
+                    "schema_version": "mastermind.operator_harness_provider_dispatch/v1",
+                    "operation_kind": OperationKind.BEGIN_TURN.value,
+                }):
+            raise StateConflict("planner TX-5 lacks an exact dispatch without unknown effect")
+
+    def _require_turn_applied(
+        self, connection: sqlite3.Connection, *, row: sqlite3.Row, turn: TurnRef,
+        operation_id: OperationId, intent: Mapping[str, Any], event: sqlite3.Row | None,
+    ) -> dict[str, Any]:
+        if (event is None
+                or event["command_id"] != operation_receipt_command_id(
+                    operation_id, OperationReceiptKind.APPLIED)
+                or event["event_type"] != OperationReceiptKind.APPLIED.value
+                or event["aggregate_type"] != "operator_operation"
+                or event["aggregate_id"] != operation_id.command_id
+                or any(event[key] != row[key] for key in (
+                    "attempt_id", "job_id", "worker_id", "quota_class"))):
+            raise StateConflict("candidate requires exact matching TX-5 APPLIED")
+        applied = _strict_canonical_json_loads(str(event["payload_json"]), name="TX-5 APPLIED")
+        _validated_operator_turn_receipts(
+            intent=intent, applied=applied, operation_id=operation_id, turn=turn,
+            worker_id=str(row["worker_id"]), provider_session_id=intent["provider_session_id"],
+        )
+        self._require_planner_turn_dispatch(
+            connection, row=row, operation_id=operation_id, intent=intent
+        )
+        return applied
 
     def _owned_generation(
         self,
@@ -23113,6 +23327,9 @@ class OperatorHarnessRegistry:
             ).fetchone()
             _interactive_tx5_admitted(job_row)
             job_role = job_row
+            planner_producer = self._turn_planner_producer(connection, row)
+            if planner_producer is not None and generation.generation_number != 1:
+                raise StateConflict("planner request custody requires the original G1")
             if (
                 job_role is not None
                 and job_role["orchestration_role"] is not None
@@ -23161,12 +23378,17 @@ class OperatorHarnessRegistry:
                     is not None
                 ):
                     raise StateConflict("TX-5 operation is not retryable")
-                return TurnRef(
+                retained_turn = TurnRef(
                     str(payload.get("turn_id")),
                     epoch.session_epoch_id,
                     generation.process_generation_id,
                     epoch.attempt_id,
                 )
+                self._require_turn_intent(
+                    connection, row=row, turn=retained_turn, operation_id=operation_id,
+                    event=existing_intent, provider_session_id=item["provider_session_id"],
+                )
+                return retained_turn
             if _interactive_tx5_admitted(job_row):
                 tx5_rows: list[dict[str, Any]] = []
                 for prior in connection.execute(
@@ -23262,16 +23484,11 @@ class OperatorHarnessRegistry:
                 op=operation_id,
                 kind=OperationReceiptKind.INTENT,
                 row=row,
-                payload={
-                    "schema_version": "mastermind.operator_harness_turn_intent/v1",
-                    "operation_kind": "begin_turn",
-                    "attempt_id": epoch.attempt_id,
-                    "session_epoch_id": epoch.session_epoch_id,
-                    "process_generation_id": generation.process_generation_id,
-                    "worker_id": row["worker_id"],
-                    "provider_session_id": item["provider_session_id"],
-                    "turn_id": turn.turn_id,
-                },
+                payload=_operator_turn_intent_payload(
+                    turn=turn, worker_id=str(row["worker_id"]),
+                    provider_session_id=item["provider_session_id"],
+                    planner_producer=planner_producer,
+                ),
             )
         return turn
 
@@ -23308,25 +23525,12 @@ class OperatorHarnessRegistry:
                    WHERE e.session_epoch_id=? AND g.process_generation_id=?""",
                 (turn.session_epoch_id, turn.process_generation_id),
             ).fetchone()
-            expected_intent = {
-                "schema_version": "mastermind.operator_harness_turn_intent/v1",
-                "operation_kind": OperationKind.BEGIN_TURN.value,
-                "attempt_id": turn.attempt_id,
-                "session_epoch_id": turn.session_epoch_id,
-                "process_generation_id": turn.process_generation_id,
-                "worker_id": str(row["worker_id"]),
-                "provider_session_id": (
-                    None if durable is None else durable["provider_session_id"]
-                ),
-                "turn_id": turn.turn_id,
-            }
             if (
                 intent is None
                 or intent["event_type"] != OperationReceiptKind.INTENT.value
                 or intent["aggregate_id"] != operation_id.command_id
                 or intent["attempt_id"] != turn.attempt_id
                 or intent["worker_id"] != row["worker_id"]
-                or intent_payload != expected_intent
                 or durable is None
                 or durable["attempt_id"] != turn.attempt_id
                 or durable["epoch_worker"] != row["worker_id"]
@@ -23335,25 +23539,21 @@ class OperatorHarnessRegistry:
                 or not durable["executive_writer_held"]
             ):
                 raise StateConflict("TX-5 target mismatch")
+            intent_payload = self._require_turn_intent(
+                connection, row=row, turn=turn, operation_id=operation_id, event=intent,
+                provider_session_id=durable["provider_session_id"],
+            )
             self._require_active_orchestration_generation(
                 connection,
                 row=row,
                 generation_id=turn.process_generation_id,
             )
-            applied_payload = {
-                "schema_version": "mastermind.operator_harness_turn_applied/v1",
-                "operation_kind": OperationKind.BEGIN_TURN.value,
-                "attempt_id": turn.attempt_id,
-                "session_epoch_id": turn.session_epoch_id,
-                "process_generation_id": turn.process_generation_id,
-                "turn_id": turn.turn_id,
-                "provider_native_turn_id": (
-                    None if observation is None else observation.provider_native_turn_id
-                ),
-                "acknowledged": (
-                    True if observation is None else observation.acknowledged
-                ),
-            }
+            self._require_planner_turn_dispatch(
+                connection, row=row, operation_id=operation_id, intent=intent_payload
+            )
+            applied_payload = _operator_turn_applied_payload(
+                intent=intent_payload, operation_id=operation_id, turn=turn, observation=observation
+            )
             applied_id = operation_receipt_command_id(
                 operation_id, OperationReceiptKind.APPLIED
             )
@@ -23694,61 +23894,21 @@ class OperatorHarnessRegistry:
                     "candidate requires exactly one matching TX-5 INTENT"
                 )
             intent, intent_payload = matching_intents[0]
-            expected_intent = {
-                "schema_version": "mastermind.operator_harness_turn_intent/v1",
-                "operation_kind": OperationKind.BEGIN_TURN.value,
-                "attempt_id": turn.attempt_id,
-                "session_epoch_id": turn.session_epoch_id,
-                "process_generation_id": turn.process_generation_id,
-                "worker_id": str(row["worker_id"]),
-                "provider_session_id": intent_payload.get("provider_session_id"),
-                "turn_id": turn.turn_id,
-            }
-            if (
-                intent["aggregate_id"] != intent["command_id"]
-                or intent["worker_id"] != row["worker_id"]
-                or not intent_payload.get("provider_session_id")
-                or intent_payload != expected_intent
-            ):
+            if not intent_payload.get("provider_session_id"):
                 raise StateConflict("candidate TX-5 INTENT provenance mismatch")
             operation = OperationId(str(intent["command_id"]))
+            intent_payload = self._require_turn_intent(
+                connection, row=row, turn=turn, operation_id=operation, event=intent,
+                provider_session_id=intent_payload["provider_session_id"],
+            )
             applied = self._event(
                 connection,
                 operation_receipt_command_id(operation, OperationReceiptKind.APPLIED),
             )
-            applied_payload = (
-                _json_loads(applied["payload_json"], fallback={}) if applied else {}
+            self._require_turn_applied(
+                connection, row=row, turn=turn, operation_id=operation,
+                intent=intent_payload, event=applied,
             )
-            if (
-                applied is None
-                or applied["aggregate_type"] != "operator_operation"
-                or applied["aggregate_id"] != operation.command_id
-                or applied["event_type"] != OperationReceiptKind.APPLIED.value
-                or applied["attempt_id"] != turn.attempt_id
-                or applied["worker_id"] != row["worker_id"]
-                or applied_payload.get("schema_version")
-                != "mastermind.operator_harness_turn_applied/v1"
-                or applied_payload.get("operation_kind")
-                != OperationKind.BEGIN_TURN.value
-                or applied_payload.get("attempt_id") != turn.attempt_id
-                or applied_payload.get("session_epoch_id") != turn.session_epoch_id
-                or applied_payload.get("process_generation_id")
-                != turn.process_generation_id
-                or applied_payload.get("turn_id") != turn.turn_id
-                or applied_payload.get("acknowledged") is not True
-                or set(applied_payload)
-                != {
-                    "schema_version",
-                    "operation_kind",
-                    "attempt_id",
-                    "session_epoch_id",
-                    "process_generation_id",
-                    "turn_id",
-                    "provider_native_turn_id",
-                    "acknowledged",
-                }
-            ):
-                raise StateConflict("candidate requires exact matching TX-5 APPLIED")
             existing = self._event(connection, command_id)
             if existing is not None:
                 if _json_loads(existing["payload_json"], fallback={}) == payload:
@@ -23866,6 +24026,21 @@ class OperatorHarnessRegistry:
             if len(tx5_applied_rows) != 1:
                 raise StateConflict("role result lost its exact TX-5 APPLIED receipt")
             _tx5_event, tx5_payload = tx5_applied_rows[0]
+            # Request acknowledgment establishes custody only. It must join
+            # the same immutable producer and original native turn before the
+            # existing semantic envelope validation may seal any result.
+            if (tx5_payload.get("schema_version") == _TURN_APPLIED_V2
+                    or self._turn_planner_producer(connection, row) is not None):
+                operation = OperationId(str(_tx5_event["aggregate_id"]))
+                intent_payload = self._require_turn_intent(
+                    connection, row=row, turn=turn, operation_id=operation,
+                    event=self._event(connection, operation.command_id),
+                    provider_session_id=admission["provider_session_id"],
+                )
+                tx5_payload = self._require_turn_applied(
+                    connection, row=row, turn=turn, operation_id=operation,
+                    intent=intent_payload, event=_tx5_event,
+                )
             try:
                 envelope = parse_and_validate_envelope(
                     observation.canonical_result_json,
@@ -25304,6 +25479,10 @@ class OperatorHarnessRegistry:
                 OperationKind.BEGIN_TURN.value: "mastermind.operator_harness_turn_intent/v1",
                 "interrupt_turn": "mastermind.operator_harness_turn_operation/v1",
             }.get(kind_value)
+            if (kind_value == OperationKind.BEGIN_TURN.value
+                    and intent_payload.get("schema_version") == _TURN_INTENT_V2):
+                expected_keys = expected_keys | {"planner_producer"}
+                expected_schema = _TURN_INTENT_V2
             if (
                 intent is None
                 or intent["command_id"] != operation_id.command_id
@@ -25341,6 +25520,15 @@ class OperatorHarnessRegistry:
             ):
                 raise StateConflict(
                     "provider dispatch requires matching operation INTENT"
+                )
+            if kind_value == OperationKind.BEGIN_TURN.value:
+                self._require_turn_intent(
+                    connection, row=row, operation_id=operation_id, event=intent,
+                    provider_session_id=durable["epoch_session"],
+                    turn=TurnRef(
+                        intent_payload["turn_id"], intent_payload["session_epoch_id"],
+                        intent_payload["process_generation_id"], attempt_id,
+                    ),
                 )
             existing = self._event(connection, dispatch_id)
             if existing is not None:
@@ -27904,6 +28092,15 @@ class BoundedRoleResultSnapshot:
 
 
 @dataclasses.dataclass(frozen=True)
+class BoundedExecutionReturnSnapshot:
+    """One canonical completion and its original return evidence, no effects."""
+
+    role_result: BoundedRoleResultSnapshot
+    execution_return: dict[str, Any] | None
+    delivery_receipt: dict[str, Any] | None
+
+
+@dataclasses.dataclass(frozen=True)
 class BoundedAdmittedPlanSnapshot:
     """Detached canonical admission and typed plan, independent of completion.
 
@@ -29680,6 +29877,62 @@ class BoundedRuntimeReadObservation:
             return dataclasses.replace(
                 result, observation_source_identity=self._identity
             )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_execution_return_bounded(
+        self, root_job_id: str, job_id: str, *,
+        expected_attempt_id: str, expected_result_envelope_digest: str,
+    ) -> BoundedExecutionReturnSnapshot:
+        """Read a canonical completion and three exact original return events.
+
+        All closure and event reads share the existing private loader, raw-byte,
+        row, statement and VM ceilings. There is no ambient reopen, native
+        observation, reconciliation, send, parent consumption or acceptance.
+        The result becomes releasable only after physical observation close.
+        """
+        self._select()
+        try:
+            from control_plane.execution_return_wiring import (
+                execution_return_intent_command_id,
+                execution_return_receipt_command_id,
+                _reconciliation_command_id, retained_execution_return,
+            )
+            root_token = _bounded_acquisition_identifier(root_job_id, name="root")
+            job_token = _bounded_acquisition_identifier(job_id, name="Job")
+            attempt_token = _bounded_acquisition_identifier(expected_attempt_id, name="Attempt")
+            digest_token = expected_result_envelope_digest
+            if type(digest_token) is not str or _DIGEST_RE.fullmatch(digest_token) is None:
+                raise StateConflict("bounded return requires the canonical envelope digest")
+            self._acquisition._require_open()
+            loader = _BoundedRoleResultLoader(self._acquisition._connection)
+            self._vm_progress.activate()
+            try:
+                role = _bounded_role_result_material(
+                    loader, root_token=root_token, job_token=job_token,
+                    attempt_token=attempt_token, digest_token=digest_token,
+                )
+                events = []
+                for command in (execution_return_intent_command_id(attempt_token),
+                                execution_return_receipt_command_id(attempt_token),
+                                _reconciliation_command_id(attempt_token)):
+                    row = loader.execute("SELECT * FROM events WHERE command_id=?", (command,)).fetchone()
+                    events.append(_event_from_row(row) if row is not None else None)
+                record, receipt = retained_execution_return(
+                    role.completion.job, attempt_token, intent_event=events[0],
+                    delivery_event=events[1], reconciliation_event=events[2],
+                )
+                return BoundedExecutionReturnSnapshot(
+                    role_result=dataclasses.replace(role, observation_source_identity=self._identity),
+                    execution_return=record, delivery_receipt=receipt,
+                )
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeRoleResultOverBudget() from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
         except BaseException:
             self._failed = True
             raise

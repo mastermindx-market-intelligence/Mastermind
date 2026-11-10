@@ -2349,6 +2349,10 @@ class WorkspaceReadService:
         if type(frame) is dict and frame.get("schema") == capacity_fabric_wire.FRAME_SCHEMA:
             from control_plane.workspace_capacity_fabric_read import handle_capacity_fabric_frame
             return await handle_capacity_fabric_frame(self, frame)
+        from common import workspace_execution_return_contract as execution_return_wire
+        if type(frame) is dict and frame.get("schema") == execution_return_wire.FRAME_SCHEMA:
+            from control_plane.workspace_execution_return_read import handle_execution_return_frame
+            return await handle_execution_return_frame(self, frame)
         from common import workspace_t3_attempt_fleet_contract as t3_fleet_wire
         if type(frame) is dict and frame.get("schema") == t3_fleet_wire.FRAME_SCHEMA:
             from control_plane.workspace_t3_attempt_fleet_read import handle_t3_attempt_fleet_frame

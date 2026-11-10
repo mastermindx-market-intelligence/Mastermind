@@ -750,17 +750,20 @@ def build_claimed_remote_operator_factory(
                 if observed != retained_producer:
                     raise RemoteAttemptTransportError("STATE_MOVED")
         require_retained_producer()
-        if producer is not None and (binding.provider, binding.harness_kind) != (
-            "claude", "claude-agent-sdk"
-        ):
+        if producer is not None and (binding.provider, binding.harness_kind) not in {
+            ("claude", "claude-agent-sdk"), ("openai-codex", "codex-app-server")
+        }:
             raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
+        scoped_capabilities = (dataclasses.replace(binding.capabilities,
+            supports_native_resume=False, supported_optional_operations=())
+            if producer is not None and binding.provider == "openai-codex" else binding.capabilities)
         operations = {
             "ohf-identity", "ohf-materialization-status", "ohf-begin-turn",
             "ohf-collect-turn", "ohf-interrupt", "ohf-stop", "ohf-cancel",
             "ohf-reconcile", "ohf-reconcile-absence",
         }
         if recovery:
-            if binding.capabilities.supports_native_resume:
+            if scoped_capabilities.supports_native_resume:
                 operations.add("ohf-resume")
         else:
             operations.update({"ohf-validate", "ohf-start"})
@@ -848,7 +851,7 @@ def build_claimed_remote_operator_factory(
                     )
 
             adapter = RuntimeGenerationBoundAdapter(
-                client, turn_input_loader=loader, capabilities=binding.capabilities,
+                client, turn_input_loader=loader, capabilities=scoped_capabilities,
                 planner_producer=producer,
             )
             if recovery:

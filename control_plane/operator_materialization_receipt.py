@@ -39,6 +39,7 @@ from control_plane.operator_harness_wire import (
 
 MATERIALIZATION_RECEIPT_SCHEMA = "mastermind.operator_materialization_receipt/v1"
 MATERIALIZATION_RECEIPT_SCHEMA_V2 = "mastermind.operator_materialization_receipt/v2"
+MATERIALIZATION_RECEIPT_SCHEMA_V3 = "mastermind.operator_materialization_receipt/v3"
 MATERIALIZATION_STATUS_SCHEMA = "mastermind.operator_materialization_status/v1"
 MAX_MATERIALIZATION_RECEIPT_BYTES = 262_144
 
@@ -67,6 +68,7 @@ _RECEIPT_FIELDS = frozenset(
 _PLANNER_RECEIPT_FIELDS = _RECEIPT_FIELDS | {
     "planner_producer", "observed_planner_contract",
 }
+_TURN_PLANNER_RECEIPT_FIELDS = _RECEIPT_FIELDS | {"planner_producer"}
 _PROCESS_FIELDS = frozenset(
     {"pid", "pgid", "process_start_identity", "boot_id"}
 )
@@ -161,6 +163,10 @@ class OperatorMaterializationReceipt:
             # Historical receipt bytes/digests are immutable. Omission is not
             # an implicit planner selection, and must not become JSON nulls.
             value.pop("planner_producer")
+            value.pop("observed_planner_contract")
+        elif self.schema == MATERIALIZATION_RECEIPT_SCHEMA_V3:
+            # Codex applies outputSchema at turn/start. This receipt retains
+            # intent only and cannot pretend initialization observed a schema.
             value.pop("observed_planner_contract")
         return value
 
@@ -365,6 +371,21 @@ def validate_materialization_request(
         )
 
 
+def planner_materialization_schema_for_profile(requested: Mapping[str, Any]) -> str:
+    """Qualify receipt evidence kind for an already selected native profile.
+
+    This does not select a worker/provider or assert that either observation
+    occurred. The original profile digest, process and receipt still must join.
+    """
+    if isinstance(requested, Mapping):
+        pair = (requested.get("provider"), requested.get("harness_kind"))
+        if pair == ("openai-codex", "codex-app-server"):
+            return MATERIALIZATION_RECEIPT_SCHEMA_V3
+        if pair == ("claude", "claude-agent-sdk"):
+            return MATERIALIZATION_RECEIPT_SCHEMA_V2
+    raise OperatorMaterializationReceiptError("native planner materialization profile is unsupported")
+
+
 def build_operator_materialization_receipt(
     *,
     operation_command_id: str,
@@ -386,7 +407,9 @@ def build_operator_materialization_receipt(
     observed_planner_contract: Mapping[str, Any] | None = None,
 ) -> OperatorMaterializationReceipt:
     versioned = planner_producer is not None or observed_planner_contract is not None
-    expected_schema = (MATERIALIZATION_RECEIPT_SCHEMA_V2 if versioned
+    turn_scoped = schema == MATERIALIZATION_RECEIPT_SCHEMA_V3
+    expected_schema = (MATERIALIZATION_RECEIPT_SCHEMA_V3 if turn_scoped
+                       else MATERIALIZATION_RECEIPT_SCHEMA_V2 if versioned
                        else MATERIALIZATION_RECEIPT_SCHEMA)
     if schema is None:
         schema = expected_schema
@@ -395,9 +418,12 @@ def build_operator_materialization_receipt(
             "materialization receipt schema is unsupported"
         )
     custody = None
-    if versioned:
+    if versioned or turn_scoped:
         custody = planner_producer_selection(planner_producer, attempt_id=attempt_id)
-        if observed_planner_contract != custody["planner_producer_binding"]["native_result_contract"]:
+        if turn_scoped:
+            if observed_planner_contract is not None or operation_kind != "start_session":
+                raise OperatorMaterializationReceiptError("turn-scoped producer is G1 intent only")
+        elif observed_planner_contract != custody["planner_producer_binding"]["native_result_contract"]:
             raise OperatorMaterializationReceiptError("initialized planner contract differs from selected producer")
     validate_materialization_request(
         operation_command_id=operation_command_id,
@@ -419,6 +445,11 @@ def build_operator_materialization_receipt(
         observed_attestation,
         worker_id=worker_id,
     )
+    # Harness kind remains bound by requested_profile_digest and the broker's
+    # exact requested/observed join. Attestation's closed auth record contains
+    # the observed provider; it has no invented top-level harness observation.
+    if turn_scoped and attestation["auth"]["provider"] != "openai-codex":
+        raise OperatorMaterializationReceiptError("turn-scoped planner requires the Codex harness")
     credentials = _process_credentials(process_credentials)
     if base_process_identity(credentials["process_identity"]) != process:
         raise OperatorMaterializationReceiptError(
@@ -444,8 +475,9 @@ def build_operator_materialization_receipt(
         "created_at": timestamp,
     }
     if custody is not None:
-        unsigned.update(planner_producer=custody,
-                        observed_planner_contract=dict(observed_planner_contract))
+        unsigned["planner_producer"] = custody
+        if not turn_scoped:
+            unsigned["observed_planner_contract"] = dict(observed_planner_contract)
     digest = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
     receipt = OperatorMaterializationReceipt(**unsigned, receipt_digest=digest)
     if len(canonical_json_bytes(receipt.to_dict())) > MAX_MATERIALIZATION_RECEIPT_BYTES:
@@ -489,7 +521,9 @@ def load_operator_materialization_receipt(
         raise OperatorMaterializationReceiptError(
             "materialization receipt is not strict UTF-8 JSON"
         ) from exc
-    expected_fields = (_PLANNER_RECEIPT_FIELDS if isinstance(value, dict)
+    expected_fields = (_TURN_PLANNER_RECEIPT_FIELDS if isinstance(value, dict)
+                       and value.get("schema") == MATERIALIZATION_RECEIPT_SCHEMA_V3
+                       else _PLANNER_RECEIPT_FIELDS if isinstance(value, dict)
                        and value.get("schema") == MATERIALIZATION_RECEIPT_SCHEMA_V2
                        else _RECEIPT_FIELDS)
     if not isinstance(value, dict) or set(value) != expected_fields:

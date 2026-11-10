@@ -199,7 +199,7 @@ def test_native_initialized_v5_reaches_digest_bound_receipt(configured, tmp_path
     proxy = make_proxy()
     binding = selected["planner_producer_binding"]
     proxy.require_planner_producer(binding)
-    with pytest.raises(BrokerProtocolError, match="initialized"):
+    with pytest.raises(BrokerProtocolError, match="materialized"):
         proxy.require_planner_producer(binding, generation=generation)
     assert proxy.validate_requested_profile(requested).accepted
     start_proxy(chain, proxy)
@@ -292,7 +292,7 @@ def test_receipt_only_restart_cannot_qualify_live_planner(configured, tmp_path):
     start_proxy(chain, make_proxy())
     broker._operator_run = None
     recovered = make_proxy()
-    with pytest.raises(BrokerProtocolError, match="current initialized custody"):
+    with pytest.raises(BrokerProtocolError, match="current materialized custody"):
         recovered.qualify_existing_planner_generation(requested=requested, epoch=epoch, generation=generation)
     assert all(m != "begin_turn" for m, _ in native.calls)
     assert recovered._planner_receipts == {}
@@ -435,12 +435,14 @@ def test_real_runtime_claim_carries_original_root_and_immediate_parent_to_wire(t
                           "process_generation_id": generation.process_generation_id}
 
 
-def test_unqualified_codex_versioned_producer_refuses_before_transport(tmp_path, monkeypatch):
+def test_codex_versioned_producer_retains_intent_without_claiming_initialization(tmp_path, monkeypatch):
     from control_plane import remote_attempt_transport as rt
     runtime, _, _, _, lease, requested, binding = runtime_case(tmp_path, monkeypatch, native=False)
-    with pytest.raises(rt.RemoteAttemptTransportError, match="HOST_BINDING_MISMATCH"):
-        rt.build_claimed_remote_operator_factory(runtime, lambda *a: binding)(
-            lease.attempt, requested, lambda t: "bounded", recovery=False)
+    adapter = rt.build_claimed_remote_operator_factory(runtime, lambda *a: binding)(
+        lease.attempt, requested, lambda t: "bounded", recovery=False)
+    adapter.require_planner_producer(runtime.jobs.get_planner_producer_binding(lease.attempt.job_id))
+    assert adapter.describe_capabilities().supports_native_resume is False
+    assert adapter._planner_receipts == {}
 
 
 @pytest.mark.parametrize("moment", ["host_read", "before_start"])

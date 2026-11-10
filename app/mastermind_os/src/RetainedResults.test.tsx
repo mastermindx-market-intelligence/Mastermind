@@ -642,3 +642,42 @@ describe("exact requested-result index join", () => {
     expect(props.readResult).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("original execution return selection", () => {
+  it("opens the original return only after the existing index and exact result qualify", async () => {
+    const index = deferred(), detail = deferred(), props = requestedProps();
+    props.readReferences.mockImplementation(() => index.promise);
+    props.readResult.mockImplementation(() => detail.promise);
+    const readExecutionReturn = vi.fn(async (exact: ResultSelection & {signal: AbortSignal}) => {
+      const result = resultBody(exact);
+      return {schema: "mastermind.workspace_execution_return.v1", selection: result.selection,
+        availability: "AVAILABLE", reason_codes: [], source_observation: result.source_observation,
+        execution_return: null, delivery_receipt: null};
+    });
+    render(<RetainedResults {...props} readExecutionReturn={readExecutionReturn} />);
+    expect(readExecutionReturn).not.toHaveBeenCalled();
+    index.resolve(availableBody());
+    await waitFor(() => expect(props.readResult).toHaveBeenCalledTimes(1));
+    expect(readExecutionReturn).not.toHaveBeenCalled();
+    detail.resolve(resultBody(requestedExact));
+    await screen.findByText("No execution return is projected yet.");
+    expect(readExecutionReturn).toHaveBeenCalledExactlyOnceWith({
+      ...requestedExact, signal: expect.any(AbortSignal),
+    });
+    const signal = readExecutionReturn.mock.calls[0][0].signal;
+    fireEvent.click(screen.getByRole("button", {name: "Back to retained results"}));
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByText("No execution return is projected yet.")).toBeNull();
+  });
+
+  it("does not open a return for a rejected retained index", async () => {
+    const props = requestedProps();
+    props.readReferences.mockResolvedValue(unavailableBody("SOURCE_CHANGED"));
+    const readExecutionReturn = vi.fn(async () => ({}));
+    render(<RetainedResults {...props} readExecutionReturn={readExecutionReturn} />);
+    await waitFor(() => expect(props.readReferences).toHaveBeenCalledTimes(1));
+    await flush();
+    expect(props.readResult).not.toHaveBeenCalled();
+    expect(readExecutionReturn).not.toHaveBeenCalled();
+  });
+});

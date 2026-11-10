@@ -1,7 +1,7 @@
 {
   "schema": "mastermind.estate_graph_composition_qualification.v1",
-  "source_parent": "70911488b1d00e6ce376cbf19906615e0cc8c866",
-  "candidate_code_tree": "e2ed3c7ff136d0b7ece284f52c39c909e9203917",
+  "source_parent": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+  "candidate_code_tree": "568bfc20eaebf700708e04b4ddbe2f17ce5eb795",
   "governing_source": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
   "qualification_scope": "COMPOSED_SOURCE_OWNERS_AND_DISPOSABLE_NATIVE_FIXTURES",
   "checks": [
@@ -21,6 +21,34 @@
       "summary": "534 passed in 72.29s; includes 350 unique custody/owner cases plus existing source-identity checks",
       "source_tree": "e2ed3c7ff136d0b7ece284f52c39c909e9203917",
       "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -o addopts= -q -p anyio.pytest_plugin --tb=short tests/test_remote_planner_producer_custody.py tests/test_operator_materialization_receipt.py tests/test_planner_producer_binding.py tests/test_remote_operator_endpoint.py tests/test_claude_operator_adapter.py tests/test_native_claude_worker_factory.py tests/test_executive_operator_broker.py tests/test_claimed_operator_control_composition.py tests/test_executive_operator_supervisor.py tests/test_remote_attempt_transport.py tests/test_executive_reviewed_site_identity_tokens.py"
+    },
+    {
+      "scope": "original_return_frontend",
+      "source_tree": "8bf35783b929c2295489bb79c132d18109d5f376",
+      "summary": "334 tests in 11 actual frontend suites passed; full TypeScript/Vite build passed (575 modules).",
+      "command": "npm test -- src/ExecutionReturnRead.test.tsx src/RetainedResults.test.tsx src/App.retained-results.test.tsx src/App.retained-root-selection.test.tsx src/App.team-code-routes.test.tsx src/host.test.ts src/web-auth.test.ts src/host.mission-result.test.ts src/host.result-references.test.ts src/web-auth.result-references.test.ts src/host.native-cancellation.test.ts && npm run build"
+    },
+    {
+      "scope": "original_return_native_host",
+      "source_tree": "8bf35783b929c2295489bb79c132d18109d5f376",
+      "summary": "Native Rust test binary compiled; two auth::execution_return_read_tests passed, 296 filtered. Qualification build only, not installed.",
+      "command": "MM_SOURCE_REVISION=8bf35783b929c2295489bb79c132d18109d5f376 MM_BUILD_IDENTITY=qualification-tree:8bf35783b929c2295489bb79c132d18109d5f376 cargo test --locked -j 2 --bin mastermind-os auth::execution_return_read_tests",
+      "environment_note": "Source revision is explicitly the exact staged Git tree object; build identity labels it qualification-tree. Initial missing build identity was repaired through the existing build contract."
+    },
+    {
+      "scope": "codex_turn_custody_and_placement",
+      "source_tree": "027f73c3e4e634084126e37699ce0574232bb575",
+      "summary": "549 cases passed in the full composed checkout (522 Codex/custody/worker owner and 27 placement/E2E cases).",
+      "command": "cd /Volumes/Mastermind/agent-workspaces/web/estate-graph-composition-20261109-c4 && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=5 tests/test_codex_planner_turn_custody.py tests/test_planner_producer_binding.py tests/test_remote_planner_producer_custody.py tests/test_operator_materialization_receipt.py tests/test_remote_operator_endpoint.py tests/test_claude_operator_adapter.py tests/test_native_claude_worker_factory.py tests/test_executive_operator_broker.py tests/test_claimed_operator_control_composition.py tests/test_executive_operator_supervisor.py tests/test_remote_attempt_transport.py tests/test_native_worker_factory.py tests/test_codex_operator_adapter.py tests/test_operator_harness_wire.py tests/test_remote_operator_harness_adapter.py tests/test_codex_operator_process_exec_attestation.py tests/test_child_execution_composition_guards.py tests/test_mmos_admission_to_t3_native_e2e.py",
+      "runtime_seconds": 97.55
+    },
+    {
+      "scope": "original_return_consumer_and_identity",
+      "source_tree": "568bfc20eaebf700708e04b4ddbe2f17ce5eb795",
+      "summary": "428 passed, zero failures/errors/skips; JUnit readback verified.",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q --tb=short --junitxml=/tmp/estate-consumer-composed-20261110-c4.xml tests/test_workspace_execution_return_read.py tests/test_workspace_execution_return_http.py tests/test_workspace_result_service.py tests/test_session_bridge_native_return.py tests/test_execution_return_projection.py tests/test_execution_return_prewrite.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_hermes_fabric_native_identity_review.py tests/test_executive_fabric_release_identity_review.py",
+      "junit_suite_seconds": 129.724,
+      "process_seconds": 136.57
     }
   ],
   "original_custody_patch": {
@@ -95,7 +123,8 @@
   "integration_repairs": [
     "Long-horizon T3 fixture assertions include the incumbent --log-level error suffix; original thread/run assertions are preserved.",
     "Workspace source guard retains exactly eight refusal tokens; the full control_room_action AST is unchanged from 7ff2a1ac and all eight sites move by five lines.",
-    "Two long-horizon source-identity merge conflicts were history comments; exact source digest and sites agree."
+    "Two long-horizon source-identity merge conflicts were history comments; exact source digest and sites agree.",
+    "Consumer composition initially failed five source-identity assertions: three stale file hashes and two moved token locations. Four affected records, including Codex, were self-checked with identical Python function ASTs and protected Rust diagnostic-test bytes; exactly sixteen existing tokens retained, zero new exemptions. Rust's prior complete-file hash was already stale at b8dbc93."
   ],
   "installed_company_read": {
     "observed_at": "2026-11-10T07:22:22.132145Z",
@@ -117,11 +146,67 @@
   },
   "boundaries": [
     "Claude planner admission remains disabled; fixtures do not enable production policy.",
-    "Codex turn-scoped producer custody is a subsequent source phase.",
-    "Native T3 artifact/validation/workspace and complete-result contracts remain separately qualified.",
     "Original return delivery is not parent consumption or acceptance.",
     "Chrome visual automation blocked by another extension UI; temporary preview stopped.",
-    "No installed model run, runtime activation, credentials, heartbeats or grant changes."
+    "No installed model run, runtime activation, credentials, heartbeats or grant changes.",
+    "Codex source custody does not establish installed worker source or live provider execution; versioned G2 remains unqualified.",
+    "Native T3 defaults do not prove fixed Job scope or descendant quiescence; fresh governed native launch/acceptance needs the existing owner contract.",
+    "COO API principal, native T3 thread and arbitrary Paperclip teammate identity are not interchangeable; authoritative native requester and explicit consumption remain separate source phases."
   ],
-  "counts_note": "Qualification runs overlap. Do not sum these as unique estate-wide cases."
+  "counts_note": "Qualification runs overlap. Do not sum these as unique estate-wide cases.",
+  "source_inputs": {
+    "consumer": {
+      "base": "395fa9820a733e6d3263b4164f00a7849e5a35b6",
+      "patch_sha256": "142f0d1b687004f9e2b8b948121da27e3b714a174e4c4480b854a90579a96357",
+      "files": 23,
+      "isolated_python_passed": 135,
+      "actual_typescript_assertions": 21
+    },
+    "codex": {
+      "base": {
+        "kind": "protected_source_plus_frozen_custody_patch",
+        "protected_sha": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+        "frozen_custody_patch_sha256": "db3882054263a709239443e8ae8d3928c6be81a72ff316ecd76318c72aecfc79",
+        "local_baseline_commit": "f1c65babb29ce3a9fe59c4a2f6bb2a65896f7b15",
+        "published_composition_target": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+        "note": "Parent owns composition. Published broker and phase1c postimages include incumbent work; use exact preimage blobs for three-way integration."
+      },
+      "patch_sha256": "2f07746d03c5b56a9e2bf466b4598f841635450706e19e1de0e1fd10337583c2",
+      "files": 13,
+      "isolated_tests": 522,
+      "protocol": {
+        "repository": "openai/codex",
+        "release": "rust-v0.167.0",
+        "commit": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
+        "sources": [
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/v2/TurnStartParams.ts",
+            "blob": "e83b6818996c56bcc433d69444ed00d0b9f55c5e",
+            "fact": "outputSchema is an optional native turn/start parameter."
+          },
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/InitializeResponse.ts",
+            "blob": "f1f79d173c77778057e223f5cac0e7ef2b113135",
+            "fact": "Initialization does not report a planner schema."
+          },
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/v2/TurnStartResponse.ts",
+            "blob": "cc2ee3772a55a41427d7f48f0de8b5971a93bdc6",
+            "fact": "Native response contains a Turn, not a schema echo."
+          },
+          {
+            "path": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+            "blob": "eeed287866855aa900f32015f43fba578109cece",
+            "fact": "turn_start_inner forwards output_schema as final_output_json_schema."
+          }
+        ]
+      }
+    },
+    "placement": {
+      "base": "395fa9820a733e6d3263b4164f00a7849e5a35b6",
+      "patch_sha256": "aac15534009ecad85c03f99ef60b1929c4a5d0e73f132f4006d168180dc5407e",
+      "files": 2,
+      "isolated_tests": 27
+    }
+  }
 }

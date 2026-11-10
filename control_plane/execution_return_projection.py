@@ -528,3 +528,78 @@ def validate_execution_return(value: Any) -> dict[str, Any]:
     if len(encoded) > _RECORD_MAX_BYTES:
         _refuse("INPUT_INVALID", "record exceeds the delivery text budget")
     return json.loads(encoded)
+
+
+# Delivery evidence is pure contract data. Transport and bounded read consumers
+# share this validator; neither a retained receipt nor a read is acceptance.
+_DELIVERY_RECEIPT_KEYS = frozenset({
+    "schema", "return_id", "return_digest", "conversation_id",
+    "submission_id", "state", "transport_ref", "refusal_code",
+})
+_DELIVERY_SUBMISSION_ID_RE = re.compile(r"execret-[0-9a-f]{32}")
+_DELIVERY_REFUSAL_RE = re.compile(REFUSAL_CODE_PATTERN)
+
+def mint_return_submission_id(return_digest: str, conversation_id: str) -> str:
+    """Deterministic native submission id for (return digest, conversation).
+
+    Same pair ⇒ same id, so a replayed delivery is recognised as the SAME
+    native submission by the existing seam (mirrors the TeamLink message-id
+    mint).  Grammar: ``execret-`` + 32 hex.
+    """
+
+    canonical = json.dumps(
+        {"return_digest": return_digest, "conversation_id": conversation_id},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    return "execret-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+def validate_execution_return_delivery(value: Any) -> dict[str, Any]:
+    """Fail-closed validation of one delivery receipt; returns a deep copy."""
+
+    if not isinstance(value, dict) or set(value) != _DELIVERY_RECEIPT_KEYS:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt is not the closed shape")
+    if value["schema"] != EXECUTION_RETURN_DELIVERY_SCHEMA:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt schema is unknown")
+    if value["state"] not in EXECUTION_RETURN_DELIVERY_STATES:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt state is outside the closed vocabulary")
+    for field in ("return_id", "conversation_id"):
+        item = value[field]
+        if type(item) is not str or not item or len(item) > 256 \
+                or any(ord(char) < 32 or ord(char) == 127 for char in item):
+            raise ExecutionReturnProjectionError("INPUT_INVALID", f"receipt {field} is malformed")
+    digest = value["return_digest"]
+    if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt return_digest is not 64-hex")
+    submission = value["submission_id"]
+    if type(submission) is not str or _DELIVERY_SUBMISSION_ID_RE.fullmatch(submission) is None:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt submission_id is malformed")
+    if submission != mint_return_submission_id(digest, value["conversation_id"]):
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "submission_id does not derive from (digest, conversation)")
+    transport_ref = value["transport_ref"]
+    if transport_ref is not None and (type(transport_ref) is not str
+                                      or not transport_ref or len(transport_ref) > 256):
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt transport_ref is malformed")
+    refusal = value["refusal_code"]
+    if refusal is not None and (type(refusal) is not str
+                                or _DELIVERY_REFUSAL_RE.fullmatch(refusal) is None):
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt refusal_code is malformed")
+    if value["state"] == "delivered" and transport_ref is None:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "a delivered receipt carries a transport ref")
+    if value["state"] == "unknown" and transport_ref is not None:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "an ambiguous receipt cannot carry a transport ref")
+    if value["state"] != "refused" and refusal is not None:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "only a refused receipt carries a refusal code")
+    if value["state"] == "refused" and refusal is None:
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "a refused receipt carries a refusal code")
+    return json.loads(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                 separators=(",", ":"), allow_nan=False))
+
+def validate_execution_return_receipt(record: Any, value: Any) -> dict[str, Any]:
+    """Validate the complete original record/receipt join without transport."""
+    validated = validate_execution_return(record)
+    receipt = validate_execution_return_delivery(value)
+    if (receipt["return_id"] != validated["return_id"]
+            or receipt["return_digest"] != validated["digest"]
+            or receipt["conversation_id"] != validated["original_requester"]["conversation_id"]):
+        raise ExecutionReturnProjectionError("INPUT_INVALID", "receipt belongs to another return")
+    return receipt

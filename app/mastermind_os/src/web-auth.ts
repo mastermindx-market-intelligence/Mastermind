@@ -1,3 +1,4 @@
+import { EXECUTION_RETURN_READ_BYTES, EXECUTION_RETURN_READ_SCHEMA } from "./execution-return-read";
 import { COMPANY_CAP, COMPANY_SCHEMA, companyQuery, validateBacklogRequest } from "./company/contract";
 import {hostObservationWebMethods} from "./resources/host-observation-web";
 import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
@@ -1532,6 +1533,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         `${ORIGIN}/workspace/mission/v3/current?${new URLSearchParams({ work_ref: workRef, root_job_id: rootJobId })}`,
         signal,
       );
+    },
+    readExecutionReturn: ({ signal, ...input }) => {
+      const selected = normalizeResultSelection(input);
+      if (!selected) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/execution-return/current?${new URLSearchParams({
+        work_ref: selected.workRef, root_job_id: selected.rootJobId, job_id: selected.jobId,
+        attempt_id: selected.attemptId, result_envelope_digest: selected.resultEnvelopeDigest,
+      })}`, signal, { cap: EXECUTION_RETURN_READ_BYTES, typedUnavailableSchema: EXECUTION_RETURN_READ_SCHEMA });
     },
     readResult: ({
       workRef,

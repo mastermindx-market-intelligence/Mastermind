@@ -1,0 +1,85 @@
+{
+  "availability": "AVAILABLE",
+  "delivery_receipt": {
+    "conversation_id": "fixture-session",
+    "refusal_code": null,
+    "return_digest": "4c24eda03b889866d75b58ec3573da49745e18adce430f5b4d0ecb7b631f353e",
+    "return_id": "execret-4c24eda03b889866d75b58ec3573da49",
+    "schema": "mastermind.execution_return_delivery/v1",
+    "state": "delivered",
+    "submission_id": "execret-1bc33a662065469e7272e8a1a386341d",
+    "transport_ref": "fixture-admission"
+  },
+  "execution_return": {
+    "acceptance": "not_accepted",
+    "acceptance_claim_refused": false,
+    "attempt": {
+      "attempt_id": "ATT-86f45f3634c44962a4fea6fc462b9084",
+      "authenticated_namespace": "fixture-principal",
+      "idempotency_key": "fixture-child",
+      "root_id": "JOB-001",
+      "seal_digest": "5fe0e8659b5472f02a5d8531055700007103f81c57a6afe27f7c7c8b9ef3c63e",
+      "t3_run_id": "fixture-run",
+      "t3_thread_id": "fixture-thread"
+    },
+    "digest": "4c24eda03b889866d75b58ec3573da49745e18adce430f5b4d0ecb7b631f353e",
+    "github": {
+      "branch": null,
+      "checks": null,
+      "checks_state": "unknown",
+      "installation": "none_claimed",
+      "merge_state": "unknown",
+      "pr_number": null,
+      "pr_url": null
+    },
+    "original_requester": {
+      "authenticated_namespace": "fixture-principal",
+      "conversation_id": "fixture-session",
+      "project_id": "fixture-project",
+      "teammate_id": "fixture-team"
+    },
+    "result": {
+      "artifact_refs": [],
+      "text": "Selected canonical result"
+    },
+    "return_id": "execret-4c24eda03b889866d75b58ec3573da49",
+    "schema": "mastermind.execution_return/v1",
+    "stage": "result_only"
+  },
+  "reason_codes": [],
+  "schema": "mastermind.workspace_execution_return.v1",
+  "selection": {
+    "attempt_id": "ATT-86f45f3634c44962a4fea6fc462b9084",
+    "job_id": "JOB-004",
+    "result_envelope_digest": "ca4b7a5fa4066cfd444f1e5100877beee7859c5ae0a3476cfcaf498d0cd26438",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:ONE"
+  },
+  "source_observation": {
+    "control_room": {
+      "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+      "document_digest": "af62bba128587438e3aae57629da3b304d80b4da328654844896c3ceaa82f057",
+      "instance_after": "bfb2389d8fc74e5bdb699bb4b755465e948673f3a8235c14dd7a5e930d3b09b0",
+      "instance_before": "bfb2389d8fc74e5bdb699bb4b755465e948673f3a8235c14dd7a5e930d3b09b0",
+      "publication_after": 1,
+      "publication_before": 1,
+      "source_validity_digest": "c8668c551574029a8f7f2f08cba7fd510e378e9c485173f09aa9772c2d168069"
+    },
+    "runtime": {
+      "after": 2,
+      "before": 2,
+      "schema": "mastermind.runtime_read_observation.v1",
+      "source_identity": "c7b96f2b8462496bf4c669e7d5865d17",
+      "state": "SAME"
+    },
+    "schema": "mastermind.workspace_result_observation.v1",
+    "selection": {
+      "attempt_id": "ATT-86f45f3634c44962a4fea6fc462b9084",
+      "job_id": "JOB-004",
+      "result_envelope_digest": "ca4b7a5fa4066cfd444f1e5100877beee7859c5ae0a3476cfcaf498d0cd26438",
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:ONE"
+    },
+    "state": "SAME"
+  }
+}

@@ -419,7 +419,7 @@ export function decodeResultEnvelope(
   return value as unknown as ResultEnvelopeDigestShape;
 }
 
-function decodeSourceObservation(
+export function decodeSourceObservation(
   value: unknown,
   expected: ResultSelection,
   availability: "AVAILABLE" | "CONTENT_OVER_BUDGET" | "UNAVAILABLE",

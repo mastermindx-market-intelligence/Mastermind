@@ -1,3 +1,5 @@
+import { ExecutionReturnRead } from "./ExecutionReturnRead";
+import type { ExecutionReturnRead as ReadExecutionReturn } from "./execution-return-read";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import {
@@ -95,6 +97,7 @@ export interface RetainedResultsProps {
   readResult: (
     request: ResultSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  readExecutionReturn?: ReadExecutionReturn;
   /** The parent's actual result renderer. This component renders no result
    * material of its own. */
   renderResult: (
@@ -139,6 +142,7 @@ export function RetainedResults({
   missionState,
   readReferences,
   readResult,
+  readExecutionReturn,
   renderResult,
 }: RetainedResultsProps) {
   const t = (value: string) =>
@@ -486,7 +490,10 @@ export function RetainedResults({
                 </p>
               ) : null}
               {detail.kind === "read"
-                ? renderResult(detail.selection, detail.decoded)
+                ? <>{renderResult(detail.selection, detail.decoded)}
+                  {readExecutionReturn && detail.decoded.availability === "AVAILABLE" ? <ExecutionReturnRead
+                    selection={detail.selection} read={readExecutionReturn}
+                    authGeneration={authGeneration} hostGeneration={hostGeneration} locale={locale} /> : null}</>
                 : null}
             </div>
           ) : null}

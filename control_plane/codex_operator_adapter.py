@@ -557,6 +557,8 @@ class _GenerationState:
     turn_subordinates: dict[str, set[str]] = field(default_factory=dict)
     audited_native_helper_turns: set[str] = field(default_factory=set)
     candidate_artifact_digests: dict[str, str] = field(default_factory=dict)
+    planner_turn_dispatches: dict[str, str] = field(default_factory=dict)
+    planner_turn_custodies: dict[str, dict[str, Any]] = field(default_factory=dict)
     pending_prebind_request_id: int | None = None
     visible_turns: set[str] = field(default_factory=set)
     skills_changed: bool = False
@@ -749,6 +751,7 @@ class CodexOperatorAdapter:
         client_factory: ClientFactory = _default_client_factory,
         extra_env: Mapping[str, str] | None = None,
         skill_canary_binding: CodexSkillCanaryBinding | None = None,
+        planner_producer: Mapping[str, Any] | None = None,
     ) -> None:
         raw_binary_path = Path(binary_path).expanduser()
         raw_codex_home = Path(codex_home).expanduser()
@@ -810,6 +813,13 @@ class CodexOperatorAdapter:
         self.client_factory = client_factory
         self.extra_env = dict(extra_env or {})
         self.skill_canary_binding = skill_canary_binding
+        # Intent belongs to Runtime. Codex applies outputSchema at turn/start,
+        # not initialize, so this must never become an initialized observation.
+        from control_plane.operator_materialization_receipt import planner_producer_selection
+        self._planner_producer = (planner_producer_selection(planner_producer)
+                                  if planner_producer is not None else None)
+        self.plan_contract = (self._planner_producer["planner_producer_binding"]["native_result_contract"]["name"]
+                              if self._planner_producer is not None else None)
         self._generations: dict[str, _GenerationState] = {}
         self._active_workers: dict[str, str] = {}
         self._bound_resources: dict[str, _BoundAttemptResource] = {}
@@ -1263,6 +1273,7 @@ class CodexOperatorAdapter:
         )
 
     def describe_capabilities(self) -> HarnessAdapterCapabilities:
+        original_planner_turn = getattr(self, "_planner_producer", None) is not None
         return HarnessAdapterCapabilities(
             interface_version=self.interface_version,
             supported_required_operations=(
@@ -1275,8 +1286,8 @@ class CodexOperatorAdapter:
                 "cancel",
                 "reconcile",
             ),
-            supported_optional_operations=("resume_session",),
-            supports_native_resume=True,
+            supported_optional_operations=(() if original_planner_turn else ("resume_session",)),
+            supports_native_resume=not original_planner_turn,
             supports_native_fork=False,
             supports_steering=False,
             supports_approval_response=False,
@@ -2242,6 +2253,12 @@ class CodexOperatorAdapter:
                 "requested profile refused: " + ",".join(validation.reasons),
             )
         self._assert_refs(requested, epoch, generation)
+        if getattr(self, "_planner_producer", None) is not None:
+            from control_plane.operator_materialization_receipt import planner_producer_selection
+            planner_producer_selection(self._planner_producer, attempt_id=epoch.attempt_id)
+            if generation.generation_number != 1:
+                raise CodexAdapterError(AdapterFailureClass.VALIDATION_FAILURE,
+                                        "versioned planner requires original G1")
         self._assert_worker_free(generation)
         if generation.process_generation_id in self._generations:
             raise CodexAdapterError(
@@ -2265,6 +2282,9 @@ class CodexOperatorAdapter:
         requested: RequestedExecutionProfile,
     ) -> SessionStartObservation:
         del operation_id
+        if getattr(self, "_planner_producer", None) is not None:
+            raise CodexAdapterError(AdapterFailureClass.VALIDATION_FAILURE,
+                                    "versioned planner resume is not qualified")
         self._assert_refs(requested, epoch, generation)
         if provider_session.worker_id != self.worker_id:
             raise CodexAdapterError(
@@ -2837,6 +2857,21 @@ class CodexOperatorAdapter:
                 )
         state.audited_native_helper_turns.add(turn.turn_id)
 
+    def retained_planner_producer(self, generation: ProcessGenerationRef):
+        """Return retained intent for an actually materialized generation.
+
+        Codex initialization provides no output-schema observation. The native
+        request and its ACK are checked later on the original TX-5 turn.
+        """
+        state = self._state(generation)
+        if getattr(self, "_planner_producer", None) is None:
+            return None
+        from control_plane.operator_materialization_receipt import planner_producer_selection
+        selected = planner_producer_selection(self._planner_producer, attempt_id=state.epoch.attempt_id)
+        if self.plan_contract != selected["planner_producer_binding"]["native_result_contract"]["name"]:
+            raise CodexAdapterError(AdapterFailureClass.CONFIG_DRIFT, "retained planner intent changed")
+        return selected
+
     def begin_turn(
         self,
         *,
@@ -2845,7 +2880,6 @@ class CodexOperatorAdapter:
         generation: ProcessGenerationRef,
         launch: LaunchComparison,
     ) -> TurnStartObservation:
-        del operation_id
         state = self._state(generation)
         self._assert_turn(state, turn)
         if state.attention_inflight:
@@ -2912,9 +2946,27 @@ class CodexOperatorAdapter:
                 AdapterFailureClass.VALIDATION_FAILURE,
                 "turn input loader returned an unsupported input type",
             )
+        producer = self.retained_planner_producer(generation)
+        native_request = {
+            "threadId": input_provider_session_id, "input": wire_input,
+            "cwd": str(self.workspace_root), "approvalPolicy": state.requested.approval_policy,
+        }
+        if producer is not None:
+            from control_plane.claude_operator_helper_protocol import native_plan_schema
+            if state.planner_turn_dispatches or state.turns:
+                raise CodexAdapterError(AdapterFailureClass.ACTIVE_WRITER_CONFLICT,
+                    "planner original turn already dispatched; reconcile without resend", effect_unknown=True)
+            native_request["outputSchema"] = native_plan_schema(
+                producer["planner_producer_binding"]["native_result_contract"]["name"])
+        frozen_request = (json.loads(json.dumps(native_request, allow_nan=False))
+                          if producer is not None else None)
+        request_digest = orchestration_result_digest(frozen_request) if producer is not None else None
         def prepare_send(request_id: int, queued: list[dict[str, Any]]) -> None:
             # Runs inside the client's existing notification/send critical
             # section. Never re-enter client I/O from this closed callback.
+            if producer is not None and orchestration_result_digest(native_request) != request_digest:
+                raise CodexAdapterError(AdapterFailureClass.CONFIG_DRIFT,
+                                        "planner native request changed before send")
             if queued:
                 previous_id = next(reversed(state.turns), None)
                 context_turn = (
@@ -2934,14 +2986,13 @@ class CodexOperatorAdapter:
             state.pending_prebind_request_id = request_id
 
         try:
+            if producer is not None:
+                # This mark precedes native I/O and survives a lost reply. It is
+                # a no-resend fence within the existing generation, not a retry.
+                state.planner_turn_dispatches[turn.turn_id] = request_digest
             result = state.client.request(
                 "turn/start",
-                {
-                    "threadId": input_provider_session_id,
-                    "input": wire_input,
-                    "cwd": str(self.workspace_root),
-                    "approvalPolicy": state.requested.approval_policy,
-                },
+                native_request,
                 timeout=60.0,
                 before_send=prepare_send,
             )
@@ -2949,6 +3000,10 @@ class CodexOperatorAdapter:
                 result.get("turn") if isinstance(result.get("turn"), Mapping) else {}
             )
             native_turn_id = str(turn_obj.get("id") or "")
+            if producer is not None and (type(turn_obj.get("id")) is not str
+                    or not native_turn_id or native_turn_id != native_turn_id.strip()):
+                raise CodexAdapterError(AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
+                                        "planner ACK has no exact native turn identity", effect_unknown=True)
         except CodexAdapterError:
             # The host-owned send guard reports configuration/authority facts,
             # not an RPC transport error. Preserve its exact failure taxonomy.
@@ -2957,13 +3012,20 @@ class CodexOperatorAdapter:
         except Exception as exc:
             self._visible_projection().drop_prebind("turn_start_error")
             raise _rpc_failure(exc, effect_unknown=True) from exc
-        if not native_turn_id:
+        if not native_turn_id or (producer is not None and native_turn_id in state.turns.values()):
             self._visible_projection().drop_prebind("turn_start_invalid_identity")
             raise CodexAdapterError(
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,
                 "turn/start returned no native turn identity",
                 effect_unknown=True,
             )
+        planner_custody = None
+        if producer is not None:
+            from control_plane.operator_harness_wire import build_planner_turn_custody
+            planner_custody = build_planner_turn_custody(producer=producer,
+                operation_id=operation_id, turn=turn, provider_session_id=input_provider_session_id,
+                provider_native_turn_id=native_turn_id, native_request=frozen_request)
+            state.planner_turn_custodies[turn.turn_id] = planner_custody
         state.turns[turn.turn_id] = native_turn_id
         turn_key = TurnKey(
             turn.attempt_id,
@@ -3002,7 +3064,7 @@ class CodexOperatorAdapter:
         notifications = state.client.drain_notifications()
         self._ingest_turn_notifications(state, turn, notifications)
         return TurnStartObservation(
-            provider_native_turn_id=native_turn_id, acknowledged=True
+            provider_native_turn_id=native_turn_id, acknowledged=True, planner_custody=planner_custody
         )
 
     def deliver_attention(
@@ -3651,7 +3713,19 @@ class CodexOperatorAdapter:
                 "raw result text is absent or noncanonical",
             )
         try:
-            parse_canonical_json(result_text)
+            parsed_result = parse_canonical_json(result_text)
+            producer = self.retained_planner_producer(state.generation)
+            if producer is not None:
+                from control_plane.operator_harness_wire import planner_turn_custody
+                from control_plane.claude_operator_helper_protocol import native_plan_schema
+                from jsonschema import Draft7Validator
+                proof = planner_turn_custody(state.planner_turn_custodies.get(turn.turn_id),
+                    producer=producer, turn=turn, provider_session_id=state.provider_session_id,
+                    provider_native_turn_id=native_turn)
+                if proof["native_request_digest"] != state.planner_turn_dispatches.get(turn.turn_id):
+                    raise ValueError("original native request custody changed")
+                Draft7Validator(native_plan_schema(
+                    producer["planner_producer_binding"]["native_result_contract"]["name"])).validate(parsed_result)
         except Exception:
             raise CodexAdapterError(
                 AdapterFailureClass.MODEL_OR_WORK_RESULT_FAILURE,

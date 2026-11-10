@@ -104,15 +104,18 @@ from control_plane.operator_harness_wire import (
     process_generation_ref as wire_process_generation_ref,
     requested_execution_profile as wire_requested_execution_profile,
     retained_plain_input_evidence as wire_retained_plain_input_evidence,
+    planner_turn_custody as wire_planner_turn_custody,
     session_epoch_ref as wire_session_epoch_ref,
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
     turn_ref as wire_turn_ref,
 )
 from control_plane.operator_materialization_receipt import (
+    MATERIALIZATION_RECEIPT_SCHEMA_V3,
     MATERIALIZATION_STATUS_SCHEMA,
     OperatorMaterializationReceipt,
     OperatorMaterializationReceiptError,
+    planner_materialization_schema_for_profile,
     build_operator_materialization_receipt,
     canonical_json_bytes as materialization_bytes,
     load_operator_materialization_receipt,
@@ -1989,15 +1992,16 @@ class ExecutiveWorkerBroker:
             options = {}
             if planner_producer is not None:
                 selected = planner_producer_selection(planner_producer)
-                if (requested.provider != "claude"
-                        or requested.harness_kind != "claude-agent-sdk"):
+                if (requested.provider, requested.harness_kind) not in {
+                        ("claude", "claude-agent-sdk"), ("openai-codex", "codex-app-server")}:
                     raise BrokerProtocolError("native planner producer is not qualified for this harness")
                 options["planner_producer"] = selected
             adapter = self.operator_adapter_factory(workspace, load_turn, requested, **options)
             if planner_producer is not None and (
                 getattr(adapter, "plan_contract", None)
                 != selected["planner_producer_binding"]["native_result_contract"]["name"]
-                or not callable(getattr(adapter, "observed_planner_contract", None))
+                or not callable(getattr(adapter, "retained_planner_producer"
+                    if requested.provider == "openai-codex" else "observed_planner_contract", None))
             ):
                 raise BrokerProtocolError("native planner producer observation is not composed")
         except Exception as exc:
@@ -2006,11 +2010,19 @@ class ExecutiveWorkerBroker:
             ) from exc
         return adapter, prompts, workspace
 
-    async def _observe_planner_contract(self, adapter, generation, planner_producer):
-        """Read native initialization evidence, never a configured assertion."""
+    async def _observe_planner_contract(self, adapter, generation, planner_producer, requested):
+        """Read provider-specific materialization; Codex has no schema echo."""
         if planner_producer is None:
             return None
         selected = planner_producer_selection(planner_producer)
+        if requested.provider == "openai-codex":
+            observer = getattr(adapter, "retained_planner_producer", None)
+            if not callable(observer) or await self._operator_call(
+                    "retained planner intent", observer, generation) != selected:
+                raise BrokerStateError("materialized Codex planner intent differs")
+            # Native initialization has no schema echo. V3 keeps this absent;
+            # the existing TX-5 path must later carry NATIVE_REQUEST_ACK.
+            return None
         observer = getattr(adapter, "observed_planner_contract", None)
         if not callable(observer):
             raise BrokerStateError("native planner initialization observation is unavailable")
@@ -2122,6 +2134,8 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError("OHF session identities do not match the broker")
         if handoff is not None and handoff.worker_id != self.policy.worker_id:
             raise BrokerProtocolError("OHF resume handoff does not match the broker")
+        if resume and producer is not None and requested.provider == "openai-codex":
+            raise BrokerProtocolError("versioned Codex planner resume is not qualified")
         try:
             validate_materialization_request(
                 operation_command_id=operation.command_id,
@@ -2170,6 +2184,8 @@ class ExecutiveWorkerBroker:
             and receipt.requested_profile_digest
             == requested_profile_digest(operator_to_wire(requested))
             and receipt.planner_producer == planner_producer
+            and (planner_producer is None or receipt.schema ==
+                 planner_materialization_schema_for_profile(operator_to_wire(requested)))
             and compare_launch(requested, observed).decision is LaunchDecision.ALLOW
             and (
                 handoff is None
@@ -2395,7 +2411,7 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator resume returned a different provider session identity"
                 )
-            initialized_contract = await self._observe_planner_contract(adapter, generation, producer)
+            initialized_contract = await self._observe_planner_contract(adapter, generation, producer, requested)
             observed = await self._operator_call(
                 "attestation", adapter.observed_attestation, generation
             )
@@ -2437,6 +2453,8 @@ class ExecutiveWorkerBroker:
                     created_at=_utc_now(),
                     planner_producer=producer,
                     observed_planner_contract=initialized_contract,
+                    schema=(planner_materialization_schema_for_profile(operator_to_wire(requested))
+                            if producer is not None else None),
                 )
                 receipt = await asyncio.to_thread(
                     persist_operator_materialization_receipt,
@@ -2570,7 +2588,7 @@ class ExecutiveWorkerBroker:
                 # Reuse the digest-covered receipt; mutation or a changed native
                 # observation cannot authorize a useful turn after initialization.
                 checked = load_operator_materialization_receipt(materialization_bytes(receipt.to_dict()))
-                observed = await self._observe_planner_contract(state.adapter, generation, state.planner_producer)
+                observed = await self._observe_planner_contract(state.adapter, generation, state.planner_producer, state.requested)
                 if observed != checked.observed_planner_contract:
                     raise BrokerStateError("native planner initialization changed")
             state.prompts[turn.turn_id] = prompt
@@ -2589,6 +2607,18 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
                 )
+            if state.planner_producer is not None and receipt.schema == MATERIALIZATION_RECEIPT_SCHEMA_V3:
+                if (observation.acknowledged is not True
+                        or type(observation.provider_native_turn_id) is not str
+                        or not observation.provider_native_turn_id.strip()):
+                    raise BrokerStateError("planner native request was not acknowledged")
+                proof = wire_planner_turn_custody(observation.planner_custody,
+                    producer=state.planner_producer, operation_id=operation, turn=turn,
+                    provider_session_id=state.provider_session_id,
+                    provider_native_turn_id=observation.provider_native_turn_id)
+                observation = dataclasses.replace(observation, planner_custody=proof)
+            elif observation.planner_custody is not None:
+                raise BrokerStateError("legacy or initialized planner cannot adopt turn custody")
             if (operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
                     and observation.acknowledged is True
                     and type(observation.provider_native_turn_id) is str

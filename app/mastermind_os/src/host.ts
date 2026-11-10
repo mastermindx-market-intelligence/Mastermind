@@ -1,3 +1,4 @@
+import { decodeExecutionReturnRead, type ExecutionReturnReadDocument } from "./execution-return-read";
 import { bindCompanyTransport, type CompanyRawMethods, type CompanyTransport } from "./company/transport";
 import { validateBacklogRequest, validateCompanySelection } from "./company/contract";
 import {bindNativeWorkAuthorization, type NativeWorkAuthorizationOwner} from "./native-work-authorization";
@@ -165,6 +166,7 @@ export interface RawClient extends Partial<CompanyRawMethods>, Partial<HostObser
     rootJobId: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  readExecutionReturn?(request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
   readResult?(request: {
     workRef: string;
     rootJobId: string;
@@ -253,6 +255,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readonly companyPriorities?: CompanyPrioritiesOwner;
   readResult?: MissionResultRead;
+  readExecutionReturn?(request: ResultSelection & { signal: AbortSignal }): Promise<ExecutionReturnReadDocument>;
   /** Mounted only when the raw method and the client invalidation generation both exist. */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
   /** Typed retained-result reference index read; same two-field selection grammar. */
@@ -1035,6 +1038,24 @@ export function bindMissionHost(
       if (!decoded) throw new Error("RESULT_REFERENCES_RESPONSE_INVALID");
       return decoded;
     },
+    ...(client.readExecutionReturn && client.invalidationGeneration ? {
+      async readExecutionReturn(request: ResultSelection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = normalizeResultSelection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch;
+        const generation = client.invalidationGeneration!();
+        check(signal, started);
+        const raw = await client.readExecutionReturn!({ ...selected, signal });
+        check(signal, started);
+        if (client.invalidationGeneration!() !== generation) throw new Error("AUTHENTICATION_CHANGED");
+        const decoded = await decodeExecutionReturnRead(raw, selected);
+        check(signal, started);
+        if (client.invalidationGeneration!() !== generation) throw new Error("AUTHENTICATION_CHANGED");
+        if (!decoded) throw new Error("EXECUTION_RETURN_RESPONSE_INVALID");
+        return decoded;
+      },
+    } : {}),
     async readResult({
       workRef,
       rootJobId,
@@ -1257,6 +1278,7 @@ export async function createNativeClient(
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
+      | "read_execution_return"
       | "read_mission_result"
       | "read_result_references"
       | "read_current_window",
@@ -1558,6 +1580,14 @@ export async function createNativeClient(
       return read("read_mission_v3", signal, {
         selection: { work_ref: workRef, root_job_id: rootJobId },
       });
+    },
+    readExecutionReturn: ({ signal, ...input }) => {
+      const selected = normalizeResultSelection(input);
+      if (!selected) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_execution_return", signal, { selection: {
+        work_ref: selected.workRef, root_job_id: selected.rootJobId, job_id: selected.jobId,
+        attempt_id: selected.attemptId, result_envelope_digest: selected.resultEnvelopeDigest,
+      } });
     },
     readResult: ({
       workRef,

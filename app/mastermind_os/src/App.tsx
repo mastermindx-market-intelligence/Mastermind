@@ -5026,6 +5026,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       missionState="UNAVAILABLE"
       readReferences={retainedResultHost.readResultReferences}
       readResult={retainedResultHost.readResult}
+      readExecutionReturn={retainedResultHost.readExecutionReturn}
       renderResult={(selected, document) =>
         <ResultCard locale={locale} state={{ kind: "READY", selection: selected, document }} />}
     /> : null;
@@ -5042,6 +5043,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         missionState={d?.read_state.state ?? "UNAVAILABLE"}
         readReferences={retainedResultHost.readResultReferences}
         readResult={retainedResultHost.readResult}
+        readExecutionReturn={retainedResultHost.readExecutionReturn}
         renderResult={(selected, document) => (
           <ResultCard locale={locale} state={{ kind: "READY", selection: selected, document }} />
         )}

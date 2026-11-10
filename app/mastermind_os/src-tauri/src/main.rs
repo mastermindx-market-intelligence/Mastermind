@@ -195,6 +195,7 @@ fn main() {
             auth::read_fabric_status,
             auth::read_t3_attempt_fleet,
             auth::read_result,
+            auth::read_execution_return,
             auth::read_mission_result,
             auth::read_result_references,
             auth::read_current_window,

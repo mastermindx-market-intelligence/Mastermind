@@ -37,6 +37,7 @@ from control_plane.execution_return_projection import (
     canonical_record_bytes,
     project_execution_return,
     validate_execution_return,
+    validate_execution_return_receipt,
 )
 from control_plane.executive_orchestration_principal import digest as orchestration_digest
 # The deliverer is INJECTED by the composing service (an
@@ -267,8 +268,9 @@ class ExecutionReturnWiring:
         # The transaction has committed before the native callback may return.
         return payload
 
-    def _delivery(self, event: Any, job: Any, attempt_id: str,
-                  intent: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def validate_delivery_event(event: Any, job: Any, attempt_id: str,
+                                intent: dict[str, Any]) -> dict[str, Any]:
         expected_type = (EXECUTION_RETURN_RECONCILED_EVENT
                          if event.command_id == _reconciliation_command_id(attempt_id)
                          else EXECUTION_RETURN_DELIVERY_EVENT)
@@ -281,10 +283,14 @@ class ExecutionReturnWiring:
                 or event.payload.get("intent_digest") != intent["digest"]
                 or event.payload.get("stage") != intent["record"]["stage"]):
             raise ValueError("delivery evidence does not join the original return intent")
-        receipt = self._deliverer.validate_receipt(intent["record"], event.payload.get("delivery"))
+        receipt = validate_execution_return_receipt(intent["record"], event.payload.get("delivery"))
         if expected_type == EXECUTION_RETURN_RECONCILED_EVENT and receipt["state"] != "delivered":
             raise ValueError("original reconciliation does not prove delivery")
         return receipt
+
+    def _delivery(self, event: Any, job: Any, attempt_id: str,
+                  intent: dict[str, Any]) -> dict[str, Any]:
+        return self.validate_delivery_event(event, job, attempt_id, intent)
 
     def _record_receipt(
         self, store: Any, job: Any, attempt_id: str, record: Any,
@@ -544,6 +550,42 @@ class ExecutionReturnWiring:
 
 class _OriginalReturnExists(Exception):
     """Another caller owns the original; this caller must not submit."""
+
+
+def retained_execution_return(job: Any, attempt_id: str, *, intent_event: Any,
+                              delivery_event: Any, reconciliation_event: Any) -> tuple[Any, Any]:
+    """Pure original-event projection for the bounded Runtime read owner.
+
+    An unqualified legacy/refusal receipt without its frozen native intent is
+    not a retained original return. Reading performs no submit, original
+    reconciliation, native observation, consumption or acceptance effect.
+    """
+    if intent_event is None:
+        if reconciliation_event is not None:
+            raise ValueError("reconciliation has no original intent")
+        if delivery_event is not None and delivery_event.payload.get("delivery", {}).get("state") == "delivered":
+            raise ValueError("delivered evidence has no original intent")
+        return None, None
+    intent = ExecutionReturnWiring._intent(intent_event, job, attempt_id)
+    record = intent["record"]
+    result = job.result if isinstance(job.result, dict) else {}
+    seal = orchestration_digest({
+        "attempt_id": attempt_id, "job_id": job.job_id,
+        "status": getattr(job.status, "value", str(job.status)),
+        "result_digest": orchestration_digest(result),
+    })
+    if record["attempt"]["seal_digest"] != seal:
+        raise ValueError("retained return differs from the selected terminal seal")
+    receipt = None
+    if delivery_event is not None:
+        receipt = ExecutionReturnWiring.validate_delivery_event(
+            delivery_event, job, attempt_id, intent)
+    if reconciliation_event is not None:
+        if receipt is None or receipt["state"] != "unknown":
+            raise ValueError("reconciliation has no original unknown outcome")
+        receipt = ExecutionReturnWiring.validate_delivery_event(
+            reconciliation_event, job, attempt_id, intent)
+    return record, receipt
 
 
 def install_execution_return_seam(

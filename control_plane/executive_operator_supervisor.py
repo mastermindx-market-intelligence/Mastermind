@@ -210,6 +210,16 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "claim-bound adapter plan contract differs from retained producer binding"
             )
+        if binding is not None and initialized_generation is not None:
+            from control_plane.codex_operator_adapter import CodexOperatorAdapter
+            if isinstance(adapter, CodexOperatorAdapter):
+                # An actual materialized Codex generation retains intent only.
+                # Its output schema is requested/acknowledged on TX-5, never
+                # asserted as a native initialization observation here.
+                selected = adapter.retained_planner_producer(initialized_generation)
+                if (selected is None or selected["job_id"] != job.job_id
+                        or selected["planner_producer_binding"] != binding):
+                    raise ExecutiveOperatorSupervisorError("materialized Codex planner intent differs")
 
     def _adapter_for_attempt(
         self, lease: AttemptLease, requested: RequestedExecutionProfile,
@@ -1025,20 +1035,20 @@ class ExecutiveOperatorSupervisor:
                 operation, OperationReceiptKind.EFFECT_UNKNOWN
             )
         )
-        expected_turn_keys = {
-            "schema_version",
-            "operation_kind",
-            "attempt_id",
-            "session_epoch_id",
-            "process_generation_id",
-            "worker_id",
-            "provider_session_id",
-            "turn_id",
-        }
         if (
             applied is None
             or unknown is not None
-            or set(turn_payload) != expected_turn_keys
+            or turn_event["aggregate_type"] != "operator_operation"
+            or turn_event["aggregate_id"] != operation.command_id
+            or turn_event["attempt_id"] != lease.attempt.attempt_id
+            or turn_event["job_id"] != lease.attempt.job_id
+            or turn_event["worker_id"] != lease.attempt.worker_id
+            or applied.event_type != OperationReceiptKind.APPLIED.value
+            or applied.aggregate_type != "operator_operation"
+            or applied.aggregate_id != operation.command_id
+            or applied.attempt_id != lease.attempt.attempt_id
+            or applied.job_id != lease.attempt.job_id
+            or applied.worker_id != lease.attempt.worker_id
             or turn_payload.get("attempt_id") != lease.attempt.attempt_id
             or turn_payload.get("session_epoch_id") != epoch.session_epoch_id
             or turn_payload.get("process_generation_id")
@@ -1057,6 +1067,17 @@ class ExecutiveOperatorSupervisor:
             process_generation_id=generation.process_generation_id,
             attempt_id=lease.attempt.attempt_id,
         )
+        from control_plane.executive_runtime import _validated_operator_turn_receipts
+        try:
+            _validated_operator_turn_receipts(
+                intent=turn_payload, applied=applied.payload,
+                operation_id=operation, turn=turn, worker_id=lease.attempt.worker_id,
+                provider_session_id=str(row["provider_session_id"]),
+            )
+        except (TypeError, ValueError, StateConflict) as exc:
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery turn has no exact acknowledged receipt"
+            ) from exc
         return session, turn, operation
 
     def _recovery_owner_identity(
