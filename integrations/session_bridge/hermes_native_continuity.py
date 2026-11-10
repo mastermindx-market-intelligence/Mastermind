@@ -186,8 +186,8 @@ def permitted_continuations(state):
         return [row]
     if state["state"] == GATEWAY_STOPPED:
         return [{"operation": "status", "idempotent": True,
-                 "why": "gateway stopped; its owner starts it — no auto-restart, "
-                        "reconnect or remake from here"}]
+                 "why": "gateway stopped; its owner starts it — automatic "
+                        "gateway recovery is not offered here"}]
     if state["state"] == VIEWER_DISCONNECTED:
         if state.get("session_id"):
             return [{"operation": "read", "session_id": state["session_id"],
