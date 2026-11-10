@@ -194,14 +194,17 @@ def test_merge_group_inert_docs_uses_fast_on_exact_integrated_head(tmp_path):
     assert result.source_head == pr["pull_request"]["head"]["sha"]
 
 
-def test_merge_group_ordinary_code_requires_source_proximate_smoke(tmp_path):
+def test_merge_group_ordinary_code_requires_the_full_suite(tmp_path):
     root, pr = setup(tmp_path, "app/mastermind_os/src/components/Widget.tsx",
                      b"export const x = 1;\n", b"export const x = 2;\n")
     event, protected = merge_event(root, pr)
     from scripts.ci_pr_scope import classify_merge_group
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
-    assert result.mode == "smoke" and result.needs_node is True
+    assert result.mode == "full" and result.tier == "STANDARD"
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
+    assert result.needs_node is True
 
 
 @pytest.mark.parametrize("path", [
@@ -319,37 +322,72 @@ def ordinary_module_group(tmp_path, count, *, owners=False, oversized=False):
     return root, pr, event, protected
 
 
-@pytest.mark.parametrize("count,expected", [(3, "smoke"), (4, "full")])
-def test_merge_group_complete_module_budget_preserves_pr_fast_feedback(tmp_path, count, expected):
+# A STANDARD merge group is full whatever its smoke selection would have
+# been: inside the former module budget (3), over it (4), with ownership
+# tests, or with an unselectable mapped module. The PR event keeps smoke.
+@pytest.mark.parametrize("count", [3, 4])
+def test_merge_group_complete_module_budget_preserves_pr_fast_feedback(tmp_path, count):
     from scripts.ci_pr_scope import classify_merge_group
     root, pr, event, protected = ordinary_module_group(tmp_path, count)
     assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
-    assert result.mode == expected and result.tier == "STANDARD"
+    assert result.mode == "full" and result.tier == "STANDARD"
     assert result.source_base == protected and result.source_head == pr["pull_request"]["head"]["sha"]
     assert result.file_count == count + 1
-    assert result.reason == ("SMOKE_SELECTION_EXCEEDS_BUDGET" if count == 4 else "SOURCE_VERIFIED")
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
 
 
-@pytest.mark.parametrize("count,expected", [(0, "smoke"), (1, "full")])
-def test_merge_group_ownership_tests_cannot_hide_an_ordinary_module(tmp_path, count, expected):
+@pytest.mark.parametrize("count", [0, 1])
+def test_merge_group_ownership_tests_cannot_hide_an_ordinary_module(tmp_path, count):
     from scripts.ci_pr_scope import classify_merge_group
-    root, _, event, protected = ordinary_module_group(tmp_path, count, owners=True)
+    root, pr, event, protected = ordinary_module_group(tmp_path, count, owners=True)
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
-    assert result.mode == expected and result.tier == "STANDARD"
-    if count:
-        assert result.reason == "SMOKE_SELECTION_EXCEEDS_BUDGET"
+    assert result.mode == "full" and result.tier == "STANDARD"
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
 
 
 def test_merge_group_oversized_mapped_module_escalates_instead_of_disappearing(tmp_path):
     from scripts.ci_pr_scope import classify_merge_group
-    root, _, event, protected = ordinary_module_group(tmp_path, 0, oversized=True)
+    root, pr, event, protected = ordinary_module_group(tmp_path, 0, oversized=True)
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
     assert result.mode == "full" and result.tier == "STANDARD"
-    assert result.reason == "SMOKE_APPLICABLE_TEST_UNAVAILABLE"
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
+
+
+@pytest.mark.parametrize("module", [
+    "integrations/quota_feed.py", "ops/quota_feed.py",
+])
+def test_standard_only_merge_group_cannot_certify_on_smoke(tmp_path, module):
+    """2026-11-10 incident shape: a PR ejected from a failed full group
+    re-entered in a STANDARD-only group, certified on smoke and merged
+    without re-running the tests that had just failed. Those tests (a
+    cross-repository pin, a package-membership count) are ones no path
+    selection maps, so the same diff must be full in the queue and smoke
+    only as a pull request.
+    """
+    root, pr = setup(tmp_path, module, b"value = 1\n", b"value = 2\n")
+    same_stem = root / "tests" / "test_quota_feed.py"
+    same_stem.parent.mkdir()
+    same_stem.write_text("def test_quota_feed(): assert True\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "same-stem test")
+    pr["pull_request"]["head"]["sha"] = git(root, "rev-parse", "HEAD")
+    as_pr = classify(root, pr, expected_repository=REPO)
+    assert (as_pr.mode, as_pr.tier, as_pr.reason) == ("smoke", "STANDARD", "SOURCE_VERIFIED")
+    event, protected = merge_event(root, pr)
+    payload = tmp_path / "merge-group.json"
+    payload.write_text(json.dumps(event))
+    queued = select_scope(root, payload, expected_repository=REPO,
+                          event_type="merge_group", protected_base_sha=protected)
+    assert (queued.mode, queued.tier) == ("full", "STANDARD")
+    assert queued.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
+    assert queued.file_count == as_pr.file_count == 2
+    assert queued.source_head == pr["pull_request"]["head"]["sha"]
 
 
 def test_workflow_uses_complete_protected_archive_despite_candidate_package_poison(tmp_path):
