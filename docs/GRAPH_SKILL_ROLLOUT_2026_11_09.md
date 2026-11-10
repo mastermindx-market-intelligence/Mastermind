@@ -67,3 +67,16 @@ G1–G3 are verified. G4 exposes the package through paired AGENTS/CLAUDE instru
 DO_NOT_REDO: preserve the 22 matching installs, 21 instruction triggers, 14 fresh memory/loader checks and 13 adapter readbacks unless a concrete drift appears. Preserve PR #1910 and the refused catalog import. Never infer a running-session reload, a background executor or an accepted recursive graph from these source/discovery receipts.
 
 Next safe action for source delivery is exact-head qualification and each repository's existing permitted protected release route. A later production mission should consume the installed skill with actual admitted ancestry and return evidence; this skill-rollout assignment creates no extra mission or worker grant.
+
+## CI dependency repair after first hosted run
+
+The first hosted run [42740522898](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42740522898), attempt 1, used integrated commit `2d211b8f207321da2a02ab5215ae684b93d9d909` for source head `4ca9b5ea2c975264105cb2d0b79f19e3503c2d32`. It exposed existing failures outside the 14 skill/documentation files:
+
+- Shard 0, job `129580215855`, runner `ubuntu1-b`: checkout emitted tracked-path removal errors, then setup-node could not resolve `app/mastermind_os/package-lock.json`. Existing PR #2388 owns the prevention repair; it does not repair an already contaminated workspace. No runner cleanup or unchanged rerun was attempted.
+- Shard 2, job `129580215904`, runner `ubuntu2-b`: the Linux initializer fast preflight refused writable disposable fixture directories. The workflow, production initializer and test files were byte-identical in candidate, current base and integrated test commit.
+
+A bounded fixture-only correction sets intended directory modes explicitly and exercises both `002` and `022` umasks. It retains every production owner/mode/ACL guard and the negative tests. On unprivileged Linux Python 3.12.14 / pytest 9.2.0, the unchanged library positive case failed under `002` at the hosted directory-mode predicate and passed under `022`. After correction, all 21 library tests passed under each process umask, including writable-ancestor, link, target and ACL negatives.
+
+The separate initializer case reproduced the hosted `line=452` first cause under `002`. Its corrected private directory hierarchy advances both parameter cases to `line=259`, where this cloud Python lacks the `fcntl.F_*SEAL*` constants. That is a demonstrated local capability boundary, not a positive initializer execution result. The full case remains enabled for the required native Linux CI; no guard, skip or assertion was weakened.
+
+The changed test hunk is disjoint from PR #2065's current test hunks. That original carrier, storage lock, H1 invocation, integration effects and explicit release holds remain untouched. The current session owns only this narrowly demonstrated fixture correction on its existing source branch. Existing PR #2388 remains a separate blocked dependency; its other failing tests are not evidence of a clean runner or permission to duplicate that repair.

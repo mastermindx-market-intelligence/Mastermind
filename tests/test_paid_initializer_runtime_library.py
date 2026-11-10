@@ -15,7 +15,7 @@ pytestmark=pytest.mark.skipif(sys.platform!='linux',reason='real Linux linkFD/AC
 @contextlib.contextmanager
 def library_chain(tmp_path,monkeypatch):
     base=tmp_path/'usr/lib';config=base/'python3.12/config-3.12-x86_64-linux-gnu';runtime=base/'x86_64-linux-gnu'
-    config.mkdir(parents=True);runtime.mkdir()
+    config.mkdir(parents=True,mode=0o755);runtime.mkdir(mode=0o755)
     first=config/m._QualifiedRuntimeLibrary.NAME;second=runtime/m._RuntimeSonameLink.NAME;target=runtime/m._QualifiedRuntimeLibrary.TARGET
     first.symlink_to(m._QualifiedRuntimeLibrary.LINK_VALUE);second.symlink_to(target.name)
     target.write_bytes(b'\x7fELF'+b'inert-not-executed'*32);target.chmod(0o644)
@@ -45,16 +45,20 @@ def library_chain(tmp_path,monkeypatch):
     finally:os.close(b);os.close(a)
 
 
-def test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed(tmp_path,monkeypatch):
-    with library_chain(tmp_path,monkeypatch)as(a,b,first,second,target):
-        with m._QualifiedRuntimeLibrary(a,b)as node:
-            node.check();fds=(node.fd,node.soname.fd,node.target_fd)
-            assert all(stat.S_ISLNK(os.fstat(fd).st_mode)for fd in fds[:2])
-            assert stat.S_ISREG(os.fstat(fds[2]).st_mode)
-            assert node.LIMIT==16777216 and m._QualifiedSysconfigLink.LIMIT==1048576
-        for fd in fds:
-            with pytest.raises(OSError)as error:os.fstat(fd)
-            assert error.value.errno==errno.EBADF
+@pytest.mark.parametrize('fixture_umask',[0o002,0o022])
+def test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed(tmp_path,monkeypatch,fixture_umask):
+    previous_umask=os.umask(fixture_umask)
+    try:
+        with library_chain(tmp_path,monkeypatch)as(a,b,first,second,target):
+            with m._QualifiedRuntimeLibrary(a,b)as node:
+                node.check();fds=(node.fd,node.soname.fd,node.target_fd)
+                assert all(stat.S_ISLNK(os.fstat(fd).st_mode)for fd in fds[:2])
+                assert stat.S_ISREG(os.fstat(fds[2]).st_mode)
+                assert node.LIMIT==16777216 and m._QualifiedSysconfigLink.LIMIT==1048576
+            for fd in fds:
+                with pytest.raises(OSError)as error:os.fstat(fd)
+                assert error.value.errno==errno.EBADF
+    finally:os.umask(previous_umask)
 
 
 @pytest.mark.parametrize('hop,payload',[(0,'/outside'),(0,'../../other/library.so'),(0,'./../../x86_64-linux-gnu/libpython3.12.so.1'),(1,'../other.so'),(1,'/usr/lib/other.so'),(1,'libpython3.12.so.1.0.extra')])
@@ -118,3 +122,4 @@ def test_library_hash_refuses_real_byte_change_with_stable_modelled_stat(tmp_pat
                 patch.setattr(os,'fstat',stable);patch.setattr(os,'stat',stable_name)
                 with node:
                     target.write_bytes(b'x'*before.st_size);node.check()
+
