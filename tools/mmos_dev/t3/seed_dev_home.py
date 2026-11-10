@@ -12,7 +12,9 @@ import json
 import os
 import sys
 
-DEV_ROOT = os.path.expanduser("~/.mastermind/mmos-dev/t3")
+DEV_ROOT = os.path.expanduser(
+    os.environ.get("MMOS_T3_DEV_ROOT", "~/.mastermind/mmos-dev/t3")
+)
 REAL_SETTINGS = os.path.expanduser("~/.t3/userdata/settings.json")
 SOURCE_INSTANCE = "capacity_fabric"
 PASS_THROUGH_ENV = [
@@ -59,7 +61,7 @@ def main() -> int:
             value = os.environ.get(name, "")
             fh.write(f"{name}={value}\n")
     os.chmod(envpath, 0o600)
-    print("SEEDED", path, "and", envpath, "(mode 0600)")
+    print("SEEDED", path, "and", envpath, "(mode 0600; DEV_ROOT=%s)" % DEV_ROOT)
     return 0
 
 
