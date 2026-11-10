@@ -1,5 +1,8 @@
 # MMOS program operating method V2 (Chairman directive 2026-11-10)
 
+> Graph, fan-out and model tiers are superseded by `OPERATING_METHOD_V3.md` (2026-11-10).
+> The CI and release rule, review rule, return format and safety section below remain binding.
+
 Binding on every agent in the Mastermind OS / Hermes Rev5 program from head `e6479f848` onward.
 Mission and constraints are unchanged: `~/.hermes/profiles/engineering/mmos/T3_HANDOFF_V2.md`
 (DONE_WHEN rows 1-7, section 6 failure matrix, section 7 hard constraints).

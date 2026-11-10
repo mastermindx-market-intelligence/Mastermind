@@ -13,10 +13,18 @@ import { WorkHierarchyView } from "./WorkHierarchyView";
 import type { DelegatedTask } from "./delegated-task";
 import "./team.css";
 
-/** Distinct conversation gateway states (HS01 + D2). A code-based classifier
- *  keeps labels honest: unknown codes stay unknown, never "healthy". */
+/** Distinct conversation gateway states (HS01 + D2, NM-06). A code-based
+ *  classifier keeps labels honest: unknown codes stay unknown, never
+ *  "healthy", and a STOPPED gateway is never shown as busy or disconnected. */
 export type TeamGatewayState =
-  | "live" | "viewer-disconnected" | "gateway-busy" | "quota" | "unknown";
+  | "live" | "viewer-disconnected" | "gateway-busy" | "gateway-stopped" | "quota" | "unknown";
+
+/** Same closed stopped-code table as the native continuity mirror
+ *  (`hermes-native/continuity.ts`): the gateway has an owner, not a here-fix. */
+const GATEWAY_STOPPED = new Set([
+  "NATIVE_GATEWAY_STOPPED",
+  "NATIVE_GATEWAY_NOT_RUNNING",
+]);
 
 const VIEWER_DISCONNECTED = new Set([
   "NATIVE_PLATFORM_UNAVAILABLE",
@@ -33,6 +41,7 @@ export function classifyGatewayState(
   if (code !== null && VIEWER_DISCONNECTED.has(code))
     return "viewer-disconnected";
   if (code === "NATIVE_BUSY") return "gateway-busy";
+  if (code !== null && GATEWAY_STOPPED.has(code)) return "gateway-stopped";
   if (code !== null && code.includes("QUOTA")) return "quota";
   return "unknown";
 }
@@ -149,10 +158,13 @@ const STRINGS = {
     gatewayLive: "Live",
     gatewayDisconnected: "Viewer disconnected",
     gatewayBusy: "Gateway busy",
+    gatewayStopped: "Gateway stopped",
     gatewayQuota: "Quota limited",
     gatewayUnknown: "Connection unknown",
     gatewayBusyNote:
       "The team gateway is handling one operation. Try again when it is free.",
+    gatewayStoppedNote:
+      "The team gateway is not running. Its owner starts it; no automatic restart or reconnect is attempted.",
     gatewayDisconnectedNote:
       "This viewer cannot reach the team gateway. Saved conversations and drafts are preserved.",
     gatewayQuotaNote:
@@ -223,9 +235,12 @@ const STRINGS = {
     gatewayLive: "在线",
     gatewayDisconnected: "查看端已断开",
     gatewayBusy: "网关繁忙",
+    gatewayStopped: "网关已停止",
     gatewayQuota: "配额受限",
     gatewayUnknown: "连接未知",
     gatewayBusyNote: "团队网关正在处理一项操作。空闲后可重试。",
+    gatewayStoppedNote:
+      "团队网关未在运行。需由其所有者启动；不会自动重启或重连。",
     gatewayDisconnectedNote:
       "当前查看端无法连接团队网关。已保存的对话与草稿均已保留。",
     gatewayQuotaNote: "网关报告配额限制。不会自动切换到其他通道。",
@@ -546,20 +561,24 @@ export function TeamWorkspace({
                   ? t.gatewayDisconnected
                   : gatewayState === "gateway-busy"
                     ? t.gatewayBusy
-                    : gatewayState === "quota"
-                      ? t.gatewayQuota
-                      : t.gatewayUnknown}
+                    : gatewayState === "gateway-stopped"
+                      ? t.gatewayStopped
+                      : gatewayState === "quota"
+                        ? t.gatewayQuota
+                        : t.gatewayUnknown}
             </p>
             <p className="muted mm-gateway-note">
               {gatewayState === "gateway-busy"
                 ? t.gatewayBusyNote
-                : gatewayState === "viewer-disconnected"
-                  ? t.gatewayDisconnectedNote
-                  : gatewayState === "quota"
-                    ? t.gatewayQuotaNote
-                    : gatewayState === "unknown"
-                      ? t.gatewayUnknownNote
-                      : null}
+                : gatewayState === "gateway-stopped"
+                  ? t.gatewayStoppedNote
+                  : gatewayState === "viewer-disconnected"
+                    ? t.gatewayDisconnectedNote
+                    : gatewayState === "quota"
+                      ? t.gatewayQuotaNote
+                      : gatewayState === "unknown"
+                        ? t.gatewayUnknownNote
+                        : null}
             </p>
             {conversationPanel ?? (
               <p className="muted">{t.conversationSectionNote}</p>
