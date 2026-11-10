@@ -343,7 +343,10 @@
   outline: 2px solid var(--noir-champagne);
   outline-offset: -2px;
 }
+/* Disabled rows keep secondary contrast — the shell's button:disabled would
+   drop them to tertiary (--faint); that is not a usable disabled state. */
 .mm-work-task-row:disabled {
+  color: var(--noir-text-secondary);
   cursor: not-allowed;
 }
 .mm-work-task-row[data-selected="true"] {
@@ -462,5 +465,27 @@
   .mm-search-view,
   .mm-work-view {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* ≤480 mobile (390px boards): the stacked panes tighten their padding and
+   the heading steps down one size — same rhythm as the conversation
+   surfaces. Desktop ≥1200px is untouched. */
+@media (max-width: 480px) {
+  .mm-search-surface h2,
+  .mm-work-surface h2 {
+    font-size: 20px;
+  }
+  .mm-search-results,
+  .mm-work-hierarchy {
+    padding: 12px;
+    border-radius: 12px;
+  }
+  .mm-search-context,
+  .mm-work-dialogue {
+    padding: 16px;
+  }
+  .mm-search-context-head h3,
+  .mm-work-dialogue-head h3 {
+    font-size: 18px;
   }
 }

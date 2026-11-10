@@ -182,8 +182,10 @@
   cursor: pointer;
   padding: 0;
 }
+/* Disabled keeps secondary contrast — tertiary is not a disabled state
+   (the Paper AT17/22 low-contrast defect is not replicated here either). */
 .mm-routines-open-result:disabled {
-  color: var(--noir-text-tertiary);
+  color: var(--noir-text-secondary);
   cursor: not-allowed;
 }
 
@@ -251,5 +253,24 @@
 @media (max-width: 800px) {
   .mm-routines-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* ≤480 mobile (390px boards): the select never relies on its intrinsic
+   option width (a long option could push past the column), headings step
+   down one size, and the stacked rhythm tightens. Desktop ≥1200px is
+   untouched. */
+@media (max-width: 480px) {
+  .mm-routines h1 {
+    font-size: 24px;
+  }
+  .mm-routines-grid {
+    gap: 20px;
+  }
+  .mm-routines-select {
+    width: 100%;
+    max-width: none;
+  }
+  .mm-routines-rail-card {
+    padding: 16px;
   }
 }

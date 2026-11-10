@@ -34,8 +34,10 @@
   line-height: 1;
   cursor: pointer;
 }
+/* Disabled keeps secondary contrast (AT17/22 not replicated): the shell's
+   button:disabled would drop this to tertiary. */
 .mm-cs-close:disabled {
-  color: var(--noir-text-tertiary);
+  color: var(--noir-text-secondary);
   cursor: not-allowed;
 }
 .mm-cs-reason {
@@ -290,7 +292,7 @@
   padding: 0;
 }
 .mm-cs-more:disabled {
-  color: var(--noir-text-tertiary);
+  color: var(--noir-text-secondary);
   cursor: not-allowed;
 }
 .mm-cs-placeholder {
@@ -322,5 +324,16 @@
 @media (max-width: 800px) {
   .mm-cs-body {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* ≤480 mobile (390px boards): the location bar lets its close button wrap
+   under a long root instead of pushing past the viewport, and the stacked
+   nav/content rhythm tightens. Desktop ≥1200px is untouched. */
+@media (max-width: 480px) {
+  .mm-cs-location {
+    flex-wrap: wrap;
+  }
+  .mm-cs-body {
+    gap: 20px;
   }
 }
