@@ -1,7 +1,8 @@
 # Paperclip finite credentials for Hermes
 
 Status: finite credential source qualified; live activation and learning proof held.
-The existing CodeQL alert disposition, baseline source-check and safe-cutover
+The specifically approved CodeQL fixture alerts 272/273 are dismissed and read
+back as used in tests. Baseline source-check, shared CI repair and safe-cutover
 holds remain in force. No live gateway capability is claimed.
 The fleet baseline is delivered in Mastermind PR #2399, merge
 `dee7a38a1e184e38cdcdd75889223d5b0ec27414`. This follow-up addresses the

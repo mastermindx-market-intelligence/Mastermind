@@ -76,9 +76,18 @@ source's 85 changed/new files. The native PM and `scripts/run_tests.sh` produced
 128 passes: 62 credential tests plus 66 existing plugin, CLI and contract
 checks. The origin repair preserves explicit port zero instead of treating it as
 an omitted default; all four negative regressions failed on the old code.
-All 16 Mastermind Paperclip contract/readiness fixtures and 15 exact-token guard
-regressions pass separately. The existing hash/token-bound D8 review mechanism
-classifies only the reviewed HTTPS default literal; scanner policy is unchanged.
+All 16 Mastermind Paperclip contract/readiness fixtures and 26 exact-token and
+metadata guard regressions pass separately. The existing hash/token-bound D8
+review mechanism recognizes only the reviewed HTTPS literal and observed metadata
+sites; scanner policy is unchanged.
+
+The later auxiliary-review investigation was withdrawn after checking the actual
+finite chat -q producer, which suppresses automatic background review. Runtime
+bytes are restored to this 128-case credential candidate; the
+[learning investigation and corrected disposition](evidence/2026-11-10-learning-qualification.json)
+is historical evidence, not a different install target or proof of automatic
+Paperclip learning. Foreground OMH save/recall and native skill_manage remain the
+existing learning owners.
 
 Native `scripts/check` remains failed on 3 footgun and 13 Ruff findings that
 reproduce identically on the installed baseline. The other 12 checks pass;

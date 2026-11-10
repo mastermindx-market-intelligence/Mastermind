@@ -278,11 +278,17 @@ the same profile and authenticated returns to the original issue. None of this
 live proof is claimed yet. Native source checking remains 12 of 14 overall,
 with the disclosed baseline footgun/Ruff failures still unwaived.
 
-CodeQL alerts 272/273 remain an explicit disposition hold. Automatic approval
-review rejected their dismissal; no alternate tool/account or source workaround
-is authorized by this continuation. Draft/disabled auto-merge remain held until
-the actual release controls are satisfied. This source work is independent of
-that denied action and does not claim to clear it.
+The Chairman subsequently approved the exact CodeQL fixture-alert dispositions.
+Alerts [272](https://github.com/mastermindx-market-intelligence/Mastermind/security/code-scanning/272)
+and [273](https://github.com/mastermindx-market-intelligence/Mastermind/security/code-scanning/273)
+were dismissed as used in tests on the original native GitHub carrier and read
+back at 2026-11-10 06:21:52/55 UTC. The unchanged synthetic regression test remains
+intact. The first approved request hit a comment-length schema error; both alerts
+were reconciled open before the corrected requests succeeded. Receipt SHA256:
+0d76c0b13e50a22de1d41276b74b0d802c4f8645f42ab7124da6b7d7a5910b67.
+The exact c994 CodeQL gate then became green without a rerun. This settles only
+those two alerts; required checks on each new head, the retained shared CI repair
+#2404, native source checking and safe runtime activation remain separate.
 
 Historical auxiliary investigation evidence and its disposition are recorded in
 [learning qualification](../../../ops/paperclip_fleet/evidence/2026-11-10-learning-qualification.json).
