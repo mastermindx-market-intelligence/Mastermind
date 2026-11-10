@@ -237,7 +237,7 @@ export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
   tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Native placement for complex C2 reviews may require a factual escalation_reason; preview refusals never authorize retry. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
-    max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
+    max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional intentional per-request Claude turn ceiling. Omit for complex implementation or audits unless a tighter ceiling is required: this only REDUCES the installed model/complexity budget and can terminate useful work before delivery. It is not a token, tool-call, dollar or acceptance budget, and never authorizes continuation or retry.'},
     work_packet:{type:'string',minLength:1,maxLength:16000,description:'In human-readable brief prose, abbreviate SHA-256 file hashes and git commit IDs to their first ~12 hex characters. Preserve complete values in explicit machine-verification fields, code, or commands requiring exact identity. Packets are forwarded unchanged; no content scanner or secret/key rejection is added.'}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
     pool:{type:'string',enum:MANUAL_POOLS,description:'Optional strict provider-pool pin; omitted means native AUTO. Manual pins disable cross-provider quota continuation. byteplus selects ModelArk Coding Plan capacity. experiential requires all three explicit consent fields; native account and funding gates remain authoritative.'},
@@ -930,7 +930,7 @@ export function createFabricFacade(engine, options={}) {
         reservation.pid=pid;
         controllers.set(pid,reservation);
         const settled=completedOutput(text);
-        return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
+        return response(withTurnBudgetAdvisory({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
           ...(args.pool?{requested_pool:args.pool,requested_model:args.model??(args.pool===EXPERIENTIAL_POOL?'free':'auto'),strict_manual_pin:true}:{}),
@@ -939,7 +939,7 @@ export function createFabricFacade(engine, options={}) {
           ...(args.response_only===true?{response_only:true}:{}),
           ...(planAuto?{provider_plan_auto:true,quota_continuation:false,attempt_limit:1}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
-          next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
+          next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'},args));
       }
       const s=await status(args);
       if(name==='fabric_status') {
@@ -1030,6 +1030,19 @@ async function main() {
   process.once('SIGINT',()=>close().finally(()=>process.exit(0)));
   process.stdin.once('end',()=>close().catch(()=>{}));
 }
+// An explicit caller ceiling on complex work is recorded as an advisory only:
+// it never raises the installed model/complexity limit and never authorizes a
+// continuation or retry. Omitted ceilings stay absent; effective limits stay
+// unobserved (null) until the installed wrapper reports them.
+function withTurnBudgetAdvisory(payload, args) {
+  if (args.max_turns===undefined
+      || !['C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT'].includes(args.task_complexity))
+    return payload;
+  return {...payload,request_budget_advisory:{code:'EXPLICIT_COMPLEX_TASK_TURN_CEILING',
+    requested_max_turns:args.max_turns,task_complexity:args.task_complexity,
+    effective_max_turns:null,limit_source:'caller_request',retry_authorized:false}};
+}
+
 if(process.argv[1] && resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   main().catch(()=>{process.stderr.write('FABRIC_MCP_STARTUP_FAILED\n');process.exitCode=1;});
 }
