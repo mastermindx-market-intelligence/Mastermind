@@ -28,3 +28,20 @@ Paperclip is the shell. The socket consumer is a Paperclip module worker process
 running as the Chairman's user, not the frozen app. §1/§2/§5 are unchanged and
 binding; §3/§4 now serve L8's thin-window/dev builds only — L4 builds no
 app-side client code.
+
+**Amendment 2026-11-10 (b) — production socket mode (defect fix, L4; flag to
+L8).** Activation-memo verification proved §2's `0600` socket is
+**unconnectable across uids in production**: file permissions gate `connect()`
+before the kernel peer-uid check runs (a socket created by gateway uid 458 at
+`0600` admits uid 458 only), and a `0700` parent blocks directory traversal for
+the operator uid. Dev/proof runs are same-uid and never hit this. Corrected
+rule, replacing the modes in §2: the socket and its parent must be
+**connectable/traversable by the operator uid** (socket `0660` with a shared
+group or `0666`; parent with traverse for the operator), and **admission is
+enforced solely by the kernel peer-uid check** — file permissions never carry
+admission authority (launchd/socket-activation discipline: connectable socket,
+kernel-credential admission). Security is unchanged in substance: the peer-uid
+check is unforgeable and unreachable from the TCP tunnel (different address
+family); permissions only ever excluded *attempts*, and a wrong-uid attempt is
+refused in-process by the check. §2's "removed on stop" and stale-socket rules
+are unchanged.

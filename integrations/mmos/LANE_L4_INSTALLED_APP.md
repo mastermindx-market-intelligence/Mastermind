@@ -164,6 +164,36 @@ L4 owes a small Python client example for that lane to copy. Lane closes after:
 Executive socket listener + gating tests + client example, activation memo,
 corrected incident record, final return.
 
+- **Activation memo ACCEPTED** (glm-5.3 child, effort high; 367-line artifact
+  opened in full by lead; load-bearing citations spot-checked against source:
+  `service-control.sh:11-15/:1052-1055/:1077-1080`, `mcp_component_update.py`
+  worker/control grep = 0 and allowed-change set `:587`, `autonomy_control.py:8333/:8865`,
+  `install.sh:1675-1682` stage-only receipt, `executive_mcp_entry.py:69-71/:1023-1031`).
+  Verdict: **YES** install/upgrade separable (own label/uid/release root + owned
+  updater that never enters the Control flow), **PARTIAL** activation at HEAD
+  (gateway process must restart; no owned tool can write the `local_operator`
+  key until the landed release admits it — `validate_document` closed key set).
+  Landed `888aa5b98`. Drafting history: gemini-4-argon attempts died on the
+  provider thought_signature bug after writing the draft to disk; glm child
+  revised that draft in place (same start verified); snapshot
+  `/tmp/memo-gemini-draft-0711utc.md`.
+
+## Lead adjudication — production socket mode (from memo finding, 2026-11-10)
+
+The memo proved a real defect in contract §2 for the production case: a socket
+created by gateway uid 458 with mode `0600` under a `0700` parent is
+**unconnectable by the Chairman's uid 501** — file permissions gate `connect()`
+before `getpeereid` is ever consulted. Dev/proof runs (same uid) never hit it,
+which is why the ctypes proof passed. Resolution (launchd discipline): the
+socket must be *connectable* (explicit `0660`/`0666`; parent traversable when
+the module creates it), and **admission lives solely in the kernel peer-uid
+check** — unforgeable, and unreachable by the TCP tunnel (different address
+family). Applied to the landed module after writer verification; contract §2
+carries a dated amendment. Positive side effect: with a connectable socket the
+disallowed-uid negative test is meaningful (misconfigure `allowed_uids` to
+exclude the test uid and exercise the real check instead of an EACCES at
+connect).
+
 ## Design-attack adjudication (lead, 2026-11-10)
 
 Grok-4.7's return said "design holds" but wrote NO artifact to disk (prose not
