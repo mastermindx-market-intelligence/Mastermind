@@ -122,7 +122,7 @@ def test_trigger_paths_do_not_resemble_reserved_account_literals():
 def test_workflow_and_test_changes_trigger_the_gate_without_write_permissions():
     config = workflow()
     assert config["permissions"] == {"contents": "read"}
-    assert set(config["on"]) == {"pull_request", "merge_group", "push", "workflow_dispatch"}
+    assert set(config["on"]) == {"pull_request", "push", "workflow_dispatch"}
     for event in ("pull_request", "push"):
         assert set(config["on"][event]["paths"]) == {
             "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH,
@@ -134,7 +134,6 @@ def test_workflow_and_test_changes_trigger_the_gate_without_write_permissions():
             "tests/test_workbench_browser_port.py",
         }
     assert config["on"]["push"]["branches"] == ["master"]
-    assert config["on"]["merge_group"]["types"] == ["checks_requested"]
 
 
 def test_build_identity_matches_checkout_and_toolchain_is_exact():
