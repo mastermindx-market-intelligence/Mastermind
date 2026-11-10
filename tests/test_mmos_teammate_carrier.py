@@ -21,12 +21,12 @@ class FakePaperclip:
     """Records calls; answers like the dev instance would for one issue."""
 
     def __init__(self, agent_id="ag-1", issues=None, comments=None,
-                 metadata=None, fail=()):
+                 interactions=None, metadata=None, fail=()):
         self.agent_id = agent_id
         self.run_id = "run-9"
         self.issues = issues or {}
         self.comment_rows = dict(comments or {})
-        self.interaction_keys = []
+        self.interaction_rows = list(interactions or [])
         self.calls = []
         self.fail = set(fail)
         self.metadata = metadata
@@ -67,11 +67,20 @@ class FakePaperclip:
         self.calls.append(("comment", issue_id, body))
         self.comment_rows.setdefault(issue_id, []).append({"body": body})
 
+    def interactions(self, issue_id):
+        return [dict(row) for row in self.interaction_rows]
+
     def request_confirmation(self, issue_id, idem_key, prompt):
         self._guard("interaction")
-        if idem_key in self.interaction_keys:  # server dedupes by idem key
-            return {"id": "dup", "deduped": True}
-        self.interaction_keys.append(idem_key)
+        # Real dev-server behavior (verified live 2026-11-10): a re-POST of an
+        # idempotencyKey that exists from ANOTHER run is 409, not a dedupe.
+        if any(row.get("idempotencyKey") == idem_key for row in self.interaction_rows):
+            raise wc.CarrierError(
+                f"POST /api/issues/{issue_id}/interactions -> HTTP 409 "
+                '{"error":"Interaction idempotency key already exists"}')
+        self.interaction_rows.append(
+            {"id": f"ix-{len(self.interaction_rows) + 1}", "kind": "request_confirmation",
+             "status": "pending", "idempotencyKey": idem_key})
         self.calls.append(("interaction", issue_id, idem_key))
         return {"id": "ix-1"}
 
@@ -82,7 +91,8 @@ class FakePaperclip:
 
 
 class FakeT3:
-    """Thread memory + a send() that appends the marker turn and answers."""
+    """Thread memory + a send() that appends the marker turn and answers.
+    Each send() gets its own runId, exactly like real T3 turns."""
 
     def __init__(self, replies=None, messages=None, send_error=None):
         self.messages_store = list(messages or [])
@@ -90,18 +100,21 @@ class FakeT3:
         self.send_error = send_error
         self.sends = []
         self._auto = 0
+        self._runs = 0
 
     def send(self, message):
         if self.send_error:
             raise wc.CarrierError(self.send_error)
         self.sends.append(message)
-        self.messages_store.append(("user", "r1", message))
+        self._runs += 1
+        run = f"r{self._runs}"
+        self.messages_store.append(("user", run, message))
         if self.replies:
             reply = self.replies.pop(0)
         else:
             self._auto += 1
             reply = "fake answer" if self._auto == 1 else f"fake answer {self._auto}"
-        self.messages_store.append(("assistant", "r1", reply))
+        self.messages_store.append(("assistant", run, reply))
         return {"status": "completed", "reply": self.messages_store[-1][2],
                 "error": None}
 
@@ -306,3 +319,51 @@ def test_t3thread_run_passes_str_stdin_and_expands_paths(tmp_path):
     proc = cat._run(["-"], stdin_text="hello carrier")
     assert proc.returncode == 0
     assert proc.stdout == "hello carrier"
+
+
+def test_side_message_after_answer_never_replaces_the_reply():
+    # Adversarial finding 2026-11-10 (MMO-7): crash after send, then an
+    # unrelated later turn answers differently in the thread. The marker's
+    # answer is bound to the marker's runId; the newer text must NOT become
+    # the reconciled reply (it used to be posted as a second comment).
+    content = "Summarize file X\nWrite a three-line summary."
+    op = wc.op_id("is-1", content)
+    messages = [
+        ("user", "r1", f"[{op}] the task"),
+        ("assistant", "r1", "ADVERSARY-5"),          # the real answer
+        ("user", "r2", "Side note from the operator"),
+        ("assistant", "r2", "a completely newer text"),
+    ]
+    t3 = FakeT3(messages=messages)
+    pc = FakePaperclip(issues={"is-1": {"identifier": "MMO-1", "status": "in_progress",
+                                         "title": "Summarize file X",
+                                         "description": "Write a three-line summary."}})
+    assert run(pc, t3) == 0
+    assert t3.sends == []  # reconciled, never resent
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies == ["ADVERSARY-5"]  # exactly one answer comment, the bound reply
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_confirmation_replay_is_skipped_not_409():
+    # Adversarial finding 2026-11-10 (run 98e3f054): a re-POST of this op's
+    # confirmation key from a later run is 409, which failed the run, released
+    # the delivered issue and attracted more wakes. deliver() must see the
+    # existing interaction and skip the POST.
+    content = "Summarize file X\nWrite a three-line summary."
+    op = wc.op_id("is-1", content)
+    messages = [("user", "r1", f"[{op}] the task"),
+                ("assistant", "r1", "fake answer")]
+    t3 = FakeT3(messages=messages)
+    pc = FakePaperclip(
+        issues={"is-1": {"identifier": "MMO-1", "status": "in_progress",
+                         "title": "Summarize file X",
+                         "description": "Write a three-line summary."}},
+        comments={"is-1": [{"body": "fake answer"}]},   # crash after comment
+        interactions=[{"id": "ix-1", "kind": "request_confirmation",
+                       "status": "pending",
+                       "idempotencyKey": f"{op}-confirm"}])  # and after confirmation
+    assert run(pc, t3) == 0
+    assert [c for c in pc.calls if c[0] == "interaction"] == []  # no re-POST, no 409
+    assert [c for c in pc.calls if c[0] == "comment"] == []      # no release note
+    assert pc.issues["is-1"]["status"] == "in_review"            # completes cleanly

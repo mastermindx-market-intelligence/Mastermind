@@ -20,7 +20,13 @@ Exactly-once discipline (smallest honest rule): the operation id
 thread. On re-entry the carrier scans the thread for that marker first: a
 pending marker is waited on (the turn may still be running server-side), a
 completed marker's reply is reconciled onto the issue, and the task is never
-sent twice. See T2_TEAMMATE_BINDING_AND_DISPATCH.md.
+sent twice. The marker's user turn and its answer share a T3 runId, so the
+reply is bound to that run — a later unrelated turn in the thread can never
+replace it (adversarial finding 2026-11-10). Delivery is idempotent across
+runs: an already-posted comment body and an already-created confirmation are
+both detected and skipped (this build answers a re-POSTed confirmation key
+from another run with 409, not a dedupe).
+See T2_TEAMMATE_BINDING_AND_DISPATCH.md.
 """
 import hashlib
 import json
@@ -80,19 +86,24 @@ def scan_marker(messages, op):
     """('reply', text) | ('pending', None) | (None, None) for `op` in a thread.
 
     `messages` is oldest-first [(role, run_id, text)] as returned by
-    T3Thread.messages(). A marker with no later assistant message is pending.
+    T3Thread.messages(). The marker's user message and its answer share a T3
+    runId; only assistant messages of THAT run are the answer (a later turn —
+    a human poke, an operator side message — has a different runId and must
+    never replace it). A marker whose run has not answered yet is pending.
     """
     tag = f"[{op}]"
-    seen = False
-    reply = None
-    for role, _run, text in messages:
-        if role == "user" and tag in (text or ""):
-            seen = True
-            reply = None
-        elif seen and role == "assistant" and (text or "").strip():
-            reply = text
-    if not seen:
+    marker_run = None
+    seen_at = None
+    for idx, (role, run_id, _text) in enumerate(messages):
+        if role == "user" and tag in (_text or ""):
+            marker_run = run_id  # the last marker for this op wins
+            seen_at = idx
+    if marker_run is None:
         return None, None
+    reply = None
+    for role, run_id, text in messages[seen_at:]:
+        if role == "assistant" and run_id == marker_run and (text or "").strip():
+            reply = text
     if reply is None:
         return "pending", None
     return "reply", reply
@@ -170,10 +181,15 @@ class PaperclipClient:
             {"clientRequestId": str(uuid.uuid4()), "body": body},
         )
 
+    def interactions(self, issue_id):
+        return self._request("GET", f"/api/issues/{issue_id}/interactions")
+
     def request_confirmation(self, issue_id, idem_key, prompt):
         """A pending request_confirmation interaction is this build's review
         path: without it, an agent PATCH to in_review is refused with
-        invalid_issue_disposition (422). The server dedupes by idempotencyKey."""
+        invalid_issue_disposition (422). CAUTION: re-POSTing an idempotencyKey
+        that already exists from ANOTHER run is answered with 409, not a
+        dedupe — callers check interactions() first."""
         return self._request(
             "POST", f"/api/issues/{issue_id}/interactions",
             {"kind": "request_confirmation", "idempotencyKey": idem_key,
@@ -261,21 +277,23 @@ def release_issue(pc, issue_id, note):
 
 
 def deliver(pc, issue, reply, op, crash_after=None):
-    """Deliver the thread's answer onto the issue, idempotently:
+    """Deliver the thread's answer onto the issue, idempotently ACROSS RUNS:
     comment (skip if the exact text is already posted), a pending
-    request_confirmation addressed to the board (the review path this build
-    requires), then status -> in_review. A crash between steps is repaired
-    by the next run without duplicating anything."""
+    request_confirmation addressed to the board (skip if this op's key already
+    exists — a re-POST from another run is a 409 in this build, not a dedupe),
+    then status -> in_review. A crash between steps is repaired by the next
+    run without duplicating anything."""
     if crash_after == "pre-comment":
         log(f"CRASH_SWITCH pre-comment (run {pc.run_id}); no comment will be posted")
         os._exit(97)
     if not comment_already_present(pc, issue["id"], reply):
         pc.add_comment(issue["id"], reply)
-    pc.request_confirmation(
-        issue["id"], f"{op}-confirm",
-        "The teammate answered in its T3 thread and the answer is posted as a "
-        "comment. Confirm it completes this issue (accept) or send it back "
-        "(reject with a reason).")
+    if not confirmation_already_present(pc, issue["id"], op):
+        pc.request_confirmation(
+            issue["id"], f"{op}-confirm",
+            "The teammate answered in its T3 thread and the answer is posted as a "
+            "comment. Confirm it completes this issue (accept) or send it back "
+            "(reject with a reason).")
     pc.set_status(issue["id"], "in_review")
     log(f"posted reply as comment on {issue.get('identifier')}; "
         "request_confirmation pending; status -> in_review")
@@ -363,6 +381,22 @@ def comment_already_present(pc, issue_id, reply):
         rows = rows.get("comments") or rows.get("rows") or []
     for row in rows:
         if (row.get("body") or "").strip() == reply.strip():
+            return True
+    return False
+
+
+def confirmation_already_present(pc, issue_id, op):
+    """True if this op's request_confirmation already exists (a re-POST would
+    be 409). An unreadable interaction list degrades to a POST attempt."""
+    key = f"{op}-confirm"
+    try:
+        rows = pc.interactions(issue_id)
+    except CarrierError:
+        return False
+    if isinstance(rows, dict):
+        rows = rows.get("interactions") or rows.get("rows") or []
+    for row in rows:
+        if row.get("idempotencyKey") == key:
             return True
     return False
 
