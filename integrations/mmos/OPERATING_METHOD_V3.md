@@ -82,6 +82,12 @@ uncommitted in dead checkouts.
   dropped it with nothing on disk. The third start named steps of at most 100 lines per tool
   call with a commit and a push after each, and had a file pushed in three minutes. Writer
   briefs now say this from the start: skeleton first, pushed inside ten minutes, then pieces.
+- A dropped stream can also replay a turn instead of killing the thread. Two drivers repeated one
+  command for 35 minutes (one read the same file 17 times; one stacked three background test
+  jobs on one log). The signs are identical assistant messages and a branch with no new commit.
+  The parent's check is the commit time on origin, not the thread's item count. Briefs say: run
+  tests in the foreground, check whether a command's output already exists before running it,
+  and after a failed Edit read `git diff --stat` before trying again.
 - Every `delegate_task` carries a unique `clientRequestId`. One writer per output: before any
   dispatch that follows an errored turn, list same-title children first.
 - Work is pushed to the lane branch on origin after every slice that passes its check, and at
