@@ -22,13 +22,41 @@ from typing import Any
 
 from control_plane.executive_runtime import (
     Runtime, RuntimeNamespaceCapability, RuntimeReadBinding, RuntimeReadUnavailable,
-    _DB_RELATIVE_PATH,
+    _CooWriteAuthorityScope, _DB_RELATIVE_PATH,
 )
 
 
 def _identity(value: os.stat_result) -> tuple[int, ...]:
     return (value.st_dev, value.st_ino, value.st_mode, value.st_uid,
             value.st_gid, 0 if stat.S_ISDIR(value.st_mode) else value.st_nlink)
+
+
+def _coo_write_namespace(bound_runtime, actual_runtime, scope):
+    """Recover only the actual installed read capability's original custodian.
+
+    The ordinary factory may wrap ``bound_runtime`` in a closure. Its returned
+    nominal owner, not the shape of that callable, proves which namespace is
+    current. No physical reader or second SQLite reservation is opened here.
+    """
+    if type(scope) is not _CooWriteAuthorityScope or type(bound_runtime) is not Runtime:
+        raise RuntimeReadUnavailable("COO write namespace owner is unavailable")
+    binding = bound_runtime.store.read_binding
+    if type(binding) is not RuntimeReadBinding:
+        raise RuntimeReadUnavailable("COO write namespace binding is unavailable")
+    capability = binding._capability
+    if (type(capability) is not _RequestCapability or capability.binding is not binding
+            or type(capability.owner) is not ServiceRuntimeNamespaceCustody
+            or capability.owner.runtime is not actual_runtime
+            or bound_runtime.store.path != capability.owner.database_path
+            or binding._invalid or binding._owner_thread is not None
+            or binding._namespace_stack is not None or binding._retained_namespace is not None
+            or binding._unclosed_connection is not None or binding._unclosed_resources is not None
+            or capability.scope is not None):
+        raise RuntimeReadUnavailable("COO write namespace is not the original service owner")
+    capability.validate(bound_runtime.store.path)
+    scope._bind_namespace(capability)
+    scope.require_current(actual_runtime.store)
+    return capability
 
 
 class _RequestCapability(RuntimeNamespaceCapability):

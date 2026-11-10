@@ -23,7 +23,10 @@ from common.executive_workspace_contract import canonical, _check_work_ref
 from control_plane import executive_runtime as owner
 from control_plane.coo_principal_host import CooHostProvider, FACT_PRINCIPAL_KEYS
 from control_plane.coo_principal_envelope import PrincipalAdmissionContext
-from control_plane.executive_delegation_identity import derive_delegation_identity
+from common import coo_requester_return_contract as requester_wire
+from control_plane.executive_delegation_identity import (
+    derive_delegation_identity, derive_coordinator_child_delegation_identity,
+)
 from integrations.hermes_delegate.schema import (
     SHA_RE, SELECTED_CHILD_FRAME_KEYS, SELECTED_CHILD_FRAME_SCHEMA,
     SubmissionError, parse_selected_child,
@@ -58,8 +61,11 @@ def validate_selected_child_frame(frame: Any) -> dict[str, Any]:
     if frame["schema"] != SELECTED_CHILD_FRAME_SCHEMA:
         raise SubmissionError("FRAME_INVALID")
     try:
-        request = parse_selected_child(frame["request"])
-    except SubmissionError as exc:
+        raw_request = frame["request"]
+        request = (requester_wire.acknowledgment(raw_request)
+            if type(raw_request) is dict and raw_request.get("action") == requester_wire.ACK_ACTION
+            else parse_selected_child(raw_request))
+    except (SubmissionError, TypeError, ValueError) as exc:
         raise SubmissionError("FRAME_INVALID") from exc
     for key in ("target_digest", "capability_profile_digest"):
         value = frame[key]
@@ -152,8 +158,6 @@ class ExecutiveChildQualification:
         selected = self.selection
         if not _valid_selection(selected):
             return _response("REFUSED", "EXECUTIVE_SELECTION_INVALID")
-        if selected.parent_job_id != selected.root_job_id:
-            return _response("REFUSED", "EXECUTIVE_CHILD_DEPTH_UNSUPPORTED")
         try:
             with self.runtime.store.read() as connection:
                 root = connection.execute(
@@ -164,6 +168,9 @@ class ExecutiveChildQualification:
                 ).fetchone()
                 if root is None or child is None:
                     return _response("REFUSED", "EXECUTIVE_CHILD_NOT_FOUND")
+                coordinator = (root if selected.parent_job_id == selected.root_job_id
+                    else connection.execute("SELECT * FROM jobs WHERE job_id=?",
+                                            (selected.parent_job_id,)).fetchone())
                 # Check raw identity before the decoder's legacy root fallback.
                 if (
                     root["job_id"] != selected.root_job_id
@@ -176,7 +183,9 @@ class ExecutiveChildQualification:
                 if (
                     child["root_job_id"] != selected.root_job_id
                     or child["parent_job_id"] != selected.parent_job_id
-                    or child["depth"] != 1
+                    or coordinator is None
+                    or coordinator["root_job_id"] != selected.root_job_id
+                    or child["depth"] != coordinator["depth"] + 1
                 ):
                     return _response("REFUSED", "EXECUTIVE_CHILD_SCOPE_MISMATCH")
                 if child["orchestration_role"] not in {"work", "repair"}:
@@ -184,7 +193,11 @@ class ExecutiveChildQualification:
 
                 derive_delegation_identity(owner._job_from_row(root))
                 job = owner._job_from_row(child)
-                identity = derive_delegation_identity(job)
+                identity = (
+                    derive_delegation_identity(job) if coordinator["job_id"] == root["job_id"]
+                    else derive_coordinator_child_delegation_identity(
+                        job, owner._job_from_row(coordinator))
+                )
                 if (
                     job.plan_attempt_id != selected.plan_attempt_id
                     or job.plan_digest != selected.plan_digest
@@ -193,9 +206,9 @@ class ExecutiveChildQualification:
                 ):
                     return _response("REFUSED", "EXECUTIVE_PLAN_SELECTION_CHANGED")
 
-                admission, plan = owner._validated_plan_admission(connection, root)
+                admission, plan = owner._selected_child_coordinator_plan(connection, root, coordinator)
                 current = owner._current_orchestration_tree_material_for_dispatch(
-                    connection, root, admission, plan
+                    connection, coordinator, admission, plan
                 )
                 step = next(
                     (item for item in current
@@ -274,7 +287,7 @@ class ExecutiveSelectedChild:
         """The incumbent deterministic coo-cycle dispatch command."""
 
         return (
-            f"coo-cycle:{self.selection.root_job_id}:dispatch:"
+            f"coo-cycle:{self.selection.parent_job_id}:dispatch:"
             f"{self.selection.job_id}:attempt:{self.attempt_ordinal}"
         )
 
@@ -327,6 +340,7 @@ class ExecutiveSelectedChildTarget:
             raise ValueError("selected child target children are invalid")
         commands: set[str] = set()
         roots: set[str] = set()
+        plans: set[tuple[str, str, str]] = set()
         for child in self.children:
             if type(child) is not ExecutiveSelectedChild or not _selected_child_valid(child):
                 raise ValueError("selected child target child is invalid")
@@ -334,8 +348,12 @@ class ExecutiveSelectedChildTarget:
                 raise ValueError("selected child target commands are not unique")
             commands.add(child.command_id)
             roots.add(child.selection.root_job_id)
+            plans.add((child.selection.parent_job_id, child.selection.plan_attempt_id,
+                       child.selection.plan_digest))
         if len(roots) != 1:
             raise ValueError("selected child target spans more than one root scope")
+        if len(plans) != 1:
+            raise ValueError("selected child target spans more than one coordinator plan")
         guard = self.currentness_guard
         if (not callable(guard)
                 or inspect.iscoroutinefunction(guard)
@@ -403,6 +421,7 @@ class ExecutiveSelectedChildTarget:
     def new_composition(
         self, *, service: Any, runtime: Any, loop: Any, authority: Any,
         context: Any, capability_profile_digest: str, receiving_request_guard: Any,
+        requester_return_guard: Any = None, requester_acknowledgment_guard: Any = None,
     ) -> "ExecutiveSelectedChildComposition":
         """Build one per-request C17 composition over these frozen children.
 
@@ -415,6 +434,8 @@ class ExecutiveSelectedChildTarget:
             authority=authority, context=context,
             capability_profile_digest=capability_profile_digest,
             receiving_request_guard=receiving_request_guard,
+            requester_return_guard=requester_return_guard,
+            requester_acknowledgment_guard=requester_acknowledgment_guard,
         )
 
 
@@ -437,7 +458,7 @@ SELECTED_CHILD_ENVELOPE_KEYS = frozenset({
     "schema", "state", "reason", "command_id", "job_id", "root_job_id",
     "orchestration_role", "attempt_id", "attempt_number", "attempt_status",
     "job_status", "live_submit", "result_status", "role", "operation_key",
-    "session_ref", "result_envelope_digest", "terminal_evidence_digest", "result_capsule",
+    "session_ref", "result_envelope_digest", "terminal_evidence_digest", "result_capsule", "requester_return",
 })
 
 
@@ -500,6 +521,8 @@ def validate_selected_child_envelope(body: Any, *, command_id: str) -> dict[str,
         from control_plane.executive_terminal_return import validate_selected_child_result_capsule
         projected["result_capsule"] = validate_selected_child_result_capsule(
             body["result_capsule"], observation=body)
+    if "requester_return" in body:
+        projected["requester_return"] = requester_wire.validate_descriptor(body["requester_return"], observation=body)
     return projected
 
 
@@ -576,7 +599,7 @@ def validate_selected_child_local_envelope(
                 or envelope["live_submit"] is not False):
             raise ValueError("selected child local refusal is unqualified")
     else:
-        expected = ("EFFECT_UNKNOWN" if action == "selected_child_submit"
+        expected = ("EFFECT_UNKNOWN" if action in {"selected_child_submit", requester_wire.ACK_ACTION}
                     else "UNAVAILABLE" if action == "selected_child_status" else None)
         if (envelope["state"] != expected
                 or envelope["reason"] not in {
@@ -637,6 +660,22 @@ class ExecutiveSelectedChildComposition:
     context: PrincipalAdmissionContext | None = field(default=None, repr=False)
     capability_profile_digest: str | None = field(default=None, repr=False)
     receiving_request_guard: Callable[[], None] | None = field(default=None, repr=False)
+    requester_return_guard: Callable[[], None] | None = field(default=None, repr=False)
+    requester_acknowledgment_guard: Callable[[], None] | None = field(default=None, repr=False)
+
+    def _with_requester_return(self, observed, child):
+        if observed.get("state") != "COMPLETED" or self.requester_return_guard is None:
+            return observed
+        if self.service._require_runtime() is not self.runtime:
+            raise owner.StateConflict("requester return Runtime changed")
+        descriptor = self.runtime.coo_selected_child_requester_return(
+            job_id=child.selection.job_id, command_id=child.command_id,
+            context=self.context, capability_profile_digest=self.capability_profile_digest,
+            currentness_guard=self.requester_return_guard)
+        if descriptor is None:
+            return observed
+        requester_wire.validate_descriptor(descriptor, observation=observed)
+        return {**observed, "requester_return": descriptor}
 
     def child_for(self, command_id: str) -> ExecutiveSelectedChild | None:
         if type(self.children) is not tuple or len(self.children) > 64:
@@ -658,15 +697,17 @@ class ExecutiveSelectedChildComposition:
         def require_request():
             if self.service._require_runtime() is not self.runtime:
                 raise owner.StateConflict("receiving selected-child Runtime changed")
-            guard = self.receiving_request_guard
-            if (inspect.iscoroutinefunction(guard)
-                    or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
-                raise owner.StateConflict("receiving selected-child request must be synchronous")
-            guarded = guard()
-            if guarded is not None:
-                if inspect.iscoroutine(guarded):
-                    guarded.close()
-                raise owner.StateConflict("receiving selected-child request unavailable")
+            for guard in (self.receiving_request_guard, self.requester_return_guard):
+                if guard is None:
+                    continue
+                if (not callable(guard) or inspect.iscoroutinefunction(guard)
+                        or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
+                    raise owner.StateConflict("receiving selected-child request must be synchronous")
+                guarded = guard()
+                if guarded is not None:
+                    if inspect.iscoroutine(guarded):
+                        guarded.close()
+                    raise owner.StateConflict("receiving selected-child request unavailable")
         def current_guard():
             require_request()
             self.authority.guard_dialogue(context=self.context,
@@ -705,18 +746,23 @@ class ExecutiveSelectedChildComposition:
             observed = await self.service.selected_child_status(
                 job_id=child.selection.job_id, command_id=command_id)
             if observed.get("state") != "NOT_CLAIMED":
-                return _envelope(observed, child)
+                return _envelope(self._with_requester_return(observed, child), child)
             guard = self._claim_guard(child)
             guard()
             qualification = ExecutiveChildQualification(self.runtime, child.selection).qualify()
             if qualification.get("state") != "QUALIFIED":
                 return _selected_child_refusal("REFUSED",
                     str(qualification.get("reason") or "EXECUTIVE_CHILD_REFUSED"), child)
+            requester_options = (
+                dict(requester_context=self.context,
+                     requester_capability_profile_digest=self.capability_profile_digest)
+                if self.requester_return_guard is not None else {})
             dispatch_started = True
             result = await self.service.dispatch_selected_child(
                 job_id=child.selection.job_id, command_id=command_id,
-                expected_selection=child.expected_selection(), admission_guard=guard)
-            return _envelope(result, child)
+                expected_selection=child.expected_selection(), admission_guard=guard,
+                **requester_options)
+            return _envelope(self._with_requester_return(result, child), child)
         except (owner.StateConflict, ValueError):
             return _selected_child_refusal(
                 "EFFECT_UNKNOWN" if dispatch_started else "REFUSED",
@@ -735,9 +781,27 @@ class ExecutiveSelectedChildComposition:
         try:
             result = await self.service.selected_child_status(
                 job_id=child.selection.job_id, command_id=command_id)
-            return _envelope(result, child)
+            return _envelope(self._with_requester_return(result, child), child)
         except Exception:
             return _selected_child_refusal("UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE", child)
+
+    async def acknowledge_result_async(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        selected = requester_wire.acknowledgment(dict(request))
+        child = self.child_for(selected["command"])
+        if child is None:
+            return _selected_child_refusal("REFUSED", "EXECUTIVE_SELECTED_CHILD_UNKNOWN_COMMAND")
+        if not callable(self.requester_acknowledgment_guard):
+            return _selected_child_refusal("REFUSED", "EXECUTIVE_SELECTED_CHILD_CLAIM_REFUSED", child)
+        try:
+            result = await self.service.acknowledge_selected_child_result(
+                selected, job_id=child.selection.job_id, context=self.context,
+                capability_profile_digest=self.capability_profile_digest,
+                currentness_guard=self.requester_acknowledgment_guard)
+            return _envelope(result, child)
+        except Exception:
+            # The event may already be committed. Only original status
+            # reconciles this acknowledgment; never send another command.
+            return _selected_child_refusal("EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", child)
 
     def submit(self, command_id: str) -> dict[str, Any]:
         child = self.child_for(command_id)

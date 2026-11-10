@@ -1,3 +1,5 @@
+import { EXECUTION_RETURN_READ_BYTES, EXECUTION_RETURN_READ_SCHEMA } from "./execution-return-read";
+import { COMPANY_CAP, COMPANY_SCHEMA, companyQuery, validateBacklogRequest } from "./company/contract";
 import {hostObservationWebMethods} from "./resources/host-observation-web";
 import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
 import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
@@ -1456,6 +1458,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
     },
+    readCompany: ({ signal, ...selection }) => read("acquisition", `${ORIGIN}/workspace/company/current?${companyQuery(selection)}`, signal,
+      { cap: COMPANY_CAP, typedUnavailableSchema: COMPANY_SCHEMA }),
+    createCompanyBacklog: ({ payload, signal }) => {
+      validateBacklogRequest(payload);
+      return sourcePost("/workspace/company/command", { ...payload }, signal);
+    },
     readModelConfiguration: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/models/current`,
       signal, { cap: 278_528, typedUnavailableSchema: "mastermind.workspace_model_configuration.v1" }),
     readCapacityFabric: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/fabric/current`,
@@ -1525,6 +1533,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         `${ORIGIN}/workspace/mission/v3/current?${new URLSearchParams({ work_ref: workRef, root_job_id: rootJobId })}`,
         signal,
       );
+    },
+    readExecutionReturn: ({ signal, ...input }) => {
+      const selected = normalizeResultSelection(input);
+      if (!selected) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/execution-return/current?${new URLSearchParams({
+        work_ref: selected.workRef, root_job_id: selected.rootJobId, job_id: selected.jobId,
+        attempt_id: selected.attemptId, result_envelope_digest: selected.resultEnvelopeDigest,
+      })}`, signal, { cap: EXECUTION_RETURN_READ_BYTES, typedUnavailableSchema: EXECUTION_RETURN_READ_SCHEMA });
     },
     readResult: ({
       workRef,

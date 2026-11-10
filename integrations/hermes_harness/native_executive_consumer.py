@@ -81,6 +81,10 @@ CURRENT_CONTEXT_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v
 CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST = "41644c90bbd8b5927c5cc7f97f65fef144ba9f9ca6e0277d702d7a8a26fa0da0"
 DISCOVERY_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v4"
 DISCOVERY_TOOLS_SCHEMA_DIGEST = "94db08906bd04c78565f6172d7a657c13bbe608f3b14dba5649cbedb23deed42"
+REQUESTER_RETURN_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v5"
+REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST = "29d6f504b79e806feefed6ab16f413338dd267de5019c7590fdc3655765537e3"
+PROJECT_HELP_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v6"
+PROJECT_HELP_TOOLS_SCHEMA_DIGEST = "0b7d9e4b7c336d0330665f40ebd8f2156997c3e42a0245c641dda625893a3e6e"
 _WORKSPACE_RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
 _WORKSPACE_SCOPE = "mastermind.workspace.read"
 _CURRENT_PRIMARY_RESOURCE = "https://mcp.mastermind-x.com/mcp"
@@ -402,6 +406,7 @@ class ExecutiveConsumerPublication:
     session: ConsumerSession
     plugin: ConsumerPlugin
     tools_schema_digest: str
+    requester_returns: bool = False
 
     def __post_init__(self) -> None:
         if _WORK_REF_RE.fullmatch(self.work_ref or "") is None:
@@ -416,6 +421,13 @@ class ExecutiveConsumerPublication:
         _digest(self.capability_profile_digest, "capability_profile_digest")
         _digest(self.principal_binding_digest, "principal_binding_digest")
         _digest(self.tools_schema_digest, "tools_schema_digest")
+        if type(self.requester_returns) is not bool:
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        from integrations.executive_mcp.coo import coo_requester_return_tool_schema_digest
+        if (self.requester_returns and (self.tools_schema_digest != REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST
+                or coo_requester_return_tool_schema_digest() != REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST)
+                or not self.requester_returns and self.tools_schema_digest == REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST):
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         parts = self.command.split(":")
         if parts[3] != self.job_id:
             # The command's own Job segment must be the frozen Job, so the two
@@ -466,6 +478,33 @@ class ConsumerSelectedChild:
 
 
 @dataclass(frozen=True)
+class ConsumerProjectHelp:
+    """Immutable explicit source selection; the remote owner proves its grant."""
+
+    scope_json: str
+
+    def __post_init__(self):
+        from common import coo_project_help_contract as wire
+        try:
+            if type(self.scope_json) is not str or len(self.scope_json) > 4096:
+                raise ValueError()
+            selected = wire.scope(wire.decode(self.scope_json.encode("utf-8"), limit=4096))
+            if wire.encode(selected).decode("utf-8") != self.scope_json:
+                raise ValueError()
+        except (ValueError, TypeError, UnicodeError):
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID") from None
+
+    def to_dict(self):
+        from common import coo_project_help_contract as wire
+        return wire.scope(wire.decode(self.scope_json.encode("utf-8"), limit=4096))
+
+    @classmethod
+    def from_scope(cls, value):
+        from common import coo_project_help_contract as wire
+        return cls(wire.encode(wire.scope(value)).decode("utf-8"))
+
+
+@dataclass(frozen=True)
 class ExecutiveContextConsumerPublication:
     """The same enrollment owner, with required context and an optional child.
 
@@ -488,11 +527,14 @@ class ExecutiveContextConsumerPublication:
     selected_child: ConsumerSelectedChild | None
     workspace_principal: ConsumerPrincipal | None = None
     discovery: bool = False
+    project_help: ConsumerProjectHelp | None = None
+    project_context_plugin: ConsumerPlugin | None = None
 
     def __post_init__(self):
         from common.workspace_project_plan_contract import validate_selection
         from integrations.executive_mcp.coo import (
-            coo_context_tool_schema_digest, coo_current_context_tool_schema_digest, coo_discovery_tool_schema_digest)
+            coo_context_tool_schema_digest, coo_current_context_tool_schema_digest, coo_discovery_tool_schema_digest,
+            coo_project_help_tool_schema_digest)
         from integrations.mastermind_executive_app.coo_binding import _digest as binding_record_digest
         try:
             validate_selection({"work_ref": self.work_ref})
@@ -509,6 +551,15 @@ class ExecutiveContextConsumerPublication:
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         if type(self.discovery) is not bool or self.discovery and self.workspace_principal is None:
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        if (self.project_help is None) != (self.project_context_plugin is None):
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        if self.project_help is not None:
+            if (type(self.project_context_plugin) is not ConsumerPlugin
+                    or self.project_context_plugin.name != "mastermind-long-horizon"
+                    or type(self.project_help) is not ConsumerProjectHelp or self.workspace_principal is None
+                    or self.discovery or self.selected_child is not None
+                    or self.project_help.to_dict()["source_plan"]["work_ref"] != self.work_ref):
+                raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         if self.workspace_principal is None:
             if (self.context.source_mode != "ADOPTED_SNAPSHOT"
                     or self.tools_schema_digest != CONTEXT_TOOLS_SCHEMA_DIGEST
@@ -517,8 +568,8 @@ class ExecutiveContextConsumerPublication:
                 raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         else:
             wp, principal = self.workspace_principal, self.principal
-            expected_tools = DISCOVERY_TOOLS_SCHEMA_DIGEST if self.discovery else CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
-            observed_tools = coo_discovery_tool_schema_digest() if self.discovery else coo_current_context_tool_schema_digest()
+            expected_tools = PROJECT_HELP_TOOLS_SCHEMA_DIGEST if self.project_help is not None else DISCOVERY_TOOLS_SCHEMA_DIGEST if self.discovery else CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST
+            observed_tools = coo_project_help_tool_schema_digest() if self.project_help is not None else coo_discovery_tool_schema_digest() if self.discovery else coo_current_context_tool_schema_digest()
             if (type(wp) is not ConsumerPrincipal or self.context.source_mode != "CANONICAL_PROJECT_DATA"
                     or self.tools_schema_digest != expected_tools or observed_tools != expected_tools
                     or wp.resource_ref != _WORKSPACE_RESOURCE or wp.scopes != (_WORKSPACE_SCOPE,)
@@ -559,19 +610,25 @@ def selected_child_publication(publication: ConsumerPublication) -> ExecutiveCon
     from dataclasses import fields
     return ExecutiveConsumerPublication(**{
         item.name: getattr(child, item.name) if item.name in _CHILD_KEYS
-        else getattr(publication, item.name) for item in fields(ExecutiveConsumerPublication)})
+        else getattr(publication, item.name) for item in fields(ExecutiveConsumerPublication)
+        if item.name != "requester_returns"})  # v2-v4 never opt into v5 acknowledgment
 
 
 def _validate_context_publication(value):
-    current = type(value) is dict and value.get("schema") in {CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}
+    current = type(value) is dict and value.get("schema") in {CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA, PROJECT_HELP_CONSUMER_SCHEMA}
     keys = _CONTEXT_PUBLICATION_KEYS | {"workspace_principal"} if current else _CONTEXT_PUBLICATION_KEYS
+    if current and value.get("schema") == PROJECT_HELP_CONSUMER_SCHEMA:
+        keys = keys | {"project_help", "project_context_plugin"}
     if (type(value) is not dict or set(value) != keys
-            or value.get("schema") not in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}):
+            or value.get("schema") not in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA, PROJECT_HELP_CONSUMER_SCHEMA}):
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     for name, keys in (("principal", _PRINCIPAL_KEYS), ("mcp", _MCP_KEYS),
                        ("session", _SESSION_KEYS), ("plugin", _PLUGIN_KEYS),
                        ("context", _CONTEXT_KEYS)):
         if type(value[name]) is not dict or set(value[name]) != keys:
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+    if current and value.get("schema") == PROJECT_HELP_CONSUMER_SCHEMA:
+        if type(value["project_context_plugin"]) is not dict or set(value["project_context_plugin"]) != _PLUGIN_KEYS:
             raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     if type(value["principal"]["scopes"]) is not list:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
@@ -597,7 +654,7 @@ def _typed_context_publication(document):
     principal["scopes"] = tuple(principal["scopes"])
     workspace = None
     mcp = dict(document["mcp"])
-    if document["schema"] in {CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}:
+    if document["schema"] in {CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA, PROJECT_HELP_CONSUMER_SCHEMA}:
         raw_workspace = dict(document["workspace_principal"])
         raw_workspace["scopes"] = tuple(raw_workspace["scopes"])
         workspace = ConsumerPrincipal(**raw_workspace)
@@ -607,6 +664,10 @@ def _typed_context_publication(document):
     return ExecutiveContextConsumerPublication(
         **common, principal=ConsumerPrincipal(**principal), mcp=ConsumerMcp(**mcp), workspace_principal=workspace,
         discovery=document["schema"] == DISCOVERY_CONSUMER_SCHEMA,
+        project_help=(ConsumerProjectHelp.from_scope(document["project_help"])
+            if document["schema"] == PROJECT_HELP_CONSUMER_SCHEMA else None),
+        project_context_plugin=(ConsumerPlugin(**document["project_context_plugin"])
+            if document["schema"] == PROJECT_HELP_CONSUMER_SCHEMA else None),
         session=ConsumerSession(**document["session"]), plugin=ConsumerPlugin(**document["plugin"]),
         context=ConsumerContext(**document["context"]), selected_child=(None
             if document["selected_child"] is None else ConsumerSelectedChild(**document["selected_child"])))
@@ -619,11 +680,11 @@ def validate_consumer_publication(value: Any) -> dict[str, Any]:
     here. No credential, bearer template, client secret, private path or
     authority boolean is accepted: the closed key set cannot carry one.
     """
-    if type(value) is dict and value.get("schema") in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}:
+    if type(value) is dict and value.get("schema") in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA, PROJECT_HELP_CONSUMER_SCHEMA}:
         return _validate_context_publication(value)
     if type(value) is not dict or set(value) != _PUBLICATION_KEYS:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
-    if value["schema"] != CONSUMER_SCHEMA:
+    if value["schema"] not in {CONSUMER_SCHEMA, REQUESTER_RETURN_CONSUMER_SCHEMA}:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     principal = value["principal"]
     if type(principal) is not dict or set(principal) != _PRINCIPAL_KEYS:
@@ -641,7 +702,7 @@ def validate_consumer_publication(value: Any) -> dict[str, Any]:
     if type(scopes) is not list:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     document = {
-        "schema": CONSUMER_SCHEMA,
+        "schema": value["schema"],
         "work_ref": value["work_ref"],
         "command": value["command"],
         "job_id": value["job_id"],
@@ -695,7 +756,7 @@ def publication_from_document(document: Mapping[str, Any]) -> ConsumerPublicatio
 
 def _typed_publication(document: Mapping[str, Any]) -> ConsumerPublication:
     """Build the typed publication from an already validated document."""
-    if document["schema"] in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA}:
+    if document["schema"] in {CONTEXT_CONSUMER_SCHEMA, CURRENT_CONTEXT_CONSUMER_SCHEMA, DISCOVERY_CONSUMER_SCHEMA, PROJECT_HELP_CONSUMER_SCHEMA}:
         return _typed_context_publication(document)
     principal = document["principal"]
     mcp = document["mcp"]
@@ -736,6 +797,7 @@ def _typed_publication(document: Mapping[str, Any]) -> ConsumerPublication:
             name=plugin["name"], source=plugin["source"], digest=plugin["digest"],
         ),
         tools_schema_digest=document["tools_schema_digest"],
+        requester_returns=document["schema"] == REQUESTER_RETURN_CONSUMER_SCHEMA,
     )
 
 
@@ -748,7 +810,7 @@ class ConsumerSlot:
                  "qualification_outcome", "load_attempted", "loader_entered",
                  "loader_result", "loader_record", "load_outcome", "registration_context",
                  "registration_binding", "registration_error", "registration_attempted",
-                 "memory_factory", "context_registration", "import_current",
+                 "memory_factory", "context_registration", "project_help_context", "import_current",
                  "discovery_binding", "discovery_context", "discovery_attempted", "discovery_handles",
                  "discovery_registration", "discovery_error", "discovery_call", "discovery_last_call",
                  "discovery_last_result", "discovery_uncertain", "discovery_uncertain_call")
@@ -779,6 +841,7 @@ class ConsumerSlot:
         self.registration_error = None
         self.load_outcome = "NOT_ATTEMPTED"
         self.memory_factory = self.context_registration = None
+        self.project_help_context = None
         self.import_current = None
         self.discovery_binding = self.discovery_context = self.discovery_registration = None
         self.discovery_error = self.discovery_call = self.discovery_last_call = None
@@ -1122,7 +1185,15 @@ class NativeExecutiveTransport:
 
     def selected_child_status(self, command_id): return self._call("selected_child_status", command_id)
 
-    def _call(self, action, command_id):
+    def acknowledge_result(self, descriptor):
+        from common import coo_requester_return_contract as wire
+        if not self._publication.requester_returns:
+            return _refusal_envelope("NATIVE_REQUESTER_RETURN_NOT_ENROLLED", self._publication)
+        request = wire.acknowledgment({"action": wire.ACK_ACTION,
+            "command": self._publication.command, "result": descriptor})
+        return self._call(wire.ACK_ACTION, self._publication.command, result=request["result"])
+
+    def _call(self, action, command_id, *, result=None):
         publication = self._publication
         try:
             if command_id != publication.command:
@@ -1134,8 +1205,14 @@ class NativeExecutiveTransport:
         except _ConsumerRefused as exc:
             return _refusal_envelope(exc.reason, publication)
         try:
-            raw = self._caller.call(TOOL_NAME, {"action": action, "command": publication.command})
+            arguments = {"action": action, "command": publication.command}
+            if result is not None:
+                arguments["result"] = result
+            raw = self._caller.call(TOOL_NAME, arguments)
             envelope = self._unwrap(raw, action=action)
+            if action == "acknowledge_result" and envelope is not None:
+                from common import coo_requester_return_contract as wire
+                wire.validate_acknowledgment_result(envelope, arguments)
             if envelope is None or (self._currentness is not None and self._currentness() is not True):
                 raise _ConsumerUncertain("native result or original binding is unavailable")
             return envelope
@@ -1434,6 +1511,10 @@ def compare_mandate(mandate: Mapping[str, Any],
         raise RuntimeRefusal("NATIVE_CONSUMER_AUTHORITY_GENERATION_MISMATCH")
     if capability.get("capability_profile_digest") != publication.capability_profile_digest:
         raise RuntimeRefusal("NATIVE_CONSUMER_CAPABILITY_MISMATCH")
+    if publication.requester_returns:
+        from common import coo_requester_return_contract as wire
+        if wire.ACTION not in capability.get("principal_actions", []):
+            raise RuntimeRefusal("NATIVE_CONSUMER_CAPABILITY_MISMATCH")
 
 
 def qualify_executive_consumer(
@@ -1509,5 +1590,6 @@ def qualify_executive_consumer(
         job_id=publication.job_id,
         session_key=session_key,
         task_id=task_id,
+        requester_returns=publication.requester_returns,
     )
     return binding

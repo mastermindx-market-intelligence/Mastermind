@@ -1,0 +1,31 @@
+{
+  "source_patch_sha256": "1e88c95d924bc61be9dd7a7121943a4928ee4c616ff87f66e76d7ed8ad896855",
+  "test_postimage_sha256": "81c8060bb57a6d136944e1b92b7fed2e435d1c8b7b53b47c03906388f3927213",
+  "unique_qualified_cases": 57,
+  "affected_suite": {
+    "files": [
+      "tests/test_fresh_conversation.py",
+      "tests/test_fresh_conversation_admission.py",
+      "tests/test_fresh_conversation_consumption.py",
+      "tests/test_fresh_conversation_http.py",
+      "tests/test_fresh_conversation_reference.py",
+      "tests/test_fresh_conversation_turn.py"
+    ],
+    "result": "51 passed in120.38s"
+  },
+  "additional_qualified": [
+    "tests/test_fresh_conversation_write_fences.py:5 passed",
+    "tests/test_fresh_conversation_private_mount.py::test_fresh_fixed_routes_retain_public_host_origin_method_and_query_fence:passed"
+  ],
+  "unproven": [
+    "Factory-only optional case stopped at missing exact-base local dependency (os_assets then company_priorities_transport); no semantic defect inferred.",
+    "Actual Unix private mount cases not attempted because this executor has an established AF_UNIX capability refusal; M2 qualification remains separate."
+  ],
+  "replay": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q tests/test_fresh_conversation.py tests/test_fresh_conversation_admission.py tests/test_fresh_conversation_consumption.py tests/test_fresh_conversation_http.py tests/test_fresh_conversation_reference.py tests/test_fresh_conversation_turn.py tests/test_fresh_conversation_write_fences.py tests/test_fresh_conversation_private_mount.py::test_fresh_fixed_routes_retain_public_host_origin_method_and_query_fence --tb=short",
+  "m2_additional_replay": "python3 -B -m pytest -q tests/test_fresh_conversation_private_mount.py tests/test_project_conversation_private_mount.py",
+  "evidence": {
+    "fresh-affected.log": "43c70874ae37ddad15a3423a13dbb0c322055f5e6d45b1fdb497fed4e4525a4a",
+    "fresh-affected.xml": "45274e88b1b2ca4ab11ea79e5130ed35c5cbef0e1411db417a758db4eff23c16",
+    "fresh-guard-mount.log": "6edae262e38b87734fad85330fe95fb69afe6f132618b19db234357bc4a792c4"
+  }
+}

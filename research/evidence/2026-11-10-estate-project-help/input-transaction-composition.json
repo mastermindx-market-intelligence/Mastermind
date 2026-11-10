@@ -1,0 +1,20 @@
+{
+  "schema": "mastermind.disjoint_input_transaction_composition.v1",
+  "input_patch_sha256": "aee642bdc037428faee4df1494776862d71fb6e8706cec4a9ef07eabc1d01834",
+  "transaction_patch_sha256": "5a5b4110e0a18aec22a500a1d1ada1f91c381b139d8e01233480163cf29c9d61",
+  "both_orders_identical": true,
+  "paths": {
+    "control_plane/coo_principal_host.py": {
+      "original_sha256": "5cfaa438669480efe341e65df270ac09679b493b35fbec63943591f783ddf852",
+      "composed_pre_sha256": "285965b20dd52f8391e3066fdcf9b970086d6217a48769e8b2f8e40baa052f64",
+      "composed_post_sha256": "5469b4d1f4b88393a781bbf387efd23f4183c6f504defd6e2a7ec5c2cc99ac24",
+      "composed_post_git_blob": "bc7f3c7c9eaf9fd4270d929061c792935b73a519"
+    },
+    "control_plane/executive_service.py": {
+      "original_sha256": "3c98ce090d9d147385edd7300b56c0eb58e88610f8018947b264a08ceae85638",
+      "composed_pre_sha256": "323374c560f3b85af617d1f334b504adce858141796b785fbb35e8a72426a6fe",
+      "composed_post_sha256": "b2191c2a96de45ee2ff7dc5cd4e55d6bc9163a6d9b110c45725b8de7d8851016",
+      "composed_post_git_blob": "ad02c970541ec351b1dba728e8b74e8db9f06379"
+    }
+  }
+}

@@ -34,6 +34,7 @@ from typing import Any
 
 from control_plane.child_execution_contracts import ChildExecutionRequest
 from control_plane.child_request_admission import admission_command_id
+from control_plane.executive_placement_authority import normalize_child_placement_spec
 from control_plane.executive_runtime import JobStatus, StateConflict
 
 #: Provenance schema of the composed placement Job.
@@ -62,7 +63,7 @@ class ChildExecutionComposition:
     """
 
     admission: Any  # AdmissionOutcome (ADMITTED or REPLAY)
-    placement_job: Any  # Job
+    placement_job: Any | None  # No placement exists for WAIT.
     placement_created: bool
     ready_to_claim: bool
 
@@ -78,13 +79,31 @@ def compose_child_execution(
 
     ``branch`` names the source branch the child works on (used by the
     post-seal GitHub evidence read); it is placement metadata, never
-    authority.
+    authority. An omitted branch on replay observes the retained branch;
+    an explicitly different branch is a conflict. WAIT admits no placement.
 
     Raises ``StateConflict(CHILD_REQUEST_DIGEST_CONFLICT...)`` unchanged
     when the triple was admitted with a different digest — the typed
     refusal the negative matrix requires, never a second Job.
     """
+    if type(request) is not ChildExecutionRequest:
+        raise StateConflict("child placement requires its original admitted request")
+    try:
+        normalized_spec = normalize_child_placement_spec(spec)
+    except (TypeError, ValueError) as exc:
+        raise StateConflict(f"child placement spec is invalid: {exc}") from exc
+    if normalized_spec["child_execution_request"] != request.to_dict():
+        raise StateConflict("child placement differs from the original admitted request")
+    if branch is not None and type(branch) is not str:
+        raise StateConflict("child placement branch is invalid")
+    branch = branch or None
     outcome = runtime.jobs.admit_child_execution_request(request)
+    if outcome.state == "WAIT":
+        return ChildExecutionComposition(
+            admission=outcome, placement_job=None,
+            placement_created=False, ready_to_claim=False)
+    if outcome.state not in {"ADMITTED", "REPLAY"} or not outcome.job_id:
+        raise StateConflict("child placement has no original admitted Job")
     command_id = placement_command_id(request)
     objective = (
         f"[child-placement] key={request.logical_child_key} "
@@ -101,7 +120,7 @@ def compose_child_execution(
     try:
         job = runtime.jobs.create_job(
             objective,
-            constraints={"child_placement": spec},
+            constraints={"child_placement": normalized_spec},
             attempt_limit=1,
             command_id=command_id,
             provenance=provenance,
@@ -112,11 +131,18 @@ def compose_child_execution(
         # A concurrent or replayed composition of the SAME handoff: the
         # events UNIQUE command id kept exactly one Job; reconcile to it.
         event = runtime.store.get_event_by_command_id(command_id)
-        if event is None or event.event_type != "JOB_CREATED":
+        if event is None:
             raise
+        if (event.event_type != "JOB_CREATED" or event.aggregate_type != "job"
+                or event.aggregate_id != event.job_id
+                or event.payload.get("provenance") != provenance):
+            raise StateConflict("child placement command belongs to another owner")
         job = runtime.jobs.get_job(str(event.job_id))
         if job is None:
             raise
+        if (job.constraints.get("child_placement") != normalized_spec
+                or branch is not None and job.branch != branch):
+            raise StateConflict("child placement material changed under the original command")
         created = False
     ready_to_claim = (
         job.status is JobStatus.QUEUED and not job.current_attempt_id

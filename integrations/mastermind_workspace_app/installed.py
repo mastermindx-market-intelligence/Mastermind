@@ -59,6 +59,7 @@ class CeoIngressWorkspaceClient:
         # result frame can never widen into the larger Mission ceiling.
         from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
         from common import coo_agentos_context_contract as context_wire
+        from common import coo_project_help_contract as help_wire
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame
         from common.workspace_control_room_read_contract import (
             FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
@@ -79,11 +80,17 @@ class CeoIngressWorkspaceClient:
         from common import workspace_t3_attempt_fleet_contract as t3_fleet_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
+        project_help = type(frame) is dict and frame.get("schema") == help_wire.FRAME_SCHEMA
+        help_context = type(frame) is dict and frame.get("schema") == context_wire.HELP_CONTEXT_FRAME_SCHEMA
         discovery_context = type(frame) is dict and frame.get("schema") == context_wire.DISCOVERY_FRAME_SCHEMA
-        current_context = discovery_context or type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
+        current_context = help_context or discovery_context or type(frame) is dict and frame.get("schema") == context_wire.CURRENT_FRAME_SCHEMA
         context_read = current_context or type(frame) is dict and frame.get("schema") == context_wire.FRAME_SCHEMA
-        if context_read:
-            validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+        if project_help:
+            help_wire.validate_frame(frame)
+            ceiling = help_wire.MAX_RESPONSE_BYTES + 4096
+            timeout = self.acceptance_timeout_seconds
+        elif context_read:
+            validator = context_wire.validate_help_context_frame if help_context else context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
             validator(frame)
             ceiling = context_wire.MAX_RESPONSE_BYTES
             timeout = self.acceptance_timeout_seconds
@@ -191,14 +198,18 @@ class CeoIngressWorkspaceClient:
                 raw = await reader.readuntil(b"\n")
                 if len(raw) > ceiling:
                     raise ValueError("source_unavailable")
-                value = context_wire.decode(raw, limit=ceiling) if context_read else json.loads(raw)
+                value = context_wire.decode(raw, limit=ceiling) if context_read or project_help else json.loads(raw)
                 if type(value) is not dict:
                     raise ValueError("source_unavailable")
                 if value.get("ok") is True:
                     if set(value) != {"ok", "result"} or type(value["result"]) is not dict:
                         raise ValueError("source_unavailable")
-                    if context_read:
-                        validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
+                    if project_help:
+                        help_wire.validate_result(value["result"], expected_context=frame["principal_context"],
+                            capability_profile_digest=frame["capability_profile_digest"],
+                            expected_workspace_principal=frame["workspace_principal"])
+                    elif context_read:
+                        validator = context_wire.validate_help_context_result if help_context else context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
                         validator(value["result"], expected_context=frame["principal_context"],
                             capability_profile_digest=frame["capability_profile_digest"],
                             **({"expected_workspace_principal": frame["workspace_principal"]} if current_context else {}))
@@ -208,7 +219,7 @@ class CeoIngressWorkspaceClient:
                     raise ValueError("source_unavailable")
                 return value
             finally:
-                if context_read:
+                if context_read or project_help:
                     # Keep cleanup finite even after the read budget expires;
                     # no retry, new connection, or compiler deadline renewal.
                     try:

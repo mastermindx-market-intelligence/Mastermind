@@ -1164,6 +1164,8 @@ class ProviderSessionHandoff:
 class TurnStartObservation:
     provider_native_turn_id: str | None = None
     acknowledged: bool = False
+    # Optional native request/ACK custody, never a schema echo or result approval.
+    planner_custody: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

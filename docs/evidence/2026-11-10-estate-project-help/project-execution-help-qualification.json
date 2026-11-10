@@ -1,0 +1,128 @@
+{
+  "boundaries": [
+    "Actual disposable Git/create/adopt/ProjectExecution admission, current DATA, Runtime, retained artifacts, original namespace and SessionBridge readers run.",
+    "Original fixture credential/PR/source-seal, worker binding and workspace preparation edges remain explicit and inert.",
+    "API proof uses actual signed two-resource SDK/App owners with explicit same-process private hop; separate real Unix replay is collected only.",
+    "Hermes proof uses actual packaged source importer and native memory/context lifecycle with incumbent plugin-manager boundary; no installed activation/native provider model.",
+    "Workspace resource remains PARTIAL/input-unavailable and generic mandate rejects it; help v2 has no execution authority/native attestation.",
+    "Original 25-second help deadline and individual source caps unchanged. Expiry stops next stage; await_owned joins original work, but Python cannot preempt OS syscalls.",
+    "No Runtime Event writes in help operations; no GitHub/M2/installed-profile/credential or external repository effects.",
+    "Current-DATA selected-child effect path B remains a separate reviewed design, not implemented by this carrier."
+  ],
+  "current_failed_cases": 0,
+  "evidence": [
+    {
+      "bytes": 579,
+      "path": "evidence/execution-help-positive.log",
+      "sha256": "6a55b759b406c0818f0df9235e424266f06cd4b0f22af776487a22a802b146d0"
+    },
+    {
+      "bytes": 417,
+      "path": "evidence/execution-help-positive.xml",
+      "sha256": "70423c939d81618f49d839fa33ec166be49fb7bf35ba10711c85fddcfea236cb"
+    },
+    {
+      "bytes": 5664,
+      "path": "evidence/execution-help-consumers.log",
+      "sha256": "29d485368301cc4ae1777cb9215d03078ee64927e7584b7aaab2fb14a0500364"
+    },
+    {
+      "bytes": 5158,
+      "path": "evidence/execution-help-consumers.xml",
+      "sha256": "50258aa4cac3209123c9552f7c27c0218811e8a12851fb89d0e30aae234d973a"
+    },
+    {
+      "bytes": 612,
+      "path": "evidence/execution-help-native-diagnostic.log",
+      "sha256": "ee3e22c83282d3b6dc96f713f7eccc739f4dace6c693e90e10654c847b64bbf2"
+    },
+    {
+      "bytes": 417,
+      "path": "evidence/execution-help-native-diagnostic.xml",
+      "sha256": "977d3974b517ec970c3751b309e78dfd530743f76a70415d34e1f1db5cec5963"
+    },
+    {
+      "bytes": 613,
+      "path": "evidence/execution-help-owner-api.log",
+      "sha256": "2ec94b725190aa611340d593bf66b3294d39feb045f21f0ae0149123a5dc44d1"
+    },
+    {
+      "bytes": 1903,
+      "path": "evidence/execution-help-owner-api.xml",
+      "sha256": "dafe04eab940eb5b466ade2ad93236cf57f33e16a2515a7d97acff941fbe19f0"
+    },
+    {
+      "bytes": 693,
+      "path": "evidence/execution-help-affected.log",
+      "sha256": "90fc48b79b2cbfa0994dbb81b2bb0674f10f82c5aca54de50a517e3045181a5d"
+    },
+    {
+      "bytes": 13344,
+      "path": "evidence/execution-help-affected.xml",
+      "sha256": "fdd7f42e1e5590ca4715d207aff2f971982588dcc989f9e5bb23c7d580dccba1"
+    },
+    {
+      "bytes": 774,
+      "path": "evidence/execution-help-ingress-collection.log",
+      "sha256": "89df2cf53629ce0e9c9da04a88a10384cc6a418ba71a29c892ce5992aab890a1"
+    }
+  ],
+  "full_replay_targets": [
+    "tests/test_project_execution_help_read.py",
+    "tests/test_project_execution_help_consumers.py",
+    "tests/test_project_execution_help_contract.py",
+    "integrations/hermes_harness/tests/test_native_project_help.py::test_actual_source_package_is_isolated_and_missing_or_changed_parser_cannot_match",
+    "integrations/hermes_harness/tests/test_native_project_help.py::test_v6_constructor_and_new_dependencies_use_original_held_source_importer",
+    "tests/test_project_execution_factory.py",
+    "tests/test_executive_coo_host.py",
+    "tests/test_coo_project_help_authority.py::test_actual_installed_plan_and_mission_qualify_original_help_scope_without_writes",
+    "tests/test_coo_project_help_budget.py::test_actual_private_help_uses_two_data_views_for_four_original_children"
+  ],
+  "host_replay": {
+    "args": [
+      "python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "tests/test_project_execution_help_ingress.py",
+      "--tb=short"
+    ],
+    "cases_collected": 2,
+    "execution": "NOT_RUN_IN_CLOUD",
+    "original_owners": "Actual admitting ExecutiveControlService, original ExecutiveSupervisor/input owner, actual namespace and private handler; no fake supervisor or handler.",
+    "required_capability": "Actual AF_UNIX peer/service custody on authorized M2",
+    "target": "tests/test_project_execution_help_ingress.py"
+  },
+  "replay_prefix": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=../estate-return-qualification/.qualification-deps:.:tests python -B -m pytest -q",
+  "retained_earlier_failures": [
+    {
+      "cause": "Setup reached original Plan child deadline and original cleanup refusal before API; native fallback lacked initial causal evidence. No source cap or production repair was made. Both consumer cases subsequently passed on unchanged production bytes; original failures retained.",
+      "log": "evidence/execution-help-consumers.log",
+      "outcome": "one setup error and one consumer UNAVAILABLE"
+    }
+  ],
+  "runs": [
+    {
+      "cases": 10,
+      "log": "evidence/execution-help-owner-api.log",
+      "scope": "Actual input owner, source/adoption/identity/permission drift, physical missing/corrupt input, elapsed deadline, cancellation join and signed T3 API",
+      "seconds": 482.33
+    },
+    {
+      "cases": 1,
+      "log": "evidence/execution-help-native-diagnostic.log",
+      "scope": "Actual packaged Hermes importer/native context tool and memory prompt delivery",
+      "seconds": 106.25
+    },
+    {
+      "cases": 86,
+      "log": "evidence/execution-help-affected.log",
+      "scope": "Closed v2 contract, package dependency/import guards, original ProjectExecution factory and COO host cases, actual legacy help and same-view budget positive",
+      "seconds": 105.76
+    }
+  ],
+  "schema": "mastermind.source_qualification.v1",
+  "source_manifest_sha256": "6eb12d2cc82fc33d6a1ba2f3779d91fe06a34d8c41e6232daa50af0e9a24d59b",
+  "unique_passed_cases": 97
+}

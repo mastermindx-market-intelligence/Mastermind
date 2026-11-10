@@ -1,0 +1,99 @@
+{
+  "accepted_owner": {
+    "merge_commit": "fd9f414bf63b3a2e059d192ce580c5754aababcd",
+    "pr": 2401
+  },
+  "artifacts": [
+    {
+      "bytes": 562,
+      "path": "accepted-macro-pin.patch",
+      "sha256": "a54a96836e125baa20626dffedebcbea0b63b5f8c384608be707e424f18b5b2f"
+    },
+    {
+      "bytes": 6163,
+      "path": "QUALIFICATION.md",
+      "sha256": "cf9dbffebd1eaa848069bff6dead36229d03579f743bf1005aa52f1f886e61b5"
+    },
+    {
+      "bytes": 798,
+      "path": "qualification.log",
+      "sha256": "abfe3106d91d2d5d8a9d558a5084ceba2e93b40cb306359a4819fd806a2e134e"
+    },
+    {
+      "bytes": 211,
+      "path": "qualification-environment-initial.log",
+      "sha256": "8c54c07e7218f13386313fda3989e17926ec2fee484e84d728ac1399f536aca8"
+    },
+    {
+      "bytes": 5077,
+      "path": "verify_cohort.py",
+      "sha256": "bab3be6eff8805394419c90907f90f5f511b7239d66342d716617294eafd4109"
+    },
+    {
+      "bytes": 2860,
+      "path": "observations.json",
+      "sha256": "04116caf6664449ed98f730d8a6afa9f43fe9e61193b082a5ea0bc066c8ec337"
+    },
+    {
+      "bytes": 1565,
+      "path": "observed_cohort.json",
+      "sha256": "fdea50483a26c125411977c812a1e5656b89ea44be321dd175ebd24b3b14bdaf"
+    },
+    {
+      "bytes": 368,
+      "path": "merge-tree-proof.json",
+      "sha256": "67e239016170d4bbedabb73fe7ad8a605da0d2800d0fd58afa526b4e8d8b56b9"
+    },
+    {
+      "bytes": 2372,
+      "path": "macro-owner-proof.md",
+      "sha256": "d09bd5b5bf950330a830cbaad8d8cab1d016b432cbebf8dce21fbe1ec6df1be2"
+    },
+    {
+      "bytes": 25884,
+      "path": "ci-failure-excerpt.log",
+      "sha256": "949dad77ef9b8e7421c42e3386a6737ebb141992a7d9a4774366ccfb7fabf61d"
+    },
+    {
+      "bytes": 19757,
+      "path": "reference/macro-a82.py",
+      "sha256": "cca4cbc2046fc4e602e87d12ef63b7d7bd34064a65b350f8aae868cbf72f7aad"
+    },
+    {
+      "bytes": 22234,
+      "path": "reference/macro-0c052.py",
+      "sha256": "c635c669d9486f736d0536ca1b26ef113f1112b2c5abb5578d7c49c6c3e036ae"
+    },
+    {
+      "bytes": 34978,
+      "path": "reference/workflow-957.yml",
+      "sha256": "4dd6f847ab33bb8b1a053d98559cfa77c5e8b749e373c3b3e8f9a2676a3f3bb0"
+    },
+    {
+      "bytes": 34978,
+      "path": "reference/workflow-accepted-fd9.yml",
+      "sha256": "178ae914ff5254bdb919853e115ead9aace24b4646639bdccd081a3a9083196e"
+    }
+  ],
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "files": [
+    {
+      "after_git_blob": "b201f8336b34bdd4a82469f234a4d2f622febd33",
+      "after_sha256": "178ae914ff5254bdb919853e115ead9aace24b4646639bdccd081a3a9083196e",
+      "before_git_blob": "d80e562479c5b30e7c7cdbdb85e4b23d495fd923",
+      "before_sha256": "4dd6f847ab33bb8b1a053d98559cfa77c5e8b749e373c3b3e8f9a2676a3f3bb0",
+      "mode": "100644",
+      "path": ".github/workflows/ci.yml",
+      "postimage": "postimage/.github/workflows/ci.yml"
+    }
+  ],
+  "macro_source_changed": false,
+  "patch": {
+    "path": "accepted-macro-pin.patch",
+    "sha256": "a54a96836e125baa20626dffedebcbea0b63b5f8c384608be707e424f18b5b2f"
+  },
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "runtime_effects": false,
+  "schema": "mastermind.source_patch_manifest.v1",
+  "workflow_reruns": 0
+}

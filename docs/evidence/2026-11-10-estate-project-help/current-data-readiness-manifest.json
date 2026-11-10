@@ -1,0 +1,136 @@
+{
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "dependencies": [
+    {
+      "kind": "source_patch",
+      "path": "/workspace/scratch/dfef37b7f33a/estate-project-help-v6-freeze/project-help-v6.patch",
+      "sha256": "d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d"
+    }
+  ],
+  "files": [
+    {
+      "base_blob": null,
+      "base_sha256": null,
+      "bytes": 9472,
+      "operation": "add",
+      "path": "tests/test_current_data_execution_readiness.py",
+      "post_blob": "439e6c11aa189655770bf8c0bbcf931d71117c53",
+      "post_sha256": "5c4a36a384e8da1f7e72efe4a591856176548e89b76084e1df1de693f4e27861"
+    }
+  ],
+  "patch": {
+    "path": "current-data-readiness-proof.patch",
+    "sha256": "373e213e033135085fd657745b47b28d83b6c7ea929be1d3134cd9093edb7a61"
+  },
+  "qualified_original_owner_sources": [
+    {
+      "base_blob": null,
+      "path": "tests/test_coo_project_help_authority.py",
+      "qualified_blob": "f7cf45eff0ecab7561819c05b84e0b0e280b7628",
+      "sha256": "102b6be3e1543e56c8745b50ebab6aa9f07374c77e6cb7dd33aa100d91a68969"
+    },
+    {
+      "base_blob": "04fe5aa5b58439792f76b855e2a963013468ba7a",
+      "path": "tests/test_project_execution_factory.py",
+      "qualified_blob": "04fe5aa5b58439792f76b855e2a963013468ba7a",
+      "sha256": "1649a05746890f32d5abf329ac83fe5ed78a0f985d3f17f422d433c03d33cf22"
+    },
+    {
+      "base_blob": "c8d9729bcec3972e92d20e316edaa04e8a4d6e0a",
+      "path": "tests/test_executive_os_phase1fc.py",
+      "qualified_blob": "c8d9729bcec3972e92d20e316edaa04e8a4d6e0a",
+      "sha256": "af410ead9b1f76bd82b9f4afa45451d121e6b2a2baa043937935fa692ff8ede4"
+    },
+    {
+      "base_blob": "65f6f7c9bc2da56bb450e63d45ffecd4b7b31004",
+      "path": "tests/test_executive_coo_app.py",
+      "qualified_blob": "65f6f7c9bc2da56bb450e63d45ffecd4b7b31004",
+      "sha256": "28c56cb869c3582268945e32bcede72385fa4a939ee0fd4ebf3b52c784d68000"
+    },
+    {
+      "base_blob": "1a31c67397f762f7aeb43c885d6e76edae36a8e3",
+      "path": "integrations/mastermind_executive_app/project_execution_factory.py",
+      "qualified_blob": "1a31c67397f762f7aeb43c885d6e76edae36a8e3",
+      "sha256": "cb92a082ba2a1a163c5659e851146badf6c43658e0637c248ce2d4da91e5a733"
+    },
+    {
+      "base_blob": "cc4a8bcb6487c8365700e3bd263773f658e5baa6",
+      "path": "control_plane/project_execution_admission.py",
+      "qualified_blob": "cc4a8bcb6487c8365700e3bd263773f658e5baa6",
+      "sha256": "079b389bd34d7ce53b248fe630b454def6fd65346094aec714b0069f8f918777"
+    },
+    {
+      "base_blob": "b8ad8a1bc9c43c8d3de7de8cf7ff6e4c771de57a",
+      "path": "control_plane/project_planning_admission.py",
+      "qualified_blob": "b8ad8a1bc9c43c8d3de7de8cf7ff6e4c771de57a",
+      "sha256": "7012c181ebca87e8cad5f5fadcd6b94864aae19378e900828b5fd9b85cfe793f"
+    },
+    {
+      "base_blob": "95113a063b021e9af2b9f4ce7849da0534fa436f",
+      "path": "control_plane/executive_service.py",
+      "qualified_blob": "83c28b82037f1a771168b484f5afd11b6c444ac0",
+      "sha256": "900f860ec952624cfe522720be85689abda394a8da997b40a37db22d4a449f35"
+    },
+    {
+      "base_blob": "f93beb510dba786d06fac38bc63301d413689a83",
+      "path": "control_plane/executive_coo_cycle.py",
+      "qualified_blob": "f93beb510dba786d06fac38bc63301d413689a83",
+      "sha256": "b6d2e00dc98f60133078f030fda0453234eb8cf669d21da5b5ad009594966c16"
+    },
+    {
+      "base_blob": "04eb8541f3135567b797614e5b0e94960cad1d4f",
+      "path": "control_plane/executive_runtime.py",
+      "qualified_blob": "04eb8541f3135567b797614e5b0e94960cad1d4f",
+      "sha256": "4e534112a48b97ce9f465aeac8eee2fab0d92624226ca547416808fa05d0f948"
+    },
+    {
+      "base_blob": "d882e555ec5b0390092c9213d17d0791ab8b5e9b",
+      "path": "control_plane/project_discovery_projection.py",
+      "qualified_blob": "d882e555ec5b0390092c9213d17d0791ab8b5e9b",
+      "sha256": "c04f0d0b038364065e8fe989faf401e68c92b50ed4a1ecc54e5f797a2a204216"
+    },
+    {
+      "base_blob": "598064540f79f0b776312c68deae44cfda2bc0de",
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "qualified_blob": "71253316a46deb20346774b1fa40d7724f2da2ee",
+      "sha256": "1bc7cfb14638c866141f5bbf9de6ba33fe4f57b12f75048e17d8547a49dbd1aa"
+    },
+    {
+      "base_blob": "5fb3c19d30fc20baa126e54a6cb5461cd8dfd560",
+      "path": "control_plane/workspace_read_service.py",
+      "qualified_blob": "2f3af87f4e2f27b945651394deddbf99804e217c",
+      "sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98"
+    },
+    {
+      "base_blob": "755b972cd200a2f028a5bbddfbc64076f1a1b121",
+      "path": "control_plane/autonomy_control_room_projection.py",
+      "qualified_blob": "755b972cd200a2f028a5bbddfbc64076f1a1b121",
+      "sha256": "eaa5d0f894c5d5736ac1a53f129b68cb4dd74beb2f639c8e09c89282648f8ea7"
+    },
+    {
+      "base_blob": "f82178f111892877fd3ab03f30d75c55abb0f26f",
+      "path": "control_plane/mission_workspace.py",
+      "qualified_blob": "f82178f111892877fd3ab03f30d75c55abb0f26f",
+      "sha256": "2948a59431bab239a9ab9b52cb15a9ca7ef156912451db5a44e44da55e801dce"
+    },
+    {
+      "base_blob": "d6ea468536cff8e671023d2a47a0965c263e8f7a",
+      "path": "control_plane/chairman_control_room.py",
+      "qualified_blob": "d6ea468536cff8e671023d2a47a0965c263e8f7a",
+      "sha256": "6bfac2378c12ebe609f745f7f620f6a61e168c02fda68515c1bac7cc67e3c5a6"
+    },
+    {
+      "base_blob": "6fa5d86b3a52207f1fd5d1e32ad72b29ff925859",
+      "path": "control_plane/project_canonical_data.py",
+      "qualified_blob": "6fa5d86b3a52207f1fd5d1e32ad72b29ff925859",
+      "sha256": "65caaabd7f1d43416bb2533fd3a08f5d9936776cf54cf53c0afce86d9059b4f1"
+    },
+    {
+      "base_blob": "4edd0b7a10d0994eb24d14171ece593d7c2c1180",
+      "path": "common/project_execution_private_contract.py",
+      "qualified_blob": "4edd0b7a10d0994eb24d14171ece593d7c2c1180",
+      "sha256": "3e5071391a39c6f557b84539fc92f2600343be62fd847b290ad8f28aafcc79e7"
+    }
+  ],
+  "schema": "mastermind.source_qualification_manifest.v1"
+}

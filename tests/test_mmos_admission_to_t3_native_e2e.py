@@ -32,6 +32,7 @@ Proven in this module:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import threading
 from datetime import datetime, timezone
@@ -144,9 +145,23 @@ class FakeReturnTransport:
     def __init__(self, fail: Exception | None = None) -> None:
         self.sends: list[dict[str, str]] = []
         self.fail = fail
+        self.originals: dict[str, tuple[dict, str]] = {}
 
     async def send(self, *, conversation_id: str, submission_id: str,
-                   text: str) -> str:
+                   text: str, before_write=None) -> str:
+        assert callable(before_write), "installed return wiring must reserve its original before send"
+        original = {
+            "binding": {"profile_id": "e2e", "session_id": conversation_id,
+                        "principal_id": "e2e-return"},
+            "request": {"operation": "submit", "submission_id": submission_id, "text": text,
+                        "target": {"profile_id": "e2e", "session_id": conversation_id,
+                                   "principal_id": "e2e-return", "instance_id": "e2e-instance",
+                                   "authority_epoch": 1, "revision": 0, "execution_generation": 0}},
+            "input_sha256": hashlib.sha256(json.dumps(
+                {"text": text, "finite": True}, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False).encode("utf-8")).hexdigest(),
+        }
+        before_write(original)
         self.sends.append({
             "conversation_id": conversation_id,
             "submission_id": submission_id,
@@ -154,7 +169,16 @@ class FakeReturnTransport:
         })
         if self.fail is not None:
             raise self.fail
-        return f"native-ref-{len(self.sends)}"
+        reference = f"native-ref-{len(self.sends)}"
+        self.originals[submission_id] = (original, reference)
+        return reference
+
+    async def read_original(self, original):
+        from integrations.session_bridge.hermes_native_return import HermesReturnUnknownOutcome
+        retained = self.originals.get(original["request"]["submission_id"])
+        if retained is None or retained[0] != original:
+            raise HermesReturnUnknownOutcome("no qualified original admission in the fixture")
+        return retained[1]
 
 
 class FakeGitHubPort:
@@ -777,23 +801,23 @@ def test_unknown_github_evidence_keeps_the_stage_honest(tmp_path):
     assert record["stage"] == "branch_pushed"
 
 
-# --- 10. delivery failure: honest refused receipt, no second send --------------
+# --- 10. untyped delivery failure: unknown receipt, no second send -------------
 
 
-def test_delivery_failure_records_honest_refused_receipt(tmp_path):
+def test_delivery_failure_records_honest_unknown_receipt(tmp_path):
     transport = FakeReturnTransport(fail=RuntimeError("native session down"))
     e2e = _run_handoff_to_seal(tmp_path, transport=transport)
 
-    # The seal completed; the delivery is honestly refused, once.
+    # The seal completed; an untyped send failure does not prove no effect.
     assert e2e.sealed.status is JobStatus.COMPLETED
     assert len(transport.sends) == 1
     events = _delivery_events(e2e.runtime, e2e.attempt_id)
     assert len(events) == 1
-    assert events[0].payload["delivery"]["state"] == "refused"
-    assert events[0].payload["delivery"]["refusal_code"] == "TRANSPORT_REFUSED"
+    assert events[0].payload["delivery"]["state"] == "unknown"
+    assert events[0].payload["delivery"]["refusal_code"] is None
 
-    # No retry loop: re-invoking the seam short-circuits on the durable
-    # receipt — the transport saw exactly one send, forever.
+    # Re-invoking the seam reads only the frozen original. Its absence is
+    # still unknown; the transport saw exactly one send, forever.
     from control_plane.executive_runtime import AttemptStatus
     e2e.runtime.attempts._execution_return_seam(
         job=e2e.sealed, status=AttemptStatus.COMPLETED)

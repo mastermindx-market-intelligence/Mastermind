@@ -882,7 +882,8 @@ class FakeMcpTransport:
             ]
             items = self.items.get(thread_id, [])
             after = arguments.get("afterPosition")
-            page = [i for i in items if after is None or i["position"] > after]
+            page = [dict(i, sourceThreadId=thread_id, textTruncated=False)
+                    for i in items if after is None or i["position"] > after]
             return {"thread": {"threadId": thread_id, "status": "idle"},
                     "recentRuns": runs, "items": page,
                     "nextPosition": (page[-1]["position"] if page else after),
@@ -1171,7 +1172,8 @@ class DonorMcpServer:
                            "runCount": len(thread["runs"]), "status": "idle",
                            "link": f"https://app.t3/{thread_id}"},
                 "recentRuns": [dict(r) for r in runs],
-                "items": [dict(i) for i in page],
+                "items": [dict(i, sourceThreadId=thread_id, textTruncated=False)
+                          for i in page],
                 "nextPosition": page[-1]["position"] if page else None,
                 "hasMore": len(rest) > len(page),
             }
@@ -1466,8 +1468,8 @@ class A4ReauditLivePortTests(unittest.IsolatedAsyncioTestCase):
             return reply
 
         port._call_tool = stalled
-        direct = await port.read_result(receipt.thread_id, receipt.run_id)
-        self.assertEqual(direct.result_ref, "")
+        with self.assertRaises(_t3m.T3PortRefusalError):
+            await port.read_result(receipt.thread_id, receipt.run_id)
 
     async def test_n9_run_beyond_recent_runs_is_looked_up_exactly(self) -> None:
         server = DonorMcpServer()

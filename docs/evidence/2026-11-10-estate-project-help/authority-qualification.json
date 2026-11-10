@@ -1,0 +1,67 @@
+{
+  "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "owned_file": "tests/test_coo_project_help_authority.py",
+  "production_owner": "/root/estate_return_consumer",
+  "source_tree": "/workspace/scratch/dfef37b7f33a/estate-project-help-v6-qualification",
+  "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests:/workspace/scratch/dfef37b7f33a/estate-return-qualification/.qualification-deps python -m pytest -q tests/test_coo_project_help_authority.py --maxfail=1 --tb=short",
+  "result": "8 passed, 1 warning in 240.01s",
+  "log": "/workspace/scratch/dfef37b7f33a/eg2-authority-current.log",
+  "log_sha256": "deb035b982742dcd21ecd0300673e57e162ab312d723fa0d2ecfd6ea6c5cd977",
+  "source_files": [
+    {
+      "path": "tests/test_coo_project_help_authority.py",
+      "sha256": "102b6be3e1543e56c8745b50ebab6aa9f07374c77e6cb7dd33aa100d91a68969",
+      "bytes": 21982
+    },
+    {
+      "path": "common/coo_project_help_contract.py",
+      "sha256": "78533893ee3ca92c583a8929342eb07e804aebbcaf9d6597b2c0c0e2a2241961",
+      "bytes": 15251
+    },
+    {
+      "path": "common/project_task_contract.py",
+      "sha256": "ebdb97a746b79b0cb776702be709aea4a646f0a41b6e922ebfdc4abb2236c08b",
+      "bytes": 10721
+    },
+    {
+      "path": "common/project_discovery_observation_contract.py",
+      "sha256": "1eb033f859bb6d25801e279f91572ea11314241a42c3b26b8b06a2c7dbc87644",
+      "bytes": 8968
+    },
+    {
+      "path": "control_plane/coo_project_help_read.py",
+      "sha256": "f3aa024b6d431c7d1eef952596cea9d3013a20bd4cb67d81ddc7a1891c34a875",
+      "bytes": 13370
+    },
+    {
+      "path": "control_plane/coo_principal_mandate.py",
+      "sha256": "1b5b28105e7decae1e638fedec5ddcd12a43df45826990f558d49ac83ed72d32",
+      "bytes": 21638
+    },
+    {
+      "path": "control_plane/coo_principal_host.py",
+      "sha256": "5ed802447f40394fdd8040e84304a960052c424b960a0a2ede55e519181bf327",
+      "bytes": 35830
+    },
+    {
+      "path": "control_plane/workspace_read_service.py",
+      "sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98",
+      "bytes": 149563
+    },
+    {
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "sha256": "1bc7cfb14638c866141f5bbf9de6ba33fe4f57b12f75048e17d8547a49dbd1aa",
+      "bytes": 11067
+    }
+  ],
+  "boundaries": [
+    "Disposable actual local Git and DATA/Runtime/Workspace owners; no installed activation",
+    "No fake clock or fabricated Mission/plan receipt",
+    "Generic PARTIAL and transport UNKNOWN remain truthful; read has no execution authority",
+    "No actual T3 native-origin, Paperclip finite-session or production enrollment coverage claimed"
+  ],
+  "recovered_dependencies": {
+    "path": "/workspace/scratch/dfef37b7f33a/eg2-auth-recovered-sources.json",
+    "sha256": "7ce3264ccca12137df026fcf030c0381778cb48611b3f080d7f9134dce0f8671"
+  }
+}

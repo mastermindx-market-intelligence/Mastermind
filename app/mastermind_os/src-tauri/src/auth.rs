@@ -2,6 +2,7 @@
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
 pub mod hermes_native;
+pub mod paperclip;
 pub mod control_room_read;
 pub mod company_priorities;
 mod draft_continuity;
@@ -2681,6 +2682,85 @@ pub async fn read_result(app: AppHandle, selection: ResultSelection) -> Result<V
     }
     Ok(value)
 }
+const EXECUTION_RETURN_PATH: &str = "/workspace/execution-return/current";
+const EXECUTION_RETURN_SCHEMA: &str = "mastermind.workspace_execution_return.v1";
+const EXECUTION_RETURN_RESPONSE_CAP: usize = 32_768;
+
+fn execution_return_url(selection: &ResultSelection) -> Result<Url> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{EXECUTION_RETURN_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id)
+        .append_pair("result_envelope_digest", &selection.result_envelope_digest);
+    Ok(url)
+}
+
+fn execution_return_unavailable(value: Value) -> Result<Value> {
+    let value = typed_unavailable(value, EXECUTION_RETURN_SCHEMA, false)?;
+    if !value.get("execution_return").is_some_and(Value::is_null)
+        || !value.get("delivery_receipt").is_some_and(Value::is_null) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+pub async fn read_execution_return(app: AppHandle, selection: ResultSelection) -> Result<Value> {
+    let url = execution_return_url(&selection)?;
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, EXECUTION_RETURN_RESPONSE_CAP).await
+            .and_then(execution_return_unavailable)
+    } else {
+        bounded_json(response, EXECUTION_RETURN_RESPONSE_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if !value.is_object() || value.get("schema").and_then(Value::as_str) != Some(EXECUTION_RETURN_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod execution_return_read_tests {
+    use super::*;
+
+    #[test]
+    fn fixed_return_url_keeps_exact_original_selection() {
+        let selection = ResultSelection {work_ref: "WS:ONE".into(), root_job_id: "JOB-1".into(),
+            job_id: "JOB-2".into(), attempt_id: format!("ATT-{}", "a".repeat(32)),
+            result_envelope_digest: "b".repeat(64)};
+        let url = execution_return_url(&selection).unwrap();
+        assert_eq!(url.path(), EXECUTION_RETURN_PATH);
+        assert_eq!(url.query_pairs().count(), 5);
+        assert!(url.query_pairs().any(|(key,value)| key == "attempt_id" && value == selection.attempt_id));
+        let mut invalid = selection; invalid.job_id = "JOB-other".into();
+        assert!(execution_return_url(&invalid).is_err());
+    }
+
+    #[test]
+    fn unavailable_return_never_retains_result_material() {
+        let body = serde_json::json!({"schema":EXECUTION_RETURN_SCHEMA,"availability":"UNAVAILABLE",
+            "execution_return":null,"delivery_receipt":null});
+        assert!(execution_return_unavailable(body.clone()).is_ok());
+        for key in ["execution_return", "delivery_receipt"] {
+            let mut invalid = body.clone(); invalid[key] = serde_json::json!({"state":"delivered"});
+            assert!(execution_return_unavailable(invalid).is_err());
+        }
+    }
+}
+
 fn mission_result_url(selection: &ResultSelection) -> Result<Url> {
     selection.validate()?;
     let mut url = Url::parse(&format!("{ORIGIN}{MISSION_RESULT_PATH}"))

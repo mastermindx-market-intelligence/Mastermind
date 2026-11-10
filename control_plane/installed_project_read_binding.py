@@ -84,14 +84,22 @@ def _matches(binding, *, reader, owner, kind):
         return False
 
 
-def read_installed_project_binding(reader, *, kind, work_ref):
+def read_installed_project_binding(reader, *, kind, work_ref, deadline=None):
     binding = reader._installed_reader_binding
     owner = reader._installed_context_owner
     if not _matches(binding, reader=reader, owner=owner, kind=kind):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
-    value = binding.callback(work_ref=work_ref)
+    options = {}
+    if deadline is not None:
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        if kind != "project_plan":
+            raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+        options["timeout"] = remaining_read_seconds(deadline, maximum=15.0)
+    value = binding.callback(work_ref=work_ref, **options)
     if not _matches(binding, reader=reader, owner=owner, kind=kind):
         raise InstalledProjectReadUnavailable("SOURCE_UNAVAILABLE")
+    if deadline is not None:
+        remaining_read_seconds(deadline, maximum=15.0)
     return value
 
 

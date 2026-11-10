@@ -28,6 +28,7 @@ not clear ``NATIVE_EXTENSION_NOT_INSTALLED``.
 from __future__ import annotations
 
 import inspect
+import copy
 import json
 import os
 import re
@@ -41,9 +42,11 @@ from integrations.hermes_delegate.schema import (
     SubmissionError,
     parse_selected_child,
 )
+from common import coo_requester_return_contract as requester_wire
 
 __all__ = [
     "NATIVE_TOOL_SCHEMA",
+    "NATIVE_REQUESTER_RETURN_TOOL_SCHEMA",
     "NativeDelegateBinding",
     "NativeDelegateRegistration",
     "NativeDelegateStartup",
@@ -124,6 +127,20 @@ NATIVE_TOOL_SCHEMA: dict[str, Any] = {
     },
 }
 
+NATIVE_REQUESTER_RETURN_TOOL_SCHEMA = {
+    "name": TOOL_NAME,
+    "description": (
+        "Submit or observe the host-frozen Executive child. After reviewing its "
+        "completed result, explicitly call acknowledge_result with the exact "
+        "requester_return descriptor. This acknowledges that result only as the "
+        "original authenticated COO API requester. It grants no admission and "
+        "is not native-parent consumption, independent review or product acceptance. "
+        "Reconcile uncertainty by selected_child_status on the original command."
+    ),
+    "parameters": {"type": "object", "oneOf": [copy.deepcopy(NATIVE_TOOL_SCHEMA["parameters"]),
+        requester_wire.acknowledgment_input_schema({"type": "string", "pattern": COMMAND_RE.pattern, "maxLength": 294})]},
+}
+
 
 class NativeToolRegistrationError(RuntimeError):
     """One closed refusal code for the native registration."""
@@ -172,9 +189,13 @@ class NativeDelegateBinding:
     job_id: str
     session_key: str | None = None
     task_id: str | None = None
+    requester_returns: bool = False
 
     def __post_init__(self) -> None:
         transport = self.transport
+        if (type(self.requester_returns) is not bool or self.requester_returns
+                and not callable(getattr(transport, "acknowledge_result", None))):
+            raise NativeToolRegistrationError("NATIVE_REQUESTER_RETURN_NOT_ENROLLED")
         if not isinstance(transport, NativeDelegateTransport):
             raise NativeToolRegistrationError("NATIVE_TRANSPORT_INVALID")
         if (not callable(self.currentness_guard)
@@ -291,7 +312,7 @@ def _binding_is_current(binding: NativeDelegateBinding) -> bool:
         return False
 
 
-def _parse_request(arguments: Any) -> tuple[dict[str, Any] | None, str | None]:
+def _parse_request(arguments: Any, *, requester_returns=False) -> tuple[dict[str, Any] | None, str | None]:
     """Return the closed request, or the closed refusal reason.
 
     The action is type-checked before it is compared with the closed action
@@ -304,9 +325,12 @@ def _parse_request(arguments: Any) -> tuple[dict[str, Any] | None, str | None]:
     if type(action) is not str:
         return None, "UNKNOWN_ACTION"
     try:
-        request = parse_selected_child(arguments)
+        request = (requester_wire.acknowledgment(dict(arguments))
+            if requester_returns and action == requester_wire.ACK_ACTION else parse_selected_child(arguments))
     except SubmissionError as exc:
         return None, exc.reason
+    except (TypeError, ValueError):
+        return None, "REQUESTER_ACKNOWLEDGMENT_INVALID"
     return request, None
 
 
@@ -365,6 +389,13 @@ def _validate_envelope(raw: Any, binding: NativeDelegateBinding) -> dict[str, An
                 body["result_capsule"], observation=dict(body))
         except (ValueError, TypeError, KeyError):
             return None
+    if "requester_return" in body:
+        if not binding.requester_returns:
+            return None
+        try:
+            projected["requester_return"] = requester_wire.validate_descriptor(body["requester_return"], observation=body)
+        except (ValueError, TypeError, KeyError):
+            return None
     return projected
 
 
@@ -415,7 +446,7 @@ def native_delegate_handler(binding: NativeDelegateBinding) -> Callable[..., str
         raise NativeToolRegistrationError("NATIVE_BINDING_INVALID")
 
     def handle(arguments: Any, *, session_id: Any = None, task_id: Any = None) -> str:
-        request, refusal = _parse_request(arguments)
+        request, refusal = _parse_request(arguments, requester_returns=binding.requester_returns)
         if refusal is not None:
             return _dump(_refusal(refusal, binding))
         # The binding owns one frozen command. A model cannot name another.
@@ -431,20 +462,27 @@ def native_delegate_handler(binding: NativeDelegateBinding) -> Callable[..., str
         try:
             if action == "selected_child_submit":
                 raw = binding.transport.submit_selected_child(binding.command)
+            elif action == requester_wire.ACK_ACTION:
+                raw = binding.transport.acknowledge_result(request["result"])
             else:
                 raw = binding.transport.selected_child_status(binding.command)
         except Exception:
             # The transport may already have sent the command. The original
             # command identity is kept; nothing is retried or cancelled.
-            if action == "selected_child_submit":
+            if action in {"selected_child_submit", requester_wire.ACK_ACTION}:
                 return _dump(_uncertain(
                     "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))
             return _dump(_uncertain(
                 "UNAVAILABLE", "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE", binding))
 
         envelope = _validate_envelope(raw, binding)
+        if envelope is not None and action == requester_wire.ACK_ACTION:
+            try:
+                requester_wire.validate_acknowledgment_result(envelope, request)
+            except (TypeError, ValueError, KeyError):
+                envelope = None
         if envelope is None:
-            if action == "selected_child_submit":
+            if action in {"selected_child_submit", requester_wire.ACK_ACTION}:
                 return _dump(_uncertain(
                     "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))
             return _dump(_uncertain(
@@ -453,7 +491,7 @@ def native_delegate_handler(binding: NativeDelegateBinding) -> Callable[..., str
         # Re-prove the original caller before exposing any result text.
         if (_caller_lineage_refusal(binding, session_id, task_id) is not None
                 or not _binding_is_current(binding)):
-            if action == "selected_child_submit":
+            if action in {"selected_child_submit", requester_wire.ACK_ACTION}:
                 return _dump(_uncertain(
                     "EFFECT_UNKNOWN", "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN", binding))
             return _dump(_uncertain(
@@ -575,6 +613,7 @@ def register_native_delegate_tool(
         raise NativeToolRegistrationError("NATIVE_PLUGIN_API_UNAVAILABLE") from None
     handler = native_delegate_handler(binding)
     check_fn = native_delegate_check_fn(binding)
+    schema = NATIVE_REQUESTER_RETURN_TOOL_SCHEMA if binding.requester_returns else NATIVE_TOOL_SCHEMA
     # Serialize the complete operation with the incumbent native context/lease
     # owner. Its lock is reentrant. Raw-registry writers are outside that
     # supported owner path; this is not a new or universal registration lock.
@@ -587,11 +626,11 @@ def register_native_delegate_tool(
             handle = ctx.register_tool(
                 name=TOOL_NAME,
                 toolset=TOOLSET_NAME,
-                schema=NATIVE_TOOL_SCHEMA,
+                schema=schema,
                 handler=handler,
                 check_fn=check_fn,
                 is_async=False,
-                description=NATIVE_TOOL_SCHEMA["description"],
+                description=schema["description"],
                 emoji="mmx",
             )
         except Exception as exc:
@@ -609,7 +648,7 @@ def register_native_delegate_tool(
                 entry is None
                 or entry.handler is not handler
                 or entry.toolset != TOOLSET_NAME
-                or entry.schema != NATIVE_TOOL_SCHEMA
+                or entry.schema != schema
                 or entry.check_fn is not check_fn
             ):
                 raise NativeToolRegistrationError("NATIVE_TOOL_READBACK_MISMATCH")

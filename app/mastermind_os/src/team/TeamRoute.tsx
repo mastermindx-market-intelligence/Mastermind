@@ -40,6 +40,7 @@ export function TeamRoute({
   onOpenConversations,
   onOpenCode,
   previewAuthority = true,
+  runtimeOnly = false,
 }: {
   locale?: "en" | "zh-CN";
   port?: NativeHermesPort;
@@ -50,6 +51,8 @@ export function TeamRoute({
   onOpenCode?: () => void;
   /** True while this surface can only observe (PREVIEW chips stay honest). */
   previewAuthority?: boolean;
+  /** Observation mode inside the composed company/runtime Team shell. */
+  runtimeOnly?: boolean;
 }) {
   const [roster, setRoster] = useState<TeamRosterRead>(() =>
     port.available()
@@ -97,6 +100,7 @@ export function TeamRoute({
       onOpenConversations={onOpenConversations}
       onOpenCode={onOpenCode}
       previewAuthority={previewAuthority}
+      runtimeOnly={runtimeOnly}
     />
   );
 }

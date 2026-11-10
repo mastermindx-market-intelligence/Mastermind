@@ -1,0 +1,10 @@
+{
+  "content": [
+    {
+      "text": "[Reading 7 new lines (total: 7 lines)]\n\n{\"source\": \"tools/tool_search.py\", \"sha256\": \"bcaf4ed695a5493fdda421f7c969db5a6fd9cf06d8ad92a8cb546c3326f52866\"}\n{\"source\": \"tools/tool_search_validation.py\", \"sha256\": \"97d327a0c122a66023b570919ab9cdf968e4737fa16652283811ce8278079cc0\"}\n{\"source\": \"hermes_cli/tools_config.py\", \"sha256\": \"c35d87a2abe61c12e065a9aa1126cae0e948b7c6d3f93c8cf1541efd9630ccc0\"}\n{\"source\": \"toolsets.py\", \"sha256\": \"9aed91987f1403b02df22997491b90fedcf2516756a0f7ab9b6c245d5f769159\"}\n{\"source\": \"agent/oneshot_footprint.py\", \"sha256\": \"c71d73626b01a950e656eec1d7855f82def3a0f235eb1928581f96eba0fc687d\"}\n{\"argv\": [\"/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/7d508aba12f24054b3f42e164a65373d/venv/bin/python\", \"-B\", \"/tmp/estate-native-model-schema-preflight-20261110-c4-native_model_schema_preflight.py\", \"/tmp/estate-native-model-schema-preflight-20261110-c4-canonical-schemas.json\"], \"elapsed_seconds\": 4.923, \"network_or_provider_invoked\": false, \"output\": \"{\\\"claim_or_ack_authority_proved\\\": false, \\\"described_tools\\\": [\\\"mcp_estate_schema_preflight_executive_project_help\\\", \\\"mcp_estate_schema_preflight_mmx_delegate\\\"], \\\"invalid_schema_refused\\\": true, \\\"model_tools\\\": [\\\"tool_search\\\", \\\"tool_describe\\\", \\\"tool_call\\\"], \\\"native_source\\\": \\\"ba4ddf9945a213ede9dda016602a86591ed634f9\\\", \\\"network_or_provider_invoked\\\": false, \\\"normal_bridge_inert_dispatches\\\": 1, \\\"outside_session_refused\\\": true}\\n\", \"returncode\": 0}\n\n\u2705 Process completed with exit code 0 (runtime: 5.13s)",
+      "type": "text"
+    }
+  ],
+  "isError": false,
+  "structuredContent": null
+}

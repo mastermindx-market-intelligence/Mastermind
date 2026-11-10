@@ -30,7 +30,7 @@ FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 # per-attempt frame admission adds one import and one elif branch in the same
 # method; the same three reviewed operands shift to 6056/6069/6071, columns
 # and values unchanged.
-STATUS_SITES = ((6056, 66, 69, 'int'), (6069, 74, 77, 'int'), (6071, 75, 78, 'int'))
+STATUS_SITES = ((6059, 66, 69, 'int'), (6072, 74, 77, 'int'), (6074, 75, 78, 'int'))
 
 # 2026-11-09 MMOS composition pin move: commit a751d78cc (PR #2316 WO-05)
 # shifts the same three reviewed backend operands to 226/416/511.

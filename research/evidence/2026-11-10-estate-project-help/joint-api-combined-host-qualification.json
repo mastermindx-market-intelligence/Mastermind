@@ -1,0 +1,122 @@
+{
+  "auth_fixture_patch_sha256": "3e241dfdf91115aa7f01f099ae5722b9ffcaf1d390a42746141ca0413cfc4ea5",
+  "distinct_passed": [
+    "test_same_signed_api_principal_discovers_joint_tools_and_qualifies_help[t3]",
+    "test_same_signed_api_principal_discovers_joint_tools_and_qualifies_help[paperclip]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-normal]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-normal]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-changed_digest]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-revoked]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-foreign_root]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-source_generation]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-foreign_principal]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-lost_response]",
+    "test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-concurrent_ack]"
+  ],
+  "final_tree": "39cd9a04485cfce734cca28ec1c599bb2934f71c",
+  "installed_activation": false,
+  "native_origin_attested": false,
+  "original_run": {
+    "after_tree": "5d81a751eb41ee38990c4a0e7e4e626a1d070457",
+    "argv": [
+      "python3",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "anyio.pytest_plugin",
+      "tests/test_joint_api_ingress.py",
+      "--maxfail=1",
+      "--tb=short",
+      "--basetemp=/tmp/estate-joint-api-transaction-owner-20261110-c4",
+      "--junitxml=/tmp/estate-joint-api-transaction-owner-20261110-c4.xml"
+    ],
+    "basetemp": "/tmp/estate-joint-api-transaction-owner-20261110-c4",
+    "elapsed_seconds": 302.536,
+    "junit_sha256": "37eedf79eadb1ef4f1721a6bf1557000177a51b2c5a951a912b2c6da7f828387",
+    "log_sha256": "546ebda94105e8db532c33b5b892648cc14a1960db1d3243c34c8702df26621d",
+    "pytest_pid": 48990,
+    "returncode": 1,
+    "source": {
+      "control_plane/coo_principal_host.py": "285965b20dd52f8391e3066fdcf9b970086d6217a48769e8b2f8e40baa052f64",
+      "control_plane/executive_runtime.py": "363276f69185150e4089fbfe03fcd7121197cc5427a37870169fccf9c59da516",
+      "control_plane/executive_service.py": "323374c560f3b85af617d1f334b504adce858141796b785fbb35e8a72426a6fe",
+      "control_plane/mission_workspace.py": "61d962771dc9823204d80c5838fc1fe4ae8009b669141db11372a41f9c8ffc20",
+      "control_plane/runtime_namespace_custody.py": "0e4255b9ec9ddda5b613b2bf610156b221aa5efadf51702be0d62ad5f3776cf2",
+      "control_plane/workspace_read_service.py": "291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254",
+      "tests/test_joint_api_ingress.py": "7d4f68e24faf65e5ead83056a15c8c4e768c59047a2d5e1f9473c000a90ee2ec",
+      "tests/test_joint_api_project_owner.py": "72f45a1090f3533f1d98c832f852c0aa18d65d2ed489663abd7aff5ab9f16d58"
+    },
+    "source_unchanged": true,
+    "suites": [
+      {
+        "errors": "0",
+        "failures": "1",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "6",
+        "time": "298.570",
+        "timestamp": "2026-11-10T06:30:00.212292-07:00"
+      }
+    ],
+    "tree": "5d81a751eb41ee38990c4a0e7e4e626a1d070457"
+  },
+  "production_source_identical_between_runs": true,
+  "remaining_run": {
+    "after_tree": "39cd9a04485cfce734cca28ec1c599bb2934f71c",
+    "argv": [
+      "python3",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "anyio.pytest_plugin",
+      "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-revoked]",
+      "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-foreign_root]",
+      "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-source_generation]",
+      "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-foreign_principal]",
+      "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[paperclip-lost_response]",
+      "tests/test_joint_api_ingress.py::test_joint_same_enrollment_help_then_original_unix_requester_lifecycle[t3-concurrent_ack]",
+      "--maxfail=1",
+      "--tb=short",
+      "--basetemp=/tmp/estate-joint-api-auth-fences-20261110-c4",
+      "--junitxml=/tmp/estate-joint-api-auth-fences-20261110-c4.xml"
+    ],
+    "basetemp": "/tmp/estate-joint-api-auth-fences-20261110-c4",
+    "elapsed_seconds": 418.42,
+    "junit_sha256": "4be3f751ca28233bf367e17262ea45399caaa8b58ffa1b738c09893ba98a3fb8",
+    "log_sha256": "700bc0322b00f8e8db3ce495047983b54ab27ab59ed1fedac05f3aeba47dae24",
+    "pytest_pid": 27016,
+    "returncode": 0,
+    "source": {
+      "control_plane/coo_principal_host.py": "285965b20dd52f8391e3066fdcf9b970086d6217a48769e8b2f8e40baa052f64",
+      "control_plane/executive_runtime.py": "363276f69185150e4089fbfe03fcd7121197cc5427a37870169fccf9c59da516",
+      "control_plane/executive_service.py": "323374c560f3b85af617d1f334b504adce858141796b785fbb35e8a72426a6fe",
+      "control_plane/mission_workspace.py": "61d962771dc9823204d80c5838fc1fe4ae8009b669141db11372a41f9c8ffc20",
+      "control_plane/runtime_namespace_custody.py": "0e4255b9ec9ddda5b613b2bf610156b221aa5efadf51702be0d62ad5f3776cf2",
+      "control_plane/workspace_read_service.py": "291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254",
+      "tests/test_joint_api_ingress.py": "fa5367923ae15aff15019f3799c3b0edfbb5ec0c8dc162a39a33777bc789dc07",
+      "tests/test_joint_api_project_owner.py": "72f45a1090f3533f1d98c832f852c0aa18d65d2ed489663abd7aff5ab9f16d58"
+    },
+    "source_unchanged": true,
+    "suites": [
+      {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "0",
+        "tests": "6",
+        "time": "411.686",
+        "timestamp": "2026-11-10T06:46:25.469713-07:00"
+      }
+    ],
+    "tree": "39cd9a04485cfce734cca28ec1c599bb2934f71c"
+  },
+  "schema": "mastermind.joint_api_combined_host_qualification.v1",
+  "status": "SOURCE_QUALIFIED",
+  "transaction_patch_sha256": "5a5b4110e0a18aec22a500a1d1ada1f91c381b139d8e01233480163cf29c9d61"
+}

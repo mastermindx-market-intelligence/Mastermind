@@ -4,6 +4,12 @@ import {
   isOwnerObservationReference,
   type OwnerObservation,
 } from "./workspace-contract";
+import {
+  decodeProjectExecutionOwnerObservation,
+  type ProjectExecutionOwnerObservation,
+  type ProjectExecutionResource,
+  type ProjectRootHistory,
+} from "./project-discovery";
 export type ReadState = "CURRENT" | "PARTIAL" | "HISTORICAL" | "UNAVAILABLE";
 export type SectionState =
   "AVAILABLE" | "EMPTY" | "PARTIAL" | "HISTORICAL" | "UNAVAILABLE";
@@ -293,6 +299,8 @@ export interface ProgramCard {
   rootJobId: string | null;
   rootState: "RESOLVED" | "CONFLICT" | "UNKNOWN";
   rootCandidates: string[];
+  /** Present only on the independently qualified Programs v3 history path. */
+  rootHistory?: ProjectRootHistory;
 }
 export interface Relationship {
   id: string;
@@ -761,6 +769,14 @@ export function decodeMission(
   value: unknown,
   sel: MissionSelection,
 ): MissionDocument | null {
+  return decodeMissionForScope(value, sel, false);
+}
+
+function decodeMissionForScope(
+  value: unknown,
+  sel: MissionSelection,
+  resourceScope: boolean,
+): MissionDocument | null {
   if (
     !obj(value) ||
     !exact(value, TOP) ||
@@ -811,13 +827,13 @@ export function decodeMission(
   )
     return null;
   const observation = v2
-    ? decodeOwnerObservation(s.owner_observation, {
+    ? (resourceScope ? decodeProjectExecutionOwnerObservation : decodeOwnerObservation)(s.owner_observation, {
         work_ref: sel.workRef,
         root_job_id: sel.rootJobId,
       })
     : null;
   if (v2 && !observation) return null;
-  if (observation?.schema === "mastermind.workspace_source_observation.v2") {
+  if (observation?.schema === "mastermind.workspace_source_observation.v2" || observation?.schema === "mastermind.workspace_source_observation.v3") {
     const basis = observation.project_data;
     if (!obj(basis) || !obj(basis.data_observation) || typeof s.control_room_generated_at !== "string"
       || typeof basis.data_observation.canonical_observed_at_ms !== "number"
@@ -1509,12 +1525,12 @@ export function programsFromControlRoom(value: unknown): {
   state: "AVAILABLE" | "UNAVAILABLE";
   reason: string;
 } {
-  if (obj(value) && value.schema === "mastermind.programs_source_composition.v1") {
+  if (obj(value) && (value.schema === "mastermind.programs_source_composition.v1" || value.schema === "mastermind.programs_source_composition.v2")) {
     try {
       if (!exact(value, ["schema", "control_room", "source_observation", "canonical_projects", "coverage"]))
         throw new Error("PROGRAM_DATA_INVALID");
-      const composed = decodeProgramsEnvelope({ ...value, schema: "mastermind.workspace_programs.v2",
-        availability: "AVAILABLE", reason_codes: [] }) as { control_room: unknown; canonical_projects: Array<{work_ref:string;control_room:unknown}>; coverage:{state:string} };
+      const composed = decodeProgramsEnvelope({ ...value, schema: value.schema === "mastermind.programs_source_composition.v2" ? "mastermind.workspace_programs.v3" : "mastermind.workspace_programs.v2",
+        availability: "AVAILABLE", reason_codes: [] }) as { control_room: unknown; canonical_projects: Array<{work_ref:string;control_room:unknown;root_history?:ProjectRootHistory}>; coverage:{state:string} };
       const base = programsFromControlRoom(composed.control_room);
       if (base.state !== "AVAILABLE") return base;
       const programs = [...base.programs];
@@ -1522,7 +1538,7 @@ export function programsFromControlRoom(value: unknown): {
         const selected = programsFromControlRoom(project.control_room);
         if (selected.state !== "AVAILABLE" || selected.programs.length !== 1 || selected.programs[0].workRef !== project.work_ref)
           throw new Error("PROGRAM_DATA_INVALID");
-        programs.push(selected.programs[0]);
+        programs.push(project.root_history === undefined ? selected.programs[0] : { ...selected.programs[0], rootHistory: project.root_history });
       }
       return { programs, state: "AVAILABLE", reason: composed.coverage.state === "PARTIAL" ? "PARTIAL_PROJECT_COVERAGE" : "QUALIFIED_PROJECT_SOURCES" };
     } catch {
@@ -1971,6 +1987,14 @@ export function decodeMissionv3(
   value: unknown,
   sel: MissionSelection,
 ): Missionv3Document | null {
+  return decodeMissionv3ForScope(value, sel, false);
+}
+
+function decodeMissionv3ForScope(
+  value: unknown,
+  sel: MissionSelection,
+  resourceScope: boolean,
+): Missionv3Document | null {
   if (!normalizeWorkspaceSelection(sel)) return null;
   // The v3 document is a companion wrapper around an unchanged v2 portion:
   // exactly the v2 top-level fields plus result_refs, and its nested source
@@ -1988,9 +2012,9 @@ export function decodeMissionv3(
   const adapted: Record<string, unknown> = { ...value };
   delete adapted.result_refs;
   adapted.schema = "mastermind.mission_workspace.v2";
-  const v2 = decodeMission(adapted, sel);
+  const v2 = decodeMissionForScope(adapted, sel, resourceScope);
   if (!v2) return null;
-  const observation = decodeOwnerObservation(
+  const observation = (resourceScope ? decodeProjectExecutionOwnerObservation : decodeOwnerObservation)(
     (value.source as Record<string, unknown>).owner_observation,
     { work_ref: sel.workRef, root_job_id: sel.rootJobId },
   );
@@ -1998,7 +2022,7 @@ export function decodeMissionv3(
   const index = decodeResultIndex(
     value.result_refs,
     sel.rootJobId,
-    observation,
+    observation as OwnerObservation,
   );
   if (
     !index ||
@@ -2006,6 +2030,26 @@ export function decodeMissionv3(
   )
     return null;
   return value as unknown as Missionv3Document;
+}
+
+/** Read-only projection; deliberately not a MissionDocument or an action target. */
+export interface ProjectExecutionResourceRead {
+  readonly resource: ProjectExecutionResource;
+  readonly observation: ProjectExecutionOwnerObservation;
+  readonly missionReadState: ReadState;
+}
+export type ProjectExecutionResourceReader = (
+  request: MissionSelection & { signal: AbortSignal },
+) => Promise<ProjectExecutionResourceRead>;
+
+/** Only this explicit reader admits the new original-execution resource scope. */
+export function decodeProjectExecutionResourceRead(value: unknown, sel: MissionSelection): ProjectExecutionResourceRead | null {
+  const document = decodeMissionv3ForScope(value, sel, true);
+  if (!document) return null;
+  const observation = decodeProjectExecutionOwnerObservation(document.source.owner_observation,
+    { work_ref: sel.workRef, root_job_id: sel.rootJobId });
+  if (!observation || document.mission.root_job_id !== sel.rootJobId || document.mission.root_job_ambiguous) return null;
+  return Object.freeze({ resource: observation.resource, observation, missionReadState: document.read_state.state });
 }
 
 export interface ProductAcceptanceView {

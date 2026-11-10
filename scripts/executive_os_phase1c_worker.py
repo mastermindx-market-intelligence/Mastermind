@@ -652,7 +652,13 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
     except CapabilityPolicyError:
         raise WorkerConfigError("native Claude capability policy is invalid") from None
 
-    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested, *,
+                                 planner_producer=None):
+        producer_options = {}
+        if planner_producer is not None:
+            from control_plane.operator_materialization_receipt import planner_producer_selection
+            selection = planner_producer_selection(planner_producer)
+            producer_options["plan_contract"] = selection["planner_producer_binding"]["native_result_contract"]["name"]
         matches = []
         for profile in registry.profiles.values():
             if (not profile.enabled or profile.execution_surface != "claude-agent-sdk"
@@ -686,6 +692,7 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
             turn_input_loader=turn_input_loader,
             policy_observer=observer_type(profile.claude_sdk_config_projection()),
             sdk_python=Path(config["claude_sdk_python"]),
+            **producer_options,
         )
 
     return ExecutiveWorkerBroker(
@@ -847,7 +854,12 @@ def _build_broker(
             )
         return matching[0]
 
-    def operator_adapter_factory(workspace: Path, turn_input_loader, requested):
+    def operator_adapter_factory(workspace: Path, turn_input_loader, requested, *,
+                                 planner_producer=None):
+        producer_options = {}
+        if planner_producer is not None:
+            from control_plane.operator_materialization_receipt import planner_producer_selection
+            producer_options["planner_producer"] = planner_producer_selection(planner_producer)
         if native_account is not None:
             native_account.auth_metadata()
         profile = resolve_operator_profile(requested)
@@ -862,6 +874,7 @@ def _build_broker(
             native_helper_grant=profile.native_helper,
             network_policy=profile.network_policy,
             turn_input_loader=turn_input_loader,
+            **producer_options,
         )
 
     def operator_resource_factory(workspace, requested, epoch, generation):

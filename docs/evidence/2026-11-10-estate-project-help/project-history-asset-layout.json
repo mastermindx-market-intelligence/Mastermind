@@ -1,0 +1,95 @@
+{
+  "schema": "mastermind.asset_layout_qualification.v1",
+  "source_tree": "5d81a751eb41ee38990c4a0e7e4e626a1d070457",
+  "file_count": 14,
+  "manifest": {
+    "schema": "mastermind.os_assets.v1",
+    "files": [
+      {
+        "path": "assets/CompanyWorkspace-CRs-UN9x.js",
+        "byte_count": 44743,
+        "sha256": "1316c3607a2fe7c981caa3e026fc8a7540f7da2885e8e8d7ff9dc1e869d4cf66",
+        "mime": "text/javascript; charset=utf-8"
+      },
+      {
+        "path": "assets/CompanyWorkspace-CaSsy2gR.css",
+        "byte_count": 7215,
+        "sha256": "416e0f333761ce0dfdcfb417e2eb8b3e693287bbef5beae112cb9f40a3f9d434",
+        "mime": "text/css; charset=utf-8"
+      },
+      {
+        "path": "assets/Inter-Variable-DiVDrmQJ.woff2",
+        "byte_count": 352240,
+        "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+        "mime": "font/woff2"
+      },
+      {
+        "path": "assets/Manrope-Variable-FzEoaBTQ.ttf",
+        "byte_count": 165420,
+        "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+        "mime": "font/ttf"
+      },
+      {
+        "path": "assets/atelier-office-poIrp4_y.jpg",
+        "byte_count": 27302,
+        "sha256": "5ffdd2a6a1296a0565d495756010d8c3f68d9c787b4061e29324b286bab70b62",
+        "mime": "image/jpeg"
+      },
+      {
+        "path": "assets/index-CNFzUICL.css",
+        "byte_count": 302382,
+        "sha256": "fc573b87425207330abe371b942d6a6533c986555483748a7c302b9067542fda",
+        "mime": "text/css; charset=utf-8"
+      },
+      {
+        "path": "assets/index-CbM-xAfd.js",
+        "byte_count": 2415781,
+        "sha256": "7024d62ecb9d1455c534a98ea09893fd5bc342427321f17e1c87e557d72fcae5",
+        "mime": "text/javascript; charset=utf-8"
+      },
+      {
+        "path": "assets/private-entry-DdyQrU0W.jpg",
+        "byte_count": 49374,
+        "sha256": "f14f930bf84c8d80635fdf34a93030a928ed51cb514cc07bdb8b7e33aebbf597",
+        "mime": "image/jpeg"
+      },
+      {
+        "path": "index.html",
+        "byte_count": 366,
+        "sha256": "36ed2cd350fc1fbc343ecd11d3365afa526a01d7275b2951d5adfe96a30fe32e",
+        "mime": "text/html; charset=utf-8"
+      },
+      {
+        "path": "licenses/fonts/Inter-OFL.txt",
+        "byte_count": 4380,
+        "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "licenses/fonts/Manrope-FONTLOG.txt",
+        "byte_count": 3075,
+        "sha256": "b6b54bcc1dbd1b18d5afd087ec0b578097644b1c9ec3e0a642d4df7808f449c2",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "licenses/fonts/Manrope-OFL.txt",
+        "byte_count": 4384,
+        "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "third-party/deepseek-client-dependency-NOTICES.txt",
+        "byte_count": 70364,
+        "sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "third-party/deepseek-harness-LICENSE.txt",
+        "byte_count": 1065,
+        "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+        "mime": "text/plain; charset=utf-8"
+      }
+    ]
+  },
+  "installed_activation": false
+}

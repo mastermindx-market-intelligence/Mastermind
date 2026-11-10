@@ -1,0 +1,38 @@
+{
+  "baseline_exceptions_unchanged": 2,
+  "baseline_memberships_unchanged": 63,
+  "confidence_counts": {
+    "HIGH": 29,
+    "LOW": 1,
+    "MODERATE": 13
+  },
+  "exact_workstream_blobs": 43,
+  "files": [
+    {
+      "bytes": 44695,
+      "git_blob": "8c35ce05eebd32c33156513add9b9eec7b2a829e",
+      "path": "docs/ESTATE_INITIATIVE_MEMBERSHIP_PROPOSAL.md",
+      "sha256": "ddb5629c61fb8db897789b16e22cbac9e5c8655aaff08a4f61f84380100b2a8b"
+    },
+    {
+      "bytes": 111828,
+      "git_blob": "30196eaa19ab970004307d95c45608af51e0aa60",
+      "path": "docs/evidence/estate_initiative_membership_proposal.sources.json",
+      "sha256": "d06325f4b6fcf834f2746cda12961ca10633a14b1b949337b0b49ed91919aa38"
+    }
+  ],
+  "hypothetical_memberships": 106,
+  "initiative_keys": 7,
+  "linear_effect": false,
+  "macro_pr_head_unchanged_by_proposal": "752394fc070259944e83891243844d2f6da9c2e7",
+  "production_tests_repeated": false,
+  "proposal_rows": 43,
+  "reserved_choices": 13,
+  "schema": "source_proposal_qualification.v1",
+  "status": "PASS",
+  "parent_canonical_artifact_identity_scan": {
+    "findings": [],
+    "guard_changed": false,
+    "observation": "Original classifiers; proposed files only; no implementation test rerun."
+  }
+}

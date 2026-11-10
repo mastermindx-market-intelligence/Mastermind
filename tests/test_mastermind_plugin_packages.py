@@ -943,6 +943,23 @@ def test_unexpected_package_file_is_refused(tmp_path: Path) -> None:
     assert "UNEXPECTED_PACKAGE_FILE" in {error["code"] for error in result["errors"]}
 
 
+@pytest.mark.parametrize("relative", (
+    ".agents/skills/unqualified-helper/SKILL.md",
+    ".agents/skills/mastermind-long-horizon/execute.py",
+))
+def test_native_session_skill_does_not_open_neighboring_inventory(
+    tmp_path: Path, relative: str,
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("unqualified source\n")
+    result = validate_repository(tmp_path)
+    assert {"path": relative, "code": "UNEXPECTED_PACKAGE_FILE",
+            "message": "file is outside the closed BSC-P1 package inventory"} in result["errors"]
+    assert result["ok"] is False
+
+
 def test_package_symlink_is_refused(tmp_path: Path) -> None:
     _copy_package(tmp_path)
     target = tmp_path / "outside.txt"

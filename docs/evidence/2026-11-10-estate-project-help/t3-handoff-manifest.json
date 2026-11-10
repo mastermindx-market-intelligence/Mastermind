@@ -1,0 +1,86 @@
+{
+  "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "files": [
+    {
+      "base_blob": "4789456033fe6a5c5452a5b6dc08d5fce946075c",
+      "base_sha256": "37b96b7249ebab8c73a95d5b0ab5d11ea9e60714aa7e3f7d147ad78133660aa4",
+      "path": "integrations/session_bridge/t3_project_team.py",
+      "post_bytes": 47716,
+      "post_sha256": "71c90a45cb08b132c87e8fc42cd189dbfd12bcbcf09b5ceab5cbcb00465a14b2"
+    },
+    {
+      "base_blob": "e0d1f9960e01b215e04098f611c1e41145ae7c88",
+      "base_sha256": "6910256ade0d2bc50795d34819933b4ce94cf755b878154ef175a38447fb66d6",
+      "path": "integrations/session_bridge/t3_project_team_cli.py",
+      "post_bytes": 13311,
+      "post_sha256": "e9f04b07b7531ee3f3d539245669e6f39de8e976ee63a8c48fa6ac6bdeb31ab9"
+    },
+    {
+      "base_blob": "1edbf05555c4d1058a61e89cd36a277e02eb653c",
+      "base_sha256": "274d38bea29771ca4b1be9e8dfd63a3cdb1c9b2c4d71d3ecdbbe78cce3aa2c86",
+      "path": "scripts/build_t3_project_team.py",
+      "post_bytes": 4088,
+      "post_sha256": "5699a577a6e13ccbf56ee9cb638fac72823cac2b9b88e5815fbb6a9323693f61"
+    },
+    {
+      "base_blob": "7e07e4d5d64b45339a22f8e0ec29c3d67b6fce69",
+      "base_sha256": "8f527097cc7e4cb080895a959891a95cfdc9337a708c198543f0486752a4fc82",
+      "path": "docs/T3_PROJECT_TEAMS.md",
+      "post_bytes": 15493,
+      "post_sha256": "95846376cac6b155b632a8480b4dd3534704610e57e4643ab8a5d580818b641f"
+    },
+    {
+      "base_blob": "f184a5d55354ada8b6b436a5a494f6bcc7286b53",
+      "base_sha256": "f49fdc067bff457064fc1416a1c5c8cd0fd27d7785d2480fd49328ab7e8ac0bf",
+      "path": "tests/test_t3_project_team_cli.py",
+      "post_bytes": 7872,
+      "post_sha256": "4149b016a4cbef8f92a02cdc7bab4f3634a90c4060784057aea034580ad79164"
+    },
+    {
+      "base_blob": null,
+      "base_sha256": null,
+      "path": "tests/test_t3_project_help_handoff.py",
+      "post_bytes": 11743,
+      "post_sha256": "44aa280727c7ef68d38c2f9c65d727dbb8ae8bc8e1630f0907eee65a1e6230c2"
+    }
+  ],
+  "owner": "/root/t3_architecture",
+  "patch": "t3-project-help-handoff.patch",
+  "patch_sha256": "777e0c5fa9019c0962e283e7067c4af0af748eb216b8260281a45b3ca5acaabf",
+  "protected_law_ref": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+  "publication": "not published by child; parent source carrier only",
+  "qualification": {
+    "actual_v6_transport_proof": "owned by estate_return_consumer; pending at this freeze",
+    "affected_tests": 111,
+    "apply_check": "passed; whitespace error-all; applied postimages all matched",
+    "duration_seconds": 1.26,
+    "legacy_handoff_sha256": "321e07c9914139ec591d6d0130a5ccd82684381d8a0c18ce3ef730da93494385",
+    "live_help_read": false,
+    "native_runtime_launch": false,
+    "result": "passed"
+  },
+  "requires_composed_dependencies": [
+    {
+      "ownership": "estate_return_consumer; not included in this patch",
+      "path": "common/coo_project_help_contract.py",
+      "sha256": "db334059532a5d8ad5a6b507d05b23ca90436afd7b0340b9642f678ea3814df1"
+    },
+    {
+      "ownership": "estate_return_consumer; not included in this patch",
+      "path": "common/project_task_contract.py",
+      "sha256": "ebdb97a746b79b0cb776702be709aea4a646f0a41b6e922ebfdc4abb2236c08b"
+    },
+    {
+      "ownership": "estate_return_consumer; not included in this patch",
+      "path": "common/workspace_project_plan_contract.py",
+      "sha256": "c72fe752f625260f8f0f27ca25f0375b96a34f801c2a9d6c430b6adfd8e119ae"
+    },
+    {
+      "ownership": "estate_return_consumer; not included in this patch",
+      "path": "integrations/session_bridge/project_task_context.py",
+      "sha256": "266cbbf72f87004f25a566df68ffcfaaee44da3f853a763b3f73834441298229"
+    }
+  ],
+  "runtime_effects": "none; source guidance and isolated tests only",
+  "schema": "mastermind.source_patch_qualification.v1"
+}

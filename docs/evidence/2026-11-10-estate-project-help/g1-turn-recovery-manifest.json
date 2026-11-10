@@ -1,0 +1,145 @@
+{
+  "schema": "mastermind.estate_g1_recovery_source_qualification/v1",
+  "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "files": [
+    {
+      "path": "control_plane/executive_runtime.py",
+      "pre_git_blob": "04eb8541f3135567b797614e5b0e94960cad1d4f",
+      "pre_sha256": "4e534112a48b97ce9f465aeac8eee2fab0d92624226ca547416808fa05d0f948",
+      "post_git_blob": "4ee6447abd23b1f72fc5ba756d8a302a790f479d",
+      "post_sha256": "4924870e1666a5e2b6be6c5742e711881641b8ef9409be92551103bc6cdc1185",
+      "bytes": 1621179
+    },
+    {
+      "path": "docs/OPERATOR_G1_REQUEST_CUSTODY_RECOVERY.md",
+      "pre_git_blob": null,
+      "pre_sha256": null,
+      "post_git_blob": "fb9cbdb278680f3b1a09cd8c4bb2342021c74427",
+      "post_sha256": "3686191a4225e2a19a1359d60aa9994f006f7d0fc9fad79b17dfd79212d4da63",
+      "bytes": 3214
+    },
+    {
+      "path": "tests/test_frontier_planner_binding.py",
+      "pre_git_blob": "0e5e6732687863b5709e88d0c3a898b18c85bc6e",
+      "pre_sha256": "1e487c7e6e4ea7dbab16f74a5c3e06323f71ac817a28a10de8f3f092845246f1",
+      "post_git_blob": "9837ff398e61ffa5a1b6f5b58727544e8ac4d5f7",
+      "post_sha256": "ba0e2e1b1b6beefb03d5d0cf42a47d4f10df755bfd1ffadfe82efce93b9c5659",
+      "bytes": 18558
+    },
+    {
+      "path": "tests/test_operator_g1_turn_custody_recovery.py",
+      "pre_git_blob": null,
+      "pre_sha256": null,
+      "post_git_blob": "89c97f8eed4ab894871c4d5c5e525bd2e16b7005",
+      "post_sha256": "f8291ad1ae5c790c9f294addf17567c974072754378521b3a5b8a8061f283fcc",
+      "bytes": 9406
+    }
+  ],
+  "patch_sha256": "c1136ddb8f08b0c0ce742724292245047689bdde59e68d931e7cb792d2d4dcb9",
+  "production_method": "OperatorHarnessRegistry._require_orchestration_g1_recovery_predicate",
+  "runtime_other_method_ASTs": "unchanged",
+  "unique_passed": 57,
+  "test_environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+    "PYTHONPATH": "../estate-return-qualification/.qualification-deps:.:tests"
+  },
+  "test_commands": [
+    {
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_frontier_planner_binding.py::test_unsealed_restart_checks_choice_before_any_fresh_turn_or_resume[True-False]",
+        "tests/test_executive_operator_supervisor.py::test_restart_waits_for_expiry_then_resumes_same_attempt_and_session",
+        "--basetemp=/tmp/eg-g1-focused",
+        "--maxfail=1",
+        "--tb=short"
+      ],
+      "log": "g1-focused.log",
+      "passed": 2,
+      "overlap": "both included in 30-case regression"
+    },
+    {
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_operator_g1_turn_custody_recovery.py",
+        "--basetemp=/tmp/eg-g1-custody",
+        "--maxfail=1",
+        "--tb=short"
+      ],
+      "log": "g1-custody.log",
+      "passed": 15
+    },
+    {
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_frontier_planner_binding.py",
+        "tests/test_executive_operator_supervisor.py",
+        "-k",
+        "frontier or restart",
+        "--basetemp=/tmp/eg-g1-recovery-regression",
+        "--maxfail=1",
+        "--tb=short"
+      ],
+      "log": "g1-recovery-regression.log",
+      "passed": 30
+    },
+    {
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/test_codex_planner_turn_custody.py",
+        "-k",
+        "real_runtime or runtime_lost_ack or runtime_candidate",
+        "--basetemp=/tmp/eg-g1-ack-regression",
+        "--maxfail=1",
+        "--tb=short"
+      ],
+      "log": "g1-ack-regression.log",
+      "passed": 12
+    }
+  ],
+  "proofs": [
+    {
+      "log": "g1-focused.log",
+      "sha256": "aa2b5769c0f506f95664d74ecf7e47795ab6f737b18d17ce2235be34b7211269",
+      "result": "2 passed in 2.92s"
+    },
+    {
+      "log": "g1-custody.log",
+      "sha256": "b3df2f4cdfc879f649a3532558e4c1d95f75b45fc45f782966fb87731428009a",
+      "result": "15 passed, 3 warnings in 8.19s"
+    },
+    {
+      "log": "g1-recovery-regression.log",
+      "sha256": "cad81c6a59782d7251aa190a92c026b16b9a6fe230c0353022ab464cc83fd0ac",
+      "result": "30 passed, 14 deselected in 7.40s"
+    },
+    {
+      "log": "g1-ack-regression.log",
+      "sha256": "9ddacb5393fbb2e4666ffe229694ff8879457621ccfd579d9553b05650667e12",
+      "result": "12 passed, 29 deselected, 3 warnings in 7.05s"
+    }
+  ],
+  "boundaries": [
+    "No new G2 planner request or native resume is authorized.",
+    "Canonical V2 read validates original producer/request custody, then refuses bound G2 before TX-10 allocation or effects.",
+    "Legacy V1 positive same-session restart remains green.",
+    "Physical native adapters are inert fixtures. No installed runtime/source/profile change.",
+    "Original-native-turn reconciliation after dead bound G1 remains a separate owner design."
+  ]
+}

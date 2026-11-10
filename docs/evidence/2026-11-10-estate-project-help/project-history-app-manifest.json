@@ -1,0 +1,35 @@
+{
+  "schema": "mastermind.source_patch_manifest.v1",
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "composed_test_tree": "5d81a751eb41ee38990c4a0e7e4e626a1d070457",
+  "consumer_dependency_patch_sha256": "e093b559214ccd00ccc49609623517bfc18b01154437a40b65dd76a8231d5a34",
+  "patch_sha256": "bd0f6e1bdd49e446e2c11b1da015ad0bb01c91bee6e7ec5133d8b4e4b004f8a2",
+  "files": [
+    {
+      "path": "app/mastermind_os/src/App.tsx",
+      "pre_sha256": "34a2e762df981f308d777cd274293969ba1eacfe9f3d7878fc484869b3a1cf0e",
+      "post_sha256": "0f25c32a681d94476b3d30a5c98435e6406ae6de3dee009eb68bcab08fe49ec9",
+      "pre_git_blob": "09cc43308a40f29e93e25c76995e30b258447820",
+      "post_git_blob": "8d55b0eb757e92feb08eeffe6bda2739a8ace2e2",
+      "bytes": 333410
+    },
+    {
+      "path": "app/mastermind_os/src/App.project-execution-history.test.tsx",
+      "pre_sha256": null,
+      "post_sha256": "86111abbc5df943677e1306918a6caf29316371e81fe9b85e445d2a40a35e839",
+      "pre_git_blob": null,
+      "post_git_blob": "be1601f668eb4c4d630483a8e981547998784670",
+      "bytes": 12951
+    }
+  ],
+  "replay_exact": true,
+  "qualification": {
+    "typecheck_exit": 0,
+    "tests_passed": 74,
+    "tests_files": 7,
+    "build_exit": 0,
+    "source_bytes_unchanged": true,
+    "junit_sha256": "6cdd784f6958570d011c07a94708c6b050472fba0cd8adac6945b2ece91168c7",
+    "scope": "actual App and host with inert native transport; no installed activation"
+  }
+}

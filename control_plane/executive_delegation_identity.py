@@ -45,7 +45,7 @@ class ExecutiveDelegationIdentity:
 
 @dataclasses.dataclass(frozen=True)
 class NestedExecutiveDelegationIdentity:
-    """Immutable identity for one admitted depth-2 orchestration child."""
+    """Immutable identity for one conserved-root nested orchestration child."""
 
     job_id: str
     parent_job_id: str
@@ -241,6 +241,11 @@ def _validate_nested_orchestration_child(job: Job, parent: Job) -> None:
     if parent.orchestration_role != "work" or parent.depth != 1:
         _refuse("nested delegation parent is not a direct-root work Job")
 
+    _validate_nested_child_evidence(job, parent, expected_depth=2)
+
+
+def _validate_nested_child_evidence(job: Job, parent: Job, *, expected_depth: int) -> None:
+    """Shared immutable leaf evidence; the caller proves the parent family."""
     required_ids = {
         "job_id": job.job_id,
         "parent_job_id": job.parent_job_id,
@@ -256,10 +261,10 @@ def _validate_nested_orchestration_child(job: Job, parent: Job) -> None:
         or job.root_job_id != parent.root_job_id
         or isinstance(job.depth, bool)
         or not isinstance(job.depth, int)
-        or job.depth != 2
+        or job.depth != expected_depth
         or job.orchestration_role not in {"work", "review", "repair"}
     ):
-        _refuse("nested orchestration lineage is not one conserved-root depth-2 child")
+        _refuse(f"nested orchestration lineage is not one conserved-root depth-{expected_depth} child")
 
     provenance = job.orchestration_provenance
     if not isinstance(provenance, dict) or set(provenance) != _PROVENANCE_KEYS:
@@ -301,6 +306,49 @@ def derive_nested_delegation_identity(
     """
 
     _validate_nested_orchestration_child(job, parent)
+    return _nested_identity(job, parent)
+
+
+def derive_coordinator_child_delegation_identity(
+    job: Job, parent: Job,
+) -> NestedExecutiveDelegationIdentity:
+    """Project an actual v2 aggregation coordinator's depth-2 or depth-3 leaf.
+
+    This checks self-contained identity only. The caller must re-prove the
+    coordinator's ancestry, parent reservation and current admitted plan with
+    Runtime before qualification or claim. The legacy work-parent projection
+    above keeps its original contract.
+    """
+    from control_plane.executive_runtime import _accepted_nested_coordinator_provenance
+
+    if not isinstance(job, Job) or not isinstance(parent, Job):
+        _refuse("coordinator child identity requires Runtime Jobs")
+    if (parent.orchestration_role != "aggregation" or type(parent.depth) is not int
+            or parent.depth not in {1, 2}
+            or any(not isinstance(value, str) or _JOB_ID_RE.fullmatch(value) is None
+                   for value in (parent.job_id, parent.parent_job_id, parent.root_job_id))
+            or parent.job_id in {parent.parent_job_id, parent.root_job_id}):
+        _refuse("nested coordinator identity is invalid")
+    provenance = parent.orchestration_provenance
+    if (type(provenance) is not dict or set(provenance) != _PROVENANCE_KEYS | {"hierarchy_grant"}
+            or not _accepted_nested_coordinator_provenance(
+                provenance, parent_job_id=parent.parent_job_id, root_job_id=parent.root_job_id,
+                job_id=parent.job_id, depth=parent.depth)
+            or provenance["job_id"] != parent.job_id
+            or provenance["root_job_id"] != parent.root_job_id
+            or provenance["parent_job_id"] != parent.parent_job_id
+            or provenance["role"] != "aggregation"
+            or not _is_wire_id(provenance["source_id"])
+            or not _is_wire_id(provenance["command_id"])
+            or not isinstance(provenance["source_digest"], str)
+            or _DIGEST_RE.fullmatch(provenance["source_digest"]) is None
+            or parent.orchestration_provenance_digest != orchestration_digest(provenance)):
+        _refuse("nested coordinator provenance is invalid")
+    _validate_nested_child_evidence(job, parent, expected_depth=parent.depth + 1)
+    return _nested_identity(job, parent)
+
+
+def _nested_identity(job: Job, parent: Job) -> NestedExecutiveDelegationIdentity:
     job_token = job.job_id.lower()
     operation_key = f"exec-{job_token}"
     session_ref = f"asd-session-exec-{job_token}"

@@ -1,0 +1,13 @@
+{
+  "schema": "mastermind.prospective_identity_guard.v1",
+  "tree": "7ea1d42d29fc27a9d7fc50055483fd21e57e74c4",
+  "merge_base": "fe42651763a8c71e71dece27a2d5b7dd02aa913d",
+  "source_paths": 438,
+  "whole_source_postimages": 159,
+  "evidence_files": 11,
+  "source_findings": [],
+  "evidence_findings": {},
+  "elapsed_seconds": 17.968,
+  "canonical_scanner_changed": false,
+  "scope": "actual candidate index and exact Git blobs through canonical D8 classifiers; hosted exact-head gate still required"
+}

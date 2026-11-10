@@ -15,7 +15,7 @@ from control_plane.frontier_selection import resolve_selection, selection_proven
 from control_plane.model_router import ModelRouter
 from control_plane.operator_harness_orchestrator import OperatorHarnessOrchestrator
 from control_plane.operator_harness_contract import (
-    ProcessIdentityObservation, ProcessLiveness, ProviderWriterState, ReconcileObservation,
+    OperationReceiptKind, ProcessIdentityObservation, ProcessLiveness, ProviderWriterState, ReconcileObservation,
 )
 from test_executive_operator_supervisor import _Clock, _PromptSource, _seed_dispatchable_operator_planner
 from test_planner_producer_binding import (
@@ -269,8 +269,20 @@ def test_unsealed_restart_checks_choice_before_any_fresh_turn_or_resume(
     assert initial_adapters[0].begin_turn_calls == (0 if live_existing else 1)
     assert initial_adapters[0].stop_calls == 0
     assert runtime.events.get_event_by_command_id(f"orchestration-result-seal:{attempt.attempt_id}") is None
+    original_producer = runtime.jobs.get_planner_producer_binding(planner.job_id)
+    original_turn_evidence = [event.to_dict() for event in runtime.events.list_events()
+        if event.payload.get("operation_kind") == "begin_turn"]
     clock.advance(1000)
     reopened, adapters = Runtime.at(tmp_path / "runtime", clock=clock), []
+    resume_refusals = []
+    original_resume = reopened.operator_harness.reserve_same_epoch_resume
+    def observe_resume(**kwargs):
+        try:
+            return original_resume(**kwargs)
+        except StateConflict as exc:
+            resume_refusals.append(str(exc))
+            raise
+    monkeypatch.setattr(reopened.operator_harness, "reserve_same_epoch_resume", observe_resume)
 
     class RecoveryAdapter(_VersionedAdapter):
         def reconcile(self, generation):
@@ -298,7 +310,33 @@ def test_unsealed_restart_checks_choice_before_any_fresh_turn_or_resume(
         plan_schema_version=PLAN_SCHEMA_V3,
     )
     outcomes = supervisor.reconcile_restart()
-    if selection_matches:
+    if selection_matches and not live_existing:
+        # Retained Codex request custody authorizes the original G1 turn.
+        # A matching frontier selection does not permit a replacement G2
+        # turn; prove refusal occurs before allocation or native resume.
+        assert [item.status for item in outcomes] == [ReconcileStatus.IDENTITY_AMBIGUOUS]
+        assert len(adapters) == 1
+        adapter = adapters[0]
+        assert adapter.start_calls == adapter.resume_calls == adapter.begin_turn_calls == 0
+        assert adapter.read_calls == adapter.stop_calls == 0
+        assert resume_refusals == [
+            "retained planner request custody cannot resume into G2; reconcile the original G1 turn"]
+        assert reopened.attempts.get_attempt(attempt.attempt_id).status is AttemptStatus.RUNNING
+        with reopened.store.read() as connection:
+            assert connection.execute("SELECT COUNT(*) FROM harness_session_epochs").fetchone()[0] == 1
+            assert connection.execute("SELECT COUNT(*) FROM process_generations").fetchone()[0] == 1
+            assert connection.execute("SELECT COUNT(*) FROM process_generations WHERE executive_writer_held=1").fetchone()[0] == 1
+            assert connection.execute("SELECT COUNT(*) FROM events WHERE event_type='OHF_RESUME_SAFETY_DERIVED'").fetchone()[0] == 0
+            assert connection.execute("SELECT COUNT(*) FROM events WHERE command_id LIKE 'ohf-op:recover-resume:%'").fetchone()[0] == 0
+            original_turns = [event for event in reopened.events.list_events()
+                if event.event_type == OperationReceiptKind.INTENT.value
+                and event.payload.get('operation_kind') == 'begin_turn']
+            assert len(original_turns) == 1
+            assert original_turns[0].payload['process_generation_id'] == session.generation.process_generation_id
+        assert [event.to_dict() for event in reopened.events.list_events()
+            if event.payload.get("operation_kind") == "begin_turn"] == original_turn_evidence
+        assert reopened.jobs.get_planner_producer_binding(planner.job_id) == original_producer
+    elif selection_matches:
         assert [item.status for item in outcomes] == [ReconcileStatus.OPERATOR_RECOVERED]
         assert len(adapters) == 1
         assert adapters[0].start_calls == 0

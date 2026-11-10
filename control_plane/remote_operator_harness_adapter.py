@@ -56,14 +56,21 @@ from control_plane.operator_harness_wire import (
     raw_role_result_observation,
     reconcile_observation,
     retained_plain_input_evidence,
+    planner_turn_custody,
     session_start_observation,
     to_wire,
     turn_start_observation,
 )
 from control_plane.operator_materialization_receipt import (
+    MATERIALIZATION_RECEIPT_SCHEMA_V2,
+    MATERIALIZATION_RECEIPT_SCHEMA_V3,
     OperatorMaterializationReceiptError,
     OperatorMaterializationStatusObservation,
+    planner_materialization_schema_for_profile,
+    canonical_json_bytes as materialization_bytes,
+    load_operator_materialization_receipt,
     operator_materialization_status,
+    planner_producer_selection,
     requested_profile_digest,
     validate_materialization_request,
 )
@@ -130,6 +137,7 @@ class RemoteOperatorHarnessAdapter:
         *,
         turn_input_loader: TurnInputLoader,
         capabilities: HarnessAdapterCapabilities,
+        planner_producer: Mapping[str, Any] | None = None,
     ) -> None:
         _validate_remote_capabilities(capabilities)
         self.client = client
@@ -137,6 +145,9 @@ class RemoteOperatorHarnessAdapter:
         self._foreground_attempt_id = None
         self.turn_input_loader = turn_input_loader
         self._capabilities = capabilities
+        self._planner_producer = (planner_producer_selection(planner_producer)
+                                  if planner_producer is not None else None)
+        self._planner_receipts: dict[str, Any] = {}
         self._start_receipts: dict[str, dict[str, Any]] = {}
         self._turn_results: dict[str, dict[str, Any]] = {}
         # Transient marks from this proxy's own successful ohf-begin-turn calls
@@ -150,6 +161,55 @@ class RemoteOperatorHarnessAdapter:
         # TurnRef; ``None`` is the explicit unavailable answer.
         self._turn_evidence: dict[TurnRef, RetainedPlainInputEvidence | None] = {}
         self._artifact_receipts: dict[str, BrowserReviewReceipt | None] = {}
+
+    def _producer_options(self, attempt_id=None):
+        if self._planner_producer is None:
+            return {}
+        return {"planner_producer": planner_producer_selection(
+            self._planner_producer, attempt_id=attempt_id)}
+
+    def require_planner_producer(self, binding, *, generation=None):
+        """Check retained intent and its provider-specific materialization.
+
+        V2 contains observed initialization. V3 contains retained intent only;
+        its later native schema request/ACK must pass the existing TX-5 owner.
+        """
+        if binding is None:
+            if self._planner_producer is not None:
+                raise BrokerProtocolError("legacy planner cannot adopt a native producer")
+            return
+        selection = self._producer_options().get("planner_producer")
+        if selection is None or selection["planner_producer_binding"] != binding:
+            raise BrokerProtocolError("remote planner selection differs from retained producer")
+        if generation is not None:
+            receipt = self._planner_receipts.get(generation.process_generation_id)
+            if (receipt is None or receipt.planner_producer != selection
+                    or receipt.session_epoch_id != generation.session_epoch_id
+                    or receipt.worker_id != generation.worker_id
+                    or receipt.schema not in {MATERIALIZATION_RECEIPT_SCHEMA_V2, MATERIALIZATION_RECEIPT_SCHEMA_V3}
+                    or (receipt.schema == MATERIALIZATION_RECEIPT_SCHEMA_V2
+                        and receipt.observed_planner_contract != binding["native_result_contract"])):
+                raise BrokerProtocolError("remote planner lacks exact materialized producer evidence")
+            load_operator_materialization_receipt(materialization_bytes(receipt.to_dict()))
+
+    def qualify_existing_planner_generation(self, *, requested, epoch, generation):
+        """One original-receipt read before unsealed live-session recovery.
+
+        Construction remains network-free. A restarted proxy cannot infer
+        producer custody from a live process or its configured selection.
+        Sealed-result/cancellation containment does not invoke this method.
+        """
+        if self._planner_producer is None:
+            return
+        if generation.generation_number != 1:
+            raise BrokerProtocolError("planner recovery needs its original materialization")
+        status = self.materialization_status(
+            operation_id=OperationId(f"ohf-op:start:{epoch.attempt_id}"),
+            requested=requested, epoch=epoch, generation=generation)
+        if status.status != "RECEIPT_CURRENT_IN_LIVE_BROKER":
+            raise BrokerProtocolError("planner recovery has no current materialized custody")
+        self.require_planner_producer(
+            self._planner_producer["planner_producer_binding"], generation=generation)
 
     def bind_fresh_effect_guard(self, guard, *, attempt_id):
         """Trusted local source from the original supervisor; never a wire field."""
@@ -212,7 +272,7 @@ class RemoteOperatorHarnessAdapter:
         self, requested: RequestedExecutionProfile
     ) -> ProfileValidation:
         result = self.client.request_sync(
-            "ohf-validate", {"requested": to_wire(requested)}
+            "ohf-validate", {"requested": to_wire(requested), **self._producer_options()}
         )
         try:
             return profile_validation(result.get("validation"))
@@ -234,6 +294,7 @@ class RemoteOperatorHarnessAdapter:
             "requested": to_wire(requested),
             "epoch": to_wire(epoch),
             "generation": to_wire(generation),
+            **self._producer_options(epoch.attempt_id),
         }
         if provider_session is not None:
             payload["provider_session"] = to_wire(provider_session)
@@ -254,6 +315,37 @@ class RemoteOperatorHarnessAdapter:
             }
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError("remote OHF start receipt is invalid") from exc
+        if self._planner_producer is not None:
+            try:
+                custody = load_operator_materialization_receipt(
+                    materialization_bytes(result.get("materialization_receipt")))
+            except OperatorMaterializationReceiptError as exc:
+                raise BrokerProtocolError("remote planner materialization custody is invalid") from exc
+            if (
+                custody.operation_command_id != operation_id.command_id
+                or custody.operation_kind != ("resume_session" if provider_session is not None else "start_session")
+                or custody.attempt_id != epoch.attempt_id
+                or custody.worker_id != epoch.worker_id
+                or custody.session_epoch_id != epoch.session_epoch_id
+                or custody.process_generation_id != generation.process_generation_id
+                or custody.generation_number != generation.generation_number
+                or custody.requested_profile_digest != requested_profile_digest(to_wire(requested))
+                or custody.provider_session_id != observation.provider_session_id
+                or custody.process_identity != to_wire(observation.process)
+                or custody.observed_attestation != to_wire(receipt["attestation"])
+                or custody.process_credentials != to_wire(receipt["process_credentials"])
+                or custody.provider_home_identity != to_wire(receipt["provider_home"])["provider_home_identity"]
+                or custody.planner_producer != self._planner_producer
+                or custody.schema != planner_materialization_schema_for_profile(to_wire(requested))
+            ):
+                raise BrokerProtocolError("remote planner materialization identity differs")
+            self._planner_receipts[generation.process_generation_id] = custody
+            self.require_planner_producer(
+                self._planner_producer["planner_producer_binding"], generation=generation)
+        elif (isinstance(result.get("materialization_receipt"), Mapping)
+              and result["materialization_receipt"].get("schema") in {
+                  MATERIALIZATION_RECEIPT_SCHEMA_V2, MATERIALIZATION_RECEIPT_SCHEMA_V3}):
+            raise BrokerProtocolError("legacy planner cannot adopt a native producer receipt")
         self._start_receipts[generation.process_generation_id] = receipt
         return observation
 
@@ -347,6 +439,7 @@ class RemoteOperatorHarnessAdapter:
             "requested": to_wire(requested),
             "epoch": to_wire(epoch),
             "generation": to_wire(generation),
+            **self._producer_options(epoch.attempt_id),
         }
         if provider_session is not None:
             payload["provider_session"] = to_wire(provider_session)
@@ -370,6 +463,9 @@ class RemoteOperatorHarnessAdapter:
             and receipt.generation_number == generation.generation_number
             and receipt.requested_profile_digest
             == requested_profile_digest(to_wire(requested))
+            and receipt.planner_producer == self._planner_producer
+            and (self._planner_producer is None
+                 or receipt.schema == planner_materialization_schema_for_profile(to_wire(requested)))
             and (
                 expected_provider_session_id is None
                 or receipt.provider_session_id == expected_provider_session_id
@@ -378,6 +474,9 @@ class RemoteOperatorHarnessAdapter:
             raise BrokerProtocolError(
                 "remote OHF materialization receipt identity is invalid"
             )
+        if (receipt is not None and self._planner_producer is not None
+                and status.status == "RECEIPT_CURRENT_IN_LIVE_BROKER"):
+            self._planner_receipts[generation.process_generation_id] = receipt
         return status
 
     def _receipt(self, generation: ProcessGenerationRef) -> dict[str, Any]:
@@ -409,6 +508,9 @@ class RemoteOperatorHarnessAdapter:
         generation: ProcessGenerationRef,
         launch: LaunchComparison,
     ) -> TurnStartObservation:
+        if self._planner_producer is not None:
+            self.require_planner_producer(
+                self._planner_producer["planner_producer_binding"], generation=generation)
         prompt = self.turn_input_loader(turn)
         payload = {
             "operation_id": to_wire(operation_id), "turn": to_wire(turn),
@@ -420,6 +522,17 @@ class RemoteOperatorHarnessAdapter:
             observation = turn_start_observation(result.get("observation"))
         except OperatorHarnessWireError as exc:
             raise BrokerProtocolError("remote OHF turn-start receipt is invalid") from exc
+        materialized = self._planner_receipts.get(generation.process_generation_id)
+        if materialized is not None and materialized.schema == MATERIALIZATION_RECEIPT_SCHEMA_V3:
+            proof = planner_turn_custody(observation.planner_custody,
+                producer=self._planner_producer, operation_id=operation_id, turn=turn,
+                provider_session_id=materialized.provider_session_id,
+                provider_native_turn_id=observation.provider_native_turn_id)
+            if observation.acknowledged is not True:
+                raise BrokerProtocolError("remote planner native request is not acknowledged")
+            observation = dataclasses.replace(observation, planner_custody=proof)
+        elif observation.planner_custody is not None:
+            raise BrokerProtocolError("planner turn custody is outside the materialized scope")
         if (operation_id.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
                 and observation.acknowledged is True
                 and type(observation.provider_native_turn_id) is str

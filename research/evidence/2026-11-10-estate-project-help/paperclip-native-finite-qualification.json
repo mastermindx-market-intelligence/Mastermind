@@ -1,0 +1,91 @@
+{
+  "files": [
+    {
+      "bytes": 15966,
+      "name": "host-receipt.json",
+      "sha256": "9975b1bb6b22bb0c18e59f1fa54a10dce6e7b02a2ee1f1caffee90752a06a14f",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4.receipt.json"
+    },
+    {
+      "bytes": 604,
+      "name": "host-junit.xml",
+      "sha256": "7001a677da4e829883d8e7168c68559defe1c119253a04ded8f281ad23e6435c",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4.xml"
+    },
+    {
+      "bytes": 80,
+      "name": "host-output.log",
+      "sha256": "99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4.log"
+    },
+    {
+      "bytes": 667,
+      "name": "lazy-module-smoke-original.json",
+      "sha256": "fc891889b2483d52ccc9b845b47060cc10842694d2693057e32c62d33588c705",
+      "source": "/tmp/estate-native-lazy-module-smoke-20261110-c4.json"
+    },
+    {
+      "bytes": 10581,
+      "name": "normal/native-return.json",
+      "sha256": "bf5f0b6b6d7bdbc12946fb6047566369565ef30bbdb392336eb3581ce5361e65",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ0/native-return.json"
+    },
+    {
+      "bytes": 2653,
+      "name": "normal/native-http-receipt.json",
+      "sha256": "fc34622ae863db0705e7bc787aa9826c2da41fde801f3ad6db5aa6aa4b86e50e",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ0/native-http-receipt.json"
+    },
+    {
+      "bytes": 3720,
+      "name": "normal/native-wire-evidence.json",
+      "sha256": "4bb3123a5e49743087a2cd45e3a3b20432a8b2ff73ca152db0796d4764818594",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ0/native-wire-evidence.json"
+    },
+    {
+      "bytes": 148,
+      "name": "normal/native-output.log",
+      "sha256": "c43e7ca1dee4fdea3a64c2170bcb9551ebf460a9f5ed32d02feffe64ed33507f",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ0/native-output.log"
+    },
+    {
+      "bytes": 7625,
+      "name": "lost-response/native-return.json",
+      "sha256": "f3a4beaacb657f763f142e78789f3ad6c870ae242712edee92bc1967969426ef",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ1/native-return.json"
+    },
+    {
+      "bytes": 2653,
+      "name": "lost-response/native-http-receipt.json",
+      "sha256": "e60924f5228980ba9c93ea028c147f511ebf3ec8b03a8c22db42cc8e932761b1",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ1/native-http-receipt.json"
+    },
+    {
+      "bytes": 3720,
+      "name": "lost-response/native-wire-evidence.json",
+      "sha256": "fb140d5e141686a9faf6981d74c9d02be47ad0ba6edabc32916dc6dff7e3729e",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ1/native-wire-evidence.json"
+    },
+    {
+      "bytes": 153,
+      "name": "lost-response/native-output.log",
+      "sha256": "f29316167ab5a230c0af8f1d983420a81566b13ac9e0513e2671831badee5651",
+      "source": "/tmp/estate-paperclip-finite-native-discovery-20261110-c4/test_finite_native_hermes_requ1/native-output.log"
+    }
+  ],
+  "installed": false,
+  "native_base_ref": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "native_origin_attested": false,
+  "native_patch_sha256": "57bbd40fc9949103ee3834ed83fe3bd46f1ec18d365618eda7bde5069621a332",
+  "native_repository": "https://github.com/NousResearch/hermes-agent",
+  "native_source_path": "/tmp/estate-hermes-native-deferred-schema-ba4ddf9-20261110-c4",
+  "primary_tree": "2b791e5ca7d35446dde1837fa95b399901bd59ce",
+  "schema": "mastermind.finite_native_requester_qualification.v1",
+  "state": "SOURCE_QUALIFIED",
+  "tests": {
+    "failed": 0,
+    "passed": 2,
+    "seconds": 46.043,
+    "skipped": 0
+  }
+}

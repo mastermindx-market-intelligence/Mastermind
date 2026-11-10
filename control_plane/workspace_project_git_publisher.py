@@ -1326,8 +1326,9 @@ class FixedProjectGitPublisher:
         """
         return self._operate(request, principal, allow_effects=False)
 
-    def observe_canonical_project_data(self, principal, *, work_ref=None):
-        return self._canonical_data.observe(principal, work_ref=work_ref)
+    def observe_canonical_project_data(self, principal, *, work_ref=None, deadline=None):
+        return self._canonical_data.observe(principal, work_ref=work_ref,
+            **({"deadline": deadline} if deadline is not None else {}))
 
     def publish_plan_proposal(self, request, recipe, principal, *, claim):
         return self._plan_proposal.operate(request, recipe, principal, phase="PUBLICATION", claim=claim)

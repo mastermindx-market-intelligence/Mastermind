@@ -33,6 +33,7 @@ from . import native_request_observation as observation
 READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v2"
 CURRENT_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v3"
 DISCOVERY_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v4"
+PROJECT_HELP_READBACK_SCHEMA = "mastermind.hermes_native_consumer_readback/v6"
 _CLAIM_ATTRIBUTE = "_mmx_agentos_memory_claim"
 _INSTANCE_ATTRIBUTE = "_mmx_agentos_memory_instance"
 _PACKAGE_MODULE = "integrations.hermes_harness.native_selected_child_plugin"
@@ -119,6 +120,7 @@ class _Claim:
         self.failed = False
         self.barrier_entered = False
         self.returned = None
+        self.project_help = None
         self.manager_return = None
         self.prompt = None
         self.prompt_anchor = None  # Transient original current-user text, never retained output.
@@ -201,10 +203,36 @@ class _Instance:
         snapshot = self.provider.context_observation()
         if snapshot is None or _sha(text.encode("utf-8")) != snapshot["rendered_context_sha256"]:
             return ""
+        help_evidence = None
+        if self.factory.publication.project_help is not None:
+            from integrations.hermes_harness.native_project_help import unavailable, delivery_identity
+            from common import coo_project_help_contract as help_wire
+            # Acquisition belongs to the existing native turn barrier. The
+            # upstream MemoryManager's bounded prefetch only renders already
+            # retained facts; it must not start a slow source read of its own.
+            help_value = claim.project_help
+            if help_value is None:
+                _refuse("NATIVE_PROJECT_HELP_UNAVAILABLE")
+            rendered = help_wire.render(help_value) if "schema" in help_value else help_wire.encode(help_value).decode()
+            combined = text + "\n\n" + rendered
+            if len(combined.encode("utf-8")) > self.factory.publication.context.max_context_bytes:
+                help_value = unavailable("PROJECT_HELP_CONTEXT_OVER_BUDGET")
+                combined = text + "\n\n" + help_wire.encode(help_value).decode()
+            if len(combined.encode("utf-8")) > self.factory.publication.context.max_context_bytes:
+                _refuse("NATIVE_PROJECT_HELP_CONTEXT_OVER_BUDGET")
+            if not claim.current(adopted=True) or self.provider.context_observation() is None:
+                return ""
+            text = combined
+            claim.project_help = help_value
+            help_evidence = {"state": "AVAILABLE" if "schema" in help_value else "UNAVAILABLE",
+                "content_sha256": delivery_identity(help_value),
+                "scope_sha256": help_wire.digest(self.factory.publication.project_help.to_dict())}
         claim.returned = {**claim.identity(), "bundle_sha256": snapshot["bundle_sha256"],
             "receipt_sha256": snapshot["receipt_sha256"],
-            "prefetch_context_sha256": snapshot["rendered_context_sha256"],
-            "prefetch_context_bytes": snapshot["rendered_context_bytes"], "prompt": None}
+            "prefetch_context_sha256": _sha(text.encode("utf-8")),
+            "prefetch_context_bytes": len(text.encode("utf-8")), "prompt": None}
+        if help_evidence is not None:
+            claim.returned["project_help"] = help_evidence
         claim.prompt = claim.prompt_anchor = None
         self.factory.last_delivery = dict(claim.returned)
         return text
@@ -226,6 +254,7 @@ class NativeAgentOsMemoryFactory:
         self.session_id = self.instance_id = self.authority_epoch = None
         self.connection = self.rpc_current = None
         self.connection_current = None
+        self.project_help_reader = None
         self.wrappers = []
         self.evaluation_history_owner = None
         self.last_instance = self.last_delivery = None
@@ -333,6 +362,22 @@ class NativeAgentOsMemoryFactory:
         self.session_id, self.instance_id, self.authority_epoch = identity[:3]
         self.connection, self.rpc_current = identity[3:], currentness
         self.connection_current = connection_current
+        if self.publication.project_help is not None:
+            from integrations.hermes_harness.native_project_help import NativeProjectHelpRead
+            self.project_help_reader = NativeProjectHelpRead(publication=self.publication,
+                server=server, session=session, loop=loop, currentness=currentness)
+
+    def read_project_help(self, claim):
+        from integrations.hermes_harness.native_project_help import read_for_claim, unavailable
+        if self.current_claim() is not claim or not claim.current(adopted=True):
+            _refuse("NATIVE_PROJECT_HELP_UNAVAILABLE")
+        try:
+            result = read_for_claim(self, claim)
+        except Exception:
+            result = unavailable()
+        if self.current_claim() is not claim or not claim.current(adopted=True):
+            _refuse("NATIVE_PROJECT_HELP_UNAVAILABLE")
+        return result
 
     def loader_ready(self):
         return self.connection is not None and self.local_current()
@@ -420,6 +465,11 @@ class NativeAgentOsMemoryFactory:
                 or provider.context_observation() is None):
             claim.failed = True  # Late completion cannot deliver into this claim.
             _refuse("NATIVE_AGENTOS_REQUIRED_CONTEXT_UNAVAILABLE")
+        if self.publication.project_help is not None:
+            claim.project_help = self.read_project_help(claim)
+            if not claim.current(adopted=True) or provider.context_observation() is None:
+                claim.failed = True
+                _refuse("NATIVE_AGENTOS_REQUIRED_CONTEXT_UNAVAILABLE")
         return claim
 
     def require_generation(self, claim):
@@ -442,6 +492,19 @@ class NativeAgentOsMemoryFactory:
             claim.failed = True
             _refuse("NATIVE_AGENTOS_REQUIRED_CONTEXT_UNAVAILABLE")
         self.require_generation(claim)
+        if self.publication.project_help is not None:
+            from integrations.hermes_harness.native_project_help import delivery_identity, unavailable
+            previous = claim.project_help
+            if previous is None:
+                _refuse("NATIVE_PROJECT_HELP_UNAVAILABLE")
+            current = self.read_project_help(claim)
+            # An over-budget refusal carries no help facts. Current ownership
+            # and source are still checked, without upgrading that old refusal.
+            if previous == unavailable("PROJECT_HELP_CONTEXT_OVER_BUDGET"):
+                return
+            if delivery_identity(current) != delivery_identity(previous):
+                claim.failed = True
+                _refuse("NATIVE_PROJECT_HELP_CHANGED_BEFORE_DELIVERY")
 
     def owns_agent(self, agent):
         # This marker confers no authority. It prevents an already bound agent
@@ -541,7 +604,7 @@ class NativeAgentOsMemoryFactory:
                     or instance.manager.get_provider("agentos") is not provider
                     or (readiness["state"] == "READY") != (snapshot is not None)))):
             _refuse("NATIVE_AGENTOS_FACTORY_UNAVAILABLE")
-        result = {"schema": DISCOVERY_READBACK_SCHEMA if self.publication.discovery else CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
+        result = {"schema": PROJECT_HELP_READBACK_SCHEMA if self.publication.project_help is not None else DISCOVERY_READBACK_SCHEMA if self.publication.discovery else CURRENT_READBACK_SCHEMA if self.publication.workspace_principal is not None else READBACK_SCHEMA,
             "binding": {
             "implementation_sha": self.slot.owner, "publication_sha256": self.publication_sha256,
             "profile_id": str(self.role_home), "instance_id": self.instance_id,
@@ -549,6 +612,14 @@ class NativeAgentOsMemoryFactory:
             "enrollment_request_id": self.slot.publication.session.request_id,
             "principal_id": self.slot.publication.session.principal_id, "session_id": self.session_id},
             "context": context, "selected_child": None}
+        if self.publication.project_help is not None:
+            from integrations.hermes_harness.native_project_help import ProjectContextRegistration
+            from common import coo_project_help_contract as help_wire
+            registration = self.slot.project_help_context
+            result["project_help"] = {"catalogue": help_wire.CATALOGUE,
+                "registered": type(registration) is ProjectContextRegistration and registration.current(),
+                "scope_sha256": help_wire.digest(self.publication.project_help.to_dict()),
+                "source_plugin_sha256": self.publication.project_context_plugin.digest}
         if self.publication.discovery:
             from integrations.hermes_harness.native_discovery_tools import readback
             result["discovery"] = readback(self.slot)
@@ -584,15 +655,24 @@ def validate_consumer_readback(value, *, publication, expected_binding):
             _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     if type(publication) is not ExecutiveContextConsumerPublication:
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
-    shape(value, ("schema", "binding", "context", "selected_child", "discovery") if publication.discovery
+    shape(value, ("schema", "binding", "context", "selected_child", "project_help") if publication.project_help is not None
+          else ("schema", "binding", "context", "selected_child", "discovery") if publication.discovery
           else ("schema", "binding", "context", "selected_child"))
     shape(value["binding"], ("implementation_sha", "publication_sha256", "profile_id", "instance_id",
         "authority_epoch", "enrollment_request_id", "principal_id", "session_id"))
-    expected_schema = DISCOVERY_READBACK_SCHEMA if publication.discovery else CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
+    expected_schema = PROJECT_HELP_READBACK_SCHEMA if publication.project_help is not None else DISCOVERY_READBACK_SCHEMA if publication.discovery else CURRENT_READBACK_SCHEMA if publication.workspace_principal is not None else READBACK_SCHEMA
     if (value["schema"] != expected_schema or value["binding"] != expected_binding
             or not observation._integer(value["binding"]["authority_epoch"])
             or value["binding"]["authority_epoch"] < 1):
         _refuse("NATIVE_AGENTOS_READBACK_INVALID")
+    if publication.project_help is not None:
+        from common import coo_project_help_contract as help_wire
+        help_observed = value["project_help"]
+        shape(help_observed, ("catalogue", "registered", "scope_sha256", "source_plugin_sha256"))
+        if (help_observed["catalogue"] != help_wire.CATALOGUE or type(help_observed["registered"]) is not bool
+                or help_observed["scope_sha256"] != help_wire.digest(publication.project_help.to_dict())
+                or help_observed["source_plugin_sha256"] != publication.project_context_plugin.digest):
+            _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     if publication.discovery:
         from integrations.hermes_harness.native_discovery_tools import schemas
         from integrations.hermes_harness.native_executive_consumer import schema_digest
@@ -647,8 +727,16 @@ def validate_consumer_readback(value, *, publication, expected_binding):
                 _refuse("NATIVE_AGENTOS_READBACK_INVALID")
     delivery = context["last_delivery"]
     if delivery is not None:
-        shape(delivery, ("admission_id", "execution_generation", "agent_session_id", "bundle_sha256",
-            "receipt_sha256", "prefetch_context_sha256", "prefetch_context_bytes", "prompt"))
+        delivery_keys = ("admission_id", "execution_generation", "agent_session_id", "bundle_sha256",
+            "receipt_sha256", "prefetch_context_sha256", "prefetch_context_bytes", "prompt")
+        shape(delivery, (*delivery_keys, "project_help") if publication.project_help is not None else delivery_keys)
+        if publication.project_help is not None:
+            evidence = delivery["project_help"]
+            shape(evidence, ("state", "content_sha256", "scope_sha256"))
+            if (evidence["state"] not in {"AVAILABLE", "UNAVAILABLE"}
+                    or not digest(evidence["content_sha256"])
+                    or evidence["scope_sha256"] != help_wire.digest(publication.project_help.to_dict())):
+                _refuse("NATIVE_AGENTOS_READBACK_INVALID")
         claim({key: delivery[key] for key in ("admission_id", "execution_generation", "agent_session_id")})
         if (any(not digest(delivery[key]) for key in (
                 "bundle_sha256", "receipt_sha256", "prefetch_context_sha256"))

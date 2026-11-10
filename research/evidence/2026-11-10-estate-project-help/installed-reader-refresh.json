@@ -1,0 +1,32 @@
+{
+  "schema": "estate_installed_reader_refresh.v1",
+  "observed_at": "2026-11-10T15:00:59Z",
+  "executive_state": {
+    "schema": "mastermind.executive_mcp_result.v1",
+    "tool": "executive_state",
+    "ok": false,
+    "server_version": "1.5.0",
+    "mode": "readonly",
+    "generated_at": "2026-11-10T15:00:59.387317+00:00",
+    "grounding": {},
+    "data": null,
+    "degraded": [],
+    "bounded": [],
+    "error": {
+      "code": "backend_unavailable",
+      "message": "Executive reader is unavailable in the installed backend. Read-only describes this read operation; submission and execution readiness were not observed."
+    },
+    "error_code": "INVALID_ARGUMENT"
+  },
+  "session_targets": {
+    "data": [],
+    "error": null,
+    "ok": true,
+    "schema": "mastermind.session_bridge_result.v1",
+    "server_version": "0.2.0",
+    "tool": "session_targets"
+  },
+  "scope": "Caller-scoped read-only observations; no global agent absence or execution readiness inferred.",
+  "earlier_arm_observation": "10:14–10:17 UTC only; arms not refreshed by these two calls.",
+  "effects": "No installed write, admission, dispatch, replay, enrollment or arm change."
+}

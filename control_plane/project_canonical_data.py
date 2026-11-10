@@ -285,9 +285,12 @@ class CanonicalProjectDataMode:
    proof.check(op.scope)
    if verified is not None:verified[key]=True
   return material
- def observe(self,principal,*,work_ref=None):
+ def observe(self,principal,*,work_ref=None,deadline=None):
+  from control_plane.workspace_owned_task import remaining_read_seconds
+  remaining_read_seconds(deadline,maximum=15.0)
   op=p._Operation(self.publisher._binding);op.mode='canonical_data';op.principal=principal;op.selected_work_ref=work_ref
   op.read_deadline=time.monotonic()+15.0
+  if deadline is not None:op.read_deadline=min(op.read_deadline,deadline)
   try:
    op.scope=self.publisher._principal_scope(principal)
    if not p._is_hex64(op.scope):_fail()

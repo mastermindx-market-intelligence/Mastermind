@@ -1,0 +1,10 @@
+{
+  "content": [
+    {
+      "text": "[Reading 2 new lines (total: 2 lines)]\n\n{\"argv\": [\"/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/7d508aba12f24054b3f42e164a65373d/venv/bin/python\", \"-B\", \"/tmp/estate-hermes-native-deferred-schema-ba4ddf9-20261110-c4/tests/tools/test_tool_search_deferred_schema.py\", \"-v\"], \"elapsed_seconds\": 8.543, \"network_or_provider_invoked\": false, \"output\": \"test_configured_cli_mcp_alias_keeps_the_normal_oneshot_selection (__main__.DeferredSchemaDisclosureTests.test_configured_cli_mcp_alias_keeps_the_normal_oneshot_selection) ... ok\\ntest_invalid_union_branches_never_invoke_the_handler (__main__.DeferredSchemaDisclosureTests.test_invalid_union_branches_never_invoke_the_handler) ... ok\\ntest_model_bridge_describes_exact_union_without_mutating_provider_schemas (__main__.DeferredSchemaDisclosureTests.test_model_bridge_describes_exact_union_without_mutating_provider_schemas) ... ok\\ntest_same_name_in_another_profile_is_not_borrowed (__main__.DeferredSchemaDisclosureTests.test_same_name_in_another_profile_is_not_borrowed) ... ok\\ntest_unknown_and_outside_session_tools_stay_undisclosed_and_uncallable (__main__.DeferredSchemaDisclosureTests.test_unknown_and_outside_session_tools_stay_undisclosed_and_uncallable) ... ok\\ntest_valid_union_branches_reach_only_the_normal_dispatcher (__main__.DeferredSchemaDisclosureTests.test_valid_union_branches_reach_only_the_normal_dispatcher) ... ok\\n\\n----------------------------------------------------------------------\\nRan 6 tests in 8.080s\\n\\nOK\\n\", \"returncode\": 0}\n\n\u2705 Process completed with exit code 0 (runtime: 8.71s)",
+      "type": "text"
+    }
+  ],
+  "isError": false,
+  "structuredContent": null
+}

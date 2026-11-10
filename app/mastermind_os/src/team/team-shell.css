@@ -1,0 +1,27 @@
+.mm-team-shell, .mm-team-shell-panel { min-width: 0; }
+.mm-team-shell-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--noir-selected);
+}
+.mm-team-shell-tabs button {
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--noir-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.mm-team-shell-tabs button[aria-selected="true"] {
+  color: var(--noir-text-primary);
+  border-bottom-color: var(--noir-champagne);
+}
+.mm-team-shell-tabs button:focus-visible {
+  outline: 2px solid var(--noir-champagne);
+  outline-offset: -2px;
+}
+.mm-team-shell-panel[hidden] { display: none; }

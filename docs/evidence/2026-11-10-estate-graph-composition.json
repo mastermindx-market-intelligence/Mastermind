@@ -1,0 +1,449 @@
+{
+  "schema": "mastermind.estate_graph_composition_qualification.v1",
+  "source_parent": "03439385ba0deced8f632d323a36ce8a1b8a9b0c",
+  "candidate_code_tree": "52e36d0e823f2d395f14a68373d642731fe723a0",
+  "governing_source": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+  "qualification_scope": "COMPOSED_SOURCE_OWNERS_AND_DISPOSABLE_NATIVE_FIXTURES",
+  "checks": [
+    {
+      "scope": "company_team_workspace",
+      "summary": "28 frontend tests and complete TypeScript/Vite production build passed; 150 affected Workspace/Paperclip/Hermes tests passed",
+      "source_commit": "18b6edc91076fad97589b20d19c9f76fb363246f"
+    },
+    {
+      "scope": "long_horizon_original_return_company",
+      "summary": "490 passed, 90 subtests passed in 25.42s",
+      "source_tree": "fdd0b36f85548769857345e6bf934332d24ee5c8",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -o addopts= -q -p anyio.pytest_plugin --tb=short tests/test_t3_project_context.py tests/test_t3_web_client.py tests/test_t3_web_client_terminal_proof.py tests/test_long_horizon_guidance.py tests/test_project_task_context.py tests/test_agentos_session_start.py tests/test_hermes_fabric_native_identity_review.py tests/test_executive_reviewed_site_identity_tokens.py tests/test_execution_return_prewrite.py tests/test_session_bridge_native_return.py tests/test_execution_return_projection.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_hermes_company_context.py"
+    },
+    {
+      "scope": "remote_planner_custody_composition",
+      "summary": "534 passed in 72.29s; includes 350 unique custody/owner cases plus existing source-identity checks",
+      "source_tree": "e2ed3c7ff136d0b7ece284f52c39c909e9203917",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -o addopts= -q -p anyio.pytest_plugin --tb=short tests/test_remote_planner_producer_custody.py tests/test_operator_materialization_receipt.py tests/test_planner_producer_binding.py tests/test_remote_operator_endpoint.py tests/test_claude_operator_adapter.py tests/test_native_claude_worker_factory.py tests/test_executive_operator_broker.py tests/test_claimed_operator_control_composition.py tests/test_executive_operator_supervisor.py tests/test_remote_attempt_transport.py tests/test_executive_reviewed_site_identity_tokens.py"
+    },
+    {
+      "scope": "original_return_frontend",
+      "source_tree": "8bf35783b929c2295489bb79c132d18109d5f376",
+      "summary": "334 tests in 11 actual frontend suites passed; full TypeScript/Vite build passed (575 modules).",
+      "command": "npm test -- src/ExecutionReturnRead.test.tsx src/RetainedResults.test.tsx src/App.retained-results.test.tsx src/App.retained-root-selection.test.tsx src/App.team-code-routes.test.tsx src/host.test.ts src/web-auth.test.ts src/host.mission-result.test.ts src/host.result-references.test.ts src/web-auth.result-references.test.ts src/host.native-cancellation.test.ts && npm run build"
+    },
+    {
+      "scope": "original_return_native_host",
+      "source_tree": "8bf35783b929c2295489bb79c132d18109d5f376",
+      "summary": "Native Rust test binary compiled; two auth::execution_return_read_tests passed, 296 filtered. Qualification build only, not installed.",
+      "command": "MM_SOURCE_REVISION=8bf35783b929c2295489bb79c132d18109d5f376 MM_BUILD_IDENTITY=qualification-tree:8bf35783b929c2295489bb79c132d18109d5f376 cargo test --locked -j 2 --bin mastermind-os auth::execution_return_read_tests",
+      "environment_note": "Source revision is explicitly the exact staged Git tree object; build identity labels it qualification-tree. Initial missing build identity was repaired through the existing build contract."
+    },
+    {
+      "scope": "codex_turn_custody_and_placement",
+      "source_tree": "027f73c3e4e634084126e37699ce0574232bb575",
+      "summary": "549 cases passed in the full composed checkout (522 Codex/custody/worker owner and 27 placement/E2E cases).",
+      "command": "cd /Volumes/Mastermind/agent-workspaces/web/estate-graph-composition-20261109-c4 && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=5 tests/test_codex_planner_turn_custody.py tests/test_planner_producer_binding.py tests/test_remote_planner_producer_custody.py tests/test_operator_materialization_receipt.py tests/test_remote_operator_endpoint.py tests/test_claude_operator_adapter.py tests/test_native_claude_worker_factory.py tests/test_executive_operator_broker.py tests/test_claimed_operator_control_composition.py tests/test_executive_operator_supervisor.py tests/test_remote_attempt_transport.py tests/test_native_worker_factory.py tests/test_codex_operator_adapter.py tests/test_operator_harness_wire.py tests/test_remote_operator_harness_adapter.py tests/test_codex_operator_process_exec_attestation.py tests/test_child_execution_composition_guards.py tests/test_mmos_admission_to_t3_native_e2e.py",
+      "runtime_seconds": 97.55
+    },
+    {
+      "scope": "original_return_consumer_and_identity",
+      "source_tree": "568bfc20eaebf700708e04b4ddbe2f17ce5eb795",
+      "summary": "428 passed, zero failures/errors/skips; JUnit readback verified.",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q --tb=short --junitxml=/tmp/estate-consumer-composed-20261110-c4.xml tests/test_workspace_execution_return_read.py tests/test_workspace_execution_return_http.py tests/test_workspace_result_service.py tests/test_session_bridge_native_return.py tests/test_execution_return_projection.py tests/test_execution_return_prewrite.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_hermes_fabric_native_identity_review.py tests/test_executive_fabric_release_identity_review.py",
+      "junit_suite_seconds": 129.724,
+      "process_seconds": 136.57
+    },
+    {
+      "scope": "native_observation_and_governed_refusal",
+      "source_tree": "a4b0ea1fa294d2909e573710e8dfb0682009bfcc",
+      "summary": "431 tests and 112 subtests passed; JUnit has 543 entries, zero failures/errors/skips.",
+      "junit_sha256": "47fba447daedf96a75ef5d8b83983e5bd5babeee3398515f02a30dbf48f75e16",
+      "junit_seconds": 93.766,
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=5 tests/test_t3_native_execution_fence.py tests/test_t3_native_terminal_supervisor.py tests/test_t3_native_composition.py tests/test_t3_execution_adapter.py tests/test_t3_adapter_durability.py tests/test_t3_native_client.py tests/test_execution_return_prewrite.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_executive_supervisor.py",
+      "scope_note": "Only source-pin test metadata changed during this run; native test inputs retained."
+    },
+    {
+      "scope": "native_governed_availability_and_claim_release",
+      "source_tree": "067c9df0775ad5e1604cb617b33b251749bf4270",
+      "summary": "50 passed, zero failures/errors/skips. Refused start releases original worker quota and retains no active/unsettled run.",
+      "junit_sha256": "c7daa3001bca21cf157fdd31f8a715e6ff045bb39002364c768cb37ac53f3351",
+      "junit_seconds": 13.363
+    },
+    {
+      "scope": "nested_selected_child_and_terminal_return",
+      "source_tree": "4bd5ebc2590976cb519c3dd6a8a37dbf841d4462",
+      "summary": "68 passed, zero failures/errors/skips, including both actual M2 Unix-service depths and canonical terminal reducers.",
+      "command": "cd '/Volumes/Mastermind/agent-workspaces/web/estate-graph-composition-20261109-c4' && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=/tmp/estate-graph-qa-python-20261110-c4:.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=3 --junitxml=/tmp/estate-nested-terminal-repair-20261110-c4.xml tests/test_hermes_nested_selected_child.py tests/test_executive_terminal_return.py tests/test_executive_terminal_return_capsule_v2.py",
+      "junit_sha256": "89dfc6b9fe887a064448d9e2e71409673db763bc9a1e7c8a38c916563c989bef",
+      "junit_seconds": 32.938,
+      "process_seconds": 35.63,
+      "qualification_environment": "Repository-declared mcp==1.28.1 installed into a task-private /tmp Python target; no global Python or installed runtime change."
+    },
+    {
+      "scope": "nested_source_identity",
+      "source_tree": "b9b1bb081228a4260952876bf6dd4b3bdb6b48fc",
+      "summary": "477 passed, zero failures/errors/skips; existing Workspace guard AST and all four token sites retained.",
+      "junit_seconds": 42.445
+    },
+    {
+      "scope": "company_release_asset_profile",
+      "source_tree": "2d11e02564c2862478525946d1e69c604cd61448",
+      "summary": "757 passed, zero failures/errors/skips, including manifest/capture/immutable HTTP/publication and old9/11/12/13 to closed14 transitions.",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=/tmp/estate-graph-qa-python-20261110-c4:.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=3 --junitxml=/tmp/estate-company-assets-20261110-c4.xml tests/test_os_private_entry_release_profile.py tests/test_deepseek_os_asset_layout.py tests/test_os_public_edge_publication.py tests/test_executive_workspace_mount.py tests/test_os_public_edge.py tests/test_os_public_edge_transition.py tests/test_source_operation_public_edge.py",
+      "junit_sha256": "d94e3d96b9678abd4fc7a229595c6348246329512e6dce0066029277c093a707",
+      "junit_seconds": 161.779,
+      "process_seconds": 167.83
+    },
+    {
+      "scope": "exact_app_archive_release_manifest",
+      "app_source_commit": "995ef2e812149ee3aab51472146ddee52888128f",
+      "owner_source_tree": "2a2bc186a030949576d4587aa2a68ddaa02cd9bb",
+      "summary": "Fresh git archive of app/mastermind_os, locked npm ci --ignore-scripts, production build and real build_os_asset_manifest accepted exactly14 files; no production publication.",
+      "receipt_sha256": "11d0bea611d80374279e04c7d9aa218ea23012a66f8fbc7a39b1d044a84a0fd7",
+      "company_assets": [
+        {
+          "path": "assets/CompanyWorkspace-CaSsy2gR.css",
+          "bytes": 7215,
+          "sha256": "416e0f333761ce0dfdcfb417e2eb8b3e693287bbef5beae112cb9f40a3f9d434"
+        },
+        {
+          "path": "assets/CompanyWorkspace-HjWVDRhs.js",
+          "bytes": 44743,
+          "sha256": "29aa08d529168bbdb2f9c1b022c730bfb3d8421cc42b8a7ca592b7eb33f22cbe"
+        }
+      ]
+    },
+    {
+      "scope": "hosted_frontend_original_failure",
+      "pr": 2424,
+      "head": "995ef2e812149ee3aab51472146ddee52888128f",
+      "merge_commit": "dd7680c0f27fb5509b8f04b2c3034816edca40a7",
+      "run_id": 42787466409,
+      "job_id": 129732196403,
+      "summary": "Typecheck and all456 frontend files passed:7414 tests passed,12 skipped. Exact app-only release archive build succeeded, then closed asset manifest refused Company chunks. Later browser and artifact steps did not run.",
+      "first_failure": "ValueError: fixed OS asset set required",
+      "failed_step": "Build exact app-only release archive",
+      "runner": "Ubuntu24.04.5, Node22.23.3, npm10.9.9",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42787466409/job/129732196403",
+      "repaired_by": "Existing closed asset owner, exact Company14 profile; no required check or release gate relaxed."
+    },
+    {
+      "scope": "requester_ack_nested_target_and_identity_composition",
+      "source_tree": "52e36d0e823f2d395f14a68373d642731fe723a0",
+      "summary": "1072 tests and 2 subtests passed; 27 incumbent vendor-dependent tests skipped, zero failures/errors and no Unix deselections. JUnit has 1099 testcase elements and 1101 suite tests including subtests.",
+      "passed": 1072,
+      "subtests_passed": 2,
+      "skipped": 27,
+      "failures": 0,
+      "errors": 0,
+      "skip_reason": "MASTERMIND_HERMES_VENDOR_ROOT does not name a checkout of the pinned upstream.",
+      "test_files": [
+        "tests/test_coo_requester_return_ingress.py",
+        "tests/test_coo_requester_ack_classification.py",
+        "tests/test_coo_requester_return.py",
+        "tests/test_coo_requester_return_contract.py",
+        "tests/test_coo_requester_return_app.py",
+        "integrations/hermes_harness/tests/test_native_executive_consumer.py",
+        "integrations/hermes_harness/tests/test_native_tool_registration.py",
+        "tests/test_executive_coo_host.py",
+        "tests/test_executive_coo_app.py",
+        "tests/test_coo_principal_mandate.py",
+        "tests/test_hermes_selected_child_ingress.py",
+        "tests/test_hermes_selected_child_result.py",
+        "tests/test_session_bridge_nested_targets.py",
+        "tests/test_session_bridge_runtime_owner.py",
+        "tests/test_executive_current_target_quota.py",
+        "tests/test_session_bridge_codex_runtime.py",
+        "tests/test_session_bridge_installed.py",
+        "tests/test_session_bridge_native_read.py",
+        "tests/test_workspace_agent_runtime_binding.py",
+        "tests/test_hermes_nested_selected_child.py",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_hermes_fabric_native_identity_review.py",
+        "tests/test_executive_reviewed_site_identity_tokens.py"
+      ],
+      "command_prefix": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=/tmp/estate-graph-qa-python-20261110-c4:.:tests python3 -m pytest -q -p anyio.pytest_plugin",
+      "command_suffix": "--maxfail=1 --tb=short --junitxml=/tmp/estate-requester-target-composition-20261110-c4.xml",
+      "junit_sha256": "7ce059078b1496be1429e1867880225e1fcb9489f4e524c0ccdd8efa57b0ad07",
+      "junit_seconds": 236.899,
+      "process_seconds": 241.388,
+      "qualification_environment": "M2 task-private declared mcp==1.28.1; actual SDK ClientSession, signed CooApp and real Unix Control service. Provider execution is inert fixture; no installed enrollment or model run.",
+      "actual_cases": [
+        "Original acknowledgment at hierarchy depths 1/2/3",
+        "Changed digest is strictly REFUSED before physical entry",
+        "Revoked current grant",
+        "Lost response after original receipt commit and original readback",
+        "13 real Control/Runtime pre-effect and possible-effect classifier cases",
+        "All 21 formerly cloud-deselected nested Session Bridge/Control cases",
+        "Existing source-identity suites after two exact record repairs"
+      ]
+    },
+    {
+      "scope": "native_typed_dynamic_tool_input",
+      "repository": "chriswong6031-creator/t3code",
+      "source_base": "924ad5d194287441f825b8f2f6054e9539808534",
+      "summary": "10 client/schema tests, package typecheck, scoped lint/format and exact patch application passed. Canonical function/namespace input reaches actual typed transport; original callback call/thread/turn identity is preserved.",
+      "patch_sha256": "8a876d72d98f48ffa689f2b5145faed7e824806c03d1a9f010573402744c1c43",
+      "scope_note": "Isolated source on Node24.22.1 (project declares26.12.1). No real provider callback/Control native dispatch or installed build claim. Exact patch retained as JSON envelope; fork push access ungranted."
+    }
+  ],
+  "original_custody_patch": {
+    "base_commit": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+    "sha256": "db3882054263a709239443e8ae8d3928c6be81a72ff316ecd76318c72aecfc79",
+    "files": [
+      {
+        "path": "control_plane/operator_materialization_receipt.py",
+        "base_blob": "2c6664eb5f1be7a88218ac9131dc74689c7a0c7b",
+        "post_blob": "d28e1b3d18d46845922bed6d7c56ee2d7ca9d2b5",
+        "post_sha256": "5d06b6c93703f32efd39bd06b4127418b3fd96f03f8dc71af243f8fe1ef56177",
+        "bytes": 48480
+      },
+      {
+        "path": "control_plane/claude_operator_adapter.py",
+        "base_blob": "cf95b7943ed0ba1dcf99bfa2346bfbd84084ed59",
+        "post_blob": "2c932a444a6f317f5cd46f02f5bc812d85e1bdf7",
+        "post_sha256": "947204a697fa7acb370a8996cd762a8dd925734ca196b9bd1e8a29e5bf5498a9",
+        "bytes": 43672
+      },
+      {
+        "path": "scripts/executive_os_phase1c_worker.py",
+        "base_blob": "b0fc50c1ddb5b9b92728d995b688cbd448c71f38",
+        "post_blob": "e2e85eb58fc2f765a75f76e422579755aeedc0cf",
+        "post_sha256": "16df503cc598592a75c367295fcd3cd745b122fb7039847450e7f3436244ed0a",
+        "bytes": 48829
+      },
+      {
+        "path": "control_plane/executive_worker_broker.py",
+        "base_blob": "9820be2eadbf09d152c340135c14786f38308721",
+        "post_blob": "3a7773f20df2d2a4763ec6861a0d0728673d2e25",
+        "post_sha256": "7be5ac0d40ddff601968931ed417ade19c81ddb2f23bea656e042752cd2a8967",
+        "bytes": 246459
+      },
+      {
+        "path": "control_plane/remote_operator_harness_adapter.py",
+        "base_blob": "af70cb8d1e55dce208c22e311cbb1faee26e6907",
+        "post_blob": "fdf0e2bf8efb1b247be313bd1f42a643bce2bb1a",
+        "post_sha256": "9f43e594700f37cbd970f345b4d0f165d4f277a0f2d7f77e4a00b2056cdf6e0a",
+        "bytes": 35255
+      },
+      {
+        "path": "control_plane/executive_operator_supervisor.py",
+        "base_blob": "2b543d5955e984af528918451447fa33a5b037f8",
+        "post_blob": "6891dca53af80124caaf610ab94617fcaa231fc5",
+        "post_sha256": "b458555a33ee093035cf54fa9f1ca3dd009344fd97e748fba6b72ae063fa5653",
+        "bytes": 94939
+      },
+      {
+        "path": "control_plane/remote_attempt_transport.py",
+        "base_blob": "4a0dce66de1daa80e3f78f8f425c28a64a1cdecf",
+        "post_blob": "feda9fcbd26fa73da091c611e38bddebbbbf49bc",
+        "post_sha256": "4d0df88357a1fe0f136b738e88e3b2e9e2e8baed7ce4326269f0ed12c8665d59",
+        "bytes": 55086
+      },
+      {
+        "path": "scripts/executive_os_phase1c.py",
+        "base_blob": "ee4daf6310d6eca17fbcceaa9f2aba6dd87fd11d",
+        "post_blob": "855ed0c05a9815f7f2a9335a0b1bd2e47c4cbd3c",
+        "post_sha256": "a4a4acdc5a46896dec3d563666ea5525a2927fa45f572914fab9ed9d582eb327",
+        "bytes": 180546
+      },
+      {
+        "path": "tests/test_remote_planner_producer_custody.py",
+        "base_blob": null,
+        "post_blob": "c46a87b1285d1b59033f44e49ed3e11dfa3d04f7",
+        "post_sha256": "02c34541305207b328ab12f2748eae9d480b50a510d227aa61edff6b5952195f",
+        "bytes": 34459
+      }
+    ]
+  },
+  "integration_repairs": [
+    "Long-horizon T3 fixture assertions include the incumbent --log-level error suffix; original thread/run assertions are preserved.",
+    "Workspace source guard retains exactly eight refusal tokens; the full control_room_action AST is unchanged from 7ff2a1ac and all eight sites move by five lines.",
+    "Two long-horizon source-identity merge conflicts were history comments; exact source digest and sites agree.",
+    "Consumer composition initially failed five source-identity assertions: three stale file hashes and two moved token locations. Four affected records, including Codex, were self-checked with identical Python function ASTs and protected Rust diagnostic-test bytes; exactly sixteen existing tokens retained, zero new exemptions. Rust's prior complete-file hash was already stale at b8dbc93.",
+    "Actual nested Unix-service claims completed but terminal status returned UNVERIFIED at both depths. Canonical same-connection coordinator evidence and the existing nested identity projection repair the shared reducer; no seal, receipt or acceptance gate relaxed.",
+    "Nested Workspace complete-file pin updated to5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa; _handle_project_instructions_frame AST and exactly four403 token sites remain unchanged from995.",
+    "Hosted exact archive found the Company's two lazy chunks absent from the closed asset topology. Added exactly the complete Company14 profile through the shared owner; no wildcard, caller MIME or new HTTP branch.",
+    "Existing old9/11/13-to12 publication fixture lacked the root directory's real dual-service traversal permission. It now uses the same explicit0755 fixture setup as the incumbent rich-client transition test; production custody checks unchanged.",
+    "Requester patch composed with nested Hermes identity imports by exact union of the existing requester and coordinator imports; no claim, capture or seal logic displaced.",
+    "Proven pre-effect acknowledgment failures were previously reported EFFECT_UNKNOWN. Actual Control entry boundary now returns existing REFUSED/UNAVAILABLE only before physical entry, retaining conservative unknown-effect behavior thereafter.",
+    "Nested current-target original reply at the full 17-Job tree/depth 3 used 257 statements under the existing 256 ceiling. Shared row validation reuses the acquired leaf row and removes two redundant statements; no limit increase, cache, store reopening or budget reset.",
+    "Requester source-identity repair updates exactly two existing records and seven reviewed literal sites. Six CooApp refusal Return ASTs and native MAX_WIRE_BYTES assignment AST are unchanged. Proof SHA256:f3c875a738282a571922c3789a6e5e4cc1f4c90d68ec9acd801c6a4a93cdda1a.",
+    "Native unified patch retains exact original bytes in a JSON envelope so blank diff context markers do not violate source whitespace checks; decoded SHA256 is verified, no patch edits or check waiver."
+  ],
+  "installed_company_read": {
+    "observed_at": "2026-11-10T07:22:22.132145Z",
+    "donor": "d69631b01b9c658f80bf8bed389863dce82643e1",
+    "people": 13,
+    "projects": 2,
+    "goals": 0,
+    "issues": 3,
+    "relationships": {
+      "reports_to": 12,
+      "issue_project": 3,
+      "issue_assignee": 2
+    },
+    "outside_visible_window": 1,
+    "state": "PARTIAL",
+    "python_typescript_projection_equal": true,
+    "native_writes": 0,
+    "scope": "NATIVE_READ_ONLY_PROJECTION_NOT_INSTALLED_WORKSPACE"
+  },
+  "boundaries": [
+    "Claude planner admission remains disabled; fixtures do not enable production policy.",
+    "Original return delivery is not parent consumption or acceptance.",
+    "Chrome visual automation blocked by another extension UI; temporary preview stopped.",
+    "No installed model run, runtime activation, credentials, heartbeats or grant changes.",
+    "Codex source custody does not establish installed worker source or live provider execution; versioned G2 remains unqualified.",
+    "Native T3 defaults do not prove fixed Job scope or descendant quiescence; fresh governed native launch/acceptance needs the existing owner contract.",
+    "Explicit authenticated COO API requester acknowledgment is qualified in source and does not establish native T3 parent consumption, arbitrary Paperclip identity or product acceptance. Native original-connection/source enrollment remains separate.",
+    "Actual project-help read integration requires explicit versioned mission/plan/root enrollment and reached T3/Hermes consumers; this next source phase is ongoing."
+  ],
+  "counts_note": "Qualification runs overlap. Do not sum these as unique estate-wide cases.",
+  "source_inputs": {
+    "consumer": {
+      "base": "395fa9820a733e6d3263b4164f00a7849e5a35b6",
+      "patch_sha256": "142f0d1b687004f9e2b8b948121da27e3b714a174e4c4480b854a90579a96357",
+      "files": 23,
+      "isolated_python_passed": 135,
+      "actual_typescript_assertions": 21
+    },
+    "codex": {
+      "base": {
+        "kind": "protected_source_plus_frozen_custody_patch",
+        "protected_sha": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+        "frozen_custody_patch_sha256": "db3882054263a709239443e8ae8d3928c6be81a72ff316ecd76318c72aecfc79",
+        "local_baseline_commit": "f1c65babb29ce3a9fe59c4a2f6bb2a65896f7b15",
+        "published_composition_target": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+        "note": "Parent owns composition. Published broker and phase1c postimages include incumbent work; use exact preimage blobs for three-way integration."
+      },
+      "patch_sha256": "2f07746d03c5b56a9e2bf466b4598f841635450706e19e1de0e1fd10337583c2",
+      "files": 13,
+      "isolated_tests": 522,
+      "protocol": {
+        "repository": "openai/codex",
+        "release": "rust-v0.167.0",
+        "commit": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
+        "sources": [
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/v2/TurnStartParams.ts",
+            "blob": "e83b6818996c56bcc433d69444ed00d0b9f55c5e",
+            "fact": "outputSchema is an optional native turn/start parameter."
+          },
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/InitializeResponse.ts",
+            "blob": "f1f79d173c77778057e223f5cac0e7ef2b113135",
+            "fact": "Initialization does not report a planner schema."
+          },
+          {
+            "path": "codex-rs/app-server-protocol/schema/typescript/v2/TurnStartResponse.ts",
+            "blob": "cc2ee3772a55a41427d7f48f0de8b5971a93bdc6",
+            "fact": "Native response contains a Turn, not a schema echo."
+          },
+          {
+            "path": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+            "blob": "eeed287866855aa900f32015f43fba578109cece",
+            "fact": "turn_start_inner forwards output_schema as final_output_json_schema."
+          }
+        ]
+      }
+    },
+    "placement": {
+      "base": "395fa9820a733e6d3263b4164f00a7849e5a35b6",
+      "patch_sha256": "aac15534009ecad85c03f99ef60b1929c4a5d0e73f132f4006d168180dc5407e",
+      "files": 2,
+      "isolated_tests": 27
+    },
+    "native_observation": {
+      "commit": "3283669eefec8e0e5cf68b2fb11e11139fbefe8d",
+      "base": "67e776064b4dc465b81e494c9d3ec70a1eb3e75c",
+      "patch_sha256": "557f7ba87f31f9d3e440696fd05377a1dcafc5486d2a7e2404277b774276bff3",
+      "files": 9
+    },
+    "native_availability": {
+      "base": "3283669eefec8e0e5cf68b2fb11e11139fbefe8d",
+      "patch_sha256": "7678d014c73fe0050d9e7eabaaa09b756a25d579b15120e12d146a45b6024f65",
+      "files": 3
+    },
+    "nested_selected_child": {
+      "base": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+      "patch_sha256": "98332af44ca10fc7a3b8a85a3e78df2c2f4324fdaa666a497d6f602020d82693",
+      "files": 8,
+      "isolated_passed": 191,
+      "incumbent_root_ownership_skips": 5,
+      "actual_service_state": "Qualified after separate terminal repair"
+    },
+    "nested_terminal_repair": {
+      "base": "995ef2e812149ee3aab51472146ddee52888128f plus frozen nested selected-child patch",
+      "patch_sha256": "a9deeecef2ed65418cf93b144056cb3fc8f12644b48f3d3cea998852ff24ed74",
+      "files": 3,
+      "isolated_passed": 137
+    },
+    "requester_return": {
+      "base": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+      "patch_sha256": "baf1475c88832eb5b876d1c7ad02fb99e207ac0ca76b599e094be5959ef7cdb5",
+      "files": 19,
+      "source_manifest_sha256": "8787633406f9d69c4064207272b61561ff31ece15217c3e86c26c9d06133bb11",
+      "catalogue": "coo.requester_return.v1",
+      "catalogue_digest": "29d6f504b79e806feefed6ab16f413338dd267de5019c7590fdc3655765537e3",
+      "native_publication": "mastermind.hermes_native_executive_consumer/v5",
+      "requester_family": "coo_api_principal",
+      "parent_consumed": false,
+      "acceptance": "not_accepted",
+      "isolated_passed": 406,
+      "incumbent_vendor_skips": 27,
+      "cloud_unix_deselections": 24
+    },
+    "requester_ack_classification": {
+      "patch_sha256": "05b38145ad00f180d7d2ad6af3c09c3f48c59caf6bfb47e5693da919f14bf3f5",
+      "source_manifest_sha256": "187118f66003dc661976a47733435bf2392a1caf0931b7416872dd6e7d7cad7d",
+      "files": 3,
+      "isolated_passed": 66,
+      "new_cases": 13,
+      "scope": "Actual Control owner classifies only proven pre-physical-entry reads as REFUSED/UNAVAILABLE; all exceptions after entry retain original-command EFFECT_UNKNOWN."
+    },
+    "nested_current_target": {
+      "patch_sha256": "2c6f6febc66486f95fe1adaf994d70e5e11e815a8086d75cc61df186ef2a3f75",
+      "source_manifest_sha256": "44a6f9cdba1e7d5ed1572de992e4a77a2402256548251367957be566674a955e",
+      "files": 4,
+      "isolated_passed": 125,
+      "cloud_unix_deselections": 21,
+      "scope": "Existing Runtime/Session Bridge list, resolve and original reply read at supported nested depths; same acquired leaf row, unchanged budgets, no send/consume/admission."
+    },
+    "t3_dynamic_tool_bindings": {
+      "repository": "chriswong6031-creator/t3code",
+      "base": "924ad5d194287441f825b8f2f6054e9539808534",
+      "generator_pin": "687a119f0fcaace47e1f1abcc77cec6c813fd6da",
+      "patch_sha256": "8a876d72d98f48ffa689f2b5145faed7e824806c03d1a9f010573402744c1c43",
+      "patch_bytes": 23587,
+      "files": 3,
+      "envelope": "docs/evidence/2026-11-10-t3-native-dynamic-tools/native-dynamic-tools-bindings.patch.json",
+      "manifest_sha256": "be34621ba1afb4c4c13429ecaccfc352f8e1006ae0978ee386765a5dec0bf40f",
+      "qualification_sha256": "c10922af51c1328319dfe6c0cc5cf341859c7827b1fab24cb6f3cbc4598232db",
+      "passed": 10,
+      "typecheck": "PASS",
+      "lint": "PASS",
+      "format": "PASS",
+      "generated_declarations_before": 2328,
+      "generated_declarations_after": 2328,
+      "node_qualified": "24.22.1",
+      "node_declared": "26.12.1",
+      "publication": "Reviewable exact patch retained in primary source only; native fork has no authorized writable carrier."
+    }
+  },
+  "organizational_knowledge": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "pr": 10946,
+    "commit": "9888c0598238276e9e16bbc42e513c87da6347ac",
+    "path": "agentos/discoveries/DSC-ESTATE-GRAPH-OWNER-AND-REQUESTER-CUSTODY.md",
+    "validation": "Canonical Agent OS validator:1 record,0errors,0warnings; exact readback.",
+    "sha256": "dee92a12667be8bfffad891e162267da44e8886fca09cbddabaf002d3573e074",
+    "prior_armed_carrier": 10920
+  },
+  "native_origin_design": {
+    "path": "docs/T3_NATIVE_REQUESTER_BOUNDARY.md",
+    "sha256": "01b751ca8f5e57ff445bfdff4803541e6dff1b18990698dc4542a4be67bde3be",
+    "join_contract_path": "docs/evidence/2026-11-10-t3-native-dynamic-tools/NATIVE_ORIGIN_JOIN_CONTRACT.md",
+    "join_contract_sha256": "f80ba40d25d59f56f58453aab53c1f5af15b732496f9f4190d90a0b4ff23f9d3",
+    "native_pin": "924ad5d194287441f825b8f2f6054e9539808534",
+    "official_codex_pin": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
+    "scope": "Typed dynamicTools input is repaired and qualified in the existing generator/client; original-call MCP binding retention and enrolled Control native-source verification remain separate API/source work. Fork publication is ungranted for observed pull-only identities; no installed activation."
+  }
+}

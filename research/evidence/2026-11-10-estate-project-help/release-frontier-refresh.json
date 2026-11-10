@@ -1,0 +1,41 @@
+{
+  "schema": "estate_release_frontier_refresh.v1",
+  "observed_at": "2026-11-10T14:55:00Z",
+  "prs": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "number": 2338,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2338",
+      "head": "957b27602d5a7d07ebf250a4c5c4cd3fadaab4ac",
+      "base": "ebc48690f20bb5c0554f91ec7cf2b4533f641f5a",
+      "state": "open",
+      "draft": true,
+      "auto_merge_present": false,
+      "updated_at": "2026-11-10T10:15:27Z"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "number": 2403,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2403",
+      "head": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+      "base": "fd9f414bf63b3a2e059d192ce580c5754aababcd",
+      "state": "open",
+      "draft": false,
+      "auto_merge_present": true,
+      "updated_at": "2026-11-10T09:43:24Z"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "number": 2404,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2404",
+      "head": "b5df6c0685466ef428279812954c28b3737e0f2c",
+      "base": "b85f7273597c6d129a0073abac3b74efc8503f62",
+      "state": "open",
+      "draft": false,
+      "auto_merge_present": false,
+      "updated_at": "2026-11-10T12:27:56Z"
+    }
+  ],
+  "effects": "Read-only. No arm, release, merge, cutover, checkout or credential change.",
+  "supersedes": "Prior #2404 auto-merge-present observation; current read returns null."
+}

@@ -61,22 +61,47 @@ class CooFactsClient:
     async def agentos_discovery_context(self, principal, workspace, context, capability_profile_digest):
         return await self._context_read(principal, context, capability_profile_digest, workspace=workspace, discovery=True)
 
-    async def _context_read(self, principal, context, capability_profile_digest, *, workspace=None, discovery=False):
+    async def project_help_context(self, principal, workspace, context, capability_profile_digest):
+        return await self._context_read(principal, context, capability_profile_digest, workspace=workspace, project_help=True)
+
+    def _require_context_transport_current(self):
+        client, request = self._context_client, self._context_request
+        if (self._client is not client or client.socket_path != self._context_socket_path
+                or getattr(client.request, "__self__", None) is not client
+                or getattr(client.request, "__func__", None) is not request.__func__):
+            raise ValueError("installed COO context transport changed")
+        return client, request
+
+    async def project_help(self, principal, workspace, context, capability_profile_digest):
+        from common import coo_project_help_contract as wire
+        from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
+        from integrations.session_bridge.installed import principal_frame as session_frame
+        client, request = self._require_context_transport_current()
+        frame = {"schema": wire.FRAME_SCHEMA, "principal": principal_frame(principal),
+            "session_principal": session_frame(principal), "workspace_principal": workspace_frame(workspace),
+            "principal_context": dataclasses.asdict(context), "capability_profile_digest": capability_profile_digest}
+        wire.validate_frame(frame)
+        response = await request(frame)
+        if self._require_context_transport_current() != (client, request) or response.get("ok") is not True:
+            raise ValueError("installed project help unavailable")
+        return wire.validate_result(response["result"], expected_context=frame["principal_context"],
+            capability_profile_digest=capability_profile_digest,
+            expected_workspace_principal=frame["workspace_principal"])
+
+    async def _context_read(self, principal, context, capability_profile_digest, *, workspace=None, discovery=False, project_help=False):
         from common import coo_agentos_context_contract as wire
         client, request = self._context_client, self._context_request
         def current():
-            if (self._client is not client or client.socket_path != self._context_socket_path
-                    or getattr(client.request, "__self__", None) is not client
-                    or getattr(client.request, "__func__", None) is not request.__func__):
+            if self._require_context_transport_current() != (client, request):
                 raise ValueError("installed COO context transport changed")
         current()
-        frame = {"schema": wire.DISCOVERY_FRAME_SCHEMA if discovery else wire.CURRENT_FRAME_SCHEMA if workspace is not None else wire.FRAME_SCHEMA,
+        frame = {"schema": wire.HELP_CONTEXT_FRAME_SCHEMA if project_help else wire.DISCOVERY_FRAME_SCHEMA if discovery else wire.CURRENT_FRAME_SCHEMA if workspace is not None else wire.FRAME_SCHEMA,
             "principal": principal_frame(principal),
             "principal_context": dataclasses.asdict(context), "capability_profile_digest": capability_profile_digest}
         if workspace is not None:
             from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
             frame["workspace_principal"] = workspace_frame(workspace)
-            (wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
+            (wire.validate_help_context_frame if project_help else wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
         else:
             wire.validate_frame(frame)
         response = await request(frame)
@@ -85,7 +110,7 @@ class CooFactsClient:
             raise ValueError("installed COO context unavailable")
         value = response["result"]
         if workspace is not None:
-            validator = wire.validate_discovery_result if discovery else wire.validate_current_result
+            validator = wire.validate_help_context_result if project_help else wire.validate_discovery_result if discovery else wire.validate_current_result
             validator(value, expected_context=frame["principal_context"],
                 capability_profile_digest=capability_profile_digest, expected_workspace_principal=frame["workspace_principal"])
         else:

@@ -83,6 +83,8 @@ def to_wire(value: Any) -> Any:
         return {
             field.name: to_wire(getattr(value, field.name))
             for field in dataclasses.fields(value)
+            if not (type(value) is TurnStartObservation
+                    and field.name == "planner_custody" and value.planner_custody is None)
         }
     if isinstance(value, enum.Enum):
         return value.value
@@ -324,7 +326,95 @@ def provider_session_handoff(value: Any) -> ProviderSessionHandoff:
 
 
 def turn_start_observation(value: Any) -> TurnStartObservation:
-    return _construct(TurnStartObservation, value, name="turn start observation")
+    if not isinstance(value, Mapping) or set(value) not in (
+        {"provider_native_turn_id", "acknowledged"},
+        {"provider_native_turn_id", "acknowledged", "planner_custody"},
+    ):
+        raise OperatorHarnessWireError("turn start observation fields are invalid")
+    raw = dict(value)
+    if "planner_custody" in raw:
+        if (type(raw["provider_native_turn_id"]) is not str
+                or not raw["provider_native_turn_id"].strip()):
+            raise OperatorHarnessWireError("planner custody requires exact native turn identity")
+        raw["planner_custody"] = planner_turn_custody(raw["planner_custody"],
+            provider_native_turn_id=raw["provider_native_turn_id"])
+        if raw["acknowledged"] is not True:
+            raise OperatorHarnessWireError("planner custody requires native acknowledgment")
+    return TurnStartObservation(**raw)
+
+
+def planner_turn_custody(value: Any, *, producer=None, operation_id=None,
+                         turn=None, provider_session_id=None, provider_native_turn_id=None):
+    """Decode exact request/ACK evidence; this never asserts a native schema echo.
+
+    Acknowledgment alone does not validate the returned plan or admit children.
+    Runtime still owns the TX-5, result seal and CooCycle admission transactions.
+    """
+    from control_plane.claude_operator_helper_protocol import native_plan_contract
+    from control_plane.operator_materialization_receipt import (
+        canonical_json_bytes, planner_producer_selection,
+    )
+    import json
+    fields = {"schema_version", "evidence_kind", "operation_id", "job_id", "attempt_id",
+              "session_epoch_id", "process_generation_id", "turn_id", "provider_session_id",
+              "provider_native_turn_id", "planner_producer_binding_digest",
+              "native_result_contract", "native_request_digest"}
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise OperatorHarnessWireError("planner turn custody fields are invalid")
+    raw = dict(value)
+    if (raw["schema_version"] != "mastermind.operator_planner_turn_custody/v1"
+            or raw["evidence_kind"] != "NATIVE_REQUEST_ACK"):
+        raise OperatorHarnessWireError("planner turn custody schema is invalid")
+    for key in fields - {"native_result_contract"}:
+        if (type(raw[key]) is not str or not 1 <= len(raw[key]) <= 256
+                or raw[key] != raw[key].strip()):
+            raise OperatorHarnessWireError("planner turn custody identity is invalid")
+    for key in ("native_request_digest", "planner_producer_binding_digest"):
+        if re.fullmatch(r"[0-9a-f]{64}", raw[key]) is None:
+            raise OperatorHarnessWireError("planner turn custody digest is invalid")
+    try:
+        contract = native_plan_contract(raw["native_result_contract"]["name"])
+        if raw["native_result_contract"] != contract:
+            raise ValueError("different contract")
+        if producer is not None:
+            selected = planner_producer_selection(producer, job_id=raw["job_id"], attempt_id=raw["attempt_id"])
+            if (selected["planner_producer_binding_digest"] != raw["planner_producer_binding_digest"]
+                    or selected["planner_producer_binding"]["native_result_contract"] != contract):
+                raise ValueError("different producer")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OperatorHarnessWireError("planner turn custody contract differs") from exc
+    if operation_id is not None and raw["operation_id"] != operation_id.command_id:
+        raise OperatorHarnessWireError("planner turn custody operation differs")
+    if turn is not None and any(raw[key] != getattr(turn, key) for key in (
+            "attempt_id", "session_epoch_id", "process_generation_id", "turn_id")):
+        raise OperatorHarnessWireError("planner turn custody target differs")
+    if ((provider_session_id is not None and raw["provider_session_id"] != provider_session_id)
+            or (provider_native_turn_id is not None and raw["provider_native_turn_id"] != provider_native_turn_id)):
+        raise OperatorHarnessWireError("planner turn custody native identity differs")
+    return json.loads(canonical_json_bytes(raw))
+
+
+def build_planner_turn_custody(*, producer, operation_id, turn, provider_session_id,
+                               provider_native_turn_id, native_request):
+    from control_plane.claude_operator_helper_protocol import native_plan_schema
+    from control_plane.operator_materialization_receipt import planner_producer_selection
+    from control_plane.executive_orchestration_result import canonical_digest
+    selected = planner_producer_selection(producer, attempt_id=turn.attempt_id)
+    if (not isinstance(native_request, Mapping)
+            or native_request.get("threadId") != provider_session_id
+            or native_request.get("outputSchema") != native_plan_schema(
+                selected["planner_producer_binding"]["native_result_contract"]["name"])):
+        raise OperatorHarnessWireError("native planner request differs from selected schema")
+    return planner_turn_custody({
+        "schema_version": "mastermind.operator_planner_turn_custody/v1",
+        "evidence_kind": "NATIVE_REQUEST_ACK", "operation_id": operation_id.command_id,
+        "job_id": selected["job_id"], **to_wire(turn),
+        "provider_session_id": provider_session_id, "provider_native_turn_id": provider_native_turn_id,
+        "planner_producer_binding_digest": selected["planner_producer_binding_digest"],
+        "native_result_contract": selected["planner_producer_binding"]["native_result_contract"],
+        "native_request_digest": canonical_digest(native_request),
+    }, producer=selected, operation_id=operation_id, turn=turn,
+        provider_session_id=provider_session_id, provider_native_turn_id=provider_native_turn_id)
 
 
 def attention_turn_observation(value: Any) -> AttentionTurnObservation:

@@ -293,6 +293,13 @@ CORTEX_FIXTURES = {
     ],
 }
 
+# The repository's native session adapter is a source skill, not a plugin
+# registration. Keep its one known file in the closed descriptor snapshot;
+# neighboring skills, executable files and symlinks remain unqualified.
+NATIVE_SESSION_SKILL_FILES = frozenset({
+    ".agents/skills/mastermind-long-horizon/SKILL.md",
+})
+
 ALLOWED_PACKAGE_FILES = frozenset(
     {MARKETPLACE_PATH.as_posix()}
     | {
@@ -315,6 +322,7 @@ ALLOWED_PACKAGE_FILES = frozenset(
     }
     | {CORTEX_FIXTURE_PATH}
     | set(NAVIGATOR_FIXTURE_PATHS)
+    | NATIVE_SESSION_SKILL_FILES
 )
 SOL_REFERENCE_MARKER = "../../references/authority-boundaries.md"
 OPERATOR_REFERENCE_MARKER = "../../references/dialogue-boundary.md"

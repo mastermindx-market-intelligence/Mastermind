@@ -1,7 +1,11 @@
 import { normalizeResultReferencesSelection } from "./result-references";
+import { useMemo } from "react";
+import { decodeProjectRootHistory, isProjectExecutionHistoryRoot, type ProjectRootHistory } from "./project-discovery";
+import { ProjectExecutionInspection, projectRootStatusLabel, type ProjectExecutionInspectionPort } from "./ProjectExecutionInspection";
 
 // Explicit read-only choice among validated programme root candidates for one
-// workspace. Choosing a root only opens that root's retained result history;
+// workspace. Choosing a root opens that root's retained result history;
+// a qualified optional execution-resource port adds a separate explicit read.
 // it never starts, switches or accepts a current Mission and never touches a
 // current action. The parent mounts this as a bounded utility inset in the
 // existing projects view (not a new dashboard) and keys/clears it on its
@@ -50,6 +54,9 @@ export interface RetainedRootChoiceProps {
   selectedRootJobId: string | null;
   locale: "en" | "zh-CN";
   onChooseRoot: (selection: { workRef: string; rootJobId: string }) => void;
+  /** Omission preserves the legacy retained-history presentation and reads. */
+  rootHistory?: ProjectRootHistory;
+  resourceInspection?: ProjectExecutionInspectionPort;
 }
 
 /** Candidate vectors are accepted only when every entry is a valid job token
@@ -81,6 +88,8 @@ export function RetainedRootChoice(props: RetainedRootChoiceProps) {
   const t = (value: string) =>
     locale === "zh-CN" ? STATIC_ZH[value] ?? value : value;
   const candidates = normalizeRootCandidates(rootCandidates, workRef);
+  const history = useMemo(() => props.rootHistory === undefined ? undefined : decodeProjectRootHistory(props.rootHistory, workRef),
+    [props.rootHistory, workRef]);
 
   const notice = (text: string) => (
     <section className="card" aria-label={t(ROOT_TITLE)}>
@@ -93,6 +102,8 @@ export function RetainedRootChoice(props: RetainedRootChoiceProps) {
 
   if (rootState !== "RESOLVED" && rootState !== "CONFLICT") return notice(t(UNKNOWN_NOTICE));
   if (candidates === null) return notice(t(INVALID_NOTICE));
+  if (history === null || (history && (history.roots.length !== candidates.length ||
+      history.roots.some((row,index) => row.root_job_id !== candidates[index])))) return notice(t(INVALID_NOTICE));
   if (rootState === "RESOLVED" && candidates.length !== 1)
     return notice(t(INVALID_NOTICE));
   if (rootState === "CONFLICT" && candidates.length < 2)
@@ -100,6 +111,10 @@ export function RetainedRootChoice(props: RetainedRootChoiceProps) {
 
   const renderChoice = (rootJobId: string) => {
     const selected = selectedRootJobId === rootJobId;
+    const original = history?.roots.find(row => row.root_job_id === rootJobId);
+    const purpose = original?.purpose === "PLANNING" ? (locale === "en" ? "Planning" : "规划") :
+      original?.purpose === "PROJECT_EXECUTION" ? (locale === "en" ? "Execution" : "执行") :
+      original ? (locale === "en" ? "Orchestration" : "协调") : null;
     return (
       <li key={rootJobId}>
         <button
@@ -110,6 +125,7 @@ export function RetainedRootChoice(props: RetainedRootChoiceProps) {
         >
           {rootJobId}
         </button>
+        {original ? <small>{purpose} · {projectRootStatusLabel(original.status,locale)}</small> : null}
         {selected ? <small className="muted">{t(SELECTED_LABEL)}</small> : null}
       </li>
     );
@@ -139,6 +155,8 @@ export function RetainedRootChoice(props: RetainedRootChoiceProps) {
           </ul>
         </details>
       ) : null}
+      {history && selectedRootJobId && isProjectExecutionHistoryRoot(history, selectedRootJobId) ?
+        <ProjectExecutionInspection history={history} rootJobId={selectedRootJobId} locale={locale} port={props.resourceInspection}/> : null}
     </section>
   );
 }

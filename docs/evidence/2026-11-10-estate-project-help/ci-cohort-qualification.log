@@ -1,0 +1,10 @@
+PASS original a82 guard rejects exact current 19-file producer (two fixture differences)
+PASS qualified 0c052 guard accepts exact current complete cohort
+PASS original owner test: test_native_source_cohort_rejects_all_mixed_combinations
+PASS original owner test: test_native_source_cohort_keeps_fixture_repair_atomic_with_runtime_version
+PASS original owner test: test_fixture_repaired_cohort_rejects_missing_extra_and_drifted_members
+PASS negative control: a loose per-file whitelist fails the incumbent atomic-cohort regression
+PASS one-line accepted pin patch, unchanged unrelated bytes, exact base apply/replay
+before blob d80e562479c5b30e7c7cdbdb85e4b23d495fd923
+after blob b201f8336b34bdd4a82469f234a4d2f622febd33
+patch SHA256 a54a96836e125baa20626dffedebcbea0b63b5f8c384608be707e424f18b5b2f

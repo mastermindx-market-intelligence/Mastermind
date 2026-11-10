@@ -89,7 +89,7 @@ from control_plane.operator_harness_wire import (
     requested_execution_profile,
 )
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
-from control_plane.executive_worker_broker import RemoteBrokerError
+from control_plane.executive_worker_broker import RemoteBrokerError, WorkerBrokerError
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
@@ -187,11 +187,19 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(str(exc)) from exc
         return PLAN_SCHEMA_V1 if binding is None else binding["plan_schema_version"]
 
-    def _require_adapter_contract(self, job: Job, adapter: OperatorHarnessAdapter) -> None:
+    def _require_adapter_contract(self, job: Job, adapter: OperatorHarnessAdapter,
+                                  *, initialized_generation=None) -> None:
         try:
             binding = self.runtime.jobs.get_planner_producer_binding(job.job_id)
         except StateConflict as exc:
             raise ExecutiveOperatorSupervisorError(str(exc)) from exc
+        from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+        if isinstance(adapter, RemoteOperatorHarnessAdapter):
+            try:
+                adapter.require_planner_producer(binding, generation=initialized_generation)
+            except (TypeError, ValueError, WorkerBrokerError) as exc:
+                raise ExecutiveOperatorSupervisorError("remote planner producer custody differs") from exc
+            return
         declared = getattr(adapter, "plan_contract", None)
         # A historical V1 transport remains historical. Schema support alone
         # must not promote that transport into a versioned native producer.
@@ -202,6 +210,16 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "claim-bound adapter plan contract differs from retained producer binding"
             )
+        if binding is not None and initialized_generation is not None:
+            from control_plane.codex_operator_adapter import CodexOperatorAdapter
+            if isinstance(adapter, CodexOperatorAdapter):
+                # An actual materialized Codex generation retains intent only.
+                # Its output schema is requested/acknowledged on TX-5, never
+                # asserted as a native initialization observation here.
+                selected = adapter.retained_planner_producer(initialized_generation)
+                if (selected is None or selected["job_id"] != job.job_id
+                        or selected["planner_producer_binding"] != binding):
+                    raise ExecutiveOperatorSupervisorError("materialized Codex planner intent differs")
 
     def _adapter_for_attempt(
         self, lease: AttemptLease, requested: RequestedExecutionProfile,
@@ -1017,20 +1035,20 @@ class ExecutiveOperatorSupervisor:
                 operation, OperationReceiptKind.EFFECT_UNKNOWN
             )
         )
-        expected_turn_keys = {
-            "schema_version",
-            "operation_kind",
-            "attempt_id",
-            "session_epoch_id",
-            "process_generation_id",
-            "worker_id",
-            "provider_session_id",
-            "turn_id",
-        }
         if (
             applied is None
             or unknown is not None
-            or set(turn_payload) != expected_turn_keys
+            or turn_event["aggregate_type"] != "operator_operation"
+            or turn_event["aggregate_id"] != operation.command_id
+            or turn_event["attempt_id"] != lease.attempt.attempt_id
+            or turn_event["job_id"] != lease.attempt.job_id
+            or turn_event["worker_id"] != lease.attempt.worker_id
+            or applied.event_type != OperationReceiptKind.APPLIED.value
+            or applied.aggregate_type != "operator_operation"
+            or applied.aggregate_id != operation.command_id
+            or applied.attempt_id != lease.attempt.attempt_id
+            or applied.job_id != lease.attempt.job_id
+            or applied.worker_id != lease.attempt.worker_id
             or turn_payload.get("attempt_id") != lease.attempt.attempt_id
             or turn_payload.get("session_epoch_id") != epoch.session_epoch_id
             or turn_payload.get("process_generation_id")
@@ -1049,6 +1067,17 @@ class ExecutiveOperatorSupervisor:
             process_generation_id=generation.process_generation_id,
             attempt_id=lease.attempt.attempt_id,
         )
+        from control_plane.executive_runtime import _validated_operator_turn_receipts
+        try:
+            _validated_operator_turn_receipts(
+                intent=turn_payload, applied=applied.payload,
+                operation_id=operation, turn=turn, worker_id=lease.attempt.worker_id,
+                provider_session_id=str(row["provider_session_id"]),
+            )
+        except (TypeError, ValueError, StateConflict) as exc:
+            raise ExecutiveOperatorSupervisorError(
+                "operator recovery turn has no exact acknowledged receipt"
+            ) from exc
         return session, turn, operation
 
     def _recovery_owner_identity(
@@ -1288,7 +1317,7 @@ class ExecutiveOperatorSupervisor:
             )
             # Initialization has its own native-contract and served-model
             # attestation. Validate before continuation preparation or useful work.
-            self._require_adapter_contract(job, adapter)
+            self._require_adapter_contract(job, adapter, initialized_generation=session.generation)
             if continuation is not None:
                 prompt_by_turn["pending"] = continuation.prepare(session)
 
@@ -1829,6 +1858,11 @@ class ExecutiveOperatorSupervisor:
                 observation.process_liveness is ProcessLiveness.ALIVE
                 and observation.provider_writer_state is ProviderWriterState.HELD
             ):
+                from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+                if isinstance(adapter, RemoteOperatorHarnessAdapter):
+                    adapter.qualify_existing_planner_generation(
+                        requested=session.launch.requested, epoch=session.epoch,
+                        generation=session.generation)
                 if existing_turn is None:
                     if self.foreground_only:
                         return ReconcileReceipt(attempt_id=attempt_id, job_id=lease.attempt.job_id,

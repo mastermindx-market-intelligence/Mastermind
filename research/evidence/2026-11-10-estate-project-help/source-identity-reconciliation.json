@@ -1,0 +1,189 @@
+{
+  "base": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "changes": [
+    {
+      "path": "control_plane/workspace_read_service.py",
+      "before_sha256": "5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa",
+      "after_sha256": "8fae6dd1f8f928011d249340739a10fe1889ff99e3e99a98b1f621615e3f8c98",
+      "sites": [
+        {
+          "before": [
+            723,
+            93,
+            96,
+            "int",
+            "403"
+          ],
+          "after": [
+            723,
+            93,
+            96,
+            "int",
+            "403"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            725,
+            56,
+            59,
+            "int",
+            "403"
+          ],
+          "after": [
+            725,
+            56,
+            59,
+            "int",
+            "403"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            732,
+            46,
+            49,
+            "int",
+            "403"
+          ],
+          "after": [
+            732,
+            46,
+            49,
+            "int",
+            "403"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            733,
+            56,
+            59,
+            "int",
+            "403"
+          ],
+          "after": [
+            733,
+            56,
+            59,
+            "int",
+            "403"
+          ],
+          "statement_ast_identical": true
+        }
+      ]
+    },
+    {
+      "path": "integrations/mastermind_executive_app/coo.py",
+      "before_sha256": "8210d5d709a7f460e0df71a5c3e2b3f63e071645ea47d75c4d2ac8207918e818",
+      "after_sha256": "da19f610b169a46b660888743fb32bb31a78e20470088c8bff0a350b2ca6d21e",
+      "sites": [
+        {
+          "before": [
+            246,
+            75,
+            78,
+            "int",
+            "400"
+          ],
+          "after": [
+            250,
+            75,
+            78,
+            "int",
+            "400"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            256,
+            93,
+            96,
+            "int",
+            "503"
+          ],
+          "after": [
+            260,
+            93,
+            96,
+            "int",
+            "503"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            647,
+            37,
+            40,
+            "int",
+            "400"
+          ],
+          "after": [
+            657,
+            37,
+            40,
+            "int",
+            "400"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            668,
+            54,
+            57,
+            "int",
+            "503"
+          ],
+          "after": [
+            682,
+            54,
+            57,
+            "int",
+            "503"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            688,
+            54,
+            57,
+            "int",
+            "503"
+          ],
+          "after": [
+            702,
+            54,
+            57,
+            "int",
+            "503"
+          ],
+          "statement_ast_identical": true
+        },
+        {
+          "before": [
+            698,
+            56,
+            59,
+            "int",
+            "503"
+          ],
+          "after": [
+            712,
+            56,
+            59,
+            "int",
+            "503"
+          ],
+          "statement_ast_identical": true
+        }
+      ]
+    }
+  ]
+}

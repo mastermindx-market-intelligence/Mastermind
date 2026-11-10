@@ -1,0 +1,83 @@
+{
+  "artifacts": [
+    {
+      "bytes": 4311,
+      "path": "QUALIFICATION.md",
+      "sha256": "816c8eeda93d01c5b9a61ccbc8f52be62ab16908e1f0947b68d4755af7edc5dd"
+    },
+    {
+      "bytes": 1771,
+      "path": "diagnose_managed.py",
+      "sha256": "76e71a30d9854e786cbda8aa9ec7525dfb359c9fcfab2ae24cf52fd4460a7710"
+    },
+    {
+      "bytes": 3284,
+      "path": "managed-affected.log",
+      "sha256": "d3d36a07f181f2d4f66422a26b75c32d92533caf779a4827600182d4b96acd66"
+    },
+    {
+      "bytes": 2003,
+      "path": "managed-exception-diagnostic.log",
+      "sha256": "35c7e335d8901c3fbb7f47a954f7b688798b268792875bd77e0797ca738ce415"
+    },
+    {
+      "bytes": 1203,
+      "path": "managed-final.log",
+      "sha256": "a9aa7588f64be5d00445e0ce9c61ff7755de488f0122d45f9291b64f3ffc9acc"
+    },
+    {
+      "bytes": 5123,
+      "path": "managed-session-canonical-status.patch",
+      "sha256": "ce45286436a3b2ae6d55eb7bdf442d59b4f7b8558d53e8064e1526722c700748"
+    },
+    {
+      "bytes": 1646,
+      "path": "original-managed-test.log",
+      "sha256": "df999045cf1bc10af252064a0265562d266d86b235930e245949b8f41bde2b96"
+    }
+  ],
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "files": [
+    {
+      "after_git_blob": "4ca2b357d2067491cc715d9c8fc3d97179a5828f",
+      "after_sha256": "8d60a3435ff4b37747dad5b218113729ede7e771c53ac054e11c5af40d952e55",
+      "before_git_blob": "044821ec1ffd173fd3dc005fcd71bdab8da2326f",
+      "before_sha256": "ed69d2718cb13aad15e8913c8122dc7138e5a26504d67cf3383c9f743f515fa9",
+      "mode": "100644",
+      "path": "control_plane/operator_materialization_receipt.py",
+      "postimage": "postimage/control_plane/operator_materialization_receipt.py"
+    },
+    {
+      "after_git_blob": "b1d2ca9b873cf77c7a18aa8f4cae4342cd8200c9",
+      "after_sha256": "c348e3fd971dbfdae0c5a5f5ec7c9c84d434679d7829f2d08afd7f85040657d4",
+      "before_git_blob": "a1353074143aa929532f913fb62abb5e2e203504",
+      "before_sha256": "cdb93b9c44716ece0e663823cb07175bb1dcb7a036af9b5bed5008c9eeca1949",
+      "mode": "100644",
+      "path": "control_plane/workspace_managed_project_session_source.py",
+      "postimage": "postimage/control_plane/workspace_managed_project_session_source.py"
+    },
+    {
+      "after_git_blob": "10f1c90190cc0f1a78a63f177936997580462ee9",
+      "after_sha256": "0c308ba6f6ad56c7342ab6a96502de78c39f6892373a75b63f5ac232c38db23c",
+      "before_git_blob": null,
+      "before_sha256": null,
+      "mode": "100644",
+      "path": "tests/test_operator_materialization_status_wire.py",
+      "postimage": "postimage/tests/test_operator_materialization_status_wire.py"
+    }
+  ],
+  "patch": {
+    "path": "managed-session-canonical-status.patch",
+    "sha256": "ce45286436a3b2ae6d55eb7bdf442d59b4f7b8558d53e8064e1526722c700748"
+  },
+  "qualification": {
+    "local_result": "93 passed, 2 warnings in 3.97s",
+    "original_test_reproduced": true,
+    "patch_replay_exact": true,
+    "socket_result": "UNQUALIFIED_ENVIRONMENT_AF_UNIX_PERMISSION_DENIED"
+  },
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "runtime_effects": false,
+  "schema": "mastermind.source_patch_manifest.v1",
+  "source_only": true
+}

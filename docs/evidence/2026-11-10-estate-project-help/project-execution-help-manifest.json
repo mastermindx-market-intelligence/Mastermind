@@ -1,0 +1,134 @@
+{
+  "composition_neighbors": [
+    {
+      "artifact": "estate-coo-transaction-freeze",
+      "note": "Parent-owned disjoint CooHost guard_dialogue/service selected-child hunks; not in this test snapshot. Apply standard patch, do not replace parent-composed files.",
+      "patch_sha256": "5a5b4110e0a18aec22a500a1d1ada1f91c381b139d8e01233480163cf29c9d61"
+    }
+  ],
+  "dependencies": [
+    "v6 d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d",
+    "joint16 postimages from budget increment_base.json",
+    "budget 9ec4c227c17e06cb59147523ea61f1a164b5813837fda5511868931b234a18ba",
+    "budget test correction 7941228551542ffffdfea1a7b755bdc5602b8e70b3ea4adb1ffd993a33b24b34",
+    "G1 Runtime postimage 4924870e1666a5e2b6be6c5742e711881641b8ef9409be92551103bc6cdc1185",
+    "selected resource f6be9fd6918be7070f836303551029f2375029d3728c6c5699ea8b28b2dc04f1"
+  ],
+  "files": [
+    {
+      "base_git_blob": "5d9b95381720c2d304c922f7c35bfb3492136069",
+      "base_sha256": "c8ca82f9ec3ed766b1db155be7607d555d34d2b4810b06345c06e96131983254",
+      "bytes": 17704,
+      "path": "common/coo_project_help_contract.py",
+      "post_git_blob": "839ff04ec783bf25834e1402e236ad2ea5bb675e",
+      "post_sha256": "939a31da00308dcec5d05d6da00946122dc52f7d05e9fcffc834d39f58fbb7c6"
+    },
+    {
+      "base_git_blob": "889f8a1fb7d7257fc8df194e58310cc936a27bd4",
+      "base_sha256": "5cfaa438669480efe341e65df270ac09679b493b35fbec63943591f783ddf852",
+      "bytes": 37737,
+      "path": "control_plane/coo_principal_host.py",
+      "post_git_blob": "c9f8b27dea6c7a8821abbc6d38c67b792715b486",
+      "post_sha256": "d1a15cca9bc93345c6f816aaeb4f5a6f4e0129530845ebcfb845433659560d39"
+    },
+    {
+      "base_git_blob": "fd9e56f7d7955dadd26159a60e3d331617af6df1",
+      "base_sha256": "d237e556c5e9c20e65f12f214a44dceda2288fdd6ab103151d9fd0ed0a85f664",
+      "bytes": 17942,
+      "path": "control_plane/coo_project_help_read.py",
+      "post_git_blob": "96f5392b6303e913a7fe6032709cf31d2a0ded1a",
+      "post_sha256": "c2c087883fa5cb61a2508ca644bf1573ba991591a4bbe3c29bf0fb904455c65d"
+    },
+    {
+      "base_git_blob": "9177cf37c47ad047507e546554257351f4cbcae3",
+      "base_sha256": "3c98ce090d9d147385edd7300b56c0eb58e88610f8018947b264a08ceae85638",
+      "bytes": 579180,
+      "path": "control_plane/executive_service.py",
+      "post_git_blob": "50d1208adcfe68cbab56c092817b60f440c6882a",
+      "post_sha256": "acb2af4ba4e834ece89ea2331f6e3a3669c1d671a1646f052cbf54823406be1a"
+    },
+    {
+      "base_git_blob": "3da9977c41954a85ffe8cc7f3fe4f4a9b531288e",
+      "base_sha256": "a73512361213e34fa58e33aa7e707d265ff96974739eb177b22e6f9fae2426e3",
+      "bytes": 39046,
+      "path": "control_plane/project_execution_admission.py",
+      "post_git_blob": "900b0f3af5a0087514ec7f5a5964a7f6ce6d6012",
+      "post_sha256": "49d939cc687f1b6c50c54046dfe24be2e6300fd9df874d12903ff6c3032c2db4"
+    },
+    {
+      "base_git_blob": "de9faa99f26a9485333e1e5b04165382b4c8e198",
+      "base_sha256": "75502465f3f3869909f1304f257654500a0ebcdd15ba2c6fa1784b1cfee3ae24",
+      "bytes": 14052,
+      "path": "control_plane/workspace_project_discovery_read.py",
+      "post_git_blob": "9116cde6ecd2ca3218c84efaf3828fce608b6192",
+      "post_sha256": "fa801b8ccd7fab049d13cd8acaf8699b6a89e50a94588d309db52b0860f3779b"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 2830,
+      "path": "docs/PROJECT_EXECUTION_HELP.md",
+      "post_git_blob": "7459c1be9500516dfbc59eca29bd2ea34dbdb9c9",
+      "post_sha256": "578d1852bbb0245297eb54ada357b4dcf240aeed362f2e231ed68cf47b6622c9"
+    },
+    {
+      "base_git_blob": "0906630203f63b7ecce36b87922a329374d6ceca",
+      "base_sha256": "121bd6987e67d015a0aa2ffdcd8d95693188d7440f9f1a62f3ee3b2cde4e01ba",
+      "bytes": 183487,
+      "path": "scripts/executive_os_phase1c.py",
+      "post_git_blob": "c04928a908b041507654c9cfeb169116bae0b430",
+      "post_sha256": "87091c2403c86840e8897c9ff60ae0fdb6dcd50353d79adc72c0b73e3a0b857c"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 4040,
+      "path": "tests/fixtures/project-execution-help-owner.json",
+      "post_git_blob": "734d4fcba25c39d2ca8353e0dc2e6937acc11fec",
+      "post_sha256": "e9c327937ff21abb72d8a5f331656fd808a99d95abbaca150715e92f7303e91b"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 4671,
+      "path": "tests/test_project_execution_help_consumers.py",
+      "post_git_blob": "beb8cdb81ece2a0ff0d075f4e4b6f79d1ecf2295",
+      "post_sha256": "44af4f49e2f4518db10bf2c9ed948fcddf2e1080523101fcafb56fc8ac12a9ad"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 4397,
+      "path": "tests/test_project_execution_help_contract.py",
+      "post_git_blob": "a008f666a1245f07990308a6de051edf631c1eb3",
+      "post_sha256": "cd6636fe234e9ba9e47c5f941c90f60566e37f5aa593c9b2fe202130a34da092"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 6010,
+      "path": "tests/test_project_execution_help_ingress.py",
+      "post_git_blob": "bc152165fc406a73b0554c2a24258c7c4bda5e68",
+      "post_sha256": "852357b226fd975530b34e9b4d02fe8bb0ff2e7a49e9ff5d6e9f2085bea0b224"
+    },
+    {
+      "base_git_blob": null,
+      "base_sha256": null,
+      "bytes": 15719,
+      "path": "tests/test_project_execution_help_read.py",
+      "post_git_blob": "f3cc6c078a3b392fef74ebd65574822e52c63bd7",
+      "post_sha256": "ef04349c3f03822dded3ed33004da0e7680f976ae25ea04f0957a1d0b4811fcd"
+    }
+  ],
+  "patch": "project-execution-input-help.patch",
+  "patch_sha256": "aee642bdc037428faee4df1494776862d71fb6e8706cec4a9ef07eabc1d01834",
+  "published_base": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "schema": "mastermind.source_patch_manifest.v1",
+  "verification": {
+    "applied_postimages_exact": true,
+    "git_diff_check": true,
+    "no_installed_effects": true,
+    "python_parse": true,
+    "strict_git_apply_check": true
+  }
+}

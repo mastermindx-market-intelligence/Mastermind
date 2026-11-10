@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from control_plane import mission_workspace as mw
+from common import project_discovery_observation_contract as discovery_observation
 
 
 SCHEMA = "mastermind.coo_principal_mandate.v1"
@@ -31,8 +32,10 @@ PRINCIPAL_ACTIONS = (
     "governed_orchestration",
     "read_adopted_agentos_context",
     "read_current_agentos_context",
+    "read_project_help",
     "read_project_discovery",
     "correct_project_discovery",
+    "acknowledge_selected_child_result",
 )
 DEFAULT_PRINCIPAL_ACTIONS = ("bounded_intent",)
 
@@ -244,6 +247,15 @@ def _coherent_owner_observation(row: Mapping[str, Any], work_ref: str, root_job_
     The existing owner supplies CURRENT/SAME. Never mint a receipt, reconstruct
     its source digests, use a clock, or treat caller-constructed data as authority.
     """
+    if row.get("schema") == discovery_observation.OBSERVATION_SCHEMA:
+        try:
+            discovery_observation.validate_coherence(dict(row), work_ref=work_ref, root_job_id=root_job_id)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            return False
+        return (
+            _coherent_runtime_observation(row.get("runtime"))
+            and _coherent_control_observation(row.get("control_room"))
+        )
     return (
         row.get("schema") == mw.OWNER_OBSERVATION_SCHEMA
         and isinstance(row.get("selection"), Mapping)
@@ -264,10 +276,17 @@ def _mission_state(document: object, *, expected_work_ref: str) -> _MissionState
     source = _mapping(
         top.get("source"), field="mission_workspace.source", keys=mw.SOURCE_KEYS_V2
     )
+    observation_value = source.get("owner_observation")
+    observation_keys = (
+        discovery_observation.OBSERVATION_KEYS
+        if isinstance(observation_value, Mapping)
+        and observation_value.get("schema") == discovery_observation.OBSERVATION_SCHEMA
+        else mw.OWNER_OBSERVATION_KEYS
+    )
     owner_observation = _mapping(
-        source.get("owner_observation"),
+        observation_value,
         field="mission_workspace.source.owner_observation",
-        keys=mw.OWNER_OBSERVATION_KEYS,
+        keys=observation_keys,
     )
     program = _mapping(
         top.get("program"), field="mission_workspace.program", keys=mw.PROGRAM_KEYS

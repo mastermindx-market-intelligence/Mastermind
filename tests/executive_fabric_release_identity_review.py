@@ -652,7 +652,11 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # the per-attempt route adds one further route-constant line above the
 # handler; the same eight reviewed action-refusal operands are byte-identical
 # and shift by one more line.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'f7e4e50df2b8945be5dfdb8e5092f4d68dcfe738c75cf39efaa89a1ffb463e95', 'sites': ((928, 71, 74, 'int', '400'), (939, 71, 74, 'int', '403'), (947, 71, 74, 'int', '400'), (953, 79, 82, 'int', '400'), (962, 71, 74, 'int', '400'), (972, 71, 74, 'int', '403'), (977, 76, 79, 'int', '503'), (983, 71, 74, 'int', '403'))}
+# Company route composition moves the existing control_room_action function
+# by five lines. Whole-function AST equality against 7ff2a1ac proves all eight
+# refusal operands unchanged; retain exactly those tokens and the new full hash.
+# Estate composition self-check: unchanged existing guarded statements; no new exemptions.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '4ecb26e79fe43d48db25b0b61cfa0af4926b82df1a0e528ac6a56b701208cf30', 'sites': ((934, 71, 74, 'int', '400'), (945, 71, 74, 'int', '403'), (953, 71, 74, 'int', '400'), (959, 79, 82, 'int', '400'), (968, 71, 74, 'int', '400'), (978, 71, 74, 'int', '403'), (983, 76, 79, 'int', '503'), (989, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -665,10 +669,8 @@ REVIEWED_FILES['tools/admin_inputs/h1_input_wrapper.py'] = {
 # full W3 composition/source review2fcbe954 preserves that exact Constant.
 # Bind the reviewed W3 postimage, including retained-input evidence, only.
 # This is not a UID exemption or a scanner/defaults change.
-REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {
-    'sha256': 'f6b94b81eec07354bf74ae6d589e76b43255604006b11cf7a7712a02fe513379',
-    'sites': ((190, 46, 49, 'int', '512'),),
-}
+# Estate composition self-check: unchanged existing guarded statements; no new exemptions.
+REVIEWED_FILES['control_plane/codex_operator_adapter.py'] = {'sha256': 'baac5f10115c8d0c896d358a7866b8e2f25f3fb4179169bab701451d0ca0a755', 'sites': ((190, 46, 49, 'int', '512'),)}
 
 # Frozen Portfolio mmtask source restored as reviewable data (P7.T5).
 # These are text display bounds, never UIDs. The payload's 500 Constant follows
@@ -724,7 +726,12 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # the trusted t3_attempt_fleet_source constructor guard adds four further
 # lines above the handler; the same four reviewed denial operands are
 # byte-identical and shift by four more lines.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
+# Estate composition self-check: unchanged existing guarded statements; no new exemptions.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254',
+ 'sites': ((723, 93, 96, 'int', '403'),
+           (725, 56, 59, 'int', '403'),
+           (732, 46, 49, 'int', '403'),
+           (733, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -796,7 +803,8 @@ REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256
 # and PR #2351 capacity-fabric OS read (commit 3838b8b82) both insert lines above
 # the fixture; the three reviewed 503 operands are byte-identical at their merged
 # positions (3812/3817/3821). Only exact existing tokens qualify.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', 'sites': ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))}
+# Estate composition self-check: diagnostic test bytes match protected c065; repairs an already stale composite pin.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'e47ac442aff8fec4ad9beb1c8b0f726c981936165e65b38c5bf430f5bb6226cc', 'sites': ((3958, 68, 71, 'int', '503'), (3963, 69, 72, 'int', '503'), (3967, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -868,7 +876,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '925aa0d
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "716b934f77cdc377b769c6cf1cefcfbb199be3e71d885f4624c6e6dc0d93b9c9",
+    "sha256": "3d617c4c58b1940fe8ac3a2a06d839d4dfc8564f5dc3ffdde80f2faf3ae782a5",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -913,14 +921,10 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
-# Pin-move history converged at this merge (origin/master into
-# feat/mmos-v1-integration-t3, 2026-11-10). Master #2365 (commit 6696153d3,
-# accepted manual-pool enumeration xai, anthropic-oauth, openai-codex) moved
-# the same two reason-length tokens by nine lines (48->57, 271->280) with
-# unchanged enclosing validation expressions. The trunk moved this pin in its
-# 2026-11-09 merge (MERGE_MASTER_20261109); master independently re-pinned in
-# #2377/#2386. Both sides carried byte-identical pin value and sites here;
-# recomputed against the merged source at this merge — no side was picked.
+# Both integration and long-horizon branches independently qualified the same
+# accepted #2365 source: three manual-pool options move the unchanged two
+# 500-character limits by nine lines. The exact digest and AST sites agree.
+# This composition reconciles history comments only; no exemption is widened.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),
@@ -960,15 +964,15 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
            (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
            (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
 
-# Material protected320 context composition: only line locations/file digest
-# move for the same six accepted Memory HTTP-status operands; no new mask.
-REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '5522cf9369fc4c04e585bd24a32e22fc4690c82f4048c65ed52dbe2467a4ae99',
- 'sites': [(245, 75, 78, 'int', '400'),
-           (255, 93, 96, 'int', '503'),
-           (636, 37, 40, 'int', '400'),
-           (657, 54, 57, 'int', '503'),
-           (677, 54, 57, 'int', '503'),
-           (687, 56, 59, 'int', '503')]}
+# Requester-return composition: file digest/locations move for the same six
+# accepted HTTP-status operands; enclosing statement ASTs are unchanged; no new mask.
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '6db8a3f6884b7cebe32b25043893b8a7d8a08380c7854e181173a88102fd432e',
+ 'sites': ((251, 75, 78, 'int', '400'),
+           (261, 93, 96, 'int', '503'),
+           (660, 37, 40, 'int', '400'),
+           (685, 54, 57, 'int', '503'),
+           (705, 54, 57, 'int', '503'),
+           (715, 56, 59, 'int', '503'))}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.
@@ -1262,3 +1266,12 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Passive Paperclip asset document pagination: exact row-count bounds only.
+# No identity, permission or runtime topology change; any source drift restores D8.
+REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
+
+# The new-group purpose textarea has a 600-character input bound. This
+# exact full-file/token review does not qualify an account, peer, scope or
+# nearby value; any source/path/spelling drift restores ordinary D8.
+REVIEWED_FILES['app/mastermind_os/src/team/NewGroupPanel.tsx'] = {'sha256': 'b84219e674c305e9d57571214e9c970c63508b774573b5d284d0bf8be869459d', 'sites': ((187, 25, 28, 'int', '600'),)}

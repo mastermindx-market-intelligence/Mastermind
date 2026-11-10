@@ -22,10 +22,10 @@ and :mod:`control_plane.teamlink_contracts`' unknown-outside-the-chain law):
   :mod:`control_plane.execution_return_projection` (``delivered`` /
   ``unknown`` / ``refused``); the TypeScript mirror asserts equality against
   the committed fixture.
-* **Port contract.**  A transport implementation raises
-  :class:`HermesReturnUnknownOutcome` EXACTLY when the send's outcome is
-  ambiguous (mirrors ``T3UnknownOutcomeError``); any other exception is a
-  clean refusal (the send definitively did not take effect).
+* **Port contract.**  Only a typed :class:`HermesReturnDeliveryError`
+  proves a clean refusal. Other send failures remain ambiguous. The native
+  transport requires the Executive owner's callback at the actual prewrite
+  boundary; a retained intent can only be reconciled by ``read_original``.
 * **In-process receipts only.**  The idempotency ledger here is
   request-scoped memory; durable persistence of the receipt belongs to the
   Executive runtime transaction at the integrator's wiring point — this
@@ -33,11 +33,12 @@ and :mod:`control_plane.teamlink_contracts`' unknown-outside-the-chain law):
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 from collections.abc import MutableMapping
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from control_plane.execution_return_projection import (
     EXECUTION_RETURN_DELIVERY_SCHEMA,
@@ -45,17 +46,20 @@ from control_plane.execution_return_projection import (
     REFUSAL_CODE_PATTERN,
     canonical_record_bytes,
     validate_execution_return,
+    ExecutionReturnProjectionError,
+    mint_return_submission_id as _mint_return_submission_id,
+    validate_execution_return_delivery as _validate_execution_return_delivery,
+    validate_execution_return_receipt as _validate_execution_return_receipt,
+)
+from control_plane.remote_worker_transport import (
+    TransportEffect,
+    TransportError,
+    validate_secretary_operation,
 )
 
 _REFUSAL_RE = re.compile(REFUSAL_CODE_PATTERN)
-_SUBMISSION_ID_RE = re.compile(r"execret-[0-9a-f]{32}")
-_RECEIPT_KEYS = frozenset({
-    "schema", "return_id", "return_digest", "conversation_id",
-    "submission_id", "state", "transport_ref", "refusal_code",
-})
-#: BridgeError codes that provably precede any native dispatch (guards in
-#: HermesNativeSession.request fire before the client call); every other
-#: live-seam failure after dispatch is treated as AMBIGUOUS, never clean.
+#: These BridgeError codes prove preflight refusal only before the native
+#: callback is reached. The same binding guard also runs after dispatch.
 _PRE_DISPATCH_CODES = frozenset({
     "binding_unavailable", "ingress_unavailable", "backend_unavailable",
 })
@@ -71,86 +75,69 @@ class HermesReturnDeliveryError(ValueError):
 
 
 class HermesReturnUnknownOutcome(Exception):
-    """The port's ambiguous-send marker: EXACTLY this exception means the
-    send's outcome is unknown.  Never retried automatically."""
+    """The port's explicit ambiguous-send marker; never authorizes retry."""
 
 
 @runtime_checkable
 class HermesReturnTransport(Protocol):
-    """The existing native send seam, narrowed to one method.
+    """The existing native submit and original-read seams.
 
     ``send`` delivers one message into the ORIGINAL conversation and returns
     a transport reference string.  It raises :class:`HermesReturnUnknownOutcome`
-    when the outcome is ambiguous; any other exception is a clean refusal.
+    when the outcome is ambiguous; only a typed delivery error is a refusal.
     """
 
     async def send(self, *, conversation_id: str, submission_id: str,
-                   text: str) -> str: ...
+                   text: str, before_write: Callable[[dict[str, Any]], None] | None = None) -> str: ...
+
+    async def read_original(self, original: dict[str, Any]) -> str: ...
+
+
+def _copy(value: Any) -> Any:
+    return json.loads(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                 separators=(",", ":"), allow_nan=False))
+
+
+def _native_input_digest(text: str) -> str:
+    # Matches the native owner's finite-input digest, including UTF-8 text.
+    return hashlib.sha256(json.dumps(
+        {"text": text, "finite": True}, sort_keys=True, ensure_ascii=False,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _original_submission(value: Any) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != {"binding", "request", "input_sha256"}:
+        raise HermesReturnDeliveryError("INPUT_INVALID", "original submission is not closed")
+    original = _copy(value)
+    request = validate_secretary_operation(original["request"])
+    binding = original["binding"]
+    if (request["operation"] != "submit" or type(binding) is not dict
+            or any(request["target"][key] != binding.get(key)
+                   for key in ("profile_id", "session_id", "principal_id"))
+            or original["input_sha256"] != _native_input_digest(request["text"])):
+        raise HermesReturnDeliveryError("INPUT_INVALID", "original submission binding differs")
+    return original
 
 
 def mint_return_submission_id(return_digest: str, conversation_id: str) -> str:
-    """Deterministic native submission id for (return digest, conversation).
-
-    Same pair ⇒ same id, so a replayed delivery is recognised as the SAME
-    native submission by the existing seam (mirrors the TeamLink message-id
-    mint).  Grammar: ``execret-`` + 32 hex.
-    """
-
-    canonical = json.dumps(
-        {"return_digest": return_digest, "conversation_id": conversation_id},
-        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    )
-    return "execret-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+    """The shared original-return submission identity."""
+    return _mint_return_submission_id(return_digest, conversation_id)
 
 
 def validate_execution_return_delivery(value: Any) -> dict[str, Any]:
-    """Fail-closed validation of one delivery receipt; returns a deep copy."""
-
-    if not isinstance(value, dict) or set(value) != _RECEIPT_KEYS:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt is not the closed shape")
-    if value["schema"] != EXECUTION_RETURN_DELIVERY_SCHEMA:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt schema is unknown")
-    if value["state"] not in EXECUTION_RETURN_DELIVERY_STATES:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt state is outside the closed vocabulary")
-    for field in ("return_id", "conversation_id"):
-        item = value[field]
-        if type(item) is not str or not item or len(item) > 256 \
-                or any(ord(char) < 32 or ord(char) == 127 for char in item):
-            raise HermesReturnDeliveryError("INPUT_INVALID", f"receipt {field} is malformed")
-    digest = value["return_digest"]
-    if type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt return_digest is not 64-hex")
-    submission = value["submission_id"]
-    if type(submission) is not str or _SUBMISSION_ID_RE.fullmatch(submission) is None:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt submission_id is malformed")
-    if submission != mint_return_submission_id(digest, value["conversation_id"]):
-        raise HermesReturnDeliveryError("INPUT_INVALID", "submission_id does not derive from (digest, conversation)")
-    transport_ref = value["transport_ref"]
-    if transport_ref is not None and (type(transport_ref) is not str
-                                      or not transport_ref or len(transport_ref) > 256):
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt transport_ref is malformed")
-    refusal = value["refusal_code"]
-    if refusal is not None and (type(refusal) is not str
-                                or _REFUSAL_RE.fullmatch(refusal) is None):
-        raise HermesReturnDeliveryError("INPUT_INVALID", "receipt refusal_code is malformed")
-    if value["state"] == "delivered" and transport_ref is None:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "a delivered receipt carries a transport ref")
-    if value["state"] == "unknown" and transport_ref is not None:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "an ambiguous receipt cannot carry a transport ref")
-    if value["state"] != "refused" and refusal is not None:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "only a refused receipt carries a refusal code")
-    if value["state"] == "refused" and refusal is None:
-        raise HermesReturnDeliveryError("INPUT_INVALID", "a refused receipt carries a refusal code")
-    return json.loads(json.dumps(value, sort_keys=True, ensure_ascii=False,
-                                 separators=(",", ":"), allow_nan=False))
+    """Preserve the transport error type around the shared pure validator."""
+    try:
+        return _validate_execution_return_delivery(value)
+    except ExecutionReturnProjectionError as exc:
+        raise HermesReturnDeliveryError(exc.code, exc.detail) from exc
 
 
 class HermesExecutionReturnDeliverer:
     """Idempotent deliverer of execution-return records over one transport.
 
     One in-process receipt per ``(return digest, conversation id)``; the
-    existing seam sees at most ONE native submission per pair through this
-    object.  Durable receipt persistence is the integrator's wiring point.
+    cache avoids sequential duplicate calls. Cross-instance and concurrent
+    exclusion belong to the Executive transaction at ``before_write``.
     """
 
     def __init__(self, transport: HermesReturnTransport, *,
@@ -174,7 +161,51 @@ class HermesExecutionReturnDeliverer:
         receipt = self._receipts.get(self._key(validated))
         return dict(receipt) if receipt is not None else None
 
-    async def deliver(self, record: Any) -> dict[str, Any]:
+    @staticmethod
+    def validate_receipt(record: Any, value: Any) -> dict[str, Any]:
+        # Preserve the original record validator's error boundary. Receipt
+        # failures retain the transport's public typed refusal API.
+        validated = validate_execution_return(record)
+        try:
+            return _validate_execution_return_receipt(validated, value)
+        except ExecutionReturnProjectionError as exc:
+            raise HermesReturnDeliveryError(exc.code, exc.detail) from exc
+
+    @staticmethod
+    def _receipt(validated: dict[str, Any], state: str, *,
+                 transport_ref: str | None = None, refusal_code: str | None = None) -> dict[str, Any]:
+        conversation_id = validated["original_requester"]["conversation_id"]
+        return validate_execution_return_delivery({
+            "schema": EXECUTION_RETURN_DELIVERY_SCHEMA,
+            "return_id": validated["return_id"],
+            "return_digest": validated["digest"],
+            "conversation_id": conversation_id,
+            "submission_id": mint_return_submission_id(validated["digest"], conversation_id),
+            "state": state,
+            "transport_ref": transport_ref,
+            "refusal_code": refusal_code,
+        })
+
+    async def read_original(self, record: Any, original: Any) -> dict[str, Any]:
+        """Read the frozen original only; absence/refusal never permits submit."""
+        validated = validate_execution_return(record)
+        try:
+            original = _original_submission(original)
+            request = original["request"]
+            if (request["text"] != canonical_record_bytes(validated).decode("utf-8")
+                    or request["submission_id"] != mint_return_submission_id(*self._key(validated))
+                    or request["target"]["session_id"] != self._key(validated)[1]):
+                raise HermesReturnUnknownOutcome("frozen original does not match the return")
+            reference = await self._transport.read_original(original)
+            receipt = self._receipt(validated, "delivered", transport_ref=reference)
+        except (Exception, asyncio.CancelledError):
+            # Even NO_EFFECT describes only this read, not the original send.
+            receipt = self._receipt(validated, "unknown")
+        self._receipts[self._key(validated)] = dict(receipt)
+        return receipt
+
+    async def deliver(self, record: Any, *,
+                      before_write: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
         """Deliver one validated record; returns the (validated) receipt.
 
         A retained receipt short-circuits BEFORE any transport call: the same
@@ -194,32 +225,24 @@ class HermesExecutionReturnDeliverer:
         transport_ref: str | None = None
         refusal_code: str | None = None
         try:
-            transport_ref = await self._transport.send(
-                conversation_id=conversation_id,
-                submission_id=submission_id,
-                text=text,
-            )
+            arguments: dict[str, Any] = dict(
+                conversation_id=conversation_id, submission_id=submission_id, text=text)
+            if before_write is not None:
+                arguments["before_write"] = before_write
+            transport_ref = await self._transport.send(**arguments)
             if type(transport_ref) is not str or not transport_ref or len(transport_ref) > 256:
                 # A post-send malformed ref cannot downgrade the send to a
                 # clean refusal: the outcome is ambiguous, never guessed.
                 raise HermesReturnUnknownOutcome("transport returned a malformed reference")
-        except HermesReturnUnknownOutcome:
-            state, transport_ref = "unknown", None
-        except Exception as exc:  # any other exception is a clean refusal
+        except HermesReturnDeliveryError as exc:
             state, transport_ref = "refused", None
             code = getattr(exc, "code", None)
             refusal_code = code if type(code) is str and _REFUSAL_RE.fullmatch(code) \
                 else "TRANSPORT_REFUSED"
-        receipt = validate_execution_return_delivery({
-            "schema": EXECUTION_RETURN_DELIVERY_SCHEMA,
-            "return_id": validated["return_id"],
-            "return_digest": validated["digest"],
-            "conversation_id": conversation_id,
-            "submission_id": submission_id,
-            "state": state,
-            "transport_ref": transport_ref,
-            "refusal_code": refusal_code,
-        })
+        except (Exception, asyncio.CancelledError):
+            state, transport_ref = "unknown", None
+        receipt = self._receipt(validated, state, transport_ref=transport_ref,
+                                refusal_code=refusal_code)
         self._receipts[key] = dict(receipt)
         return dict(receipt)
 
@@ -244,17 +267,66 @@ class SecretaryNativeSendTransport:
 
     def __init__(self, session: Any, binding: dict[str, Any], *,
                  target: dict[str, Any]) -> None:
-        if not callable(getattr(session, "request", None)):
-            raise HermesReturnDeliveryError("INPUT_INVALID", "session does not expose the native request seam")
-        if not isinstance(binding, dict) or not isinstance(binding.get("session_id"), str):
-            raise HermesReturnDeliveryError("INPUT_INVALID", "binding does not name a native session")
-        if not isinstance(target, dict) or type(target.get("session_id")) is not str:
-            raise HermesReturnDeliveryError("INPUT_INVALID", "target does not name a native session")
+        if any(not callable(getattr(session, method, None))
+               for method in ("request", "require_binding", "require_submit")):
+            raise HermesReturnDeliveryError("INPUT_INVALID", "session lacks the guarded native seam")
+        if (type(binding) is not dict or type(target) is not dict
+                or any(type(binding.get(key)) is not str or not binding[key]
+                       or target.get(key) != binding[key]
+                       for key in ("profile_id", "session_id", "principal_id"))):
+            raise HermesReturnDeliveryError("INPUT_INVALID", "native binding and target differ")
         self._session = session
-        self._binding = binding
-        self._target = dict(target)
+        self._binding = _copy(binding)
+        self._target = _copy(target)
 
-    async def send(self, *, conversation_id: str, submission_id: str, text: str) -> str:
+    @staticmethod
+    def _admission_reference(result: Any, original: dict[str, Any]) -> str:
+        binding = original["binding"]
+        admission = result.get("admission") if isinstance(result, dict) else None
+        if (not isinstance(result, dict)
+                or result.get("schema") != "mastermind.hermes_secretary_native_control/v1"
+                or result.get("status") not in {"ADMITTED", "OBSERVED"}
+                or not isinstance(admission, dict)
+                or admission.get("ref") != {"profile_id": binding["profile_id"],
+                                             "session_id": binding["session_id"]}
+                or admission.get("status") not in {"queued", "started", "unknown", "terminal"}
+                or type(admission.get("sequence")) is not int or admission["sequence"] < 1
+                or type(admission.get("authority_epoch")) is not int or admission["authority_epoch"] < 1
+                or set(admission) != {"admission_id", "ref", "sequence", "status", "outcome",
+                                      "authority_epoch", "execution_generation"}
+                or (admission["execution_generation"] is not None
+                    and (type(admission["execution_generation"]) is not int
+                         or admission["execution_generation"] < 0))
+                or (admission["outcome"] is not None and type(admission["outcome"]) is not str)):
+            raise HermesReturnUnknownOutcome("native admission does not identify the original session")
+        reference = admission.get("admission_id")
+        if (type(reference) is not str or not reference or len(reference) > 256
+                or any(ord(char) < 32 or ord(char) == 127 for char in reference)):
+            raise HermesReturnUnknownOutcome("native admission reference is malformed")
+        return reference
+
+    async def read_original(self, original: dict[str, Any]) -> str:
+        """Use the native owner's exact input lookup; never observe or submit."""
+        try:
+            original = _original_submission(original)
+            if original["binding"] != self._binding:
+                raise HermesReturnUnknownOutcome("original native selection is unavailable")
+            binding, request = original["binding"], original["request"]
+            self._session.require_binding(binding)
+            result = await self._session.request(binding, {
+                "operation": "read_original", "session_id": binding["session_id"],
+                "submission_id": request["submission_id"],
+                "input_sha256": original["input_sha256"],
+            })
+            self._session.require_binding(binding)
+            if not isinstance(result, dict) or result.get("status") != "OBSERVED":
+                raise HermesReturnUnknownOutcome("original admission is not observable")
+            return self._admission_reference(result, original)
+        except Exception as exc:
+            raise HermesReturnUnknownOutcome("original send outcome remains unknown") from exc
+
+    async def send(self, *, conversation_id: str, submission_id: str, text: str,
+                   before_write: Callable[[dict[str, Any]], None] | None = None) -> str:
         if conversation_id != self._binding["session_id"]:
             # Never route a record into a conversation the binding did not
             # select: a mismatched send is refused before any dispatch.
@@ -268,16 +340,46 @@ class SecretaryNativeSendTransport:
             "submission_id": submission_id,
             "text": text,
         }
+        if not callable(before_write):
+            raise HermesReturnDeliveryError("PREWRITE_REQUIRED", "durable original intent is required")
         try:
-            result = await self._session.request(self._binding, native_request)
+            original = _original_submission({
+                "binding": self._binding, "request": native_request,
+                "input_sha256": _native_input_digest(text),
+            })
+            self._session.require_submit(self._binding)
         except Exception as exc:
             code = getattr(exc, "code", None)
-            if type(code) is str and code in _PRE_DISPATCH_CODES:
-                # A guard refusal provably precedes dispatch: clean, and the
-                # receipt carries the guard's own code.
-                raise HermesReturnDeliveryError(code, "native guard refused before dispatch") from None
+            raise HermesReturnDeliveryError(
+                code if type(code) is str and _REFUSAL_RE.fullmatch(code) else "NATIVE_PREFLIGHT_REFUSED",
+                "native submit refused before dispatch") from exc
+        reached_prewrite = False
+
+        def commit_original(operation: str, request: dict[str, Any]) -> None:
+            nonlocal reached_prewrite
+            reached_prewrite = True
+            self._session.require_submit(self._binding)
+            if operation != "submit" or request != original["request"]:
+                raise ValueError("native prewrite request changed")
+            if before_write(_copy(original)) is not None:
+                raise ValueError("invalid original-intent callback result")
+            self._session.require_submit(self._binding)
+
+        try:
+            result = await self._session.request(
+                self._binding, _copy(native_request), before_write=commit_original)
+        except Exception as exc:
+            code = getattr(exc, "code", None)
+            no_effect = isinstance(exc, TransportError) and exc.classification is TransportEffect.NO_EFFECT
+            if no_effect or (not reached_prewrite and code in _PRE_DISPATCH_CODES):
+                # A post-request binding guard can share a preflight code;
+                # its code alone never proves the preceding submit absent.
+                raise HermesReturnDeliveryError(code, "native request proved no effect") from None
             raise HermesReturnUnknownOutcome("native send outcome unknown") from exc
-        if not isinstance(result, dict):
+        if not reached_prewrite:
+            raise HermesReturnUnknownOutcome("native seam did not execute the required prewrite guard")
+        if (not isinstance(result, dict)
+                or result.get("schema") != "mastermind.hermes_secretary_native_control/v1"):
             raise HermesReturnUnknownOutcome("native result is not readable")
         status = result.get("status")
         if status in {"NOT_SUBMITTED", "REFUSED", "UNAVAILABLE"}:
@@ -286,12 +388,4 @@ class SecretaryNativeSendTransport:
             raise HermesReturnDeliveryError(code, f"native refused with {status}")
         if status == "EFFECT_UNKNOWN":
             raise HermesReturnUnknownOutcome("native send is effect-unknown")
-        admission = result.get("admission")
-        if status in {"ADMITTED", "OBSERVED"} and isinstance(admission, dict):
-            ref = admission.get("admission_id", submission_id)
-            if type(ref) is not str or not ref or len(ref) > 256:
-                ref = submission_id
-            return ref
-        # ADMITTED/OBSERVED without an admission, or an unknown status, after
-        # dispatch: the outcome cannot be established — ambiguous, never green.
-        raise HermesReturnUnknownOutcome(f"native result status {status!r} is ambiguous")
+        return self._admission_reference(result, original)

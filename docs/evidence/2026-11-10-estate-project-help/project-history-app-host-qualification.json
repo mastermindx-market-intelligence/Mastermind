@@ -1,0 +1,58 @@
+{
+  "schema": "mastermind.app_composition_qualification.v1",
+  "tree": "5d81a751eb41ee38990c4a0e7e4e626a1d070457",
+  "node": "v26.5.0",
+  "commands": [
+    {
+      "name": "typecheck",
+      "argv": [
+        "/opt/homebrew/bin/npm",
+        "run",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "seconds": 2.925,
+      "log": "/tmp/estate-project-history-app-20261110-c4-typecheck.log",
+      "log_sha256": "20aa618c5feed49ebeca9949c4e1449d20443655e0fc77de19db43e4dfa2194c"
+    },
+    {
+      "name": "tests",
+      "argv": [
+        "/opt/homebrew/bin/npm",
+        "run",
+        "test",
+        "--",
+        "src/App.project-execution-history.test.tsx",
+        "src/App.retained-root-selection.test.tsx",
+        "src/App.team-code-routes.test.tsx",
+        "src/ProjectExecutionInspection.integration.test.tsx",
+        "src/project-execution-resource.test.ts",
+        "src/host.project-discovery.test.ts",
+        "src/programs-observation.test.ts",
+        "--maxWorkers=2",
+        "--reporter=dot",
+        "--reporter=junit",
+        "--outputFile.junit=/tmp/estate-project-history-app-20261110-c4.xml"
+      ],
+      "exit_code": 0,
+      "seconds": 19.889,
+      "log": "/tmp/estate-project-history-app-20261110-c4-tests.log",
+      "log_sha256": "95f117933b80afa68b77a635c4449bd4ba60906b4d58b80c908b2ad3024f9890"
+    },
+    {
+      "name": "build",
+      "argv": [
+        "/opt/homebrew/bin/npm",
+        "run",
+        "build"
+      ],
+      "exit_code": 0,
+      "seconds": 3.644,
+      "log": "/tmp/estate-project-history-app-20261110-c4-build.log",
+      "log_sha256": "65116972864865de33f49c0b8543b0579d8979fac2ca4dfebc3aa1634cde949f"
+    }
+  ],
+  "scope": "actual App/host/rendered consumer with inert native edge; no installed activation",
+  "source_bytes_unchanged": true,
+  "junit_sha256": "6cdd784f6958570d011c07a94708c6b050472fba0cd8adac6945b2ece91168c7"
+}

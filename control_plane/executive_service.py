@@ -2070,7 +2070,7 @@ _SELECTED_CHILD_REQUEST_KEYS = frozenset({"action", "command"})
 CHILD_REQUEST_ADMISSION_SCHEMA = "mastermind.child_request_admission/v1"
 CHILD_REQUEST_ADMISSION_STATES = frozenset({"ADMITTED", "REPLAY", "WAIT"})
 _SELECTED_CHILD_ACTIONS = frozenset({
-    "selected_child_submit", "selected_child_status", "selected_child_admit",
+    "selected_child_submit", "selected_child_status", "selected_child_admit", "acknowledge_result",
 })
 _SELECTED_CHILD_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 #: The exact reviewed frozen target type. The core never imports the
@@ -2133,7 +2133,10 @@ def _selected_child_frame(parsed: Any) -> dict[str, Any]:
     if parsed["schema"] != SELECTED_CHILD_FRAME_SCHEMA:
         raise ValueError("selected-child frame has a foreign discriminator")
     request = parsed["request"]
-    if type(request) is not dict or set(request) != _SELECTED_CHILD_REQUEST_KEYS:
+    from common import coo_requester_return_contract as requester_wire
+    if type(request) is dict and request.get("action") == requester_wire.ACK_ACTION:
+        request = requester_wire.acknowledgment(request)
+    elif type(request) is not dict or set(request) != _SELECTED_CHILD_REQUEST_KEYS:
         raise ValueError("selected-child request is not the closed shape")
     if (type(request["action"]) is not str
             or request["action"] not in _SELECTED_CHILD_ACTIONS):
@@ -6527,24 +6530,30 @@ class ExecutiveControlService:
                     await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
                 return
             from common import coo_agentos_context_contract as context_wire
-            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
+            from common import coo_project_help_contract as help_wire
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA,
+                    context_wire.HELP_CONTEXT_FRAME_SCHEMA, help_wire.FRAME_SCHEMA}:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
                     return
                 try:
                     parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
+                    project_help_read = parsed["schema"] == help_wire.FRAME_SCHEMA
+                    project_help_context = parsed["schema"] == context_wire.HELP_CONTEXT_FRAME_SCHEMA
                     discovery_context = parsed["schema"] == context_wire.DISCOVERY_FRAME_SCHEMA
-                    current_context = discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
-                    validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+                    current_context = project_help_read or project_help_context or discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    validator = help_wire.validate_frame if project_help_read else context_wire.validate_help_context_frame if project_help_context else context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
                     validator(parsed)
                     factory = app_binding.principal_facts_factory
                     runtime = self._require_runtime()
                     arms = (app_binding.armed, app_binding.principal_admission_armed)
+                    bridge_factory = app_binding.session_bridge_provider_factory if project_help_read else None
                     def require_context_host_current():
                         if (self._closing or not self._ceo_ingress_ready
                                 or self._service_state not in {"READY", "AWAITING_CANARY"}
                                 or self._ceo_ingress_app_binding is not app_binding
                                 or app_binding.principal_facts_factory is not factory
+                                or project_help_read and app_binding.session_bridge_provider_factory is not bridge_factory
                                 or (app_binding.armed, app_binding.principal_admission_armed) != arms
                                 or self._require_runtime() is not runtime
                                 or writer.get_extra_info("socket") is not connection
@@ -6560,23 +6569,36 @@ class ExecutiveControlService:
                     if type(provider) is not CooHostProvider or provider.workspace.runtime is not runtime:
                         raise ValueError("COO context owner unavailable")
                     source, workspace, context_reader = provider.source, provider.workspace, provider.agentos_context_reader
+                    original_input_reader = provider.project_execution_input_reader
                     data_binding = workspace._canonical_project_data
                     require_context_host_current()
                     from control_plane.workspace_owned_task import await_owned
-                    context_read = provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
-                    result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
+                    if project_help_read:
+                        bridge = None
+                        if app_binding.armed and callable(bridge_factory):
+                            bridge = bridge_factory(runtime)
+                            if type(bridge) is not SessionBridgeIngressOwner:
+                                raise ValueError("project-help target owner unavailable")
+                        require_context_host_current()
+                        result = await await_owned(asyncio.create_task(provider.read_project_help(parsed,
+                            session_bridge_owner=bridge, host_current=require_context_host_current)))
+                    else:
+                        context_read = provider.read_project_help_agentos_context if project_help_context else provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                        result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
                     require_context_host_current()
                     if (provider.source is not source or provider.workspace is not workspace
                             or provider.agentos_context_reader is not context_reader or workspace.runtime is not runtime
+                            or provider.project_execution_input_reader is not original_input_reader
                             or workspace._canonical_project_data is not data_binding):
                         raise ValueError("COO context owner changed")
-                    validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                    validator = help_wire.validate_result if project_help_read else context_wire.validate_help_context_result if project_help_context else context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if current_context else context_wire.validate_result
                     validator(result, expected_context=parsed["principal_context"],
                         capability_profile_digest=parsed["capability_profile_digest"],
                         **({"expected_workspace_principal": parsed["workspace_principal"]} if current_context else {}))
                     response = {"ok": True, "result": result}
-                    context_wire.encode(response, limit=context_wire.MAX_RESPONSE_BYTES - 1)
-                    await self._send_ceo_ingress_response(writer, response, response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                    ceiling = help_wire.MAX_RESPONSE_BYTES + 4096 if project_help_read else context_wire.MAX_RESPONSE_BYTES
+                    context_wire.encode(response, limit=ceiling - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=ceiling)
                 except Exception:
                     await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503),
                         response_ceiling=context_wire.MAX_RESPONSE_BYTES)
@@ -6770,7 +6792,7 @@ class ExecutiveControlService:
 
         from control_plane.coo_principal_envelope import PrincipalAdmissionContext
         from control_plane.coo_principal_host import CooHostProvider
-        from control_plane.coo_principal_mandate import project_coo_principal_mandate
+        from control_plane.coo_principal_mandate import AuthorityFact, PrincipalFact
         from control_plane.workspace_owned_task import await_owned
 
         try:
@@ -6874,19 +6896,20 @@ class ExecutiveControlService:
                 raise ValueError("selected-child receiving source changed")
             before = source.for_principal(parsed["principal"], target.work_ref)
             row, fact, authority = before
+            if not isinstance(fact, PrincipalFact) or not isinstance(authority, AuthorityFact):
+                raise ValueError("selected-child principal facts are unavailable")
             actual_context = PrincipalAdmissionContext(
                 row["work_ref"], fact.principal_binding_digest,
                 authority.mission_authority_ref, authority.authority_generation_digest,
             )
-            projection = project_coo_principal_mandate(
-                principal=fact, authority=authority,
-                mission_workspace=workspace.read_mission_for_work_ref(target.work_ref),
-            )
+            provider._require_selected_child_project_scope(
+                row, target.work_ref, child.selection.root_job_id)
+            mission_state = workspace._coo_guard_mission_state(target.work_ref)
             if (actual_context != frame_context
                     or authority.work_ref != target.work_ref
                     or authority.capability_profile_digest != parsed["capability_profile_digest"]
-                    or projection["mission"]["work_ref"] != target.work_ref
-                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or mission_state.work_ref != target.work_ref
+                    or mission_state.root_job_id != child.selection.root_job_id
                     or source.for_principal(parsed["principal"], target.work_ref) != before):
                 raise ValueError("selected-child principal is not current")
             require_current()
@@ -6905,11 +6928,40 @@ class ExecutiveControlService:
             )
             return
         try:
+            from common import coo_requester_return_contract as requester_wire
+            from common import coo_project_help_contract as help_wire
+
+            def require_requester_return_current():
+                current_context, current_authority = require_read_current()
+                if (current_context != actual_context
+                        or requester_wire.ACTION not in current_authority.principal_actions
+                        or source.catalogue_for_principal(parsed["principal"], work_ref=target.work_ref)
+                            not in {requester_wire.CATALOGUE, help_wire.API_REQUESTER_CATALOGUE}):
+                    raise ValueError("original COO requester-return contract is not current")
+                require_read_current()
+
+            def require_requester_acknowledgment_current():
+                require_requester_return_current()
+                # This explicit receipt write is separately selected by the
+                # current catalogue/action. It grants no child admission.
+                require_fresh_request()
+                if child.selection.job_id in self._dispatch_errors:
+                    raise ValueError("original selected-child effect is unresolved")
+                require_requester_return_current()
+
+            requester_options = {}
+            if requester_wire.ACTION in authority.principal_actions:
+                require_requester_return_current()
+                requester_options = dict(requester_return_guard=require_requester_return_current,
+                    requester_acknowledgment_guard=require_requester_acknowledgment_current)
+            if action == requester_wire.ACK_ACTION:
+                require_requester_acknowledgment_current()
             composition = target.new_composition(
                 service=self, runtime=runtime, loop=asyncio.get_running_loop(),
                 authority=provider, context=actual_context,
                 capability_profile_digest=authority.capability_profile_digest,
                 receiving_request_guard=require_fresh_request,
+                **requester_options,
             )
         except Exception:
             await self._send_ceo_ingress_error(
@@ -6923,6 +6975,9 @@ class ExecutiveControlService:
             if action == "selected_child_submit":
                 result = await await_owned(asyncio.create_task(
                     composition.submit_async(command)))
+            elif action == requester_wire.ACK_ACTION:
+                result = await await_owned(asyncio.create_task(
+                    composition.acknowledge_result_async(request)))
             else:
                 result = await await_owned(asyncio.create_task(
                     composition.status_async(command)))
@@ -8791,6 +8846,7 @@ class ExecutiveControlService:
     async def dispatch_selected_child(
         self, *, job_id: str, command_id: str,
         expected_selection: ExpectedChildSelection, admission_guard: Callable[[], None] | None = None,
+        requester_context: Any | None = None, requester_capability_profile_digest: str | None = None,
     ) -> dict[str, Any]:
         """Use the original command under the incumbent dispatch lock.
 
@@ -8824,7 +8880,9 @@ class ExecutiveControlService:
                 raise StateConflict("selected child admission guard refused")
             root = self._require_bound_coo_job(job)
             try:
-                with expected_child_selection(expected_selection, admission_guard=admission_guard):
+                with expected_child_selection(expected_selection, admission_guard=admission_guard,
+                        requester_context=requester_context,
+                        requester_capability_profile_digest=requester_capability_profile_digest):
                     outcome = await self._dispatch_cycle_job_exact_locked(job_id, command_id)
             except Exception:
                 # The original owner has returned. Only a successful canonical
@@ -8842,6 +8900,54 @@ class ExecutiveControlService:
             if attempt is None:
                 attempt = outcome.attempt
             return self._selected_child_observation(job_id, command_id, attempt)
+
+    async def acknowledge_selected_child_result(
+        self, request: Mapping[str, Any], *, job_id: str, context: Any,
+        capability_profile_digest: str, currentness_guard: Callable[[], None],
+    ) -> dict[str, Any]:
+        """Record an explicit original API-requester ACK through Runtime."""
+        from common import coo_requester_return_contract as wire
+        selected = wire.acknowledgment(dict(request))
+        effect_may_have_started = False
+        try:
+            if selected["result"]["job_id"] != job_id:
+                raise StateConflict("requester acknowledgment names another frozen child")
+            runtime = self._require_runtime()
+            def current():
+                if self._require_runtime() is not runtime or self._closing or job_id in self._dispatch_errors:
+                    raise StateConflict("requester acknowledgment owner is no longer current")
+                if (not callable(currentness_guard) or inspect.iscoroutinefunction(currentness_guard)
+                        or inspect.iscoroutinefunction(getattr(currentness_guard, "__call__", None))):
+                    raise StateConflict("requester acknowledgment guard is unavailable")
+                checked = currentness_guard()
+                if checked is not None:
+                    if inspect.iscoroutine(checked):
+                        checked.close()
+                    raise StateConflict("requester acknowledgment guard refused")
+            async with self._dispatch_lock:
+                current()
+                observed = await self.selected_child_status(job_id=job_id, command_id=selected["command"])
+                wire.validate_descriptor(selected["result"], observation=observed)
+                # Only this owner knows that its preflight has not entered the
+                # physical write. After entry, even a StateConflict is not a
+                # no-effect receipt: preserve original-command reconciliation.
+                effect_may_have_started = True
+                descriptor = await self._run_physical(runtime.acknowledge_coo_selected_child_result,
+                    selected, context=context, capability_profile_digest=capability_profile_digest,
+                    currentness_guard=current)
+                current()
+                observed = await self.selected_child_status(job_id=job_id, command_id=selected["command"])
+                wire.validate_descriptor(descriptor, observation=observed)
+                return {**observed, "requester_return": descriptor}
+        except Exception as exc:
+            if effect_may_have_started:
+                raise
+            refused = isinstance(exc, (StateConflict, ValueError))
+            return {"command_id": selected["command"], "job_id": job_id,
+                "attempt_id": None, "attempt_status": None, "job_status": None,
+                "state": "REFUSED" if refused else "UNAVAILABLE",
+                "reason": "EXECUTIVE_SELECTED_CHILD_CLAIM_REFUSED" if refused
+                else "EXECUTIVE_SELECTED_CHILD_UNAVAILABLE"}
 
     async def selected_child_status(
         self, *, job_id: str, command_id: str

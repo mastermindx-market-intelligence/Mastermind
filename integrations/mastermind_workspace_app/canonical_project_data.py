@@ -86,12 +86,15 @@ class InstalledCanonicalProjectData:
         try:return self.latest(self._frame(principal)) is True
         except (ValueError,PermissionError,TypeError):return False
 
-    def view(self,principal,*,work_ref):
+    def view(self,principal,*,work_ref,deadline=None):
+        from control_plane.workspace_owned_task import remaining_read_seconds
+        remaining_read_seconds(deadline,maximum=15.0)
         frame=self._frame(principal)
         if self.latest(frame) is not True:return None
         # Acquire the actual configured CODE pin lazily. Original operation GET
         # and reconciliation never call this method or refresh Macro source.
-        capture=self.collector._capture_canonical_code()
+        capture=self.collector._capture_canonical_code(
+            **({'deadline':deadline} if deadline is not None else {}))
         code=capture.observations[1]
         def no_compile(*args):raise ValueError('SOURCE_WRITE_NOT_AVAILABLE')
         publisher=FixedProjectGitPublisher(self.identity.binding,no_compile,lambda _:False,lambda _:'',
@@ -100,7 +103,8 @@ class InstalledCanonicalProjectData:
             authorize_workspace_read=self._can_read,workspace_read_permission_stamp=self._read_stamp,
             authorize_latest_project_data=self._can_latest,latest_project_data_permission_stamp=self._latest_stamp,
             canonical_data_events=self.events)
-        view=publisher.observe_canonical_project_data(principal,work_ref=work_ref)
+        view=publisher.observe_canonical_project_data(principal,work_ref=work_ref,
+            **({'deadline':deadline} if deadline is not None else {}))
         self.collector._bind_canonical_code_capture(capture,view)
         return view
 
@@ -136,7 +140,7 @@ class InstalledCanonicalProjectData:
             return self.identity.qualify(binding)
         except (ValueError,PermissionError):return False
 
-    def read_plan(self,principal_frame,*,operation,selection):
+    def read_plan(self,principal_frame,*,operation,selection,deadline=None):
         # This fixed READ entry shares the existing opaque installed DATA owner.
         # Newly created projects are qualified by their actual publication Event,
         # never by a browser WorkRef or an unchanged-DATA fallback.
@@ -145,12 +149,14 @@ class InstalledCanonicalProjectData:
         selected=validate_selection(selection)
         encoded=json.dumps(principal_frame,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
         principal=_ReadPrincipal(self,encoded)
-        view=self.view(principal,work_ref=selected['work_ref'])
+        view=self.view(principal,work_ref=selected['work_ref'],
+            **({'deadline':deadline} if deadline is not None else {}))
         if view is None:return None
         try:
-            with view.capture_scope():
+            with view.capture_scope(deadline=deadline) as capture:
                 with self.collector.canonical_project_data_scope(view,work_ref=selected['work_ref']):
-                    body=validate_body(self.collector.read_project_plan(**selected))
+                    body=validate_body(self.collector.read_project_plan(**selected,
+                        **({'timeout':min(15.0,capture.remaining())} if deadline is not None else {})))
                 witness=view.witness()
         finally:self.collector._discard_canonical_code_capture(view)
         generation=hashlib.sha256(json.dumps({'code':view.code_commit,'data':view.data_commit,

@@ -12,6 +12,7 @@ the documented boundary. It is not this repository's self-attestation.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import hashlib
 import importlib.util
 import json
@@ -494,10 +495,16 @@ def test_the_policy_is_never_installed_late_by_the_initializer():
 # ------------------------------------------------------------ unit recipe ----
 
 
-def test_shared_recipe_bytes_are_unchanged_for_the_profile_renderer():
+def test_shared_recipe_bytes_are_unchanged_for_the_profile_renderer(tmp_path):
     from integrations.hermes_harness.stack import compose_profile
+    # The actual profile validator owns only disposable filesystem paths.
+    # Installed paths are inert inputs to the pure unit renderer below.
     profile = compose_profile(
-        "mmsecretary", state_dir=Path("/home/mmsecretary/.local/state/hermes-runtime-mmsecretary"),
+        "mmsecretary", state_dir=tmp_path / "role-state",
+        hermes_home=tmp_path / "role-state/current/hermes-home",
+        secrets_file=tmp_path / "role-secrets.env")
+    profile = replace(profile,
+        state_dir=Path("/home/mmsecretary/.local/state/hermes-runtime-mmsecretary"),
         hermes_home=Path("/home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/hermes-home"),
         secrets_file=Path("/home/mmsecretary/.config/hermes-runtime/mmsecretary.secrets.env"))
     unit = system_service.render_host_unit(

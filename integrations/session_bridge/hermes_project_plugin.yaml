@@ -1,0 +1,7 @@
+name: mastermind-long-horizon
+kind: standalone
+version: "1.0.0"
+description: "Preserve explicitly bound project scope through native Hermes turns and compression. Read-only context, native skill and bounded habits; no runtime, scheduler or profile migration."
+author: Mastermind-X
+provides_tools:
+  - mmx_project_context

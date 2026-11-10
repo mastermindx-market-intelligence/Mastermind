@@ -21,6 +21,7 @@ from integrations.executive_mcp.web_ceo import (
 from integrations.hermes_delegate.schema import (
     COMMAND_RE, SELECTED_CHILD_ACTIONS, SubmissionError, parse_selected_child,
 )
+from common import coo_requester_return_contract as requester_wire
 
 COO_SERVER_NAME = "mastermind-executive-coo"
 COO_SERVER_VERSION = "1.0.0"
@@ -86,6 +87,31 @@ COO_TOOL_SCHEMA_DIGEST = (
     "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
 )
 
+# A separately selected contract. Existing catalogue grants keep their exact
+# descriptors and digest; a model argument cannot opt into this alternative.
+_REQUESTER_DELEGATE = ToolSpec("mmx_delegate",
+    "Submit or observe the host-frozen Executive child. After reviewing its completed result, explicitly invoke acknowledge_result with the exact requester_return descriptor to acknowledge it as the original authenticated COO API requester. This grants no admission, is not native-parent consumption, independent review or product acceptance. Reconcile uncertainty with selected_child_status on the original command.",
+    {"type": "object", "oneOf": [copy.deepcopy(COO_TOOL_SPECS[-1].input_schema),
+        requester_wire.acknowledgment_input_schema(_SELECTED_CHILD_COMMAND)]},
+    "Original selected-child result and optional API-requester acknowledgment; native parent consumption and product acceptance remain separate.", False)
+COO_REQUESTER_RETURN_TOOL_SPECS = (*COO_TOOL_SPECS[:-1], _REQUESTER_DELEGATE)
+
+
+def coo_requester_return_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_REQUESTER_RETURN_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
+def validate_coo_requester_tool_arguments(name, arguments):
+    if name == "mmx_delegate" and type(arguments) is dict and arguments.get("action") == requester_wire.ACK_ACTION:
+        try:
+            return requester_wire.acknowledgment(arguments)
+        except (ValueError, TypeError, KeyError):
+            raise GatewayError("invalid_input", "invalid original requester acknowledgment") from None
+    return validate_coo_tool_arguments(name, arguments)
+
 # A separate reviewed catalogue. Existing descriptors and the v1 digest above
 # retain their exact meaning for every currently enrolled principal.
 from common import coo_agentos_context_contract as context_wire
@@ -103,6 +129,36 @@ COO_CURRENT_CONTEXT_TOOL_SPECS = (*COO_TOOL_SPECS, ToolSpec(context_wire.CURRENT
      "properties": {"work_ref": dict(_WORK)}},
     "Exact current DATA context with pinned CODE, original publication and source/runtime evidence.", True))
 COO_CURRENT_CONTEXT_TOOL_NAMES = tuple(spec.name for spec in COO_CURRENT_CONTEXT_TOOL_SPECS)
+
+# An explicit read-only help alternative. It does not combine the independent
+# discovery-correction or requester-acknowledgment catalogues.
+from common import coo_project_help_contract as project_help_wire
+COO_PROJECT_HELP_TOOL_SPECS = (*COO_CURRENT_CONTEXT_TOOL_SPECS, ToolSpec(project_help_wire.TOOL,
+    "Read current help for one explicitly enrolled project and original Executive root, joined to its exact adopted source plan. Reachable sessions, teammate relationships and placement eligibility are separate. No execution, contact, delegation, parent consumption or acceptance is authorized.",
+    {"type": "object", "additionalProperties": False, "required": ["work_ref"],
+     "properties": {"work_ref": dict(_WORK)}},
+    "Current owner-qualified project scope and bounded Session Bridge targets, or explicit unavailable read owners. This API-principal read does not attest a native T3 or Hermes origin.", True))
+
+
+def coo_project_help_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_PROJECT_HELP_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
+# A new, fixed API contract, selected by an exact installed profile. The
+# existing help and requester catalogues retain their original descriptors.
+COO_PROJECT_HELP_REQUESTER_TOOL_SPECS = tuple(
+    _REQUESTER_DELEGATE if spec.name == "mmx_delegate" else spec
+    for spec in COO_PROJECT_HELP_TOOL_SPECS)
+
+
+def coo_project_help_requester_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_PROJECT_HELP_REQUESTER_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
 
 # This v4 catalogue is an explicit opt-in over the same authenticated owner.
 # The original catalogue descriptors above retain their exact digests.
@@ -194,6 +250,9 @@ def coo_current_context_tool_schema_digest():
 
 
 def catalogue_specs(catalogue):
+    if catalogue == project_help_wire.API_REQUESTER_CATALOGUE: return COO_PROJECT_HELP_REQUESTER_TOOL_SPECS
+    if catalogue == project_help_wire.CATALOGUE: return COO_PROJECT_HELP_TOOL_SPECS
+    if catalogue == requester_wire.CATALOGUE: return COO_REQUESTER_RETURN_TOOL_SPECS
     if catalogue == context_wire.LEGACY_CATALOGUE: return COO_TOOL_SPECS
     if catalogue == context_wire.CATALOGUE: return COO_CONTEXT_TOOL_SPECS
     if catalogue == context_wire.CURRENT_CATALOGUE: return COO_CURRENT_CONTEXT_TOOL_SPECS
@@ -202,6 +261,11 @@ def catalogue_specs(catalogue):
 
 
 def validate_coo_context_tool_arguments(name, arguments):
+    if name == project_help_wire.TOOL:
+        try:
+            return project_help_wire.arguments(arguments)
+        except (ValueError, TypeError, KeyError):
+            raise GatewayError("invalid_input", "invalid project-help selector") from None
     if name in discovery_wire.TOOLS:
         try:
             return discovery_wire.arguments(name, arguments)

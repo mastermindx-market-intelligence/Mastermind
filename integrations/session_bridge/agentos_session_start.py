@@ -53,7 +53,7 @@ def _directory(value) -> Path:
         raise LaunchInputError("SESSION_CONTEXT_PATH_UNAVAILABLE") from None
 
 
-def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER_ROOT,
+def _owner_session_start_context(event, *, workspace_root, workstream, owner_root=OWNER_ROOT,
                           budget=4000, reader=read_context, charter_root=None,
                           owner_session=None, owner=None) -> dict:
     """Expand one explicit context focus; workspace equality grants no authority."""
@@ -122,6 +122,50 @@ def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER
                             else "AGENTOS_CONTEXT_UNAVAILABLE")
 
 
+def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER_ROOT,
+                          budget=4000, reader=read_context, charter_root=None,
+                          owner_session=None, owner=None, plan_path=None, plan_sha256=None,
+                          plan_contract_sha256=None) -> dict:
+    """Compose an explicitly bound source-plan view with the incumbent hook.
+
+    No registration or runtime activation occurs here. The optional plan is
+    source evidence, never a replacement owner, a grant, or a continuation loop.
+    """
+    result = _owner_session_start_context(event, workspace_root=workspace_root,
+        workstream=workstream, owner_root=owner_root, budget=budget, reader=reader,
+        charter_root=charter_root, owner_session=owner_session, owner=owner)
+    if not result or (plan_path is None and plan_sha256 is None and plan_contract_sha256 is None):
+        return result
+    from integrations.session_bridge.project_task_context import load_context, PlanContextError
+    try:
+        context = load_context(workspace_root=workspace_root, relative_path=plan_path,
+                               expected_sha256=plan_sha256, workstream=workstream,
+                               expected_contract_sha256=plan_contract_sha256, context_detail="frontier")
+        # Keep every requirement and every task identity/dependency; load the
+        # complete off-focus acceptance details from the same pinned plan.
+        from integrations.session_bridge.long_horizon_guidance import compact_context
+        brief = compact_context(context)
+        addition = ("\nGitHub-owned plan projection. Source claims, not runtime permission or acceptance.\n"
+                    + json.dumps(brief, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+        original = result["hookSpecificOutput"]["additionalContext"]
+        if len((original + addition).encode("utf-8")) > MAX_CONTEXT_BYTES:
+            raise PlanContextError("PLAN_CONTEXT_DELIVERY_TOO_LARGE")
+        return _output(original + addition)
+    except (PlanContextError, TypeError, ValueError) as exc:
+        reason = str(exc)
+        reason = reason if SAFE_REASON.fullmatch(reason) else "PLAN_CONTEXT_UNAVAILABLE"
+        # A failed optional plan must not discard a healthy incumbent bundle.
+        notice = (f"Project plan context was not supplied ({reason}). Read {workstream} through the "
+            "existing Agent OS owner and the exact assigned GitHub plan separately. "
+            "Do not infer that the project is complete or that runtime custody transferred.")
+        original = result["hookSpecificOutput"]["additionalContext"]
+        combined = original + "\n" + notice
+        if len(combined.encode("utf-8")) <= MAX_CONTEXT_BYTES:
+            return _output(combined)
+        # Neither partial mission text nor silent truncation is a safe fallback.
+        return _output(notice + " The incumbent context must also be read separately because the delivery limit was reached.")
+
+
 def _unique(pairs):
     value = {}
     for key, item in pairs:
@@ -149,6 +193,9 @@ def main(argv=None, *, stdin=None, stdout=None, stderr=None, reader=read_context
     parser.add_argument("--charter-root", type=Path)
     parser.add_argument("--owner-session")
     parser.add_argument("--owner")
+    parser.add_argument("--plan-path")
+    parser.add_argument("--plan-sha256")
+    parser.add_argument("--plan-contract-sha256")
     stream = sys.stdin.buffer if stdin is None else stdin
     out = sys.stdout if stdout is None else stdout
     err = sys.stderr if stderr is None else stderr
@@ -162,7 +209,9 @@ def main(argv=None, *, stdin=None, stdout=None, stderr=None, reader=read_context
         result = session_start_context(event, workspace_root=args.workspace_root,
             workstream=args.workstream, owner_root=args.macro_root,
             budget=args.budget, reader=reader, charter_root=args.charter_root,
-            owner_session=args.owner_session, owner=args.owner)
+            owner_session=args.owner_session, owner=args.owner,
+            plan_path=args.plan_path, plan_sha256=args.plan_sha256,
+            plan_contract_sha256=args.plan_contract_sha256)
     except (LaunchInputError, OSError, ValueError, TypeError, RecursionError) as exc:
         reason = str(exc)
         err.write((reason if SAFE_REASON.fullmatch(reason)

@@ -768,7 +768,8 @@ def _consumer_extension(runner, home: Path) -> dict:
     from integrations.hermes_harness.native_executive_consumer import (
         CONSUMER_SLOT_ATTRIBUTE, CONSUMER_PLUGIN_NAME, ConsumerSlot,
         NativeConsumerCurrentness, schema_digest, selected_child_publication)
-    from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
+    from integrations.hermes_harness.native_tool_registration import (
+        NATIVE_TOOL_SCHEMA, NATIVE_REQUESTER_RETURN_TOOL_SCHEMA)
     descriptor = runner.session_runtime_descriptor
     if descriptor.get("state") != "ready" or runner._draining:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_NOT_READY")
@@ -791,8 +792,10 @@ def _consumer_extension(runner, home: Path) -> dict:
             raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     guard = binding.currentness_guard
     publication = selected_child_publication(slot.publication)
-    if publication is None:
+    if publication is None or binding.requester_returns != publication.requester_returns:
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
+    expected_schema = (NATIVE_REQUESTER_RETURN_TOOL_SCHEMA
+                       if publication.requester_returns else NATIVE_TOOL_SCHEMA)
     if (not isinstance(guard, NativeConsumerCurrentness) or guard() is not True
             or guard.session_id != binding.session_id
             or guard.instance_id != descriptor.get("instance_id")
@@ -809,7 +812,7 @@ def _consumer_extension(runner, home: Path) -> dict:
         return (entry is not None and entry.handler is registration.handler
                 and entry.check_fn is registration.check_fn
                 and entry.toolset == registration.toolset
-                and entry.schema == NATIVE_TOOL_SCHEMA)
+                and entry.schema == expected_schema)
     if not matches(registry.snapshot_registration(CONSUMER_EXTENSION_TOOL, scope=slot.scope)):
         raise RuntimeRefusal("NATIVE_CONSUMER_EXTENSION_UNAVAILABLE")
     if guard() is not True or registration.check_fn() is not True:
@@ -825,7 +828,7 @@ def _consumer_extension(runner, home: Path) -> dict:
     return {
         "tool": CONSUMER_EXTENSION_TOOL, "scope": slot.scope, "profile_id": str(home),
         "present": True, "toolset": registration.toolset,
-        "schema_sha256": schema_digest(NATIVE_TOOL_SCHEMA),
+        "schema_sha256": schema_digest(expected_schema),
         "implementation_sha": slot.owner,
         "instance_id": guard.instance_id, "authority_epoch": guard.authority_epoch,
         "enrollment_request_id": publication.session.request_id,

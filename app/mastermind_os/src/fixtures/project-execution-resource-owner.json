@@ -1,0 +1,1051 @@
+{
+  "mission": {
+    "acceptance": {
+      "artifact_revision": null,
+      "evidence": [],
+      "owner": null,
+      "reason_codes": [
+        "ACCEPTANCE_OWNER_NOT_PROJECTED"
+      ],
+      "ruling": null,
+      "state": "NOT_PROJECTED"
+    },
+    "budget": {},
+    "children": {
+      "coverage": "COMPLETE",
+      "items": [],
+      "overflow_count": 0,
+      "reason_codes": [],
+      "state": "EMPTY",
+      "total_count": 0,
+      "unjoined_job_count": 0,
+      "unjoined_job_ids": []
+    },
+    "conversation": {
+      "coverage": "NOT_PROJECTED",
+      "items": [],
+      "overflow_count": null,
+      "reason_codes": [
+        "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+      ],
+      "state": "UNAVAILABLE",
+      "total_count": null
+    },
+    "degraded": [
+      "active_builds: unavailable",
+      "boot_packet: unavailable",
+      "executive_inbox: unavailable"
+    ],
+    "execution": {
+      "artifacts": [],
+      "errors_present": false,
+      "evidence": [],
+      "next_actions": [],
+      "state": "NOT_STARTED",
+      "summary_present": false
+    },
+    "feature_gates": {
+      "actions": "READ_ONLY",
+      "advanced": "AVAILABLE",
+      "conversation": "UNAVAILABLE"
+    },
+    "generated_at": "2026-11-10T12:56:08Z",
+    "missingness": [
+      {
+        "missingness_class": "EXCLUDED",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "conversation"
+      },
+      {
+        "missingness_class": "EXCLUDED",
+        "producer_owner": "wake",
+        "reason": "source detail withheld",
+        "target_field": "return_path"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": null,
+        "reason": "source detail withheld",
+        "target_field": "acceptance"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": null,
+        "reason": "source detail withheld",
+        "target_field": "acceptance.state"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "children.worker_id"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "mission.title"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_runtime",
+        "reason": "source detail withheld",
+        "target_field": "runtime.jobs"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "slack",
+        "reason": "source detail withheld",
+        "target_field": "transport.continued"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "slack",
+        "reason": "source detail withheld",
+        "target_field": "transport.stopped"
+      },
+      {
+        "missingness_class": "NULL_BY_DESIGN",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "runtime.identity"
+      }
+    ],
+    "mission": {
+      "armed": {
+        "ceo_ingress_app_armed": null,
+        "ceo_submit_armed": null,
+        "coo_autonomy_armed": null,
+        "dialogue_bridge_armed": null,
+        "source": "absent",
+        "terminal_return_armed": null
+      },
+      "capability": {
+        "detail": "no executive runtime database is present at this root",
+        "installed": false,
+        "state": "NOT_INSTALLED",
+        "version": null
+      },
+      "depth": 0,
+      "evidence": [],
+      "orchestration_role": "aggregation",
+      "plan_step_id": null,
+      "root_job_ambiguous": false,
+      "root_job_candidates": [
+        "JOB-002"
+      ],
+      "root_job_id": "JOB-002",
+      "runtime_root_state": "RESOLVED",
+      "status": "QUEUED",
+      "submission_availability": "UNKNOWN",
+      "title": null
+    },
+    "posture": {
+      "evidence": [],
+      "rule": "H1",
+      "value": "NOT_STARTED"
+    },
+    "principal": {
+      "accountable_seat": "ceo",
+      "current_sol_target": null,
+      "current_worker": null,
+      "evidence": [],
+      "owed_turn": {
+        "reason": "no_owed_turn_signal",
+        "seat": "unknown",
+        "source_refs": []
+      }
+    },
+    "program": {
+      "attention_ids": [],
+      "disagreements": [],
+      "evidence": [],
+      "github_prs": [],
+      "next_action": "Clarify scope before execution admission.",
+      "state": "proposed",
+      "title": "Mastermind OS delivery",
+      "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+    },
+    "read_state": {
+      "reason_codes": [
+        "SOURCE_OR_VALIDITY_INCOMPLETE"
+      ],
+      "state": "PARTIAL",
+      "usable_sections": [
+        "program",
+        "mission",
+        "review",
+        "execution",
+        "principal",
+        "transport",
+        "children"
+      ]
+    },
+    "result_refs": {
+      "absent_job_ids": [],
+      "availability": "UNAVAILABLE",
+      "generation": {
+        "after": 2,
+        "before": 2,
+        "schema": "mastermind.runtime_read_observation.v1",
+        "source_identity": "8f90fede9df1b31e1a45673e182108e6",
+        "state": "SAME"
+      },
+      "omitted_job_ids": [],
+      "refs": [],
+      "root_job_id": "JOB-002",
+      "schema": "mastermind.fabric_result_reference_index.v1",
+      "snapshot_digest": "5cbb3006921b11de2634b50d3ed42a87aefe09b7e1584e6d023fedfc5bf0e793",
+      "truncated": false
+    },
+    "review": {
+      "evidence": [],
+      "required": false,
+      "reviews_job_id": null,
+      "verdict": "NOT_YET"
+    },
+    "schema": "mastermind.mission_workspace.v3",
+    "source": {
+      "control_room_generated_at": "2026-11-10T12:56:08Z",
+      "control_room_schema": "mastermind.chairman_control_room.v1",
+      "fabric_view_generated_at": "2026-11-10T12:56:09Z",
+      "fabric_view_schema": "mastermind.fabric_job_view.v2",
+      "owner_observation": {
+        "control_room": {
+          "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+          "document_digest": "768de124a85c82105d2dc2841fd2c0aba0d531b5beeb1626629bf5458a3603e2",
+          "instance_after": "cafb4a4ad7306f8a98f3f5f359d056d69839f59e5ca91d013572315f614e9949",
+          "instance_before": "cafb4a4ad7306f8a98f3f5f359d056d69839f59e5ca91d013572315f614e9949",
+          "publication_after": 1,
+          "publication_before": 1,
+          "source_validity_digest": "b3297e20db10744f35753eeed29b827a88501831fd9710d60b8bdd39c8907808"
+        },
+        "project_data": {
+          "cache_currentness_digest": "16a5f0e7b321a79a01ec0085667352337ccb590172e86e598a6aad1ba6bb751d",
+          "code_source": {
+            "commit": "06ec0b1b89cf297d6735f26df36209a064bf11fc",
+            "content_sha256": "acf3d970decb0b0c79b536bcc4e64cca93adace078321156fa72ff29c73f64a3",
+            "path": "scripts/agentos.py",
+            "repository": "mastermindx-market-intelligence/macro"
+          },
+          "creation_publication": {
+            "event_id": 10,
+            "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+            "receipt_sha256": "a74c131ed4905ac28402890819914be0832363387d9a135191d00ccebcf8e70f",
+            "recipe_fingerprint_sha256": "6ed51ba79115352d567f1157a3958b41dd07f5b1e9e9aa42bebd86cc4a68e4f3",
+            "recorded_at_ms": 1794315336000,
+            "request_sha256": "22d9635a0e8a8cda3e3f72bfd8ca9fc5af63d464e2137a42f134c45ef37492be",
+            "selection": {
+              "action": "publish_project_proposal",
+              "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "sources": [
+              {
+                "commit": "67ea1800dc85408ec6e0ce22c018949aa9a868dd",
+                "content_sha256": "4c91de7c9bec00519182ec79ca1e07ccf42a2b21d4e437af7d208e0e36db2541",
+                "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                "repository": "macro"
+              }
+            ]
+          },
+          "data_observation": {
+            "authority": "OBSERVATION_ONLY",
+            "canonical_commit_at": "2026-11-10T06:55:54-06:00",
+            "canonical_data_commit": "3c7ac03d9450db1df7e551fc4e185286185617ed",
+            "canonical_observed_at_ms": 1794315368129,
+            "code_config_relation": "IDENTICAL_READER_CLOSURE",
+            "default_ref": "main",
+            "executable_macro_commit": "06ec0b1b89cf297d6735f26df36209a064bf11fc",
+            "publication_recorded_at_ms": 1794315336000,
+            "publication_time": null,
+            "reader_closure_sha256": "e34b64c58074f70ded9eb9892b3e23426a2795b31a34bc9c602a0ab7aa078046",
+            "repository": "mastermindx-market-intelligence/macro",
+            "schema": "mastermind.canonical_project_data_observation.v1",
+            "source_operation": {
+              "event_id": 10,
+              "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+              "receipt_sha256": "a74c131ed4905ac28402890819914be0832363387d9a135191d00ccebcf8e70f",
+              "recipe_fingerprint_sha256": "6ed51ba79115352d567f1157a3958b41dd07f5b1e9e9aa42bebd86cc4a68e4f3",
+              "recorded_at_ms": 1794315336000,
+              "request_sha256": "22d9635a0e8a8cda3e3f72bfd8ca9fc5af63d464e2137a42f134c45ef37492be",
+              "selection": {
+                "action": "publish_project_proposal",
+                "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+              },
+              "sources": [
+                {
+                  "commit": "67ea1800dc85408ec6e0ce22c018949aa9a868dd",
+                  "content_sha256": "4c91de7c9bec00519182ec79ca1e07ccf42a2b21d4e437af7d208e0e36db2541",
+                  "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                  "repository": "macro"
+                }
+              ]
+            }
+          },
+          "document_digest": "71796c1e9150c74d515c9f055634ad809fa5abe8f9ffc230e74f2ea95a8da5e7",
+          "source": {
+            "commit": "3c7ac03d9450db1df7e551fc4e185286185617ed",
+            "content_sha256": "4c91de7c9bec00519182ec79ca1e07ccf42a2b21d4e437af7d208e0e36db2541",
+            "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+            "repository": "mastermindx-market-intelligence/macro"
+          },
+          "source_generation": "8cc1bd624e8ed3898425cf88798efcc0f23e78db3919ff360cd3e48f96a421b0",
+          "source_validity_digest": "dcb889bc598f6c458858634d298317806f256f34e3611f9dc7acd619cfb1c28f"
+        },
+        "resource": {
+          "current_adoption": {
+            "reason": "CURRENT_ADOPTION_NOT_READ",
+            "state": "NOT_OBSERVED"
+          },
+          "execution_authorized": false,
+          "history": {
+            "observation": {
+              "after": 2,
+              "before": 2,
+              "schema": "mastermind.runtime_read_observation.v1",
+              "snapshot_digest": "fe7f2e7a485203f3eb359cfb2320ccd736cbc00aee7b36e978f8648801b481b3",
+              "source_identity": "5b91d6e53e7d3249be2d0c11138da011",
+              "state": "SAME"
+            },
+            "roots": [
+              {
+                "creation_event_sha256": "653c91873e04339d283f1fc4f231d51bb16f65971647726f6956e344606a69d6",
+                "execution": null,
+                "kind": "DIRECT_NATIVE_CEO",
+                "purpose": "PLANNING",
+                "root_job_id": "JOB-001",
+                "status": "QUEUED"
+              },
+              {
+                "creation_event_sha256": "d812ff71afb3f0589c8f0ee4cfd0aaddfe764e52e13089b518b1b3a7a7b772c8",
+                "execution": {
+                  "command_id": "ceo-intent:auto-dd94b25e3a83aa5d3a5dff8d1fef71df",
+                  "context_sha256": "7d2a706429c4aa232aebbcc36c7e24bc15ea33b835121f05e22debffa60ef777",
+                  "continuation_mode": "DURABLE",
+                  "input_reference_sha256": "2d157cb38f7c4620fe1e656da1a48d9db9582c283c418067413191898fab85b7",
+                  "operation_key": "mmos-project-execute-ce37aad7f2d1ab5b56e2d5980edf88ae6586e8bf",
+                  "previous_root_job_id": null,
+                  "source_sha256": "1daa7731f27039e87fa6e5ae72751748b94eba1bc84c02bb21c25b5f73c489e1"
+                },
+                "kind": "STRICT_V2_CEO",
+                "purpose": "PROJECT_EXECUTION",
+                "root_job_id": "JOB-002",
+                "status": "QUEUED"
+              }
+            ],
+            "schema": "mastermind.project_root_history.v1",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "original_execution": {
+            "command_id": "ceo-intent:auto-dd94b25e3a83aa5d3a5dff8d1fef71df",
+            "context_sha256": "7d2a706429c4aa232aebbcc36c7e24bc15ea33b835121f05e22debffa60ef777",
+            "continuation_mode": "DURABLE",
+            "input_reference_sha256": "2d157cb38f7c4620fe1e656da1a48d9db9582c283c418067413191898fab85b7",
+            "operation_key": "mmos-project-execute-ce37aad7f2d1ab5b56e2d5980edf88ae6586e8bf",
+            "previous_root_job_id": null,
+            "source_sha256": "1daa7731f27039e87fa6e5ae72751748b94eba1bc84c02bb21c25b5f73c489e1"
+          },
+          "original_input": {
+            "reason": "RETAINED_INPUT_AUTHORITY_NOT_COMPOSED",
+            "state": "UNAVAILABLE"
+          },
+          "schema": "mastermind.project_execution_resource.v1",
+          "scope": "ORIGINAL_PROJECT_EXECUTION_RESOURCE",
+          "selection": {
+            "root_job_id": "JOB-002",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          }
+        },
+        "runtime": {
+          "after": 2,
+          "before": 2,
+          "schema": "mastermind.runtime_read_observation.v1",
+          "snapshot_digest": "5cbb3006921b11de2634b50d3ed42a87aefe09b7e1584e6d023fedfc5bf0e793",
+          "source_identity": "8f90fede9df1b31e1a45673e182108e6",
+          "state": "SAME"
+        },
+        "schema": "mastermind.workspace_source_observation.v3",
+        "selection": {
+          "root_job_id": "JOB-002",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "state": "SAME"
+      },
+      "source_coverage": [
+        "control_room",
+        "fabric_view"
+      ],
+      "source_generation": {
+        "generation": null,
+        "state": "UNKNOWN",
+        "version": null
+      }
+    },
+    "transport": {
+      "actionable": false,
+      "carrier": null,
+      "dispatch_state": "UNKNOWN",
+      "evidence": [],
+      "historical": true,
+      "reason": "dispatch_evidence_not_supplied",
+      "w3c": null,
+      "watch_proven": false
+    }
+  },
+  "programs": {
+    "availability": "AVAILABLE",
+    "canonical_projects": [
+      {
+        "cache_currentness": {
+          "source_generation": "a31593c43184f28927d7d693f2be4e5684bdbaaa72a9355b71cf116f673b274b",
+          "state": "fresh"
+        },
+        "control_room": {
+          "attention": {
+            "ceo": [],
+            "chairman": [],
+            "coo": []
+          },
+          "autonomy": {
+            "chairman_decisions": [],
+            "counts": {
+              "actionable": 0,
+              "blocked": 0,
+              "declared_blocked": 0,
+              "empty": false,
+              "stale": 0,
+              "total": 1
+            },
+            "generated_at": "2026-11-10T12:56:06Z",
+            "issues": [
+              {
+                "code": "runtime_root_missing",
+                "message": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412 has no exact root_job_id join",
+                "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                "sources": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-10T12:56:06Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ]
+              }
+            ],
+            "owed_by_seat": {
+              "ceo": 0,
+              "chairman": 0,
+              "coo": 0,
+              "unknown": 1,
+              "worker": 0
+            },
+            "responsibilities": [
+              {
+                "accountable_seat": "ceo",
+                "actionability_reason": "no_owed_turn_signal",
+                "blocker": null,
+                "chairman_decision_reason": null,
+                "chairman_decision_required": false,
+                "current_sol_target": null,
+                "current_worker": null,
+                "declared_blocker": null,
+                "disagreements": [],
+                "dispatch": {
+                  "actionable": false,
+                  "carrier": null,
+                  "dispatch_state": "UNKNOWN",
+                  "evidence": null,
+                  "historical": true,
+                  "reason": "dispatch_evidence_not_supplied",
+                  "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                  "root_job_id": null,
+                  "w3c": null,
+                  "watch_proven": false
+                },
+                "freshness": "current",
+                "is_actionable": false,
+                "owed_turn": {
+                  "reason": "no_owed_turn_signal",
+                  "seat": "unknown",
+                  "source_refs": []
+                },
+                "placement_state": {
+                  "observable": false,
+                  "reason": "no_canonical_producer",
+                  "value": "not_observable"
+                },
+                "query_status": "ok",
+                "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                "root_job_ambiguous": true,
+                "root_job_candidates": [
+                  "JOB-001",
+                  "JOB-002"
+                ],
+                "root_job_id": null,
+                "runtime_root_state": "CONFLICT",
+                "source_receipts": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-10T12:56:06Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ],
+                "state": "proposed",
+                "title": "Mastermind OS delivery",
+                "validity": {
+                  "card": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "9200258843a3a8c692ce3b43cb5a653917b05e9334d95257d18585deba5cf87c",
+                    "qualified_at": "2026-11-10T12:56:06Z",
+                    "reason": "source_budget",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-10T12:56:06Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": 172800000
+                  },
+                  "decision_current": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "f44045d3ad6f3be054c38577c6b2e90c375b751541c65696eded65cb34d40f0c",
+                    "qualified_at": "2026-11-10T12:56:06Z",
+                    "reason": "source_budget",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-10T12:56:06Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": 172800000
+                  },
+                  "dispatch": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "ad755f728716b14c87e2ea91bd49fcf15fbe9e68f5298ce0d18e4b15a5cc9863",
+                    "qualified_at": "2026-11-10T12:56:06Z",
+                    "reason": "unqualified_source_context",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [],
+                    "valid_for_ms": null
+                  },
+                  "owed_open_age": {
+                    "binding_fingerprint": null,
+                    "binding_id": null,
+                    "owed_seat": "unknown",
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "e12247562050492d3384c48f41c652a9813a09c7ff132a3b16ebe693f90c61ca",
+                    "qualified_at": "2026-11-10T12:56:06Z",
+                    "reason": "unqualified_source_context",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-10T12:56:06Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": null
+                  }
+                },
+                "wake_outcome": "not_observable"
+              }
+            ],
+            "schema": "mastermind.autonomy_control_room.v1",
+            "source_failures": [],
+            "unmapped_responsibilities": []
+          },
+          "binding_conflicts": [],
+          "degraded": [
+            "active_builds: unavailable",
+            "boot_packet: unavailable",
+            "executive_inbox: unavailable"
+          ],
+          "generated_at": "2026-11-10T12:56:06Z",
+          "placement_selection": null,
+          "runtime_capability_status": null,
+          "schema": "mastermind.chairman_control_room.v1",
+          "sources": {
+            "active_builds_collected_at": null,
+            "active_builds_schema": null,
+            "agent_os_brief_schema": null,
+            "agent_os_state_generated_at": "2026-11-10T12:56:06Z",
+            "agent_os_state_schema": "agent_os_state.v1",
+            "bindings_path_present": false,
+            "executive_inbox_schema": null,
+            "macro_root": null,
+            "macro_sha": null,
+            "mastermind_branch": null,
+            "mastermind_sha": null,
+            "runtime_db_present": null
+          },
+          "unbound_surfaces": [],
+          "unjoined_open_prs": [],
+          "work": [
+            {
+              "agent_os": {
+                "depends_on": [],
+                "next_action": "Clarify scope before execution admission.",
+                "program": "executive-os",
+                "reason": null,
+                "reason_code": null,
+                "source": null,
+                "state": null,
+                "status": "proposed",
+                "title": "Mastermind OS delivery",
+                "unmet_dependencies": [],
+                "workstream": "PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+              },
+              "attention_ids": [],
+              "bindings": [],
+              "disagreements": [],
+              "executive": {
+                "jobs": [
+                  {
+                    "job_id": "JOB-001",
+                    "status": "QUEUED",
+                    "workstream": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  },
+                  {
+                    "job_id": "JOB-002",
+                    "status": "QUEUED",
+                    "workstream": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ],
+                "joined_by": "ceo_intent_provenance"
+              },
+              "github": {
+                "prs": []
+              },
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            }
+          ]
+        },
+        "root_history": {
+          "observation": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "snapshot_digest": "fe7f2e7a485203f3eb359cfb2320ccd736cbc00aee7b36e978f8648801b481b3",
+            "source_identity": "298b382095cf5203ded79bc83a7b8ab3",
+            "state": "SAME"
+          },
+          "roots": [
+            {
+              "creation_event_sha256": "653c91873e04339d283f1fc4f231d51bb16f65971647726f6956e344606a69d6",
+              "execution": null,
+              "kind": "DIRECT_NATIVE_CEO",
+              "purpose": "PLANNING",
+              "root_job_id": "JOB-001",
+              "status": "QUEUED"
+            },
+            {
+              "creation_event_sha256": "d812ff71afb3f0589c8f0ee4cfd0aaddfe764e52e13089b518b1b3a7a7b772c8",
+              "execution": {
+                "command_id": "ceo-intent:auto-dd94b25e3a83aa5d3a5dff8d1fef71df",
+                "context_sha256": "7d2a706429c4aa232aebbcc36c7e24bc15ea33b835121f05e22debffa60ef777",
+                "continuation_mode": "DURABLE",
+                "input_reference_sha256": "2d157cb38f7c4620fe1e656da1a48d9db9582c283c418067413191898fab85b7",
+                "operation_key": "mmos-project-execute-ce37aad7f2d1ab5b56e2d5980edf88ae6586e8bf",
+                "previous_root_job_id": null,
+                "source_sha256": "1daa7731f27039e87fa6e5ae72751748b94eba1bc84c02bb21c25b5f73c489e1"
+              },
+              "kind": "STRICT_V2_CEO",
+              "purpose": "PROJECT_EXECUTION",
+              "root_job_id": "JOB-002",
+              "status": "QUEUED"
+            }
+          ],
+          "schema": "mastermind.project_root_history.v1",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+            "document_digest": "768de124a85c82105d2dc2841fd2c0aba0d531b5beeb1626629bf5458a3603e2",
+            "instance_after": "cafb4a4ad7306f8a98f3f5f359d056d69839f59e5ca91d013572315f614e9949",
+            "instance_before": "cafb4a4ad7306f8a98f3f5f359d056d69839f59e5ca91d013572315f614e9949",
+            "publication_after": 1,
+            "publication_before": 1,
+            "source_validity_digest": "4b3e6ae34b0e5c5e8fbe3a4a9a1fcb4b98535cf7ebae411680d4824f7f4c6fc0"
+          },
+          "project_data": {
+            "cache_currentness_digest": "6098dd31d4888474d647a951416b6e8ea12b684c8eadd7ed672cc2958ee795b0",
+            "code_source": {
+              "commit": "06ec0b1b89cf297d6735f26df36209a064bf11fc",
+              "content_sha256": "acf3d970decb0b0c79b536bcc4e64cca93adace078321156fa72ff29c73f64a3",
+              "path": "scripts/agentos.py",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "creation_publication": {
+              "event_id": 10,
+              "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+              "receipt_sha256": "a74c131ed4905ac28402890819914be0832363387d9a135191d00ccebcf8e70f",
+              "recipe_fingerprint_sha256": "6ed51ba79115352d567f1157a3958b41dd07f5b1e9e9aa42bebd86cc4a68e4f3",
+              "recorded_at_ms": 1794315336000,
+              "request_sha256": "22d9635a0e8a8cda3e3f72bfd8ca9fc5af63d464e2137a42f134c45ef37492be",
+              "selection": {
+                "action": "publish_project_proposal",
+                "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+              },
+              "sources": [
+                {
+                  "commit": "67ea1800dc85408ec6e0ce22c018949aa9a868dd",
+                  "content_sha256": "4c91de7c9bec00519182ec79ca1e07ccf42a2b21d4e437af7d208e0e36db2541",
+                  "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                  "repository": "macro"
+                }
+              ]
+            },
+            "data_observation": {
+              "authority": "OBSERVATION_ONLY",
+              "canonical_commit_at": "2026-11-10T06:55:54-06:00",
+              "canonical_data_commit": "3c7ac03d9450db1df7e551fc4e185286185617ed",
+              "canonical_observed_at_ms": 1794315366139,
+              "code_config_relation": "IDENTICAL_READER_CLOSURE",
+              "default_ref": "main",
+              "executable_macro_commit": "06ec0b1b89cf297d6735f26df36209a064bf11fc",
+              "publication_recorded_at_ms": 1794315336000,
+              "publication_time": null,
+              "reader_closure_sha256": "e34b64c58074f70ded9eb9892b3e23426a2795b31a34bc9c602a0ab7aa078046",
+              "repository": "mastermindx-market-intelligence/macro",
+              "schema": "mastermind.canonical_project_data_observation.v1",
+              "source_operation": {
+                "event_id": 10,
+                "principal_scope": "2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9",
+                "receipt_sha256": "a74c131ed4905ac28402890819914be0832363387d9a135191d00ccebcf8e70f",
+                "recipe_fingerprint_sha256": "6ed51ba79115352d567f1157a3958b41dd07f5b1e9e9aa42bebd86cc4a68e4f3",
+                "recorded_at_ms": 1794315336000,
+                "request_sha256": "22d9635a0e8a8cda3e3f72bfd8ca9fc5af63d464e2137a42f134c45ef37492be",
+                "selection": {
+                  "action": "publish_project_proposal",
+                  "request_id": "mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                  "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                },
+                "sources": [
+                  {
+                    "commit": "67ea1800dc85408ec6e0ce22c018949aa9a868dd",
+                    "content_sha256": "4c91de7c9bec00519182ec79ca1e07ccf42a2b21d4e437af7d208e0e36db2541",
+                    "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                    "repository": "macro"
+                  }
+                ]
+              }
+            },
+            "document_digest": "89a8bc7e0752a34fed8eef13b3e451eea06c8142c532f0bc8fc0aebc70ee70a3",
+            "source": {
+              "commit": "3c7ac03d9450db1df7e551fc4e185286185617ed",
+              "content_sha256": "4c91de7c9bec00519182ec79ca1e07ccf42a2b21d4e437af7d208e0e36db2541",
+              "path": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+              "repository": "mastermindx-market-intelligence/macro"
+            },
+            "source_generation": "a31593c43184f28927d7d693f2be4e5684bdbaaa72a9355b71cf116f673b274b",
+            "source_validity_digest": "020343b57eb9388d5b142e75912f0987b2a2af417cc4788557d13d55f3fabeee"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "snapshot_digest": "18ce94041aded03fb0de5374e2582203d191ab9aebcc2d965c316a0e04315154",
+            "source_identity": "3d0cc1fa0844cb387d266c487a5a8146",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_source_observation.v2",
+          "selection": null,
+          "state": "SAME"
+        },
+        "source_validity": {
+          "cards": [
+            {
+              "components": {
+                "card": {
+                  "proof_ref": "9200258843a3a8c692ce3b43cb5a653917b05e9334d95257d18585deba5cf87c",
+                  "qualified_at": "2026-11-10T12:56:06Z",
+                  "remaining_ms": 13536,
+                  "state": "current"
+                },
+                "decision_current": {
+                  "proof_ref": "f44045d3ad6f3be054c38577c6b2e90c375b751541c65696eded65cb34d40f0c",
+                  "qualified_at": "2026-11-10T12:56:06Z",
+                  "remaining_ms": 13536,
+                  "state": "current"
+                },
+                "dispatch": {
+                  "proof_ref": "ad755f728716b14c87e2ea91bd49fcf15fbe9e68f5298ce0d18e4b15a5cc9863",
+                  "qualified_at": "2026-11-10T12:56:06Z",
+                  "remaining_ms": null,
+                  "state": "unqualified"
+                },
+                "owed_open_age": {
+                  "proof_ref": "e12247562050492d3384c48f41c652a9813a09c7ff132a3b16ebe693f90c61ca",
+                  "qualified_at": "2026-11-10T12:56:06Z",
+                  "remaining_ms": null,
+                  "state": "unqualified"
+                }
+              },
+              "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+              "root_job_id": null
+            }
+          ],
+          "profile": "workspace_project_data_read.v1",
+          "schema": "mastermind.project_data_source_validity.v1",
+          "source_generation": "a31593c43184f28927d7d693f2be4e5684bdbaaa72a9355b71cf116f673b274b"
+        },
+        "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+      }
+    ],
+    "control_room": {
+      "attention": {
+        "ceo": [],
+        "chairman": [],
+        "coo": []
+      },
+      "autonomy": {
+        "chairman_decisions": [],
+        "counts": {
+          "actionable": 0,
+          "blocked": 0,
+          "declared_blocked": 0,
+          "empty": false,
+          "stale": 0,
+          "total": 1
+        },
+        "generated_at": "2026-11-10T12:55:54.671820Z",
+        "issues": [
+          {
+            "code": "runtime_root_missing",
+            "message": "WS:PROJECT-338B85D54B7FE5749460E366C77E6837 has no exact root_job_id join",
+            "responsibility_ref": "WS:PROJECT-338B85D54B7FE5749460E366C77E6837",
+            "sources": [
+              {
+                "freshness": "current",
+                "observed_at": "2026-11-10T12:55:54Z",
+                "owner": "agent_os",
+                "ref": "agent_os_state.workstreams:PROJECT-338B85D54B7FE5749460E366C77E6837"
+              }
+            ]
+          }
+        ],
+        "owed_by_seat": {
+          "ceo": 0,
+          "chairman": 0,
+          "coo": 0,
+          "unknown": 1,
+          "worker": 0
+        },
+        "responsibilities": [
+          {
+            "accountable_seat": "ceo",
+            "actionability_reason": "no_owed_turn_signal",
+            "blocker": null,
+            "chairman_decision_reason": null,
+            "chairman_decision_required": false,
+            "current_sol_target": null,
+            "current_worker": null,
+            "declared_blocker": null,
+            "disagreements": [],
+            "dispatch": {
+              "actionable": false,
+              "carrier": null,
+              "dispatch_state": "UNKNOWN",
+              "evidence": null,
+              "historical": true,
+              "reason": "dispatch_evidence_not_supplied",
+              "responsibility_ref": "WS:PROJECT-338B85D54B7FE5749460E366C77E6837",
+              "root_job_id": null,
+              "w3c": null,
+              "watch_proven": false
+            },
+            "freshness": "current",
+            "is_actionable": false,
+            "owed_turn": {
+              "reason": "no_owed_turn_signal",
+              "seat": "unknown",
+              "source_refs": []
+            },
+            "placement_state": {
+              "observable": false,
+              "reason": "no_canonical_producer",
+              "value": "not_observable"
+            },
+            "query_status": "ok",
+            "responsibility_ref": "WS:PROJECT-338B85D54B7FE5749460E366C77E6837",
+            "root_job_ambiguous": false,
+            "root_job_candidates": [],
+            "root_job_id": null,
+            "runtime_root_state": "UNKNOWN",
+            "source_receipts": [
+              {
+                "freshness": "current",
+                "observed_at": "2026-11-10T12:55:54Z",
+                "owner": "agent_os",
+                "ref": "agent_os_state.workstreams:PROJECT-338B85D54B7FE5749460E366C77E6837"
+              }
+            ],
+            "state": "proposed",
+            "title": "Mastermind OS delivery",
+            "validity": {
+              "card": {
+                "policy": "mapper-inclusive-48h-future-1h.v1",
+                "proof_ref": "491b2ce0f78d8941187bc6e7f432a572c92a20643cb83959a2a6c0581905ea06",
+                "qualified_at": "2026-11-10T12:55:54.671820Z",
+                "reason": "source_budget",
+                "schema": "mastermind.autonomy_validity.v1",
+                "sources": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-10T12:55:54Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-338B85D54B7FE5749460E366C77E6837"
+                  }
+                ],
+                "valid_for_ms": 172799328
+              },
+              "decision_current": {
+                "policy": "mapper-inclusive-48h-future-1h.v1",
+                "proof_ref": "901fa6cddb9643b6a2f7f7fa123be15ab33bec0b396522458c95870099024d3c",
+                "qualified_at": "2026-11-10T12:55:54.671820Z",
+                "reason": "source_budget",
+                "schema": "mastermind.autonomy_validity.v1",
+                "sources": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-10T12:55:54Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-338B85D54B7FE5749460E366C77E6837"
+                  }
+                ],
+                "valid_for_ms": 172799328
+              },
+              "dispatch": {
+                "policy": "mapper-inclusive-48h-future-1h.v1",
+                "proof_ref": "b79cd56fef168ae57a1d1e0cb0c511c2c8f7456aec0dbc28cec309e803cc17fd",
+                "qualified_at": "2026-11-10T12:55:54.671820Z",
+                "reason": "unqualified_source_context",
+                "schema": "mastermind.autonomy_validity.v1",
+                "sources": [],
+                "valid_for_ms": null
+              },
+              "owed_open_age": {
+                "binding_fingerprint": null,
+                "binding_id": null,
+                "owed_seat": "unknown",
+                "policy": "mapper-inclusive-48h-future-1h.v1",
+                "proof_ref": "7bdb58aba1b81ea81449c3c1b1bb2dce3081e93fd62857a465a967d541dcaef7",
+                "qualified_at": "2026-11-10T12:55:54.671820Z",
+                "reason": "unqualified_source_context",
+                "schema": "mastermind.autonomy_validity.v1",
+                "sources": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-10T12:55:54Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-338B85D54B7FE5749460E366C77E6837"
+                  }
+                ],
+                "valid_for_ms": null
+              }
+            },
+            "wake_outcome": "not_observable"
+          }
+        ],
+        "schema": "mastermind.autonomy_control_room.v1",
+        "source_failures": [],
+        "unmapped_responsibilities": []
+      },
+      "binding_conflicts": [],
+      "degraded": [
+        "active_builds: unavailable",
+        "boot_packet: no agentos/handoffs/ directory at /tmp/pytest-of-agent/pytest-260/test_actual_history_preserves_0/configured-code/agentos/handoffs",
+        "executive_inbox: unavailable",
+        "executive_runtime: unavailable; fixture projection is BUILT_NOT_PROVEN, not live"
+      ],
+      "generated_at": "2026-11-10T12:55:54.671820Z",
+      "placement_selection": null,
+      "runtime_capability_status": null,
+      "schema": "mastermind.chairman_control_room.v1",
+      "sources": {
+        "active_builds_collected_at": null,
+        "active_builds_schema": null,
+        "agent_os_brief_schema": "ceo_brief.v1",
+        "agent_os_state_generated_at": "2026-11-10T12:55:54Z",
+        "agent_os_state_schema": "agent_os_state.v1",
+        "bindings_path_present": false,
+        "executive_inbox_schema": null,
+        "macro_root": "/tmp/pytest-of-agent/pytest-260/test_actual_history_preserves_0/configured-code",
+        "macro_sha": "06ec0b1b89cf297d6735f26df36209a064bf11fc",
+        "mastermind_branch": "source-qualified-fixture",
+        "mastermind_sha": "5da73136bdc4dd92fc7358eae25d82b00713aae1",
+        "runtime_db_present": null
+      },
+      "unbound_surfaces": [],
+      "unjoined_open_prs": [],
+      "work": [
+        {
+          "agent_os": {
+            "depends_on": [],
+            "next_action": "Clarify scope before execution admission.",
+            "program": "executive-os",
+            "reason": "All declared dependencies are done.",
+            "reason_code": "dependencies_satisfied",
+            "source": "agentos/workstreams/WS-PROJECT-338B85D54B7FE5749460E366C77E6837.md",
+            "state": "ready",
+            "status": "proposed",
+            "title": "Mastermind OS delivery",
+            "unmet_dependencies": [],
+            "workstream": "PROJECT-338B85D54B7FE5749460E366C77E6837"
+          },
+          "attention_ids": [],
+          "bindings": [],
+          "disagreements": [],
+          "executive": {
+            "jobs": [],
+            "joined_by": null
+          },
+          "github": {
+            "prs": []
+          },
+          "work_ref": "WS:PROJECT-338B85D54B7FE5749460E366C77E6837"
+        }
+      ]
+    },
+    "coverage": {
+      "high_water": 10,
+      "limit": 8,
+      "returned": 1,
+      "state": "PARTIAL"
+    },
+    "reason_codes": [],
+    "schema": "mastermind.workspace_programs.v3",
+    "source_observation": {
+      "control_room": {
+        "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+        "document_digest": "768de124a85c82105d2dc2841fd2c0aba0d531b5beeb1626629bf5458a3603e2",
+        "instance_after": "cafb4a4ad7306f8a98f3f5f359d056d69839f59e5ca91d013572315f614e9949",
+        "instance_before": "cafb4a4ad7306f8a98f3f5f359d056d69839f59e5ca91d013572315f614e9949",
+        "publication_after": 1,
+        "publication_before": 1,
+        "source_validity_digest": "4b3e6ae34b0e5c5e8fbe3a4a9a1fcb4b98535cf7ebae411680d4824f7f4c6fc0"
+      },
+      "runtime": null,
+      "schema": "mastermind.workspace_source_observation.v1",
+      "selection": null,
+      "state": "SAME"
+    }
+  },
+  "selection": {
+    "root_job_id": "JOB-002",
+    "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+  }
+}

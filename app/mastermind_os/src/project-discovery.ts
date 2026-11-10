@@ -11,6 +11,49 @@ export interface ProjectDataOwnerObservation {
 export interface CanonicalProgramProject {
   work_ref:string; control_room:JsonRecord; source_validity:JsonRecord;
   cache_currentness:JsonRecord; source_observation:ProjectDataOwnerObservation;
+  root_history?: ProjectRootHistory;
+}
+export interface ProjectExecutionIdentity {
+  readonly operation_key: string;
+  readonly command_id: string;
+  readonly continuation_mode: 'DURABLE' | 'ATTENDED';
+  readonly source_sha256: string;
+  readonly context_sha256: string;
+  readonly input_reference_sha256: string;
+  readonly previous_root_job_id: string | null;
+}
+export interface ProjectRootRecord {
+  readonly root_job_id: string;
+  readonly kind: 'DIRECT_NATIVE_CEO' | 'STRICT_V2_CEO' | 'LEGACY_CEO';
+  readonly purpose: 'PLANNING' | 'ORCHESTRATION' | 'PROJECT_EXECUTION';
+  readonly status: 'QUEUED' | 'RUNNING' | 'CHECKPOINTED' | 'RATE_LIMITED' | 'FAILED' |
+    'LOST' | 'CANCEL_REQUESTED' | 'COMPLETED' | 'CANCELLED';
+  readonly creation_event_sha256: string;
+  readonly execution: ProjectExecutionIdentity | null;
+}
+export interface ProjectRootHistory {
+  readonly schema: 'mastermind.project_root_history.v1';
+  readonly work_ref: string;
+  readonly roots: readonly ProjectRootRecord[];
+  readonly observation: Readonly<{
+    schema: 'mastermind.runtime_read_observation.v1'; state: 'SAME';
+    source_identity: string; before: number; after: number; snapshot_digest: string;
+  }>;
+}
+export interface ProjectExecutionResource {
+  readonly schema: 'mastermind.project_execution_resource.v1';
+  readonly scope: 'ORIGINAL_PROJECT_EXECUTION_RESOURCE';
+  readonly selection: Readonly<{ work_ref: string; root_job_id: string }>;
+  readonly history: ProjectRootHistory;
+  readonly original_execution: ProjectExecutionIdentity;
+  readonly original_input: Readonly<{ state: 'UNAVAILABLE'; reason: 'RETAINED_INPUT_AUTHORITY_NOT_COMPOSED' }>;
+  readonly current_adoption: Readonly<{ state: 'NOT_OBSERVED'; reason: 'CURRENT_ADOPTION_NOT_READ' }>;
+  readonly execution_authorized: false;
+}
+export interface ProjectExecutionOwnerObservation extends Omit<ProjectDataOwnerObservation, 'schema' | 'selection'> {
+  schema: 'mastermind.workspace_source_observation.v3';
+  selection: { work_ref: string; root_job_id: string };
+  resource: ProjectExecutionResource;
 }
 function fail():never { throw new Error('PROJECT_DATA_INVALID'); }
 const rec = (x:unknown):x is JsonRecord => !!x && typeof x==='object' && !Array.isArray(x);
@@ -85,11 +128,12 @@ function runtime(value:unknown):JsonRecord {
     ||!text(value.source_identity)||!integer(value.before)||value.before!==value.after||!hash(value.snapshot_digest))fail();
   return value;
 }
-function decodeOwner(value:any,selection:Selection):ProjectDataOwnerObservation {
-  if(!exact(value,['schema','state','selection','control_room','runtime','project_data'])
-    ||value.schema!=='mastermind.workspace_source_observation.v2'||value.state!=='SAME'
+function decodeOwner(value:any,selection:Selection, resourceScope=false):ProjectDataOwnerObservation | ProjectExecutionOwnerObservation {
+  if(!exact(value,['schema','state','selection','control_room','runtime','project_data',...(resourceScope?['resource']:[])])
+    ||value.schema!==(resourceScope?'mastermind.workspace_source_observation.v3':'mastermind.workspace_source_observation.v2')||value.state!=='SAME'
     ||!same(value.selection,selection))fail();
   if(selection!==null&&(!exact(value.selection,['work_ref','root_job_id'])||!work(selection.work_ref)||!root(selection.root_job_id)))fail();
+  if(resourceScope){if(selection===null)fail();decodeResource(value.resource,selection);}
   control(value.control_room);runtime(value.runtime);
   const p=value.project_data;if(!exact(p,BASIS)||!hash(p.source_generation)
     ||!hash(p.document_digest)||!hash(p.source_validity_digest)||!hash(p.cache_currentness_digest))fail();
@@ -108,10 +152,79 @@ function decodeOwner(value:any,selection:Selection):ProjectDataOwnerObservation 
     ||!integer(creation.event_id,1)||!integer(creation.recorded_at_ms,1)||!Array.isArray(creation.sources)||creation.sources.length!==1)fail();
   const original=reference(creation.sources[0],'macro');if(original.path!==source.path)fail();
   if(witness.source_operation&&(witness.source_operation.principal_scope!==creation.principal_scope||witness.source_operation.selection.work_ref!==ref))fail();
-  return value as ProjectDataOwnerObservation;
+  return value as ProjectDataOwnerObservation | ProjectExecutionOwnerObservation;
 }
 export function decodeProjectDataOwnerObservation(raw:unknown,selection:Selection):ProjectDataOwnerObservation|null {
-  try{return decodeOwner(detached(raw),selection);}catch{return null;}
+  try{return decodeOwner(detached(raw),selection) as ProjectDataOwnerObservation;}catch{return null;}
+}
+/** Explicit resource scope only; the ordinary Mission decoder never calls this. */
+export function decodeProjectExecutionOwnerObservation(raw:unknown,selection:Exclude<Selection,null>):ProjectExecutionOwnerObservation|null {
+  try{return decodeOwner(detached(raw),selection,true) as ProjectExecutionOwnerObservation;}catch{return null;}
+}
+
+const ROOT_FIELDS=['root_job_id','kind','purpose','status','creation_event_sha256','execution'];
+const EXECUTION_FIELDS=['operation_key','command_id','continuation_mode','source_sha256','context_sha256','input_reference_sha256','previous_root_job_id'];
+const ROOT_STATUSES=['QUEUED','RUNNING','CHECKPOINTED','RATE_LIMITED','FAILED','LOST','CANCEL_REQUESTED','COMPLETED','CANCELLED'];
+const resourceRoot=(value:unknown):value is string=>typeof value==='string'&&/^JOB-[0-9]{1,9}$/.test(value)&&value.length<=16;
+const resourceWork=(value:unknown):value is string=>typeof value==='string'&&/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(value);
+function decodeHistory(value:any,workRef:string):ProjectRootHistory {
+  if(!resourceWork(workRef)||!exact(value,['schema','work_ref','roots','observation'])
+    ||value.schema!=='mastermind.project_root_history.v1'||value.work_ref!==workRef
+    ||!Array.isArray(value.roots)||value.roots.length>50)fail();
+  const ids:string[]=[];
+  for(const row of value.roots){
+    if(!exact(row,ROOT_FIELDS)||!resourceRoot(row.root_job_id)||!ROOT_STATUSES.includes(row.status)
+      ||!hash(row.creation_event_sha256))fail();
+    ids.push(row.root_job_id);
+    const execution=row.execution;
+    if(execution===null){
+      if(!((row.kind==='DIRECT_NATIVE_CEO'&&row.purpose==='PLANNING')
+        ||(['STRICT_V2_CEO','LEGACY_CEO'].includes(row.kind)&&row.purpose==='ORCHESTRATION')))fail();
+      continue;
+    }
+    if(row.kind!=='STRICT_V2_CEO'||row.purpose!=='PROJECT_EXECUTION'||!exact(execution,EXECUTION_FIELDS)
+      ||typeof execution.operation_key!=='string'||!/^mmos-project-execute-[a-f0-9]{40}$/.test(execution.operation_key)
+      ||typeof execution.command_id!=='string'||!/^ceo-intent:[A-Za-z0-9][A-Za-z0-9._-]{2,63}$/.test(execution.command_id)
+      ||!['DURABLE','ATTENDED'].includes(execution.continuation_mode)
+      ||!['source_sha256','context_sha256','input_reference_sha256'].every(key=>hash(execution[key]))
+      ||!(execution.previous_root_job_id===null||(resourceRoot(execution.previous_root_job_id)&&execution.previous_root_job_id!==row.root_job_id)))fail();
+  }
+  if(!same(ids,[...new Set(ids)].sort()))fail();
+  runtime(value.observation);
+  if(value.observation.snapshot_digest!==digest({work_ref:workRef,roots:value.roots}))fail();
+  return value as ProjectRootHistory;
+}
+export function decodeProjectRootHistory(raw:unknown,workRef:string):ProjectRootHistory|null {
+  try{return decodeHistory(detached(raw),workRef);}catch{return null;}
+}
+function decodeResource(value:any,selection:Exclude<Selection,null>):ProjectExecutionResource {
+  if(!resourceRoot(selection.root_job_id)||!exact(value,['schema','scope','selection','history','original_execution','original_input','current_adoption','execution_authorized'])
+    ||value.schema!=='mastermind.project_execution_resource.v1'||value.scope!=='ORIGINAL_PROJECT_EXECUTION_RESOURCE'
+    ||!exact(value.selection,['work_ref','root_job_id'])||!same(value.selection,selection)||value.execution_authorized!==false)fail();
+  const history=decodeHistory(value.history,selection.work_ref);
+  const rows=history.roots.filter(row=>row.root_job_id===selection.root_job_id);
+  if(rows.length!==1||rows[0].execution===null||!same(value.original_execution,rows[0].execution)
+    ||!same(value.original_input,{state:'UNAVAILABLE',reason:'RETAINED_INPUT_AUTHORITY_NOT_COMPOSED'})
+    ||!same(value.current_adoption,{state:'NOT_OBSERVED',reason:'CURRENT_ADOPTION_NOT_READ'}))fail();
+  return value as ProjectExecutionResource;
+}
+export function decodeProjectExecutionResource(raw:unknown,selection:Exclude<Selection,null>):ProjectExecutionResource|null {
+  try{return decodeResource(detached(raw),selection);}catch{return null;}
+}
+/** Rebind immutable origins; status/observation belong to each independent read. */
+export function sameProjectRootProvenance(before:ProjectRootHistory,after:ProjectRootHistory):boolean {
+  const origins=(history:ProjectRootHistory)=>({work_ref:history.work_ref,roots:history.roots.map(({status:_status,...original})=>original)});
+  return same(origins(before),origins(after));
+}
+/** Display/routing facts from a previously decoded history; never an effect grant. */
+export function isProjectExecutionHistoryRoot(history:ProjectRootHistory|undefined,rootJobId:string):boolean {
+  return !!history?.roots.some(row=>row.root_job_id===rootJobId&&row.purpose==='PROJECT_EXECUTION'&&row.execution!==null);
+}
+export function canChooseRetainedHistory(card:{workRef:string;rootState:string;rootJobId:string|null;rootCandidates:readonly string[];rootHistory?:ProjectRootHistory},rootJobId:string):boolean {
+  if(!card.rootCandidates.includes(rootJobId))return false;
+  if(card.rootState==='CONFLICT'&&card.rootCandidates.length>1)return true;
+  return card.rootState==='RESOLVED'&&card.rootJobId===rootJobId&&card.rootCandidates.length===1
+    &&card.rootHistory?.work_ref===card.workRef&&isProjectExecutionHistoryRoot(card.rootHistory,rootJobId);
 }
 
 function validity(project:CanonicalProgramProject):void {
@@ -140,7 +253,7 @@ function validity(project:CanonicalProgramProject):void {
   }
 }
 
-export function decodeCanonicalProgramsProjects(raw:unknown,baseObservation:unknown,baseControlRoom:unknown):readonly CanonicalProgramProject[] {
+export function decodeCanonicalProgramsProjects(raw:unknown,baseObservation:unknown,baseControlRoom:unknown,withRootHistory=false):readonly CanonicalProgramProject[] {
   try{
     const values=detached(raw),base=detached(baseControlRoom),observation=detached(baseObservation);
     if(!Array.isArray(values)||values.length>8||!rec(base)||!rec(base.sources)||!hash(base.sources.macro_sha,40)
@@ -149,7 +262,7 @@ export function decodeCanonicalProgramsProjects(raw:unknown,baseObservation:unkn
     control(observation.control_room);
     const seen=new Set(base.work.map((row:any)=>row.work_ref));
     for(const value of values){
-      if(!exact(value,['work_ref','control_room','source_validity','cache_currentness','source_observation'])||!work(value.work_ref)||seen.has(value.work_ref))fail();
+      if(!exact(value,['work_ref','control_room','source_validity','cache_currentness','source_observation',...(withRootHistory?['root_history']:[])])||!work(value.work_ref)||seen.has(value.work_ref))fail();
       seen.add(value.work_ref);const o=decodeOwner(value.source_observation,null),p=o.project_data;
       if(!same(o.control_room,observation.control_room)||p.code_source.commit!==base.sources.macro_sha
         ||p.creation_publication.selection.work_ref!==value.work_ref)fail();
@@ -161,7 +274,14 @@ export function decodeCanonicalProgramsProjects(raw:unknown,baseObservation:unkn
         ||p.document_digest!==digest(doc)||p.source_validity_digest!==digest(value.source_validity)
         ||p.cache_currentness_digest!==digest(value.cache_currentness))fail();
       validity(value as CanonicalProgramProject);
+      if(withRootHistory){
+        const history=decodeHistory(value.root_history,value.work_ref);
+        const rows=doc.autonomy.responsibilities;
+        if(rows.length!==1||!Array.isArray(rows[0].root_job_candidates)
+          ||!same(history.roots.map(row=>row.root_job_id),rows[0].root_job_candidates))fail();
+      }
     }
+    if(withRootHistory&&!values.some(value=>value.root_history.roots.some((row:ProjectRootRecord)=>row.execution!==null)))fail();
     return values as readonly CanonicalProgramProject[];
   }catch{fail();}
 }

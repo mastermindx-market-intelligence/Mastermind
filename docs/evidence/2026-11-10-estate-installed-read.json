@@ -1,0 +1,295 @@
+{
+  "schema": "mastermind.estate_graph_installed_read_evidence.v1",
+  "scope": "Read-only observations through the existing authenticated Executive V3 connector; no submission, dispatch, send, enrollment, retry or arm change.",
+  "source_candidate": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "observations": {
+    "session_targets": {
+      "tool": "session_targets",
+      "schema": "mastermind.session_bridge_result.v1",
+      "server_version": "0.2.0",
+      "ok": true,
+      "count": 0,
+      "error": null,
+      "interpretation": "No exact addressable targets in this caller's current projection; not a global count of sessions or work."
+    },
+    "executive_state": {
+      "tool": "executive_state",
+      "server_version": "1.5.0",
+      "generated_at": "2026-11-10T10:14:08.749987+00:00",
+      "ok": false,
+      "error": {
+        "code": "backend_unavailable",
+        "message": "Executive reader is unavailable in the installed backend. Read-only describes this read operation; submission and execution readiness were not observed."
+      },
+      "interpretation": "Aggregate cold-start reader unavailable; does not establish Runtime absence or execution readiness."
+    },
+    "fabric_roots": {
+      "tool": "executive_fabric",
+      "server_version": "1.5.0",
+      "generated_at": "2026-11-10T10:16:17Z",
+      "ok": true,
+      "data": {
+        "count": 10,
+        "degraded": [
+          "bounded root discovery truncated; omitted roots are not counted",
+          "ceo_submit_armed: false; new CEO submissions are unavailable through this arm",
+          "root enumeration provenance is unjoined; creation provenance requires exact-root acquisition"
+        ],
+        "generated_at": "2026-11-10T10:16:17Z",
+        "roots": [
+          {
+            "depth": 0,
+            "job_id": "JOB-001",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-002",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "QUEUED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-003",
+            "orchestration_role": "aggregation",
+            "parent_job_id": null,
+            "status": "QUEUED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-004",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-005",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-007",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-008",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-009",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-010",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          },
+          {
+            "depth": 0,
+            "job_id": "JOB-011",
+            "orchestration_role": null,
+            "parent_job_id": null,
+            "status": "COMPLETED"
+          }
+        ],
+        "runtime": {
+          "acquisition": {
+            "budgets": {
+              "attempts_per_job": 20,
+              "attempts_total": 340,
+              "creation_events_per_job": 1,
+              "jobs": 17,
+              "roots": 64
+            },
+            "generation": {
+              "after": 2,
+              "before": 2,
+              "schema": "mastermind.runtime_read_observation.v1",
+              "source_identity": "08603aad69c447e57420e4d0e3f61d33",
+              "state": "SAME"
+            },
+            "owner": "executive_runtime",
+            "provenance": {
+              "state": "PARTIAL",
+              "unjoined_job_ids": [
+                "JOB-001",
+                "JOB-002",
+                "JOB-003",
+                "JOB-004",
+                "JOB-005",
+                "JOB-007",
+                "JOB-008",
+                "JOB-009",
+                "JOB-010",
+                "JOB-011",
+                "JOB-012",
+                "JOB-013",
+                "JOB-014",
+                "JOB-015",
+                "JOB-016",
+                "JOB-017",
+                "JOB-018",
+                "JOB-019",
+                "JOB-020",
+                "JOB-021",
+                "JOB-022",
+                "JOB-023",
+                "JOB-024",
+                "JOB-025",
+                "JOB-026",
+                "JOB-027"
+              ]
+            },
+            "query": {
+              "kind": "root_discovery",
+              "root_job_id": null
+            },
+            "schema": "mastermind.fabric_runtime_acquisition.v1",
+            "snapshot_digest": "2f761b36d007ee3ba7b506e7feced7468bca2fbd4fd901aa1f9964d2fd106a36",
+            "truncation": {
+              "attempt_job_ids": [],
+              "jobs": false,
+              "projection": true,
+              "roots": false
+            }
+          },
+          "db_present": true,
+          "identity": null,
+          "root": null
+        },
+        "schema": "mastermind.fabric_job_root_list.v2",
+        "total": 26,
+        "truncated": true
+      },
+      "interpretation": "Bounded installed Runtime read succeeded. Enumeration provenance is explicitly unjoined; exact-root acquisition remains required."
+    },
+    "fabric_root": {
+      "tool": "executive_fabric",
+      "server_version": "1.5.0",
+      "generated_at": "2026-11-10T10:16:46Z",
+      "ok": true,
+      "root_job_id": "JOB-003",
+      "root_status": "QUEUED",
+      "armed": {
+        "ceo_ingress_app_armed": true,
+        "ceo_submit_armed": false,
+        "coo_autonomy_armed": false,
+        "dialogue_bridge_armed": false,
+        "source": "control.json",
+        "terminal_return_armed": false
+      },
+      "capability": {
+        "detail": "the executive runtime database was read; the requested root job was found",
+        "installed": true,
+        "state": "PROVEN",
+        "version": null
+      },
+      "runtime_acquisition": {
+        "budgets": {
+          "attempts_per_job": 20,
+          "attempts_total": 340,
+          "creation_events_per_job": 1,
+          "jobs": 17,
+          "roots": 64
+        },
+        "generation": {
+          "after": 2,
+          "before": 2,
+          "schema": "mastermind.runtime_read_observation.v1",
+          "source_identity": "1149a0f04b993d42150dcdf89c4aaefe",
+          "state": "SAME"
+        },
+        "owner": "executive_runtime",
+        "provenance": {
+          "state": "COMPLETE",
+          "unjoined_job_ids": []
+        },
+        "query": {
+          "kind": "root_detail",
+          "root_job_id": "JOB-003"
+        },
+        "schema": "mastermind.fabric_runtime_acquisition.v1",
+        "snapshot_digest": "008fb9d9ed93dde537dcd6266a0923564bb935d0f9f202835b3ae70155704266",
+        "truncation": {
+          "attempt_job_ids": [],
+          "jobs": false,
+          "projection": false,
+          "roots": false
+        }
+      },
+      "child_ids": [
+        "JOB-006"
+      ],
+      "child_statuses": [
+        {
+          "job_id": "JOB-006",
+          "status": "FAILED",
+          "attempt_id": "ATT-f036984f66a94a1fbf5a6f4bbd15a7bb",
+          "summary": "Executive Codex launch failed"
+        }
+      ],
+      "missingness": [
+        {
+          "missingness_class": "EXCLUDED",
+          "producer_owner": "wake",
+          "reason": "return path disarmed; production_armed=false",
+          "target_field": "return_path"
+        },
+        {
+          "missingness_class": "MISSING_PRODUCER",
+          "producer_owner": null,
+          "reason": "product acceptance has no producer in this projection",
+          "target_field": "acceptance.state"
+        },
+        {
+          "missingness_class": "NULL_BY_DESIGN",
+          "producer_owner": "executive_os",
+          "reason": "no in-tree runtime identity artifact is readable by this view",
+          "target_field": "runtime.identity"
+        }
+      ],
+      "interpretation": "Historical root inspected only to verify exact owner acquisition and distinguish read capability from current execution arms. It is not selected for this mission, altered or replayed."
+    }
+  },
+  "release_context": {
+    "mastermind_integration": {
+      "pr": 2338,
+      "head": "957b27602d5a7d07ebf250a4c5c4cd3fadaab4ac",
+      "state": "open",
+      "draft": true,
+      "auto_merge": false
+    },
+    "paperclip_credentials": {
+      "pr": 2403,
+      "head": "b2b74c2cde0e68fa6af14e0e6bf28d77dc255bda",
+      "state": "open",
+      "draft": false,
+      "auto_merge": true,
+      "native_patch": "unapplied per current owner receipt",
+      "cutover": "Original owner and reconciled MAS-2 retained"
+    },
+    "independent_ci_repair": {
+      "pr": 2404,
+      "head": "60803c5c7d1ae6578a78ba22f978ef8394f3f5d7",
+      "state": "open",
+      "auto_merge": true
+    }
+  },
+  "conclusion": "Installed read availability differs by owner. Current source proof does not enable the projected CEO/COO/dialogue/return arms or replace existing release and native-cutover owners."
+}

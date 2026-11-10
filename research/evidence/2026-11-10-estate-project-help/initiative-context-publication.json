@@ -1,0 +1,314 @@
+{
+  "schema": "mastermind.source_publication_readback.v1",
+  "observed_at": "2026-11-10 14:56:43 UTC",
+  "repository": "mastermindx-market-intelligence/macro",
+  "parent_carrier": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2424",
+  "operation_id": "estate-initiative-context-qualification-20261110-c4",
+  "branch": "sol/web-estate-initiative-context-qualification-20261110-c4",
+  "commit": "752394fc070259944e83891243844d2f6da9c2e7",
+  "tree": "ace0afa341019a19c15bdf54d3ef871bf3455b3c",
+  "qualified_base": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+  "publication_base": "6207a79f1827060e6fd075552ac4bf04ac7ce0df",
+  "pr": {
+    "number": 10960,
+    "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10960",
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "mergeable": true,
+    "mergeable_state": "unstable",
+    "author": "mastermidx4",
+    "labels": [],
+    "auto_merge": null
+  },
+  "commit_receipt": {
+    "schema": "mastermind.studio_git_commit_result.v2",
+    "status": "OK",
+    "effect_state": "APPLIED",
+    "code": "APPLIED",
+    "action_ref": "1ddf80f5f98ad6151ab44a7ca2b347360fe0440a1d8c56159d4eefa7f06902cd",
+    "operation_id": "estate-initiative-context-qualification-20261110-c4",
+    "branch": "sol/web-estate-initiative-context-qualification-20261110-c4",
+    "previous_head_sha": "0267bf8fffc083cd048504bdb5c8e775025d6396",
+    "commit_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+    "local_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+    "clean": true,
+    "index_synced": true,
+    "repository": "macro"
+  },
+  "push_receipt": {
+    "schema": "mastermind.studio_git_push_result.v2",
+    "status": "OK",
+    "effect_state": "APPLIED",
+    "code": "APPLIED",
+    "action_ref": "00b737f05e1a7777d89739a1c94da6360a3b0eb2d21e662b666f74f0860d88c3",
+    "push_attempted": true,
+    "receipt_recorded": true,
+    "operation_id": "estate-initiative-context-qualification-20261110-c4",
+    "branch": "sol/web-estate-initiative-context-qualification-20261110-c4",
+    "local_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+    "remote_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+    "clean": true,
+    "publication_state": "APPLIED",
+    "ready_to_push": false,
+    "repository": "macro"
+  },
+  "publication_status": {
+    "schema": "mastermind.studio_git_publish_status.v2",
+    "operation_id": "estate-initiative-context-qualification-20261110-c4",
+    "branch": "sol/web-estate-initiative-context-qualification-20261110-c4",
+    "local_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+    "remote_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+    "clean": true,
+    "publication_state": "APPLIED",
+    "ready_to_push": false,
+    "publication_recovery": {
+      "action_ref": "00b737f05e1a7777d89739a1c94da6360a3b0eb2d21e662b666f74f0860d88c3",
+      "intended_head_sha": "752394fc070259944e83891243844d2f6da9c2e7",
+      "expected_remote_head_sha": null,
+      "stage": "TERMINAL",
+      "generation_id": "42959:5d3ebd91-6ef9-4c09-89b2-20e73322f2f4",
+      "retry_allowed": false,
+      "outcome": "APPLIED",
+      "reason": "REMOTE_EXACT_AFTER_PUSH",
+      "current_remote_head_sha": "752394fc070259944e83891243844d2f6da9c2e7"
+    },
+    "repository": "macro"
+  },
+  "source_patch_sha256": "569be0ab3846aa19d0619cff00bd14d9a164da674cfd9569b055a3c2df5b938d",
+  "source_manifest_sha256": "da3bf88677e4be74bdeb6aec910c08fb5131a9581e1e11ac1411a8bba243de7f",
+  "remote_files": [
+    {
+      "path": ".github/ci/legacy-jobs.yml",
+      "git_blob": "5073a48aa88ba7642302c79fb666c69de85ced82",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "path": "agentos/discoveries/DSC-INITIATIVE-CONTEXT-IS-A-SOURCE-POINTER-NOT-MEMBERSHIP.md",
+      "git_blob": "66f801291eedafc40f7e03bbcef0c7a86fc9c670",
+      "status": "added",
+      "additions": 48,
+      "deletions": 0
+    },
+    {
+      "path": "config/linear_initiative_portfolio.v1.json",
+      "git_blob": "65e3d896a2f2fd81858e48456e7529ad9c1b9d23",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/README.md",
+      "git_blob": "04f364e9354451373dffac8995f3f938dfb4d0b7",
+      "status": "added",
+      "additions": 126,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/census.md",
+      "git_blob": "d77b3f7d3ea660d104f55d86d29f85eddaef584e",
+      "status": "added",
+      "additions": 93,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/classification_census.json",
+      "git_blob": "c14df71a05dc2eb140698c71c456c724432dbd20",
+      "status": "added",
+      "additions": 497,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/host_qualification.json",
+      "git_blob": "d410fd20b0f127996b2932346fc7c93428f86abe",
+      "status": "added",
+      "additions": 91,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/owner-suite.txt",
+      "git_blob": "804c07f7e3fdf3ecb257796f52fbba31da8268a3",
+      "status": "added",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/source_manifest.json",
+      "git_blob": "e1b91f6711eaf2fac2de6c6f3fe486e394361226",
+      "status": "added",
+      "additions": 132,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/verify_current_universe.py",
+      "git_blob": "7288f3413aff349a5a4c9cd0fb3fdf814e54aee8",
+      "status": "added",
+      "additions": 70,
+      "deletions": 0
+    },
+    {
+      "path": "research/linear_portfolio_p0/estate_initiative_context_2026-11-10/workstream_sources.json",
+      "git_blob": "b8f0a1d4ee8dc4fe2d699e441d047dd5b3131263",
+      "status": "added",
+      "additions": 467,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/agentos.py",
+      "git_blob": "5c2e7bfdcbf483f86313efd4622a2b687060d0c5",
+      "status": "modified",
+      "additions": 31,
+      "deletions": 0
+    },
+    {
+      "path": "scripts/linear_initiative_plan.py",
+      "git_blob": "a36e5ba6ea603b5cdc2b3106499801ba32a820f8",
+      "status": "modified",
+      "additions": 219,
+      "deletions": 131
+    },
+    {
+      "path": "scripts/linear_initiative_plan_legacy.py",
+      "git_blob": "3a913d1ebccb2e6ff947bcf70a838e64a7a8bb33",
+      "status": "added",
+      "additions": 864,
+      "deletions": 0
+    },
+    {
+      "path": "tests/linear_initiative_plan_current_epoch_cases.py",
+      "git_blob": "72a08363316d341a49bd439be3a39100ee1f4100",
+      "status": "added",
+      "additions": 467,
+      "deletions": 0
+    },
+    {
+      "path": "tests/linear_portfolio_plan_live_cases.py",
+      "git_blob": "9a92dea8038402e694df1cb122b7ff4932cda99d",
+      "status": "modified",
+      "additions": 4,
+      "deletions": 0
+    },
+    {
+      "path": "tests/test_agentos_compile.py",
+      "git_blob": "f277e121b1f935b8345f367415df008a86bcf51d",
+      "status": "modified",
+      "additions": 98,
+      "deletions": 1
+    }
+  ],
+  "host_proof": {
+    "tests_passed": 131,
+    "failures": 0,
+    "skips": 0,
+    "test_seconds": 99.7,
+    "owner_log_sha256": "9779e67b6d03deccb8f623515c2c3bc45137846f5ae132d21f7787ef0d9aed52",
+    "full_current_universe": true,
+    "unmapped_active_refusals": 43
+  },
+  "publication_validation": {
+    "original_process": 36284,
+    "exit_code": 0,
+    "all_files_exact": true,
+    "record_errors": 0,
+    "record_warnings": 0,
+    "compiled_contexts": [
+      "WS:ORCHESTRATOR-PROJECT-CONTINUITY",
+      "WS:CHAIRMAN-CONTROL-ROOM"
+    ],
+    "pointer_and_discovery_reached": true
+  },
+  "ci_observation": {
+    "checks": [
+      {
+        "id": 129909114364,
+        "name": "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'self-mod-fence' || 'fork-self-mod-fence-unused'",
+        "status": "completed",
+        "conclusion": "skipped",
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839065698/job/129909114364"
+      },
+      {
+        "id": 129909038794,
+        "name": "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'grader-manifest' || 'fork-grader-manifest-unused'",
+        "status": "completed",
+        "conclusion": "skipped",
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839065698/job/129909038794"
+      },
+      {
+        "id": 129909038358,
+        "name": "github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'capability-broker' || 'fork-capability-broker-unused'",
+        "status": "completed",
+        "conclusion": "skipped",
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839065698/job/129909038358"
+      },
+      {
+        "id": 129909035466,
+        "name": "fence-pack",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839065698/job/129909035466"
+      },
+      {
+        "id": 129909032716,
+        "name": "ci-authority",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839062150/job/129909032716"
+      },
+      {
+        "id": 129909032304,
+        "name": "ci-plan",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839064683/job/129909032304"
+      },
+      {
+        "id": 129909031766,
+        "name": "contract-delta",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839064683/job/129909031766"
+      }
+    ],
+    "runs": [
+      {
+        "id": 42839065698,
+        "name": "fences",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839065698",
+        "head": "752394fc070259944e83891243844d2f6da9c2e7",
+        "event": "pull_request"
+      },
+      {
+        "id": 42839064683,
+        "name": "ci",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839064683",
+        "head": "752394fc070259944e83891243844d2f6da9c2e7",
+        "event": "pull_request"
+      },
+      {
+        "id": 42839062150,
+        "name": "ci-authority",
+        "status": "queued",
+        "conclusion": null,
+        "url": "https://github.com/mastermindx-market-intelligence/macro/actions/runs/42839062150",
+        "head": "752394fc070259944e83891243844d2f6da9c2e7",
+        "event": "pull_request_target"
+      }
+    ],
+    "release_armed": false,
+    "review_submitted": false
+  },
+  "boundaries": {
+    "full_strategic_classification": false,
+    "linear_effect": false,
+    "installed_adoption": false,
+    "native_acceptance": false,
+    "original_donor_unchanged": true,
+    "preserve_10920": true
+  }
+}

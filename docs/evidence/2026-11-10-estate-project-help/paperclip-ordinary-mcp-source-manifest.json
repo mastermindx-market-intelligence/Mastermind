@@ -1,0 +1,30 @@
+{
+  "scope": "Read-only current installed source; no credential reads, native launch, enrollment or activation",
+  "files": [
+    {
+      "path": "ORDINARY_MCP_API_AVENUE.md",
+      "sha256": "894923d2492a1901676b2e6fc9130b649df8794a3ec287bd27007cf7dafa5ecc",
+      "bytes": 6199
+    },
+    {
+      "path": "ordinary-mcp-source.json",
+      "sha256": "3896237993122880684d04f61f926a42bd17a6aa04f2045dda8874cac111d34c",
+      "bytes": 9228
+    },
+    {
+      "path": "ordinary-mcp-reachability.json",
+      "sha256": "532254a73f4f3e08bb147ea69780757c364bebf0a2d5458b4690967c237a2fc2",
+      "bytes": 3746
+    },
+    {
+      "path": "ordinary-mcp-owner-excerpts.json",
+      "sha256": "06490580d47982b170f753600e82707c3098e04aec83bd612f88ec12a9a36c0e",
+      "bytes": 11667
+    },
+    {
+      "path": "workspace-companion-search.json",
+      "sha256": "65ce0e6f08310f7580e3656f564b1a79aba00058be75a63ec1d7686c86fcf26a",
+      "bytes": 252
+    }
+  ]
+}

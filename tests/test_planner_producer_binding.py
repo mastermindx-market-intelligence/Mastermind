@@ -234,6 +234,30 @@ class _VersionedAdapter(_ActiveAdapter):
         self.start_calls += 1
         return super().start_session(**kwargs)
 
+    def begin_turn(self, *, turn, operation_id, **kwargs):
+        observation = super().begin_turn(turn=turn, operation_id=operation_id, **kwargs)
+        # Inert native transport fixture, with explicit request/ACK evidence.
+        # Claude's selected contract remains observed at initialization; only
+        # Codex carries its schema selection on the original turn request.
+        if self.profile.provider != "openai-codex":
+            return observation
+        from control_plane.claude_operator_helper_protocol import native_plan_schema
+        from control_plane.operator_harness_wire import build_planner_turn_custody
+        attempt = self.runtime.attempts.get_attempt(turn.attempt_id)
+        binding = self.runtime.jobs.get_planner_producer_binding(attempt.job_id)
+        producer = {"job_id": attempt.job_id, "attempt_id": turn.attempt_id,
+                    "planner_producer_binding": binding,
+                    "planner_producer_binding_digest": canonical_digest(binding)}
+        proof = build_planner_turn_custody(
+            producer=producer, operation_id=operation_id, turn=turn,
+            provider_session_id=self.provider_session_id,
+            provider_native_turn_id=observation.provider_native_turn_id,
+            native_request={"threadId": self.provider_session_id,
+                            "input": [{"type": "text", "text": self.prompts[-1]}],
+                            "outputSchema": native_plan_schema(self.plan_contract)},
+        )
+        return dataclasses.replace(observation, planner_custody=proof)
+
     def _canonical_result(self, turn):
         envelope = json.loads(super()._canonical_result(turn))
         body = envelope["role_result"]

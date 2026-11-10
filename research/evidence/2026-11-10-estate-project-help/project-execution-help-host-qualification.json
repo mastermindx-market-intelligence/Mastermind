@@ -1,0 +1,60 @@
+{
+  "schema": "mastermind.original_input_help_host_qualification.v1",
+  "tree": "0ea2e0f7d1242a9d714ba5a72e2d231f68c797cd",
+  "after_tree": "0ea2e0f7d1242a9d714ba5a72e2d231f68c797cd",
+  "returncode": 0,
+  "source_unchanged": true,
+  "source": {
+    "common/coo_project_help_contract.py": "939a31da00308dcec5d05d6da00946122dc52f7d05e9fcffc834d39f58fbb7c6",
+    "control_plane/coo_principal_host.py": "5469b4d1f4b88393a781bbf387efd23f4183c6f504defd6e2a7ec5c2cc99ac24",
+    "control_plane/coo_project_help_read.py": "c2c087883fa5cb61a2508ca644bf1573ba991591a4bbe3c29bf0fb904455c65d",
+    "control_plane/executive_service.py": "b2191c2a96de45ee2ff7dc5cd4e55d6bc9163a6d9b110c45725b8de7d8851016",
+    "control_plane/project_execution_admission.py": "49d939cc687f1b6c50c54046dfe24be2e6300fd9df874d12903ff6c3032c2db4",
+    "control_plane/workspace_project_discovery_read.py": "fa801b8ccd7fab049d13cd8acaf8699b6a89e50a94588d309db52b0860f3779b",
+    "docs/PROJECT_EXECUTION_HELP.md": "578d1852bbb0245297eb54ada357b4dcf240aeed362f2e231ed68cf47b6622c9",
+    "scripts/executive_os_phase1c.py": "87091c2403c86840e8897c9ff60ae0fdb6dcd50353d79adc72c0b73e3a0b857c",
+    "tests/fixtures/project-execution-help-owner.json": "e9c327937ff21abb72d8a5f331656fd808a99d95abbaca150715e92f7303e91b",
+    "tests/test_project_execution_help_consumers.py": "44af4f49e2f4518db10bf2c9ed948fcddf2e1080523101fcafb56fc8ac12a9ad",
+    "tests/test_project_execution_help_contract.py": "cd6636fe234e9ba9e47c5f941c90f60566e37f5aa593c9b2fe202130a34da092",
+    "tests/test_project_execution_help_ingress.py": "852357b226fd975530b34e9b4d02fe8bb0ff2e7a49e9ff5d6e9f2085bea0b224",
+    "tests/test_project_execution_help_read.py": "ef04349c3f03822dded3ed33004da0e7680f976ae25ea04f0957a1d0b4811fcd",
+    "control_plane/executive_runtime.py": "363276f69185150e4089fbfe03fcd7121197cc5427a37870169fccf9c59da516",
+    "control_plane/mission_workspace.py": "61d962771dc9823204d80c5838fc1fe4ae8009b669141db11372a41f9c8ffc20",
+    "control_plane/runtime_namespace_custody.py": "0e4255b9ec9ddda5b613b2bf610156b221aa5efadf51702be0d62ad5f3776cf2",
+    "control_plane/workspace_read_service.py": "291f290848ab65507c10fbd205cc566fcdcdb5b937b24746a92ef97120aca254",
+    "tests/executive_company_identity_review.py": "907cdb54eb219297ccb94286b0b5da246f8cf3690e8a8e4fed7a3e823e7325bd",
+    "tests/test_ceo_submit_armed_composition.py": "12909253d188d6535c6fc53fdb7c908379f600ed2014a395b3588d0a93eb1ca8"
+  },
+  "argv": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "anyio.pytest_plugin",
+    "tests/test_project_execution_help_ingress.py",
+    "--maxfail=1",
+    "--tb=short",
+    "--basetemp=/tmp/estate-input-help-unix-20261110-c4",
+    "--junitxml=/tmp/estate-input-help-unix-20261110-c4.xml"
+  ],
+  "elapsed_seconds": 382.239,
+  "suites": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "2",
+      "time": "377.052",
+      "timestamp": "2026-11-10T07:13:32.980922-07:00",
+      "hostname": "m2studio"
+    }
+  ],
+  "log_sha256": "99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87",
+  "junit_sha256": "6d23e3b6f6d2b84e3dca09ca6fc7cda6dfa3e452c6a2f0238f21eb9f4afe7d96",
+  "installed_activation": false,
+  "native_origin_attested": false,
+  "provider_dispatch": false
+}

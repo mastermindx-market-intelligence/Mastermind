@@ -1,0 +1,38 @@
+{
+  "app_mcp": "1.28.1",
+  "base_ref": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "environment": [
+    "MMX_NATIVE_HERMES_PYTHON",
+    "MMX_NATIVE_HERMES_SOURCE",
+    "MMX_NATIVE_HERMES_PYTHONPATH"
+  ],
+  "files": [
+    {
+      "bytes": 11196,
+      "path": "tests/paperclip_hermes_native_client.py",
+      "post_git_blob": "55c00727d455d342d11baa972d0c2a22fe8886f6",
+      "post_sha256": "76a7b6fc313d6173697225978091ca08255890b46224c1ffba8f821e1b0e5bf8",
+      "pre_git_blob": null
+    },
+    {
+      "bytes": 9777,
+      "path": "tests/test_paperclip_hermes_api_transport.py",
+      "post_git_blob": "181f49522143468ce50a2153b38f279390bf7ede",
+      "post_sha256": "72f73a3a1b00fbcda288ecee838aeb11092b50c254b5e00b6e4bcb495d6edf65",
+      "pre_git_blob": null
+    }
+  ],
+  "native_dependency_fact_sha256": "b29cf28250a1045859e9982af2371bb8797e3aa7f58fe10ab0eef42f8c63a790",
+  "native_httpx2": "2.15.1",
+  "native_mcp": "2.3.0",
+  "native_python": "3.14.9",
+  "native_source_ref": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "patch_sha256": "c347e9e5abf2e29f994ee8e5e93a68aaa09970c9cc20ee2384eca03897a97566",
+  "qualification": "Compiled only. Two real host cases require original joint remainder success and source composition. No installed activation or native origin claim.",
+  "required_composed_tree": "39cd9a04485cfce734cca28ec1c599bb2934f71c",
+  "schema": "mastermind.paperclip_native_api_source_candidate.v1",
+  "selectors": [
+    "tests/test_paperclip_hermes_api_transport.py::test_finite_native_hermes_requester_uses_original_http_and_unix_owners[normal-paperclip]",
+    "tests/test_paperclip_hermes_api_transport.py::test_finite_native_hermes_requester_uses_original_http_and_unix_owners[lost_response-paperclip]"
+  ]
+}

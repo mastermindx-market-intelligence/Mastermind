@@ -1,0 +1,93 @@
+{
+  "base_commit": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "dependencies": [
+    {
+      "path": "/workspace/scratch/dfef37b7f33a/estate-project-help-v6-freeze/project-help-v6.patch",
+      "sha256": "d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d"
+    }
+  ],
+  "files": [
+    {
+      "base_blob": null,
+      "base_sha256": null,
+      "bytes": 6410,
+      "operation": "add",
+      "path": "tests/test_current_data_execution_bootstrap.py",
+      "post_blob": "9d287128cd196d630646d2b3143a200eb4c7cd96",
+      "post_sha256": "4828d318fa102f1fdd91eb817e580cd155e3bbcfa010ee988538974e0ed74784"
+    }
+  ],
+  "patch": {
+    "path": "current-data-bootstrap-proof.patch",
+    "sha256": "ac0fbf660c7de9228a610df958a7ccbb8450e5da894f1bd894243215172f6a08"
+  },
+  "qualified_sources": [
+    {
+      "base_blob": null,
+      "path": "tests/test_coo_project_help_authority.py",
+      "post_blob": "f7cf45eff0ecab7561819c05b84e0b0e280b7628",
+      "sha256": "102b6be3e1543e56c8745b50ebab6aa9f07374c77e6cb7dd33aa100d91a68969"
+    },
+    {
+      "base_blob": "3bf1817cb65caab137055199450055b1d49347ee",
+      "path": "tests/test_project_execution_service.py",
+      "post_blob": "3bf1817cb65caab137055199450055b1d49347ee",
+      "sha256": "15769a2e272534be319a8972102b00c7f8738187efe21739649844ab74218357"
+    },
+    {
+      "base_blob": "04fe5aa5b58439792f76b855e2a963013468ba7a",
+      "path": "tests/test_project_execution_factory.py",
+      "post_blob": "04fe5aa5b58439792f76b855e2a963013468ba7a",
+      "sha256": "1649a05746890f32d5abf329ac83fe5ed78a0f985d3f17f422d433c03d33cf22"
+    },
+    {
+      "base_blob": "90327d4c203e5d6ca8d67db6b5385b3ee09da5b4",
+      "path": "tests/test_executive_coo_hierarchy_service.py",
+      "post_blob": "90327d4c203e5d6ca8d67db6b5385b3ee09da5b4",
+      "sha256": "2c8ea75fea51bbf2f889e03a804108f9550ffbbb38a1485205597db326bd15ab"
+    },
+    {
+      "base_blob": "97426b2bc8745c9be27ca20a8ffacf90bd08e2f9",
+      "path": "tests/test_executive_coo_hierarchy_cycle.py",
+      "post_blob": "97426b2bc8745c9be27ca20a8ffacf90bd08e2f9",
+      "sha256": "92e291263bea1fe29e654becc8809b7bbc9006700a3f1f8258ab671bab51d6dd"
+    },
+    {
+      "base_blob": "3fcc67d88622d2c2bcf7651e335538cee9604ff3",
+      "path": "tests/test_executive_service.py",
+      "post_blob": "3fcc67d88622d2c2bcf7651e335538cee9604ff3",
+      "sha256": "e955fb62d8dd3e1700559774cafaec1338d4d52aaf280a6486f717481302b3ee"
+    },
+    {
+      "base_blob": "95113a063b021e9af2b9f4ce7849da0534fa436f",
+      "path": "control_plane/executive_service.py",
+      "post_blob": "83c28b82037f1a771168b484f5afd11b6c444ac0",
+      "sha256": "900f860ec952624cfe522720be85689abda394a8da997b40a37db22d4a449f35"
+    },
+    {
+      "base_blob": "04eb8541f3135567b797614e5b0e94960cad1d4f",
+      "path": "control_plane/executive_runtime.py",
+      "post_blob": "04eb8541f3135567b797614e5b0e94960cad1d4f",
+      "sha256": "4e534112a48b97ce9f465aeac8eee2fab0d92624226ca547416808fa05d0f948"
+    },
+    {
+      "base_blob": "f93beb510dba786d06fac38bc63301d413689a83",
+      "path": "control_plane/executive_coo_cycle.py",
+      "post_blob": "f93beb510dba786d06fac38bc63301d413689a83",
+      "sha256": "b6d2e00dc98f60133078f030fda0453234eb8cf669d21da5b5ad009594966c16"
+    },
+    {
+      "base_blob": "cc4a8bcb6487c8365700e3bd263773f658e5baa6",
+      "path": "control_plane/project_execution_admission.py",
+      "post_blob": "cc4a8bcb6487c8365700e3bd263773f658e5baa6",
+      "sha256": "079b389bd34d7ce53b248fe630b454def6fd65346094aec714b0069f8f918777"
+    },
+    {
+      "base_blob": "1a31c67397f762f7aeb43c885d6e76edae36a8e3",
+      "path": "integrations/mastermind_executive_app/project_execution_factory.py",
+      "post_blob": "1a31c67397f762f7aeb43c885d6e76edae36a8e3",
+      "sha256": "cb92a082ba2a1a163c5659e851146badf6c43658e0637c248ce2d4da91e5a733"
+    }
+  ],
+  "schema": "mastermind.source_qualification_manifest.v1"
+}

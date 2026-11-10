@@ -77,7 +77,7 @@ class ExistingManagedProjectSessionSource:
             status = adapter.materialization_status(**args)
             body = compose_project_session_association(evidence, epoch=retained.session.epoch,
                 generation=retained.session.generation, requested_profile_digest=requested_profile_digest(to_wire(requested)),
-                broker_status=to_wire(status))
+                broker_status=status.to_dict())
             # No current-session/permission proof is inferred from a retained
             # receipt. Recheck the actual same source and existing live owner.
             after = self._current(selected)

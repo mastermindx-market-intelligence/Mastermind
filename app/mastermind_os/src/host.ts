@@ -1,3 +1,6 @@
+import { decodeExecutionReturnRead, type ExecutionReturnReadDocument } from "./execution-return-read";
+import { bindCompanyTransport, type CompanyRawMethods, type CompanyTransport } from "./company/transport";
+import { validateBacklogRequest, validateCompanySelection } from "./company/contract";
 import {bindNativeWorkAuthorization, type NativeWorkAuthorizationOwner} from "./native-work-authorization";
 import {bindNativePrimaryAccount, type NativePrimaryAccountOwner} from "./native-primary-account";
 import {bindNativeAuthorizationContinuation, type NativeAuthorizationContinuationOwner} from "./native-authorization-continuation-host";
@@ -43,12 +46,14 @@ import {
   decodeMission,
   decodeMissionv3,
   decodeMissionv4,
+  decodeProjectExecutionResourceRead,
   normalizeSelection,
   normalizeWorkspaceSelection,
   type MissionDocument,
   type MissionSelection,
   type Missionv3Document,
   type ProgramRead,
+  type ProjectExecutionResourceReader,
 } from "./mission";
 import {
   decodeProgramsEnvelope,
@@ -87,7 +92,7 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+export interface RawClient extends Partial<CompanyRawMethods>, Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
   signInPrimary?(): Promise<unknown>;
   readWorkAuthorization?(): Promise<unknown>;
   signInForWork?(): Promise<unknown>;
@@ -163,6 +168,7 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
     rootJobId: string;
     signal: AbortSignal;
   }): Promise<unknown>;
+  readExecutionReturn?(request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
   readResult?(request: {
     workRef: string;
     rootJobId: string;
@@ -195,6 +201,7 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readonly company?: CompanyTransport;
   readonly primaryAccount?: NativePrimaryAccountOwner;
   readonly workAuthorization?: NativeWorkAuthorizationOwner;
   readonly authorizationContinuation?: NativeAuthorizationContinuationOwner;
@@ -217,6 +224,8 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readMissionV3?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  /** Explicit read-only scope on the incumbent Mission v3 transport. */
+  readProjectExecutionResource?: ProjectExecutionResourceReader;
   readAutonomyPolicy?: (request: AutonomySelection & { signal: AbortSignal }) => Promise<AutonomyRead>;
   readSourceOperationContext?: (request: SourceOperationContextSelection & { signal: AbortSignal }) => Promise<SourceOperationContext>;
   readProjectPlan?: (request: ProjectPlanSelection & { signal: AbortSignal }) => Promise<ProjectPlanRead>;
@@ -250,6 +259,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readonly companyPriorities?: CompanyPrioritiesOwner;
   readResult?: MissionResultRead;
+  readExecutionReturn?(request: ResultSelection & { signal: AbortSignal }): Promise<ExecutionReturnReadDocument>;
   /** Mounted only when the raw method and the client invalidation generation both exist. */
   readMissionResult?(request: ResultSelection & { signal: AbortSignal }): Promise<MissionResultDocument>;
   /** Typed retained-result reference index read; same two-field selection grammar. */
@@ -305,6 +315,8 @@ export function bindMissionHost(
   const sourceContextReader = client.readSourceOperationContext;
   const sourceGroup = client.sourceOperations;
   const sourceEpochReader = client.invalidationGeneration;
+  const executionResourceReader = client.readMissionV3;
+  const executionResourceGeneration = client.invalidationGeneration;
   const sourceMethods = sourceGroup
     ? {
         options: sourceGroup.readProjectCreationOptions,
@@ -582,6 +594,7 @@ export function bindMissionHost(
       if(!current())throw Error('PROJECT_PLANNING_UNAVAILABLE');
       return result;
     }}} : {}),
+    company: bindCompanyTransport(client),
     ...(boundSource?{sourceOperations:boundSource}:{}),
     ...(sourceContextReader && client.invalidationGeneration ? {
       async readSourceOperationContext(request: SourceOperationContextSelection & { signal: AbortSignal }) {
@@ -992,6 +1005,32 @@ export function bindMissionHost(
         throw new Error("MISSION_RESPONSE_INVALID");
       return result;
     },
+    ...(executionResourceReader && executionResourceGeneration ? {
+      async readProjectExecutionResource({ workRef, rootJobId, signal }: MissionSelection & { signal: AbortSignal }) {
+        const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
+        if (!selection) throw new Error("SELECTION_INVALID");
+        const started = epoch;
+        const generation = executionResourceGeneration.call(client);
+        const verify = () => {
+          check(signal, started);
+          if (!Number.isSafeInteger(generation) || generation < 0 ||
+              client.readMissionV3 !== executionResourceReader ||
+              client.invalidationGeneration !== executionResourceGeneration ||
+              executionResourceGeneration.call(client) !== generation)
+            throw new Error("READ_CANCELLED");
+          const state = client.getState();
+          if (state.status !== "signed_in" || !state.acquisition)
+            throw new Error("PROJECT_EXECUTION_READ_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await executionResourceReader.call(client, { ...selection, signal });
+        verify();
+        const result = decodeProjectExecutionResourceRead(raw, selection);
+        if (!result) throw new Error("PROJECT_EXECUTION_RESOURCE_INVALID");
+        verify();
+        return result;
+      },
+    } : {}),
     async readMissionV3({ workRef, rootJobId, signal }) {
       const selection = normalizeWorkspaceSelection({ workRef, rootJobId });
       if (!selection) throw new Error("SELECTION_INVALID");
@@ -1031,6 +1070,24 @@ export function bindMissionHost(
       if (!decoded) throw new Error("RESULT_REFERENCES_RESPONSE_INVALID");
       return decoded;
     },
+    ...(client.readExecutionReturn && client.invalidationGeneration ? {
+      async readExecutionReturn(request: ResultSelection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = normalizeResultSelection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch;
+        const generation = client.invalidationGeneration!();
+        check(signal, started);
+        const raw = await client.readExecutionReturn!({ ...selected, signal });
+        check(signal, started);
+        if (client.invalidationGeneration!() !== generation) throw new Error("AUTHENTICATION_CHANGED");
+        const decoded = await decodeExecutionReturnRead(raw, selected);
+        check(signal, started);
+        if (client.invalidationGeneration!() !== generation) throw new Error("AUTHENTICATION_CHANGED");
+        if (!decoded) throw new Error("EXECUTION_RETURN_RESPONSE_INVALID");
+        return decoded;
+      },
+    } : {}),
     async readResult({
       workRef,
       rootJobId,
@@ -1247,10 +1304,13 @@ export async function createNativeClient(
       | "read_model_configuration"
       | "read_capacity_fabric"
       | "read_t3_attempt_fleet"
+      | "read_company_workspace"
+      | "create_company_backlog"
       | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
       | "read_result"
+      | "read_execution_return"
       | "read_mission_result"
       | "read_result_references"
       | "read_current_window",
@@ -1512,6 +1572,14 @@ export async function createNativeClient(
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
+    readCompany: ({ signal, ...selection }) => {
+      validateCompanySelection(selection);
+      return read("read_company_workspace", signal, { selection });
+    },
+    createCompanyBacklog: ({ payload, signal }) => {
+      validateBacklogRequest(payload);
+      return read("create_company_backlog", signal, { payload });
+    },
     readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
     readCapacityFabric: ({ signal }) => read("read_capacity_fabric", signal),
     readT3AttemptFleet: ({ attemptId, signal }) => {
@@ -1544,6 +1612,14 @@ export async function createNativeClient(
       return read("read_mission_v3", signal, {
         selection: { work_ref: workRef, root_job_id: rootJobId },
       });
+    },
+    readExecutionReturn: ({ signal, ...input }) => {
+      const selected = normalizeResultSelection(input);
+      if (!selected) return Promise.reject(new Error("SELECTION_INVALID"));
+      return read("read_execution_return", signal, { selection: {
+        work_ref: selected.workRef, root_job_id: selected.rootJobId, job_id: selected.jobId,
+        attempt_id: selected.attemptId, result_envelope_digest: selected.resultEnvelopeDigest,
+      } });
     },
     readResult: ({
       workRef,

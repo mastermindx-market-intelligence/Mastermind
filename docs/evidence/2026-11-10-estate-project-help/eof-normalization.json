@@ -1,0 +1,45 @@
+{
+  "schema": "mastermind.source_normalization.v1",
+  "base": "95762fc3700598a7be1a12b8c6c1995753071eed",
+  "input_patch_sha256": "d7f37cf70eb2bc50406b512f9914f39f0e1fbe9bb392fa6dc95b6438b28eee1d",
+  "reason": "Four files contain extra EOF blank lines rejected by strict git whitespace check",
+  "files": [
+    {
+      "path": "common/project_task_contract.py",
+      "before_sha256": "ebdb97a746b79b0cb776702be709aea4a646f0a41b6e922ebfdc4abb2236c08b",
+      "after_sha256": "bf8c2a21612e83b57cc4b5f4112a19731c4fd874619e525b8f2bd71fdf33afc8",
+      "removed_bytes": 2,
+      "ast_identical": true
+    },
+    {
+      "path": "integrations/hermes_harness/tests/test_native_project_help.py",
+      "before_sha256": "36a11f3fc0e0d708ab16975d517f3700e8d1a83eb1e19f0e37bf23fdaeeecdc5",
+      "after_sha256": "76c14d725a56b38fe055c6fb7acc3ce94dda42495120cd26add39a96257f8a2f",
+      "removed_bytes": 1,
+      "ast_identical": true
+    },
+    {
+      "path": "tests/test_coo_project_help_avenues.py",
+      "before_sha256": "57c214c977b1780548e36d451fb6a9cb1fc71ba92ad30a6c78a2a0b4c09e2b73",
+      "after_sha256": "34bed991f5551191109eb100d5cf86500a8038f51be9d1478fe37ba9247b9cab",
+      "removed_bytes": 1,
+      "ast_identical": true
+    },
+    {
+      "path": "tests/test_coo_project_help_ingress.py",
+      "before_sha256": "492add2803e4a268e9447e677f8f30af4fee53247e12cd14501c106b7a8b584b",
+      "after_sha256": "68b9546b928703ffc9686eb3515ea27d04f8686f4c0b666dd8ec46d142c75810",
+      "removed_bytes": 1,
+      "ast_identical": true
+    }
+  ],
+  "artifact_files": [
+    {
+      "path": "docs/evidence/2026-11-10-estate-project-help/T3_PAIRED_OAUTH_OWNER.md",
+      "before_sha256": "2cd2ea2e94ccf13b85c30ccfe3aadd756bf889246cf4bfadc167c83e4bed9882",
+      "after_sha256": "7525cdfe5484138095784c6675ae2dcdb1c4bc7e576b4d7b985878d890bbe810",
+      "removed_bytes": 1,
+      "change": "EOF blank lines only; original bytes reconstruct by appending removed newline bytes"
+    }
+  ]
+}

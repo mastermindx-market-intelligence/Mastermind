@@ -1,0 +1,73 @@
+{
+  "schema": "mastermind.estate_hosted_qualification.v1",
+  "prior_exact_head": {
+    "scope": "hosted_os_and_pinned_hermes_after_package_repair",
+    "head": "03439385ba0deced8f632d323a36ce8a1b8a9b0c",
+    "merge_commit": "d3bf9f25eeae034331fe159c79ed5e01e1d05dbd",
+    "base": "957b27602d5a7d07ebf250a4c5c4cd3fadaab4ac",
+    "os_run_id": 42793291874,
+    "os_frontend_job_id": 129751931899,
+    "native_macos_job_id": 129751931544,
+    "os_conclusion": "success",
+    "frontend_test_files": 456,
+    "frontend_passed": 7414,
+    "frontend_skipped": 12,
+    "release_asset_count": 14,
+    "app_control_fixture": {
+      "passed": true,
+      "live_acceptance": false,
+      "calls": 131,
+      "registration": "WEBMCP",
+      "documentModelContext": true
+    },
+    "app_control_python_passed": 26,
+    "browser_fixture_artifact_id": 13754295039,
+    "hermes_run_id": 42793291990,
+    "hermes_jobs": [
+      {
+        "python": "3.12",
+        "job_id": 129751932001,
+        "conclusion": "success"
+      },
+      {
+        "python": "3.13",
+        "job_id": 129751931633,
+        "conclusion": "success"
+      }
+    ],
+    "vendor_pin": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+    "scope_note": "Existing hosted fixture and package tests succeeded on exact prior head; current candidate's native model execution, installed acceptance and personal Chrome visual check remain separate. The current requester phase has its own M2 qualification; its new head must retain its own required CI.",
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42793291874"
+  },
+  "latest_exact_head": {
+    "head": "95762fc3700598a7be1a12b8c6c1995753071eed",
+    "observed_from_jobs": true,
+    "os_run_id": 42796811314,
+    "os_job_ids": [
+      129763982637,
+      129763983026
+    ],
+    "harness_run_id": 42796811306,
+    "harness_job_ids": [
+      129763981945,
+      129763982224
+    ],
+    "all_conclusions": "success",
+    "live_acceptance": false,
+    "scope": "OS_and_Hermes_harness_jobs_only",
+    "overall_ci": {
+      "run_id": 42796811883,
+      "conclusion": "failure",
+      "tested_merge": "a2bf5931c4ce69f9c2afc427c5e1bb399256c847",
+      "tested_tree": "e2f3936b89a67ac88a02526f585c10182a285cf6",
+      "failed_shards": [
+        0,
+        2,
+        3,
+        4,
+        5
+      ],
+      "current_source_repairs": "Retained in this candidate; required checks on a future composed head remain distinct."
+    }
+  }
+}

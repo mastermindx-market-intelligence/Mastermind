@@ -50,6 +50,7 @@ _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
+_EXECUTION_RETURN_ROUTE = "/workspace/execution-return/current"
 _MISSION_RESULT_ROUTE = "/workspace/mission-result/current"
 _RESULT_REFERENCES_ROUTE = "/workspace/result-references/current"
 _PLAN_ROUTE = "/workspace/plan/current"
@@ -378,7 +379,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return selection({k: query[k] for k in ("work_ref", "root_job_id")})
         except (TypeError, ValueError):
             return None
-    if operation in ("result", "mission_result"):
+    if operation in ("result", "mission_result", "execution_return"):
         return _v2_selection(query)
     if operation == "result_references":
         return _mission_v3_selection(query)
@@ -424,8 +425,13 @@ class WorkspaceAppConfig:
     authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
     authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
     source_operation_context: Any = None
+    paperclip: Any = None
 
     def __post_init__(self) -> None:
+        if self.paperclip is not None:
+            from integrations.paperclip_control.installed import PaperclipWorkspaceBinding
+            if type(self.paperclip) is not PaperclipWorkspaceBinding or self.paperclip.policy_id != self.authenticator.policy.policy_id:
+                raise ValueError("Paperclip must bind the same Workspace principal policy")
         if self.project_admission_load_bindings is not None and not callable(self.project_admission_load_bindings):
             raise ValueError("sealed current project membership loader required")
         if self.source_operation_context is not None:
@@ -1122,6 +1128,10 @@ async def _dispatch_v2(
             from common import workspace_resource_capacity_contract as capacity_wire
             frame = capacity_wire.validate_frame({"schema": capacity_wire.FRAME_SCHEMA, "operation": operation,
                      "selection": selection_value, "principal": principal_frame})
+        elif operation == "execution_return":
+            from common import workspace_execution_return_contract as return_wire
+            frame = return_wire.validate_frame({"schema": return_wire.FRAME_SCHEMA,
+                "operation": return_wire.OPERATION, "selection": selection_value, "principal": principal_frame})
         elif operation == "retained_activity":
             from common import executive_workspace_activity_contract as activity
             frame = activity.validate_frame({
@@ -1180,7 +1190,7 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source", "autonomy", "project_instructions") and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("execution_return", "admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source", "autonomy", "project_instructions") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
         expected_selection = ({key: item for key, item in selection_value.items() if key not in {"expected_revision", "expected_source_commit"}}
                               if operation in {"project_knowledge_source", "project_discovery_source"} else selection_value)
@@ -1314,6 +1324,28 @@ async def mission_result_current(
         required_keys=_RESULT_QUERY_KEYS,
         response_fn=_mission_result_envelope_response,
     )
+
+
+def _execution_return_envelope_response(envelope):
+    from common import workspace_execution_return_contract as return_wire
+    from control_plane.workspace_execution_return_read import validate_body
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            if set(envelope) != {"ok", "result"}:
+                raise ValueError("invalid_envelope")
+            result = validate_body(envelope["result"])
+            body = contract.bounded_canonical(result, limit=return_wire.MAX_RESPONSE_BYTES)
+        except (TypeError, ValueError):
+            return _refuse_json(503, "source_unavailable")
+        return Response(body, status_code=503 if result["availability"] == "UNAVAILABLE" else 200,
+                        media_type="application/json", headers={"Cache-Control": "no-store"})
+    return _v2_envelope_response(envelope, operation="result")
+
+
+async def execution_return_current(request: Request, *, config: WorkspaceAppConfig) -> Response:
+    """One exact retained return through the existing authenticated read pipeline."""
+    return await _dispatch_v2(request, config=config, operation="execution_return",
+        required_keys=_RESULT_QUERY_KEYS, response_fn=_execution_return_envelope_response)
 
 
 async def result_current(
@@ -1693,6 +1725,7 @@ class _RawPathFence:
         _MISSION_V3_ROUTE,
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
+        _EXECUTION_RETURN_ROUTE,
         _MISSION_RESULT_ROUTE,
         _RESULT_REFERENCES_ROUTE,
         _PLAN_ROUTE,
@@ -1707,6 +1740,7 @@ class _RawPathFence:
         _MODEL_CONFIGURATION_ROUTE,
         _CAPACITY_FABRIC_ROUTE,
         _T3_ATTEMPT_FLEET_ROUTE,
+        "/workspace/company/current",
         _HOST_OBSERVATION_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
@@ -1717,6 +1751,7 @@ class _RawPathFence:
     _ROUTE_METHODS = {
         **{path: "GET" for path in _READ_ROUTES},
         **{path: "POST" for path in _CCR_ACTION_ROUTES.values()},
+        "/workspace/company/command": "POST",
     }
 
     def __init__(self, app: Any) -> None:
@@ -1806,6 +1841,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
 
     async def mission_v4_endpoint(request: Request) -> JSONResponse:
         return await mission_v4_current(request, config=config)
+
+    async def execution_return_endpoint(request: Request) -> Response:
+        return await execution_return_current(request, config=config)
 
     async def result_endpoint(request: Request) -> JSONResponse:
         return await result_current(request, config=config)
@@ -1936,6 +1974,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
         Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
+        Route(_EXECUTION_RETURN_ROUTE, execution_return_endpoint, methods=["GET"]),
         Route(_MISSION_RESULT_ROUTE, mission_result_endpoint, methods=["GET"]),
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
@@ -1976,6 +2015,15 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         async def action_endpoint(request: Request, *, operation=operation) -> Response:
             return await control_room_action(request, config=config, operation=operation)
         routes.append(Route(path, action_endpoint, methods=["POST"]))
+    from integrations.mastermind_workspace_app.paperclip_http import paperclip_http
+    async def company_read_endpoint(request):
+        return await paperclip_http(request, config=config)
+    async def company_command_endpoint(request):
+        return await paperclip_http(request, config=config, command=True)
+    routes.extend([
+        Route("/workspace/company/current", company_read_endpoint, methods=["GET"]),
+        Route("/workspace/company/command", company_command_endpoint, methods=["POST"]),
+    ])
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain

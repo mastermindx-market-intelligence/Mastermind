@@ -151,19 +151,20 @@ export function decodeOwnerObservation(
   return value as unknown as OwnerObservation;
 }
 export function decodeProgramsEnvelope(value: unknown): unknown {
-  if (record(value) && value.schema === "mastermind.workspace_programs.v2") {
+  if (record(value) && (value.schema === "mastermind.workspace_programs.v2" || value.schema === "mastermind.workspace_programs.v3")) {
+    const withRootHistory = value.schema === "mastermind.workspace_programs.v3";
     if (!exact(value, ["schema", "availability", "control_room", "source_observation", "reason_codes", "canonical_projects", "coverage"]))
       throw new Error("PROGRAM_RESPONSE_INVALID");
     const base = decodeProgramsEnvelope({ schema: "mastermind.workspace_programs.v1", availability: value.availability,
       control_room: value.control_room, source_observation: value.source_observation, reason_codes: value.reason_codes });
     const observation = decodeOwnerObservation(value.source_observation, null);
-    const projects = decodeCanonicalProgramsProjects(value.canonical_projects, observation, base);
+    const projects = decodeCanonicalProgramsProjects(value.canonical_projects, observation, base, withRootHistory);
     const coverage = value.coverage;
     if (!record(coverage) || !exact(coverage, ["state", "limit", "returned", "high_water"])
       || !["COMPLETE", "PARTIAL"].includes(String(coverage.state)) || coverage.limit !== 8
       || !integer(coverage.returned) || coverage.returned !== projects.length || !integer(coverage.high_water))
       throw new Error("PROGRAM_RESPONSE_INVALID");
-    return Object.freeze({ schema: "mastermind.programs_source_composition.v1", control_room: base,
+    return Object.freeze({ schema: withRootHistory ? "mastermind.programs_source_composition.v2" : "mastermind.programs_source_composition.v1", control_room: base,
       source_observation: observation, canonical_projects: projects, coverage: Object.freeze({ ...coverage }) });
   }
   if (
