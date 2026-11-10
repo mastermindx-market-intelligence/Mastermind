@@ -907,7 +907,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     ]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
-        "umask 077\n"
+        "umask 022\n"
         "python -m scripts.ci_parallel_shard --jobs 6 --index "
         "${{ matrix.index }}\n"
     )
