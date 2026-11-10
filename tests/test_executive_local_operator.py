@@ -61,3 +61,138 @@ def test_well_formed_block_parses():
     assert parsed.socket_path.as_posix() == "/tmp/local-operator-test.sock"
     assert parsed.allowed_uids == (501, 0)  # order preserved; membership only
     assert parsed.operator_subject == FAKE_SUBJECT
+
+
+# --------------------------------------------------------------------------
+# listener: admission is the kernel peer uid, never headers or file mode
+
+
+import asyncio
+import os
+import socket
+import stat
+
+from integrations.executive_mcp.local_operator import (
+    LocalOperatorBindError,
+    LocalOperatorConfig,
+    LocalOperatorListener,
+)
+
+
+def _config(tmp_path):
+    return LocalOperatorConfig(
+        socket_path=tmp_path / "l4.sock",
+        allowed_uids=(os.getuid(),),
+        operator_subject=FAKE_SUBJECT,
+    )
+
+
+class RecordingApp:
+    def __init__(self):
+        self.scopes = []
+
+    async def __call__(self, scope, receive, send):
+        self.scopes.append(scope)
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": b'{"ok":true}'})
+
+
+def _http_request(path):
+    # HTTP/1.0: the listener closes after one response.
+    return (f"POST {path} HTTP/1.0\r\nHost: mcp.mastermind-x.com\r\n"
+            "Content-Type: application/json\r\nContent-Length: 2\r\n\r\n{}").encode()
+
+
+def _run_with_listener(listener, client):
+    async def main():
+        server = asyncio.create_task(listener.serve_forever())
+        try:
+            return await asyncio.wait_for(client(), 10)
+        finally:
+            listener.stop()
+            server.cancel()
+            await asyncio.gather(server, return_exceptions=True)
+    return asyncio.run(main())
+
+
+def test_socket_created_connectable_and_removed_on_stop(tmp_path):
+    """(7) bind creates the socket (connectable mode); stop removes it."""
+    listener = LocalOperatorListener(_config(tmp_path), RecordingApp())
+    listener.bind()
+    path = tmp_path / "l4.sock"
+    assert stat.S_ISSOCK(os.lstat(str(path)).st_mode)
+    assert os.stat(path).st_mode & 0o777 in (0o660, 0o666)  # amendment (b)
+    listener.stop()
+    assert not os.path.lexists(path)
+
+
+def test_live_listener_at_bind_is_refused_stale_replaced(tmp_path):
+    """(6) a live listener keeps its socket; a stale file is replaced."""
+    incumbent = LocalOperatorListener(_config(tmp_path), RecordingApp())
+    incumbent.bind()
+    try:
+        with pytest.raises(LocalOperatorBindError):
+            LocalOperatorListener(_config(tmp_path), RecordingApp()).bind()
+    finally:
+        incumbent.stop()
+    # Stale leftover: a bound-then-closed socket file nobody answers.
+    leftover = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    leftover.bind(str(tmp_path / "l4.sock"))
+    leftover.close()
+    replacement = LocalOperatorListener(_config(tmp_path), RecordingApp())
+    replacement.bind()  # unlinks the stale file, binds fresh
+    replacement.stop()
+
+
+def test_disallowed_peer_uid_refused_before_any_request(tmp_path):
+    """(2) peer uid outside allowed_uids: connection refused, app never sees it."""
+    app = RecordingApp()
+    listener = LocalOperatorListener(
+        _config(tmp_path), app, peer_uid_reader=lambda conn: 424242)
+    listener.bind()
+
+    async def client():
+        loop = asyncio.get_running_loop()
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(str(tmp_path / "l4.sock"))
+        conn.setblocking(False)  # asyncio sock_* multiplexes; never block the loop
+        await loop.sock_sendall(conn, _http_request("/os/executive/context"))
+        chunks = []
+        while True:
+            data = await loop.sock_recv(conn, 65536)
+            if not data:
+                break
+            chunks.append(data)
+        conn.close()
+        return b"".join(chunks)
+
+    assert _run_with_listener(listener, client) == b""
+    assert app.scopes == []
+
+
+def test_real_same_uid_socket_serves_request(tmp_path):
+    """(2, positive) a real same-uid connection is admitted and served."""
+    app = RecordingApp()
+    listener = LocalOperatorListener(_config(tmp_path), app)  # real getpeereid
+    listener.bind()
+
+    async def client():
+        loop = asyncio.get_running_loop()
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(str(tmp_path / "l4.sock"))
+        conn.setblocking(False)  # asyncio sock_* multiplexes; never block the loop
+        await loop.sock_sendall(conn, _http_request("/os/executive/context"))
+        chunks = []
+        while True:
+            data = await loop.sock_recv(conn, 65536)
+            if not data:
+                break
+            chunks.append(data)
+        conn.close()
+        return b"".join(chunks)
+
+    response = _run_with_listener(listener, client)
+    assert b"HTTP/1." in response and b"200" in response.split(b"\r\n", 1)[0]
+    assert b'{"ok":true}' in response
+    assert len(app.scopes) == 1
