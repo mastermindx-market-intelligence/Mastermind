@@ -29,6 +29,7 @@ class SelectedIngressFixture(NativeApplicationHTTPFixture):
         self.policy_document["pools"]["go"]["capabilities"] = {"tools": True, "vision": False}
         self.policy_path.write_text(json.dumps(self.policy_document))
         self.ledger_path = self.directory / "ledger.jsonl"
+        self.ledger_path.touch(mode=0o600)
         self.ledger_path.write_text("")
         for module, name, value in ((pick, "POOLS_YAML", str(self.policy_path)),
                                     (pool_ledger, "LEDGER_PATH", str(self.ledger_path))):
@@ -235,9 +236,12 @@ class SelectedIngressTests(SelectedIngressFixture):
                 if raw is None:
                     self.ledger_path.unlink(missing_ok=True)
                 else:
+                    self.ledger_path.touch(mode=0o600)
+                    self.ledger_path.write_text("")
                     self.ledger_path.write_text(raw)
                 self.assertEqual(self.request()[0], 409)
                 self.assert_no_effect()
+        self.ledger_path.touch(mode=0o600)
         self.ledger_path.write_text("")
         self.assertEqual(self.request()[0], 200)
 

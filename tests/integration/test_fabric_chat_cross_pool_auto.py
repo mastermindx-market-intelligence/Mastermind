@@ -379,7 +379,8 @@ class AutoAdvisorApplicationTests(unittest.TestCase):
         self.assertEqual(len(self.closes), 1)
 
     def test_durable_receipt_corruption_refuses_before_mutable_binding(self):
-        self.assertEqual(self.events()[-1]["type"], "done")
+        events = self.events()
+        self.assertEqual(events[-1]["type"], "done", events)
         original = self.document()
         mutations = (
             lambda t: t.pop("schema"),
@@ -471,3 +472,4 @@ class AutoAdvisorApplicationTests(unittest.TestCase):
         self.assertEqual(len(self.costs()), 1)
         self.assertEqual(self.costs()[0]["model"], _fixed.MODEL)
         self.assertEqual(len(self.native.posts), 2)
+

@@ -53,6 +53,7 @@ def _run_default_control_config(
     *,
     release_root: Path = ROOT,
     source: Path | None = None,
+    install_arm: str = "0",
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     destination = tmp_path / "control.json"
     expected_sha = "a" * 40
@@ -80,7 +81,7 @@ def _run_default_control_config(
             "501",
             "b" * 64,
             "0.147.0",
-            "0",
+            install_arm,
             _projected_digest(),
             "",  # no attended APPLICATION configuration selected by default
         ],
@@ -418,3 +419,69 @@ def test_installer_refuses_ambiguous_or_nonfinite_source_before_any_replacement(
         identity.st_ino, identity.st_mtime_ns, stat.S_IMODE(identity.st_mode))
     assert source.read_bytes() == source_before
     assert list(tmp_path.glob(".control.json.*.tmp")) == []
+
+
+@pytest.mark.parametrize("prior_arm", [False, True])
+@pytest.mark.parametrize("install_arm", ["0", "1"])
+def test_preserved_broker_readiness_requires_the_same_explicit_install_arm(
+    tmp_path: Path, prior_arm: bool, install_arm: str,
+) -> None:
+    """Execute only the existing embedded generator, never the installer shell."""
+    value = _render_default_control_config(tmp_path)
+    value["privileged_readiness_armed"] = prior_arm
+    value["privileged_broker_socket_path"] = (
+        "/var/run/mastermind-executive/privileged.sock" if prior_arm else None
+    )
+    source = tmp_path / "preserved-control.json"
+    source.write_text(json.dumps(value))
+    before_source = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before_destination = destination.read_bytes()
+    completed, _ = _run_default_control_config(
+        tmp_path, source=source, install_arm=install_arm,
+    )
+    assert source.read_bytes() == before_source
+    if prior_arm == (install_arm == "1"):
+        assert completed.returncode == 0, completed.stderr
+        assert json.loads(destination.read_bytes()) == value
+    else:
+        assert completed.returncode != 0
+        assert "conflicts with privileged broker installation arm" in completed.stderr
+        assert destination.read_bytes() == before_destination
+
+
+def test_existing_closed_memory_stanzas_roundtrip_without_minting_authority(tmp_path: Path) -> None:
+    # Reuse the accepted explicit v3 fixture, not live/private configuration.
+    # This proves lossless installer serialization only; actual Control loader,
+    # current root/receiver/Linux/economic permission remain distinct owners.
+    from tests.test_memory_v3_wire_configuration import stanzas
+    value = _render_default_control_config(tmp_path)
+    value.update(stanzas())
+    source = tmp_path / "preserved-memory-control.json"
+    source.write_text(json.dumps(value))
+    before = source.read_bytes()
+    completed, destination = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(destination.read_bytes()) == value
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("field,old_value", [
+    ("proof_base_sha", "9" * 40),
+    ("proof_source_repository", "/private/old-admin-checkout"),
+])
+def test_preserved_source_must_already_name_the_qualified_target_coordinates(
+    tmp_path: Path, field: str, old_value: str,
+) -> None:
+    value = _render_default_control_config(tmp_path)
+    value[field] = old_value
+    source = tmp_path / "old-generation-control.json"
+    source.write_text(json.dumps(value))
+    source_before = source.read_bytes()
+    destination = tmp_path / "control.json"
+    before = destination.read_bytes()
+    completed, _ = _run_default_control_config(tmp_path, source=source)
+    assert completed.returncode != 0
+    assert f"control config {field} differs from the reviewed host policy" in completed.stderr
+    assert source.read_bytes() == source_before
+    assert destination.read_bytes() == before

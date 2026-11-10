@@ -60,6 +60,7 @@ from control_plane.worker_execution_contract import (
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
+    WorkerResult,
     WorkerRunStatus,
     worker_launch_spec_sha256,
 )
@@ -305,8 +306,12 @@ class HermesWorkerAdapter:
 
         original = self._require_original_ref(ref)
         receipt = await self._runner.collect(original)
-        if not isinstance(receipt, CollectionReceipt) or (
-            receipt.process_ref.run_id != original.run_id
+        if (
+            not isinstance(receipt, CollectionReceipt)
+            or not isinstance(receipt.process_ref, WorkerProcessRef)
+            or receipt.process_ref != original
+            or not isinstance(receipt.result, WorkerResult)
+            or receipt.result.run_id != original.run_id
         ):
             raise HermesWorkerAdapterError(
                 "collection did not return the original retained execution's "

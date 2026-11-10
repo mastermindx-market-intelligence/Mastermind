@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { workConnectionPresentation } from "./work-connection-presentation";
 import type { NativeExecutiveObservation } from "./native-executive-observation";
 import type {
   DiagnosticHostKind,
@@ -44,6 +45,10 @@ function booleanCode(value: boolean | null, zh: boolean): string {
  * it confers no authority and triggers nothing.
  */
 export function TransportDiagnosticFields(props: {
+  /** Put the same local observation owner in a customer-facing disclosure. */
+  connectionDetails?: boolean;
+  onConnectionDetailsOpen?: () => void;
+  children?: ReactNode;
   snapshot: unknown;
   programsPhase: DiagnosticPhase;
   programsReason?: DiagnosticReadReason;
@@ -59,7 +64,7 @@ export function TransportDiagnosticFields(props: {
   const observed = local?.reader === props.refreshNativeDiagnostics ? local : null;
   const refresh = async () => {
     const reader = props.refreshNativeDiagnostics;
-    if (!reader || observed?.phase === "pending") return;
+    if (!reader || observed?.phase === "pending" || active.current && !active.current.signal.aborted) return;
     active.current?.abort();
     const controller = new AbortController(); active.current = controller;
     setLocal({ reader, phase: "pending" });
@@ -70,6 +75,8 @@ export function TransportDiagnosticFields(props: {
     } catch {
       if (!controller.signal.aborted && latest.current === reader && active.current === controller)
         setLocal({ reader, phase: "unavailable" });
+    } finally {
+      if (active.current === controller) active.current = null;
     }
   };
   const d: MissionDiagnosticSnapshot | null = decodeMissionDiagnostics(
@@ -135,7 +142,7 @@ export function TransportDiagnosticFields(props: {
     {term: zh ? "最近原生 Projects 读取" : "Last native Projects read", code: closed(native.programsRead?.phase, ["NOT_OBSERVED","PENDING","READY","AUTH_UNAVAILABLE","HTTP_FAILURE","NETWORK_FAILURE","TIMEOUT","BODY_FAILURE","INVALID_RESPONSE"])},
     {term: zh ? "最近 Projects HTTP 状态" : "Last Projects HTTP status", code: typeof native.programsRead?.httpStatus === "number" && Number.isInteger(native.programsRead.httpStatus) && native.programsRead.httpStatus >= 100 && native.programsRead.httpStatus <= 599 ? String(native.programsRead.httpStatus) : "UNKNOWN"},
   );
-  return (<>
+  const fields = (<>
     <dl className="muted">
       {rows.map((row) => (
         <div key={row.term}>
@@ -154,5 +161,20 @@ export function TransportDiagnosticFields(props: {
       <p role="status">{observed?.phase === "pending" ? (zh ? "正在读取本地状态。" : "Reading local status.") : observed?.phase === "unavailable" ? (zh ? "无法读取本地诊断。" : "Local diagnostics unavailable.") : null}</p>
     </div> : null}
   </>);
-
+  if (!props.connectionDetails) return fields;
+  const presentation = workConnectionPresentation(d, native, props.locale);
+  return <>
+    {presentation ? <div role="status">
+      <p><strong>{presentation.title}</strong></p>
+      <p className="muted">{zh ? "最近的登录状态显示账户和内容访问已连接。" : "Your latest sign-in status reports account and content access."}</p>
+      <p className="muted">{presentation.description}</p>
+    </div> : <p className="muted">{zh ? "暂时无法开始工作。" : "Starting work is unavailable right now."}</p>}
+    <details className="reason-details work-connection-details" onToggle={(event) => {
+      if (event.currentTarget.open) props.onConnectionDetailsOpen?.();
+    }}>
+      <summary>{zh ? "连接详情" : "Connection details"}</summary>
+      {props.children}
+      {fields}
+    </details>
+  </>;
 }

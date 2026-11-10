@@ -72,11 +72,13 @@ def _identity_problems(binding: ExecutionBinding, spec: Any) -> str:
 
 
 def _issued_problems(
-    binding: ExecutionBinding, current_fence: int | None
+    binding: ExecutionBinding, current_fence: int | None, *, require_issued: bool
 ) -> list[tuple[str, str]]:
-    """Fence-currency and non-empty-lease problems (opt-in, PR #2311 M1)."""
+    """Issuance and current-fence checks selected independently by the caller."""
     problems = []
-    if not binding.lease_expiry:
+    if not require_issued and current_fence is None:
+        return problems
+    if require_issued and not binding.lease_expiry:
         problems.append((
             BINDING_LEASE_REQUIRED,
             "lease_expiry is empty: a broker claim always carries the "
@@ -129,7 +131,9 @@ def binding_for_launch_spec(
     when the caller holds the broker's current fence generation for this
     attempt (the authenticated owner channel can supply it), must equal
     ``binding.fence_counter`` — refusing a stale/drifted fence at this seam.
-    Both are opt-in so the PR #2330 lanes' behavior is unchanged.
+    These checks are independently opt-in. With neither requested, only the
+    existing type/identity compatibility is verified; that alone is not proof
+    of a current broker-issued launch grant. PR #2330 compatibility is retained.
     """
     if binding is None:
         if required:
@@ -149,7 +153,8 @@ def binding_for_launch_spec(
     problems = _identity_problems(admitted, spec)
     if problems:
         raise ExecutionBindingCompatError(BINDING_IDENTITY_MISMATCH, problems)
-    lease_or_fence = _issued_problems(admitted, current_fence)
+    lease_or_fence = _issued_problems(
+        admitted, current_fence, require_issued=require_issued)
     for code, detail in lease_or_fence:
         raise ExecutionBindingCompatError(code, detail)
     return admitted

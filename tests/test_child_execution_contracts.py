@@ -227,6 +227,109 @@ def test_case_23_options_dict_never_mutated():
 
 
 # =============================================================================
+# Invalid configuration cannot weaken the established C3 witness contract
+# =============================================================================
+
+@pytest.mark.parametrize("class_key,class_name", [
+    ("task_complexity", C3_FRONTIER_JUDGMENT), ("task_class", "c3"),
+])
+@pytest.mark.parametrize("witness_flag", [None, False])
+@pytest.mark.parametrize("context", [
+    "", "witness: short",
+    "witness: this is a very urgent and important production task",
+])
+def test_c3_witness_is_mandatory_despite_missing_or_false_option_flag(
+        class_key, class_name, witness_flag, context):
+    options = {
+        "frontier": {class_key: class_name, "downgrade_to": "hard"},
+        "hard": {"task_class": "C2"},
+    }
+    if witness_flag is not None:
+        options["frontier"]["requires_witness"] = witness_flag
+    before = json.dumps(options, sort_keys=True)
+    decision = ev("frontier", context=context, options=options)
+    assert decision.resolved == "hard"
+    assert decision.task_complexity == C2_COMPLEX_BOUNDED
+    assert decision.downgraded and decision.witness_problem
+    assert json.dumps(options, sort_keys=True) == before
+
+
+@pytest.mark.parametrize("witness_flag", [None, False])
+def test_c3_valid_witness_is_retained_without_a_caller_gate_flag(witness_flag):
+    options = {"frontier": {"task_class": "C3"}}
+    if witness_flag is not None:
+        options["frontier"]["requires_witness"] = witness_flag
+    decision = ev("frontier", context=WITNESS, options=options)
+    assert decision.resolved == "frontier"
+    assert decision.task_complexity == C3_FRONTIER_JUDGMENT
+    assert not decision.downgraded and decision.witness_problem == ""
+    assert decision.witness == WITNESS.removeprefix("witness: ")
+
+
+@pytest.mark.parametrize("target,target_class", [
+    ("frontier", "C3"), ("other-frontier", "c3"),
+    ("other-frontier", C3_FRONTIER_JUDGMENT),
+    ("mechanical", "C0"), ("routine", "C1"), ("review", "reviewer"),
+    ("future", "C9_UNHEARD_OF"), ("untyped", ""), ("missing", None),
+])
+def test_failed_c3_witness_refuses_every_non_c2_declared_target(target, target_class):
+    options = {
+        "frontier": {"task_class": "C3", "requires_witness": True,
+                     "downgrade_to": target},
+    }
+    if target != "frontier" and target_class is not None:
+        options[target] = {"task_complexity": target_class}
+    decision = ev("frontier", options=options)
+    assert decision.resolved == "" and decision.task_complexity == ""
+    assert not decision.downgraded
+    assert decision.witness_problem == "no 'witness:' line in the task"
+    assert "needs a concrete witness" in decision.reason
+
+
+@pytest.mark.parametrize("class_key,class_name", [
+    ("task_complexity", C2_COMPLEX_BOUNDED), ("task_class", "c2"),
+])
+def test_failed_c3_witness_uses_explicit_c2_target_under_any_option_name(
+        class_key, class_name):
+    options = {
+        "frontier": {"task_class": "C3", "downgrade_to": "bounded-custom"},
+        "bounded-custom": {class_key: class_name},
+    }
+    decision = ev("frontier", options=options)
+    assert decision.resolved == "bounded-custom" and decision.downgraded
+    assert decision.task_complexity == C2_COMPLEX_BOUNDED
+    assert decision.reason == (
+        "downgraded frontier->bounded-custom: no 'witness:' line in the task")
+
+
+def test_additional_non_c3_witness_gate_cannot_fall_back_into_c3():
+    options = {
+        "bounded": {"task_class": "C2", "requires_witness": True,
+                    "downgrade_to": "frontier"},
+        "frontier": {"task_class": "C3"},
+    }
+    decision = ev("bounded", options=options)
+    assert decision.resolved == "" and decision.witness_problem
+
+    accepted = ev("bounded", context=WITNESS, options=options)
+    assert accepted.resolved == "bounded"
+    assert accepted.task_complexity == C2_COMPLEX_BOUNDED
+    assert accepted.witness_problem == ""
+
+    options["bounded"]["downgrade_to"] = "routine"
+    options["routine"] = {"task_class": "C1"}
+    lower = ev("bounded", options=options)
+    assert lower.resolved == "routine" and lower.downgraded
+    assert lower.task_complexity == C1_ROUTINE_BOUNDED
+
+
+@pytest.mark.parametrize("minimum", [-1, 0, 1, 23, True, False, 23.9, 24.5, "24", None])
+def test_witness_threshold_rejects_weaker_or_non_integer_configuration(minimum):
+    with pytest.raises(ValueError, match="witness_min_chars must be an integer >= 24"):
+        ChildRoutingPolicy(minimum)
+
+
+# =============================================================================
 # Canonical vocabulary and the port's contract with the plugin config shape
 # =============================================================================
 

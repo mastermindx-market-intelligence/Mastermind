@@ -225,3 +225,60 @@ def test_installed_path_alias_refused_before_open(tmp_path, monkeypatch, directi
     with pytest.raises(prepare.PreparationError, match="alias"):
         prepare.prepare(input_path=str(source), output_path=str(output),
                         source_sha=NEW_SHA, macro_root=NEW_MACRO)
+
+
+@pytest.mark.parametrize("damage", ["transport-option", "profile-origin", "recipient-user", "permission-start"])
+def test_offline_successor_reuses_closed_memory_configuration_validation(tmp_path, control_input, damage):
+    from tests.test_memory_v3_wire_configuration import stanzas
+    document = copy.deepcopy(control_input)
+    document.update(stanzas())
+    if damage == "transport-option":
+        document["memory_native_issuer"]["options"] = ["ProxyCommand=untrusted"]
+    elif damage == "profile-origin":
+        document["protected_memory_execution"]["api_origin"] = "https://untrusted.invalid/api/paas/v4"
+    elif damage == "recipient-user":
+        document["memory_original_result_access"]["receiver_kind"] = "end_user"
+    else:
+        document["memory_original_result_access"]["permissions"].append("start")
+    source = tmp_path / "memory-input.json"
+    source.write_text(json.dumps(document))
+    source.chmod(0o600)
+    before = source.read_bytes()
+    destination = tmp_path / "memory-output.json"
+    with pytest.raises(prepare.PreparationError, match="protected Memory"):
+        prepare.prepare(input_path=str(source), output_path=str(destination),
+                        source_sha=NEW_SHA, macro_root=NEW_MACRO)
+    assert source.read_bytes() == before
+    assert not destination.exists()
+
+
+def test_offline_successor_preserves_valid_memory_stanzas_without_host_qualification(
+    tmp_path, control_input, monkeypatch,
+):
+    from scripts import executive_os_phase1c as control
+    from control_plane import executive_memory_issuer, protected_memory_profile
+    from tests.test_memory_v3_wire_configuration import stanzas
+    memory = stanzas()
+    document = copy.deepcopy(control_input)
+    document.update(memory)
+    source = tmp_path / "memory-input.json"
+    source.write_text(json.dumps(document))
+    source.chmod(0o600)
+    before = source.read_bytes()
+    destination = tmp_path / "memory-output.json"
+    def forbidden(*args, **kwargs):
+        pytest.fail("offline validation must not inspect installed/private state")
+    monkeypatch.setattr(control, "_private_json", forbidden)
+    monkeypatch.setattr(executive_memory_issuer, "_read", forbidden)
+    monkeypatch.setattr(protected_memory_profile, "_read_config", forbidden)
+    result = prepare.prepare(input_path=str(source), output_path=str(destination),
+                             source_sha=NEW_SHA, macro_root=OLD_MACRO)
+    output = json.loads(destination.read_bytes())
+    assert source.read_bytes() == before
+    assert {key: output[key] for key in memory} == memory
+    assert output == {**document, "proof_base_sha": NEW_SHA,
+                      "proof_source_repository": f"/var/db/mastermind-executive/control/admin-checkout/{NEW_SHA}"}
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert result["changed_fields"] == ["proof_base_sha", "proof_source_repository"]
+    assert result["installed_configuration_changed"] is False
+    assert result["macro_seal_verified"] is False

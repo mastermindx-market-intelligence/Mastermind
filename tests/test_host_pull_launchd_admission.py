@@ -190,10 +190,8 @@ def _go_dependency_bytes(lineage="application"):
         predecessor, _ = _host_pull_cohort(lineage)
         return {name: predecessor["ext/" + name] for name in BUILDER.GO_APPLICATION_DEPENDENCIES}
     assert lineage == "application"
-    return {
-        name: hashlib.sha256((CANDIDATE / name).read_bytes()).hexdigest()
-        for name in BUILDER.GO_APPLICATION_DEPENDENCIES
-    }
+    predecessor, _ = _host_pull_cohort(lineage)
+    return {name: predecessor["ext/" + name] for name in BUILDER.GO_APPLICATION_DEPENDENCIES}
 
 
 @pytest.mark.parametrize("lineage", ["application", "worker"])

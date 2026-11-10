@@ -128,7 +128,14 @@ def test_native_module_namespace_restores_the_exact_foreign_owner(monkeypatch):
 
 def before_extended_host_pull_epoch(manifest):
     """Reconstruct an exact historical test image; never validate an extended base."""
+    manifest = builder.before_glm_application_core(manifest)
     historical_by_current = {
+        # Current Go/HTTP payloads with the exact prior core, independently
+        # materialized from this builder; all earlier frozen pairs stay intact.
+        "89b83d634f90bad07bc44c75f0a7e6982d2ee356a2e74ac1ee65330fef129c3b":
+            "05cae94005dea8f568f79337520747d7b99c372bb880a5425fb13a888b75a273",
+        "4ede2629354c1ae4cba895bb3c90c20c3cd50be6861c7f5bc41a45546e7d1042":
+            "fe17a36022001450c0ca2dba1bb98b7a3a7247f1cc8fbb0eea7079b6103ff06e",
         "a3b345e305c34a5f8b6284fc5ee00c36c0ddf274635886038c472eb88284780f": "59e99bc523a627e72b5df97e37c9765eebe61480981b801ab6b9b4165ac469d0",
         "bbc0d92d0d6377603ea162c9f5efe3205069235fc4959d49ab1bddd86520b3af": "8443024b1ad7982ea66747f409b27b0e69abec20af15d662854862a679a781ec",
         "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2": "acf6fdcc2df38eb2865c83f114e4bfec5c05f7ebfb66c4677ad6cfe87f5aa8c8",
@@ -141,6 +148,13 @@ def before_extended_host_pull_epoch(manifest):
             "c830ad60c191394c5aec80d6678801a1939a85dd08665fda20d16b096e95f818",
         "e917b89cf49a9bcc3a4d14e4fb264bb9459dd95d2d86dfbcece70b8e6a644467":
             "cacfba749a6ef6f5a8f905243aa7ef4f5423f7b1ebb1beb0e61c22f1b6d05e48",
+        # The qualified native_go_entry helper successor changes only that
+        # member of the two complete Go/HTTP images above. Retain both entry
+        # generations and bind the full before/after host-pull closures.
+        "873bd5ec7ec1d46a1850202f12b76dd5dd09b4e43c9e01bdae5e689794ac0f1b":
+            "3a85e0746bd228d6ebf4c0e57fea4e8e9c757449f2f6eb995cbb6694bc052d60",
+        "21abea132c329c159dfcb46069879ee90b8ca59bc450bd0ab0af9a227ac3d17d":
+            "87b59355de02f14f90261608179f3f520722f01a43ca77376cf8b750f01a32d7",
     }
     actual = g.digest((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode())
     assert actual in historical_by_current
@@ -148,6 +162,57 @@ def before_extended_host_pull_epoch(manifest):
     previous.update(builder.HOST_PULL_INTEGRITY_PREIMAGES)
     assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == historical_by_current[actual]
     return previous
+
+
+
+@pytest.mark.parametrize(
+    "extended,current_historical,legacy_historical",
+    [
+        ("application",
+         "3a85e0746bd228d6ebf4c0e57fea4e8e9c757449f2f6eb995cbb6694bc052d60",
+         "05cae94005dea8f568f79337520747d7b99c372bb880a5425fb13a888b75a273"),
+        ("http",
+         "87b59355de02f14f90261608179f3f520722f01a43ca77376cf8b750f01a32d7",
+         "fe17a36022001450c0ca2dba1bb98b7a3a7247f1cc8fbb0eea7079b6103ff06e"),
+    ],
+)
+def test_extended_historical_fixture_preserves_exact_entry_generations(
+    builds, extended, current_historical, legacy_historical,
+):
+    manifest = json.loads(
+        (getattr(builds, extended) / "native-manifest.json").read_bytes()
+    )
+    original = dict(manifest)
+
+    def manifest_digest(value):
+        return g.digest((json.dumps(value, sort_keys=True, indent=2) + "\n").encode())
+
+    assert manifest_digest(before_extended_host_pull_epoch(manifest)) == current_historical
+    assert manifest == original
+
+    legacy = dict(manifest)
+    legacy["ext/native_go_entry.py"] = (
+        "5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878"
+    )
+    legacy_before = dict(legacy)
+    assert manifest_digest(before_extended_host_pull_epoch(legacy)) == legacy_historical
+    assert legacy == legacy_before
+
+    foreign = dict(manifest)
+    foreign["ext/native_go_entry.py"] = "f" * 64
+    foreign_before = dict(foreign)
+    with pytest.raises(AssertionError):
+        before_extended_host_pull_epoch(foreign)
+    assert foreign == foreign_before
+
+    partial = builder.before_glm_application_core(manifest)
+    key, prior = next(iter(builder.HOST_PULL_INTEGRITY_PREIMAGES.items()))
+    assert partial[key] != prior
+    partial[key] = prior
+    partial_before = dict(partial)
+    with pytest.raises(AssertionError):
+        before_extended_host_pull_epoch(partial)
+    assert partial == partial_before
 
 
 @pytest.mark.parametrize("extended", ["application", "http"])
@@ -163,7 +228,7 @@ def test_current_host_pull_epoch_refuses_extended_native_base(builds, extended):
 
 
 def before_collection_successor(manifest):
-    manifest = builder.before_host_pull_integrity(manifest)
+    manifest = builder.before_host_pull_integrity(builder.before_glm_application_core(manifest))
     # Frozen historical tests keep their original bytes. This test-only inverse
     # binds both complete current and prior closures before changing one member.
     previous = dict(manifest)
@@ -191,7 +256,7 @@ def pool_source_fixture(builds):
     raw = (ROOT.parents[2] / "tests/fixtures/fabric-application-pool107-b955c82.json").read_bytes()
     assert g.digest(raw) == "d8a112411c28c42e812907435f5b182ce351a4cb4c00e47b94ca1ddf58294ac9"
     prior = json.loads(raw)
-    current = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
     assert set(prior) == set(current)
     assert {key for key in current if current[key] != prior[key]} == {
         "ext/remote_sub_exec.py", "ext/original_delivery_collector.py"}
@@ -218,7 +283,7 @@ def before_sparse_commit_preflight(manifest):
 
 def before_source_successors(manifest):
     return builder.before_qualification_quiescence(
-        builder.before_host_pull_integrity(builder.before_sparse_index_advice(manifest)))
+        builder.before_host_pull_integrity(builder.before_glm_application_core(builder.before_sparse_index_advice(manifest))))
 
 
 def before_admission_integrity(manifest):
@@ -624,7 +689,7 @@ def test_participant_cohort_preserves_prior_104_and_input_identity(builds):
 
 
 def test_original_collection_successor_preserves_prior_releases_without_backdating(builds):
-    current = builder.normalize_application_carrier_base_manifest(builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes())))
+    current = builder.normalize_application_carrier_base_manifest(builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes()))))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     key = "ext/original_delivery_collector.py"
     old = "4343b5c9dc3e4fbed10a68cad8758157412f94e2903a7974bd5abdf7a9154183"
@@ -667,7 +732,7 @@ def test_committed_original_collection_successor_carries_one_qualified_member(bu
     The successor replaces exactly one source member, so the published
     generation keeps validating and no other source or entrypoint hash moves.
     """
-    current = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
     captured = {name: current["ext/" + name] for name in builder.GO_APPLICATION_DEPENDENCIES}
     key = "ext/original_delivery_collector.py"
     successor = builder.GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256
@@ -685,7 +750,7 @@ def test_committed_original_collection_successor_carries_one_qualified_member(bu
 
 def test_committed_original_collection_successor_keeps_parent_closures_exact(builds):
     """Each successor parent closure is an exact whole-manifest identity."""
-    current = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
     key = "ext/original_delivery_collector.py"
     assert g.digest((json.dumps(current, sort_keys=True, indent=2) + "\n").encode()) == "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e"
     sparse_parent = builder.before_application_pool_composition(current)
@@ -730,7 +795,7 @@ def test_committed_original_collection_successor_keeps_parent_closures_exact(bui
 @pytest.mark.parametrize("successor", [False, True])
 @pytest.mark.parametrize("publisher", [False, True])
 def test_collector_sparse_and_pool_or_scoped_routes_bind_complete_parents(builds, successor, publisher):
-    current = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
     if not successor:
         current["ext/original_delivery_collector.py"] = builder.GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256
     if not publisher:
@@ -1209,13 +1274,13 @@ def test_both_exact_admission_repair_lineages_remain_distinct(builds, lineage):
         parent_identity = "815ec3c880b5f66590b7dcc04ac42c6c5384ba296b44e83af7e96c23326f6347"
         historical_identity = parent_identity
     elif lineage == "application":
-        actual = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+        actual = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
         raw = (json.dumps(before_sparse_commit_preflight(actual), sort_keys=True, indent=2) + "\n").encode()
         current_identity = "b9fd5f760bd578bb40ef93feee861763d287f098ecddab07ed28f44863ee5da4"
         parent_identity = "3ad8c6993609b17378c2c248c73fffc210a71754078d3a6bbb71cfaa6e7018c9"
         historical_identity = "e43384b1bfdae31d694f6771455dc32681241c80ec18e7747e364351fe3d92f4"
     else:
-        actual = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+        actual = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
         parent = builder.before_sparse_commit_preflight(builder.before_application_pool_composition(actual))
         raw = (json.dumps(parent, sort_keys=True, indent=2) + "\n").encode()
         current_identity = "4f6a64b8b22188c324923b4575dcc1b6490ca59df21ba303d9f16db0f6fd6552"
@@ -1361,6 +1426,7 @@ def test_scoped_model_successor_binds_actual_dependencies_and_preserves_parent(b
     assert current == original
     for output in (builds.default, builds.application, builds.http):
         manifest = json.loads((output / "native-manifest.json").read_bytes())
+        historical = builder.before_glm_application_core(manifest)
         inventory = json.loads((output / "native-source-inventory.json").read_bytes())
         for name, expected in builder.EXACT_SCOPED_MODEL_DIGESTS.items():
             staged = (output / "native-code-stage" / name).read_bytes()
@@ -1371,7 +1437,7 @@ def test_scoped_model_successor_binds_actual_dependencies_and_preserves_parent(b
             accepted = (expected,) if name != "ext/lease_broker.py" else (
                 expected, builder.APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256)
             assert g.digest(staged) == manifest[name] == inventory["files"][name]["sha256"]
-            assert g.digest(staged) in accepted
+            assert historical[name] in accepted
             assert inventory["files"][name]["source"] == "candidate/" + Path(name).name
 
 
@@ -1506,14 +1572,15 @@ def test_application_pool_composition_emits_actual_complete_provenance(builds, v
         row = inventory["files"][name]
         assert g.digest(raw) == row["sha256"] == digest
         assert len(raw) == row["bytes"]
+    historical = builder.before_glm_application_core(manifest)
     for key, digest in builder.APPLICATION_POOL_COMPOSITION_DIGESTS.items():
         # The composed pool successor stages the quiescence broker endpoint
         # (candidate bytes) while the historical endpoint stays accepted.
         accepted = (digest,) if key != "ext/lease_broker.py" else (
             digest, builder.APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256)
-        assert manifest[key] in accepted
+        assert historical[key] in accepted
         assert inventory["files"][key]["source"] == "candidate/" + Path(key).name
-        assert g.digest((ROOT / inventory["files"][key]["source"]).read_bytes()) in accepted
+        assert g.digest((ROOT / inventory["files"][key]["source"]).read_bytes()) == manifest[key]
 
 
 def test_application_pool_forward_delta_is_reversible_and_source_exact(tmp_path):
@@ -1527,7 +1594,9 @@ def test_application_pool_forward_delta_is_reversible_and_source_exact(tmp_path)
     original = {}
     for key, digest in builder.APPLICATION_POOL_COMPOSITION_DIGESTS.items():
         name = Path(key).name
-        original[name] = (ROOT / "candidate" / name).read_bytes()
+        original[name] = (builder._glm_historical_core_source(ROOT, name).read_bytes()
+                          if name in builder.GLM_CORE_PREIMAGES else
+                          (ROOT / "candidate" / name).read_bytes())
         accepted = (digest,) if key != "ext/lease_broker.py" else (
             digest, builder.APPLICATION_POOL_COMPOSITION_COMPOSED_BROKER_SHA256)
         assert g.digest(original[name]) in accepted
@@ -1558,7 +1627,7 @@ def test_application_pool_forward_delta_is_reversible_and_source_exact(tmp_path)
 
 
 def test_combined_pool_and_sparse_source_preserves_both_exact_lineages(builds):
-    current = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
     unchanged = dict(current)
     fixtures = (
         ("fabric-application-sparse-scoped107-317cc5d.json", "d416ac1611112f757d602ddc73b4ed61636a7dd53c4b66866ce302aeabd7a86f", "ext/support_bundle.py"),
@@ -1593,7 +1662,7 @@ def test_combined_pool_and_sparse_source_preserves_both_exact_lineages(builds):
     "application109", "http112",
 ])
 def test_combined_pool_and_sparse_source_refuses_unqualified_closures(builds, mutation):
-    current = builder.before_host_pull_integrity(json.loads((builds.default / "native-manifest.json").read_bytes()))
+    current = builder.before_host_pull_integrity(builder.before_glm_application_core(json.loads((builds.default / "native-manifest.json").read_bytes())))
     if mutation in {"old-gateway", "old-broker"}:
         key = "ext/go_lease_gateway.py" if mutation == "old-gateway" else "ext/lease_broker.py"
         current[key] = builder.APPLICATION_POOL_COMPOSITION_PREIMAGES[key]

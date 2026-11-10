@@ -416,12 +416,77 @@ class HermesStatusCollectTests(unittest.IsolatedAsyncioTestCase):
         adapter, runner = _adapter(binding=_binding())
         ref = await adapter.start(_launch_spec())
         receipt = await adapter.collect_result(ref)
-        self.assertEqual(receipt.process_ref.run_id, ref.run_id)
+        self.assertEqual(receipt.process_ref, ref)
+        self.assertIsNot(receipt.process_ref, ref)
+        self.assertEqual(receipt.result.run_id, ref.run_id)
         self.assertEqual(runner.collections, [ref.run_id])
         # A result minted for a different run is a replacement: refused.
         runner.collect_receipt_run = "run-other"
         with self.assertRaises(HermesWorkerAdapterError):
             await adapter.collect_result(ref)
+
+    async def test_collection_refuses_same_run_replacements_and_malformed_receipts(self):
+        import dataclasses
+
+        adapter, runner = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        original = await runner.collect(ref)
+        changed_refs = (
+            dataclasses.replace(ref, pid=ref.pid + 1),
+            dataclasses.replace(ref, pgid=ref.pgid + 1),
+            dataclasses.replace(ref, process_start_identity="replacement-start"),
+            dataclasses.replace(ref, boot_session_id="replacement-boot"),
+            dataclasses.replace(ref, launch_nonce="replacement-nonce"),
+        )
+        receipts = [
+            ("same-run process replacement", dataclasses.replace(original, process_ref=changed))
+            for changed in changed_refs
+        ] + [
+            ("foreign result run", dataclasses.replace(original,
+                result=dataclasses.replace(original.result, run_id="run-other"))),
+            ("invalid receipt", object()),
+            ("invalid process ref", dataclasses.replace(original, process_ref=None)),
+            ("invalid result", dataclasses.replace(original, result=None)),
+        ]
+        for label, receipt in receipts:
+            with self.subTest(label=label, receipt=repr(receipt)):
+                async def collect(_ref):
+                    return receipt
+                runner.collect = collect
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.collect_result(ref)
+        self.assertEqual(len(runner.launches), 1)
+        self.assertEqual(runner.terminations, [])
+
+    async def test_collection_after_reattach_survives_expired_launch_lease(self):
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+
+        started = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
+        runner = FakeNativeRunner()
+        binding = _binding(lease_expiry=(started + timedelta(minutes=1)).isoformat())
+        first = HermesWorkerAdapter(runner, lambda spec: binding,
+            FakeInspector(), clock=lambda: started)
+        with tempfile.TemporaryDirectory(prefix="mmos-wo10-collect-") as directory:
+            run_dir = Path(directory)
+            (run_dir / "input").mkdir()
+            spec = _launch_spec(run_dir=run_dir)
+            ref = await first.start(spec)
+            recovery = _recovery_binding(spec, ref)
+
+            def no_new_binding(spec):
+                raise AssertionError("original collection must not reacquire launch admission")
+
+            recovered = HermesWorkerAdapter(runner, no_new_binding, FakeInspector(),
+                clock=lambda: started + timedelta(minutes=2),
+                fence_source=no_new_binding)
+            reattached = recovered.reattach(spec, recovery)
+            receipt = await recovered.collect_result(reattached)
+            self.assertEqual(receipt.process_ref, ref)
+            self.assertIsNot(receipt.process_ref, ref)
+            self.assertEqual(receipt.result.run_id, ref.run_id)
+        self.assertEqual(len(runner.launches), 1)
+        self.assertEqual(runner.terminations, [])
 
     async def test_unknown_or_swapped_refs_are_refused(self) -> None:
         adapter, _ = _adapter(binding=_binding())
@@ -592,6 +657,78 @@ def _recovery_binding(
         adapter_id="hermes-native", spec=spec, process_ref=ref,
         prompt_path=prompt_path,
     )
+
+
+
+
+class ExecutionBindingCompatOptInTests(unittest.TestCase):
+    def test_default_contract_values_remain_compatible_as_record_and_mapping(self):
+        from control_plane.execution_binding_compat import binding_for_launch_spec
+
+        binding = _binding(fence_counter=0, lease_expiry="")
+        for payload in (binding, binding.to_dict()):
+            with self.subTest(wire=isinstance(payload, dict)):
+                admitted = binding_for_launch_spec(_launch_spec(), payload, required=True)
+                self.assertEqual(admitted, binding)
+
+    def test_issuance_is_required_only_when_explicitly_requested(self):
+        from control_plane.execution_binding_compat import (
+            BINDING_FENCE_NOT_CURRENT, BINDING_LEASE_REQUIRED,
+            ExecutionBindingCompatError, binding_for_launch_spec,
+        )
+
+        for binding, code in (
+                (_binding(lease_expiry=""), BINDING_LEASE_REQUIRED),
+                (_binding(fence_counter=0), BINDING_FENCE_NOT_CURRENT)):
+            with self.subTest(code=code):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(), binding,
+                        required=True, require_issued=True)
+                self.assertEqual(error.exception.code, code)
+        binding = _binding()
+        self.assertIs(binding_for_launch_spec(_launch_spec(), binding,
+            required=True, require_issued=True), binding)
+
+    def test_current_fence_is_independent_of_the_issuance_lease_requirement(self):
+        from control_plane.execution_binding_compat import (
+            BINDING_FENCE_NOT_CURRENT, ExecutionBindingCompatError,
+            binding_for_launch_spec,
+        )
+
+        binding = _binding(lease_expiry="")
+        self.assertIs(binding_for_launch_spec(_launch_spec(), binding,
+            required=True, current_fence=7), binding)
+        for current in (0, -1, True, 7.0, "7", 8):
+            with self.subTest(current=current):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(), binding,
+                        required=True, current_fence=current)
+                self.assertEqual(error.exception.code, BINDING_FENCE_NOT_CURRENT)
+        for fence in (0, True, 7.0):
+            with self.subTest(binding_fence=fence):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(),
+                        _binding(lease_expiry="", fence_counter=fence),
+                        required=True, current_fence=7)
+                self.assertEqual(error.exception.code, BINDING_FENCE_NOT_CURRENT)
+
+    def test_issuance_and_current_fence_can_both_be_required(self):
+        from control_plane.execution_binding_compat import (
+            BINDING_FENCE_NOT_CURRENT, BINDING_LEASE_REQUIRED,
+            ExecutionBindingCompatError, binding_for_launch_spec,
+        )
+
+        binding = _binding()
+        self.assertIs(binding_for_launch_spec(_launch_spec(), binding,
+            required=True, require_issued=True, current_fence=7), binding)
+        for binding, current, code in (
+                (_binding(), 8, BINDING_FENCE_NOT_CURRENT),
+                (_binding(lease_expiry=""), 7, BINDING_LEASE_REQUIRED)):
+            with self.subTest(code=code):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(), binding,
+                        required=True, require_issued=True, current_fence=current)
+                self.assertEqual(error.exception.code, code)
 
 
 if __name__ == "__main__":  # pragma: no cover
