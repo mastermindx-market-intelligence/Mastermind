@@ -783,7 +783,8 @@ def test_route_row_proposal_loads_through_the_real_router(tmp_path):
 
     live_before = _ROUTES.read_bytes()
     live = json.loads(live_before)
-    assert "t3" not in live["providers"]  # the live file stays untouched
+    # R5 landed the approved staged row (disabled): the live file carries it.
+    assert live["providers"]["t3"] == _proposal_row()
     merged = json.loads(json.dumps(live))
     merged["providers"]["t3"] = _proposal_row()
     proposed = tmp_path / "executive_worker_routes.json"

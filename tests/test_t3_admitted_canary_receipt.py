@@ -118,9 +118,12 @@ class L1ReceiptStructureTests(unittest.TestCase):
         self.assertIs(route["provider_autonomous_allowed"], False)
         self.assertIn("T3_NATIVE_ROUTE_ROW_PROPOSAL.md", route["t3_row_source"])
         self.assertRegex(route["scratch_sha256"], _HEX64)
-        # The live protected file still has NO t3 provider row.
+        # The live protected file carries the approved STAGED t3 row, disabled (R5).
         live = json.loads(LIVE_ROUTES.read_text())
-        self.assertNotIn("t3", live["providers"])
+        staged = live["providers"]["t3"]
+        self.assertEqual(staged["adapter_id"], "t3-native")
+        self.assertIs(staged["enabled"], False)
+        self.assertIs(staged["production_armed"], False)
 
     def test_environment_project_and_namespaces(self) -> None:
         receipt = _receipt()
