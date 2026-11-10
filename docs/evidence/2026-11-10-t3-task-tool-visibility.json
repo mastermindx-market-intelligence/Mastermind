@@ -293,5 +293,74 @@
     "Native governed Executive T3 launch/settlement",
     "Paperclip/Hermes bidirectional model consumption",
     "Whole-project interruption recovery"
-  ]
+  ],
+  "live_adoption": {
+    "verification_mode": "read-only bounded metadata observation; no launch, restart, cancel or model call",
+    "install_cutoff_utc": "2026-11-10T10:44:06.673272Z",
+    "observed_activity_through_utc": "2026-11-10T10:57:19.446Z",
+    "consumers": [
+      {
+        "kind": "delegated_native_child",
+        "log": "events.thread-delegated-task-command-3amcp-3a3e28f1d7-e94d-4bba-abb0-f31cd1d12232-3adel-5027c019abd43b54.log",
+        "init_utc": "2026-11-10T10:44:48.476Z",
+        "model": "glm-5.3",
+        "provider": "capacity_fabric",
+        "cli_version": "2.1.319",
+        "tool_count": 180,
+        "task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "tool_array_sha256": "671e37e4761d6df9b9c1bcc33d90eca43bff19f7074e6796f4a569eeebb864a6"
+      },
+      {
+        "kind": "existing_native_root",
+        "log": "events.2f136a11-91f9-4bca-bf10-8a1d8b7f4e5d.log",
+        "init_utc": "2026-11-10T10:50:31.928Z",
+        "model": "claude-fable-5-2",
+        "provider": "capacity_fabric",
+        "cli_version": "2.1.319",
+        "tool_count": 182,
+        "task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "tool_array_sha256": "f6ea896d3ea7518f0039bd90e4a9c252422cd72114cd90a10251f7585c56911a"
+      }
+    ],
+    "digest_encoding": "SHA-256 of UTF-8 compact JSON of complete native initialization tool array",
+    "later_task_tool_invocation_observed": false,
+    "visual_rendering_observed": false,
+    "background_task_started_is_plan_progress": false
+  },
+  "execution_boundaries": {
+    "browser": {
+      "surface": "http://127.0.0.1:3773",
+      "observed_state": "Pair with this environment; trusted pairing credential required; desktop-managed",
+      "pairing_attempted": false,
+      "credential_extracted": false
+    },
+    "executive": {
+      "projection_reads": "session_targets and executive_fabric roots timed out",
+      "state_receipt_utc": "2026-11-10T10:56:42.309722Z",
+      "server_version": "1.5.0",
+      "error_code": "backend_unavailable",
+      "meaning": "installed reader unavailable; no admission denial or execution ineligibility inferred"
+    },
+    "estate": {
+      "pr": 2424,
+      "head": "95762fc3700598a7be1a12b8c6c1995753071eed",
+      "state": "open Ready; retained named work; currently running source writer not established"
+    },
+    "release": {
+      "parent_pr": 2367,
+      "head": "f6c794d228c9ffa0d9d95c508aea61d99a85d63e",
+      "state": "open unmerged; existing auto-merge preserved"
+    },
+    "future_execution_claimed": false
+  }
 }

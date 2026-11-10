@@ -47,7 +47,9 @@ Exact preimages, backups and postimage readback establish the only semantic chan
 as that one environment key. Existing 24/5 native concurrency/depth settings were
 preserved; those values are not Executive admission grants. T3's live application
 settings, running sessions, router services and default model were not changed.
-This is next-session configuration; current sessions are not claimed reloaded.
+This is next-session configuration; existing sessions were not force-reloaded.
+A later bounded log observation found fresh native initialization in an existing
+Fable root and a delegated GLM child with all four Task tools present.
 
 ### Discriminating evidence
 
@@ -62,8 +64,13 @@ This is next-session configuration; current sessions are not claimed reloaded.
 - With tool search disabled equally in a separate A/B pair, all four appear in
   the repaired model-request tool definitions and remain absent in the baseline.
   Default deferred tool search remains unchanged in production.
+- Live post-install adoption was observed without creating a new session: an
+  existing delegated GLM child initialized at 10:44:48.476Z with 180 tools and a
+  Fable root initialized at 10:50:31.928Z with 182 tools. Both used the existing
+  `capacity_fabric` provider and exposed TaskCreate/Get/List/Update.
 - Configured, initialized, model-used and visually rendered are separate evidence.
-  A fresh real T3 task-progression and resume journey remains owed.
+  A bounded scan found no later Task tool invocation in those two logs. A real
+  task-progression and resume journey remains owed.
 
 Exact evidence: [2026-11-10-t3-task-tool-visibility.json](evidence/2026-11-10-t3-task-tool-visibility.json).
 Reproducible offline runtime proof: [qualify_t3_task_tools.py](../scripts/qualify_t3_task_tools.py).
@@ -72,8 +79,8 @@ Reproducible offline runtime proof: [qualify_t3_task_tools.py](../scripts/qualif
 
 | Capability | Evidence and owner | Readiness |
 | --- | --- | --- |
-| Fable/Capacity native sessions | Actual installed Fable init; #2367 Capacity registration | Observed live native execution, scoped to those sessions |
-| Visible task steps | Existing runtime/UI; this task-tool repair and installed configuration | Tool availability repaired; fresh production use/visual proof pending |
+| Fable/Capacity native sessions | Actual installed Fable init; #2367 Capacity registration | Live native initialization observed; later streaming scoped to those sessions |
+| Visible task steps | Existing runtime/UI; this task-tool repair and installed configuration | Repaired and adopted by live Fable/GLM initialization; actual task use/visual proof pending |
 | COO → domain lead → worker | Merged #2394 hierarchy and #2414 real native continuation canary | Native path partially proven; broader governed acceptance separate |
 | Company-governed nested admission | #2424 existing Executive hierarchy: depth 3, at most 16 retained descendants, narrowed grants and conserved ancestor accounting | Source implemented; actual native T3 scope/settlement not qualified |
 | Original mission and scope through steering/compaction | #2375 `336062e39625b4231553fd725af01931fa5df87c` and #2424 | Source and isolated API proof; selected installed model journey pending |
@@ -113,6 +120,43 @@ what remains blocked and what happens next. Delivered, awakened, started, result
 returned, parent consumed and accepted remain distinct states. The original project
 conversation is the return destination; a late result must not attach to whichever
 session happens to be newest.
+
+## Final observed execution frontier
+
+The original contribution is [PR #2431](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2431),
+targeting the existing #2367 router branch. #2367 remains open at its recorded
+head with its existing auto-merge configuration. No release hold or other writer
+was altered. The independent task-tool repair is installed and verified; whole
+harness acceptance remains incomplete.
+
+The connected Chrome surface reached the actual T3 listener at
+`http://127.0.0.1:3773`. The rendered page requires a trusted pairing credential
+and states that the environment is desktop-managed. No explicitly issued pairing
+credential was available in this session. No credential was extracted, no new
+pairing was created, and no visible plan acceptance is claimed.
+
+Two read-only Executive ownership projections timed out. A subsequent canonical
+`executive_state` receipt at 10:56:42.309722Z returned server 1.5.0,
+`backend_unavailable`: the Executive reader is unavailable in the installed
+backend. This is a reader/transport boundary, not a security denial and not proof
+that submission or execution is unavailable. It leaves current owner and
+admission state unqualified; it does not justify duplicating or taking over an
+original native operation.
+
+A bounded same-log metadata observation shows actual live native work through
+10:57Z, including compaction, background task lifecycle and streaming. These
+events do not prove that the estate integration's source writer is running, nor
+do they prove task-plan progress. #2424 was refreshed at the same exact head and
+still names the project-help consumer and original callback binding as current
+owned work. Its installed cutover, credential and original-operation fences
+remain in effect.
+
+The next consumer proof is one admitted original T3 task/progress journey
+through a trusted native surface. Then finish the current #2424 help/callback
+implementation and perform its original installed return/recovery canary.
+Do not replay this configuration install, the 16 passing tests or the five-case
+CLI qualification absent a relevant change. No new watcher, background runner
+or future execution commitment was created.
 
 ## Remaining acceptance, through existing carriers
 
