@@ -81,6 +81,19 @@ describe("classifyGatewayState — distinct conversation states per HS01", () =>
       classifyGatewayState("EFFECT_UNKNOWN", "NATIVE_INSTALL_UNAVAILABLE"),
     ).toBe("viewer-disconnected");
   });
+
+  it("NM-06: a stopped gateway is its own state — never busy or disconnected", () => {
+    for (const code of ["NATIVE_GATEWAY_STOPPED", "NATIVE_GATEWAY_NOT_RUNNING"]) {
+      expect(classifyGatewayState("UNAVAILABLE", code)).toBe("gateway-stopped");
+    }
+    expect(
+      new Set([
+        classifyGatewayState("UNAVAILABLE", "NATIVE_GATEWAY_STOPPED"),
+        classifyGatewayState("UNAVAILABLE", "NATIVE_BUSY"),
+        classifyGatewayState("UNAVAILABLE", "NATIVE_CLIENT_UNAVAILABLE"),
+      ]),
+    ).toEqual(new Set(["gateway-stopped", "gateway-busy", "viewer-disconnected"]));
+  });
 });
 
 describe("TeamWorkspace roster (TD01/TS01) on Director B's contract", () => {
@@ -264,7 +277,7 @@ describe("TeamWorkspace roster (TD01/TS01) on Director B's contract", () => {
     expect(facts).toContain("none"); // gateway.source
   });
 
-  it("labels the four distinct non-live gateway states (HS01)", () => {
+  it("labels the five distinct non-live gateway states (HS01 + NM-06)", () => {
     const cases: {
       gateway: { state: string | null; code: string | null };
       label: string;
@@ -280,6 +293,11 @@ describe("TeamWorkspace roster (TD01/TS01) on Director B's contract", () => {
         gateway: { state: "UNAVAILABLE", code: "NATIVE_BUSY" },
         label: "Gateway busy",
         note: /handling one operation/i,
+      },
+      {
+        gateway: { state: "UNAVAILABLE", code: "NATIVE_GATEWAY_STOPPED" },
+        label: "Gateway stopped",
+        note: /its owner starts it.*no automatic restart or reconnect/i,
       },
       {
         gateway: { state: "UNAVAILABLE", code: "NATIVE_QUOTA_LIMIT" },
