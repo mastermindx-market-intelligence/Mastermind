@@ -73,6 +73,10 @@ uncommitted in dead checkouts.
   HTTP 429 or 503, `FABRIC_ALL_ROUTES_COOLING`, or "tool result missing": stop dispatching.
   Do not re-send. List threads by title (`t3_thread_list`, `includeSubagents`) to see what
   actually started. Commit and push what exists. Return to the parent with the state.
+- One child that dies on a single gateway error (502, a dropped stream) while the router answers
+  a canary is restarted in its own thread: it keeps what it read. A new task is for a thread
+  that is looping, very long (300 items or more), or whose model is refusing. Before either,
+  list same-title threads; someone else may already have restarted it.
 - Every `delegate_task` carries a unique `clientRequestId`. One writer per output: before any
   dispatch that follows an errored turn, list same-title children first.
 - Work is pushed to the lane branch on origin after every slice that passes its check, and at
