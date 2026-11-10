@@ -1,10 +1,10 @@
 # Mastermind OS — T3 conversations and persistent teammates
 ## Revision 7 source brief and implementation change order for Fable
 
-**Date:** 10 November 2026 (America/Vancouver).  
-**Scope:** Reconcile the current Mastermind OS build, latest masterplan and Paper designs; update the existing Fable programme. This is an architecture and implementation brief, not an installation, runtime admission, migration or product-acceptance receipt.  
-**Current user intent:** Make the everyday company harness as simple and responsive as the user's successful T3 Code / DeepSeek Harness experience. Provide persistent teammates, real live conversation, project continuity and company work without exposing the complexity or defects of the Paperclip and Hermes apps.  
-**Protected procedure pin:** Mastermind d8240eb033a3025aaa119a61c2adec8fb943b27c; sol skillpack 1.0.1, bootstrap major 1. INDEX and applicable laws were read at this pin.  
+**Date:** 10 November 2026 (America/Vancouver).
+**Scope:** Reconcile the current Mastermind OS build, latest masterplan and Paper designs; update the existing Fable programme. This is an architecture and implementation brief, not an installation, runtime admission, migration or product-acceptance receipt.
+**Current user intent:** Make the everyday company harness as simple and responsive as the user's successful T3 Code / DeepSeek Harness experience. Provide persistent teammates, real live conversation, project continuity and company work without exposing the complexity or defects of the Paperclip and Hermes apps.
+**Protected procedure pin:** Mastermind d8240eb033a3025aaa119a61c2adec8fb943b27c; sol skillpack 1.0.1, bootstrap major 1. INDEX and applicable laws were read at this pin.
 **Programme:** Continue the current Fable-led integration and its existing writers. No new programme, executive root, worker assignment or parallel app is created by reading this document.
 
 ## 1. Decision
