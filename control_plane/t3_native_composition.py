@@ -25,6 +25,13 @@ T3EnvironmentProjection` as the endpoint carrier (``server_endpoint``), with
   ``T3_NOT_ENROLLED`` composition result, never an exception at import or
   composition time: the t3-native route stays unselected until it is
   enrolled.
+* **Launch arguments (G1)** — T3's ``t3_thread_launch`` requires
+  ``projectId``/``workspaceStrategy``; they are read from a JSON FILE named
+  by ``MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE`` (path-only, like the token
+  file) under a closed ``{projectId, workspaceStrategy}`` schema with
+  ``environmentId`` refused.  On the default port path an enrolled host
+  with no usable launch arguments is a typed ``T3_ENROLLMENT_BROKEN`` —
+  never a port whose every launch would fail upstream.
 * **Port + transport** — ``T3McpToolPort.from_access_token`` over a minimal
   stdlib streamable-HTTP MCP transport defined in this module (control_plane
   must not import the ``integrations`` package; the donor client stays a
@@ -75,6 +82,24 @@ from control_plane.t3_execution_adapter import (
 #: The token itself is never an environment variable value (it would land in
 #: process listings and crash reports); only its path is configuration.
 T3_MCP_ACCESS_TOKEN_FILE_ENV = "MASTERMIND_T3_MCP_ACCESS_TOKEN_FILE"
+
+#: Environment variable naming the FILE that holds the ``t3_thread_launch``
+#: launch arguments (``projectId`` + ``workspaceStrategy``).  T3's native
+#: launch REQUIRES them (the L1 admitted canary could only launch by riding
+#: them through ``port_factory``); like the token file, only the PATH is
+#: configuration — never the arguments inline in the environment.
+T3_LAUNCH_ARGUMENTS_FILE_ENV = "MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE"
+
+#: The closed launch-arguments schema: exactly these keys, nothing else
+#: (``environmentId`` is refused explicitly — the port already refuses
+#: linked-environment forwarding, and the composition refuses it with a
+#: visible reason BEFORE any port exists).
+#: ``providerInstanceId`` names the T3 provider instance that serves the
+#: claimed route's model (the port fills it into modelSelection; it is never
+#: sent as a top-level launch argument).
+T3_LAUNCH_ARGUMENT_ALLOWED_KEYS = frozenset(
+    {"projectId", "workspaceStrategy", "providerInstanceId"}
+)
 
 #: Local default MCP endpoint (host:port form for the projection carrier).
 T3_MCP_DEFAULT_ENDPOINT = "127.0.0.1:3773"
@@ -198,6 +223,93 @@ def _read_access_token(token_file: Path) -> str:
             f"t3 access token file {token_file} is empty"
         )
     return token
+
+
+def resolve_t3_launch_arguments_file(
+    launch_arguments_file: str | Path | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> Path | None:
+    """Resolve the launch-arguments FILE path; ``None`` means not configured.
+
+    Mirrors :func:`resolve_t3_access_token_file`: an explicit path wins,
+    otherwise the environment variable names it.  Reads only the path.
+    """
+    if launch_arguments_file is not None:
+        return Path(launch_arguments_file)
+    env = os.environ if environ is None else environ
+    value = env.get(T3_LAUNCH_ARGUMENTS_FILE_ENV, "").strip()
+    return Path(value) if value else None
+
+
+def _read_launch_arguments(path: Path) -> dict[str, Any]:
+    """Read + closed-schema-validate the launch-arguments file (G1).
+
+    Fail-closed and typed (never a bare ``OSError``/``ValueError`` into the
+    service seam): only ``projectId`` and ``workspaceStrategy`` are admitted;
+    ``environmentId`` is refused with its own reason (linked-environment
+    forwarding — the port refuses it at launch too, but a configured file
+    must fail VISIBLE at composition, before any owner exists).
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path} is unreadable: "
+            f"{type(exc).__name__}"
+        ) from exc
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path} is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path} must hold a JSON object"
+        )
+    if "environmentId" in payload:
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path} refuses environmentId: "
+            "linked-environment forwarding changes the error semantics the "
+            "lost-reply classifier relies on (the port refuses it at launch "
+            "too; nothing was sent)"
+        )
+    extra = sorted(str(key) for key in set(payload)
+                   - T3_LAUNCH_ARGUMENT_ALLOWED_KEYS)
+    if extra:
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path} carries unknown keys {extra}; "
+            f"only {sorted(T3_LAUNCH_ARGUMENT_ALLOWED_KEYS)} are allowed"
+        )
+    if not payload:
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path} carries no launch arguments; "
+            "expected projectId and/or workspaceStrategy"
+        )
+    project_id = payload.get("projectId")
+    if "projectId" in payload and (
+        not isinstance(project_id, str) or not project_id.strip()
+    ):
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path}: projectId must be a non-empty "
+            "string"
+        )
+    workspace = payload.get("workspaceStrategy")
+    instance = payload.get("providerInstanceId")
+    if "providerInstanceId" in payload and (
+        not isinstance(instance, str) or not instance.strip()
+    ):
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path}: providerInstanceId must be a "
+            "non-empty string"
+        )
+    if "workspaceStrategy" in payload and not isinstance(workspace, dict):
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path}: workspaceStrategy must be a "
+            "JSON object"
+        )
+    return dict(payload)
 
 
 def _endpoint_url(
@@ -498,6 +610,8 @@ def compose_t3_native_adapter(
     *,
     inspector: Any = None,
     token_file: str | Path | None = None,
+    launch_arguments: Mapping[str, Any] | None = None,
+    launch_arguments_file: str | Path | None = None,
     endpoint: str | None = None,
     projection: Any = None,
     clock: Any = None,
@@ -511,12 +625,35 @@ def compose_t3_native_adapter(
 
     Fail-closed and typed: an absent token file yields
     ``T3_NOT_ENROLLED`` (the route stays unselected); a CONFIGURED but
-    broken enrollment (unreadable, empty or malformed token file) yields
-    ``T3_ENROLLMENT_BROKEN`` with a visible reason — never an exception at
-    composition time, and never a silent capability gap.  A present, valid
-    token builds the port over the SAME token the transport sends and
-    constructs the adapter through the reviewed instantiation path.
+    broken enrollment (unreadable, empty or malformed token file, or — G1 —
+    a launch-arguments file that is absent, unreadable, malformed, outside
+    the closed ``{projectId, workspaceStrategy}`` schema, or carrying
+    ``environmentId``) yields ``T3_ENROLLMENT_BROKEN`` with a visible
+    reason — never an exception at composition time, and never a silent
+    capability gap.  A present, valid token builds the port over the SAME
+    token the transport sends and constructs the adapter through the
+    reviewed instantiation path.
+
+    Launch arguments (G1): T3's ``t3_thread_launch`` requires
+    ``projectId``/``workspaceStrategy``, so whenever THIS composition builds
+    the port (no ``port_factory``) a valid launch-arguments source is
+    REQUIRED — the explicit ``launch_arguments=`` mapping, or the file named
+    by ``MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE`` — and an enrolled host
+    without one is a typed ``T3_ENROLLMENT_BROKEN`` (never a port whose
+    every launch would fail upstream).  A ``port_factory`` caller owns port
+    construction entirely (the canary pattern: launch arguments ride the
+    factory), so the file is not required there; combining a ``port_factory``
+    with an explicit launch-arguments source is a contradictory call and
+    raises typed at composition time.
     """
+    if port_factory is not None and (
+        launch_arguments is not None or launch_arguments_file is not None
+    ):
+        raise T3NativeCompositionError(
+            "port_factory owns port construction (launch arguments ride the "
+            "factory); passing launch_arguments or launch_arguments_file "
+            "together with port_factory is contradictory"
+        )
     placement = store_placement or resolve_t3_adapter_store_placement(runtime)
     url = _endpoint_url(endpoint, projection)
     resolved_file = resolve_t3_access_token_file(token_file, environ=environ)
@@ -539,6 +676,95 @@ def compose_t3_native_adapter(
             endpoint_url=url,
             reason=str(exc),
         )
+    # Attest the token BEFORE any other enrollment fault so a broken
+    # CREDENTIAL keeps its visible "does not attest" reason (review #3 B1)
+    # regardless of the launch-arguments state.  This is the SAME check
+    # ``T3McpToolPort.from_access_token`` runs at construction — same token,
+    # nothing between — so a port built below cannot attest differently.
+    from control_plane.t3_execution_adapter import t3_mcp_upstream_namespace
+    try:
+        t3_mcp_upstream_namespace(token)
+    except T3NamespaceAttestationError as exc:
+        return T3NativeComposition(
+            status=COMPOSITION_ENROLLMENT_BROKEN,
+            store_placement=placement,
+            endpoint_url=url,
+            reason=(
+                f"access token file {resolved_file} does not attest an "
+                f"MCP-client bearer session: {exc}"
+            ),
+        )
+    resolved_launch_file = resolve_t3_launch_arguments_file(
+        launch_arguments_file, environ=environ
+    )
+    if launch_arguments is not None and resolved_launch_file is not None:
+        return T3NativeComposition(
+            status=COMPOSITION_ENROLLMENT_BROKEN,
+            store_placement=placement,
+            endpoint_url=url,
+            reason=(
+                "both explicit launch_arguments and a launch arguments file "
+                f"({T3_LAUNCH_ARGUMENTS_FILE_ENV} or launch_arguments_file) "
+                "are configured; refusing an ambiguous launch configuration"
+            ),
+        )
+    port_launch_arguments: dict[str, Any] | None = None
+    try:
+        if launch_arguments is not None:
+            if not isinstance(launch_arguments, Mapping):
+                raise T3NativeCompositionError(
+                    "launch_arguments must be a mapping"
+                )
+            # The explicit caller source gets the SAME closed-schema law as
+            # the file (the port would refuse environmentId at launch; a
+            # composition-time refusal is visible before any owner exists).
+            if "environmentId" in launch_arguments:
+                raise T3NativeCompositionError(
+                    "launch_arguments refuse environmentId: linked-environment "
+                    "forwarding changes the error semantics the lost-reply "
+                    "classifier relies on (the port refuses it at launch too; "
+                    "nothing was sent)"
+                )
+            extra = sorted(
+                str(key) for key in set(launch_arguments)
+                - T3_LAUNCH_ARGUMENT_ALLOWED_KEYS
+            )
+            if extra:
+                raise T3NativeCompositionError(
+                    f"launch_arguments carry unknown keys {extra}; only "
+                    f"{sorted(T3_LAUNCH_ARGUMENT_ALLOWED_KEYS)} are allowed"
+                )
+            if not launch_arguments:
+                raise T3NativeCompositionError(
+                    "launch_arguments carry no launch arguments; expected "
+                    "projectId and/or workspaceStrategy"
+                )
+            port_launch_arguments = dict(launch_arguments)
+        elif resolved_launch_file is not None:
+            port_launch_arguments = _read_launch_arguments(resolved_launch_file)
+        elif port_factory is None:
+            # G1 fail-closed law: this composition builds the port, and a
+            # port without launch arguments can never satisfy T3's required
+            # projectId/workspaceStrategy — a launch that would fail
+            # upstream must be refused at composition, visibly.
+            return T3NativeComposition(
+                status=COMPOSITION_ENROLLMENT_BROKEN,
+                store_placement=placement,
+                endpoint_url=url,
+                reason=(
+                    "no t3 launch arguments configured: t3_thread_launch "
+                    "requires projectId/workspaceStrategy (configure "
+                    f"{T3_LAUNCH_ARGUMENTS_FILE_ENV} naming a JSON file, or "
+                    "pass launch_arguments=)"
+                ),
+            )
+    except T3NativeCompositionError as exc:
+        return T3NativeComposition(
+            status=COMPOSITION_ENROLLMENT_BROKEN,
+            store_placement=placement,
+            endpoint_url=url,
+            reason=str(exc),
+        )
     try:
         if port_factory is not None:
             # A test-injected port over the same token (no real transport).
@@ -551,7 +777,13 @@ def compose_t3_native_adapter(
             )
             # COMPOSITION PRECONDITION (re-check M2): attestation and transport
             # are built from the SAME token, right here, with nothing between.
-            port = T3McpToolPort.from_access_token(transport.call_tool, token)
+            # G1: the launch arguments (projectId/workspaceStrategy) ride the
+            # port's own launch_arguments seam — the same seam the canary
+            # proved live.
+            port = T3McpToolPort.from_access_token(
+                transport.call_tool, token,
+                launch_arguments=port_launch_arguments,
+            )
     except T3NamespaceAttestationError as exc:
         # A configured token that cannot attest an MCP-client session is a
         # BROKEN enrollment, not an unenrolled host and not a service crash
@@ -871,10 +1103,18 @@ def compose_t3_native_owners_for_service(
     t3-native workers composes NOTHING — the existing supervisor composition
     stays byte-identical, and the primary is never touched at all.  A
     CONFIGURED-but-broken enrollment (unreadable, empty or malformed token
-    file) surfaces as a typed, VISIBLE ``T3_ENROLLMENT_BROKEN`` result at
-    startup (module log, with the reason) and composes no owner — fail-closed
-    for the t3-native lane only, never a crash of the paid/plain/fabric
-    lanes around it (review #3 B1).
+    file, or — G1 — an absent/broken launch-arguments file while the token
+    IS configured) surfaces as a typed, VISIBLE ``T3_ENROLLMENT_BROKEN``
+    result at startup (module log, with the reason) and composes no owner —
+    fail-closed for the t3-native lane only, never a crash of the
+    paid/plain/fabric lanes around it (review #3 B1).
+
+    The whole t3-native enrollment is env-only here: the token file comes
+    from ``MASTERMIND_T3_MCP_ACCESS_TOKEN_FILE`` and the launch arguments
+    (projectId/workspaceStrategy) from ``MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE``
+    (both PATHS, both threaded through ``environ`` into
+    :func:`compose_t3_native_adapter` — the installed Executive configures
+    this lane with no code).
 
     Review #3 (B1 MAJOR): enrollment is resolved BEFORE any ``primary``
     attribute is read — the seam must not require stand-in primaries to

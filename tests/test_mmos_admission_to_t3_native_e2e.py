@@ -414,6 +414,9 @@ def test_e2e_admission_to_t3_native_launch_seal_and_return(tmp_path):
         envelope.request_namespace)
     assert record["attempt"]["t3_thread_id"] == e2e.ref.provider_session_id
     assert record["attempt"]["seal_digest"]
+    # G3: attempt.root_id is the COMPANY ROOT of the original request (the
+    # handoff's root_ref), never the placement Job's own ledger id (JOB-N).
+    assert record["attempt"]["root_id"] == "hermes-root-1"
 
     events = _delivery_events(e2e.runtime, e2e.attempt_id)
     assert len(events) == 1

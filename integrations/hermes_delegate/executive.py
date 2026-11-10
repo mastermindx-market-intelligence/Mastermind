@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import re
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
@@ -37,6 +38,65 @@ _PRINCIPAL_CONTEXT_KEYS = frozenset({
     "work_ref", "principal_binding_digest", "mission_authority_ref",
     "authority_generation_digest",
 })
+
+#: The core-private selected-child admission action (WO-13).  The same
+#: literal is a member of ``control_plane.executive_service``'s
+#: ``_SELECTED_CHILD_ACTIONS``; the model-facing parser refuses it by
+#: design (PR #2317: the App-side forwarding arrives with WO-12).
+CHILD_REQUEST_ADMIT_ACTION = "selected_child_admit"
+#: The host-frozen child-request admission command id (WO-13's
+#: ``admission_command_id``: ``"child-request:" + sha256(triple)``).
+CHILD_REQUEST_COMMAND_RE = re.compile(r"^child-request:[0-9a-f]{64}$")
+
+
+def validate_child_request_admit_frame(frame: Any) -> dict[str, Any]:
+    """Validate one closed private App-to-Control child-request admit frame.
+
+    Same law as :func:`validate_selected_child_frame` — every authority
+    field comes from the authenticated App's own providers and is re-proved
+    by the Control — except the request names the core-private
+    ``selected_child_admit`` action and a host-frozen child-request
+    admission command id, shapes the model-facing parser refuses by design.
+    The ``ChildExecutionRequest.v1`` envelope itself never travels through
+    this frame: the trusted host froze it under the command id.
+    """
+
+    if type(frame) is not dict or set(frame) != SELECTED_CHILD_FRAME_KEYS:
+        raise SubmissionError("FRAME_INVALID")
+    if frame["schema"] != SELECTED_CHILD_FRAME_SCHEMA:
+        raise SubmissionError("FRAME_INVALID")
+    request = frame["request"]
+    if (type(request) is not dict
+            or set(request) != {"action", "command"}
+            or request["action"] != CHILD_REQUEST_ADMIT_ACTION
+            or type(request["command"]) is not str
+            or CHILD_REQUEST_COMMAND_RE.fullmatch(request["command"]) is None):
+        raise SubmissionError("FRAME_INVALID")
+    for key in ("target_digest", "capability_profile_digest"):
+        value = frame[key]
+        if type(value) is not str or SHA_RE.fullmatch(value) is None:
+            raise SubmissionError("FRAME_INVALID")
+    principal = frame["principal"]
+    if (type(principal) is not dict or set(principal) != FACT_PRINCIPAL_KEYS
+            or type(principal["scopes"]) is not list or not 1 <= len(principal["scopes"]) <= 16
+            or any(type(scope) is not str or not 1 <= len(scope) <= 96 for scope in principal["scopes"])
+            or principal["scopes"] != sorted(set(principal["scopes"]))
+            or any(type(principal[key]) is not str or not 1 <= len(principal[key]) <= 256
+                   for key in FACT_PRINCIPAL_KEYS - {"scopes"})):
+        raise SubmissionError("FRAME_INVALID")
+    context = frame["principal_context"]
+    if type(context) is not dict or set(context) != _PRINCIPAL_CONTEXT_KEYS:
+        raise SubmissionError("FRAME_INVALID")
+    try:
+        PrincipalAdmissionContext(**context)
+    except (TypeError, ValueError) as exc:
+        raise SubmissionError("FRAME_INVALID") from exc
+    if len(canonical(frame)) > MAX_SELECTED_CHILD_FRAME_BYTES:
+        raise SubmissionError("FRAME_INVALID")
+    return {"schema": frame["schema"], "request": dict(request),
+            "target_digest": frame["target_digest"], "principal": principal,
+            "principal_context": context,
+            "capability_profile_digest": frame["capability_profile_digest"]}
 
 
 def validate_selected_child_frame(frame: Any) -> dict[str, Any]:
