@@ -14,6 +14,7 @@ from .contract import (
 )
 from .installed import PaperclipWorkspaceBinding
 from .runtime_migration import prepare_existing_runtime
+from .connections import project_connections
 
 
 class PaperclipWorkspace:
@@ -184,7 +185,7 @@ class PaperclipWorkspace:
             await self._owned("project", selected["projectId"])
             visible_projects.add(selected["projectId"])
         if view == "overview":
-            names = ("people", "projects", "work", "routines")
+            names = ("people", "projects", "goals", "work", "routines")
             collections = await asyncio.gather(*(self._collection(name, {}) for name in names))
             result["collections"] = dict(zip(names, collections))
         elif view == "task":
@@ -232,6 +233,7 @@ class PaperclipWorkspace:
             for project, work in self.binding.project_bindings if project in visible_projects]
         if any(collection["state"] != "CURRENT" for collection in result["collections"].values()):
             result["state"] = "PARTIAL"
+        result["connections"] = project_connections(result)
         self._check()
         return result
 
