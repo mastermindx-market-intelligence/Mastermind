@@ -308,11 +308,17 @@ export class Teamlink {
     }
   }
   async scan(binding, deadline = Infinity) {
-    if (binding.activeOperationId) return;
+    // An independently completed COO message must not wait for an unrelated
+    // queued/running exchange. Hold only while its native provenance is unknown:
+    // otherwise the tracked run lookup below can safely suppress outbound echo.
+    if (binding.activeOperationId) {
+      const active = await this.store.get(binding.companyId, binding.activeOperationId);
+      if (!active || !active.nativeRun && !finalPhases.has(active.phase)) return { more: false, progressed: false };
+    }
     const result = await this.native.call('scan', { environmentId: binding.environmentId, connectionId: binding.connectionId, projectId: binding.projectId, threadId: binding.threadId, cursor: binding.watchCursor });
-    let nextCursor = result.cursor;
+    let nextCursor = result.cursor, budgetLimited = false, observationError = null;
     for (const message of result.messages) {
-      if (Date.now() >= deadline) { nextCursor = message.position > 0 ? message.position - 1 : null; break; }
+      if (Date.now() >= deadline) { nextCursor = message.position > 0 ? message.position - 1 : null; budgetLimited = true; break; }
       if (message.bindingId !== binding.bindingId) continue;
       const operationId = `t3-${hash([binding.bindingId, message.itemId]).slice(0,48)}`;
       const target = { environmentId: binding.environmentId, projectId: binding.projectId, threadId: binding.threadId, connectionId: binding.connectionId };
@@ -329,37 +335,84 @@ export class Teamlink {
         fingerprint: hash({ bindingId: binding.bindingId, target, ...message }), expiresAt: null };
       const inserted = await this.store.insert(row);
       assert(inserted.row.fingerprint === row.fingerprint, 'NATIVE_MESSAGE_CHANGED');
-      await this.reconcile(inserted.row);
+      const observed = await this.reconcile(inserted.row);
+      if (observed?.lastObservationError && !finalPhases.has(observed.phase)) observationError = observed.lastObservationError;
     }
     // Insert receipts before advancing. A crash repeats observations and dedupes by
     // native item identity; it cannot skip an unrecorded message.
     const current = await this.store.binding(binding.companyId, binding.issueId);
     if (current?.bindingId === binding.bindingId && current.watchCursor === binding.watchCursor) {
-      try { await this.store.saveBinding(binding.companyId, binding.issueId, current.revision, { ...current, watchCursor: nextCursor, scannedAt: stamp(), scanStatus: result.waitingForRun ? 'waiting_for_native_run' : 'observed' }); }
+      try {
+        await this.store.saveBinding(binding.companyId, binding.issueId, current.revision, { ...current, watchCursor: nextCursor, scannedAt: stamp(), scanStatus: result.waitingForRun ? 'waiting_for_native_run' : 'observed' });
+        const progressed = nextCursor !== binding.watchCursor;
+        return { progressed, more: progressed && Boolean(result.hasMore || budgetLimited) && !result.waitingForRun, error: observationError };
+      }
       catch (error) { if (error.message !== 'BINDING_REVISION_CONFLICT') throw error; }
     }
+    return { more: false, progressed: false, error: observationError };
   }
-  async tick() {
+  async reconcileBinding(issueId, bindingId, { deadline = Date.now() + 45000, isCurrent = () => true } = {}) {
+    let binding = await this.store.binding(this.config.companyId, issueId);
+    if (!isCurrent() || binding?.bindingId !== bindingId) return { ok: true, more: false };
+    let more = false, error = null, finalized = 0;
+    const rows = await this.store.pendingForIssue(this.config.companyId, issueId);
+    for (const row of rows) {
+      if (!isCurrent() || Date.now() >= deadline) return { ok: !error, more, error };
+      if (row.bindingId !== bindingId) continue;
+      await this.store.attempted(row.companyId, row.operationId);
+      const observed = await this.reconcile(row);
+      if (observed?.lastObservationError && !finalPhases.has(observed.phase)) error = observed.lastObservationError;
+      if (observed && finalPhases.has(observed.phase) && !finalPhases.has(row.phase)) finalized++;
+      // Only durable progress can request another bounded catch-up pass.
+      // Running turns, held effects and unchanged failures must not spin.
+      if (observed && !observed.lastObservationError && !finalPhases.has(observed.phase)) {
+        if (observed.resultProgress && JSON.stringify(observed.resultProgress) !== JSON.stringify(row.resultProgress)) more = true;
+        if (observed.phase === 'send_unknown' && observed.recoverCursor !== row.recoverCursor) more = true;
+      }
+    }
+    if (rows.length === 32 && finalized > 0) more = true;
+    if (!isCurrent() || Date.now() >= deadline) return { ok: !error, more, error };
+    binding = await this.store.binding(this.config.companyId, issueId);
+    if (binding?.bindingId !== bindingId) return { ok: !error, more: false, error };
+    if (binding.activeOperationId) {
+      const active = await this.store.get(binding.companyId, binding.activeOperationId);
+      if (active && finalPhases.has(active.phase)) {
+        await this.release(active); binding = await this.store.binding(binding.companyId, issueId);
+      }
+    }
+    if (!isCurrent() || binding?.bindingId !== bindingId) return { ok: !error, more: false, error };
+    await this.store.scanAttempted(binding.companyId, issueId);
+    const scanned = await this.scan(binding, deadline);
+    error ||= scanned?.error || null;
+    return { ok: !error, more: more || scanned?.more === true, error };
+  }
+  async tick(exclusive = async (_issueId, work) => work()) {
     if (!this.config.enabled) return;
     const start = Date.now(), deadline = start + 90000;
     const rows = await this.store.list(this.config.companyId);
     for (const row of rows) {
       if (Date.now() >= start + 45000) break;
-      await this.store.attempted(row.companyId, row.operationId);
-      await this.reconcile(row);
+      await exclusive(row.issueId, async () => {
+        await this.store.attempted(row.companyId, row.operationId);
+        await this.reconcile(row);
+      });
     }
     const bindings = await this.store.bindings(this.config.companyId);
     for (let binding of bindings) {
       if (Date.now() >= deadline) break;
       try {
-        await this.store.scanAttempted(binding.companyId, binding.issueId);
-        if (binding.activeOperationId) {
-          const active = await this.store.get(binding.companyId, binding.activeOperationId);
-          if (active && finalPhases.has(active.phase)) {
-            await this.release(active); binding = await this.store.binding(binding.companyId, binding.issueId);
+        await exclusive(binding.issueId, async () => {
+          binding = await this.store.binding(binding.companyId, binding.issueId);
+          if (!binding) return;
+          await this.store.scanAttempted(binding.companyId, binding.issueId);
+          if (binding.activeOperationId) {
+            const active = await this.store.get(binding.companyId, binding.activeOperationId);
+            if (active && finalPhases.has(active.phase)) {
+              await this.release(active); binding = await this.store.binding(binding.companyId, binding.issueId);
+            }
           }
-        }
-        await this.scan(binding, deadline);
+          await this.scan(binding, deadline);
+        });
       }
       catch (e) { this.ctx.logger.warn('Teamlink source observation unavailable', { issueId: binding.issueId, code: /^[A-Z_]+$/.test(e.message) ? e.message : 'OBSERVATION_UNAVAILABLE' }); }
     }
@@ -412,3 +465,4 @@ export class Teamlink {
     return this.native.call('inspect', { environmentId: b.environmentId, connectionId: b.connectionId, projectId: b.projectId, threadId: b.threadId, cursor: params.cursor });
   }
 }
+

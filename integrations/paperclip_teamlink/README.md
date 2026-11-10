@@ -70,13 +70,56 @@ attention run. Arbitrary prose, user messages and tool output are not routed.
 An explicit block inside an already tracked request's original result is not
 echoed as a second incoming exchange.
 
-The existing Paperclip plugin scheduler observes bound native timelines each
-minute. It waits for native completion before advancing over mutable assistant
-content. Receipt insertion precedes cursor advancement, so crashes re-observe
-and deduplicate the same native item. A binding made during an active COO run
-replays bounded native history through its new binding ID to avoid skipping an
-already-streaming item. Initial catch-up and unavailable observations may delay
-delivery; neither is reported as an empty or completed inbox.
+The plugin subscribes to native T3 thread events and schedules reconciliation
+as soon as a bound root changes. It waits for native completion before advancing
+over mutable assistant content. Receipt insertion precedes cursor advancement,
+so crashes re-observe and deduplicate the same native item. A binding made during
+an active COO run replays bounded native history through its new binding ID to
+avoid skipping an already-streaming item. An independent COO message can return
+while another tracked exchange is running; an uncertain outgoing run identity
+still holds the reverse cursor to prevent an echo.
+
+## Event delivery and health
+
+The listener is an owned child of the Paperclip plugin worker. It subscribes to
+T3's existing orchestration thread stream with a short-lived read-only native
+session. It sends only bound root identifiers, sequence hints and health notices
+to the plugin. The stream does not send transcript content or become the receipt
+database. Native event sequences never replace the persisted timeline cursor.
+
+Each event marks its bound issues for a fresh native observation. A 30 ms debounce
+coalesces bursts, with at most two bindings being reconciled concurrently and a
+500 ms minimum interval per binding. Tools, cron, comment-event recovery and
+event reconciliation share the same issue lock. Locked issues do not consume
+slots needed by unrelated roots. Proven cursor progress drains additional pages
+without waiting for another event; an unrelated receipt failure remains visible
+while other pages continue. Waiting runs and unchanged failures cannot spin.
+
+The subscription inventory is paginated and covers up to 512 bindings, in groups
+of at most 128 distinct native roots per helper. Scope mismatches and overflow
+are reported as incomplete coverage. Configuration changes pause admission and
+drain the old generation before replacing it. Shutdown closes the owned helper
+and drains admitted work. No detached process is installed.
+
+Connection loss triggers bounded reconnect backoff and a fresh catch-up. An
+authorization, scope or protocol refusal remains held; it is not retried as a
+connection failure. The existing native cron still reconciles each minute and
+rotates fairly through pending deliveries and bindings. It is the durable
+recovery path after worker restart, missed notifications or degraded coverage.
+Set `realtime: false` to retain only this scheduled path.
+
+Native plugin health reports coverage, ready/requested roots, queued and active
+bindings, reconnect count, event/observation timestamps, dispatch lag and native
+observation duration. Inventory, listener and per-issue observation errors are
+separate; a ready listener cannot clear a failed result observation. Delivery,
+wake request and actual recipient consumption remain distinct receipts.
+
+The debounce is a dispatch setting, not an end-to-end latency guarantee. Native
+observation, database publication, agent admission and model execution take
+additional time. Measure native completion → returned comment → attention
+request → actual consumption separately during consumer acceptance. Initial
+catch-up and unavailable observations can delay delivery and are never reported
+as an empty or completed inbox.
 
 ## Continuity and visibility
 
@@ -120,8 +163,9 @@ Results include observation timestamps and explicit truncation/unavailability.
   Pending native input is surfaced with original request references. Teamlink
   never approves permissions or answers native human-input requests automatically.
 - Fair last-attempt rotation prevents held effects or unavailable bindings from
-  starving later exchanges. Native cron execution is bounded; there are no
-  detached watchers, timers, retry services or retained agent tokens.
+  starving later exchanges. Native cron execution and event catch-up are bounded.
+  Timers and listener processes belong to the plugin lifecycle; there are no
+  detached watchers, retry services or retained agent tokens.
 
 ## Installation and qualification
 
@@ -138,7 +182,8 @@ Use native `paperclipai plugin install <absolute-package-path> --local --json`
 and native company configuration. Required configuration: exact company and T3
 environment IDs; allowed native project IDs; absolute `nativeCliPath`,
 `nodePath`, `pythonPath`, `portPath`, `t3Home`; native listener `t3Port`; and
-`enabled: true`. No tokens or provider credentials belong in configuration.
+`enabled: true`. Event delivery defaults to enabled; `realtime: false` selects
+the scheduled recovery path. No tokens or provider credentials belong in configuration.
 The plugin starts disabled until configuration is present. Use native plugin
 health, jobs and tool discovery to verify startup, migration and company scope.
 
@@ -149,6 +194,11 @@ node --test integrations/paperclip_teamlink/test/*.test.mjs
 python -m unittest discover -s tests -p test_paperclip_teamlink.py -v
 ```
 
+After installing the pinned SDK dependency in this package, also run
+`node test/sdk-lifecycle.mjs`. It uses the SDK's own harness with an empty fake
+database to exercise company scope, concurrent configuration, handler admission
+and shutdown during asynchronous configuration. It makes no live T3 or agent call.
+
 Acceptance additionally requires real consumer proof: a Paperclip bot sends to
 the exact T3 root, receives and consumes the original result, continues with a
 referenced follow-up, and responds to a new COO-initiated question on the same
@@ -158,3 +208,4 @@ observations. Passing unit tests or installing the plugin alone is insufficient.
 To stop new routing, disable the plugin through Paperclip's native controls.
 Retain its database receipts and original source/runtime references. Disabling
 the bridge does not cancel native work already admitted by T3 or Paperclip.
+

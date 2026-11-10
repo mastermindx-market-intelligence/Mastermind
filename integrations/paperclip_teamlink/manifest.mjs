@@ -14,7 +14,7 @@ export const tools = [
 ].map(([name, displayName, description, parametersSchema]) => ({ name, displayName, description, parametersSchema }));
 
 export default {
-  id: 'mastermind.teamlink', apiVersion: 1, version: '1.0.0',
+  id: 'mastermind.teamlink', apiVersion: 1, version: '1.1.0',
   displayName: 'Mastermind Teamlink', author: 'MastermindX',
   description: 'Two-way Paperclip ↔ T3 conversations, exact-run returns, shared project context and live environment visibility.',
   categories: ['automation'],
@@ -32,5 +32,7 @@ export default {
     nativeCliPath: string, nodePath: string, pythonPath: string, portPath: string, t3Home: string,
     t3Port: { type: 'integer', minimum: 1, maximum: 65535 },
     enabled: { type: 'boolean', default: false },
+    realtime: { type: 'boolean', default: true },
   }, ['companyId', 'environmentId', 'projectIds', 'nativeCliPath', 'nodePath', 'pythonPath', 'portPath', 't3Home', 't3Port']),
 };
+

@@ -69,7 +69,8 @@ prove that the requested Teamlink effect succeeded.
    and exact binding ID.
 6. Finish the finite bot turn when waiting for native work. Do not create a poller,
    detached watcher, replacement session or retry queue. Paperclip's existing
-   plugin scheduler observes the original native operation and requests attention.
+   plugin listener observes native changes and requests attention; the existing
+   scheduler provides recovery. Neither requires you to keep a model turn alive.
 
 ## Consume a reply or COO-initiated message
 
@@ -98,6 +99,11 @@ child transcripts. Process data covers the T3 listener and OS descendants; it is
 not proof of exact process-to-thread ownership. Respect timestamps, pagination,
 truncation, stale context and explicit unavailable states.
 
+If a return is delayed, inspect the exact operation and native plugin health.
+Check subscription coverage and observation errors before interpreting silence.
+A connected listener or a requested attention run does not prove consumption.
+Keep the original operation ID while the native recovery path catches up.
+
 Recover using `teamlink_status` with the original operation ID; `reconcile=true`
 observes existing effects. Never resend an uncertain operation under a new ID.
 Changed operation semantics, changed destinations, reassignment, permission
@@ -105,3 +111,4 @@ refusals and uncertain effects require their exact native disposition. Do not
 change accounts, providers, adapter flags, permissions or carriers to force a
 pass. Teamlink does not approve native input requests. Escalate the original
 request through its existing owner when human input is actually required.
+

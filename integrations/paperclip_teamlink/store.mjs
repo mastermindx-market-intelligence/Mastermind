@@ -40,6 +40,16 @@ export class Store {
     const rows = await this.db.query(`SELECT revision,payload FROM ${this.ns}.bindings WHERE company_id=$1 ORDER BY last_scan_attempt_at ASC LIMIT 32`, [company]);
     return rows.map(r => ({ ...r.payload, revision: r.revision }));
   }
+  async bindingPage(company, after = null, limit = 128) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 128) throw new Error('BINDING_PAGE_LIMIT_INVALID');
+    const rows = await this.db.query(`SELECT issue_id,revision,payload FROM ${this.ns}.bindings WHERE company_id=$1 AND ($2::text IS NULL OR issue_id>$2) ORDER BY issue_id ASC LIMIT $3`, [company, after, limit]);
+    return { bindings: rows.map(r => ({ ...r.payload, revision: r.revision })),
+      nextCursor: rows.length === limit ? rows.at(-1).issue_id : null };
+  }
+  async pendingForIssue(company, issue) {
+    const rows = await this.db.query(`SELECT revision,phase,payload,fingerprint FROM ${this.ns}.deliveries WHERE company_id=$1 AND issue_id=$2 AND phase NOT IN ('consumed','returned','wake_requested','refused','expired') ORDER BY last_attempt_at ASC,updated_at ASC LIMIT 32`, [company, issue]);
+    return rows.map(r => ({ ...r.payload, revision: r.revision, phase: r.phase, fingerprint: r.fingerprint }));
+  }
   async outgoingRun(company, binding, run) {
     const rows = await this.db.query(`SELECT operation_id FROM ${this.ns}.deliveries WHERE company_id=$1 AND payload->>'bindingId'=$2 AND payload->>'direction'='paperclip_to_t3' AND payload->'nativeRun'->>'runId'=$3 LIMIT 1`, [company, binding, run]);
     return rows.length > 0;
@@ -51,3 +61,4 @@ export class Store {
     await this.db.execute(`UPDATE ${this.ns}.bindings SET last_scan_attempt_at=CURRENT_TIMESTAMP WHERE company_id=$1 AND issue_id=$2`, [company, issue]);
   }
 }
+

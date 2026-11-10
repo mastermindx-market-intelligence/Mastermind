@@ -2,7 +2,7 @@
 
 Operation: `paperclip-teamlink-t3-20261110`.
 Parent programme: existing Executive ecosystem / Chairman Control Room.
-Protected procedure pin: `c065e56b4cb7c4487e51249795ca6ebf010e6ffa`;
+Protected procedure pin for this continuation: `76cca6bf0d4f54c1c4a732726a16c70dbe8ed679`;
 mastermind.sol_skillpack.v1, skillpack 1.0.1, bootstrap major 1.
 Source carrier: `sol/paperclip-teamlink-t3-20261110` in Mastermind.
 PLAN_NOT_ORG_LINKED: this source task tree introduces no Agent OS workstream.
@@ -46,7 +46,7 @@ Native per-delivery receipts record transport evidence, never execution authorit
 | P1 qualify | Installed APIs, exact identities, incumbent collision and Teamlink contracts | verified |
 | P2 implement | Native Paperclip plugin tools, exact T3 transport, original-issue return, shared context and scoped telemetry | verified |
 | P3 harden | Duplicate/lost-response/stale-target/restart/concurrent-message/secret-boundary tests | verified |
-| P4 deliver | Same branch, source checks, normal protected PR release and exact merge readback | PR #2419, protected checks pending |
+| P4 deliver | Same branch, source checks, normal protected PR release and exact merge readback | PR #2419 baseline green and enrolled in merge queue; realtime upgrade under qualification |
 | P5 connect | Native plugin install/configure; role instructions through existing skill owner; fresh native tool discovery | proposed |
 | P6 accept | Real Paperclip to T3 message and correlated return, continuation recovery, native status/process proof | proposed |
 
@@ -62,8 +62,9 @@ Native per-delivery receipts record transport evidence, never execution authorit
   remain uncertain and reconcile on the original target; never blind resend.
 - Native Paperclip scheduled reconciliation is deterministic and suppresses
   unchanged samples. No reasoning-model polling, extra system service or scheduler.
-- Native plugin-authored return comments identify T3 provenance and use native
-  idempotent wakeups. Preserve echo suppression and original-issue correlation.
+- Native plugin-authored return comments identify T3 provenance. Exact-agent
+  attention uses a single CAS-fenced native invocation, never an uncertain replay.
+  Preserve echo suppression and original-issue correlation.
 - Project notes keep original objective, source/plan refs, remaining acceptance,
   decisions and unresolved effects. Do not clone OMH or invent an Agent OS store.
 - Scope process observations to the T3 runtime tree, with PID/start identity and
@@ -99,7 +100,7 @@ Next: finish installed-SDK setup qualification, deliver the qualified head throu
 
 The isolated native helper build passed all 37 focused tests. Six empty patch context lines were normalized for repository whitespace checks; reverse application verifies the stored patch against the same tested source. The relocatable runtime contains 22 dependency packages and no external worktree symlinks.
 
-Native acceptance issue `MAS-4` (`474dbaf5-ad88-42fc-88e6-8bbbbd120e0f`) was created as unassigned backlog. Its dedicated idle T3 root is `mcp:launch:de3dceeae2cfef0105545f884dcfe605f8d4921cb2449892f04fdc1098b30e56`, in native project `9de77193-e68a-49fe-adee-f85406f04772`. No provider run was launched by that idle creation. The existing Meta-CEO is now assigned only the independent native continuity-document preparation phase. Actual Teamlink exchange remains gated on merged-source installation and native discovery.
+Native acceptance issue `MAS-4` (`474dbaf5-ad88-42fc-88e6-8bbbbd120e0f`) was created as unassigned backlog. Its dedicated idle T3 root is `mcp:launch:de3dceeae2cfef0105545f884dcfe605f8d4921cb2449892f04fdc1098b30e56`, in native project `9de77193-e68a-49fe-adee-f85406f04772`. No provider run was launched by that idle creation. The dedicated root remains the acceptance target. The preparation phase was subsequently held after the credential incident recorded below. Actual Teamlink exchange remains gated on merged-source installation, native discovery and genuine agent/run identity.
 
 The existing Hermes adapter does not inject plugin tools directly. A native company skill is therefore bundled for durable bot discovery and authenticated tool use. Install/select it through the existing Paperclip skill owner, preserving all current agent identities, adapters, roles and selected skills.
 
@@ -132,3 +133,67 @@ Do not duplicate it or infer a pending mutation from the adapter's finalizer tex
 
 Source-linked recovery evidence:
 https://github.com/mastermindx-market-intelligence/Mastermind/pull/2419#issuecomment-6762515027
+
+## Realtime continuation — 2026-11-10
+
+The Chairman resumed this mission with a low-latency, robust messaging outcome.
+The existing PR #2419 at `bf7574e6b2860f84855f031da52cc681cb4522b2` has green
+required tests and CodeQL (run `42781961856`) and is already enrolled in the native
+merge queue. Reuse this carrier until its release is reconciled. Do not create a
+replacement PR to bypass queue ordering or the existing acceptance hold.
+
+The parent added lifecycle-owned native subscription integration, paginated
+coverage of 512 bindings, burst coalescing, two concurrent binding observations,
+per-issue exclusion shared with tools/events/cron, bounded reconnect backoff,
+generation fencing, and distinct listener/inventory/observation health. Native
+event sequence hints never replace durable timeline cursors. Actual cursor
+progress drains additional pages immediately; waiting turns and unchanged errors
+do not spin. Independent COO messages can return while a known outgoing run is
+busy, while an uncertain outgoing identity still holds echo-sensitive scanning.
+
+Qualification of this Paperclip portion: 44 Node scenarios, 11 Python boundary
+tests, bundled instruction validation, and the actual Paperclip SDK 2026.1106.0
+harness all pass. SDK proof covers concurrent configuration, handler admission,
+shutdown during managed-skill preparation, and shutdown during listener drain.
+The harness has an empty fake database and does not start a T3 or agent call.
+An earlier read-only inspection of the dedicated live root took 2,024 ms and
+proved idle scope. This is baseline native command overhead, not a new latency
+or consumer-acceptance result. Transport latency must be measured separately
+from model execution and recipient consumption.
+
+The additive upstream `thread native-watch` helper is assigned to the original
+Fabric root `paperclip-teamlink-t3-20261110`, run
+`teamlink-native-watch-upgrade-20261110-01`, controller PID 2725. Its exact remote
+worker was observed present on the original ubuntu2 carrier. No terminal artifact
+or accepted return was available at this checkpoint. Preserve its writer and
+reconcile the original return; do not dispatch a replacement or overwrite its
+upstream files. The parent owns only the separate Paperclip integration here.
+
+### Consumer identity hold
+
+The original preparation retry reached an `agent_jwt_run_id_mismatch` refusal.
+Its gateway then substituted a Secretary run claim and wrote document
+`73c5432c-04a0-464f-a476-7b5a9fdd79b4` and comment
+`5971cbdd-8439-4584-befa-6f5f9139f27b`. These are rejected acceptance evidence.
+Preserve them for diagnosis; never borrow that identity, replay the denied
+effect, or relabel the writes as a genuine Meta-CEO result. The original session
+ended and no live issue execution remained on readback. MAS-4 is blocked,
+unassigned, statusVersion 5, and has no active checkout or execution.
+
+Credential isolation has its existing source/install owner. The composed rollout
+is recorded at
+https://github.com/mastermindx-market-intelligence/Mastermind/pull/2425#issuecomment-6762915578
+with candidate head `d4419be49e14f977103da6408ac9fd88ee6fbddc` and native install
+commit `b4332e52ae8e70276824189ac38c6a9ea4c0c170`. It is not proven active. Preserve
+the original `release-packaging-20261110-9bd2` transaction and live shared gateway
+work. Do not force a gateway shutdown to manufacture a maintenance boundary.
+
+Next: consume and qualify the original native helper, compose its exact patch
+and runtime provenance, publish the complete upgrade through the original source
+carrier, satisfy required checks and normal protected release, then install the
+exact released plugin. Resume MAS-4 only after credential isolation is active and
+a fresh genuine Meta-CEO identity/run is proven. Consumer acceptance still owes
+both directions, a referenced follow-up, original-run/comment/consumption
+receipts, latency measurements and continuity/visibility proof. No Teamlink
+message or valid bot consumption has been produced by this continuation yet.
+

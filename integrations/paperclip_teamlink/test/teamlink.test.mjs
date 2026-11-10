@@ -30,6 +30,9 @@ class MemoryStore {
     return clone([...this.rows.values()].filter(x => x.companyId === company && (issue ? x.issueId === issue : !['consumed','returned','wake_requested','refused','expired'].includes(x.phase))));
   }
   async bindings(company) { return clone([...this.links.values()].filter(x => x.companyId === company)); }
+  async pendingForIssue(company, issue) {
+    return (await this.list(company)).filter(x => x.issueId === issue);
+  }
   async outgoingRun(company, binding, run) {
     return [...this.rows.values()].some(x => x.companyId === company && x.bindingId === binding && x.direction === 'paperclip_to_t3' && x.nativeRun?.runId === run);
   }
@@ -91,6 +94,22 @@ async function fixture(options = {}) {
     setIncoming(value) { incoming = value.map(x => ({ bindingId: binding.bindingId, ...x })); } };
 }
 const message = { issueId: 'issue', operationId: 'op-1', message: 'Please answer the original question.' };
+
+test('a newly inserted incoming receipt preserves its failed original reread in health', async () => {
+  const f = await fixture();
+  f.setIncoming([{ itemId: 'incoming', runId: 'coo-run', position: 40, sourceHash: 'source', kind: 'question', message: 'Question' }]);
+  const native = f.native.call; let scans = 0;
+  f.native.call = async (action, params) => {
+    if (action === 'scan' && ++scans > 1) throw new Error('NATIVE_OBSERVATION_UNAVAILABLE');
+    return native(action, params);
+  };
+  const binding = await f.store.binding('company', 'issue');
+  const result = await f.service.reconcileBinding('issue', binding.bindingId);
+  assert.equal(result.ok, false); assert.equal(result.error, 'NATIVE_OBSERVATION_UNAVAILABLE');
+  assert.equal((await f.store.pendingForIssue('company', 'issue')).length, 1);
+  assert.equal((await f.store.binding('company', 'issue')).watchCursor, 55);
+  assert.equal(f.comments.length, 0); assert.equal(f.invokes.length, 0);
+});
 
 test('exact original return, native recipient wake and explicit agent consumption survive a new worker', async () => {
   const f = await fixture();
@@ -211,6 +230,75 @@ test('informational COO updates are durable but do not wake a model', async () =
   assert.equal((await f.store.list('company', 'issue'))[0].phase, 'returned');
 });
 
+test('an independent COO question returns while a tracked outgoing run is still busy', async () => {
+  const f = await fixture({ nativeStatus: 'running' });
+  await f.service.send(message, f.actor);
+  f.setIncoming([
+    { itemId: 'tracked-item', runId: 'original-run', position: 40, kind: 'question', message: 'Tracked result must not echo', sourceHash: 'tracked' },
+    { itemId: 'independent-item', runId: 'other-run', position: 41, kind: 'question', message: 'A preceding COO run needs an answer', sourceHash: 'independent' },
+  ]);
+  const binding = await f.store.binding('company', 'issue');
+  await f.service.reconcileBinding('issue', binding.bindingId);
+  await f.service.reconcileBinding('issue', binding.bindingId);
+  assert.equal(f.invokes.length, 1); assert.equal(f.comments.length, 2);
+  assert.match(f.comments[1].body, /preceding COO run/);
+  assert.equal((await f.store.binding('company', 'issue')).activeOperationId, 'op-1');
+  assert.equal((await f.store.get('company', 'op-1')).phase, 'in_native');
+});
+
+test('reverse scan preserves its cursor while an outgoing run identity is uncertain', async () => {
+  const f = await fixture({ sendFailure: 'NATIVE_EFFECT_UNKNOWN', noMatch: true });
+  await f.service.send(message, f.actor);
+  f.setIncoming([{ itemId: 'maybe-tracked', runId: 'unresolved-run', position: 40, kind: 'question', message: 'Unresolved provenance', sourceHash: 'uncertain' }]);
+  const binding = await f.store.binding('company', 'issue');
+  await f.service.reconcileBinding('issue', binding.bindingId);
+  assert.equal((await f.store.binding('company', 'issue')).watchCursor, 30);
+  assert.equal(f.invokes.length, 0); assert.equal(f.comments.length, 1);
+  assert.equal(f.sends.length, 1);
+});
+
+test('an obsolete binding event and a stopped generation cannot reconcile a replacement', async () => {
+  const f = await fixture({ nativeStatus: 'running' });
+  await f.service.send(message, f.actor);
+  const binding = await f.store.binding('company', 'issue'), before = f.observations.length;
+  await f.service.reconcileBinding('issue', 'old-binding');
+  await f.service.reconcileBinding('issue', binding.bindingId, { isCurrent: () => false });
+  assert.equal(f.observations.length, before);
+});
+
+test('timeline pagination requests fair immediate continuation only after a durable cursor advance', async () => {
+  const f = await fixture(); const original = f.native.call; let pages = 0;
+  f.native.call = async (action, p) => action === 'scan'
+    ? { messages: [], cursor: ++pages === 1 ? 80 : 95, hasMore: pages === 1 }
+    : original(action, p);
+  const binding = await f.store.binding('company', 'issue');
+  assert.equal((await f.service.reconcileBinding('issue', binding.bindingId)).more, true);
+  assert.equal((await f.store.binding('company', 'issue')).watchCursor, 80);
+  assert.equal((await f.service.reconcileBinding('issue', binding.bindingId)).more, false);
+  assert.equal((await f.store.binding('company', 'issue')).watchCursor, 95);
+});
+
+test('native waiting and unchanged result cursors cannot spin the event reconciler', async () => {
+  const f = await fixture({ nativeStatus: 'running' }); await f.service.send(message, f.actor);
+  const original = f.native.call;
+  f.native.call = async (action, p) => action === 'observe'
+    ? { status: 'completed', terminal: true, complete: false, progress: { cursor: 100, resultRunId: 'original-run' } }
+    : action === 'scan' ? { messages: [], cursor: 30, hasMore: true, waitingForRun: 'busy-run' } : original(action, p);
+  const binding = await f.store.binding('company', 'issue');
+  assert.equal((await f.service.reconcileBinding('issue', binding.bindingId)).more, true);
+  assert.equal((await f.service.reconcileBinding('issue', binding.bindingId)).more, false);
+});
+
+test('persisted observation errors remain visible to real-time health', async () => {
+  const f = await fixture({ nativeStatus: 'running' }); await f.service.send(message, f.actor);
+  const original = f.native.call;
+  f.native.call = async (action, p) => { if (action === 'observe') throw new Error('NATIVE_UNAVAILABLE'); return original(action, p); };
+  const binding = await f.store.binding('company', 'issue');
+  const result = await f.service.reconcileBinding('issue', binding.bindingId);
+  assert.equal(result.ok, false); assert.equal(result.error, 'NATIVE_UNAVAILABLE');
+  assert.equal(f.sends.length, 1);
+});
+
 test('a proactive message naming another binding cannot fan out to this issue', async () => {
   const f = await fixture();
   f.setIncoming([{ bindingId: 'different-binding', itemId: 'wrong-destination', runId: 'coo-update', position: 40, kind: 'question', message: 'Question for another issue', sourceHash: 'source-digest' }]);
@@ -258,3 +346,4 @@ test('context is CAS-protected and preserves canonical document references', asy
   assert.equal(result.binding.context.doneWhen, 'Original acceptance'); assert.equal(result.documents[0].key, 'plan');
   await assert.rejects(f.service.context({ issueId: 'issue', expectedRevision: b.revision, context: packet }, f.actor), /BINDING_REVISION_CONFLICT/);
 });
+

@@ -144,10 +144,12 @@ class NativePortTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Node is required for the Paperclip worker suite')
     def test_worker_delivery_failure_scenarios(self):
         root = Path(__file__).resolve().parents[1]
-        suite = root / 'integrations/paperclip_teamlink/test/teamlink.test.mjs'
-        result = subprocess.run([shutil.which('node'), '--test', str(suite)], capture_output=True, text=True, timeout=30)
+        suites = sorted((root / 'integrations/paperclip_teamlink/test').glob('*.test.mjs'))
+        self.assertTrue(suites, 'Teamlink behavioral suites must be present')
+        result = subprocess.run([shutil.which('node'), '--test', *map(str, suites)], capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == '__main__':
     unittest.main()
+
