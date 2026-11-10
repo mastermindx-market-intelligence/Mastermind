@@ -343,4 +343,5 @@ class LocalOperatorAuthenticator:
         return principal_scope_from_identity(
             issuer_digest=self._issuer_digest,
             subject_digest=self._subject_digest,
-            client_ref=self.CLIENT_REF)
+            client_ref=self.CLIENT_REF,
+            resource=self.RESOURCE)
