@@ -210,6 +210,10 @@ def write_carrier_config(spec, agent_dir):
         "pending_timeout_sec": int(spec.get("pending_timeout_sec", 600)),
         "poll_interval_sec": int(spec.get("poll_interval_sec", 5)),
     }
+    # Same-company teammate roster (display name -> agent id) for the carrier's
+    # ask block; a name not in this map cannot become a child issue.
+    if spec.get("teammates"):
+        cfg["teammates"] = dict(spec["teammates"])
     path = os.path.join(agent_dir, "carrier.json")
     with open(path, "w") as fh:
         json.dump(cfg, fh, indent=2)

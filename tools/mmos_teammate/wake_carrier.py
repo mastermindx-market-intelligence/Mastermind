@@ -50,6 +50,44 @@ class NeedsHuman(Exception):
 
 
 OUTPUT_BLOCK = "paperclip-output"
+ASK_BLOCK = "paperclip-ask"
+
+
+def parse_ask_block(reply):
+    """The LAST ```paperclip-ask fenced block in a reply, if any.
+
+        ```paperclip-ask
+        assignee: Atlas-TEST
+        title: Count lines in t45_alpha.txt
+        description: <may span lines until the fence>
+        ```
+
+    -> {"assignee", "title", "description"} or None. Malformed -> None (the
+    reply is delivered as a plain answer; an ask can never fail the run)."""
+    lines = (reply or "").splitlines()
+    start = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") and ASK_BLOCK in stripped:
+            start = idx
+    if start is None:
+        return None
+    assignee, title, desc_lines, closed = None, None, [], False
+    for line in lines[start + 1:]:
+        if line.strip().startswith("```"):
+            closed = True
+            break
+        if assignee is None and line.strip().startswith("assignee:"):
+            assignee = line.split(":", 1)[1].strip()
+            continue
+        if title is None and line.strip().startswith("title:"):
+            title = line.split(":", 1)[1].strip()
+            continue
+        desc_lines.append(line)
+    if not closed or not assignee or not (title or "").strip():
+        return None
+    return {"assignee": assignee, "title": title.strip(),
+            "description": "\n".join(desc_lines).strip()}
 
 
 def parse_output_block(reply):
@@ -276,6 +314,24 @@ class PaperclipClient:
             {"format": "markdown", "title": title, "body": body,
              "changeSummary": f"teammate output via {OUTPUT_BLOCK} block"})
 
+    def children(self, issue_id):
+        rows = self._request("GET", f"/api/issues/{issue_id}/children")
+        if isinstance(rows, dict):
+            rows = rows.get("children") or rows.get("issues") or rows.get("rows") or []
+        return rows
+
+    def create_issue(self, company_id, payload):
+        return self._request(
+            "POST", f"/api/companies/{company_id}/issues", payload)
+
+    def block_issue(self, issue_id, blocker_ids, owner_agent_id, action):
+        return self._request("PATCH", f"/api/issues/{issue_id}", {
+            "status": "blocked",
+            "blockedByIssueIds": blocker_ids,
+            "unblockDescriptor": {
+                "owner": {"agentId": owner_agent_id}, "action": action},
+        })
+
 
 class T3Thread:
     """The teammate's primary thread, driven through the stock `t3` CLI.
@@ -387,6 +443,56 @@ def deliver(pc, issue, reply, op, crash_after=None):
         "request_confirmation pending; status -> in_review")
 
 
+def handle_ask(pc, issue, reply, ask, op, roster):
+    """A teammate's reply asked another teammate for work (```paperclip-ask).
+
+    Creates the child issue under the current issue for the named teammate
+    (only names in this company's roster resolve), leaves the parent blocked
+    on it with an unblock descriptor, and posts the asking reply as the
+    parent comment. No confirmation and no in_review: the parent is waiting,
+    not ready for review. Idempotent across runs via the ask marker in the
+    child description. Returns True when the ask was placed."""
+    ask_op = f"{op}-ask"
+    agent_id = (roster or {}).get(ask["assignee"])
+    if not agent_id:
+        log(f"ask block names unknown teammate {ask['assignee']!r}; "
+            "reply delivered as a plain answer, no child issue")
+        return False
+    company_id = os.environ.get("PAPERCLIP_COMPANY_ID")
+    if not company_id:
+        log("no PAPERCLIP_COMPANY_ID; cannot create the child issue")
+        return False
+    child = None
+    for row in pc.children(issue["id"]):
+        if ask_op in (row.get("description") or ""):
+            child = row
+            break
+    if child is None:
+        child = pc.create_issue(company_id, {
+            "title": ask["title"],
+            "description": (f"{ask['description']}\n\n"
+                            f"Asked by {pc.me().get('name', 'a teammate')} on "
+                            f"{issue.get('identifier')} [{ask_op}]"),
+            "assigneeAgentId": agent_id,
+            "parentId": issue["id"],
+            "status": "todo",
+        })
+        log(f"child issue created for {ask['assignee']}: "
+            f"{child.get('identifier')} under {issue.get('identifier')}")
+    else:
+        log(f"ask {ask_op} already has child {child.get('identifier')}; reused")
+    if issue.get("status") != "blocked":
+        pc.block_issue(
+            issue["id"], [child["id"]], agent_id,
+            f"{ask['assignee']} completes {child.get('identifier')}: "
+            f"{ask['title']}")
+    if not comment_already_present(pc, issue["id"], reply):
+        pc.add_comment(issue["id"], reply)
+    log(f"parent {issue.get('identifier')} left blocked on "
+        f"{child.get('identifier')}; no confirmation, not in_review")
+    return True
+
+
 def run_carrier(pc, t3_factory, opts):
     """One wake. Returns an exit code; raises nothing."""
     crash_after = opts.get("crash_after")
@@ -443,6 +549,10 @@ def run_carrier(pc, t3_factory, opts):
             reply = existing
         if not reply.strip():
             raise CarrierError("thread reply was empty")
+        ask = parse_ask_block(reply)
+        if ask and handle_ask(pc, issue, reply, ask, op,
+                              opts.get("roster") or {}):
+            return 0
         deliver(pc, issue, reply, op, crash_after)
         return 0
     except NeedsHuman:
@@ -519,6 +629,9 @@ def main() -> int:
         "crash_after": os.environ.get("MMOS_T2_CARRIER_CRASH_AFTER"),
         "pending_timeout_sec": cfg.get("pending_timeout_sec", 600),
         "poll_interval_sec": cfg.get("poll_interval_sec", 5),
+        # Same-company teammate roster: display name -> agent id. An ask block
+        # naming anyone else resolves to nothing (plain reply, no child issue).
+        "roster": cfg.get("teammates") or {},
     }
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],

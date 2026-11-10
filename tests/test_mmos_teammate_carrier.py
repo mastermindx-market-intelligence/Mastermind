@@ -28,6 +28,7 @@ class FakePaperclip:
         self.comment_rows = dict(comments or {})
         self.interaction_rows = list(interactions or [])
         self.documents = {}
+        self.child_rows = {}
         self.calls = []
         self.fail = set(fail)
         self.metadata = metadata
@@ -99,6 +100,28 @@ class FakePaperclip:
         self.documents[(issue_id, key)] = {"key": key, "title": title,
                                            "body": body}
         self.calls.append(("document", issue_id, key))
+
+    def children(self, issue_id):
+        return [dict(c) for c in self.child_rows.get(issue_id, [])]
+
+    def create_issue(self, company_id, payload):
+        self._guard("create_issue")
+        iid = f"child-{len(self.child_rows.get(payload.get('parentId'), [])) + 1}"
+        row = {"id": iid, "identifier": f"MMO-C{len(self.calls)}",
+               "parentId": payload.get("parentId"),
+               "assigneeAgentId": payload.get("assigneeAgentId"),
+               "title": payload.get("title"),
+               "description": payload.get("description"),
+               "status": payload.get("status", "todo")}
+        self.child_rows.setdefault(payload.get("parentId"), []).append(row)
+        self.calls.append(("create_issue", payload.get("parentId"), iid))
+        return dict(row)
+
+    def block_issue(self, issue_id, blocker_ids, owner_agent_id, action):
+        self._guard("block")
+        self.calls.append(("block", issue_id, tuple(blocker_ids),
+                           owner_agent_id))
+        self.issues[issue_id]["status"] = "blocked"
 
 
 class FakeT3:
@@ -495,3 +518,81 @@ def test_reply_without_output_block_writes_no_document():
     pc, t3 = FakePaperclip(issues=one_issue()), FakeT3(replies=["plain answer"])
     assert run(pc, t3) == 0
     assert [c for c in pc.calls if c[0] == "document"] == []
+
+
+ASK_REPLY = ("I need Atlas for the line count.\n\n"
+             "```paperclip-ask\n"
+             "assignee: Atlas-TEST\n"
+             "title: Count lines in t45_alpha.txt\n"
+             "description: Run wc -l on t45_alpha.txt and report the number.\n"
+             "```\n")
+
+
+def run_with_roster(pc, t3, roster, opts=None):
+    os.environ["PAPERCLIP_AGENT_ID"] = "ag-1"
+    os.environ["PAPERCLIP_COMPANY_ID"] = "co-1"
+    merged = {"roster": roster}
+    merged.update(opts or {})
+    return wc.run_carrier(pc, lambda tid: t3, merged)
+
+
+def test_ask_block_creates_child_and_blocks_parent():
+    roster = {"Atlas-TEST": "ag-atlas"}
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc, t3, roster) == 0
+    creates = [c for c in pc.calls if c[0] == "create_issue"]
+    assert len(creates) == 1
+    parent_id, child_id = creates[0][1], creates[0][2]
+    assert pc.child_rows[parent_id][0]["assigneeAgentId"] == "ag-atlas"
+    assert pc.child_rows[parent_id][0]["title"] == "Count lines in t45_alpha.txt"
+    blocks = [c for c in pc.calls if c[0] == "block"]
+    assert len(blocks) == 1 and blocks[0][2] == (child_id,)
+    # the asking reply is the parent comment; no confirmation, not in_review
+    kinds = [c[0] for c in pc.calls]
+    assert "comment" in kinds and "interaction" not in kinds
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_ask_replay_creates_no_second_child():
+    roster = {"Atlas-TEST": "ag-atlas"}
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc, t3, roster) == 0
+    # second run (crash-replay): the marker rule reconciles the same reply;
+    # the existing child is reused, the parent is not double-blocked
+    pc2 = FakePaperclip(issues={"is-1": {"identifier": "MMO-1",
+                                         "status": "blocked",
+                                         "title": "Summarize file X",
+                                         "description": "Write a three-line summary."}})
+    pc2.child_rows = pc.child_rows
+    t3.messages_store = [("user", "r1", "task"), ("assistant", "r1", ASK_REPLY)]
+    assert run_with_roster(pc2, t3, roster) == 0
+    assert [c for c in pc2.calls if c[0] == "create_issue"] == []
+    assert [c for c in pc2.calls if c[0] == "block"] == []
+    assert [c for c in pc2.calls if c[0] == "comment"] == []  # already posted
+
+
+def test_ask_for_unknown_or_foreign_teammate_is_plain_reply():
+    roster = {"Atlas-TEST": "ag-atlas"}  # Mira-TEST deliberately absent
+    pc = FakePaperclip(issues=one_issue())
+    foreign = ASK_REPLY.replace("Atlas-TEST", "Somebody-Else")
+    t3 = FakeT3(replies=[foreign])
+    assert run_with_roster(pc, t3, roster) == 0
+    assert [c for c in pc.calls if c[0] == "create_issue"] == []
+    # delivered as a normal answer instead: comment + confirmation + in_review
+    kinds = [c[0] for c in pc.calls]
+    assert "interaction" in kinds
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_malformed_ask_block_is_plain_reply_never_error():
+    roster = {"Atlas-TEST": "ag-atlas"}
+    for bad in ("```paperclip-ask\nno assignee\n```\n",
+                "```paperclip-ask\nassignee: Atlas-TEST\nnever closed",
+                "```paperclip-ask\nassignee: Atlas-TEST\ntitle: \n```\n"):
+        pc = FakePaperclip(issues=one_issue())
+        t3 = FakeT3(replies=[bad])
+        assert run_with_roster(pc, t3, roster) == 0
+        assert [c for c in pc.calls if c[0] == "create_issue"] == []
+        assert pc.issues["is-1"]["status"] == "in_review"
