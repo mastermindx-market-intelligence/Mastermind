@@ -123,3 +123,18 @@ def test_library_hash_refuses_real_byte_change_with_stable_modelled_stat(tmp_pat
                 with node:
                     target.write_bytes(b'x'*before.st_size);node.check()
 
+@pytest.mark.parametrize("creation_umask", [0o002, 0o022])
+def test_library_fixture_declares_safe_modes_before_qualification(
+    tmp_path, monkeypatch, creation_umask
+):
+    previous = os.umask(creation_umask)
+    try:
+        with library_chain(tmp_path, monkeypatch) as (a, b, first, second, target):
+            os.umask(previous)
+            assert stat.S_IMODE(os.fstat(a).st_mode) == 0o755
+            assert stat.S_IMODE(os.fstat(b).st_mode) == 0o755
+            assert stat.S_IMODE(target.stat().st_mode) == 0o644
+            with m._QualifiedRuntimeLibrary(a, b) as node:
+                node.check()
+    finally:
+        os.umask(previous)
