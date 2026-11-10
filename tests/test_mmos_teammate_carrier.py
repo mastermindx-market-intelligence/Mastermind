@@ -197,6 +197,37 @@ def test_message_carries_marker_title_and_body():
     assert f"[{op}]" in msg and "MMO-1" in msg and "three-line" in msg
 
 
+def test_issue_link_is_config_driven_and_loopback_only():
+    tpl = "http://127.0.0.1:3100/MAS/issues/{identifier}"
+    assert wc.issue_link(tpl, "MAS-12") == \
+        "[MAS-12](http://127.0.0.1:3100/MAS/issues/MAS-12)"
+    msg = wc.build_message("MAS-12", "t", "b", "pc-x-1",
+                           link=wc.issue_link(tpl, "MAS-12"))
+    assert "[MAS-12](http://127.0.0.1:3100/MAS/issues/MAS-12)" in msg
+    assert msg.startswith("[pc-x-1]")
+    # no template, a non-loopback host, a hostile identifier: no link at all
+    assert wc.issue_link(None, "MAS-12") is None
+    assert wc.issue_link("https://example.com/{identifier}", "MAS-12") is None
+    assert wc.issue_link("http://127.0.0.1.evil.test:80/{identifier}", "MAS-12") is None
+    assert wc.issue_link(tpl, "MAS-12)](http://x") is None
+    assert wc.issue_link("http://127.0.0.1:3100/MAS/issues/", "MAS-12") is None
+    assert "Issue page" not in wc.build_message("MAS-12", "t", "b", "pc-x-1")
+
+
+def test_t3_cli_gets_the_port_and_never_the_run_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("PAPERCLIP_API_KEY", "not-a-real-key")
+    monkeypatch.setenv("PAPERCLIP_RUN_ID", "run-1")
+    monkeypatch.delenv("T3CODE_PORT", raising=False)
+    env_bin = "/usr/bin/env"
+    with_port = wc.T3Thread(env_bin, str(tmp_path), "th-1", str(tmp_path),
+                            t3_port=3780)._run([]).stdout
+    assert "T3CODE_PORT=3780" in with_port.splitlines()
+    assert f"T3CODE_HOME={tmp_path}" in with_port.splitlines()
+    assert "PAPERCLIP_" not in with_port
+    without = wc.T3Thread(env_bin, str(tmp_path), "th-1", str(tmp_path))._run([]).stdout
+    assert "T3CODE_PORT" not in without and "PAPERCLIP_" not in without
+
+
 def test_no_ready_issue_is_a_clean_exit():
     pc, t3 = FakePaperclip(issues={"is-1": {"identifier": "MMO-1",
                                             "status": "done",

@@ -150,11 +150,33 @@ def ask_child_op(text: str):
     return match.group(1) if match else None
 
 
-def build_message(identifier: str, title: str, body: str, op: str) -> str:
+def issue_link(template, identifier):
+    """A labelled link to the issue page for the conversation, or None.
+
+    `template` comes from the carrier config (`issue_url_template`, with
+    `{identifier}`), never from issue text. Only a loopback http address is
+    accepted, and only for an identifier shaped like MAS-12, so nothing a task
+    author writes can turn into a link target."""
+    if not template or not identifier:
+        return None
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,15}-[0-9]{1,9}", identifier):
+        return None
+    if not re.match(r"http://(127\.0\.0\.1|localhost):[0-9]{2,5}/", template):
+        return None
+    if template.count("{identifier}") != 1:
+        return None
+    return f"[{identifier}]({template.replace('{identifier}', identifier)})"
+
+
+def build_message(identifier: str, title: str, body: str, op: str,
+                  link: str = None) -> str:
     body = (body or "").strip()
+    where = (f"Issue page (the board accepts or declines the answer there): "
+             f"{link}\n\n") if link else ""
     return (
         f"[{op}]\n\n"
         f"You were woken for Paperclip issue {identifier}: {title}\n\n"
+        f"{where}"
         f"{body}\n\n"
         "Do the task described above. Your reply to this message is posted as "
         "the issue comment and completes the issue."
@@ -376,15 +398,24 @@ class T3Thread:
     short-lived MCP session from T3CODE_HOME, so no credential is passed here.
     """
 
-    def __init__(self, t3_bin: str, t3_home: str, thread_id: str, scratch_dir: str):
+    def __init__(self, t3_bin: str, t3_home: str, thread_id: str, scratch_dir: str,
+                 t3_port=None):
         self._bin = os.path.expanduser(t3_bin)
         self._home = os.path.expanduser(t3_home)
         self.thread_id = thread_id
         self._cwd = os.path.expanduser(scratch_dir)
+        # A T3 server that is not on the CLI's default port (the team server)
+        # must be named, or the CLI would dial the default port instead.
+        self._port = int(t3_port) if t3_port else None
 
     def _run(self, args, stdin_text=None):
-        env = dict(os.environ)
+        # The Paperclip run token and run identity stay in this process: the
+        # T3 CLI has no use for them, so its environment does not carry them.
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("PAPERCLIP_")}
         env["T3CODE_HOME"] = self._home
+        if self._port:
+            env["T3CODE_PORT"] = str(self._port)
         # text=True: subprocess wants str input, not bytes
         proc = subprocess.run(  # noqa: S603 - fixed binary, fixed args
             [self._bin, *args],
@@ -821,8 +852,11 @@ def run_carrier(pc, t3_factory, opts):
             return 0
         state, existing = scan_marker(t3.messages()[1], op)
         if state is None:
-            message = build_message(issue.get("identifier"), issue.get("title"),
-                                    issue.get("description"), op)
+            message = build_message(
+                issue.get("identifier"), issue.get("title"),
+                issue.get("description"), op,
+                link=issue_link(opts.get("issue_url_template"),
+                                issue.get("identifier")))
             log(f"sending {op} to thread {thread_id}")
             result = t3.send(message)
             reply = result.get("reply") or ""
@@ -918,12 +952,15 @@ def main() -> int:
         # Same-company teammate roster: display name -> agent id. An ask block
         # naming anyone else resolves to nothing (plain reply, no child issue).
         "roster": cfg.get("teammates") or {},
+        # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
+        "issue_url_template": cfg.get("issue_url_template"),
     }
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],
                          os.environ["PAPERCLIP_RUN_ID"])
     t3_factory = lambda thread_id: T3Thread(  # noqa: E731
-        cfg["t3_bin"], cfg["t3_home"], thread_id, cfg.get("t3_cwd") or "/tmp")
+        cfg["t3_bin"], cfg["t3_home"], thread_id, cfg.get("t3_cwd") or "/tmp",
+        t3_port=cfg.get("t3_port"))
     try:
         return run_carrier(pc, t3_factory, opts)
     except NeedsHuman as nh:
