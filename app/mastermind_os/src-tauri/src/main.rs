@@ -1,5 +1,6 @@
 mod auth;
 mod dev_log;
+mod shell_mode;
 mod native_session_send;
 mod project_planning;
 mod project_execution;
@@ -72,6 +73,49 @@ fn readiness() -> Readiness {
         .expect("MM_NATIVE_CLIENT_ID was validated at build time")
 }
 
+const MAIN_WINDOW_LABEL: &str = "main";
+
+/// Reads `MM_SHELL_URL` exactly once.
+///
+/// Unset returns `None` and changes nothing anywhere. A set but invalid value is
+/// recorded through the dev log (best effort) and then treated exactly like unset.
+fn shell_url_from_env() -> Option<url::Url> {
+    let raw = std::env::var("MM_SHELL_URL").ok()?;
+    match shell_mode::parse_shell_url(&raw) {
+        Ok(url) => Some(url),
+        Err(refusal) => {
+            shell_mode::log_refusal(refusal);
+            None
+        }
+    }
+}
+
+/// Build the shell-mode main window.
+///
+/// The configuration window is normally created by Tauri before `setup` runs, which
+/// leaves no way to add an initialization script. In shell mode the config entry is
+/// marked `create: false`, so this builder is the only creator and can inject the
+/// page bootstrap before any page script runs. `.navigate` then points the webview
+/// at the local shell server; `setup` runs before the event loop, so the app
+/// frontend never gets a chance to paint (no sign-in gate flash).
+fn build_shell_window(
+    app: &tauri::AppHandle,
+    url: &url::Url,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|config| config.label == MAIN_WINDOW_LABEL)
+        .ok_or("MAIN_WINDOW_CONFIG_UNAVAILABLE")?;
+    let window = tauri::WebviewWindowBuilder::from_config(app, config)?
+        .initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP)
+        .build()?;
+    window.navigate(url.clone())?;
+    Ok(())
+}
+
 fn terminal_callback_owner(url: &url::Url) -> bool {
     url.scheme() == "com.mastermind.os" && url.host_str() == Some("terminal")
 }
@@ -87,21 +131,32 @@ fn dispatch_auth_callback(app: tauri::AppHandle, url: url::Url) {
 }
 
 #[cfg(target_os = "macos")]
-fn reopen_main_window(app: &tauri::AppHandle) -> Result<(), &'static str> {
+fn reopen_main_window(app: &tauri::AppHandle, shell: Option<&url::Url>) -> Result<(), &'static str> {
     use tauri::Manager;
 
     // Closing the macOS window can leave the existing application alive. Reopen
     // its one configured window without rebuilding app state or restarting auth.
-    let window = match app.get_webview_window("main") {
+    let window = match app.get_webview_window(MAIN_WINDOW_LABEL) {
         Some(window) => window,
         None => {
             let config = app.config().app.windows.iter()
-                .find(|config| config.label == "main")
+                .find(|config| config.label == MAIN_WINDOW_LABEL)
                 .ok_or("MAIN_WINDOW_CONFIG_UNAVAILABLE")?;
-            tauri::WebviewWindowBuilder::from_config(app, config)
-                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?
+            let mut builder = tauri::WebviewWindowBuilder::from_config(app, config)
+                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+            // Only shell mode reopens its window with the page bootstrap.
+            if shell.is_some() {
+                builder = builder.initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP);
+            }
+            let window = builder
                 .build()
-                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?
+                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+            if let Some(url) = shell {
+                window
+                    .navigate(url.clone())
+                    .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+            }
+            window
         }
     };
     window.show().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
@@ -111,12 +166,24 @@ fn reopen_main_window(app: &tauri::AppHandle) -> Result<(), &'static str> {
 }
 
 fn main() {
+    let shell_url = shell_url_from_env();
+    let mut context = tauri::generate_context!();
+    if shell_url.is_some() {
+        // Shell mode builds the main window in `setup` so it can carry the page
+        // bootstrap; stop Tauri from creating an unstamped one first.
+        for window in context.config_mut().app.windows.iter_mut() {
+            if window.label == MAIN_WINDOW_LABEL {
+                window.create = false;
+            }
+        }
+    }
+    let setup_shell_url = shell_url.clone();
     let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
         .manage(terminal_session::TerminalSession::new().expect("Terminal transport configuration"))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 // Callback values stay in Rust and are never logged.
@@ -130,6 +197,9 @@ fn main() {
                 for url in urls {
                     dispatch_auth_callback(app.handle().clone(), url);
                 }
+            }
+            if let Some(url) = setup_shell_url.as_ref() {
+                build_shell_window(app.handle(), url)?;
             }
             Ok(())
         })
@@ -215,12 +285,12 @@ fn main() {
             auth::executive_session_references,
             auth::executive_project_session_references
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("tauri runtime error");
-    app.run(|_app, _event| {
+    app.run(move |_app, _event| {
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
-            if let Err(code) = reopen_main_window(_app) {
+            if let Err(code) = reopen_main_window(_app, shell_url.as_ref()) {
                 // Only a fixed local window error is logged, never callback data.
                 eprintln!("Mastermind OS: {code}");
             }
