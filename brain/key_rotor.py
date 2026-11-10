@@ -752,6 +752,8 @@ _AUTH_PHRASES_STRICT = [
     "invalid bearer token",
     "authentication_error",
     "oauth token has expired",
+    # Exact SDK result banner; generic 401/revoked remain error-source only.
+    "failed to authenticate. api error: 401 oauth access token has been revoked",
 ]
 _WINDOW_PHRASES_STRICT = [
     "usage limit reached",

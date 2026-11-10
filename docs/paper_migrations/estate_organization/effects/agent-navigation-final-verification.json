@@ -1,0 +1,1140 @@
+{
+  "schema": "paper.estate.final_navigation_verification.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "observed_at": "2026-11-09T13:25:44.493Z",
+  "source_parent": "c81ab602ee34d252a64979c2b818073dfb114b7a",
+  "law_pin": "9e6659c4a49ee6f11a6f6ee690d222ce81d67b09",
+  "macro_pin": "cf07e7a73334c646a09c043647c43e43ee6e4060",
+  "scope": "AI-worker navigation, source qualification, preserved identity and documentation delivery; no product or runtime adoption",
+  "counts": {
+    "resources": 83,
+    "readable_design_files": 80,
+    "pages": 617,
+    "dividers": 19
+  },
+  "local_guides": {
+    "planned": 50,
+    "verified": 50,
+    "first_page": true
+  },
+  "resource_comparison": {
+    "observed_at": "2026-11-09T13:06:58.313Z",
+    "count": 83,
+    "new_ids": [],
+    "missing_ids": []
+  },
+  "file_metadata": [
+    {
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "observed_at": "2026-11-09T13:07:09.852Z",
+      "pages": 9,
+      "dividers": 2
+    },
+    {
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "observed_at": "2026-11-09T13:07:11.306Z",
+      "pages": 62,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "observed_at": "2026-11-09T13:07:15.447Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "observed_at": "2026-11-09T13:07:08.389Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "observed_at": "2026-11-09T13:07:13.433Z",
+      "pages": 8,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M312VSDSZFVT45674GDVJVZN",
+      "observed_at": "2026-11-09T13:07:08.195Z",
+      "pages": 10,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "observed_at": "2026-11-09T13:07:07.009Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "observed_at": "2026-11-09T13:07:09.311Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "observed_at": "2026-11-09T13:07:37.050Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "observed_at": "2026-11-09T13:07:33.880Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "observed_at": "2026-11-09T13:07:37.575Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "observed_at": "2026-11-09T13:07:30.313Z",
+      "pages": 5,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "observed_at": "2026-11-09T13:07:38.900Z",
+      "pages": 5,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3X59BVYPETH1DRC4YSVAW",
+      "observed_at": "2026-11-09T13:07:40.325Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y486E4X85MVP1AWS8H6E53",
+      "observed_at": "2026-11-09T13:07:33.933Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "observed_at": "2026-11-09T13:07:41.564Z",
+      "pages": 11,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "observed_at": "2026-11-09T13:07:51.535Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "observed_at": "2026-11-09T13:07:57.552Z",
+      "pages": 9,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "observed_at": "2026-11-09T13:07:56.739Z",
+      "pages": 8,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "observed_at": "2026-11-09T13:07:58.835Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
+      "observed_at": "2026-11-09T13:07:58.093Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "observed_at": "2026-11-09T13:07:52.902Z",
+      "pages": 5,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "observed_at": "2026-11-09T13:07:52.237Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "observed_at": "2026-11-09T13:07:58.376Z",
+      "pages": 12,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "observed_at": "2026-11-09T13:08:10.461Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "observed_at": "2026-11-09T13:08:12.519Z",
+      "pages": 8,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5EX8RTPR7YEZD2A144XED2S",
+      "observed_at": "2026-11-09T13:08:06.798Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3397SE03G626MJ72N90PF",
+      "observed_at": "2026-11-09T13:08:25.659Z",
+      "pages": 5,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+      "observed_at": "2026-11-09T13:08:30.703Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+      "observed_at": "2026-11-09T13:08:27.487Z",
+      "pages": 5,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+      "observed_at": "2026-11-09T13:08:24.344Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "observed_at": "2026-11-09T13:08:08.665Z",
+      "pages": 6,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "observed_at": "2026-11-09T13:09:04.416Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y37BWE719DWW5Z0DQS6DS9",
+      "observed_at": "2026-11-09T13:09:01.641Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5J3GC90GAKHK8B6SAPRV3JQ",
+      "observed_at": "2026-11-09T13:09:08.018Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y396T7MXR7VQXSRKMYS3RM",
+      "observed_at": "2026-11-09T13:09:09.062Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+      "observed_at": "2026-11-09T13:08:58.748Z",
+      "pages": 15,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "observed_at": "2026-11-09T13:09:05.127Z",
+      "pages": 25,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
+      "observed_at": "2026-11-09T13:09:03.410Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "observed_at": "2026-11-09T13:09:06.088Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "observed_at": "2026-11-09T13:09:21.718Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "observed_at": "2026-11-09T13:09:19.589Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+      "observed_at": "2026-11-09T13:09:19.035Z",
+      "pages": 8,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
+      "observed_at": "2026-11-09T13:09:18.385Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
+      "observed_at": "2026-11-09T13:09:20.099Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+      "observed_at": "2026-11-09T13:09:22.010Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "observed_at": "2026-11-09T13:09:20.714Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "observed_at": "2026-11-09T13:09:20.382Z",
+      "pages": 5,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+      "observed_at": "2026-11-09T13:09:27.963Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
+      "observed_at": "2026-11-09T13:09:27.392Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "observed_at": "2026-11-09T13:09:28.975Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+      "observed_at": "2026-11-09T13:09:29.859Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
+      "observed_at": "2026-11-09T13:09:30.198Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+      "observed_at": "2026-11-09T13:09:29.412Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y39WH7QVTH07RTWHTSRP65",
+      "observed_at": "2026-11-09T13:09:26.894Z",
+      "pages": 3,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Z6PYK9BAV3ECXFC575JYT7",
+      "observed_at": "2026-11-09T13:09:28.355Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "observed_at": "2026-11-09T13:09:37.636Z",
+      "pages": 51,
+      "dividers": 8
+    },
+    {
+      "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "observed_at": "2026-11-09T13:09:37.915Z",
+      "pages": 4,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "observed_at": "2026-11-09T13:09:39.987Z",
+      "pages": 6,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "observed_at": "2026-11-09T13:09:36.993Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "observed_at": "2026-11-09T13:09:38.991Z",
+      "pages": 16,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "observed_at": "2026-11-09T13:09:38.395Z",
+      "pages": 11,
+      "dividers": 1
+    },
+    {
+      "file_id": "01M3NRCX55B452A12819WNE1RH",
+      "observed_at": "2026-11-09T13:09:35.462Z",
+      "pages": 32,
+      "dividers": 2
+    },
+    {
+      "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "observed_at": "2026-11-09T13:09:35.824Z",
+      "pages": 10,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
+      "observed_at": "2026-11-09T13:09:48.807Z",
+      "pages": 36,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5HVW84WZFE62DREB6QB9ZDJ",
+      "observed_at": "2026-11-09T13:09:49.278Z",
+      "pages": 57,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6XQBG616KHKS5011KKQTQSN",
+      "observed_at": "2026-11-09T13:09:47.497Z",
+      "pages": 62,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5HDPF3HSZFJJAFMARVQSHZR",
+      "observed_at": "2026-11-09T13:09:46.183Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5K3WQXMD1QKXM2SBD7VABW1",
+      "observed_at": "2026-11-09T13:09:48.101Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5JV8SY6WP21H72WKK7GJ5R6",
+      "observed_at": "2026-11-09T13:09:47.147Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6JA41WWACWMRRVMVX1NQP9K",
+      "observed_at": "2026-11-09T13:09:47.811Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5HRAG5659SFE58D3PTA7D0V",
+      "observed_at": "2026-11-09T13:09:48.358Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5JKR6H0JNN07BA3YKQDXBNC",
+      "observed_at": "2026-11-09T13:09:56.225Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5HQ8VMMY87NVDENZAGJNYKM",
+      "observed_at": "2026-11-09T13:09:55.559Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
+      "observed_at": "2026-11-09T13:09:53.830Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5JS8TNZKQ01SJS4D0S9VQFC",
+      "observed_at": "2026-11-09T13:09:54.779Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5JRN1HWF62YK527NKCY7WD5",
+      "observed_at": "2026-11-09T13:09:54.320Z",
+      "pages": 2,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6XNXMVK65A0JRXKJHXT7ZCF",
+      "observed_at": "2026-11-09T13:09:55.113Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M5K0V5AGPSDXKA2K1PH1ABNE",
+      "observed_at": "2026-11-09T13:09:54.059Z",
+      "pages": 1,
+      "dividers": 0
+    },
+    {
+      "file_id": "01M6Y4G3644Y8918FCX2NS9M68",
+      "observed_at": "2026-11-09T13:09:56.029Z",
+      "pages": 1,
+      "dividers": 0
+    }
+  ],
+  "page_deltas": [
+    {
+      "file": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "name": "Intraday Flow · R1 Draft",
+      "before": 2,
+      "after": 4,
+      "added": [
+        {
+          "id": "p-4-0",
+          "name": "04 · Build · Basis, freshness and states"
+        },
+        {
+          "id": "p-3-0",
+          "name": "01 · Product · Recorded scan and evidence"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "file": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "name": "Sector Intelligence · R4 · Working Design",
+      "before": 9,
+      "after": 12,
+      "added": [
+        {
+          "id": "p-B-0",
+          "name": "06 · Shared Shell · Product · Round 2"
+        },
+        {
+          "id": "p-C-0",
+          "name": "07 · Shared Shell · States & help · Round 2"
+        },
+        {
+          "id": "p-D-0",
+          "name": "08 · Shared Shell · Build & design map · Round 2"
+        }
+      ],
+      "removed": []
+    },
+    {
+      "file": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "name": "Catalyst Intelligence · Decision Desk and Integration",
+      "before": 7,
+      "after": 8,
+      "added": [
+        {
+          "id": "p-8-0",
+          "name": "04A · Build · R3 workflow contract"
+        }
+      ],
+      "removed": []
+    }
+  ],
+  "missing_original_pages": [],
+  "structured_validation": {
+    "passed": true,
+    "failures": [],
+    "files": 83,
+    "routes": 203,
+    "guides": 50
+  },
+  "explicit_board_routes": [
+    {
+      "file_id": "01M312VSDSZFVT45674GDVJVZN",
+      "page_id": "p-9-0",
+      "board_ids": [
+        "47Q-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:26.739Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "5E9-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:30.102Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "page_id": "p-2-0",
+      "board_ids": [
+        "17-0",
+        "2P-0",
+        "54-0",
+        "6S-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.609Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "page_id": "p-C-0",
+      "board_ids": [
+        "7FE-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.192Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "page_id": "p-3-0",
+      "board_ids": [
+        "7FJ-0",
+        "KE-0",
+        "10M-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:26.744Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "page_id": "p-3-0",
+      "board_ids": [
+        "IK-0",
+        "MB-0",
+        "OD-0",
+        "PO-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:26.745Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "page_id": "p-4-0",
+      "board_ids": [
+        "W6-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:26.747Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "1-0",
+        "FE-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:26.748Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "U2-0",
+        "44L-0",
+        "4F5-0",
+        "4SA-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.611Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "1-0",
+        "11-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.612Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "4ED-0",
+        "3DN-0",
+        "4OO-0",
+        "56C-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.614Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-D-0",
+      "board_ids": [
+        "MBQ-0",
+        "MHA-0",
+        "MIV-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.615Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-3-0",
+      "board_ids": [
+        "BML-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:36.905Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-5-0",
+      "board_ids": [
+        "GPI-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:34.902Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "page_id": "p-8-0",
+      "board_ids": [
+        "2JD-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:31.619Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+      "page_id": "p-2-0",
+      "board_ids": [
+        "GK-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:35.501Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+      "page_id": "p-3-0",
+      "board_ids": [
+        "V1-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:39.986Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "page_id": "p-5-0",
+      "board_ids": [
+        "3HH-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:42.328Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+      "page_id": "p-5-0",
+      "board_ids": [
+        "AFT-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:36.909Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y3T1K3573JYPMBATASW1W5",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "1-0",
+        "11G-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:36.910Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "page_id": "p-2-0",
+      "board_ids": [
+        "B9-0",
+        "4GX-0",
+        "4I0-0",
+        "4LS-0",
+        "4OS-0",
+        "4VP-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:41.361Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "9F-0",
+        "AE-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:36.912Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "QI-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:36.914Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "page_id": "p-3-0",
+      "board_ids": [
+        "2ZJ-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:40.872Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "page_id": "p-4-0",
+      "board_ids": [
+        "3IP-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:23:00.205Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "page_id": "p-2-0",
+      "board_ids": [
+        "Z1-0",
+        "251-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:58.081Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "1-0",
+        "U-0",
+        "2H-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:42.333Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "page_id": "p-R-0",
+      "board_ids": [
+        "1BCX-0",
+        "1NDQ-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:50.315Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "page_id": "p-3-0",
+      "board_ids": [
+        "16B-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:57.303Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M3NRCX55B452A12819WNE1RH",
+      "page_id": "p-1-0",
+      "board_ids": [
+        "A2Q-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:23:01.706Z",
+      "reused_fresh_metadata": false
+    },
+    {
+      "file_id": "01M3NRCX55B452A12819WNE1RH",
+      "page_id": "p-D-0",
+      "board_ids": [
+        "KSB-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:22:42.338Z",
+      "reused_fresh_metadata": true
+    },
+    {
+      "file_id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "page_id": "p-A-0",
+      "board_ids": [
+        "6M0-0"
+      ],
+      "missing": [],
+      "observed_at": "2026-11-09T13:23:04.107Z",
+      "reused_fresh_metadata": false
+    }
+  ],
+  "source_context_repairs": [
+    {
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "node_id": "1DQ-0",
+      "observed_at": "2026-11-09T12:50:12.006Z"
+    },
+    {
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "node_id": "H1-0",
+      "observed_at": "2026-11-09T12:50:21.095Z"
+    },
+    {
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "node_id": "4HF-0",
+      "observed_at": "2026-11-09T12:51:01.260Z"
+    },
+    {
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "node_id": "29W-0",
+      "observed_at": "2026-11-09T12:51:26.645Z"
+    },
+    {
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "node_id": "2SN-0",
+      "observed_at": "2026-11-09T12:52:26.195Z"
+    },
+    {
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "node_id": "1WT-0",
+      "observed_at": "2026-11-09T12:52:37.250Z"
+    },
+    {
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "node_id": "3VN-0",
+      "observed_at": "2026-11-09T12:52:46.561Z"
+    },
+    {
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "node_id": "2RD-0",
+      "observed_at": "2026-11-09T12:52:57.854Z"
+    }
+  ],
+  "fresh_page_guide_updates": [
+    {
+      "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "node_id": "I6-0",
+      "routes": 3,
+      "observed_at": "2026-11-09T13:18:23.431Z",
+      "status": "READBACK_VERIFIED"
+    },
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "node_id": "HD9-0",
+      "routes": 8,
+      "observed_at": "2026-11-09T13:18:51.571Z",
+      "status": "READBACK_VERIFIED"
+    },
+    {
+      "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "node_id": "1JR-0",
+      "routes": 7,
+      "observed_at": "2026-11-09T13:19:27.307Z",
+      "status": "READBACK_VERIFIED"
+    }
+  ],
+  "central_source_link": {
+    "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+    "page_id": "p-1-0",
+    "node_id": "GT-0",
+    "observed_at": "2026-11-09T13:22:26.737Z",
+    "old_stale_pin_removed": true,
+    "current_branch": "sol/paper-estate-organization-20261108-c1",
+    "delivery_pr": 2364
+  },
+  "visual_checks": [
+    {
+      "file_id": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "node_id": "BDU-0",
+      "result": "PASS",
+      "scope": "Guide text, routes and footer readable"
+    },
+    {
+      "file_id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+      "node_id": "AHQ-0",
+      "status": "PASS",
+      "observation": "All nine route rows, qualification and footer readable; no clipping or overlap."
+    },
+    {
+      "file_id": "01M38EVF74SJWG1GANN5VP380Z",
+      "node_id": "B6N-0",
+      "status": "PASS_AFTER_REPAIR",
+      "observation": "Guide and footer fully visible at 1440x954. Original AFT-0 retains four children and fixed730px height. New guide is separate on same page; original guide node B63-0 preserved; spatial wording readback verified."
+    },
+    {
+      "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "node_id": "28UR-0",
+      "result": "PASS",
+      "scope": "Separate guide fully visible; fixed original directory preserved"
+    },
+    {
+      "file_id": "01M3NRCX55B452A12819WNE1RH",
+      "node_id": "1QJZ-0",
+      "result": "PASS",
+      "scope": "Full guide and footer fit within growing parent"
+    },
+    {
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "node_id": "1-0",
+      "result": "PASS",
+      "scope": "Current source card and all entry routes visible without clipping"
+    }
+  ],
+  "consumer_reasoning": [
+    {
+      "scenario": "Forex implementation source",
+      "file_id": "01M6Y3PVKKXC83MRGJYCX77959",
+      "guide": "p-3-0/3AW-0",
+      "selected_path": "estate p-6-0/8L-0 Forex BT-0 -> 01M6Y4CC5V5NZ92G3A0X3XZN3B p-1-0/AV5-0 -> AZ5-0",
+      "result": "Valid reading path; retained studies and future watch lifecycle not promoted"
+    },
+    {
+      "scenario": "Returns with staging copies",
+      "file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "guide": "p-R-0/28UR-0",
+      "selected_path": "p-Q-0/1BBQ-0 -> 28BZ-0,28FS-0,28LZ-0",
+      "result": "Original working source; #2357 staging/no cutover and1B5H-0 hold preserved"
+    },
+    {
+      "scenario": "OS Code implementation",
+      "file_id": "01M3NRCX55B452A12819WNE1RH",
+      "guide": "p-1-0/1QJZ-0",
+      "selected_path": "product p-U-0; states p-W-0; build p-X-0/1M93-0",
+      "result": "Design contract reached; future consumer proof and #2345 status retained"
+    }
+  ],
+  "consumer_limits": "Bounded reasoning and live read probes; not a weaker-model benchmark or blanket runtime acceptance.",
+  "formatting_repair": {
+    "files": [
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/agent-navigation-001-015.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-001-020.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-021-040.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-041-060.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-061-080.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-081-100.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-101-120.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-121-138.json",
+        "lexical_tokens_preserved": true
+      },
+      {
+        "path": "docs/paper_migrations/estate_organization/effects/operations-139-148.json",
+        "lexical_tokens_preserved": true
+      }
+    ],
+    "canonical_paths_unchanged": true,
+    "shared_validation_policy_unchanged": true,
+    "diagnostic": "Complete 37-file pre-final candidate set: existing D8 scanner helpers report zero matches after whitespace-only JSON formatting. Actual current-head hosted gate still required."
+  },
+  "reconciled_no_effects": [
+    {
+      "operation_id": "peo-20261109-c1-dashboard-spatial-wording",
+      "reconciliation": {
+        "classification": "SCHEMA_CONFIG",
+        "observed_at": "2026-11-09T12:56:02.575Z",
+        "evidence": "Catalog requires html; submitted textContent for non-Text wrapper B6O-0. Exact readback of B6P-0 and B69-0 confirms both original strings unchanged. Corrected operation targets actual Text node with schema-conforming html; same Paper carrier.",
+        "unknown_effect": false
+      }
+    }
+  ],
+  "additional_reconciliations": [
+    {
+      "operation_id": "peo-20261109-c1-dashboard-unclip-frame",
+      "outcome": "CONFIRMED_NO_NODES_CREATED",
+      "evidence": "createdNodes empty, unchanged guard and exact requested page still has original AFT-0 only",
+      "next_action": "Materially changed nonempty wrapper; original operation not replayed."
+    }
+  ],
+  "release": {
+    "pr": 2364,
+    "author": "MastermindX1",
+    "original_native_actor": "mastermindxryan",
+    "native_host": "m2studio",
+    "prior_native_read": {
+      "head": "c81ab602ee34d252a64979c2b818073dfb114b7a",
+      "draft": true,
+      "auto_merge": null,
+      "merge_queue": null,
+      "author_coauthors": [
+        "MastermindX1"
+      ]
+    },
+    "state": "AWAIT_EXACT_FINAL_HEAD_QUALIFICATION",
+    "admin_protection_read_denial": "Preserved; not retried"
+  },
+  "limits": [
+    "Metadata is non-atomic across active writers",
+    "Source-specific holds and original effect custody remain binding",
+    "Archive parity, physical disposal and product deployment are not claimed"
+  ]
+}

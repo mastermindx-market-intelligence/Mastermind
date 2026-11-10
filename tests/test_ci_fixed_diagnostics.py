@@ -234,10 +234,16 @@ def test_workflow_retains_job_limit_and_bounds_upload_opportunity():
     workflow=yaml.load(text,Loader=_WorkflowYAMLLoader);job=workflow['jobs']['pytest_shards']
     step=next(s for s in job['steps']if s.get('name')=='Run repository test shard')
     upload=next(s for s in job['steps']if s.get('name')=='Upload fixed test diagnostics')
-    assert job['timeout-minutes']==60 and step['timeout-minutes']==45
+    assert job['timeout-minutes']==75 and step['timeout-minutes']==45
     assert upload['if']=='always()' and upload['timeout-minutes']==2
     assert upload['uses']=='actions/upload-artifact@v4'
-    assert upload['with']['path']=='${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json'
+    assert upload['with']['path'].splitlines() == [
+        '${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json',
+        '${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json',
+        '${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json']
+    prepare = next(s for s in job['steps'] if s.get('name') == 'Prepare fixed test diagnostics')
+    preflight = next(s for s in job['steps'] if s.get('name') == 'Verify native application admission and dispatch custody')
+    assert job['steps'].index(prepare) < job['steps'].index(preflight) < job['steps'].index(step)
     assert upload['with']['name']=='ci-fixed-diagnostics-${{ matrix.index }}'
     assert upload['with']['if-no-files-found']=='warn'
     assert job['steps'].index(step)<job['steps'].index(upload)

@@ -1,3 +1,4 @@
+import { OfficeDependencies } from "./OfficeDependencies";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   createDirectionPreview, previewIsCurrent, type DirectionPreview, type OfficeLaunchOutcome,
@@ -125,7 +126,7 @@ const OFFICE_ZH = {
   "No mission lanes were supplied. This is not a company-wide zero.": "尚未提供任务分支。这不代表全公司没有工作。",
   "Company total is not established.": "全公司总量尚未确认。",
   "Needs you": "需要你处理",
-  "Returns, critical path and journal": "返回结果、关键路径和日志",
+  "Returns, dependencies and journal": "返回结果、依赖和日志",
   "Returns to review": "待查看的返回结果",
   "A return is not acceptance.": "返回结果不等于验收通过。",
   "Critical path": "关键路径",
@@ -461,7 +462,7 @@ export function MetaCeoOffice({
     </details>
 
     <details className="office-context">
-      <summary>{t("Returns, critical path and journal")}</summary>
+      <summary>{t("Returns, dependencies and journal")}</summary>
       <div className="office-main-grid">
       <section className="office-panel" aria-labelledby="office-returns-title">
         <div className="office-section-label"><h2 id="office-returns-title">{t("Returns to review")}</h2><SourceBadge source={projection.result.source} /></div>
@@ -473,13 +474,12 @@ export function MetaCeoOffice({
           <p>{t("Acceptance")} · {projection.result.value.result.acceptance}</p>
         </> : <p className="office-empty">{t("No exactly associated return has been qualified for this view.")}</p>}
       </section>
-      <section className="office-panel" aria-labelledby="office-path-title">
-        <h2 id="office-path-title">{t("Critical path")}</h2>
-        <p>{t("The critical path is unavailable. The owner’s next action remains visible.")}</p>
+      <OfficeDependencies read={projection.programs} locale={locale}>
+        <h3>{locale === "zh-CN" ? "所选任务上下文" : "Selected Mission context"}</h3>
         <dl className="office-next"><dt>{t("Next accountable owner")}</dt><dd>{mission?.principal.accountable_seat ?? t("Not supplied")}</dd>
           <dt>{t("Next action")}</dt><dd>{mission?.program.next_action ?? t("Not supplied")}</dd>
           <dt>{t("Return condition")}</dt><dd>{t("Not supplied by the current owner read")}</dd></dl>
-      </section>
+      </OfficeDependencies>
       <section className="office-panel" aria-labelledby="office-journal-title">
         <h2 id="office-journal-title">{t("What changed — and why")}</h2>
         {projectJournal ? <><p>{locale === "zh-CN" ? "所选项目日志；有界记录样本，不是全公司历史。" : "Selected-project journal: a bounded record sample, not company-wide history."}</p>{projectJournal}</>

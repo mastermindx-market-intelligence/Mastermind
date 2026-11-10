@@ -1,3 +1,4 @@
+import { readCompanyPending } from "../company/pending";
 import { parseProjectSourceWriteTarget, projectSourceWriteKeyMatches } from "./project-source-write-target";
 import { parseInstructionAdmissionTarget } from "./instruction-admission-target";
 import type { OperationPointer } from "./operation-controller";
@@ -77,6 +78,9 @@ type ClosedRecord = {
 } | {
   /** Original PLAN publication lookup only; no private body or preview witness. */
   readonly v: 15; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
+} | {
+  /** Paperclip original request lookup; no task body, token or execution state. */
+  readonly v: 16; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
 };
 
 type DurableReservation =
@@ -150,7 +154,8 @@ const KIND_RECORDS = {
 const KIND_VARIANTS = {
   conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false }],
   conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false }],
-  project_source_write: [{v:15,key:/^mmos-project-plan-proposal-[0-9a-f]{40}$/,consume:false}],
+  project_source_write: [{v:15,key:/^mmos-project-plan-proposal-[0-9a-f]{40}$/,consume:false},
+    {v:16,key:/^mmos-paperclip-backlog-[0-9a-f]{32}$/,consume:false}],
   project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
   launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
     { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
@@ -203,6 +208,7 @@ function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<
   if (spec.v === 13 || spec.v === 14) {
     return readNativePending(raw as unknown as OperationPointer) !== null;
   }
+  if (spec.v === 16) return readCompanyPending(raw as unknown as OperationPointer, scope) !== null;
   if (spec.v === 15) {
     const target=parsePlanProposalTarget(raw.targetKey);
     return target!==null && target.request_id===raw.operationKey && target.principal_scope===scope;

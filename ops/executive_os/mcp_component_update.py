@@ -91,6 +91,7 @@ import json
 import os
 import plistlib
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -730,6 +731,7 @@ class Host(Protocol):
         self, release_sha: str, profile_ids: tuple[str, ...]
     ) -> dict[str, str]: ...
     def verify_release(self, release_sha: str) -> str: ...
+    def require_os_web_assets(self, release_sha: str) -> None: ...
     def verify_closure(self) -> str: ...
     def readback(self, release_sha: str) -> dict: ...
     def marker_read(self) -> dict | None: ...
@@ -1000,6 +1002,24 @@ class ProductionHost:
         except PeerIdentityError as error:
             raise UpdateRefused("RELEASE_UNVERIFIED:" + str(error)) from None
         return observed.manifest_digest
+
+    def require_os_web_assets(self, release_sha: str) -> None:
+        """Require the sealed OS manifest when the installed v3 config needs OS transport.
+
+        This is a read-only pre-dispatch check after the complete target release
+        was verified. The runtime still validates the content/mimes on startup;
+        an absent bundle must never reach a gateway stop.
+        """
+        path = (installed._SERVICE_RELEASES + "/" + release_sha
+                + "/app/mastermind_os/dist/asset-manifest.json")
+        try:
+            info = os.lstat(path)
+        except OSError:
+            raise UpdateRefused("TARGET_OS_WEB_ASSETS_MISSING") from None
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+                or info.st_gid != 0 or info.st_nlink != 1
+                or stat.S_IMODE(info.st_mode) & 0o022):
+            raise UpdateRefused("TARGET_OS_WEB_ASSETS_UNQUALIFIED")
 
     def derive_capability_profile_digests(
         self, release_sha: str, profile_ids: tuple[str, ...]
@@ -1793,6 +1813,13 @@ def build_plan(host: Host, release_sha: str, set_public: bool,
                                   capability_profile_digests=digests,
                                   canary_enrollment=canary)
     manifest = host.verify_release(release_sha)
+    # A valid source seal is not evidence that the optional OS asset bundle
+    # was imported.  The installed v3 composer requires a real OsStaticApp
+    # whenever os_executive_transport is enabled. Refuse before any marker or
+    # launchd effect instead of crash-looping the newly selected gateway.
+    after = _strict_json(candidate.config_after, "MCP_COMPONENT_CONFIG_MALFORMED")
+    if after.get("os_executive_transport") is True:
+        host.require_os_web_assets(release_sha)
     closure = host.verify_closure()
     return plan_document(candidate, manifest_sha256=manifest, closure_sha256=closure), candidate
 

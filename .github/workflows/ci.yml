@@ -37,6 +37,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Classify integrated source diff using protected base code
         id: scope
         env:
@@ -89,6 +92,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - name: Verify exact changed source without executing untrusted PR text
         env:
           PR_BASE_SHA: ${{ needs.pr_scope.outputs.source_base }}
@@ -97,11 +104,6 @@ jobs:
           set -euo pipefail
           git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"
           python -m compileall -q scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py
-      - uses: actions/setup-python@v5
-        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
-        with:
-          python-version: "3.12"
-          cache: pip
       # Source-proximate web tests import app.deps through the real application.
       # Supply the same immutable engine/lib source as the full-shard job;
       # no runtime data, new credential policy or alternate dependency owner.
@@ -141,6 +143,39 @@ jobs:
           npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
           npm --prefix app/mastermind_os run typecheck
 
+  # CI Lightning F2: the source-identity/exact-pin guard family runs early
+  # on every CI event, including protected pushes and manual runs. Four
+  # modules move out of the six shards; two protected modules also stay in
+  # the shards. These modules hash/tokenize/parse the checked-out
+  # source and need no fixtures, so a churned pin fails the PR in minutes.
+  # The canonical shards exclude exactly the four excludable modules
+  # (ci/pytest_exclusions.toml) and the fail-closed "test" fan-in below
+  # refuses any non-success result. Assertions are byte-identical.
+  pin_guards:
+    name: Pin and identity guards
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history: the D8/armed-composition guards diff against
+      # origin/master exactly as they did inside the shards.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: |-
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run pinned source-identity guard suite
+        run: python -m scripts.ci_pin_guards
+
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules
   # or the repository's one protected status context named "test".
@@ -155,10 +190,11 @@ jobs:
       contents: read
       actions: read
     runs-on: ubuntu-latest
-    # Keep all modules and the protected fan-in gate; hosted merge-group shard 0
-    # needs headroom beyond the observed 45-minute full-suite plus cleanup.
-    # 60 minutes stays inside the merge queue's 100-minute check response limit.
-    timeout-minutes: 60
+    # Keep every prerequisite and the full 45-minute repository allowance.
+    # Actual setup took ~23m; a successful test/upload then crossed job60 in
+    # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
+    # This budget correction does not diagnose a post-test process-exit stall.
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       max-parallel: 6
@@ -333,8 +369,14 @@ jobs:
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
 
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
       - name: Verify native application admission and dispatch custody
-        if: matrix.index == 0
+        if: matrix.index == 5
         run: |
           python - <<'PYTEST'
           import unittest
@@ -350,12 +392,14 @@ jobs:
           ):
               suite.addTests(unittest.defaultTestLoader.discover(
                   "ops/native_fabric/quota_continuity/tests", pattern=pattern))
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          from scripts.ci_native_preflight import unittest_runner
+          result = unittest_runner(verbosity=2).run(suite)
           raise SystemExit(not result.wasSuccessful())
           PYTEST
           native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
           trap 'rm -rf "$native_rollout_test_root"' EXIT
           NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            -p scripts.ci_native_preflight \
             --junitxml="$native_rollout_test_root/native-proof.xml" \
             ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
             ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
@@ -407,7 +451,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: f38c5b9ea25ea598094a309f0edf48e2722408be
+          ref: 0c0521169260d87889da8a7711a90460982eefa2
           path: .ci-production-macro
           sparse-checkout: |
             engine
@@ -556,12 +600,6 @@ jobs:
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_chat_browser.py -v
 
-      - name: Prepare fixed test diagnostics
-        run: |
-          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
-          chmod 0700 "$diagnostic_dir"
-          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
-
       # No shard JOB is skipped. Existing non-pytest security gates always
       # execute; only a previously green, same-SHA native merge-group proof
       # may avoid re-executing the identical pytest module suite on a push.
@@ -574,11 +612,10 @@ jobs:
 
       - name: Run repository test shard
         if: ${{ steps.previous_ci.outputs.reuse != 'true' }}
-        # Give best-effort upload an opportunity inside the 60-minute job.
-        # The prior 38-minute step timed out; its snapshot retained the final
-        # module summary. Observed setup was 175s and upload 1s; 45+2 leaves 13m
-        # for setup/cleanup opportunity, not a guaranteed future bound.
-        # Slow setup or runner loss can still prevent artifact delivery.
+        # Preserve the independent 45-minute test limit. Job75 accommodates
+        # observed ~23m prerequisite work plus upload/cleanup; slow setup or
+        # runner loss can still prevent artifact delivery. No exit is inferred
+        # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
         run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
@@ -588,7 +625,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ci-fixed-diagnostics-${{ matrix.index }}
-          path: ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
@@ -598,7 +638,7 @@ jobs:
   # exact integrated fast/smoke check; a missing or failed check stays red.
   test:
     name: test
-    needs: [pr_scope, pr_fast, pytest_shards]
+    needs: [pr_scope, pr_fast, pin_guards, pytest_shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -616,12 +656,17 @@ jobs:
           PR_SCOPE_STATUS: ${{ needs.pr_scope.result }}
           PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
+          GUARDS_STATUS: ${{ needs.pin_guards.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
         run: |
           set -euo pipefail
           if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then
             if [ "$PR_SCOPE_STATUS" != success ]; then
               echo "trusted source risk qualification unavailable"
+              exit 1
+            fi
+            if [ "$GUARDS_STATUS" != success ]; then
+              echo "pinned source-identity guards must pass"
               exit 1
             fi
             case "$PR_SCOPE_MODE" in
@@ -644,8 +689,11 @@ jobs:
             esac
           else
             # Protected pushes and deliberate manual CI always run all shards.
+            # Excluded guard modules must pass here too: manual runs and
+            # pushes without reusable proof still require complete coverage.
             if [ "$SHARDS_STATUS" != success ] ||
-               [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then
+               [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||
+               [ "$GUARDS_STATUS" != success ]; then
               echo "integration/release CI must pass the full matrix"
               exit 1
             fi
