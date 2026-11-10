@@ -37,13 +37,13 @@ patch). The patch collapses both to 1 item; two "attack" tests in the suite pin 
   mode) releases running text ONLY at blank lines, list-item starts
   (`/^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]/`), closing code fences, or top-level ATX
   headings, with a 400 ms rate limit. Completed text always passes.
-- Honest live result: with the pinned proof prompt ("Count from 1 to 40 … one number
-  per line, with a short word after each") glm-5.3 answers `"1 one\n2 two\n…"` —
-  tight lines, no boundary — so every running update is held by the filter and the
-  text still appears at completion (2 text changes per turn, same as stock). With
-  blank lines between numbers, the same patched server shows live growth
-  (85→267→478→485 chars across one turn; `stream_diag` evidence). Demonstrated at
-  source level: counting style → `ready:""`; blank-line and list styles → released.
+- Honest live result: with the pinned proof prompt (count 1–40, "a short word after
+  each") glm-5.3 answers `"1 one\n2 two\n…"` — tight lines, no boundary — so every
+  running update is held by the filter and the text still appears at completion
+  (2 text changes per turn, same as stock). With blank lines between numbers, the
+  same patched server shows live growth (85→267→478→485 chars across one turn,
+  `stream_diag` evidence). Demonstrated at source level: counting style →
+  `ready:""`; blank-line and list styles → released.
 - So: the patch makes the adapter stream; the filter decides what the Chairman
   watches. Most prose answers (paragraphs, lists, code) cross boundaries and will
   now stream; tight single-token lines will not.
@@ -54,9 +54,8 @@ patch). The patch collapses both to 1 item; two "attack" tests in the suite pin 
   item, plus one completed settle per content block. Delivered client events are
   bounded downstream by the filter's 400 ms rate limit; running `node.updated`
   frames are dropped by the filter (as for Codex).
-- Store growth: none in item count — one item per API message id, same as the
-  incumbent's per-message item; only live `turn_item.updated` projection events
-  increase.
+- Store growth: none in item count — one item per API message id; only live
+  `turn_item.updated` projection events increase.
 
 ## Not covered
 
@@ -74,8 +73,7 @@ patch). The patch collapses both to 1 item; two "attack" tests in the suite pin 
 Same mechanism as the admission patch: a pinned upstream patch under
 `integrations/t3/upstream_patches/` recorded in `MANIFEST.md`; the bundle builder
 applies it (with `mastermind_admission_0770446.patch`, disjoint files) to the donor
-pin at build time. The lane ships the patch + tests + this note; performing the
-bundle carry is the principal's step, not this lane's.
+pin at build time. Performing the carry is the principal's step, not this lane's.
 
 ## Evidence
 
