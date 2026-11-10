@@ -5869,11 +5869,12 @@ class ExecutiveControlService:
             from common import workspace_model_configuration_contract as model_configuration_wire
             from common import workspace_capacity_fabric_contract as capacity_fabric_wire
             from common import workspace_t3_attempt_fleet_contract as t3_fleet_wire
+            from common import workspace_t3_thread_projection_contract as t3_thread_wire
             from common import workspace_host_observation_contract as host_observation_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA, capacity_fabric_wire.FRAME_SCHEMA, t3_fleet_wire.FRAME_SCHEMA,
+                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA, capacity_fabric_wire.FRAME_SCHEMA, t3_fleet_wire.FRAME_SCHEMA, t3_thread_wire.FRAME_SCHEMA,
                     project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, model_configuration_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
@@ -5890,6 +5891,13 @@ class ExecutiveControlService:
                     ceiling = t3_fleet_wire.MAX_RESPONSE_BYTES
                     try:
                         t3_fleet_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == t3_thread_wire.FRAME_SCHEMA:
+                    ceiling = t3_thread_wire.MAX_RESPONSE_BYTES
+                    try:
+                        t3_thread_wire.validate_frame(parsed)
                     except (TypeError, ValueError):
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
                         return
@@ -6813,30 +6821,28 @@ class ExecutiveControlService:
                     or self._service_state != "READY"):
                 raise ValueError("selected-child admission is unavailable")
 
-        if action == "selected_child_admit":
-            # The child-request lane (WO-13): the host froze which
-            # ``ChildExecutionRequest.v1`` envelopes may be named; the
-            # frame names one by its frozen command.  Admission queues
-            # bounded work and selects nothing (OQ-9).
-            await self._handle_child_request_admit_frame(
-                writer, app_binding=app_binding,
-                require_current=require_current, command=command)
-            return
-
-        try:
-            require_current()
-            child = target.child_for(command)
-        except Exception:
-            await self._send_ceo_ingress_error(
-                writer, "ingress_unavailable",
-                "the selected-child target is unavailable",
-            )
-            return
-        if child is None:
-            await self._send_ceo_ingress_error(
-                writer, "invalid_input", "selected-child command is not frozen"
-            )
-            return
+        # L1B3-1: the admit frame is NOT dispatched early.  It passes the
+        # exact same principal/work-ref proof as status/result below before
+        # ``_handle_child_request_admit_frame`` runs.  The selected-child
+        # lookup is skipped for it: an admission names a host-frozen
+        # ``ChildExecutionRequest.v1`` envelope by its command, never a
+        # frozen selected child.
+        child = None
+        if action != "selected_child_admit":
+            try:
+                require_current()
+                child = target.child_for(command)
+            except Exception:
+                await self._send_ceo_ingress_error(
+                    writer, "ingress_unavailable",
+                    "the selected-child target is unavailable",
+                )
+                return
+            if child is None:
+                await self._send_ceo_ingress_error(
+                    writer, "invalid_input", "selected-child command is not frozen"
+                )
+                return
         runtime = self._require_runtime()
         factory = app_binding.principal_facts_factory
         if not callable(factory):
@@ -6886,7 +6892,9 @@ class ExecutiveControlService:
                     or authority.work_ref != target.work_ref
                     or authority.capability_profile_digest != parsed["capability_profile_digest"]
                     or projection["mission"]["work_ref"] != target.work_ref
-                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or (child is not None
+                        and projection["mission"]["root_job_id"]
+                        != child.selection.root_job_id)
                     or source.for_principal(parsed["principal"], target.work_ref) != before):
                 raise ValueError("selected-child principal is not current")
             require_current()
@@ -6903,6 +6911,17 @@ class ExecutiveControlService:
                 writer, "authority_refused",
                 "the selected-child principal is not current",
             )
+            return
+        if action == "selected_child_admit":
+            # L1B3-1: the admit lane reaches this point only AFTER passing
+            # the same installed-facts proof (principal, work-ref equality,
+            # capability digest) as status/result.  The handler re-proves
+            # the same facts at its own claim boundary.
+            await self._handle_child_request_admit_frame(
+                writer, app_binding=app_binding,
+                require_current=require_current,
+                require_read_current=require_read_current,
+                command=command)
             return
         try:
             composition = target.new_composition(
@@ -6947,6 +6966,7 @@ class ExecutiveControlService:
         *,
         app_binding: CeoIngressAppBinding,
         require_current: Callable[[], None],
+        require_read_current: Callable[[], tuple] | None = None,
         command: str,
     ) -> None:
         """Admit one host-frozen ``ChildExecutionRequest.v1`` (WO-13).
@@ -6959,11 +6979,19 @@ class ExecutiveControlService:
         mismatch is a precise conflict, a full ready queue returns a
         precise wait reason.  Nothing here selects a worker, provider
         or host — the host still selects (OQ-9).
+
+        L1B3-1: the caller supplies the SAME ``require_read_current``
+        proof used by the status/result lanes (installed principal
+        facts, work-ref equality, capability digest).  When present it
+        is re-proved at this claim boundary, immediately before the
+        admission is committed; the frozen material's key and the
+        envelope's own admission command id must also be one identity.
         """
 
         from control_plane.child_execution_contracts import ChildExecutionRequest
         from control_plane.child_request_admission import (
             CHILD_REQUEST_DIGEST_CONFLICT,
+            admission_command_id,
         )
 
         material = app_binding.child_request_material
@@ -6988,6 +7016,28 @@ class ExecutiveControlService:
                 writer, "ingress_unavailable",
                 "the selected-child target is unavailable",
             )
+            return
+        if require_read_current is not None:
+            # L1B3-1: the same read-current proof as the status/result
+            # lanes, re-proved at the admission boundary.  The frame's own
+            # authority fields are never trusted: the installed principal
+            # facts must still carry this exact principal at the target's
+            # work scope with the frame's capability digest.
+            try:
+                require_read_current()
+            except Exception:
+                await self._send_ceo_ingress_error(
+                    writer, "authority_refused",
+                    "the selected-child principal is not current",
+                )
+                return
+        if admission_command_id(request) != command:
+            # L1B3-1: the frozen material's key and the envelope's own
+            # admission command id are one identity.  A mismatch is a
+            # precise pre-effect refusal; nothing is admitted.
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input",
+                "the child request command does not match the frozen frame command")
             return
         runtime = self._require_runtime()
         try:
