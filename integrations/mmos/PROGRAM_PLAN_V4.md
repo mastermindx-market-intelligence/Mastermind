@@ -103,7 +103,7 @@ Carries over, unchanged in value:
 | --- | --- | --- |
 | T1 shared conversation | DONE_WHEN 1 to 3, in the dev bundle against an isolated T3 server, then paired to the real one by the principal | stage 1 accepted 2026-11-10 at trunk `6a2634bb6` (stock client signs in, opens one thread by URL, queues, survives a restart, two views; see `T1_SHARED_CONVERSATION_FINDINGS.md`). Stage 2 (the window) starts when L8 has returned |
 | T1s live answer text | Claude-driver threads stream answer text the way Codex-driver threads already do | accepted 2026-11-10 at trunk `1bc6b7574` (patch sha256 `661566e1…5400`, 355 tests in the principal's run; see section 11) |
-| T6 team server | An always-on headless T3 server owned by Mastermind, separate from the Chairman's T3 Code app, that the window and the teammates use | started 2026-11-10. See section 11 |
+| T6 team server | An always-on headless T3 server owned by Mastermind, separate from the Chairman's T3 Code app, that the window and the teammates use | **accepted and installed 2026-11-10** at trunk `54da298e1`. See section 12 |
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
 | T3 Team fork | Teammate list and work cards as a thin fork of the T3 web client | starts when T1 is proven |
 | T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
@@ -283,3 +283,67 @@ and in a browser, and DONE_WHEN 3 is met there.
 **Offered upstream, not done:** the duplicate-text fix and the streaming patch are useful
 to T3 itself. Sending them upstream is a public act under the Chairman's name and waits
 for his word.
+
+## 12. Amendment, 2026-11-10 19:55 UTC: T6 accepted, the team server is installed
+
+Lane T6 returned and the principal verified it: 23 tests pass, the launcher selftest
+passes, every evidence file is valid JSON, and the lane left no launchd job, listener or
+home behind. The principal then installed the real server. The note is
+`integrations/mmos/T6_TEAM_SERVER.md`; the tool is `tools/mmos_team_server/team_server.sh`.
+
+**What is running now**
+
+| Item | Value |
+|---|---|
+| launchd label | `com.mastermind.t3-team` (user LaunchAgent, KeepAlive, no secrets in the plist) |
+| Address | `127.0.0.1:3780` only. The server process has no other listener |
+| Home | `~/.mastermind/t3-team` (state in `home/userdata`, route keys in `fabric.env` mode 0600) |
+| Server build | `~/.mastermind/t3-team-server/bin/t3`, a link to `t3-0770446-textdelta`: upstream pin `0770446` plus the T1s patch, bundle sha256 `37271af3a1c6…`, run by `/opt/homebrew/bin/node` |
+| Pairing | `~/.mastermind/t3-team/run/access.txt` (0600). The token changes on every server start; a paired browser keeps working across restarts |
+
+Checked on the real server by the principal: one turn on the stock build, `kill -9` and
+back in about one second with the thread intact, a second turn after the revival, the
+switch to the patched build, a third turn there, and the Chairman's T3 Code server
+(pid 17210, port 3773) unchanged throughout. Not checked on the real server: answer text
+arriving in steps in a browser. The lane showed 13 steps with this same build file in a
+dev root; the principal's own attempt polled too slowly to see them.
+
+**The team server does not run the Chairman's app.** The stock command `~/.t3/bin/t3` is
+a wrapper around the T3 Code app bundle, so a team server on it would change whenever the
+app updates itself and would run as a second copy of his app. The team server therefore
+runs its own build from its own directory. Updating T3 Code no longer touches the team.
+
+**Correction to the lane's report.** T6 wrote that the installed app carries a database
+change newer than our build. It is the other way round. The installed app is 0.1.7,
+built from upstream commit `322f6544dfad` of 2026-11-04. Our pin `0770446` is 408 commits
+later and adds database change 80 (a `thread_mode` column on scheduled tasks). So:
+
+- Our build moves a home forward to 80. The stock app's server then opens that home, logs
+  one warning that it does not know change 80, and still works. The principal tested this
+  on a throwaway copy of the team home.
+- The team home is at 80 now. It was switched while it held one test thread, so nothing
+  of value went through the change.
+- The stock command prints that warning on standard output, in front of its JSON. A
+  script that reads JSON from `~/.t3/bin/t3` against the team home will fail.
+
+**Rule that follows:** anything that talks to the team server uses the team server's own
+command, `~/.mastermind/t3-team-server/bin/t3`, with `T3CODE_HOME=~/.mastermind/t3-team/home`.
+That includes the wake carrier's `t3_bin` setting for every teammate bound there.
+
+**DONE_WHEN 3, answered.** The T3 Code app cannot hold a second server connection. T3's
+supported way is an environment link: `t3 pair` on one server, `t3 environment link` on
+the other, and the linked server's threads appear as a group in the sidebar. It needs the
+Labs setting for linked environments on both sides. On the team server that is ours to
+set. On the Chairman's app it is a change to his app, so it is his to make or to order.
+Until then team threads open in the Mastermind window and in a browser, which section 11
+already accepts for DONE_WHEN 3.
+
+**Known limits of the install**
+
+- It depends on `/opt/homebrew/bin/node`. A Homebrew upgrade of node changes the runtime
+  under it. A pinned node copy is a small follow-up, not done.
+- The build directory is a 4 GB copy of a full source tree with its packages. A packed
+  build is a follow-up, not done.
+- Nothing has run on it for days yet, and it has not been through a reboot.
+- The seeded settings give it one provider, the Capacity Fabric route. Teammate personas
+  are added when the first installed agent is moved, after T45 returns.

@@ -56,10 +56,13 @@ server start. Off-loopback access (LAN + tailnet) is refused.
 switches one home both ways. Proven stock→patched→stock on one home
 (evidence 05): same thread list, new turns worked both ways. The patched
 build (T1s streaming, sha256 `37271af3a1c6…`, 8,307,715 bytes, esbuild from
-a private copy of `src-textdelta`) logged a database migration-history
-divergence warning against the newer stock schema (migration 80 skipped, not
-reconciled — no hand-migration attempted) and still read/wrote the home
-correctly. With the patched server, a six-paragraph turn showed 13 live
+a private copy of `src-textdelta`) is NEWER than the installed 0.1.7 app
+(pin `0770446` is 408 commits after the app's `322f6544dfad`): it applies
+migration 80 to the home, after which the stock server logs one
+migration-history divergence warning ("80 unknown to this build") and still
+reads/writes the home correctly. (Corrected by the principal 2026-11-10; the
+first version of this note had the direction reversed. See PROGRAM_PLAN_V4
+section 12.) With the patched server, a six-paragraph turn showed 13 live
 text changes in the browser (stock reveals the answer only at completion).
 
 ## Can one app see two servers? (item 6)
@@ -94,7 +97,8 @@ reviewed, committed and patched it (63c179525) — disclosed here.
 
 - Multiple concurrent teammates over days (long-run stability, memory).
 - macOS restart / login-window behavior beyond RunAtLoad+KeepAlive semantics.
-- The real install at `~/.mastermind/t3-team`, port 3780 — principal's to
-  run; everything above was proven on dev roots 3805/3806.
-- Patched build carries a known migration-history divergence vs newer stock
-  schema; safe switch proven, long-term mixed use not assessed.
+- The real install was done by the principal on 2026-11-10 (PROGRAM_PLAN_V4
+  section 12); everything above was proven on dev roots 3805/3806.
+- A home that the patched build has opened is at migration 80; the stock
+  0.1.7 server warns about it and its CLI prints that warning on stdout ahead
+  of JSON. Use the team server's own command against the team home.
