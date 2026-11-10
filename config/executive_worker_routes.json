@@ -61,6 +61,13 @@
       "production_armed": true,
       "arming_grant": "OQ-7 (Chairman ruling, 2026-11-08): V1 routes armed NOW for Wave 2 live testing — a scoped arming grant for this programme's routes, NOT blanket production arming. Hermes provider row for the WO-10 hermes-native descriptor; built but unselected until the incumbent runtime selects it (Rev 4 l.253). No model alias is bound to this row: the Hermes native principal surface is deliberately absent from the worker-placement surface map (named principal surface, not a worker placement surface), so this row arms the route without claiming worker-alias eligibility. Global production_armed stays false (loader law)."
     },
+    "t3": {
+      "adapter_id": "t3-native",
+      "enabled": false,
+      "autonomous_allowed": false,
+      "production_armed": false,
+      "arming_grant": "OQ-7 (Chairman ruling, 2026-11-08): scoped V1 arming for Wave 2 live testing — NOT blanket production arming. This row names the t3-native route only: enabled=false and production_armed=false keep it unselected until the installed Executive canary passes through control_plane/t3_native_composition.py (the reviewed composition of the SQLite adapter store, T3McpToolPort and the supervisor pre-ACK recovery binding). No model alias is bound to this row: t3-native has no entry in _ADAPTER_EXECUTION_SURFACES, so no worker-eligible alias can load today (same shape as the hermes-native row, which arms a route without claiming worker-alias eligibility). Actual placement follows the capacity quota-class metadata pattern {\"adapter_id\": \"t3-native\"} (worker_type t3-native), not a Model Router alias."
+    },
     "deepseek": {
       "adapter_id": "opencode-free-cli",
       "enabled": false,
