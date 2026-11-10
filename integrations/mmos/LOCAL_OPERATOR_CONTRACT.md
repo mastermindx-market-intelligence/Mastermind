@@ -20,3 +20,11 @@ Agreed surface for local operator mode. L8's harness consumes 1–4; L4 implemen
    are attributed to `operator_subject` for OS executive + workspace routes; no
    bearer, no header trust; the TCP listener stays byte-for-byte unchanged (the
    public tunnel must not be able to reach the socket or its privileges).
+
+---
+
+**Amendment 2026-11-10 (PROGRAM_PLAN_V3):** the native app screens are frozen;
+Paperclip is the shell. The socket consumer is a Paperclip module worker process
+running as the Chairman's user, not the frozen app. §1/§2/§5 are unchanged and
+binding; §3/§4 now serve L8's thin-window/dev builds only — L4 builds no
+app-side client code.

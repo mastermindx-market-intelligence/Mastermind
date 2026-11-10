@@ -38,6 +38,7 @@ from control_plane.t3_native_composition import (
     COMPOSITION_NOT_ENROLLED,
     STORE_BASIS_CHECKOUT_DEFAULT,
     STORE_BASIS_EXECUTIVE_DATA_DIR,
+    T3_LAUNCH_ARGUMENTS_FILE_ENV,
     T3_MCP_ACCESS_TOKEN_FILE_ENV,
     T3McpHttpTransport,
     T3NativeCompositionError,
@@ -178,6 +179,227 @@ def test_token_file_resolution_prefers_explicit_then_environment(tmp_path):
     assert resolve_t3_access_token_file(None, environ={}) is None
 
 
+# --- launch arguments (G1: canary deviation "launch arguments ride the
+# --- port_factory seam; the default composition passed none") ------------------
+
+
+def _write_launch_arguments(
+    tmp_path, payload=None, *, name="t3-launch-arguments.json"
+) -> Path:
+    """Write a launch-arguments file (the canary's exact shape by default)."""
+    if payload is None:
+        payload = {
+            "projectId": "bc18d268-d100-484a-8952-3ce2b0b0a66b",
+            "workspaceStrategy": {
+                "type": "worktree",
+                "branch": "t3/mmos-l1-canary-eaacc05d",
+                "baseRef": "master",
+                "startFromOrigin": True,
+            },
+        }
+    path = tmp_path / name
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _enrolled_runtime(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    token_file = tmp_path / "t3-token"
+    token_file.write_text(_session_token("sess-launch-args"), encoding="utf-8")
+    return runtime, token_file
+
+
+def test_launch_arguments_file_resolution_prefers_explicit_then_environment(tmp_path):
+    from control_plane.t3_native_composition import (
+        resolve_t3_launch_arguments_file,
+    )
+
+    explicit = tmp_path / "explicit-args.json"
+    assert resolve_t3_launch_arguments_file(explicit) == explicit
+    env_file = tmp_path / "env-args.json"
+    resolved = resolve_t3_launch_arguments_file(
+        None, environ={T3_LAUNCH_ARGUMENTS_FILE_ENV: str(env_file)}
+    )
+    assert resolved == env_file
+    assert resolve_t3_launch_arguments_file(None, environ={}) is None
+
+
+def test_absent_launch_arguments_file_is_a_typed_broken_enrollment(tmp_path):
+    # G1 fail-closed law: an ENROLLED host (valid token) whose composition
+    # would build the port with NO launch arguments can never satisfy T3's
+    # required projectId/workspaceStrategy — refuse at composition, never
+    # launch a port whose every launch fails upstream.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert not composition.composed
+    assert composition.adapter is None
+    assert T3_LAUNCH_ARGUMENTS_FILE_ENV in composition.reason
+
+
+def test_missing_launch_arguments_file_is_a_typed_broken_enrollment(tmp_path):
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    absent = tmp_path / "absent-args.json"
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        launch_arguments_file=absent,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert "unreadable" in composition.reason
+
+
+def test_malformed_launch_arguments_file_is_a_typed_broken_enrollment(tmp_path):
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    for label, raw in (
+        ("not json", "{projectId: unquoted}"),
+        ("not an object", '["projectId"]'),
+        ("empty object", "{}"),
+        ("blank projectId", '{"projectId": "  "}'),
+        ("workspaceStrategy not an object", '{"workspaceStrategy": "worktree"}'),
+    ):
+        bad = tmp_path / f"bad-args-{abs(hash(label))}.json"
+        bad.write_text(raw, encoding="utf-8")
+        composition = compose_t3_native_adapter(
+            runtime,
+            inspector=FakeInspector(),
+            token_file=token_file,
+            launch_arguments_file=bad,
+            state_store=SQLiteT3AdapterStateStore(
+                tmp_path / f"state-{abs(hash(label))}.sqlite3"
+            ),
+            environ={},
+        )
+        assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+        assert not composition.composed
+        assert composition.adapter is None
+
+
+def test_extra_key_launch_arguments_file_is_refused(tmp_path):
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    extra = _write_launch_arguments(
+        tmp_path,
+        {"projectId": "p-1", "zone": "us-east"},  # 'zone' is not in the schema
+    )
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        launch_arguments_file=extra,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert "zone" in composition.reason
+
+
+def test_launch_arguments_environmentId_is_refused(tmp_path):
+    # The port already refuses environmentId at launch; a CONFIGURED file
+    # carrying it fails visibly at composition, before any owner exists.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    env_id = _write_launch_arguments(
+        tmp_path,
+        {"projectId": "p-1", "environmentId": "5f4cd5f0-e3df-407d-af02"},
+    )
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        launch_arguments_file=env_id,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert "environmentId" in composition.reason
+
+
+def test_valid_launch_arguments_file_composes_and_the_port_carries_them(tmp_path):
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    launch_arguments_file = _write_launch_arguments(tmp_path)
+    args = json.loads(launch_arguments_file.read_text(encoding="utf-8"))
+    recording: dict[str, RecordingTransport] = {}
+
+    def transport_factory(url, access_token):
+        transport = RecordingTransport(url, access_token)
+        recording["transport"] = transport
+        return transport
+
+    composition = compose_t3_native_adapter(
+        runtime,
+        inspector=FakeInspector(),
+        token_file=token_file,
+        launch_arguments_file=launch_arguments_file,
+        transport_factory=transport_factory,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_COMPOSED
+    assert composition.composed
+    port = composition.adapter._port
+    # The port carries the file's arguments on its own launch_arguments seam
+    # — the SAME seam the canary proved live through port_factory.
+    assert port._launch_arguments == args
+
+
+def test_launch_arguments_env_var_threads_through_the_service_seam(tmp_path):
+    # compose_t3_native_owners_for_service configures the whole lane from
+    # the environment: token file + launch arguments file, paths only.
+    from control_plane.t3_native_composition import (
+        T3_LAUNCH_ARGUMENTS_FILE_ENV,
+    )
+
+    runtime, _job_id, _workspace, _observations = _t3_runtime_and_job(tmp_path)
+    primary = _primary_owner(runtime, tmp_path)
+    token_file = tmp_path / "t3-token"
+    token_file.write_text(_session_token("sess-service-seam"), encoding="utf-8")
+    launch_arguments_file = _write_launch_arguments(tmp_path)
+    owners = compose_t3_native_owners_for_service(
+        primary,
+        runtime,
+        runs_root=tmp_path / "runs",
+        isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+        environ={
+            T3_MCP_ACCESS_TOKEN_FILE_ENV: str(token_file),
+            T3_LAUNCH_ARGUMENTS_FILE_ENV: str(launch_arguments_file),
+        },
+    )
+    assert set(owners) == {_T3_WORKER_ID}
+
+
+def test_service_seam_without_launch_arguments_composes_no_owner(tmp_path, caplog):
+    # The installed Executive configures this lane env-only: an enrolled
+    # token with NO launch arguments file is a VISIBLE broken enrollment at
+    # startup (fail-closed for this lane alone), never a half-composed port.
+    runtime, _job_id, _workspace, _observations = _t3_runtime_and_job(tmp_path)
+    primary = _primary_owner(runtime, tmp_path)
+    token_file = tmp_path / "t3-token"
+    token_file.write_text(_session_token("sess-service-seam-2"), encoding="utf-8")
+    with caplog.at_level(
+        logging.ERROR, logger="control_plane.t3_native_composition"
+    ):
+        owners = compose_t3_native_owners_for_service(
+            primary,
+            runtime,
+            runs_root=tmp_path / "runs",
+            isolation_roots=(tmp_path / "workspaces", tmp_path / "runs"),
+            environ={T3_MCP_ACCESS_TOKEN_FILE_ENV: str(token_file)},
+        )
+    assert owners == {}
+    assert any(
+        T3_LAUNCH_ARGUMENTS_FILE_ENV in record.message
+        for record in caplog.records
+    )
+
+
 # --- configured-but-broken enrollment (review #3 B1) ---------------------------
 
 
@@ -298,6 +520,10 @@ def test_present_token_attests_namespace_and_binds_the_same_token(tmp_path):
     token_file = tmp_path / "t3-token"
     token = _session_token("sess-compose-1")
     token_file.write_text(token + "\n", encoding="utf-8")
+    # G1: the default port path REQUIRES launch arguments (t3_thread_launch
+    # needs projectId/workspaceStrategy); this token/transport-binding probe
+    # supplies a valid file so composition reaches the port.
+    launch_arguments_file = _write_launch_arguments(tmp_path)
     recording: dict[str, RecordingTransport] = {}
 
     def transport_factory(url, access_token):
@@ -309,6 +535,7 @@ def test_present_token_attests_namespace_and_binds_the_same_token(tmp_path):
         runtime,
         inspector=FakeInspector(),
         token_file=token_file,
+        launch_arguments_file=launch_arguments_file,
         transport_factory=transport_factory,
         state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
         environ={},
@@ -556,7 +783,8 @@ def test_route_row_proposal_loads_through_the_real_router(tmp_path):
 
     live_before = _ROUTES.read_bytes()
     live = json.loads(live_before)
-    assert "t3" not in live["providers"]  # the live file stays untouched
+    # R5 landed the approved staged row (disabled): the live file carries it.
+    assert live["providers"]["t3"] == _proposal_row()
     merged = json.loads(json.dumps(live))
     merged["providers"]["t3"] = _proposal_row()
     proposed = tmp_path / "executive_worker_routes.json"
@@ -914,3 +1142,36 @@ def test_bridge_reattach_refuses_entry_from_a_running_event_loop(tmp_path):
         with pytest.raises(T3NativeCompositionError) as caught:
             asyncio.run(on_loop())
     assert "running event loop" in str(caught.value)
+
+
+def test_launch_arguments_provider_instance_is_admitted_and_kept_off_the_wire(tmp_path):
+    # Lead review L1: the host names the T3 provider instance serving the
+    # claimed model; the port holds it for modelSelection, never top-level.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    path = _write_launch_arguments(
+        tmp_path, {"projectId": "p-1", "providerInstanceId": "capacity_fabric"})
+    composition = compose_t3_native_adapter(
+        runtime, inspector=FakeInspector(), token_file=token_file,
+        launch_arguments_file=path,
+        transport_factory=lambda url, token: RecordingTransport(url, token),
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_COMPOSED
+    port = composition.adapter._port
+    assert port._launch_arguments == {"projectId": "p-1"}
+    assert port._provider_instance_id == "capacity_fabric"
+
+
+def test_launch_arguments_blank_provider_instance_is_refused(tmp_path):
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    path = _write_launch_arguments(
+        tmp_path, {"projectId": "p-1", "providerInstanceId": " "})
+    composition = compose_t3_native_adapter(
+        runtime, inspector=FakeInspector(), token_file=token_file,
+        launch_arguments_file=path,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert "providerInstanceId" in composition.reason
