@@ -15,6 +15,7 @@ from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping
 
 from .t3_mission_brief import MissionBrief, Phase
+from .t3_native_client import T3NativeClient
 from .t3_project_team_inventory import NativeInventory
 from .t3_project_team_results import NativeSettledResult
 from .t3_web_client import HandoffBrief, NativeUnavailable, T3CliClient, ThreadReceipt
@@ -790,15 +791,29 @@ def project_graph(team: ProjectTeam, *, bindings: tuple[RoleBinding, ...] = (),
 
 class ProjectTeamClient:
     """Compose the existing client; no subprocess/auth/persistence/retry owner."""
-    def __init__(self, client: T3CliClient, *, environment_id: str) -> None:
+    def __init__(self, client: T3CliClient, *, environment_id: str,
+                 native_client: T3NativeClient | None = None) -> None:
         _require(type(client) is T3CliClient, "TEAM_INCUMBENT_CLIENT_REQUIRED")
         self.client = client
         self.environment_id = _native_id(environment_id)
+        _require(native_client is None or type(native_client) is T3NativeClient
+                 and native_client.scope.environment_id == environment_id,
+                 "TEAM_NATIVE_CAPACITY_SCOPE_DIFFERS")
+        self.native_client = native_client
 
     async def launch(self, team: ProjectTeam, *, project_id: str, request_id: str,
-                     definition_ref: str | None = None) -> RoleBinding:
+                     capacity_model: str, definition_ref: str | None = None) -> RoleBinding:
+        # The old CLI remains useful for original retained reads, not for a new
+        # COO launch that could inherit its provider default. No alternate carrier.
+        native = self.native_client
+        _require(type(native) is T3NativeClient, "TEAM_NATIVE_CAPACITY_CLIENT_REQUIRED")
+        _require(native.scope.project_id == project_id, "TEAM_NATIVE_CAPACITY_SCOPE_DIFFERS")
+        _native_id(capacity_model)
         brief = team.root_handoff(project_id=project_id, request_id=request_id, definition_ref=definition_ref)
-        receipt = await self.client.launch(brief)
+        run = await native.launch(request_id=request_id, title="Project COO: " + request_id[:48],
+                                  prompt=brief.render(), model=capacity_model,
+                                  base_sha=team.mission.base_sha, writable=True)
+        receipt = ThreadReceipt(request_id, project_id, run.thread.thread_id, run.run_id, brief.fingerprint)
         return RoleBinding(team.root.role_id, self.environment_id, receipt.thread_id,
                            None, None, receipt, team.fingerprint)
 

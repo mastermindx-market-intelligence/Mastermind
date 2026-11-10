@@ -86,31 +86,36 @@ def _emit(value: Any) -> None:
 
 
 def launch_request(team, *, project_id: str, request_id: str, environment_id: str,
-                   definition_ref: str | None = None) -> dict[str, Any]:
-    """Native tool payload only. No OAuth, provider selection, launch or retries."""
+                   capacity_model: str, definition_ref: str | None = None) -> dict[str, Any]:
+    """Prepare an explicit Capacity model; no catalog admission, launch or retry."""
     brief = team.root_handoff(project_id=project_id, request_id=request_id, definition_ref=definition_ref)
     _native_id(environment_id)
+    _native_id(capacity_model)
     arguments = {"projectId": project_id,
+                 "modelSelection": {"instanceId": "capacity_fabric", "model": capacity_model},
                  "title": "Project COO: " + request_id[:48], "message": brief.render(),
                  "workspaceStrategy": {"type": "worktree", "baseRef": team.mission.base_sha,
                                        "branch": "web/" + request_id, "startFromOrigin": False},
                  "clientRequestId": "team-" + hashlib.sha256(
-                     (request_id + ":" + brief.fingerprint).encode()).hexdigest()[:48]}
+                     json.dumps([request_id, brief.fingerprint, "capacity_fabric", capacity_model],
+                                 separators=(",", ":")).encode()).hexdigest()[:48]}
     return {"tool": "t3_thread_launch", "arguments": arguments,
             "expected_environment_id": environment_id,
             "team_sha256": team.fingerprint, "brief_sha256": brief.fingerprint,
             "effect_state": "NOT_DISPATCHED", "execution_authorized": False,
+            "capacity_catalog_validation": "REQUIRED_AT_NATIVE_DISPATCH",
             "recovery": "Retain original caller namespace and native receipt. Lost replies require original-effect reconciliation; never replay via a fresh CLI/OAuth client."}
 
 
 def project_actions(*, definition: str, launcher: str, project_id: str,
-                    request_id: str, environment_id: str, definition_ref: str | None = None) -> dict[str, Any]:
+                    request_id: str, environment_id: str, capacity_model: str, definition_ref: str | None = None) -> dict[str, Any]:
     """Importable native T3 actions; all are explicitly manual and read-only."""
     _text(definition, 4096)
     _text(launcher, 4096)
     _require(Path(launcher).is_absolute(), "TEAM_LAUNCHER_ABSOLUTE_PATH_REQUIRED")
     _native_id(project_id)
     _native_id(environment_id)
+    _native_id(capacity_model)
     base = [launcher]
     reference_args = ["--definition-ref", definition_ref] if definition_ref else []
 
@@ -121,7 +126,8 @@ def project_actions(*, definition: str, launcher: str, project_id: str,
         ("Check project team", command("check")),
         ("Inspect project graph", command("graph")),
         ("Prepare COO launch request", command("launch-request", "--project-id", project_id,
-                                              "--request-id", request_id, "--environment-id", environment_id)),
+                                              "--request-id", request_id, "--environment-id", environment_id,
+                                              "--capacity-model", capacity_model)),
     ]
     return {"$schema": "https://t3.codes/schema/t3.json", "scripts": [
         {"name": name, "command": cmd, "icon": "configure", "runOnWorktreeCreate": False,
@@ -141,6 +147,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--request-id", required=True)
         if name in {"launch-request", "actions"}:
             sub.add_argument("--environment-id", required=True)
+            sub.add_argument("--capacity-model", required=True, help="Exact logical model from the live Capacity Fabric catalog; no provider default")
         if name in {"graph", "delegate"}:
             sub.add_argument("--snapshot", required=name == "delegate",
                              help="Existing owner's retained bindings and current native reads")
@@ -163,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                     definition_ref=args.definition_ref).render(), end="")
         elif args.command == "launch-request":
             _emit(launch_request(team, project_id=args.project_id, request_id=args.request_id,
-                                 environment_id=args.environment_id, definition_ref=args.definition_ref))
+                                 environment_id=args.environment_id, capacity_model=args.capacity_model, definition_ref=args.definition_ref))
         elif args.command in {"graph", "delegate"}:
             snapshot = _load_snapshot(args.snapshot)
             if args.command == "graph":
@@ -181,10 +188,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "actions":
             # Validate the complete eventual launch request before emitting a shell command.
             launch_request(team, project_id=args.project_id, request_id=args.request_id,
-                           environment_id=args.environment_id, definition_ref=args.definition_ref)
+                           environment_id=args.environment_id, capacity_model=args.capacity_model, definition_ref=args.definition_ref)
             _emit(project_actions(definition=args.definition, launcher=args.launcher,
                                   project_id=args.project_id, request_id=args.request_id,
-                                  environment_id=args.environment_id, definition_ref=args.definition_ref))
+                                  environment_id=args.environment_id, capacity_model=args.capacity_model, definition_ref=args.definition_ref))
         return 0
     except TeamError as error:
         _emit({"error": str(error), "effect_state": "NOT_DISPATCHED"})
