@@ -758,7 +758,7 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # and line positions; these same three fixture HTTP statuses are not principals.
 # Primary/work-entry composition preserves these three complete fixture calls.
 # Root re-reviewed the material auth diff; only exact existing tokens qualify.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6ce90063ed44ef222e081019ad43d94e373c485f5a7ff63cb795fc99f44d56e6', 'sites': ((3782, 68, 71, 'int', '503'), (3787, 69, 72, 'int', '503'), (3791, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '244f2012d4c7f19f8f7f5d2c8231a92436521e7421d7e2eafcfe6544b7bb258f', 'sites': ((3794, 68, 71, 'int', '503'), (3799, 69, 72, 'int', '503'), (3803, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
