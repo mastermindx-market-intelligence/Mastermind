@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
-"""Adaptive, usage-aware Claude compaction for the existing T3 provider homes.
+"""Usage-aware compaction recommendations for the existing T3 provider homes.
 
 Uses only local Claude session usage metadata and the local T3 rate catalog.
-It edits Claude Code modelSettings, not T3's owner-controlled server settings.
-No model requests, credentials, process restarts, or conversation text reads.
+Application is held until the existing settings owner is qualified.
+No model requests, process restarts, or conversation text in retained output.
 """
 from __future__ import annotations
 
 import argparse
-import fcntl
-import hashlib
 import json
+import math
 import os
-import statistics
-import tempfile
 import time
 from pathlib import Path
 
@@ -25,7 +22,6 @@ PROVIDERS = {
     "fabric_experiential": "fabric-experiential",
 }
 RATE_FILE = T3 / "userdata" / "usage-model-rates.json"
-STATE_DIR = T3 / "tools" / "adaptive_compaction"
 FABLE = ("claude-fable-5-2", "claude-fable-5.2", "claude-fable-5-1",
          "claude-fable-5.1", "claude-fable-5")
 OPUS = ("claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7")
@@ -145,7 +141,10 @@ def collect_usage(profile: Path, now: float) -> dict[str, list[dict]]:
 
 def price_catalog() -> dict:
     try:
-        rates = json.loads(RATE_FILE.read_text()).get("document", {})
+        catalog = json.loads(RATE_FILE.read_text())
+        if not isinstance(catalog, dict):
+            return {}
+        rates = catalog.get("document", {})
         return rates if isinstance(rates, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -164,8 +163,12 @@ def rate_for(model: str, rates: dict) -> tuple[dict | None, str]:
         vals = [rec.get(x) for x in ("input_cost_per_token",
                                      "cache_read_input_token_cost",
                                      "cache_creation_input_token_cost")]
-        if all(isinstance(x, (float, int)) and not isinstance(x, bool) and x >= 0
-               for x in vals):
+        try:
+            valid = all(type(x) in (float, int) and x >= 0 and math.isfinite(x)
+                        for x in vals)
+        except OverflowError:
+            valid = False
+        if valid:
             return rec, "catalog-exact" if candidate in candidates[:2] else "proxy-fable-5-1"
     return None, "unknown"
 
@@ -181,17 +184,20 @@ def stats(samples: list[dict], price: dict | None) -> dict:
     total = inputs + reads + writes
     cost = None
     if price is not None:
-        cost = (
-            inputs * price["input_cost_per_token"] +
-            reads * price["cache_read_input_token_cost"] +
-            writes * price["cache_creation_input_token_cost"]
-        ) / n
+        try:
+            cost = (
+                inputs * price["input_cost_per_token"] +
+                reads * price["cache_read_input_token_cost"] +
+                writes * price["cache_creation_input_token_cost"]
+            ) / n
+        except OverflowError:
+            cost = None
+        if cost is not None and not math.isfinite(cost):
+            cost = None
     return {"samples": n,
             "cache_ratio": round(reads / total, 4) if total else None,
             "mean_input_usd": round(cost, 5) if cost is not None else None,
-            "mean_context_tokens": int(statistics.mean(
-                x["input_tokens"] + x["cache_read_input_tokens"] +
-                x["cache_creation_input_tokens"] for x in samples))}
+            "mean_context_tokens": total // n}
 
 
 def target_window(model: str, sample_stats: dict) -> tuple[int, str]:
@@ -219,18 +225,24 @@ def target_window(model: str, sample_stats: dict) -> tuple[int, str]:
 
 
 def step_limit(old: int | None, target: int, group: str) -> int:
+    policy = POLICY[group]
     if old is None or group in ("economical", "low_context_opus"):
-        return target
+        effective = target
     # The first pass must establish the requested 200K/250K baselines,
     # not leap directly from 160K/200K to a speculative 300K/350K.
-    base = POLICY[group]["base"]
-    if old < base <= target:
-        return base
-    return max(old - 50000, min(old + 50000, target))
+    elif old < policy["base"] <= target:
+        effective = policy["base"]
+    else:
+        effective = max(old - 50000, min(old + 50000, target))
+    # Policy bounds take priority when an existing value is outside the
+    # legal range; normal in-range recommendations retain the 50K step.
+    return min(policy["maximum"], max(policy["minimum"], effective))
 
 
 def snapshot_profile(profile: str, enabled: bool, data: dict, usages: dict, rates: dict) -> tuple[dict, list[dict]]:
     out = json.loads(json.dumps(data))
+    if not enabled:
+        return out, []
     model_settings = out.setdefault("modelSettings", {})
     if not isinstance(model_settings, dict):
         raise ValueError("modelSettings is not an object")
@@ -242,8 +254,6 @@ def snapshot_profile(profile: str, enabled: bool, data: dict, usages: dict, rate
     else:
         active |= set(FABLE + OPUS + LOW_CONTEXT_OPUS + CHEAP)
     decisions = []
-    if not enabled:
-        return out, decisions
     for model in sorted(active):
         group = family(model)
         if group is None:
@@ -268,100 +278,54 @@ def snapshot_profile(profile: str, enabled: bool, data: dict, usages: dict, rate
     return out, decisions
 
 
-def atomic_json_update(path: Path, expected: bytes, modified: dict) -> bool:
-    new = (json.dumps(modified, ensure_ascii=False, indent=2) + "\n").encode()
-    if json.loads(expected) == modified:
-        return False
-    if path.read_bytes() != expected:
-        raise RuntimeError(f"concurrent update to {path.name}; did not replace")
-    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    backup = path.with_name(f"settings.json.bak-adaptive-compaction-{timestamp}")
-    if not list(path.parent.glob("settings.json.bak-adaptive-compaction-*")):
-        with backup.open("xb") as f:
-            f.write(expected)
-            f.flush()
-            os.fsync(f.fileno())
-    fd, tmp = tempfile.mkstemp(prefix=".t3-compact-", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            os.fchmod(f.fileno(), path.stat().st_mode & 0o777)
-            f.write(new)
-            f.flush()
-            os.fsync(f.fileno())
-        if path.read_bytes() != expected:
-            raise RuntimeError(f"concurrent update to {path.name}; did not replace")
-        os.replace(tmp, path)
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-    if json.loads(path.read_bytes()) != modified:
-        raise RuntimeError(f"readback mismatch {path.name}")
-    return True
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--apply", action="store_true", help="update T3 provider Claude settings")
+    parser.add_argument("--apply", action="store_true", help="held: shared-settings application is not qualified")
     parser.add_argument("--json", action="store_true", help="show safe decisions as JSON")
     args = parser.parse_args()
+    if args.apply:
+        parser.error("application held: shared-settings writer is not qualified; "
+                     "use report mode until the existing settings owner is integrated")
     state = json.loads((T3 / "userdata" / "settings.json").read_text())
     instances = state.get("providerInstances", {})
     rates = price_catalog()
     now = time.time()
     records = {}
-    STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
-    with (STATE_DIR / "run.lock").open("a+") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print("another adaptive compaction run is active; no duplicate effect")
-            return 0
-        for instance, profile in PROVIDERS.items():
-            cfg = instances.get(instance, {})
-            enabled = cfg.get("enabled") is True
-            p = T3 / "providers" / profile / "settings.json"
-            if not p.is_file():
-                continue
-            raw = p.read_bytes()
-            data = json.loads(raw)
-            usage = collect_usage(p.parent, now) if enabled else {}
-            updated, decisions = snapshot_profile(profile, enabled, data, usage, rates)
-            changed = json.loads(raw) != updated
-            applied = atomic_json_update(p, raw, updated) if args.apply and changed else False
-            records[instance] = {"provider_home": profile, "enabled": enabled,
-                                 "would_change": changed, "applied": applied,
-                                 "models": decisions}
-        snapshot = {"schema": "mastermind.t3.adaptive_compaction_snapshot.v1",
-                    "epoch": int(now), "mode": "apply" if args.apply else "dry_run",
-                    "pricing": "local catalog API-equivalent proxy, not subscription bill",
-                    "provider_records": records}
-        if args.apply:
-            dst = STATE_DIR / "latest-decisions.json"
-            fd, tmp = tempfile.mkstemp(prefix=".decisions-", dir=STATE_DIR)
-            try:
-                with os.fdopen(fd, "w") as f:
-                    json.dump(snapshot, f, ensure_ascii=False, indent=2)
-                    f.write("\n")
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.chmod(tmp, 0o600)
-                os.replace(tmp, dst)
-            finally:
-                if os.path.exists(tmp):
-                    os.unlink(tmp)
-        if args.json:
-            print(json.dumps(snapshot, ensure_ascii=False))
-        else:
-            for instance, entry in records.items():
-                print(instance, "active" if entry["enabled"] else "disabled",
-                      "changed" if entry["applied"] else "no-change",
-                      "relevant", len(entry["models"]))
-                for item in entry["models"]:
-                    if item["model"] in ("claude-fable-5-2", "claude-opus-5-5",
-                                         "glm-5.3", "glm-5.3-flash"):
-                        print(" ", item["model"], item["from"], "->", item["set_to"],
-                              item["reason"], "samples", item["samples"],
-                              "cache_ratio", item["cache_ratio"])
+    for instance, profile in PROVIDERS.items():
+        cfg = instances.get(instance, {})
+        enabled = cfg.get("enabled") is True
+        p = T3 / "providers" / profile / "settings.json"
+        if not p.is_file():
+            continue
+        records[instance] = {"provider_home": profile, "enabled": enabled,
+                             "would_change": False, "applied": False,
+                             "models": []}
+        if not enabled:
+            continue
+        raw = p.read_bytes()
+        data = json.loads(raw)
+        usage = collect_usage(p.parent, now)
+        updated, decisions = snapshot_profile(profile, True, data, usage, rates)
+        records[instance]["would_change"] = data != updated
+        records[instance]["models"] = decisions
+    snapshot = {"schema": "mastermind.t3.adaptive_compaction_snapshot.v1",
+                "epoch": int(now), "mode": "dry_run",
+                "application_status": "held-settings-owner-unqualified",
+                "pricing": "local catalog API-equivalent proxy, not subscription bill",
+                "provider_records": records}
+    if args.json:
+        print(json.dumps(snapshot, ensure_ascii=False))
+    else:
+        for instance, entry in records.items():
+            print(instance, "active" if entry["enabled"] else "disabled",
+                  "recommend-change" if entry["would_change"] else "no-change",
+                  "relevant", len(entry["models"]))
+            for item in entry["models"]:
+                if item["model"] in ("claude-fable-5-2", "claude-opus-5-5",
+                                     "glm-5.3", "glm-5.3-flash"):
+                    print(" ", item["model"], item["from"], "->", item["set_to"],
+                          item["reason"], "samples", item["samples"],
+                          "cache_ratio", item["cache_ratio"])
     return 0
 
 
