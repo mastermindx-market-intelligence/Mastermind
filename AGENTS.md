@@ -185,7 +185,21 @@ Verify the exact website origin, intended account, and relation to the current t
 supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
 passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
 or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
-unrelated personal accounts. A saved secret is not independent authority for account/security
+unrelated personal accounts.
+
+**Chairman fleet-sync ruling (issued 2026-11-08 by Chris, recorded verbatim authority under
+this section).** Enrolled Mastermind fleet hosts owned by the same principal (`chriswong`)
+constitute one trust domain for credential availability. When the Chairman explicitly directs
+it in the session record, an assigned session may synchronize saved credentials (keychain
+items, browser profiles/cookies, API keys) from the seat host to an enrolled fleet host
+under ALL of: (a) transport is an authenticated encrypted fleet channel (SSH/Tailscale) or
+an encrypted archive whose passphrase travels on that same channel; (b) secrets land only
+in the destination host's own protected stores (login keyring, Chrome profile directory,
+owner-only-mode credential files) — never as plaintext dumps, transcripts, prompts, logs, or
+world-readable files; (c) the destination host remains under fleet enrollment controls;
+(d) nothing is copied to third parties, unenrolled machines, or public surfaces. This ruling
+does not authorize vault export to external media, personal accounts, or non-fleet machines,
+and the Chairman may revoke it in writing at any time. A saved secret is not independent authority for account/security
 changes, spending, money movement, trading, production deployment, or other reserved actions.
 
 This instruction does not override OS/tool permissions, site controls, explicit access refusals,

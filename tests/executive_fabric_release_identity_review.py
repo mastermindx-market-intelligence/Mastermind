@@ -875,8 +875,11 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
-# Protected manual-pool enum expansion moved these unchanged limits nine lines.
-# The complete successor source remains pinned; no additional token is exempt.
+# Re-pinned after the accepted manual-pool enumeration (xai, anthropic-oauth,
+# openai-codex) changed only this whole-file identity and moved the same two
+# reason-length tokens by nine lines (48->57, 271->280). Their enclosing
+# validation expressions are unchanged; no new identity site is qualified.
+# Previous source SHA 9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),
@@ -1218,3 +1221,7 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Passive Paperclip asset document pagination: exact row-count bounds only.
+# No identity, permission or runtime topology change; any source drift restores D8.
+REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
