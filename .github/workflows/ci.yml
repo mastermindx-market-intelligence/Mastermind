@@ -83,7 +83,8 @@ jobs:
     name: PR fast checks
     needs: [pr_scope]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
-    runs-on: ubuntu-latest
+    # Test-executing jobs run on a GitHub-hosted image only (see pytest_shards).
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
       contents: read
@@ -189,7 +190,14 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    # GitHub-hosted image only. In this organization `ubuntu-latest` can also be
+    # served by persistent, multi-slot self-hosted runners. This suite asserts
+    # single-tenant host invariants (ancestor directory identity, modes, ACLs,
+    # a private temp tree), so a shared persistent host fails it regardless of
+    # the change under test. No self-hosted runner carries `ubuntu-24.04`.
+    # Scope classification and the `test` fan-in execute no suite and stay on
+    # `ubuntu-latest`.
+    runs-on: ubuntu-24.04
     # Keep every prerequisite and the full 45-minute repository allowance.
     # Actual setup took ~23m; a successful test/upload then crossed job60 in
     # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.

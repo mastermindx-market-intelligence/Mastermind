@@ -119,6 +119,15 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
          'npm --prefix app/mastermind_os run typecheck\n'}]
 
 
+# Full pytest shards and the PR fast lane use a GitHub-hosted image. In this
+# organization `ubuntu-latest` can also select persistent, multi-slot
+# self-hosted runners, where this suite's single-tenant host assertions
+# (ancestor directory identity, modes, ACLs, private temp tree) fail
+# independently of the change under test. No self-hosted runner carries this
+# label. Scope classification and the `test` fan-in run no suite.
+HOSTED_TEST_RUNNER = "ubuntu-24.04"
+
+
 def _validate_pin_guards_lane(jobs: dict) -> None:
     """Strict structure for the early source-identity guard job; no bypass."""
     guards = jobs["pin_guards"]
@@ -172,7 +181,7 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
         or fast.get("if") != _REQUIRED_PR_FAST_IF
         or fast.get("needs") != ["pr_scope"]
         or fast.get("permissions") != {"contents": "read"}
-        or fast.get("runs-on") != "ubuntu-latest"
+        or fast.get("runs-on") != HOSTED_TEST_RUNNER
         or fast.get("timeout-minutes") != 8
         or fast.get("continue-on-error") is not None
     ):
@@ -326,6 +335,8 @@ def validate_parallel_workflow(text: str) -> None:
         or shards.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
+    if shards.get("runs-on") != HOSTED_TEST_RUNNER:
+        raise ci_pytest.PolicyError("pytest shards must run on the GitHub-hosted test image")
     if (
         gate.get("name") != "test"
         or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
