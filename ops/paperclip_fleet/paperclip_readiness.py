@@ -12,7 +12,12 @@ import hashlib
 import json
 import os
 import subprocess
-import yaml
+try:
+    import hermes_yaml as yaml
+except ModuleNotFoundError as exc:
+    if exc.name != "hermes_yaml":
+        raise
+    import yaml
 from pathlib import Path
 import urllib.request
 
