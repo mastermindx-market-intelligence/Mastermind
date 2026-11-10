@@ -368,7 +368,21 @@ EOF
 # --------------------------------------------------------------------------- #
 # Scrub list as an array so the launch path can hand it to nohup(1), which
 # cannot exec a shell function ("nohup cli_env …" dies with ENOENT).
-SCRUB_ENV=(env -u PORT -u HOST \
+#
+# HOME is redirected to an empty dir under the dev home. The CLI doctor's
+# resolveInstallStorePaths() computes shimPath as $HOME/.local/bin/paperclipai
+# (USER-GLOBAL, not per -d home), and hasManagedArtifacts() treats an existing
+# shim as "managed install artifacts exist". On this machine the Chairman's
+# managed install created that shim, so without the redirect the doctor demands
+# <dev-home>/cli/install.json for every fresh dev home ("Re-run paperclipai
+# install") and refuses to start. With an empty HOME the probe honestly
+# reports "Not present (optional)" — correct, since we invoke the CLI by its
+# absolute installed path. Instance paths all come from -d and config.json,
+# never from HOME. The script's OWN $HOME stays the real user home, so the
+# default-instance identity marker (~/.paperclip/) keeps working.
+ISOLATED_HOME="$DEV_HOME/home"
+mkdir -p "$ISOLATED_HOME"
+SCRUB_ENV=(env -u PORT -u HOST HOME="$ISOLATED_HOME" \
     -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
     -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
     -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID)
