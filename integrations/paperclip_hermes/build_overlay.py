@@ -225,6 +225,18 @@ def creation_and_lifecycle(o):
 
 
 def tools_and_redaction(o):
+    o.import_line('agent/background_review.py',
+                  'from agent.launch_credential_binding import credential_free_auxiliary_review, redact as _redact_launch')
+    o.decorator('agent/background_review.py', '_run_review_in_thread', 'credential_free_auxiliary_review')
+    o.function('agent/background_review.py', 'build_cache_parity_fork',
+               'review_agent = AIAgent(**_fork_init_kwargs(agent, _rt, _routed, max_iterations, task_cfg))',
+               'review_agent = AIAgent(**_redact_launch(_fork_init_kwargs(agent, _rt, _routed, max_iterations, task_cfg)))')
+    o.function('agent/background_review.py', 'build_cache_parity_fork',
+               'review_agent._cached_system_prompt = agent._cached_system_prompt',
+               'review_agent._cached_system_prompt = _redact_launch(agent._cached_system_prompt)')
+    o.function('agent/background_review.py', '_inherit_parent_tool_surface',
+               'review_agent.tools = copy.deepcopy(getattr(agent, "tools", None) or [])',
+               'review_agent.tools = _redact_launch(copy.deepcopy(getattr(agent, "tools", None) or []))')
     o.import_line('model_tools.py',
                   'from agent.launch_credential_binding import guard_tool_call, redact as _redact_launch')
     o.decorator('model_tools.py', 'handle_function_call', 'guard_tool_call')

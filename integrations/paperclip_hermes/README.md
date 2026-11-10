@@ -1,6 +1,8 @@
 # Paperclip finite credentials for Hermes
 
-Status: qualified source candidate; not installed in the live Hermes fleet.
+Status: credential and native learning source qualified; live activation held.
+The existing CodeQL alert disposition, baseline source-check and safe-cutover
+holds remain in force. No live gateway capability is claimed.
 The fleet baseline is delivered in Mastermind PR #2399, merge
 `dee7a38a1e184e38cdcdd75889223d5b0ec27414`. This follow-up addresses the
 credential gap observed in the original Product task, MAS-2. The task reached
@@ -69,6 +71,16 @@ This does not disable those features for ordinary unbound Hermes sessions.
 
 ## Privacy and profile isolation
 
+Native background review keeps its existing thread, cancellation, profile,
+provider and usage owners. Its worker now enters an explicit credential-free
+scope: foreground bearer/tool authority is removed, while exact-value redaction
+and credential-name snapshot exclusions remain available after foreground lease
+retirement. It neither claims nor renews the parent lease. Copied review inputs,
+cached/ephemeral prompts and tool schemas are scrubbed without modifying their
+parent objects; clean prompt/cache parity is preserved. This supports native
+memory/skill review, not delegated Paperclip credential execution. Effective
+review configuration and OMH preservation do not yet prove a live learned lesson.
+
 The plugin manifest contains metadata only. Private values are not placed in
 prompts, ordinary `client_env`, profile YAML or `.env`, plugin-host environments,
 daemon environments or a new credential service.
@@ -118,12 +130,20 @@ contracts were regenerated from their canonical owner during qualification.
 | Existing manifest and plugin-host/provider-auth compatibility | 48 passed |
 | Existing gateway CLI compatibility | 14 passed |
 | Generated gateway contract and profile-history checks | 4 passed |
-| Total native qualification on the composed source | 128 passed |
+| Native review compatibility and new auxiliary boundary | 95 passed |
+| Total distinct native qualification on the composed source | 223 passed |
 | Mastermind manifest/edge contract and readiness fixtures | 16 passed |
-| Exact HTTPS-token review and guard regressions | 15 passed |
+| Exact HTTPS-token and frozen metadata guard regressions | 26 passed |
 
-The final 128 distinct native cases use 66 unchanged compatibility checks plus
-62 credential, gateway and tool cases rerun after the exact-origin repair.
+The current 223 distinct native cases use 66 unchanged compatibility checks plus
+157 credential, gateway, tool and review cases run on the composed learning
+candidate. The latter includes seven adversarial auxiliary cases with the real
+native constructor, worker and file-tool dispatcher; only model generation is
+stubbed. Live/retired parent leases, copied tool scope, cancellation, provider and
+profile continuity, secret-bearing tool schemas, cache parity and logging are
+covered. No network, paid inference or live memory write was used.
+
+The exact-origin repair and its six cases from head `7734f25d` are preserved.
 Six new cases establish omitted/default-port equivalence and refusal when either
 endpoint specifies port zero against a default-port peer. All four zero-port
 cases failed on the old expression before the repair; only an omitted port now

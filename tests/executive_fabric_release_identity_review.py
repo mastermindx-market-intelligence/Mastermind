@@ -1226,7 +1226,7 @@ REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256':
 # principal or fleet topology change. Exact source/token self-reviewed under the
 # attended Web waiver; any byte, path or context drift restores ordinary D8.
 REVIEWED_FILES["integrations/paperclip_hermes/core_overlay/agent/launch_credential_binding.py"] = {
-    "sha256": "f7b2afe6fb6d14ca607e99f3fe1d54afab2c36dc2e08db1c81412da9c869b679",
+    "sha256": "376e06c81f0cf6dbf859931f76e58fb9784ccee3cc56236cb9f5fac20c45c318",
     "sites": ((150, 19, 22, "int", "443"),),
 }
 

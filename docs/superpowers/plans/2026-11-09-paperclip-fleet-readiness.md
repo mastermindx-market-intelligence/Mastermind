@@ -3,11 +3,10 @@
 Operation: `paperclip-fleet-readiness-20261109`.
 Baseline PR: #2399, merged at `dee7a38a1e184e38cdcdd75889223d5b0ec27414`.
 Continuation branch: `sol/web-paperclip-fleet-readiness-20261109`.
-Governing protected pin: Mastermind `ebc48690f20bb5c0554f91ec7cf2b4533f641f5a`,
-skillpack 1.0.1. The subsequently observed master
-`edc9f6293b54fb53795b32ea0fb8be9ed6047f97` changes only
-`brain/bot_mcp.py` and `tests/test_direct_read_evidence_truth.py`; no affected
-law or owned path changed.
+Governing protected continuation pin: Mastermind
+`fe42651763a8c71e71dece27a2d5b7dd02aa913d`, skillpack 1.0.1.
+The accepted baseline and original source qualification retain their recorded
+pins; the current expanded migration uses this continuation pin.
 
 Assignment: the Chairman requests making the already-installed Paperclip system
 fully capable for the always-on Hermes fleet using Capacity Fabric, including
@@ -26,7 +25,7 @@ routes inference through Capacity Fabric, performs authorized work, and returns
 durable verifiable results to the originating issue. The existing fleet remains
 recoverable across ordinary process restarts.
 
-**Current result: CREDENTIAL_CANDIDATE_QUALIFIED_LIVE_ACCEPTANCE_OPEN.** Installation,
+**Current result: HISTORY_PUBLISHED_RUNTIME_ACCEPTANCE_HELD.** Installation,
 configuration, a model response, CI, merge and consumer acceptance are different
 facts. The original model/tool/memory/task-return proof has not succeeded.
 
@@ -58,6 +57,9 @@ facts. The original model/tool/memory/task-return proof has not succeeded.
 | P3 — always-on service | Native service and ordinary restart proven | Version-pinned managed CLI, launchd startup/KeepAlive, fresh backup, zero-work cutover, new healthy PID and preserved data/config |
 | P4 — consumer proof | Original task reconciled; credential capability qualifying | Workspace setting approved/applied. Real model and tools reached; credentials absent. Canary cancelled natively. Tested private finite credential candidate awaits safe activation and actual consumer proof |
 | P5 — source delivery | Baseline merged; credential follow-up in owned source | PR #2399 merged through native controls; exact helper installed. Candidate source, tests, composition/evidence and updated operating guidance are being published through the same controls |
+| P6 — historical conversations | Private archive published and read back | PR #2406 merged; MAS-3 contains all 3,368 sessions and 153,543 stored messages from 14 profile snapshots, 1,131 attachments and 19 index documents; zero wakes. Referenced asset supplement remains open |
+| P7 — memory and learning | Existing OMH/profiles preserved; compatibility source qualified | Effective background review is enabled in all 14 homes. Native review retains redaction without inheriting retired foreground authority. Real learned-lesson/later-run proof remains open |
+| P8 — operating cutover | Held at existing release and live-work boundaries | Original MAS-2 only; authenticated issue return, runtime MCP, Fabric accounting, OMH marker, second profile and leadership skills still owed |
 
 A baseline source merge must not mark P4 or the parent mission accepted.
 
@@ -243,6 +245,33 @@ The regenerated twenty-five-file patch passed `git apply --check` at 05:10:05
 UTC with no target or captured-source drift; it remains unapplied.
 
 ## Source qualification and DO_NOT_REDO
+
+### Continued learning qualification
+
+The learning repair composes onto head `7734f25d`, preserving the explicit
+port-zero fix, its six native cases, the frozen predecessor evidence and both
+existing exact-token review entries. The 157 affected credential/review cases
+pass through the native isolated runner; 66 prior unchanged compatibility cases
+remain valid. All 26 HTTPS/metadata guard cases pass. Four unrelated donor-source
+checks could not run in the minimal local fixture because their files were not
+materialized; they are not reported as source failures or passing evidence.
+
+The new 26-runtime-file patch passes `git apply --check` without installation.
+Native source checking again passes 12 of 14 checks; footguns and Ruff match the
+predecessor failure sections exactly after temporary-path normalization. Health
+reports zero blocking/advisory findings. The first archive-only check lacked Git
+metadata and is superseded by the same candidate in an isolated Git/index context.
+
+CodeQL alerts 272/273 remain an explicit disposition hold. Automatic approval
+review rejected their dismissal; no alternate tool/account or source workaround
+is authorized by this continuation. Draft/disabled auto-merge remain held until
+the actual release controls are satisfied. This source work is independent of
+that denied action and does not claim to clear it.
+
+Exact learning evidence is recorded in
+[learning qualification](../../../ops/paperclip_fleet/evidence/2026-11-10-learning-qualification.json).
+The accepted history publication receipt is linked from PR #2406 comment
+6760043164. Do not re-export, re-upload or replay accepted history.
 
 - Ten focused tests pass, including foreign-link preservation, immutable inventory
   integrity, cross-company refusal, no secret passthrough, disabled beta pins,
