@@ -73,6 +73,21 @@ uncommitted in dead checkouts.
   HTTP 429 or 503, `FABRIC_ALL_ROUTES_COOLING`, or "tool result missing": stop dispatching.
   Do not re-send. List threads by title (`t3_thread_list`, `includeSubagents`) to see what
   actually started. Commit and push what exists. Return to the parent with the state.
+- One child that dies on a single gateway error (502, a dropped stream) while the router answers
+  a canary is restarted in its own thread: it keeps what it read. A new task is for a thread
+  that is looping, very long (300 items or more), or whose model is refusing. Before either,
+  list same-title threads; someone else may already have restarted it.
+- A restart that changes nothing fails the same way. Lane L4 died twice on one generation of
+  about 17 minutes with no tool call (a whole module composed in one turn); each router restart
+  dropped it with nothing on disk. The third start named steps of at most 100 lines per tool
+  call with a commit and a push after each, and had a file pushed in three minutes. Writer
+  briefs now say this from the start: skeleton first, pushed inside ten minutes, then pieces.
+- A dropped stream can also replay a turn instead of killing the thread. Two drivers repeated one
+  command for 35 minutes (one read the same file 17 times; one stacked three background test
+  jobs on one log). The signs are identical assistant messages and a branch with no new commit.
+  The parent's check is the commit time on origin, not the thread's item count. Briefs say: run
+  tests in the foreground, check whether a command's output already exists before running it,
+  and after a failed Edit read `git diff --stat` before trying again.
 - Every `delegate_task` carries a unique `clientRequestId`. One writer per output: before any
   dispatch that follows an errored turn, list same-title children first.
 - Work is pushed to the lane branch on origin after every slice that passes its check, and at

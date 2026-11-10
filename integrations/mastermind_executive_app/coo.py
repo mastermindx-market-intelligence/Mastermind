@@ -706,6 +706,12 @@ class CooApp:
             target.require_current()
         except Exception:
             return refused("EXECUTIVE_CHILD_REQUEST_TARGET_UNAVAILABLE")
+        if work_ref != target.work_ref:
+            # L1B3-1: this App's authority material is frozen for ONE work
+            # scope.  Authority proved for another scope must never admit
+            # into an App frozen here — and the frame is never sent, so the
+            # refusal is a provable pre-send preflight like the checks above.
+            return refused("EXECUTIVE_CHILD_REQUEST_WORK_REF_MISMATCH")
         try:
             authority, context = await self._authority(principal, work_ref, stamp)
         except Exception:

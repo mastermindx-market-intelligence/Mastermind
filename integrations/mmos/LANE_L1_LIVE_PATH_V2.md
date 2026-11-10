@@ -75,3 +75,34 @@ G2 no Model-Router-route → T3 `modelSelection` derivation (model harness-fixed
 G3 `execution_return_wiring.py:347` projects `root_id = JOB-002` rather than the request root (contract check).
 Deviations recorded in the receipt: branch derives from the request digest (Job.branch fixed at create_job);
 placement-intent ids strip `roots/`/`parents/` prefixes (slash-free token law).
+
+## 4. L1R close-out: fresh-hunt status table (2026-11-10, trunk `3b344ce12`)
+
+Lane `t3/mmos-v2-l1r` (branch on origin). Every row verified by reading trunk code, not by trusting the finding text.
+
+| Finding | Status on trunk `3b344ce12` | Where read |
+|---|---|---|
+| L1B3-1 CRITICAL: admit frame skips the principal/work-ref proof; App authorizes caller work_ref; no command-id check | **OPEN** (fixed this lane, §5) | dispatch-before-proof `control_plane/executive_service.py:6816-6824`; proof only at `:6866-6906`; caller-supplied `work_ref` authorized with no `target.work_ref` comparison `integrations/mastermind_executive_app/coo.py:682,710`; no `admission_command_id` check before `runtime.jobs.admit_child_execution_request` `executive_service.py:6994` |
+| L1B3-2 HIGH: ambient `MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE` refuses explicit args | **FIXED** — `d6e6f266d` (verified in code; ancestor of trunk) | both-explicit-only refusal + explicit-mapping-wins `control_plane/t3_native_composition.py:705-720`; tests in `tests/test_t3_native_composition.py` |
+| L1B3-3 MEDIUM: `port_factory` silently drops launch args | **FIXED** — `d6e6f266d` | typed contradictory-call refusal; ambient file never read under `port_factory` `control_plane/t3_native_composition.py:653-668,721-737` |
+| L1B3-4 MEDIUM: `attempt.idempotency_key` prefers job-level `command_id` | **OPEN on trunk**; fix reviewed on local `t3/l1b-pluggable-return-2` commit `6ff1cb10f` (landed this lane, §6) | command_id-first chain still at `control_plane/execution_return_wiring.py:309-311` |
+| L1B3-5 MEDIUM: supervisor cannot adopt a launch that crashed between `put_launch_receipt` and `record_process` | **OPEN — recorded, not fixed here** (see §7 for the reason) | `AWAITING_LEASE_EXPIRY` branch `control_plane/executive_supervisor.py:5490-5503`; `adopt_attempt` refuses `pid IS NULL AND provider_session_id IS NULL` `control_plane/executive_runtime.py:20527-20532` |
+| L1B3-6 LOW: tautological receipt assertions | **PARTLY FIXED → closed this lane**; the quoted `or True` forms are gone, but the same class remained | dead asserts at `tests/test_t3_admitted_canary_receipt.py:166` (`x == (a and x)`) and `:209` (`x[-8:] == x[-8:]`) |
+
+## 5. L1R close-out: L1B3-1 FIXED (trunk `9be1ce6d5`)
+
+- `integrations/mastermind_executive_app/coo.py:709` refuses `work_ref != target.work_ref` pre-send (`EXECUTIVE_CHILD_REQUEST_WORK_REF_MISMATCH`).
+- `control_plane/executive_service.py:6915` dispatches the admit frame only AFTER `require_read_current()`; `:6963` `_handle_child_request_admit_frame` re-proves the same installed-facts proof at its claim boundary and checks `admission_command_id(request) == command` before any admission.
+- Fail-before proof: all five new negative tests FAIL on unfixed trunk (the command-id mismatch was admitted, `ok: True`). After the fix: forwarding suite 23 passed, full ingress suite 78 passed, coo App suite 49 passed. coo.py identity pin moved per the `4148c639d` precedent (pure 6-line insertion verified; commit `2979e77b2`).
+- CRITICAL for the release-candidate review: `control_plane/executive_service.py`, `integrations/mastermind_executive_app/coo.py`, `tests/test_hermes_selected_child_ingress.py`, `tests/test_hermes_child_request_host_forwarding.py`.
+
+## 6. L1B3-4 FIXED — pluggable result-return transport landed (cherry-pick of `6ff1cb10f`)
+
+`control_plane/result_delivery.py` (OriginRef/ResultDeliveryRegistry/typed unknown-kind refusal), registry routing in `execution_return_wiring.py` (idempotency key prefers the binding `operation_key`), retry case added: a replayed reconciliation of the same attempt delivers exactly once to a non-Hermes transport. Suites: pluggable-delivery 9, projection 27, e2e admission + identity + ingress 112 — all green. L10 registers a `paperclip_task` transport at the seam install site (see `CODING_JOB_REUSE_MAP.md`).
+
+## 7. L1B3-6 FIXED; L1B3-5 recorded OPEN — lane CLOSED
+
+- L1B3-6: the two remaining tautologies in `tests/test_t3_admitted_canary_receipt.py` replaced with real checks (commit `2ef50a868`); suite 21 passed.
+- L1B3-5 stays OPEN and is handed to L10 as build-list item 8 of `integrations/mmos/CODING_JOB_REUSE_MAP.md`. Reason not fixed here: the fix is a new supervisor adopt transition for the crash window between `put_launch_receipt` and `record_process` (`executive_supervisor.py` startup reconciliation + `executive_runtime.py` `adopt_attempt` law) — a production-supervisor path other lanes are editing, needing its own crash-window harness; not small, and this lane's brief reserved non-small fixes as recorded-open.
+
+Lane L1 (coding-job engine) CLOSED at trunk merge of the above. Reuse map delivered: `integrations/mmos/CODING_JOB_REUSE_MAP.md`.
