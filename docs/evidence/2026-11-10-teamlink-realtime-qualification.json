@@ -1,0 +1,114 @@
+{
+  "schema": "mastermind.teamlink.native-watch-proof.v1",
+  "observedAt": "2026-11-10T12:04:25.028964+00:00",
+  "sourcePin": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+  "patchSha256": "5495395fe53c834112067e9220bc6c5456f02a32c5b361090ad73cda962057b7",
+  "sourceFiles": {
+    "apps/server/src/cli/thread.ts": "77d24421586833eef08a6aec6cf862db9dfa6a38ef681604880a9ca3b5071142",
+    "apps/server/src/cli/thread-watch.ts": "386394a03d650826e427d2674f81e551fbbb5702e8a5be21d0e5e6c1769b699f",
+    "apps/server/src/auth/EnvironmentAuth.ts": "d873d5ec3e3db57d066eea2c2aff1416b75d525ed9d0abd03503f601b41db658",
+    "apps/server/src/mcp/AcpMcpStdioBridge.ts": "c5eada8eb8495a48feb5c1077392dde5a5a8aba0a92967e3780324cd632e04c2"
+  },
+  "readOnly": true,
+  "agentCalls": 0,
+  "messageSends": 0,
+  "notices": [
+    {
+      "elapsedMs": 1262,
+      "notice": {
+        "schema": "mastermind.teamlink.native-watch.v1",
+        "type": "ready",
+        "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+        "threadId": "mcp:launch:de3dceeae2cfef0105545f884dcfe605f8d4921cb2449892f04fdc1098b30e56",
+        "sequence": 342312
+      }
+    },
+    {
+      "elapsedMs": 16177,
+      "notice": {
+        "schema": "mastermind.teamlink.native-watch.v1",
+        "type": "heartbeat",
+        "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937"
+      }
+    }
+  ],
+  "sessions": [
+    {
+      "sessionIdSha256": "e8c6f7e6528586cacf2138ea9214ce1c950fd8ff6fd059fc1be7b108758df8fa",
+      "label": "t3 thread cli",
+      "scopes": [
+        "orchestration:read"
+      ],
+      "ttlSeconds": 900,
+      "revokedAfterOwnerClosed": true
+    },
+    {
+      "sessionIdSha256": "eded24ce777e943b82311c008d8efa9ff7e607c8d3208415534e2974d6d62e04",
+      "label": "t3 thread native-watch",
+      "scopes": [
+        "orchestration:read"
+      ],
+      "ttlSeconds": 900,
+      "revokedAfterOwnerClosed": true
+    }
+  ],
+  "invalidFrames": 0,
+  "exitCode": 0,
+  "forcedTermination": false,
+  "elapsedMs": 17326,
+  "stderrBytes": 0,
+  "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "trailingStdoutBytes": 0,
+  "ok": true,
+  "qualification": {
+    "nodeTransport": {
+      "passed": 45
+    },
+    "pythonBoundary": {
+      "passed": 11
+    },
+    "nativeFocused": {
+      "passed": 61,
+      "ttlAffectedRerunPassed": 23
+    },
+    "effectTypecheck": "exit_0",
+    "lint": "0_warnings_0_errors",
+    "nativeBuild": "vp_pack_exit_0",
+    "runtimeDependencyPackages": 22,
+    "patchReapplication": "byte_identical",
+    "sql": {
+      "passed": 8,
+      "guardedStatements": 680,
+      "nativeService": "Paperclip 2026.1106.0 pluginDatabaseService",
+      "database": "disposable_socket_only_postgresql",
+      "serverStopped": true,
+      "productionDatabaseAccess": false,
+      "nativeOrAgentCalls": 0
+    },
+    "sdkLifecycle": "Prepared commit 837ace0397d0a88b44010400f6b35478ff5401e9 actual SDK 2026.1106.0 qualification retained; lifecycle source unchanged"
+  },
+  "workerReturn": {
+    "root": "paperclip-teamlink-t3-20261110",
+    "run": "teamlink-native-watch-upgrade-20261110-01",
+    "state": "TERMINAL",
+    "rc": 0,
+    "responseSha256": "af0050dbd25bb5634b3ed63affbcac23f1625eb7fcfa2781eaedc07dea7d0acb",
+    "originalPatchSha256": "9c2c19ae6b47e019ceca092004428be6c2b4d771d9aa6c90557d98e0558851b9",
+    "accepted": true,
+    "acceptanceBasis": "artifact_digest_comparison",
+    "parentCorrections": [
+      "read_only_qualification",
+      "typed_failure_classification",
+      "bounded_pagination",
+      "stdout_backpressure_and_failure_supervision",
+      "stdin_owned_bootstrap",
+      "finite_mcp_session_ttl"
+    ]
+  },
+  "limits": [
+    "Read-only native readiness/heartbeat/cleanup, not event-to-message latency",
+    "No Paperclip plugin installation",
+    "No bot send, consumption, continuity exchange or project acceptance",
+    "MAS-4 remains blocked pending protected source release and active genuine run credential binding"
+  ]
+}

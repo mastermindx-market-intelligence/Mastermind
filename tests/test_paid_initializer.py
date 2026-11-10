@@ -449,6 +449,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     # Canonicalize only the fixture directory. Keep python3's final selector
     # symlink so the real owner still checks its image and alias identity.
     bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
+    assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
     monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
@@ -738,7 +739,10 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     try:
         (lane/'ext/lanes').mkdir(parents=True,mode=0o700)
         (lane/'venv/bin').mkdir(parents=True,mode=0o700)
-        bootstrap=Path(sys.executable).with_name('python3')
+        # Canonicalize only this inert fixture's existing interpreter parent;
+        # retain the python3 leaf alias and all production custody/drift checks.
+        bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
+        assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
         system_launch=_system_fixture_launch();real=(system_launch or bootstrap).resolve()
         monkeypatch.setenv('PATH','/usr/bin:/bin')
         logical=lane/'venv/bin/python3';logical.symlink_to(real)
