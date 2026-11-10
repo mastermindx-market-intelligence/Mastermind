@@ -416,7 +416,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: mastermindx-market-intelligence/macro
-          ref: a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c
+          ref: 2e20d4031a12b198d5c19a705260ea6804fa5568
           path: .ci-production-macro
           sparse-checkout: |
             engine
