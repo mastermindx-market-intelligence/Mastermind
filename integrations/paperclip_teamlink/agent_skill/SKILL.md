@@ -33,12 +33,20 @@ The HTTP tool request is `POST /api/plugins/tools/execute`:
 
 Use only native credentials and identity supplied to your own current process.
 Use `PAPERCLIP_API_KEY` and `PAPERCLIP_RUN_ID` without printing or retaining them.
-Read your own authenticated identity and the issue when any field is uncertain.
+Require both values before invoking a tool: the CLI can otherwise fall back to
+stored board credentials. Read your authenticated `/api/agents/me` identity and
+the issue, and verify the current run identity before any Teamlink effect.
+For HTTP, send `Authorization: Bearer $PAPERCLIP_API_KEY` and
+`X-Paperclip-Run-Id: $PAPERCLIP_RUN_ID`; for the CLI, request `--json` output.
 Use the issue's Paperclip project ID in runContext; use the T3 project ID only
 in Teamlink parameters. The issue must belong to a native Paperclip project.
 Never fabricate a run,
 borrow another agent's credentials, or use board actions to claim agent work.
-A tool response may contain `error`; inspect it before claiming success.
+The native HTTP response wraps the tool result as
+`{pluginId, toolName, result: {content, data}}`. Check both a top-level `error`
+and `result.error`, then use `result.data` and verify its operation, binding,
+recipient and phase. An HTTP 200 or a succeeded tool-invocation record does not
+prove that the requested Teamlink effect succeeded.
 
 ## Link and send
 
@@ -70,6 +78,11 @@ fresh run. Read `teamlink_context`, then `teamlink_status` for the exact operati
 in the attention prompt. Read the returned native comment and result before
 calling `teamlink_ack`. Acknowledgment records your actual consuming run; it does
 not accept code, close the issue or authorize additional work.
+
+Context includes native document summaries. Recover the current document body
+through `GET /api/issues/<issueId>/documents/<key>` and retain its returned
+revision when it contains acceptance, decisions or continuity needed for the
+reply. Do not treat a summary or an expired advisory packet as that source.
 
 For a COO question or blocker, answer on the same binding with a new stable
 operation ID and `replyTo` naming the incoming operation. Preserve the original
