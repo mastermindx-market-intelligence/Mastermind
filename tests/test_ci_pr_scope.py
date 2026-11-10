@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -275,3 +276,124 @@ def test_merge_group_without_trusted_protected_base_cannot_choose_fast(tmp_path)
     result = select_scope(root, file, expected_repository=REPO,
                           event_type="merge_group")
     assert result.mode == "full" and result.tier == "HOLD"
+
+
+def ordinary_module_group(tmp_path, count, *, owners=False, oversized=False):
+    root = tmp_path / "group"
+    root.mkdir()
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "example@example.test")
+    git(root, "config", "user.name", "Test")
+    (root / "app").mkdir()
+    (root / "tests").mkdir()
+    (root / "app/customer.py").write_text("value = 1\n")
+    names = [f"tests/test_customer_{i}.py" for i in range(count)]
+    for name in names:
+        (root / name).write_text("def test_customer(): assert True\n")
+    if oversized:
+        (root / "tests/test_customer.py").write_text("#" + "x" * 160000 + "\n")
+    if owners:
+        from scripts.ci_pr_smoke import _IDENTITY_PIN_REGISTRIES
+        registry, _, required = _IDENTITY_PIN_REGISTRIES[0]
+        (root / registry).write_text("REVIEWED_FILES = {'app/customer.py': {}}\n")
+        for name in required:
+            (root / name).write_text("def test_pin(): assert True\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "protected fixture")
+    base = git(root, "rev-parse", "HEAD")
+    (root / "app/customer.py").write_text("value = 2\n")
+    for index, name in enumerate(names):
+        (root / name).write_text("def test_customer(): assert 1 == 1\n")
+        # Two individually small queue entries must still qualify their union.
+        if index == 1:
+            git(root, "add", ".")
+            git(root, "commit", "-qm", "first queue entry")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "remaining queue entry")
+    head = git(root, "rev-parse", "HEAD")
+    pr = {"repository": {"full_name": REPO}, "pull_request": {
+        "number": 42, "base": {"sha": base, "repo": {"full_name": REPO}},
+        "head": {"sha": head, "repo": {"full_name": REPO}},
+    }}
+    event, protected = merge_event(root, pr)
+    return root, pr, event, protected
+
+
+@pytest.mark.parametrize("count,expected", [(3, "smoke"), (4, "full")])
+def test_merge_group_complete_module_budget_preserves_pr_fast_feedback(tmp_path, count, expected):
+    from scripts.ci_pr_scope import classify_merge_group
+    root, pr, event, protected = ordinary_module_group(tmp_path, count)
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
+    result = classify_merge_group(root, event, expected_repository=REPO,
+                                  protected_base_sha=protected)
+    assert result.mode == expected and result.tier == "STANDARD"
+    assert result.source_base == protected and result.source_head == pr["pull_request"]["head"]["sha"]
+    assert result.file_count == count + 1
+    assert result.reason == ("SMOKE_SELECTION_EXCEEDS_BUDGET" if count == 4 else "SOURCE_VERIFIED")
+
+
+@pytest.mark.parametrize("count,expected", [(0, "smoke"), (1, "full")])
+def test_merge_group_ownership_tests_cannot_hide_an_ordinary_module(tmp_path, count, expected):
+    from scripts.ci_pr_scope import classify_merge_group
+    root, _, event, protected = ordinary_module_group(tmp_path, count, owners=True)
+    result = classify_merge_group(root, event, expected_repository=REPO,
+                                  protected_base_sha=protected)
+    assert result.mode == expected and result.tier == "STANDARD"
+    if count:
+        assert result.reason == "SMOKE_SELECTION_EXCEEDS_BUDGET"
+
+
+def test_merge_group_oversized_mapped_module_escalates_instead_of_disappearing(tmp_path):
+    from scripts.ci_pr_scope import classify_merge_group
+    root, _, event, protected = ordinary_module_group(tmp_path, 0, oversized=True)
+    result = classify_merge_group(root, event, expected_repository=REPO,
+                                  protected_base_sha=protected)
+    assert result.mode == "full" and result.tier == "STANDARD"
+    assert result.reason == "SMOKE_APPLICABLE_TEST_UNAVAILABLE"
+
+
+def test_workflow_uses_complete_protected_archive_despite_candidate_package_poison(tmp_path):
+    import yaml
+    source = Path(__file__).resolve().parents[1]
+    root = tmp_path / "repository"
+    root.mkdir()
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "example@example.test")
+    git(root, "config", "user.name", "Test")
+    paths = ("scripts/__init__.py", "scripts/ci_pr_scope.py", "scripts/ci_pr_smoke.py",
+             "control_plane/__init__.py", "control_plane/github_review_risk_policy.py")
+    for name in paths:
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes((source / name).read_bytes())
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "protected qualifier closure")
+    protected = git(root, "rev-parse", "HEAD")
+    for name in ("scripts/__init__.py", "scripts/ci_pr_smoke.py", "control_plane/__init__.py"):
+        (root / name).write_text("raise RuntimeError('CANDIDATE_PACKAGE_EXECUTED')\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "poison candidate packages")
+    head = git(root, "rev-parse", "HEAD")
+    event = {"repository": {"full_name": REPO}, "pull_request": {
+        "number": 42, "base": {"sha": protected, "repo": {"full_name": REPO}},
+        "head": {"sha": head, "repo": {"full_name": REPO}},
+    }}
+    payload, output = tmp_path / "event.json", tmp_path / "output"
+    payload.write_text(json.dumps(event))
+    workflow = yaml.safe_load((source / ".github/workflows/ci.yml").read_text())
+    (scope_step,) = (
+        step for step in workflow["jobs"]["pr_scope"]["steps"]
+        if step.get("id") == "scope"
+    )
+    command = scope_step["run"]
+    result = subprocess.run(["bash", "-c", command], cwd=root, env={
+        **os.environ, "RUNNER_TEMP": str(tmp_path), "PR_BASE_SHA": protected,
+        "GITHUB_EVENT_NAME": "pull_request", "GITHUB_WORKSPACE": str(root),
+        "GITHUB_EVENT_PATH": str(payload), "GITHUB_REPOSITORY": REPO,
+        "GITHUB_OUTPUT": str(output),
+    }, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert "mode=full" in output.read_text().splitlines()
+    assert "CANDIDATE_PACKAGE_EXECUTED" not in result.stdout + result.stderr
+    for name in paths:
+        assert (tmp_path / "ci-trusted-base" / name).read_bytes() == (source / name).read_bytes()
