@@ -21,6 +21,13 @@ API = "http://127.0.0.1:3100/api"
 INSTANCE = Path("/Users/chriswong/.paperclip/instances/default")
 HERMES = "/Users/chriswong/.local/bin/hermes"
 DISABLED_FEEDBACK = {"complain", "suggestion-box"}
+PAPERCLIP_CLIENT_CONTEXT = {
+    "PAPERCLIP_API_URL", "PAPERCLIP_AGENT_ID", "PAPERCLIP_COMPANY_ID",
+    "PAPERCLIP_RUN_ID", "PAPERCLIP_TASK_ID", "PAPERCLIP_WAKE_REASON",
+    "PAPERCLIP_WAKE_COMMENT_ID", "PAPERCLIP_APPROVAL_ID", "PAPERCLIP_APPROVAL_STATUS",
+    "PAPERCLIP_LINKED_ISSUE_IDS", "PAPERCLIP_WORKSPACE_CWD",
+    "PAPERCLIP_RUNTIME_TOOLS_MCP_URL", "PAPERCLIP_RUNTIME_TOOLS_EXPIRES_AT",
+}
 MARKER = "<!-- mastermind-paperclip-fleet-readiness-v1 -->"
 ROSTER = {
     "ec1116b7-e972-40ed-89cb-15ed4f8b04c4": ("Engineering", "engineering"),
@@ -196,30 +203,38 @@ def profile_config(home):
     return data
 
 
-def configure_feedback_filter(home, slug):
-    """Use Hermes' own key-level writer; never rewrite credentials."""
+def configure_profile_context(home, slug):
+    """Use Hermes' key-level writer for nonsecret behavior; preserve its secret filter."""
     before = profile_config(home)
-    existing = disabled_names(before.get("skills", {}).get("disabled"))
-    desired = existing | DISABLED_FEEDBACK
-    if desired == existing:
-        return False
+    feedback = disabled_names(before.get("skills", {}).get("disabled")) | DISABLED_FEEDBACK
+    context = disabled_names(before.get("terminal", {}).get("client_env_passthrough")) | PAPERCLIP_CLIENT_CONTEXT
+    desired = {"skills.disabled": feedback, "terminal.client_env_passthrough": context}
+    changed = False
     env = os.environ.copy()
     env.pop("HERMES_HOME", None)
-    result = subprocess.run(
-        [HERMES, "--profile", slug, "config", "set", "skills.disabled", json.dumps(sorted(desired))],
-        env=env, text=True, capture_output=True, timeout=45,
-    )
-    if result.returncode:
-        raise RuntimeError(f"Hermes config writer returned {result.returncode}; reconcile its original target.")
+    for dotted, values in desired.items():
+        section, key = dotted.split(".")
+        if disabled_names(before.get(section, {}).get(key)) == values:
+            continue
+        result = subprocess.run(
+            [HERMES, "--profile", slug, "config", "set", dotted, json.dumps(sorted(values))],
+            env=env, text=True, capture_output=True, timeout=45,
+        )
+        if result.returncode:
+            raise RuntimeError(f"Hermes config writer returned {result.returncode} for {dotted}; reconcile its original target.")
+        saved = profile_config(home)
+        if disabled_names(saved.get(section, {}).get(key)) != values:
+            raise RuntimeError(f"Hermes configuration readback mismatch for {dotted}.")
+        changed = True
     after = profile_config(home)
-    if disabled_names(after.get("skills", {}).get("disabled")) != desired:
-        raise RuntimeError("Hermes feedback-filter readback mismatch.")
     clean_before, clean_after = copy.deepcopy(before), copy.deepcopy(after)
-    clean_before.setdefault("skills", {}).pop("disabled", None)
-    clean_after.setdefault("skills", {}).pop("disabled", None)
+    for dotted in desired:
+        section, key = dotted.split(".")
+        clean_before.setdefault(section, {}).pop(key, None)
+        clean_after.setdefault(section, {}).pop(key, None)
     if clean_before != clean_after:
         raise RuntimeError("Concurrent or additional profile configuration change; inspect before continuing.")
-    return True
+    return changed
 
 
 def qualify_versions(selected, home, apply):
@@ -312,6 +327,7 @@ def configure_agent(aid, name, slug, apply):
         "max_concurrent_runs": a.get("runtimeConfig", {}).get("heartbeat", {}).get("maxConcurrentRuns"),
         "hermes_command": config.get("command"),
         "feedback_disabled": DISABLED_FEEDBACK.issubset(disabled_names(profile.get("skills", {}).get("disabled"))),
+        "gateway_identity_context_ready": PAPERCLIP_CLIENT_CONTEXT.issubset(disabled_names(profile.get("terminal", {}).get("client_env_passthrough"))),
         "model_provider": "capacity-fabric", "memory_provider": "omh", "changes": [],
     }
     if not apply:
@@ -348,11 +364,11 @@ def configure_agent(aid, name, slug, apply):
         if request(f"/agents/{aid}")["runtimeConfig"] != runtime:
             raise RuntimeError("Runtime configuration readback mismatch.")
         result["changes"].append("single_profile_run")
-    if configure_feedback_filter(home, slug):
-        result["changes"].append("feedback_skill_filter")
+    if configure_profile_context(home, slug):
+        result["changes"].append("hermes_profile_context")
     result.update(
         instructions_ready=True, max_concurrent_runs=1, hermes_command=HERMES,
-        feedback_disabled=True, model=model_name, provider_selection="profile", persist_session=False,
+        feedback_disabled=True, gateway_identity_context_ready=True, model=model_name, provider_selection="profile", persist_session=False,
         instruction_sha256=hashlib.sha256(intended.encode()).hexdigest(),
     )
     return result
