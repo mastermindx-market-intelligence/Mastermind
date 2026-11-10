@@ -1220,3 +1220,7 @@ REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256':
 # response operands, owning methods and complete return ASTs are unchanged.
 # Only exact line positions and the full-file hash are requalified; no new
 # identity site or scanner exemption is introduced. Parent self-review only.
+
+# Passive Paperclip asset document pagination: exact row-count bounds only.
+# No identity, permission or runtime topology change; any source drift restores D8.
+REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
