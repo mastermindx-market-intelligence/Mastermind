@@ -10,6 +10,70 @@
   - `apps/server/src/orchestration-v2/runtimeLayer.ts` — modified, +29/−6
 - **Attribution (also carried in the module docstring):** Mastermind pinned admission patch - donor: github.com/pingdotgg/t3code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4 — adapt existing seams, never rebuild.
 
+## Pinned upstream patch: Claude driver live answer-text streaming (lane T1s, 2026-11-10)
+
+Same donor and pin. Makes the Claude driver's `claudeAgent` adapter stream answer text
+live (`text_delta`), exactly the way the same source's Codex adapter already does, instead
+of emitting each completed content block in one piece.
+
+- **Patch file:** `claude_text_delta_0770446.patch`
+- **Patch sha256:** `8ca39b00add5b6813db79bf4e0c3e3a32bd670dfa883b0279496db9fc8043d56`
+- **Diff stat:** 2 files changed, 652 insertions(+)
+  - `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts` — modified, +203 (new
+    `assistantTextDeltas` coalescer mirroring Codex `agentMessageDeltas`; text arms in the
+    `stream_event` branch; snapshot completion correlated by API `message.id`; flush at turn
+    finalize; `streamedAnyText` guards on both result-text fallback sites)
+  - `apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts` — modified, +449
+    (new `assistant text streaming` suite: 5 tests, upstream testkit/`makeWakeHarness`)
+- **Applies cleanly (both tested with `git apply --check`, exit 0):**
+  1. on the bare pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4` (throwaway worktree of a
+     private clone; tree clean before/after), and
+  2. on the pin with `mastermind_admission_0770446.patch` applied first (the two patches
+     touch disjoint files).
+- **Mechanism:** one streamed item per API message id (`assistant-text:<message.id>`; every
+  text block of the message concatenates into it, matching `textFromClaudeContent`). The SDK
+  `assistant` snapshot for that message id completes the SAME item with authoritative
+  `finalText` (no second uuid-keyed item; the snapshot uuid is added to
+  `emittedNativeItemIds` so duplicate snapshots and the result-text fallback cannot
+  re-emit). Streamed text reserves its ordinal at the first delta, so text keeps its place
+  before tool items of the same snapshot (upstream emitted tool items first). At turn
+  finalize, never-snapshotted streamed text settles as one completed item (interrupt case).
+  Parented (sub-agent) frames never reach the new arms; synthetic notices never stream.
+  Downstream is unchanged: running updates flow through the existing
+  `makeAssistantStreamingFilter` exactly like Codex's (no new streaming mode).
+
+### Verification actually run (2026-11-10, private clone `~/.mastermind/mmos-dev/t3/src-textdelta` at the pin, patch applied)
+
+```
+$ git rev-parse HEAD
+0770446869d247a8b28c27d7ed93f47f8ff0c1e4
+$ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+exit=0        # 0 error-level diagnostics (suggestions unchanged from the pin's baseline)
+$ node "$(ls -d ../../node_modules/.pnpm/vitest@5.0.5*/node_modules/vitest | head -1)/vitest.mjs" \
+    run src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts -t "assistant text streaming"
+# BEFORE patch (red):  Tests  3 failed | 2 passed | 346 skipped   (the 2 are guards that
+#                      pass by design pre-patch: parented exclusion, replay/duplicate)
+# AFTER patch (green): Tests  5 passed | 346 skipped
+$ node ".../vitest.mjs" run src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts --maxWorkers=4
+Test Files  1 passed (1)   Tests  351 passed (351)
+$ node ".../vitest.mjs" run <assistantStreaming + ClaudeAutomaticDelivery.integration +
+    ThreadFork.execution + ThreadStop + ThreadLaunchService> --maxWorkers=4
+Test Files  5 passed (5)   Tests  107 passed (107)
+$ node ".../vitest.mjs" run <testkit: ThreadMergeBack, OrchestratorReplayRestartBackgroundNote,
+    OrchestratorReplayRecovery, ThreadFork, ClaudeReplayFixtures, ProviderSwitch> --maxWorkers=4
+Test Files  6 passed (6)   Tests  99 passed (99)
+```
+
+Red/green runs and the full-suite runs are saved in `~/.mastermind/mmos_evidence/t1s-20261110/`
+(`tests_red_before_patch.log`, `tests_green_after_patch.log`, `tests_full_suite_patched.log`,
+`tests_affected_set1_patched.log`, `tests_affected_set2_patched.log`). What the lane's five
+new tests pin: (a) live streaming event of one item during the block; (b) the snapshot does
+not emit text a second time and the final text equals the snapshot exactly; (c) ordinals
+text → tool use → text; (d) parented sub-agent frames still excluded; (e) an interrupted
+turn keeps its partial text with no stuck `streaming` item; (f) replayed history never
+streams and duplicate snapshots add no item or announcement.
+
+
 ## Rework A3 (2026-11-09) — audit finding #2: no nested `Layer.build`
 
 The distinct Opus audit (`integrations/t3/docs/AUDIT_T3_DURABLE_ADAPTER_OPUS_20261109.md`,

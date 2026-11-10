@@ -1,0 +1,738 @@
+diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
+index 4877eed6..788c1447 100644
+--- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
++++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
+@@ -6104,6 +6104,455 @@ describe("ClaudeAdapterV2 background wake turns", () => {
+       ),
+   );
+ 
++  // assistant answer-text streaming (mirrors the Codex adapter's agent message
++  // deltas): text_delta frames update one live assistant item; the SDK
++  // assistant snapshot settles it exactly once with authoritative text.
++  describe("assistant text streaming", () => {
++    const streamFrame = (event: unknown, parent: string | null = null) =>
++      claudeSdkFrame({
++        type: "stream_event",
++        event,
++        parent_tool_use_id: parent,
++        session_id: WAKE_NATIVE_SESSION,
++        uuid: "stream-frame",
++      });
++    const textStream = (messageId: string, deltas: ReadonlyArray<string>, parent: string | null = null) => [
++      streamFrame({ type: "message_start", message: { id: messageId } }, parent),
++      streamFrame(
++        {
++          type: "content_block_start",
++          index: 0,
++          content_block: { type: "text", text: "" },
++        },
++        parent,
++      ),
++      ...deltas.map((text) =>
++        streamFrame(
++          { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
++          parent,
++        ),
++      ),
++      streamFrame({ type: "content_block_stop", index: 0 }, parent),
++    ];
++    const textSnapshot = (input: {
++      readonly id: string;
++      readonly uuid: string;
++      readonly content: ReadonlyArray<unknown>;
++      readonly parent?: string | null;
++    }) =>
++      claudeSdkFrame({
++        type: "assistant",
++        uuid: input.uuid,
++        session_id: WAKE_NATIVE_SESSION,
++        parent_tool_use_id: input.parent ?? null,
++        message: {
++          id: input.id,
++          model: "claude-sonnet-4-6",
++          content: input.content,
++        },
++      });
++    const assistantItems = (
++      events: ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event>,
++    ) =>
++      new Map(
++        events.flatMap((event) =>
++          event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
++            ? [[event.turnItem.id, event.turnItem] as const]
++            : [],
++        ),
++      );
++
++    it.effect(
++      "streams live text deltas into one assistant item and settles exactly on the snapshot",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-live"),
++              text: "Count for me",
++              attachments: [],
++            }),
++          );
++          for (const frame of textStream("msg_live_1", ["Count from", " 1 to 40."])) {
++            yield* harness.offerAndWait(frame);
++          }
++          // Fire the 50ms coalescer flush with the frozen TestClock, then let
++          // the emit chain land before any snapshot exists.
++          yield* TestClock.adjust("60 millis");
++          yield* yieldTicks(20);
++          const liveEvents = harness.events.flatMap((event) =>
++            event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
++              ? [event.turnItem]
++              : [],
++          );
++          assert.ok(liveEvents.length >= 1, "no live assistant_message event before the snapshot");
++          assert.equal(liveEvents.at(-1)?.streaming, true);
++          assert.equal(liveEvents.at(-1)?.text, "Count from 1 to 40.");
++          // Settle: the snapshot carries authoritative (different) text.
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_live_1",
++              uuid: "snap-uuid-1",
++              content: [{ type: "text", text: "Count from 1 to 40. Done." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            makeResultFrame({ uuid: "result-live-1", result: "Count from 1 to 40. Done." }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "completed");
++          const items = new Map(
++            harness.events.flatMap((event) =>
++              event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
++                ? [[event.turnItem.id, event.turnItem] as const]
++                : [],
++            ),
++          );
++          assert.equal(items.size, 1, "text must stay one assistant_message item");
++          const finalItem = [...items.values()][0]!;
++          assert.equal(finalItem.text, "Count from 1 to 40. Done.");
++          assert.equal(finalItem.streaming, false);
++          assert.isNotNull(finalItem.completedAt);
++          assert.isFalse(
++            [...items.values()].some(
++              (item) => item.nativeItemRef?.nativeId === "snap-uuid-1",
++            ),
++            "the snapshot uuid must not open a second item",
++          );
++          const assistantMessageUpdates = harness.events.filter(
++            (event) => event.type === "message.updated" && event.message.role === "assistant",
++          );
++          assert.equal(
++            assistantMessageUpdates.length,
++            1,
++            "completed text must be announced exactly once",
++          );
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
++
++    it.effect(
++      "orders streamed text before and after a tool use",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-order"),
++              text: "Use the tool",
++              attachments: [],
++            }),
++          );
++          for (const frame of textStream("msg_order_1", ["Before the tool"])) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_order_1",
++              uuid: "snap-order-1",
++              content: [
++                { type: "text", text: "Before the tool." },
++                { type: "tool_use", id: "toolu-order-1", name: "Bash", input: { command: "echo hi" } },
++              ],
++            }),
++          );
++          yield* harness.offerAndWait(
++            claudeSdkFrame({
++              type: "user",
++              uuid: "tool-result-order",
++              session_id: WAKE_NATIVE_SESSION,
++              parent_tool_use_id: null,
++              message: {
++                role: "user",
++                content: [
++                  {
++                    type: "tool_result",
++                    tool_use_id: "toolu-order-1",
++                    content: [{ type: "text", text: "hi" }],
++                    is_error: false,
++                  },
++                ],
++              },
++            }),
++          );
++          for (const frame of textStream("msg_order_2", ["After the tool"])) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_order_2",
++              uuid: "snap-order-2",
++              content: [{ type: "text", text: "After the tool." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            makeResultFrame({ uuid: "result-order-1", result: "Before and after" }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "completed");
++          const latest = new Map(
++            harness.events.flatMap((event) =>
++              event.type === "turn_item.updated"
++                ? [[event.turnItem.id, event.turnItem] as const]
++                : [],
++            ),
++          );
++          const textItem = (text: string) =>
++            [...latest.values()].find(
++              (item) => item.type === "assistant_message" && item.text === text,
++            );
++          const before = textItem("Before the tool.");
++          const after = textItem("After the tool.");
++          const tool = [...latest.values()].find(
++            (item) => item.nativeItemRef?.nativeId === "toolu-order-1",
++          );
++          assert.isDefined(before);
++          assert.isDefined(after);
++          assert.isDefined(tool, "the tool_use must still become an item");
++          assert.ok(
++            before!.ordinal < tool!.ordinal,
++            `text before the tool must precede it (${before!.ordinal} < ${tool!.ordinal})`,
++          );
++          assert.ok(
++            tool!.ordinal < after!.ordinal,
++            `text after the tool must follow it (${tool!.ordinal} < ${after!.ordinal})`,
++          );
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
++
++    it.effect(
++      "excludes sub-agent (parented) streamed text from the root thread",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-parent"),
++              text: "Delegate",
++              attachments: [],
++            }),
++          );
++          for (const frame of textStream("msg_child_1", ["Child answer text"], "child-tool-1")) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_child_1",
++              uuid: "child-uuid-1",
++              parent: "child-tool-1",
++              content: [{ type: "text", text: "Child answer text." }],
++            }),
++          );
++          for (const frame of textStream("msg_root_1", ["Root answer"])) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_root_1",
++              uuid: "root-uuid-1",
++              content: [{ type: "text", text: "Root answer." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            makeResultFrame({ uuid: "result-parent-1", result: "Root answer." }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "completed");
++          const items = assistantItems(harness.events);
++          assert.equal(items.size, 1, "only the root text becomes an item");
++          const root = [...items.values()][0]!;
++          assert.equal(root.text, "Root answer.");
++          assert.isFalse(
++            harness.events.some(
++              (event) =>
++                (event.type === "turn_item.updated" &&
++                  event.turnItem.type === "assistant_message" &&
++                  event.turnItem.text.includes("Child")) ||
++                (event.type === "message.updated" &&
++                  event.message.role === "assistant" &&
++                  event.message.text.includes("Child")),
++            ),
++            "no sub-agent text may reach the root thread",
++          );
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
++
++    it.effect(
++      "keeps partial streamed text visible when the turn is interrupted",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-interrupt"),
++              text: "Long answer please",
++              attachments: [],
++            }),
++          );
++          for (const frame of textStream("msg_interrupt_1", ["Half of an answ"])) {
++            yield* harness.offerAndWait(frame);
++          }
++          // No snapshot ever arrives: the stream is aborted mid-block.
++          yield* harness.offerAndWait(
++            makeResultFrame({
++              uuid: "result-interrupt-1",
++              result: "",
++              terminalReason: "aborted_streaming" as const,
++            }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "interrupted");
++          const items = assistantItems(harness.events);
++          assert.equal(items.size, 1, "the partial text must remain as one item");
++          const partial = [...items.values()][0]!;
++          assert.equal(partial.text, "Half of an answ");
++          assert.equal(partial.streaming, false, "no item may stay stuck streaming");
++          assert.isNotNull(partial.completedAt);
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
++
++    it.effect(
++      "neither replays history as streaming nor double-emits duplicate snapshots",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-replay"),
++              text: "Resume here",
++              attachments: [],
++            }),
++          );
++          // Replayed history: an assistant snapshot with no stream events.
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_replay_1",
++              uuid: "replay-uuid-1",
++              content: [{ type: "text", text: "Replayed history answer." }],
++            }),
++          );
++          // Live stream, then the same snapshot delivered twice.
++          for (const frame of textStream("msg_dup_1", ["Live answer "])) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* TestClock.adjust("60 millis");
++          yield* yieldTicks(20);
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_dup_1",
++              uuid: "dup-uuid-1",
++              content: [{ type: "text", text: "Live answer once." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_dup_1",
++              uuid: "dup-uuid-1",
++              content: [{ type: "text", text: "Live answer once." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            makeResultFrame({ uuid: "result-replay-1", result: "Done" }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "completed");
++          const items = assistantItems(harness.events);
++          assert.equal(
++            items.size,
++            2,
++            "one item per message: replay + live, duplicate snapshot adds none",
++          );
++          assert.deepEqual(
++            [...items.values()].map((item) => item.text).sort(),
++            ["Live answer once.", "Replayed history answer."],
++          );
++          for (const item of items.values()) {
++            assert.equal(item.streaming, false);
++            assert.isNotNull(item.completedAt);
++          }
++          assert.isFalse(
++            harness.events.some(
++              (event) =>
++                event.type === "turn_item.updated" &&
++                event.turnItem.type === "assistant_message" &&
++                event.turnItem.text.includes("Replayed") &&
++                event.turnItem.streaming === true,
++            ),
++            "replayed history must never stream",
++          );
++          const assistantMessageUpdates = harness.events.filter(
++            (event) => event.type === "message.updated" && event.message.role === "assistant",
++          );
++          assert.equal(assistantMessageUpdates.length, 2, "one announcement per message");
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
++  });
++
+   // regression: #15892 non-execution metadata is carried through, not guessed from result text
+   it.effect.each(["cancelled", "denied", "permission_denied", undefined])(
+     "preserves native tool non-execution metadata %s without inferring a denial from text",
+diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
+index 2824552b..1f9ea8d2 100644
+--- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
++++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
+@@ -4284,6 +4284,98 @@ function buildAssistantArtifacts(input: {
+   };
+ }
+ 
++// Streaming variant of buildAssistantArtifacts for answer-text deltas: running
++// artifacts while the text arrives, completed artifacts once it settles. The
++// item id is stable across the whole stream (one item per streamed message).
++function buildStreamingAssistantArtifacts(input: {
++  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
++  readonly turnInput: ProviderAdapter.ProviderAdapterV2TurnInput;
++  readonly providerTurnId: OrchestrationV2ProviderTurn["id"];
++  readonly nativeItemId: string;
++  readonly text: string;
++  readonly ordinal: number;
++  readonly startedAt: DateTime.Utc;
++  readonly updatedAt: DateTime.Utc;
++  readonly completed: boolean;
++}): {
++  readonly node: OrchestrationV2ExecutionNode;
++  readonly message: OrchestrationV2ConversationMessage;
++  readonly turnItem: OrchestrationV2TurnItem;
++} {
++  const nodeId = input.idAllocator.derive.nodeFromProviderItem({
++    driver: CLAUDE_PROVIDER,
++    nativeItemId: input.nativeItemId,
++  });
++  const messageId = input.idAllocator.derive.messageFromProviderItem({
++    driver: CLAUDE_PROVIDER,
++    nativeItemId: input.nativeItemId,
++  });
++  const turnItemId = input.idAllocator.derive.turnItemFromProviderItem({
++    driver: CLAUDE_PROVIDER,
++    nativeItemId: input.nativeItemId,
++  });
++  const nativeItemRef = {
++    driver: CLAUDE_PROVIDER,
++    nativeId: input.nativeItemId,
++    strength: "strong" as const,
++  };
++  const completedAt = input.completed ? input.updatedAt : null;
++
++  return {
++    node: {
++      id: nodeId,
++      threadId: input.turnInput.threadId,
++      runId: input.turnInput.runId,
++      parentNodeId: input.turnInput.rootNodeId,
++      rootNodeId: input.turnInput.rootNodeId,
++      kind: "assistant_message",
++      status: input.completed ? "completed" : "running",
++      countsForRun: false,
++      providerThreadId: input.turnInput.providerThread.id,
++      providerTurnId: input.providerTurnId,
++      nativeItemRef,
++      runtimeRequestId: null,
++      checkpointScopeId: null,
++      startedAt: input.startedAt,
++      completedAt,
++    },
++    message: {
++      createdBy: "agent",
++      creationSource: "provider",
++      id: messageId,
++      threadId: input.turnInput.threadId,
++      runId: input.turnInput.runId,
++      nodeId,
++      role: "assistant",
++      text: input.text,
++      attachments: [],
++      streaming: !input.completed,
++      createdAt: input.startedAt,
++      updatedAt: input.updatedAt,
++    },
++    turnItem: {
++      id: turnItemId,
++      threadId: input.turnInput.threadId,
++      runId: input.turnInput.runId,
++      nodeId,
++      providerThreadId: input.turnInput.providerThread.id,
++      providerTurnId: input.providerTurnId,
++      nativeItemRef,
++      parentItemId: null,
++      ordinal: input.ordinal,
++      status: input.completed ? "completed" : "running",
++      title: null,
++      startedAt: input.startedAt,
++      completedAt,
++      updatedAt: input.updatedAt,
++      type: "assistant_message",
++      messageId,
++      text: input.text,
++      streaming: !input.completed,
++    },
++  };
++}
++
+ const CLAUDE_USAGE_LIMIT_WINDOWS = {
+   five_hour: "5-hour",
+   seven_day: "7-day",
+@@ -4343,6 +4435,13 @@ interface ActiveClaudeTurnContext {
+     emittedNativeItemIds: Set<string>;
+     // The CLI repeats a notice that ends a prompt as the turn's result text.
+     noticeTexts: Set<string>;
++    // Live answer-text streaming (mirrors Codex agentMessageDeltas): the API
++    // message id currently streaming, whether a text block is open, and the
++    // startedAt of each streamed item (one per API message id).
++    streamMessageId: string | null;
++    textBlockOpen: boolean;
++    streamedAnyText: boolean;
++    readonly streamedItemStartedAt: Map<string, DateTime.Utc>;
+   };
+   readonly reasoning: {
+     messageId: string | null;
+@@ -7893,6 +7992,50 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+             }),
+         });
+ 
++        // Live answer-text streaming, mirroring Codex agentMessageDeltas: the
++        // streamed item completes with the SDK snapshot's authoritative text.
++        const assistantTextDeltas = yield* makeProviderTextDeltaCoalescer({
++          flushIntervalMs: 50,
++          emit:
++            /* Provider events include streaming deltas; avoid a span for each update. */
++            Effect.fnUntraced(function* (update) {
++              const context = yield* Ref.get(activeTurn);
++              if (context === null || context.nativeTurnId !== update.turnId) return;
++              if (update.text.length === 0) return;
++              const now = yield* DateTime.now;
++              const startedAt =
++                context.assistant.streamedItemStartedAt.get(update.itemId) ?? now;
++              const artifacts = buildStreamingAssistantArtifacts({
++                idAllocator,
++                turnInput: context.input,
++                providerTurnId: context.providerTurnId,
++                nativeItemId: update.itemId,
++                text: update.text,
++                ordinal: yield* resolveItemOrdinal(context, update.itemId),
++                startedAt,
++                updatedAt: now,
++                completed: update.completed,
++              });
++              yield* emitProviderEvent({
++                type: "node.updated",
++                driver: CLAUDE_PROVIDER,
++                node: artifacts.node,
++              });
++              if (update.completed) {
++                yield* emitProviderEvent({
++                  type: "message.updated",
++                  driver: CLAUDE_PROVIDER,
++                  message: artifacts.message,
++                });
++              }
++              yield* emitProviderEvent({
++                type: "turn_item.updated",
++                driver: CLAUDE_PROVIDER,
++                turnItem: artifacts.turnItem,
++              });
++            }),
++        });
++
+         const endToolCalls = Effect.fnUntraced(function* (input: {
+           readonly context: ActiveClaudeTurnContext | null;
+           readonly toolCalls: ReadonlyArray<ActiveClaudeToolCall>;
+@@ -7954,6 +8097,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+           readonly result?: SDKResultMessage;
+         }) {
+           yield* reasoningDeltas.flushTurn(input.context.nativeTurnId);
++          // Streamed text that never met its snapshot (interrupt, dropped
++          // frame) still settles as one completed item with what arrived.
++          yield* assistantTextDeltas.flushTurn(input.context.nativeTurnId);
+           if (input.context.compaction?.status === "running") {
+             const reason = input.result?.subtype === "success" ? input.result.result.trim() : "";
+             yield* emitProviderEvent({
+@@ -8023,6 +8169,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+ 
+           if (
+             input.context.assistant.emittedNativeItemIds.size === 0 &&
++            !input.context.assistant.streamedAnyText &&
+             input.context.assistant.fallbackText.length > 0
+           ) {
+             const ordinal = yield* resolveItemOrdinal(
+@@ -9029,6 +9176,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+             if (event.type === "message_start") {
+               reasoning.messageId = event.message.id;
+               reasoning.streamBlocks.clear();
++              context.assistant.streamMessageId = event.message.id;
++              context.assistant.textBlockOpen = false;
+               const usage: ClaudeMessageUsage | undefined = event.message.usage;
+               context.streamUsage =
+                 usage === undefined ? null : { messageId: event.message.id, usage };
+@@ -9067,7 +9216,35 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+                   delta: event.delta.thinking,
+                 });
+               }
++            } else if (
++              event.type === "content_block_start" &&
++              event.content_block.type === "text" &&
++              context.assistant.streamMessageId !== null
++            ) {
++              // One streamed item per API message: every text block of the
++              // message concatenates into it, matching textFromClaudeContent.
++              context.assistant.textBlockOpen = true;
++              const itemId = `assistant-text:${context.assistant.streamMessageId}`;
++              if (!context.assistant.streamedItemStartedAt.has(itemId)) {
++                context.assistant.streamedItemStartedAt.set(itemId, yield* DateTime.now);
++                context.assistant.streamedAnyText = true;
++                // Reserve the ordinal at first sight so streamed text keeps its
++                // place before tool items of the same snapshot.
++                yield* resolveItemOrdinal(context, itemId);
++              }
++            } else if (
++              event.type === "content_block_delta" &&
++              event.delta.type === "text_delta" &&
++              context.assistant.textBlockOpen &&
++              context.assistant.streamMessageId !== null
++            ) {
++              yield* assistantTextDeltas.append({
++                turnId: context.nativeTurnId,
++                itemId: `assistant-text:${context.assistant.streamMessageId}`,
++                delta: event.delta.text,
++              });
+             } else if (event.type === "content_block_stop") {
++              context.assistant.textBlockOpen = false;
+               const itemId = reasoning.streamBlocks.get(event.index);
+               if (itemId !== undefined) {
+                 yield* reasoningDeltas.complete({
+@@ -9941,6 +10118,27 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+           ) {
+             return;
+           }
++          if (
++            message.type === "assistant" &&
++            !message.parent_tool_use_id &&
++            typeof message.message.id === "string" &&
++            context.assistant.streamedItemStartedAt.has(`assistant-text:${message.message.id}`)
++          ) {
++            // This snapshot settles a message we streamed live: complete the
++            // streamed item with the authoritative text (one item, no second
++            // uuid-keyed emission) and let the guard below skip the uuid path.
++            const itemId = `assistant-text:${message.message.id}`;
++            context.assistant.streamedItemStartedAt.delete(itemId);
++            context.assistant.emittedNativeItemIds.add(message.uuid);
++            yield* assistantTextDeltas.complete({
++              turnId: context.nativeTurnId,
++              itemId,
++              ...(assistantText !== null && assistantText.text.length > 0
++                ? { finalText: assistantText.text }
++                : {}),
++              emitEmpty: false,
++            });
++          }
+           if (assistantText !== null && assistantText.text.length > 0) {
+             yield* emitAssistantTextArtifacts({
+               context,
+@@ -10000,6 +10198,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+               message.local_command === "compact"
+             ) &&
+             context.assistant.emittedNativeItemIds.size === 0 &&
++            !context.assistant.streamedAnyText &&
+             context.assistant.fallbackText.length === 0 &&
+             resultText !== null &&
+             resultText.text.length > 0 &&
+@@ -11230,6 +11429,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+                 fallbackNativeItemId: `assistant:${turnInput.runId}`,
+                 emittedNativeItemIds: new Set(),
+                 noticeTexts: new Set(),
++                streamMessageId: null,
++                textBlockOpen: false,
++                streamedAnyText: false,
++                streamedItemStartedAt: new Map(),
+               },
+               reasoning: {
+                 messageId: null,
