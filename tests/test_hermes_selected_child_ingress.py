@@ -1290,3 +1290,92 @@ def test_private_child_request_admit_queue_full_wait_reason(
                 assert service.runtime.jobs.get_job(job_id).attempt_count == 0
 
     asyncio.run(exercise())
+
+
+# ---------------------------------------------------------------------------
+# 8. L1B3-1: the admit frame passes the SAME installed-facts proof as
+#    status/result before any admission is committed
+# ---------------------------------------------------------------------------
+
+
+def _child_request_job_count(service) -> int:
+    """Jobs whose creation provenance is a ChildExecutionRequest.v1."""
+
+    with service.runtime.store.read() as connection:
+        return int(connection.execute(
+            "SELECT COUNT(*) FROM events e JOIN jobs j"
+            " ON j.job_id=e.job_id"
+            " WHERE e.event_type='JOB_CREATED'"
+            " AND json_extract(e.payload_json,"
+            " '$.provenance.child_request.schema')"
+            " = 'ChildExecutionRequest.v1'"
+        ).fetchone()[0])
+
+
+@pytest.mark.parametrize("fault", ["work_ref", "principal", "capability"])
+def test_private_child_request_admit_refuses_a_stale_or_foreign_principal(
+        tmp_path, fault):
+    """A caller authorised on another work scope, a forged principal and a
+    stale capability digest are all refused on the admit frame itself,
+    before any admission — zero jobs created (L1B3-1)."""
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-c29-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            async with _control(tmp_path, socket_root,
+                                name="child-request-gate") as host:
+                service = host.service
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "gate-key-0001")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope})
+                frame = _frame_for(context, command=command,
+                                   action="selected_child_admit")
+                if fault == "work_ref":
+                    # A principal context frozen for a DIFFERENT work scope:
+                    # this App is frozen on WORK_REF, and authority proved
+                    # for another scope must never admit here.
+                    frame["principal_context"] = dict(
+                        frame["principal_context"],
+                        work_ref="WS:EXECUTIVE-OTHER")
+                elif fault == "principal":
+                    frame["principal"] = dict(
+                        frame["principal"], subject_digest="f" * 64)
+                else:
+                    frame["capability_profile_digest"] = "f" * 64
+                reply = await _send_frame(host.socket, frame)
+                assert reply["ok"] is False, reply
+                assert reply["error"]["code"] == "authority_refused", reply
+                assert _child_request_job_count(service) == 0
+
+    asyncio.run(exercise())
+
+
+def test_private_child_request_admit_refuses_a_command_id_mismatch(tmp_path):
+    """The frozen material's key and the envelope's own admission command
+    id are one identity; a mismatch refuses before admission with zero
+    jobs created (L1B3-1)."""
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-c29-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            async with _control(tmp_path, socket_root,
+                                name="child-request-mismatch") as host:
+                service = host.service
+                context = _control_context(host)
+                command, _own = _admission_material(
+                    host.root.job_id, host.root.job_id, "mismatch-key-0001")
+                _other_command, other = _admission_material(
+                    host.root.job_id, host.root.job_id, "mismatch-key-0002")
+                # Frozen under the frame's command, but the envelope is a
+                # DIFFERENT request: key and envelope disagree.
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: other})
+                reply = await _send_frame(host.socket, _frame_for(
+                    context, command=command, action="selected_child_admit"))
+                assert reply["ok"] is False, reply
+                assert reply["error"]["code"] == "invalid_input", reply
+                assert _child_request_job_count(service) == 0
+
+    asyncio.run(exercise())
