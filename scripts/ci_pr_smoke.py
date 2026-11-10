@@ -195,14 +195,17 @@ def _reviewed_registries(
 def select_modules(
     repo: pathlib.Path, changed: Sequence[str], *,
     identity_registries: Sequence[tuple[bytes, tuple[str, ...]]],
+    require_complete: bool = False,
 ) -> tuple[str, ...]:
     """Pick fixed ownership dependencies, then capped source-proximate tests.
 
     Fixed dependencies — the paper stage pin and the owning test modules of
     every identity registry whose chain text quotes a changed path — are
-    exempt from the module cap, so a selection legitimately exceeds
-    _MAX_SELECTED_MODULES when several ownership groups fire together and
-    the cap never truncates a required owner.
+    exempt from the ordinary PR module cap, so that selection legitimately
+    exceeds _MAX_SELECTED_MODULES when several ownership groups fire.
+    Complete merge-group qualification instead requires the deduplicated
+    union of owners and source-proximate modules to fit the allowance;
+    overflow escalates to full tests rather than truncating coverage.
     """
     root = repo.resolve(strict=True)
     selected: set[str] = set()
@@ -210,6 +213,11 @@ def select_modules(
         if not path or path.startswith("/") or ".." in pathlib.PurePosixPath(path).parts:
             raise SmokeUnqualified("SMOKE_PATH_UNSAFE")
         file = root / path
+        if (require_complete and path.startswith("tests/")
+                and file.name.startswith("test_") and path.endswith(".py")):
+            # A directly changed test is applicable even when the checkout
+            # cannot provide it. Strict group qualification must refuse it.
+            selected.add(path)
         if path.endswith(".py") and file.exists() and file.is_file():
             if not file.resolve().is_relative_to(root):
                 raise SmokeUnqualified("SMOKE_PATH_ESCAPED")
@@ -217,7 +225,9 @@ def select_modules(
                 selected.add(path)
             else:
                 candidate = root / "tests" / ("test_" + file.stem + ".py")
-                if candidate.exists() and candidate.is_file():
+                if ((candidate.exists() and candidate.is_file())
+                        or (require_complete
+                            and (candidate.exists() or candidate.is_symlink()))):
                     selected.add(candidate.relative_to(root).as_posix())
     required: tuple[str, ...] = ()
     if _PAPER_STAGE_SOURCES.intersection(changed):
@@ -243,6 +253,23 @@ def select_modules(
             available = False
         if not available:
             raise SmokeUnqualified("SMOKE_REQUIRED_TEST_UNAVAILABLE")
+    if require_complete:
+        # The protected merge group may use smoke only when every known
+        # applicable module fits. Ordinary PR feedback keeps its old cap.
+        for path in selected:
+            file = root / path
+            try:
+                available = (not file.is_symlink() and file.is_file()
+                             and file.resolve().is_relative_to(root)
+                             and file.stat().st_size <= _MAX_MODULE_BYTES)
+            except OSError:
+                available = False
+            if not available:
+                raise SmokeUnqualified("SMOKE_APPLICABLE_TEST_UNAVAILABLE")
+        complete = tuple(dict.fromkeys((*required, *sorted(selected))))
+        if len(set(complete) - {_BASELINE}) > _MAX_SELECTED_MODULES:
+            raise SmokeUnqualified("SMOKE_SELECTION_EXCEEDS_BUDGET")
+        return tuple(dict.fromkeys((_BASELINE, *complete)))
     # Fixed dependencies cannot be lost to alphabetic ties or the module cap.
     # Other source-proximate tests retain their deterministic
     # alphabetic ties and fixed cap. Never let a PR path select a workflow,

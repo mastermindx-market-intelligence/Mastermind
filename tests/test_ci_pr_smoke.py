@@ -60,6 +60,44 @@ def test_changed_test_is_included_and_capacity_is_bounded(tmp_path):
     assert len(set(selected)) == len(selected)
 
 
+def test_complete_group_refuses_to_drop_the_fourth_applicable_module(tmp_path):
+    root = repo(tmp_path)
+    paths = tuple(f"tests/test_customer_{i}.py" for i in range(4))
+    for path in paths:
+        (root / path).write_text("def test_customer(): assert True\n")
+    assert len(select_modules(root, paths, identity_registries=())) == 4
+    with pytest.raises(SmokeUnqualified, match="SMOKE_SELECTION_EXCEEDS_BUDGET"):
+        select_modules(root, paths, identity_registries=(), require_complete=True)
+
+
+def test_complete_group_deduplicates_owners_before_counting_and_never_slices(tmp_path):
+    source = "integrations/customer.py"
+    root, registries = identity_repo(tmp_path, fabric=repr(source).encode())
+    selected = select_modules(root, (source, *FABRIC_TESTS),
+                              identity_registries=registries, require_complete=True)
+    assert selected == ("tests/test_ci_pytest_policy.py", *FABRIC_TESTS)
+    extra = "tests/test_customer.py"
+    (root / extra).write_text("def test_customer(): assert True\n")
+    with pytest.raises(SmokeUnqualified, match="SMOKE_SELECTION_EXCEEDS_BUDGET"):
+        select_modules(root, (source, extra), identity_registries=registries,
+                       require_complete=True)
+
+
+@pytest.mark.parametrize("fault", ["missing", "directory", "symlink", "oversized"])
+def test_complete_group_refuses_unavailable_applicable_tests(tmp_path, fault):
+    root = repo(tmp_path)
+    path = "tests/test_customer.py"
+    file = root / path
+    if fault == "directory":
+        file.mkdir()
+    elif fault == "symlink":
+        file.symlink_to(root / "tests/test_ci_pytest_policy.py")
+    elif fault == "oversized":
+        file.write_text("#" + "x" * 160000 + "\n")
+    with pytest.raises(SmokeUnqualified, match="SMOKE_APPLICABLE_TEST_UNAVAILABLE"):
+        select_modules(root, (path,), identity_registries=(), require_complete=True)
+
+
 def test_source_python_syntax_is_checked_before_pytest(tmp_path):
     root = repo(tmp_path)
     (root / "app").mkdir()
