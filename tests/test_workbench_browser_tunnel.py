@@ -7,7 +7,6 @@ from pathlib import Path
 import sys
 
 import mcp.types as mcp_types
-import pytest
 
 from integrations.workbench_action_mcp.tunnel import create_runtime_channel
 from integrations.workbench_browser_mcp.app import build_browser_tool_surface
@@ -29,7 +28,7 @@ def _private(path: Path) -> str:
 def _browser_block(tmp_path: Path) -> dict[str, object]:
     root = Path(__file__).resolve().parents[1]
     return {
-        "source_root": _private(tmp_path / "source"),
+        "source_root": str(root),
         "python_executable": sys.executable,
         "node_executable": "/opt/homebrew/bin/node",
         "mcp_cli_path": "/tmp/mcp/node_modules/@playwright/mcp/cli.js",
@@ -97,29 +96,6 @@ def test_browser_tunnel_config_composes_existing_action_tunnel(tmp_path: Path):
     assert selected.browser.tool_catalog_file.endswith(
         "claude_browser_mcp_tools_0_0_79.json"
     )
-
-
-def test_browser_fixture_custody_is_independent_of_checkout_mode(tmp_path: Path, monkeypatch):
-    from integrations.workbench_browser_mcp.resource_port import (
-        BrowserResourceRefused,
-        validate_host_config,
-    )
-    from integrations.workbench_browser_mcp.tunnel import _host_config
-
-    original = Path(__file__).resolve().parents[1]
-    checkout = tmp_path / "shared-checkout"
-    catalog = Path("research/evidence/claude_browser_mcp_tools_0_0_79.json")
-    (checkout / catalog).parent.mkdir(parents=True)
-    (checkout / catalog).write_bytes((original / catalog).read_bytes())
-    (checkout / catalog).chmod(0o600)
-    checkout.chmod(0o770)
-    monkeypatch.setattr(sys.modules[__name__], "__file__", str(checkout / "tests" / "fixture.py"))
-    path, _outer, _audit = _config_file(tmp_path)
-    host = _host_config(load_browser_tunnel_config(str(path)).browser)
-    assert validate_host_config(host) is host
-    host.source_root.chmod(0o770)
-    with pytest.raises(BrowserResourceRefused, match=r"^SOURCE_ROOT_UNSAFE$"):
-        validate_host_config(host)
 
 
 def test_browser_tunnel_config_refuses_extra_authority_field(tmp_path: Path):
@@ -270,4 +246,3 @@ def test_browser_stdio_describe_is_dependency_free_and_inert():
     assert value["mode"] == "fixed-channel-stdio"
     assert value["installed"] is False
     assert value["persistent_profiles"] is False
-

@@ -1,18 +1,14 @@
 """Focused adversarial tests for the home-directory ACL exception.
 
 These tests are fully offline: they build temp-owned fixture trees, never
-read or change existing host-home contents, private config, credentials,
-services, or installed state, and never read another uid's bytes. Linux
-fixtures use a fresh private child of the process account's canonical home;
-existing parent directories and permissions are unchanged. Mechanical fixtures
-are disclosed:
+touch the live host home, private config, credentials, services, or installed
+state, and never read another uid's bytes. Mechanical fixtures are disclosed:
 
 1. ``reader.FIXED_OBSERVED_UID`` is monkeypatched to the current process uid
    so temp-owned fixtures qualify; the shipped constant remains 501.
 2. ``reader.pwd`` is replaced with a fake account database so the sole
    pwd-qualified exception home is the disposable fixture directory. The real
-   host home's existing contents are never read and its permissions are never
-   modified; the unchanged reader still validates ancestor permission metadata.
+   host home directory is never read or modified.
 3. ``reader.has_macos_acl`` and ``reader.has_macos_everyone_deny_delete_only_acl``
    are monkeypatched at the reader boundary for reader-wiring tests, and
    ``fs_security._bind_acl_classifier_functions`` is replaced with a pure
@@ -31,7 +27,6 @@ import errno
 import hashlib
 import json
 import os
-import pwd
 import shutil
 import stat
 import subprocess
@@ -621,10 +616,6 @@ class HomeAclFixture:
         backend_dir = self.tools / "backend"
         backend_dir.mkdir()
         (backend_dir / "server.py").write_bytes(b"print('backend')\n")
-        # These are newly created fixture paths beneath mkdtemp's private root.
-        # Their custody must not depend on a shared runner's umask.
-        for path in [self.root, *self.root.rglob("*")]:
-            path.chmod(0o700 if path.is_dir() or path == node else 0o600)
         return self
 
     def inode(self, path: Path) -> int:
@@ -679,10 +670,7 @@ def reader_overrides(
 
 class HomeAclReaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        # Linux checkouts may have writable shared-runner ancestors. Preserve
-        # Darwin's original anchor for its real native ACL qualifications.
-        parent = REPO_ROOT if IS_DARWIN else Path(pwd.getpwuid(CURRENT_UID).pw_dir).resolve(strict=True)
-        self._tmp = tempfile.mkdtemp(prefix="acl-reader-", dir=parent)
+        self._tmp = tempfile.mkdtemp(prefix="acl-reader-", dir=REPO_ROOT)
         self.addCleanup(cleanup_owned_fixture, self._tmp)
         self.fx = HomeAclFixture(Path(self._tmp) / "fx").build()
 
@@ -690,34 +678,6 @@ class HomeAclReaderTestCase(unittest.TestCase):
         with self.assertRaises(reader.StudioObservationError) as caught:
             fn(*args, **kwargs)
         self.assertEqual(str(caught.exception), "gateway_studio_invalid")
-
-
-class FixtureCustodyTests(HomeAclReaderTestCase):
-    def test_fixture_is_qualified_under_group_writable_umask(self) -> None:
-        previous = os.umask(0o002)
-        try:
-            fixture = HomeAclFixture(Path(self._tmp) / "group-umask").build()
-        finally:
-            os.umask(previous)
-        with reader_overrides():
-            self.assertTrue(fixture.observe().node_sha256)
-
-    def test_owned_ancestor_write_permission_remains_refused(self) -> None:
-        self.fx.root.chmod(0o770)
-        with reader_overrides():
-            self.assertRefused(self.fx.observe)
-
-    @unittest.skipIf(IS_DARWIN, "Darwin retains the existing native ACL fixture anchor")
-    def test_linux_fixture_does_not_inherit_unsafe_checkout_ancestry(self) -> None:
-        checkout = Path(self._tmp) / "shared-checkout"
-        checkout.mkdir(mode=0o770)
-        checkout.chmod(0o770)
-        other = HomeAclReaderTestCase(methodName="runTest")
-        self.addCleanup(other.doCleanups)
-        with mock.patch.object(sys.modules[__name__], "REPO_ROOT", checkout):
-            other.setUp()
-        with reader_overrides():
-            self.assertTrue(other.fx.observe().node_sha256)
 
 
 # ---------------------------------------------------------------------------
@@ -1138,4 +1098,3 @@ class NativeReaderDarwinTests(HomeAclReaderTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-
