@@ -159,11 +159,17 @@ class L1MainScenarioTests(unittest.TestCase):
         self.assertRegex(main["branch_remote_sha"], _SHA1)
 
     def test_p1_deterministic_crash_after_receipt(self) -> None:
-        p1 = _receipt()["scenarios"]["main"]["processes"]["p1"]
+        main = _receipt()["scenarios"]["main"]
+        p1 = main["processes"]["p1"]
         self.assertEqual(p1["crash_point"], "after_receipt_persist_before_ack")
         self.assertTrue(p1["upstream_echo_proven"])
         self.assertEqual(p1["durable_state"], "intent+receipt+original_ref COMMITTED")
-        self.assertEqual(p1["native"]["thread_id"], p1["client_request_id"] and p1["native"]["thread_id"])
+        # L1B3-6: real checks, not the old tautology — the request id is a
+        # 64-hex client request id, and the thread P1 launched is the SAME
+        # thread the scenario records.
+        self.assertRegex(p1["client_request_id"], _HEX64)
+        self.assertRegex(p1["native"]["thread_id"], _THREAD)
+        self.assertEqual(p1["native"]["thread_id"], main["thread_id"])
 
     def test_p2_restart_safety_zero_native_calls(self) -> None:
         p2 = _receipt()["scenarios"]["main"]["processes"]["p2"]
@@ -205,8 +211,10 @@ class L1MainScenarioTests(unittest.TestCase):
         self.assertEqual(p2["thread_run_count"], 1)
         self.assertEqual(len(p2["recent_runs"]), 1)
         # The branch is the request-digest derivation (disclosed deviation).
+        # The receipt records no independent digest field to cross-check the
+        # suffix against, so the shape check is the whole provable claim
+        # (L1B3-6: the old self-comparison asserted nothing and is removed).
         self.assertRegex(main["branch"], r"^t3/mmos-l1-canary-[0-9a-f]{8}$")
-        self.assertEqual(main["branch"][-8:], main["branch"][-8:])
         self.assertEqual(p2["seal"]["job_status"], "COMPLETED")
         self.assertEqual(p2["seal"]["current_attempt_id"], main["attempt_id"])
         # Local-process census recorded honestly (may be 0 for remote execution).
