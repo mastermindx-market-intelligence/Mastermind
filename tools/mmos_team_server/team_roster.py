@@ -24,12 +24,27 @@ server.
 import argparse
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
 import time
 
 RESERVED_PORTS = (3773, 3774)  # the Chairman's own T3 Code app
+
+# A teammate's primary thread is titled exactly "Name — one-word-role". The
+# sidebar ellipsizes long titles, so the whole title must fit in 24 characters.
+TITLE_MAX = 24
+ROLE_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+
+def teammate_title(mate):
+    """The one canonical title for a teammate's primary thread.
+
+    Exactly ``Name — role_line`` (em dash, single spaces). ``role_line`` is a
+    single ASCII word; ``load_spec`` enforces that and the 24-character cap.
+    """
+    return f"{mate['name']} — {mate['role_line']}"
 
 
 def die(msg):
@@ -88,6 +103,15 @@ def load_spec(path):
             die(f"duplicate slug {mate['slug']!r}")
         if mate["accent_color"].lower() in colors:
             die(f"duplicate accent_color {mate['accent_color']!r}")
+        if "—" in mate["name"] or mate["name"] != mate["name"].strip():
+            die(f"{where}.name must not contain an em dash or outer spaces")
+        if not ROLE_LINE_RE.fullmatch(mate["role_line"]):
+            die(f"{where}.role_line must be one ASCII word (letters, digits, "
+                f"'_' or '-'), got {mate['role_line']!r}")
+        title = teammate_title(mate)
+        if len(title) > TITLE_MAX:
+            die(f"{where} title {title!r} is {len(title)} characters; the "
+                f"sidebar fits at most {TITLE_MAX}")
         names.add(mate["name"])
         instances.add(mate["instance"])
         slugs.add(mate["slug"])
@@ -144,15 +168,33 @@ def project_by_root(spec):
     return dict(row) if row else None
 
 
-def threads_in_project(spec, project_id):
+def list_threads(spec, project_id):
+    """Every live thread in the project, with its durable provider instance.
+
+    ``provider_instance_id`` is the column the server writes for a thread's
+    provider instance (``orchestration_v2_projection_threads``); the same value
+    is mirrored in ``payload_json.providerInstanceId``. Either is durable
+    evidence of which teammate a thread belongs to, independent of its title.
+    """
     with db(spec) as conn:
         rows = conn.execute(
-            "SELECT thread_id, json_extract(payload_json, '$.title') AS title, "
-            "json_extract(payload_json, '$.pinnedAt') AS pinned_at, deleted_at "
+            "SELECT thread_id, "
+            "COALESCE(title, json_extract(payload_json, '$.title')) AS title, "
+            "json_extract(payload_json, '$.pinnedAt') AS pinned_at, "
+            "COALESCE(provider_instance_id, "
+            "json_extract(payload_json, '$.providerInstanceId')) AS instance "
             "FROM orchestration_v2_projection_threads "
-            "WHERE project_id = ? AND deleted_at IS NULL", (project_id,)).fetchall()
-    return {r["title"]: {"threadId": r["thread_id"], "pinnedAt": r["pinned_at"]}
-            for r in rows}
+            "WHERE project_id = ? AND deleted_at IS NULL "
+            "ORDER BY created_at, thread_id", (project_id,)).fetchall()
+    return [{"threadId": r["thread_id"], "title": r["title"],
+             "pinnedAt": r["pinned_at"], "instance": r["instance"]}
+            for r in rows]
+
+
+def threads_in_project(spec, project_id):
+    """Compatibility view: exact title → {threadId, pinnedAt}."""
+    return {t["title"]: {"threadId": t["threadId"], "pinnedAt": t["pinnedAt"]}
+            for t in list_threads(spec, project_id)}
 
 
 def ensure_project(spec):
@@ -326,32 +368,109 @@ def environment_id(spec):
         return None
 
 
+def _recover_thread(mate, live, recorded_by_name):
+    """The one live thread that is this teammate's, or ``(None, None)``.
+
+    Evidence, strongest first: the thread id saved in state (a renamed title
+    is still the same thread), then the thread's durable provider instance,
+    then the stable ``"Name — "`` title prefix. Returns ``(thread, problem)``;
+    ``problem`` is a sentence when the evidence is ambiguous or points at
+    another teammate. Adopting the wrong thread would put a teammate into
+    someone else's conversation, so ambiguity is refused, never guessed.
+    """
+    name = mate["name"]
+    others = {n: tid for n, tid in recorded_by_name.items()
+              if n != name and tid}
+    by_id = {t["threadId"]: t for t in live}
+    recorded = recorded_by_name.get(name)
+    if recorded:
+        if recorded in others.values():
+            return None, (f"saved thread {recorded} is also recorded for "
+                          f"another teammate")
+        if recorded in by_id:
+            found = by_id[recorded]
+            if found["instance"] and found["instance"] != mate["instance"]:
+                return None, (f"saved thread {recorded} belongs to provider "
+                              f"instance {found['instance']!r}, not "
+                              f"{mate['instance']!r}")
+            return found, None
+    candidates = {}
+    for t in live:
+        if t["threadId"] in others.values():
+            continue  # recorded to another teammate
+        if t["instance"] == mate["instance"]:
+            candidates[t["threadId"]] = t
+    prefix = f"{name} — "
+    for t in live:
+        if t["threadId"] in others.values():
+            continue
+        if (t["title"] or "").startswith(prefix):
+            candidates[t["threadId"]] = t
+    if len(candidates) > 1:
+        return None, (f"{len(candidates)} threads could be its primary "
+                      f"({', '.join(sorted(candidates))})")
+    if not candidates:
+        return None, None
+    found = next(iter(candidates.values()))
+    if found["instance"] and found["instance"] != mate["instance"]:
+        return None, (f"thread {found['threadId']} is titled for {name} but "
+                      f"belongs to provider instance {found['instance']!r}")
+    return found, None
+
+
+def _recovered_by(mate, found, recorded):
+    if found["threadId"] == recorded:
+        return "state"
+    if found["instance"] == mate["instance"]:
+        return "instance"
+    return "title"
+
+
 def ensure_threads(spec, project_id):
     state, state_path = load_state(spec)
-    existing = threads_in_project(spec, project_id)
+    live = list_threads(spec, project_id)
+    recorded_by_name = {name: (entry or {}).get("threadId")
+                        for name, entry in state["teammates"].items()}
     threads = {}
     for mate in spec["teammates"]:
-        title = f"{mate['name']} — {mate['role_line']}"
-        recorded = (state["teammates"].get(mate["name"]) or {}).get("threadId")
-        if recorded and recorded in [v["threadId"] for v in existing.values()]:
-            threads[mate["name"]] = {"threadId": recorded, "title": title,
-                                     "created": False}
-            continue
-        if title in existing:  # recovery: thread exists but state was lost
-            threads[mate["name"]] = {"threadId": existing[title]["threadId"],
-                                     "title": title, "created": False}
+        title = teammate_title(mate)
+        recorded = recorded_by_name.get(mate["name"])
+        found, problem = _recover_thread(mate, live, recorded_by_name)
+        if problem:
+            die(f"{mate['name']}: {problem}; refusing to pick or create a "
+                f"primary thread")
+        if found is not None:
+            threads[mate["name"]] = {
+                "threadId": found["threadId"], "title": title,
+                "created": False,
+                "recoveredBy": _recovered_by(mate, found, recorded),
+                "instance": found["instance"] or mate["instance"],
+            }
+            if found["title"] != title:
+                log(f"{mate['name']}: thread {found['threadId']} is titled "
+                    f"{found['title']!r}; the roster title is {title!r}")
             continue
         launched = t3_json(t3(spec, [
             "thread", "start", project_id, "Reply with just: READY",
             "--provider", mate["instance"], "--model", spec["model"],
             "--title", title, "--json"]), "t3 thread start")
         threads[mate["name"]] = {"threadId": launched["threadId"],
-                                 "title": title, "created": True}
+                                 "title": title, "created": True,
+                                 "recoveredBy": None,
+                                 "instance": mate["instance"]}
         log(f"primary thread for {mate['name']}: {launched['threadId']}")
+    seen = {}
+    for name, info in threads.items():
+        if info["threadId"] in seen:
+            die(f"{name} and {seen[info['threadId']]} resolved to the same "
+                f"thread {info['threadId']}; refusing")
+        seen[info["threadId"]] = name
     by_name = {mate["name"]: mate for mate in spec["teammates"]}
     state["teammates"] = {name: {"instance": by_name[name]["instance"],
                                  "threadId": info["threadId"],
-                                 "title": info["title"]}
+                                 "title": info["title"],
+                                 "threadInstance": info["instance"],
+                                 "recoveredBy": info["recoveredBy"]}
                           for name, info in threads.items()}
     state["appliedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(spec, state, state_path)
@@ -417,19 +536,15 @@ def cmd_status(spec):
     settings = load_settings(spec)
     instances = settings.get("providerInstances", {})
     state, _ = load_state(spec)
-    existing = threads_in_project(spec, project["project_id"]) if project else {}
+    live = list_threads(spec, project["project_id"]) if project else []
+    recorded_by_name = {name: (entry or {}).get("threadId")
+                        for name, entry in state["teammates"].items()}
     rows = []
     for mate in spec["teammates"]:
         home = teammate_home(spec, mate)
         instance = instances.get(mate["instance"])
-        title = f"{mate['name']} — {mate['role_line']}"
-        thread = existing.get(title)
-        if thread is None:
-            recorded = (state["teammates"].get(mate["name"]) or {}).get("threadId")
-            for candidate in existing.values():
-                if candidate["threadId"] == recorded:
-                    thread = candidate
-                    break
+        title = teammate_title(mate)
+        thread, problem = _recover_thread(mate, live, recorded_by_name)
         rows.append({
             "name": mate["name"],
             "home": home,
@@ -441,7 +556,9 @@ def cmd_status(spec):
                           instance.get("accentColor") == mate["accent_color"],
             "threadTitle": title,
             "threadId": (thread or {}).get("threadId"),
+            "threadCurrentTitle": (thread or {}).get("title"),
             "pinned": bool((thread or {}).get("pinnedAt")),
+            "recoveryProblem": problem,
         })
     print(json.dumps({"project": project, "teammates": rows,
                       "environmentId": environment_id(spec)}, indent=2))
