@@ -1,0 +1,20 @@
+{
+  "schema": "mastermind.t3_project_team_local_read.v1",
+  "observed_at": "2026-11-10T01:19:16.291864+00:00",
+  "host": "m2studio",
+  "device_id": "3f5ce987-e3eb-40a3-af9f-4b0ae54919cc",
+  "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+  "client_source_sha256": "5f1ec12ab7f10e7abe009a2a3e1cdb7193bc4ea33a2c0ade92cce80e278b3c6e",
+  "native_cli": "/Users/chriswong/.t3/bin/t3",
+  "native_call_count": 1,
+  "root_threads_read": 26,
+  "all_project_ids_match": true,
+  "json_log_flag": ["--log-level", "error"],
+  "includes_subagents": false,
+  "effects": {
+    "model_calls": 0,
+    "native_threads_created": 0,
+    "source_or_profile_edits": 0
+  },
+  "proves": "The actual incumbent Python client consumes the installed local CLI root inventory with supported error-only logging. Not a complete child inventory, launch, hierarchy execution or acceptance."
+}
