@@ -200,6 +200,29 @@ def test_wiring_default_install_keeps_exactly_today_hermes_behavior():
     assert _receipt(store)["delivery"]["state"] == "delivered"
 
 
+def test_wiring_retry_after_a_committed_receipt_makes_no_second_delivery():
+    """A replayed reconciliation of the SAME attempt finds the committed
+    receipt event and returns without a second delivery — the non-Hermes
+    transport target sees exactly one call, ever (the events table's
+    UNIQUE command_id is what makes this atomic in production)."""
+    store = _wiring_store("paperclip_issue")
+
+    def by_command_id(command_id):
+        return next(
+            (row for row in store.appended
+             if row.get("command_id") == command_id), None)
+
+    store.get_event_by_command_id = by_command_id
+    transport = RecordingTransport()
+    _deliver(store, registry=_registry_with(transport))
+    assert len(transport.calls) == 1
+    # The retry: same attempt, same job, a fresh reconciler.
+    _deliver(store, registry=_registry_with(transport))
+    assert len(transport.calls) == 1
+    assert len([a for a in store.appended
+                if a["event_type"] == EXECUTION_RETURN_DELIVERY_EVENT]) == 1
+
+
 # --- 3. the L1B3-4 idempotency fix ------------------------------------------
 
 
