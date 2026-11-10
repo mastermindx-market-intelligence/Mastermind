@@ -20,7 +20,7 @@ from scripts import ci_pytest
 
 _REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
 _REQUIRED_PR_FAST_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
-_REQUIRED_PIN_GUARDS_IF = "${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}"
+_REQUIRED_PIN_GUARDS_IF = "${{ !cancelled() }}"
 
 _PIN_GUARDS_RUN_STEP = "Run pinned source-identity guard suite"
 
@@ -133,7 +133,7 @@ def _validate_pin_guards_lane(jobs: dict) -> None:
         or guards.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError(
-            "pin guards must run unconditionally on PR and merge-group events"
+            "pin guards must run on every non-cancelled CI event"
         )
     timeout = guards.get("timeout-minutes")
     if type(timeout) is not int or not 1 <= timeout <= 15:
@@ -272,11 +272,11 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '  esac\n'
  'else\n'
  '  # Protected pushes and deliberate manual CI always run all shards.\n'
- '  # The guard family already ran at the group head; on a push it\n'
- '  # must report skipped, never a silently missing context.\n'
+ '  # Excluded guard modules must pass here too: manual runs and\n'
+ '  # pushes without reusable proof still require complete coverage.\n'
  '  if [ "$SHARDS_STATUS" != success ] ||\n'
  '     [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||\n'
- '     [ "$GUARDS_STATUS" != skipped ]; then\n'
+ '     [ "$GUARDS_STATUS" != success ]; then\n'
  '    echo "integration/release CI must pass the full matrix"\n'
  '    exit 1\n'
  '  fi\n'

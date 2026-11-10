@@ -1,13 +1,14 @@
-"""Early standalone source-identity guard suite for PRs and merge groups.
+"""Early standalone source-identity guard suite for every CI event.
 
 The pinned modules below assert the exact identity of repository source --
 sha256 full-file pins, reviewed-site token scans, D8 protected-default
 topology, reviewed release tokens and the overnight tool wiring -- using
 only the checked-out source tree: no network, no service fixtures and no
-privileged credentials. Each is excluded from the six canonical pytest
-shards (``ci/pytest_exclusions.toml``) and runs in the fast CI job
-``Pin and identity guards`` instead, so a broken pin fails the pull request
-in minutes rather than being discovered at full merge-group proof depth.
+privileged credentials. Four modules move out of the six canonical pytest
+shards (``ci/pytest_exclusions.toml``); two protected modules also stay in
+the shards. All six run in ``Pin and identity guards`` on every PR, merge
+group, protected push and manual CI run, so moving their placement never
+removes coverage when no reusable merge-group proof exists.
 
 This is placement only. The assertions are byte-identical; discovery and
 coverage for every other module are unchanged, and the fail-closed fan-in

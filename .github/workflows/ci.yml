@@ -142,15 +142,16 @@ jobs:
           npm --prefix app/mastermind_os run typecheck
 
   # CI Lightning F2: the source-identity/exact-pin guard family runs early
-  # and alone on every PR and merge-group head, instead of deep inside the
-  # six full-proof shards. These modules hash/tokenize/parse the checked-out
+  # on every CI event, including protected pushes and manual runs. Four
+  # modules move out of the six shards; two protected modules also stay in
+  # the shards. These modules hash/tokenize/parse the checked-out
   # source and need no fixtures, so a churned pin fails the PR in minutes.
-  # The canonical shards exclude exactly these modules
+  # The canonical shards exclude exactly the four excludable modules
   # (ci/pytest_exclusions.toml) and the fail-closed "test" fan-in below
   # refuses any non-success result. Assertions are byte-identical.
   pin_guards:
     name: Pin and identity guards
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -686,11 +687,11 @@ jobs:
             esac
           else
             # Protected pushes and deliberate manual CI always run all shards.
-            # The guard family already ran at the group head; on a push it
-            # must report skipped, never a silently missing context.
+            # Excluded guard modules must pass here too: manual runs and
+            # pushes without reusable proof still require complete coverage.
             if [ "$SHARDS_STATUS" != success ] ||
                [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||
-               [ "$GUARDS_STATUS" != skipped ]; then
+               [ "$GUARDS_STATUS" != success ]; then
               echo "integration/release CI must pass the full matrix"
               exit 1
             fi

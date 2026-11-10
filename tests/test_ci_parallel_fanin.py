@@ -618,8 +618,8 @@ _GATE_PASS_CASES = [
     ("merge_group", "full", ("success", "skipped", "success", "success")),
     ("merge_group", "fast", ("success", "success", "skipped", "success")),
     ("merge_group", "smoke", ("success", "success", "skipped", "success")),
-    ("push", "", ("skipped", "skipped", "success", "skipped")),
-    ("workflow_dispatch", "", ("skipped", "skipped", "success", "skipped")),
+    ("push", "", ("skipped", "skipped", "success", "success")),
+    ("workflow_dispatch", "", ("skipped", "skipped", "success", "success")),
 ]
 
 

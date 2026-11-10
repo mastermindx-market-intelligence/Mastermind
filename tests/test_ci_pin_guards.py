@@ -81,12 +81,14 @@ def test_workflow_pin_guards_lane_is_pinned_by_the_validator() -> None:
     workflow = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
     job = workflow["jobs"]["pin_guards"]
     assert job["name"] == "Pin and identity guards"
+    assert job["if"] == "${{ !cancelled() }}"
     assert job["steps"][3]["name"] == fan._PIN_GUARDS_RUN_STEP
     assert guards.GUARD_MODULES  # the manifest itself is non-empty
 
 
 @pytest.mark.parametrize("mutation", [
-    "wrong-if", "needs-scope", "timeout", "continue-on-error", "missing-step",
+    "wrong-if", "pr-and-merge-group-only", "needs-scope", "timeout",
+    "continue-on-error", "missing-step",
     "wrong-command", "conditional-step", "permissions", "extra-step",
 ])
 def test_validator_rejects_pin_guards_lane_drift(mutation: str) -> None:
@@ -101,6 +103,8 @@ def test_validator_rejects_pin_guards_lane_drift(mutation: str) -> None:
     job = workflow["jobs"]["pin_guards"]
     if mutation == "wrong-if":
         job["if"] = "${{ github.event_name == 'pull_request' }}"
+    elif mutation == "pr-and-merge-group-only":
+        job["if"] = "${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}"
     elif mutation == "needs-scope":
         job["needs"] = ["pr_scope"]
     elif mutation == "timeout":
