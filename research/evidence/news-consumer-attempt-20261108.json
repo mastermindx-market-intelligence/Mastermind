@@ -1,0 +1,44 @@
+{
+  "schema": "news.consumer_attempt.v1",
+  "purpose": "Mastermind News consumer verification",
+  "deployed_commit": "eaf849bf808b3f1fdaaa81ec9e7e4dc154da9233",
+  "proof_reference": "mm-news-eaf849-20261108-001",
+  "turn_id": "nvda-proof-001",
+  "request_sha256": "6aa11b9d898105df8d880020ae301572488bfa39a7d5fb1c1f255d2e7e98299f",
+  "request_attempted_at": "2026-11-08T10:12:38.117542+00:00",
+  "service_pid": "2799428",
+  "disposition": "STREAM_RETURNED",
+  "http_status": 200,
+  "finished_at": "2026-11-08T10:12:44.075317+00:00",
+  "events": [
+    {
+      "type": "start",
+      "conversation_id": "mm-news-eaf849-20261108-001",
+      "backend": "waterfall"
+    },
+    {
+      "type": "error",
+      "code": "advisor_chat_unavailable",
+      "error": "Mastermind AI is temporarily unavailable. Please retry."
+    },
+    {
+      "type": "done",
+      "session_id": "b2952c62-691c-4234-b6a5-45291c4633a0",
+      "cost_usd": 0,
+      "tools_used": []
+    }
+  ],
+  "assistant_text": "Failed to authenticate. API Error: 401 OAuth access token has been revoked.",
+  "receipt_path": "/tmp/mastermind-news-proof-eaf849-20261108-001.json",
+  "acceptance": "NOT_PROVEN",
+  "observed_bot_tools": 0,
+  "provider_failure_class": "AUTHENTICATION_FAILURE_REVOKED_OAUTH",
+  "failed_key_identity": "UNPROVEN",
+  "http_attempts": 1,
+  "replayed": false,
+  "notes": [
+    "HTTP 200 and a terminal done event do not establish tool execution or consumer acceptance.",
+    "The later candidate snapshot does not prove historical selection or credential validity.",
+    "No retrospective cooldown write, forced slot selection, credential renewal, provider/account switch or second HTTP request was performed."
+  ]
+}

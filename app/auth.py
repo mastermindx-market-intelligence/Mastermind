@@ -177,6 +177,9 @@ _LLM_OPERATOR_PATHS: frozenset[str] = frozenset({
 
 #: Non-LLM mutating operator POSTs — sliding window: 30/hour.
 _NON_LLM_OPERATOR_PATHS: frozenset[str] = frozenset({
+    # Supplied-snapshot what-ifs are non-persistent but contain private account
+    # inputs. Reuse the operator bearer, mirror and rate-limit boundary.
+    "/api/portfolio/scenarios/compare",
     "/api/self_directed/order",
     "/api/self_directed/thesis",
     "/api/self_directed/cancel",

@@ -21,6 +21,13 @@ interface TodayProps {
   onOpenInbox: () => void;
   onOpenProjects: () => void;
   onOpenMission?: (selection: MissionSelection) => void;
+  /** SAME acquired current C/N catalogue; Office keeps its configured-C basis. */
+  currentCatalogue?: {
+    value: { state: "AVAILABLE" | "UNAVAILABLE" | "PENDING"; programs: readonly ProgramCard[]; reason: string };
+    current(): boolean;
+  };
+  /** Existing parent-owned catalogue navigation, never a guessed Mission. */
+  onOpenProject?: (workRef: string) => void;
 }
 
 const STRINGS = {
@@ -54,6 +61,7 @@ const STRINGS = {
     suppliedCount: (count: number) => `${count} ${count === 1 ? "project" : "projects"} supplied`,
     rootLabel: (root: string) => `Mission ${root}`,
     projectsUnavailable: "Projects are unavailable right now.",
+    catalogueScope: "Only projects supplied by the current catalogue read are shown.",
     stateLabel: "Source",
     coverageLabel: "Coverage",
     provenance: "Source details",
@@ -117,6 +125,7 @@ const STRINGS = {
     suppliedCount: (count: number) => `${count} 个已提供项目`,
     rootLabel: (root: string) => `任务 ${root}`,
     projectsUnavailable: "暂时无法获取项目。",
+    catalogueScope: "仅显示当前目录读取提供的项目。",
     stateLabel: "来源",
     coverageLabel: "覆盖",
     provenance: "来源详情",
@@ -284,24 +293,33 @@ function Attention({ projection, strings, onOpenInbox, onOpenMission }: {
   </section>;
 }
 
-function Programs({ projection, strings, selection, onOpenProjects, onOpenMission }: {
+function Programs({ projection, strings, selection, onOpenProjects, onOpenMission, currentCatalogue, onOpenProject }: {
   projection: OfficeProjection;
   strings: Strings;
   selection: OfficeProjection["context"]["selection"];
   onOpenProjects: TodayProps["onOpenProjects"];
   onOpenMission: TodayProps["onOpenMission"];
+  currentCatalogue: TodayProps["currentCatalogue"];
+  onOpenProject: TodayProps["onOpenProject"];
 }) {
-  const qualified = qualifyPrograms(projection.programs);
+  let catalogueCurrent = false;
+  try { catalogueCurrent = currentCatalogue?.current() === true && currentCatalogue.value.state === "AVAILABLE"; }
+  catch { /* A withdrawn owner withholds its whole collection. */ }
+  const cards = currentCatalogue && catalogueCurrent ? currentCatalogue.value.programs : null;
+  const catalogueCards = cards && cards.length <= 500 && new Set(cards.map(card => card.workRef)).size === cards.length ? cards : null;
+  // A supplied but unqualified current owner never falls back to older Office data.
+  const qualified = currentCatalogue ? null : qualifyPrograms(projection.programs);
+  const visibleCards = currentCatalogue ? catalogueCards : qualified?.cards;
   const source = projection.programs.source;
   return <section className="today-programs" aria-label={strings.projectsTitle}>
     <div className="today-programs-head">
       <h2 className="today-module-title">{strings.projectsTitle}</h2>
       <button type="button" className="today-view-all" onClick={onOpenProjects}>{strings.viewAll}</button>
     </div>
-    {qualified ? <>
-      <p className="today-faint">{strings.suppliedCount(qualified.cards.length)}</p>
+    {visibleCards ? <>
+      <p className="today-faint">{strings.suppliedCount(visibleCards.length)}</p>
       <ul className="today-project-list">
-        {qualified.cards.slice(0, 3).map(card => {
+        {visibleCards.slice(0, 3).map(card => {
           const open = resolvedSelection(card);
           const title = card.title || card.workRef;
           const selected = !!selection && selection.workRef === card.workRef && selection.rootJobId === card.rootJobId;
@@ -315,16 +333,21 @@ function Programs({ projection, strings, selection, onOpenProjects, onOpenMissio
               {card.nextActionWithheld ? strings.withheldNext : card.nextAction || ""}
               <span data-state={card.state ? "KNOWN" : "UNKNOWN"}>{card.state || strings.notSupplied}</span>
             </p>
-            {open && onOpenMission && <button type="button" aria-label={`${strings.openProject} ${title}`}
-              onClick={() => onOpenMission(open)}>{strings.openProject}</button>}
+            {currentCatalogue ? onOpenProject && <button type="button" aria-label={`${strings.openProject} ${title}`}
+              onClick={() => { try { if (currentCatalogue.current()) onOpenProject(card.workRef); } catch { /* Owner withdrawn. */ } }}>{strings.openProject}</button>
+              : open && onOpenMission && <button type="button" aria-label={`${strings.openProject} ${title}`}
+                onClick={() => onOpenMission(open)}>{strings.openProject}</button>}
           </li>;
         })}
       </ul>
-      {qualified.cards.length > 3 && <p className="today-faint">{strings.firstProjects}</p>}
-      <Provenance source={qualified.source} summary={strings.provenance} strings={strings} />
+      {visibleCards.length > 3 && <p className="today-faint">{strings.firstProjects}</p>}
+      {currentCatalogue ? <details className="today-provenance"><summary>{strings.provenance}</summary>
+        <p>{strings.catalogueScope}</p><dl><dt>{strings.stateLabel}</dt><dd>{currentCatalogue.value.state}</dd>
+          <dt>{strings.coverageLabel}</dt><dd>{currentCatalogue.value.reason}</dd></dl>
+      </details> : qualified && <Provenance source={qualified.source} summary={strings.provenance} strings={strings} />}
     </> : <div className="today-unavailable">
       <p>{strings.projectsUnavailable}</p>
-      <Provenance source={source} summary={strings.provenance} strings={strings} reason={projection.programs.reason} />
+      {!currentCatalogue && <Provenance source={source} summary={strings.provenance} strings={strings} reason={projection.programs.reason} />}
     </div>}
   </section>;
 }
@@ -397,7 +420,7 @@ function Work({ work, projection, strings }: {
   </section>;
 }
 
-function TodayBody({ locale, projection, work, composer, authenticationCue, retainComposerWithAuth, onOpenInbox, onOpenProjects, onOpenMission }: TodayProps) {
+function TodayBody({ locale, projection, work, composer, authenticationCue, retainComposerWithAuth, onOpenInbox, onOpenProjects, onOpenMission, currentCatalogue, onOpenProject }: TodayProps) {
   const strings = STRINGS[locale ?? "en"];
   const selection = projection.context.selection;
   return <section className="atelier-today" aria-label={strings.heroTitle}>
@@ -411,7 +434,7 @@ function TodayBody({ locale, projection, work, composer, authenticationCue, reta
       {authenticationCue && projection.receipts.effect === "EFFECT_UNKNOWN" && <p className="today-exception" role="alert">{strings.workEffectUnknown}</p>}
       <div className="today-side">
         {!authenticationCue && <Programs projection={projection} strings={strings} selection={selection}
-          onOpenProjects={onOpenProjects} onOpenMission={onOpenMission} />}
+          onOpenProjects={onOpenProjects} onOpenMission={onOpenMission} currentCatalogue={currentCatalogue} onOpenProject={onOpenProject} />}
         {work.kind === "DOCUMENT" && work.document.availability === "AVAILABLE" &&
           work.document.source_observation.state === "SAME" &&
           (work.document.effect_exception.value === "EFFECT_UNKNOWN" ||

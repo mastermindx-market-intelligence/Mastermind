@@ -104,6 +104,7 @@ class CurrentGenerationClosure(unittest.TestCase):
         import build_review_stage as builder
         import native_generation as generation
         import native_install as installer
+        import test_native_current_source as current_source
 
         temporary=tempfile.TemporaryDirectory(prefix='support-current-generation-',dir=harness.ROOT/'tests')
         root=Path(temporary.name)
@@ -114,13 +115,9 @@ class CurrentGenerationClosure(unittest.TestCase):
         built=root/'built'
         with mock.patch.object(sys,'argv',['builder','--output',str(built)]),contextlib.redirect_stdout(io.StringIO()):
             builder.main()
-        raw=(built/'native-manifest.json').read_bytes()
-        self.assertEqual(raw,(rollout/'native-manifest.json').read_bytes())
-        self.assertEqual((built/'native-source-inventory.json').read_bytes(),
-                         (rollout/'native-source-inventory.json').read_bytes())
-        manifest=json.loads(raw)
-        self.assertEqual(set(manifest), {"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+        manifest=current_source.verify_current_stage(
+            built,harness.ROOT,{"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
+        self.assertEqual(hashlib.sha256((rollout/'native-manifest.json').read_bytes()).hexdigest(),
                          '22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada')
         inventory=json.loads((built/'native-source-inventory.json').read_bytes())
         predecessor=json.loads((rollout/'native-preimages.json').read_bytes())

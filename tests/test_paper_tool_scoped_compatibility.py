@@ -21,6 +21,9 @@ FILES = ["1b9aff_full_catalog.json", "f3483_full_catalog.json",
          "955e92_full_catalog.json", "16e6b_full_catalog.json"]
 CATALOGS = [json.loads((FIXTURES / name).read_text()) for name in FILES]
 M2 = CATALOGS[-1]
+# This is one observed descriptor, not a reconstructed full f200 catalog.
+NATIVE_STYLE = json.loads(
+    (FIXTURES / "f200eaf_update_styles_descriptor.json").read_text())["tool"]
 READ_ONLY_4 = {"archive_resources", "create_folder", "move_resources",
                "unarchive_resources"}
 FILE_ID = "01M2VWK62FA5S4VVF6G7SBPE5J"
@@ -49,6 +52,133 @@ class Client:
 
 
 class ContractResilienceTests(unittest.TestCase):
+
+    @staticmethod
+    def _native_style_catalog():
+        """Synthetic catalog: historical M2 plus the exact observed style tool."""
+        cat = copy.deepcopy(M2)
+        cat["update_styles"] = copy.deepcopy(NATIVE_STYLE)
+        return cat
+
+    def _assert_style_descriptor_held(self, cat):
+        self.assertIsNone(
+            b.compatible_tool_contract("update_styles", cat["update_styles"]))
+        receipt = b.schema_receipt(Client(cat), cat)
+        self.assertNotIn("update_styles", receipt["compatible_write_tools"])
+        self.assertIn("write_html", receipt["compatible_write_tools"])
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("edit", tool="update_styles",
+                          arguments={"fileId": FILE_ID, "updates": [{
+                              "nodeIds": ["node-1"], "styles": {"opacity": 1}}]},
+                          expected_snapshot="a" * 64,
+                          operation_id="unreviewed-style-descriptor",
+                          allow_write=True, client=c, lock_root=Path(tmp))
+            self.assertEqual(c.calls, [])
+
+    def test_observed_style_primitive_union_dispatches_once(self):
+        cat = self._native_style_catalog()
+        receipt = b.schema_receipt(Client(cat), cat)
+        self.assertIn("update_styles", receipt["compatible_write_tools"])
+        self.assertFalse(receipt["full_catalog_known"])
+        self.assertNotIn(b.digest(cat), b.REVIEWED_CATALOG_SHA256_ALTERNATES)
+        args = {"fileId": FILE_ID, "updates": [{
+            "nodeIds": ["node-1", "node-2"],
+            "styles": {"boxShadow": "none", "zIndex": 110,
+                       "backgroundColor": "var(--mx-dark-panel)", "opacity": 0}}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            c = Client(cat)
+            guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+            c.calls.clear()
+            result = b.execute("edit", tool="update_styles", arguments=args,
+                               expected_snapshot=guard,
+                               operation_id="observed-style-union",
+                               allow_write=True, client=c, lock_root=Path(tmp))
+            self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+            self.assertEqual([call for call in c.calls
+                              if call[0] == "update_styles"],
+                             [("update_styles", args)])
+
+    def test_observed_style_union_type_and_value_constraints_stay_held(self):
+        variants = [
+            {"type": ["string", "number", "null"]},
+            {"type": ["string", "number", "boolean"]},
+            {"type": ["string", "integer"]},
+            {"type": ["string"]},
+            {"type": ["number"]},
+            {"type": ["number", "string"]},  # No general union normalization.
+            {"type": ["string", "number"], "minimum": 0},
+            {"type": ["string", "number"], "maxLength": 4},
+            {"type": ["string", "number"], "default": 0},
+        ]
+        for values in variants:
+            with self.subTest(values=values):
+                cat = self._native_style_catalog()
+                styles = cat["update_styles"]["inputSchema"]["properties"][
+                    "updates"]["items"]["properties"]["styles"]
+                styles["additionalProperties"] = values
+                self._assert_style_descriptor_held(cat)
+
+    def test_observed_style_nested_shape_and_dialect_stay_held(self):
+        for change in ("node_type", "file_type", "missing_styles",
+                       "relaxed_item", "relaxed_top", "nested_optional",
+                       "property_names", "schema_dialect"):
+            with self.subTest(change=change):
+                cat = self._native_style_catalog()
+                schema = cat["update_styles"]["inputSchema"]
+                item = schema["properties"]["updates"]["items"]
+                if change == "node_type":
+                    item["properties"]["nodeIds"]["items"]["type"] = "number"
+                elif change == "file_type":
+                    schema["properties"]["fileId"]["type"] = "number"
+                elif change == "missing_styles":
+                    item["required"] = ["nodeIds"]
+                elif change == "relaxed_item":
+                    item["additionalProperties"] = True
+                elif change == "relaxed_top":
+                    schema["additionalProperties"] = True
+                elif change == "nested_optional":
+                    item["properties"]["futureFlag"] = {"type": "boolean"}
+                elif change == "property_names":
+                    item["properties"]["styles"]["propertyNames"]["minLength"] = 1
+                else:
+                    schema["$schema"] = "https://json-schema.org/draft-07/schema"
+                self._assert_style_descriptor_held(cat)
+
+    def test_observed_style_safety_annotation_types_stay_exact(self):
+        for annotations in ({}, {"destructiveHint": False},
+                            {"destructiveHint": 1},
+                            {"destructiveHint": True, "readOnlyHint": False}):
+            with self.subTest(annotations=annotations):
+                cat = self._native_style_catalog()
+                cat["update_styles"]["annotations"] = annotations
+                self._assert_style_descriptor_held(cat)
+
+    def test_observed_style_descriptor_drift_after_guard_refuses(self):
+        class ChangedAfterGuard(Client):
+            armed = False
+
+            def call(self, name, arguments):
+                response = super().call(name, arguments)
+                if self.armed and name == "get_basic_info":
+                    self.value["update_styles"]["inputSchema"]["properties"][
+                        "updates"]["items"]["properties"]["styles"][
+                            "additionalProperties"]["type"].append("boolean")
+                return response
+
+        c = ChangedAfterGuard(self._native_style_catalog())
+        guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+        c.calls.clear()
+        c.armed = True
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(b.Refusal, "TOOL_SCHEMA_CHANGED"):
+                b.execute("edit", tool="update_styles",
+                          arguments={"fileId": FILE_ID, "updates": [{
+                              "nodeIds": ["node-1"], "styles": {"zIndex": 110}}]},
+                          expected_snapshot=guard, operation_id="style-guard-drift",
+                          allow_write=True, client=c, lock_root=Path(tmp))
+        self.assertEqual([name for name, _ in c.calls], ["get_basic_info"])
 
     def test_requested_tool_drift_during_guard_refuses_before_dispatch(self):
         cases = [

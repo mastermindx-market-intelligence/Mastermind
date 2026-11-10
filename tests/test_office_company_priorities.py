@@ -272,7 +272,7 @@ def test_company_route_is_one_forward_addition_and_caddy_has_exact_fixed_profile
 
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + (PATH,)
     assert (
-        edge.GET_ROUTES,
+        edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES,
         edge.PRE_COMPANY_PRIORITIES_POST_ROUTES,
     ) in edge.TRANSITION_ROUTE_PROFILES
     text = edge.render(CURRENT_MANIFEST, 49200)

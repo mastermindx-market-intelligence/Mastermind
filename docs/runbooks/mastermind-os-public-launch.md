@@ -147,6 +147,33 @@ config path is accepted. Seal dependencies and start through the same lifecycle.
 Legacy installs remain off; an enabled prior setting is preserved only when its
 manifest/config hashes still match. All staged modules are included in the manifest.
 
+### Successor publication with an enrolled Studio seat
+
+Keep the fixed publication seat stopped while adopting the exact protected source
+through its normal upgrade owner. Preserve its existing commission enrollment and
+old grant digest. The gateway publisher admits that profile only after joining the
+actual predecessor receipt, MCP configuration/plist and original grant; an ordinary
+first publication still requires the base profile without commission enrollment.
+The opt-in must contain exactly enabled=true and the qualified prior grant digest.
+The same normal upgrade preserves the fixed seat's already selected Paper v20
+profile after checking its exact paths, bridge hash, runtime receipt and custody.
+That qualified member is retained through the later grant refresh as well;
+unrecognized Paper profiles refuse before installation writes.
+
+Publication continues to write its existing three targets. The Studio configuration
+and manifest remain unchanged and are rechecked against the retained definition,
+including after the root grant changes. Lost acknowledgement uses the original
+transaction's reconciliation path and retained prior grant; it does not re-enroll
+the seat or substitute the newly published grant.
+
+After the new publication receipt and postimages are qualified and the original
+transaction marker is absent, use normal private-service upgrade with
+--os-commission-config-sha256 <actual-new-root-grant-sha256>, preserving the same
+account, port, source, Node and backend. Consume and verify that upgrade's own
+configuration/manifest result before normal startup. Refreshing Studio while the
+publication transaction is incomplete invalidates its retained definition and
+must leave the original operation unresolved.
+
 In the existing Executive MCP config, enable only web_ceo_v3 with
 os_executive_transport: true, os_executive_resource equal to the exact resource
 above, and os_commission_port equal to the opted-in private Studio port.

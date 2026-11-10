@@ -191,7 +191,8 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     assert runners[0]["run"] == (
         "python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}"
     )
-    receipts = [s for s in shards["steps"] if s.get("uses") == "actions/upload-artifact@v4"]
+    receipts = [s for s in shards["steps"] if s.get("uses") == "actions/upload-artifact@v4"
+                and s.get("name") == "Upload receipt"]
     assert len(receipts) == 1
     assert receipts[0]["if"] == "always()"
     assert receipts[0]["with"]["name"] == "rwe-receipt-linux-${{ matrix.index }}"

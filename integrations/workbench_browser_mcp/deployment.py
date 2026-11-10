@@ -116,7 +116,8 @@ def create_browser_ports(
     if selected_host.credential_runtime is not None and not callable(resolve_credential_use):
         raise ValueError("CREDENTIAL_USE_OWNER_REQUIRED")
     selected_inspector = inspector or ProcessInspector()
-    codec = BrowserRefCodec(action_token_key)
+    from control_plane.browser_resource_contract import browser_tools_for_digest
+    codec = BrowserRefCodec(action_token_key, allowed_tools=browser_tools_for_digest(selected_host.expected_tool_schema_digest))
 
     resource_port = BrowserResourcePort(
         resolve_binding=resolve_binding,

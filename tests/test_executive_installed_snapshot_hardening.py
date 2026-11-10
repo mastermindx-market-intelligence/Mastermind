@@ -2144,10 +2144,11 @@ def test_installed_collector_refuses_without_child_when_proof_branch_fails(
     assert child_seen is False
 
 
+@pytest.mark.parametrize("mutation_kind", ["worktree", "temporary_pack"])
 def test_installed_collector_refuses_live_macro_mutation_made_during_child(
-    tmp_path: Path,
+    tmp_path: Path, mutation_kind: str,
 ):
-    """A real byte mutation during the child fails the final generation check."""
+    """Changed consumed bytes or temporary-pack metadata invalidate the read."""
     import json
     from integrations.executive_mcp.installed import (
         InstalledBootPacketCollector,
@@ -2165,6 +2166,10 @@ def test_installed_collector_refuses_live_macro_mutation_made_during_child(
     python.write_text("fixture", encoding="utf-8")
     source_sha = _git(repo, "rev-parse", "HEAD").stdout.strip()
     consumed = macro / "agentos/workstreams/WS-SPARSE.md"
+    if mutation_kind == "temporary_pack":
+        consumed = macro / ".git/objects/pack/tmp_pack_Aa09zZ"
+        consumed.write_text("unfinished private pack\n", encoding="utf-8")
+        consumed.chmod(0o600)
     materialized_roots: list[Path] = []
     child_seen = False
 
@@ -2432,3 +2437,117 @@ def test_installed_collector_pair_error_first_never_waits_past_cumulative_deadli
         release.set()
         assert finished.wait(timeout=1.0)
 
+
+
+def test_git_materialization_omits_only_unpublished_temporary_packs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A private unfinished pack cannot break reads of the published objects."""
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    _git(repo, "repack", "-ad")
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    temporary = repo / ".git/objects/pack/tmp_pack_Aa09zZ"
+    temporary.write_bytes(b"unfinished private pack")
+    temporary.chmod(0o600)
+    original_clone = installed._clone_regular_file
+    copied = []
+
+    def clone(source, destination):
+        if source == temporary:
+            raise PermissionError(13, "private temporary pack", str(source))
+        copied.append(source)
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    materialized = tmp_path / "materialized"
+    materialized.mkdir()
+    installed._clone_git_read_database(
+        repo / ".git", materialized / ".git", deadline=time.monotonic() + 10,
+    )
+    assert not (materialized / ".git/objects/pack" / temporary.name).exists()
+    assert temporary not in copied
+    assert temporary.read_bytes() == b"unfinished private pack"
+    assert _git(materialized, "rev-parse", "HEAD").stdout.strip() == head
+    assert _git(materialized, "show", "HEAD:tracked.txt").stdout == "original\n"
+
+
+@pytest.mark.parametrize("suffix", ["pack", "idx"])
+def test_git_materialization_still_refuses_unreadable_published_packs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, suffix: str,
+):
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    _git(repo, "repack", "-ad")
+    required = next((repo / ".git/objects/pack").glob(f"pack-*.{suffix}"))
+    original_clone = installed._clone_regular_file
+
+    def clone(source, destination):
+        if source == required:
+            raise PermissionError(13, "required published object", str(source))
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    with pytest.raises(PermissionError, match="required published object"):
+        installed._clone_git_read_database(
+            repo / ".git", tmp_path / "copy.git", deadline=time.monotonic() + 10,
+        )
+
+
+@pytest.mark.parametrize("relative", [
+    "objects/pack/tmp_pack_Aa09zZ.pack",
+    "objects/pack/tmp_pack_short",
+    "objects/info/tmp_pack_Aa09zZ",
+    "refs/heads/tmp_pack_Aa09zZ",
+])
+def test_git_materialization_does_not_skip_other_unreadable_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str,
+):
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    required = repo / ".git" / relative
+    required.parent.mkdir(parents=True, exist_ok=True)
+    required.write_bytes(b"must not be silently omitted")
+    original_clone = installed._clone_regular_file
+
+    def clone(source, destination):
+        if source == required:
+            raise PermissionError(13, "unclassified entry", str(source))
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    with pytest.raises(PermissionError, match="unclassified entry"):
+        installed._clone_git_read_database(
+            repo / ".git", tmp_path / "copy.git", deadline=time.monotonic() + 10,
+        )
+
+
+def test_git_materialization_does_not_skip_linked_temporary_pack(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    import os
+    import time
+    from integrations.executive_mcp import installed
+
+    repo, _tracked = _clean_repo(tmp_path)
+    temporary = repo / ".git/objects/pack/tmp_pack_Aa09zZ"
+    temporary.write_bytes(b"linked preimage")
+    os.link(temporary, tmp_path / "retained-link")
+    original_clone = installed._clone_regular_file
+
+    def clone(source, destination):
+        if source == temporary:
+            raise PermissionError(13, "linked entry", str(source))
+        return original_clone(source, destination)
+
+    monkeypatch.setattr(installed, "_clone_regular_file", clone)
+    with pytest.raises(PermissionError, match="linked entry"):
+        installed._clone_git_read_database(
+            repo / ".git", tmp_path / "copy.git", deadline=time.monotonic() + 10,
+        )

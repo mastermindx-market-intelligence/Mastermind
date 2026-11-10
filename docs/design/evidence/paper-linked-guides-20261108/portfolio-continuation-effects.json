@@ -1,0 +1,4015 @@
+{
+  "mission": "paper-linked-guides-portfolio-20261108-44569e75",
+  "lastObservedUtc": "2026-11-09 00:00:39 UTC",
+  "sourcePins": {
+    "Mastermind": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+    "Macro": "b5674d8ef898e503d6164922654f5ff89be9981c",
+    "Terminal": "cfe14c49f2e0166c0ded5e6f23a274bb663d0fd3",
+    "AERLOR": "c6f7deee41b9d941182130d9bfb95c1e84f8a319"
+  },
+  "effects": [
+    {
+      "key": "os_source_link_edit",
+      "operationId": "paper-portfolio-os-source-urls-20261108-44569e75-001",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NRCX55B452A12819WNE1RH",
+            "name": "Mastermind OS"
+          },
+          "contentHash": {
+            "tokens": "f3c5ac93"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "YDT-0"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "os_index_source_edit",
+      "operationId": "paper-portfolio-os-index-guide-20261108-44569e75-002",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NRCX55B452A12819WNE1RH",
+            "name": "Mastermind OS"
+          },
+          "contentHash": {
+            "tokens": "f3c5ac93"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "ZM6-0",
+              "name": "Implementation guide · source URL",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "os_link_labels_edit",
+      "operationId": "paper-portfolio-os-source-copy-labels-20261108-44569e75-003",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NRCX55B452A12819WNE1RH",
+            "name": "Mastermind OS"
+          },
+          "contentHash": {
+            "tokens": "f3c5ac93"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "YDT-0"
+            },
+            {
+              "nodeId": "ZM6-0"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "os_link_finish",
+      "operationId": "paper-portfolio-os-finish-20261108-44569e75-004",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M3NRCX55B452A12819WNE1RH",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NRCX55B452A12819WNE1RH",
+            "name": "Mastermind OS"
+          },
+          "contentHash": {
+            "tokens": "f3c5ac93"
+          }
+        },
+        "OK"
+      ],
+      "detail": null
+    },
+    {
+      "key": "newsSourceEdit",
+      "operationId": "paper-portfolio-news-sources-20261108-44569e75-005",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "result": [
+        {
+          "file": {
+            "id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+            "name": "News Intelligence · R3 Ledger + R2 States"
+          },
+          "contentHash": {
+            "tokens": "1a25e5be"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "2JI-0"
+            },
+            {
+              "nodeId": "2JJ-0"
+            },
+            {
+              "nodeId": "2J8-0"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "hubSourceEdit",
+      "operationId": "paper-portfolio-hub-sources-20261108-44569e75-006",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "result": [
+        {
+          "file": {
+            "id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+            "name": "Intelligence Hub · R4 Workspace"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "73D-0"
+            },
+            {
+              "nodeId": "73E-0"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "gmiSourceEdit",
+      "operationId": "paper-portfolio-gmi-sources-20261108-44569e75-007",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
+      "result": [
+        {
+          "file": {
+            "id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "name": "GMI Explorer · Product system"
+          },
+          "contentHash": {
+            "tokens": "ac191fd9"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "73R-0"
+            },
+            {
+              "nodeId": "73S-0"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "breadthOverviewEdit",
+      "operationId": "paper-portfolio-breadth-overview-20261108-44569e75-008",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+            "name": "Mastermind - Market Breadth - Command Center R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "2H0-0",
+              "name": "Global navigation · Overview",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2H1-0",
+              "name": "▦",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2H2-0",
+              "name": "Overview",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "breadthMarketsEdit",
+      "operationId": "paper-portfolio-breadth-markets-20261108-44569e75-009",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+            "name": "Mastermind - Market Breadth - Command Center R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "2H4-0",
+              "name": "Global navigation · Markets · selected",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2H5-0",
+              "name": "⌁",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2H6-0",
+              "name": "Markets",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "sectorSourceEdit",
+      "operationId": "paper-portfolio-sector-sources-20261108-44569e75-010",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "result": [
+        {
+          "file": {
+            "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "name": "Sector Intelligence · R4 · Astra Pro · 2026-11-02"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "GOL-0"
+            },
+            {
+              "nodeId": "GOM-0"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorControlsEdit",
+      "operationId": "paper-portfolio-aerlor-controls-20261108-44569e75-011",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "5UX-1"
+            },
+            {
+              "nodeId": "5WW-1"
+            },
+            {
+              "nodeId": "5U3-1"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMapPageEdit",
+      "operationId": "paper-portfolio-aerlor-map-page-20261108-44569e75-012",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "create_page",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "pageId": "p-A-0",
+          "name": "Start here / Design & build map",
+          "icon": "arrow"
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMapHeaderEdit",
+      "operationId": "paper-portfolio-aerlor-map-header-20261108-44569e75-013",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "6M0-0",
+              "name": "AERLOR · Design and build map",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M1-0",
+              "name": "Build map heading",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M2-0",
+              "name": "AERLOR / DESIGN & BU…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M3-0",
+              "name": "Find the design. Fol…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M4-0",
+              "name": "Choose the page for …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMap_release",
+      "operationId": "paper-portfolio-aerlor-map-release-20261108-44569e75-014",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "6M6-0",
+              "name": "Build map · release",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M7-0",
+              "name": "01 / RELEASE LINEAGE",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M8-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6M9-0",
+              "name": "R5 / Source-backed d…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MA-0",
+              "name": "The inspected main b…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MB-0",
+              "name": "Paper release · copy…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MC-0",
+              "name": "Source guide · copy …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMap_directions",
+      "operationId": "paper-portfolio-aerlor-map-directions-20261108-44569e75-015",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "6ME-0",
+              "name": "Build map · directions",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MF-0",
+              "name": "02 / LATER DIRECTION…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MG-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MH-0",
+              "name": "Choose by user journ…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MI-0",
+              "name": "R7–R8 explore the ho…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MJ-0",
+              "name": "R7–R8 · Home and pro…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MK-0",
+              "name": "R9 · Solutions and p…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMap_references",
+      "operationId": "paper-portfolio-aerlor-map-references-20261108-44569e75-016",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "6MM-0",
+              "name": "Build map · references",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MN-0",
+              "name": "03 / RETAINED REFERE…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MO-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MP-0",
+              "name": "Keep the useful beha…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MQ-0",
+              "name": "Original Website (p-…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MR-0",
+              "name": "Interaction and reco…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MS-0",
+              "name": "Original source line…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMap_owners",
+      "operationId": "paper-portfolio-aerlor-map-owners-20261108-44569e75-017",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "6MU-0",
+              "name": "Build map · owners",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MV-0",
+              "name": "04 / IMPLEMENTATION",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MW-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MX-0",
+              "name": "Use the existing own…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MY-0",
+              "name": "The page generator o…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6MZ-0",
+              "name": "Generator · copy sou…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N0-0",
+              "name": "Shared UI · copy sou…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N1-0",
+              "name": "Interaction owner · …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorMap_r9-contract",
+      "operationId": "paper-portfolio-aerlor-map-r9-contract-20261108-44569e75-018",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "6N3-0",
+              "name": "Build map · r9-contract",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N4-0",
+              "name": "05 / R9 BUILD CONTRA…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N5-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N6-0",
+              "name": "A clear draft, then …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N7-0",
+              "name": "Project list shows t…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N8-0",
+              "name": "Each preview row mir…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6N9-0",
+              "name": "Keep the draft after…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6NA-0",
+              "name": "Original local-brief…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "6NB-0",
+              "name": "Source review: 8 Nov…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "aerlorPageOrderEdit",
+      "operationId": "paper-portfolio-aerlor-map-first-20261108-44569e75-019",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "arrange_pages",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        {
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-A-0",
+              "name": "Start here / Design & build map",
+              "icon": "arrow",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "00 / Foundations and components",
+              "icon": "swatches",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-9-1",
+              "name": "08 / R9 / Solutions · Editorial + Professional",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-8-0",
+              "name": "07 / R7 / Consumer flagship + business",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-7-0",
+              "name": "06 / R6 / Solutions · Salons + specialty markets",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "05 / R5 Release / Premium technology",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "04 / R5 / Brand + product / Design-first rebuild",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "03 / R4 / Precision hospitality",
+              "icon": "design",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "02 / Product and interaction states",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "01 · Website · Desktop & Mobile",
+              "icon": "design",
+              "isActive": true
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "d06ClassifyEdit",
+      "operationId": "paper-portfolio-d06-classify-20261108-44569e75-020",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "rename_nodes",
+      "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+            "name": "Mastermind - Market Structure, Stages and Allocation - D06 R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "WB-0",
+              "name": "REFERENCE · S&P desktop · Incomplete migration"
+            },
+            {
+              "nodeId": "WG-0",
+              "name": "REFERENCE · S&P phone · Incomplete migration"
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "d06DesktopRouteEdit",
+      "operationId": "paper-portfolio-d06-desktop-route-20261108-44569e75-021",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+            "name": "Mastermind - Market Structure, Stages and Allocation - D06 R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "WV-0",
+              "name": "Completed design destination",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "WW-0",
+              "name": "Completed design liv…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "WX-0",
+              "name": "This migrated refere…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "WY-0",
+              "name": "Completed Paper desi…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "WZ-0",
+              "name": "Implementation and s…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "X0-0",
+              "name": "The completed design…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "d06PhoneRouteEdit",
+      "operationId": "paper-portfolio-d06-phone-route-20261108-44569e75-022",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+            "name": "Mastermind - Market Structure, Stages and Allocation - D06 R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "X2-0",
+              "name": "完整设计位置 · 迁移参考",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "X3-0",
+              "name": "参考页 · 内容未完整迁移",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "X4-0",
+              "name": "完整设计位于 Terminal 的 D0…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "X5-0",
+              "name": "完整设计 · 复制地址\nhttps://…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "X6-0",
+              "name": "实现与来源记录 · 复制地址\nhttps…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null
+    },
+    {
+      "key": "botSourceEdit",
+      "operationId": "paper-portfolio-bot-sources-20261108-44569e75-023",
+      "state": "DOCUMENT_CHANGED",
+      "tool": "write_html",
+      "fileId": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+      "result": [],
+      "detail": "Read the exact target file before deciding on a new edit.",
+      "targetNodeId": "27-0",
+      "retryAllowed": false,
+      "readback": "Exact original target reread; attempted source block absent. No retry. Concurrent earlier navigation repairs not attributed to this session."
+    },
+    {
+      "key": "directoryBuildPageEdit",
+      "operationId": "paper-portfolio-directory-build-page-20261108-44569e75-024",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "create_page",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "pageId": "p-6-0",
+          "name": "05 · Build sources · Implementation & lineage",
+          "icon": "blueprint"
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directoryBuildHeaderEdit",
+      "operationId": "paper-portfolio-directory-build-heading-20261108-44569e75-025",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "8L-0",
+              "name": "Builder sources · Portfolio directory",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8M-0",
+              "name": "Builder directory heading",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8N-0",
+              "name": "MASTERMIND / BUILD S…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8O-0",
+              "name": "From the design to t…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8P-0",
+              "name": "Implementation notes…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_os",
+      "operationId": "paper-portfolio-directory-os-20261108-44569e75-26",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "8R-0",
+              "name": "Source directory · os",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8S-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8T-0",
+              "name": "Mastermind OS",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8U-0",
+              "name": "SOURCE + BUILD CONTR…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8V-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8W-0",
+              "name": "Project activity, re…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8X-0",
+              "name": "Paper builder notes …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "8Y-0",
+              "name": "Implementation guide…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_gmi-ai",
+      "operationId": "paper-portfolio-directory-gmi-ai-20261108-44569e75-27",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "90-0",
+              "name": "Source directory · gmi-ai",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "91-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "92-0",
+              "name": "GMI + Mastermind AI",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "93-0",
+              "name": "CURRENT SOURCE / INT…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "94-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "95-0",
+              "name": "Existing build plan:…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "96-0",
+              "name": "Build plan · copy UR…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "97-0",
+              "name": "Motion and state ref…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_news",
+      "operationId": "paper-portfolio-directory-news-20261108-44569e75-28",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "99-0",
+              "name": "Source directory · news",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9A-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9B-0",
+              "name": "News Intelligence",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9C-0",
+              "name": "R3 PRESENTATION / R2…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9D-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9E-0",
+              "name": "R3 defines the ledge…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9F-0",
+              "name": "R3 presentation · co…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9G-0",
+              "name": "R2 behavior and stat…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_d06",
+      "operationId": "paper-portfolio-directory-d06-20261108-44569e75-29",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "9I-0",
+              "name": "Source directory · d06",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9J-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9K-0",
+              "name": "Market structure + a…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9L-0",
+              "name": "COMPLETED DESIGN LIN…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9M-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9N-0",
+              "name": "Use Terminal’s compl…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9O-0",
+              "name": "Completed native des…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9P-0",
+              "name": "Implementation and s…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_f01",
+      "operationId": "paper-portfolio-directory-f01-20261108-44569e75-30",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "9R-0",
+              "name": "Source directory · f01",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9S-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9T-0",
+              "name": "Shared shell · F01",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9U-0",
+              "name": "CANDIDATE.4 / RIG DR…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9V-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9W-0",
+              "name": "Candidate.4 remains …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9X-0",
+              "name": "Migrated design and …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "9Y-0",
+              "name": "Exact candidate hand…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_bonds",
+      "operationId": "paper-portfolio-directory-bonds-20261108-44569e75-31",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "A0-0",
+              "name": "Source directory · bonds",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A1-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A2-0",
+              "name": "Bonds transmission ·…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A3-0",
+              "name": "IMPLEMENTATION CANDI…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A4-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A5-0",
+              "name": "S05 preserves route,…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A6-0",
+              "name": "Paper build map · 11…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "A7-0",
+              "name": "Exact candidate hand…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_options",
+      "operationId": "paper-portfolio-directory-options-20261108-44569e75-32",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "A9-0",
+              "name": "Source directory · options",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AA-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AB-0",
+              "name": "Options · Desk + Ter…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AC-0",
+              "name": "CURRENT OWNERS / DRA…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AD-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AE-0",
+              "name": "The current Macro de…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AF-0",
+              "name": "Current desk specifi…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AG-0",
+              "name": "Exact draft D08 hand…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AH-0",
+              "name": "Paper interaction/bu…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_prophet",
+      "operationId": "paper-portfolio-directory-prophet-20261108-44569e75-33",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "AJ-0",
+              "name": "Source directory · prophet",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AK-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AL-0",
+              "name": "PROPHET · D03",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AM-0",
+              "name": "DRAFT DESIGN / NO NE…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AN-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AO-0",
+              "name": "Use the Phase 2A gui…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AP-0",
+              "name": "Paper draft build co…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AQ-0",
+              "name": "Exact draft source ·…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_policy",
+      "operationId": "paper-portfolio-directory-policy-20261108-44569e75-34",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "AS-0",
+              "name": "Source directory · policy",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AT-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AU-0",
+              "name": "Macro Policy Monitor",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AV-0",
+              "name": "CANDIDATE SOURCE / P…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AW-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AX-0",
+              "name": "The upgrade guide an…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AY-0",
+              "name": "Paper evidence/build…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "AZ-0",
+              "name": "Exact candidate guid…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_memory",
+      "operationId": "paper-portfolio-directory-memory-20261108-44569e75-35",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "B1-0",
+              "name": "Source directory · memory",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B2-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B3-0",
+              "name": "Market Memory",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B4-0",
+              "name": "CURRENT SOURCE / RET…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B5-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B6-0",
+              "name": "Keep exact operands,…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B7-0",
+              "name": "Paper recovery/build…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B8-0",
+              "name": "Existing page builde…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "B9-0",
+              "name": "Existing template · …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_expectation",
+      "operationId": "paper-portfolio-directory-expectation-20261108-44569e75-36",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "BB-0",
+              "name": "Source directory · expectation",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BC-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BD-0",
+              "name": "Expectation Surface",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BE-0",
+              "name": "CURRENT SOURCE / KNO…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BF-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BG-0",
+              "name": "Preserve the existin…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BH-0",
+              "name": "Paper implementation…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BI-0",
+              "name": "Existing builder · c…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BJ-0",
+              "name": "Existing UI evidence…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directorySourceEdit_native",
+      "operationId": "paper-portfolio-directory-native-20261108-44569e75-37",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "BL-0",
+              "name": "Source directory · native",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BM-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BN-0",
+              "name": "Native builder refer…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BO-0",
+              "name": "PAPER CONTRACTS / RE…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BP-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BQ-0",
+              "name": "BioCatalyst, Governm…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BR-0",
+              "name": "BioCatalyst · Bluepr…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BS-0",
+              "name": "Government Revenue R…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BT-0",
+              "name": "Forex · Decisions, s…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directoryStatusPrecision",
+      "operationId": "paper-portfolio-directory-status-20261108-44569e75-038",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "9E-0"
+            },
+            {
+              "nodeId": "9N-0"
+            },
+            {
+              "nodeId": "9W-0"
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directoryStartPointer",
+      "operationId": "paper-portfolio-directory-pointer-20261108-44569e75-039",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "BV-0",
+              "name": "Build notes and implementation sources",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BW-0",
+              "name": "From the design to t…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BX-0",
+              "name": "Implementation owner…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "BY-0",
+              "name": "Build sources · copy…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directoryNeutralEdge",
+      "operationId": "paper-portfolio-directory-edge-20261108-44569e75-040",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "C0-0",
+              "name": "Migration complete - verified outcome",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "C1-0",
+              "name": "Migration complete. …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "C2-0",
+              "name": "42 smaller editable …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "C3-0",
+              "name": "Draft, reference and…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directoryPageOrder",
+      "operationId": "paper-portfolio-directory-order-20261108-44569e75-041",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "arrange_pages",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "pages": [
+            {
+              "type": "page",
+              "id": "p-1-0",
+              "name": "00 · START HERE · Migration status and safe navigation",
+              "icon": "arrow",
+              "isActive": true
+            },
+            {
+              "type": "page",
+              "id": "p-2-0",
+              "name": "01 - Existing product files - not migration receipts",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-3-0",
+              "name": "02 - Migrated file locations - 1 of 3",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-4-0",
+              "name": "03 - Migrated file locations - 2 of 3",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-5-0",
+              "name": "04 - Migrated file locations - 3 of 3",
+              "icon": "blueprint",
+              "isActive": false
+            },
+            {
+              "type": "page",
+              "id": "p-6-0",
+              "name": "05 · Build sources · Implementation & lineage",
+              "icon": "blueprint",
+              "isActive": false
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "terminalRecoveryTimeEdit",
+      "operationId": "paper-portfolio-terminal-recovery-20261108-44569e75-042",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "UKA-0"
+            },
+            {
+              "nodeId": "UKN-0"
+            },
+            {
+              "nodeId": "UFB-0"
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "terminalHeatmapBuildHeader",
+      "operationId": "paper-portfolio-terminal-build-header-20261108-44569e75-043",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "28BB-0",
+              "name": "38 · Build · Heatmap save and recovery",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BC-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BD-0",
+              "name": "BUILD / SAVED VIEWS …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BE-0",
+              "name": "One saved definition…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BF-0",
+              "name": "R7–R8 design contrac…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "terminalHeatmapBuild_owner",
+      "operationId": "paper-portfolio-terminal-build-owner-20261108-44569e75-44",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "28BH-0",
+              "name": "Heatmap build · owner",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BI-0",
+              "name": "01 · Reuse the curre…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BJ-0",
+              "name": "Current master store…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BK-0",
+              "name": "Current persistence …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BL-0",
+              "name": "Existing build atlas…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "terminalHeatmapBuild_candidate",
+      "operationId": "paper-portfolio-terminal-build-candidate-20261108-44569e75-45",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "28BN-0",
+              "name": "Heatmap build · candidate",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BO-0",
+              "name": "02 · Typed save / or…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BP-0",
+              "name": "The candidate adds t…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BQ-0",
+              "name": "Candidate contract ·…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BR-0",
+              "name": "Release and rollback…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "terminalHeatmapBuild_proof",
+      "operationId": "paper-portfolio-terminal-build-proof-20261108-44569e75-46",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "28BT-0",
+              "name": "Heatmap build · proof",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BU-0",
+              "name": "03 · Prove evaluatio…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BV-0",
+              "name": "Typed persistence do…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BW-0",
+              "name": "Draft PR status · co…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "28BX-0",
+              "name": "R7–R8 native design …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "terminalPortfolioSourceEdit",
+      "operationId": "paper-portfolio-terminal-portfolio-source-20261108-44569e75-047",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "26LN-0"
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "directoryFooterEdit",
+      "operationId": "paper-portfolio-directory-source-status-20261108-44569e75-048",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "C5-0",
+              "name": "Source status and return",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "C6-0",
+              "name": "Source links do not …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "C7-0",
+              "name": "Back to file directo…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "prophetSourceEdit",
+      "operationId": "paper-portfolio-prophet-source-20261108-44569e75-049",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+            "name": "PROPHET"
+          },
+          "contentHash": {
+            "tokens": "640746f9"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "10QQ-0"
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "optionsSourceEdit",
+      "operationId": "paper-portfolio-options-source-20261108-44569e75-50",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "result": [
+        {
+          "file": {
+            "id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+            "name": "Terminal · Options R1 · Design Upgrade · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "acef2e0d"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "16H-0",
+              "name": "Implementation source URLs",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "16I-0",
+              "name": "Implementation sourc…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "16J-0",
+              "name": "D08 is a draft integ…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "16K-0",
+              "name": "D08 draft handoff · …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "expectationSourceEdit",
+      "operationId": "paper-portfolio-expectation-source-20261108-44569e75-51",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+      "result": [
+        {
+          "file": {
+            "id": "01M5EX8RTPR7YEZD2A144XED2S",
+            "name": "Expectation Surface · R1 · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "d776b76d"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "4AR-0",
+              "name": "Implementation source URLs",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "4AS-0",
+              "name": "Existing implementat…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "4AT-0",
+              "name": "Extend these owners …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "4AU-0",
+              "name": "Current builder · co…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "4AV-0",
+              "name": "Current template and…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "memorySourceEdit",
+      "operationId": "paper-portfolio-memory-source-20261108-44569e75-52",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+      "result": [
+        {
+          "file": {
+            "id": "01M6PXFEP1E1T59M2B3N673PMG",
+            "name": "Market Memory · Revision evidence · R1 · 2026-11-05"
+          },
+          "contentHash": {
+            "tokens": "ee9dbe57"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "1EW-0",
+              "name": "Implementation source URLs",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1EX-0",
+              "name": "Existing implementat…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1EY-0",
+              "name": "Reuse the current pa…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1EZ-0",
+              "name": "Page builder · copy …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1F0-0",
+              "name": "Page template · copy…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "policySourceEdit",
+      "operationId": "paper-portfolio-policy-source-20261108-44569e75-53",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+            "name": "Macro · Policy Monitor · Production Design"
+          },
+          "contentHash": {
+            "tokens": "c8cafbb7"
+          }
+        },
+        {
+          "updates": [
+            {
+              "nodeId": "RE-0"
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "optionsDeskSourceEdit",
+      "operationId": "paper-portfolio-optionsdesk-source-20261108-44569e75-54",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+            "name": "Mastermind - Options Research Desk - R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "1ZN-0",
+              "name": "Current Options implementation sources",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1ZO-0",
+              "name": "Implementation owner…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1ZP-0",
+              "name": "The current Macro wo…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1ZQ-0",
+              "name": "Workspace specificat…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "1ZR-0",
+              "name": "Existing template · …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "biocatalystRouteEdit",
+      "operationId": "paper-portfolio-biocatalyst-source-20261108-44569e75-55",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y34XE4JKS3A40GMMZ954JE",
+            "name": "Mastermind - BioCatalyst - Blueprint and Builder Contracts"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "2B6-0",
+              "name": "Current file locations · retained provenance",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2B7-0",
+              "name": "Current design locat…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2B8-0",
+              "name": "The p-K-0 / p-S-1 pa…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2B9-0",
+              "name": "BioCatalyst product …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2BA-0",
+              "name": "Government Revenue p…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "optionsMobileGuideHeader",
+      "operationId": "paper-portfolio-options-mobile-guide-20261108-44569e75-056",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "result": [
+        {
+          "file": {
+            "id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+            "name": "Terminal · Options R1 · Design Upgrade · W3 mobile · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "2V-0",
+              "name": "Build reference · U08 mobile study",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2W-0",
+              "name": "Frame",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2X-0",
+              "name": "BUILDER REFERENCE / …",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2Y-0",
+              "name": "Follow the owning Op…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "2Z-0",
+              "name": "This file is a mobil…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "optionsMobileGuideLinks",
+      "operationId": "paper-portfolio-options-mobile-sources-20261108-44569e75-057",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "result": [
+        {
+          "file": {
+            "id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+            "name": "Terminal · Options R1 · Design Upgrade · W3 mobile · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        {
+          "createdNodes": [
+            {
+              "id": "31-0",
+              "name": "Owning Options routes",
+              "component": "Frame",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "32-0",
+              "name": "Interaction and impl…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "33-0",
+              "name": "Owning Options produ…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            },
+            {
+              "id": "34-0",
+              "name": "The study’s illustra…",
+              "component": "Text",
+              "worldX": null,
+              "worldY": null,
+              "x": null,
+              "y": null
+            }
+          ]
+        }
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_news",
+      "operationId": "paper-portfolio-finish-news-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "result": [
+        {
+          "file": {
+            "id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+            "name": "News Intelligence · R3 Ledger + R2 States"
+          },
+          "contentHash": {
+            "tokens": "1a25e5be"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_hub",
+      "operationId": "paper-portfolio-finish-hub-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
+      "result": [
+        {
+          "file": {
+            "id": "01M2VWK62FA5S4VVF6G7SBPE5J",
+            "name": "Intelligence Hub · R4 Workspace"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_gmi",
+      "operationId": "paper-portfolio-finish-gmi-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
+      "result": [
+        {
+          "file": {
+            "id": "01M5H6EARN9YHQV17JC6ZG9BRY",
+            "name": "GMI Explorer · Product system"
+          },
+          "contentHash": {
+            "tokens": "ac191fd9"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_sector",
+      "operationId": "paper-portfolio-finish-sector-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "result": [
+        {
+          "file": {
+            "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+            "name": "Sector Intelligence · R4 · Astra Pro · 2026-11-02"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_breadth",
+      "operationId": "paper-portfolio-finish-breadth-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+            "name": "Mastermind - Market Breadth - Command Center R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_aerlor",
+      "operationId": "paper-portfolio-finish-aerlor-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+      "result": [
+        {
+          "file": {
+            "id": "01M6JNN71ZN4867VJZ83PPXQZ0",
+            "name": "AERLOR — Hospitality Website & Design System"
+          },
+          "contentHash": {
+            "tokens": "ec4e1841"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_d06",
+      "operationId": "paper-portfolio-finish-d06-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+            "name": "Mastermind - Market Structure, Stages and Allocation - D06 R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_directory",
+      "operationId": "paper-portfolio-finish-directory-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "result": [
+        {
+          "file": {
+            "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+            "name": "MASTERMIND · Migration Directory · START HERE"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_terminal",
+      "operationId": "paper-portfolio-finish-terminal-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+            "name": "Terminal"
+          },
+          "contentHash": {
+            "tokens": "55dd37b7"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_prophet",
+      "operationId": "paper-portfolio-finish-prophet-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "result": [
+        {
+          "file": {
+            "id": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+            "name": "PROPHET"
+          },
+          "contentHash": {
+            "tokens": "640746f9"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_options",
+      "operationId": "paper-portfolio-finish-options-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "result": [
+        {
+          "file": {
+            "id": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+            "name": "Terminal · Options R1 · Design Upgrade · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "acef2e0d"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_expectation",
+      "operationId": "paper-portfolio-finish-expectation-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+      "result": [
+        {
+          "file": {
+            "id": "01M5EX8RTPR7YEZD2A144XED2S",
+            "name": "Expectation Surface · R1 · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "d776b76d"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_memory",
+      "operationId": "paper-portfolio-finish-memory-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+      "result": [
+        {
+          "file": {
+            "id": "01M6PXFEP1E1T59M2B3N673PMG",
+            "name": "Market Memory · Revision evidence · R1 · 2026-11-05"
+          },
+          "contentHash": {
+            "tokens": "ee9dbe57"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_policy",
+      "operationId": "paper-portfolio-finish-policy-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+            "name": "Macro · Policy Monitor · Production Design"
+          },
+          "contentHash": {
+            "tokens": "c8cafbb7"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_options-desk",
+      "operationId": "paper-portfolio-finish-options-desk-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+            "name": "Mastermind - Options Research Desk - R1"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_biocatalyst",
+      "operationId": "paper-portfolio-finish-biocatalyst-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "result": [
+        {
+          "file": {
+            "id": "01M6Y34XE4JKS3A40GMMZ954JE",
+            "name": "Mastermind - BioCatalyst - Blueprint and Builder Contracts"
+          },
+          "contentHash": {
+            "tokens": "6234666b"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    },
+    {
+      "key": "finish_options-mobile",
+      "operationId": "paper-portfolio-finish-options-mobile-20261109-44569e75",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "result": [
+        {
+          "file": {
+            "id": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+            "name": "Terminal · Options R1 · Design Upgrade · W3 mobile · 2026-10-21"
+          },
+          "contentHash": {
+            "tokens": "811c9dc5"
+          }
+        },
+        "OK"
+      ],
+      "detail": null,
+      "retryAllowed": false,
+      "productionAcceptance": false
+    }
+  ]
+}

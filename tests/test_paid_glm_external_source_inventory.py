@@ -26,6 +26,10 @@ OLD_FLAT_PREIMAGES = {
 }
 
 
+
+SIGNED_PREFIX_LENGTHS = {'glm_lease_capability.py': 17698, 'glm_lease_gateway.py': 14300, 'glm_shim.py': 76048}
+APPLICATION_SUCCESSOR_SHA = {'glm_lease_capability.py': 'ccfe3c6f4f08778d6d179d60da67f393f000b66e4997a2502a7ad180c6a571a6', 'glm_lease_gateway.py': '2b2e47c2e9f01ba72a33603e17465c96c084e79a32c331a8d52d0f4039bfbef7', 'glm_shim.py': 'd680789e7a184b7b882a57f6cc7b0337b6bebc4e27069ac8263aeffd456c5fed'}
+
 def _unique_pairs(pairs):
     value = {}
     for name, data in pairs:
@@ -52,7 +56,8 @@ def _verify(base: Path, inventory: Path):
         assert _sha256(base / "candidate" / name) == digests["candidate_sha256"], name
         assert _sha256(base / "source" / name) == digests["preimage_sha256"], name
     for name, wanted in SIGNED_UPGRADE_SHA.items():
-        assert document["files"][name]["candidate_sha256"] == wanted
+        assert hashlib.sha256((base / "candidate" / name).read_bytes()[:SIGNED_PREFIX_LENGTHS[name]]).hexdigest() == wanted
+        assert document["files"][name]["candidate_sha256"] == APPLICATION_SUCCESSOR_SHA[name]
         assert document["files"][name]["preimage_sha256"] == OLD_FLAT_PREIMAGES[name]
     assert _sha256(base / "candidate" / "glm_shim.py") != _sha256(base / "source" / "glm_shim.py")
 

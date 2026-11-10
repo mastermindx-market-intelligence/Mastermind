@@ -34,6 +34,16 @@ primary inference provider.
 No additional session, queue, account, token, scheduler, or result ledger is
 introduced.
 
+The read-only durable-intent projection recognizes a direct worker call and the
+canonical native lazy-broker envelope: one `tool_call` containing
+`calls: [{name: "mmx_fabric_worker", arguments: {...}}]`. Both retain the
+persisted **outer** call ID and its native durable UID. The frontend and
+independent backend verifier share this projection; neither writes a synthetic
+direct-call record. Local batches, nested wrappers and legacy argument coercions
+are refused. Matching direct and wrapped intents share the same relevant-copy
+bound, original-submit uniqueness and completed-result checks. Unrelated broker
+history does not consume that bound.
+
 ## Actual native composition
 
 `native_session.py` binds the actual installed native types. It requires an
@@ -134,8 +144,10 @@ and disabled-by-default capability reporting.
 
 The explicit `tests/native_owner_qualification.py` suite additionally uses the
 installed native classes, SessionDB, real turn leases, middleware and registry.
-Its wire cases execute the actual Node facade and native read-only verifier.
-Only the final Fabric command engine is substituted. These checks prove source
+Its broker cases invoke the original Hermes dispatcher with persisted outer
+`tool_call` envelopes and unchanged identity/scope/middleware checks. Its wire
+cases execute the actual Node facade and native read-only verifier. Only the
+final Fabric command engine is substituted. These checks prove source
 composition and recovery boundaries, not paid worker execution.
 
 Prior source records remain in [CONTINUATION.md](CONTINUATION.md). They are

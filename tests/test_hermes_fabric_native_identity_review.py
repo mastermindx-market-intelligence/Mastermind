@@ -6,7 +6,7 @@ from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = "integrations/hermes_attended_fabric/native.py"
-EXPECTED = ((48, 65, 68, "int"), (271, 60, 63, "int"))
+EXPECTED = ((57, 65, 68, "int"), (280, 60, 63, "int"))
 
 
 def _source():
