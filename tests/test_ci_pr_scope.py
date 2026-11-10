@@ -381,7 +381,11 @@ def test_workflow_uses_complete_protected_archive_despite_candidate_package_pois
     payload, output = tmp_path / "event.json", tmp_path / "output"
     payload.write_text(json.dumps(event))
     workflow = yaml.safe_load((source / ".github/workflows/ci.yml").read_text())
-    command = workflow["jobs"]["pr_scope"]["steps"][1]["run"]
+    (scope_step,) = (
+        step for step in workflow["jobs"]["pr_scope"]["steps"]
+        if step.get("id") == "scope"
+    )
+    command = scope_step["run"]
     result = subprocess.run(["bash", "-c", command], cwd=root, env={
         **os.environ, "RUNNER_TEMP": str(tmp_path), "PR_BASE_SHA": protected,
         "GITHUB_EVENT_NAME": "pull_request", "GITHUB_WORKSPACE": str(root),
