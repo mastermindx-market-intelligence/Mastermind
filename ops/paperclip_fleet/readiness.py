@@ -101,7 +101,7 @@ memory before updating it. Do not create a competing PARA or other memory backen
 copy another bot's private memory, or treat remembered prose as authorization.
 For a Paperclip task, put its material result, artifact/revision references,
 unresolved effects and exact next action on that same issue. Resume from those
-references and the existing Hermes session rather than recreating work.
+references and existing Hermes session-search rather than recreating work.
 Use skill creation/update only for a reusable verified procedure under its normal
 owner; do not install arbitrary marketplace plugins merely because a task mentions one.
 
@@ -109,7 +109,10 @@ owner; do not install arbitrary marketplace plugins merely because a task mentio
 Use the Paperclip skill's supported API/client and the injected environment for
 task updates. Run-scoped credentials stay in the process environment, never in
 prompts, comments, source, memory or logs. Bind mutating issue requests to the
-current Paperclip run. Report the actual result and focused verification, then
+current Paperclip run. If required Paperclip credentials are absent, stop those API
+actions and report the missing run credential in the run result. Never fall back
+to unauthenticated local-board access or another bot's key.
+Report the actual result and focused verification, then
 use the issue state that the evidence supports.
 On a blocker, record what failed, the exact original run/effect, and the next
 permitted action. Reconcile an uncertain action before retry or failover. Preserve
@@ -228,26 +231,27 @@ def qualify_versions(selected, home, apply):
             raise ValueError(f"Existing company skill not found: {key}")
         version_id = selection.get("versionId") if isinstance(selection, dict) else None
         version_id = version_id or skill.get("currentVersionId")
-        if not version_id and apply:
-            version = request(
-                f"/companies/{COMPANY}/skills/{skill['id']}/versions",
-                {"label": "Mastermind fleet readiness 2026-11-09"}, "POST",
-            )
-            version_id = version["id"]
-            version = request(f"/companies/{COMPANY}/skills/{skill['id']}/versions/{version_id}")
-        elif version_id:
+        if version_id:
             version = request(f"/companies/{COMPANY}/skills/{skill['id']}/versions/{version_id}")
         else:
-            rows.append({"key": key, "state": "needs_native_version"})
+            # The first native run owns snapshot creation/materialization.
+            pinned.append({"key": key, "versionId": None})
+            rows.append({"key": key, "state": "pending_native_materialization"})
             continue
         if version["companyId"] != COMPANY or version["companySkillId"] != skill["id"]:
             raise ValueError("Native version identity mismatch.")
         source = version_path(skill["id"], version_id)
-        verify_inventory(source, version)
         runtime_name = skill["slug"]
         if not runtime_name or Path(runtime_name).name != runtime_name:
             raise ValueError("Unsafe skill runtime name.")
         target = home / "skills" / runtime_name
+        if not source.exists():
+            if target.exists() or target.is_symlink():
+                raise RuntimeError(f"Unmaterialized snapshot has an occupied target: {target}")
+            pinned.append({"key": key, "versionId": version_id})
+            rows.append({"key": key, "state": "pending_native_materialization", "version_id": version_id})
+            continue
+        verify_inventory(source, version)
         state = link_state(target, source)
         if state in {"foreign_link", "foreign_path"}:
             raise RuntimeError(f"Preserving conflicting skill installation at {target}: {state}")
@@ -260,6 +264,11 @@ def qualify_versions(selected, home, apply):
         pinned.append({"key": key, "versionId": version_id})
         rows.append({"key": key, "state": state, "version_id": version_id})
     return pinned, rows
+
+
+def assignment_selections(resolved, beta_enabled):
+    """Honor the native feature gate; never enable it as part of installation."""
+    return resolved if beta_enabled else [entry["key"] for entry in resolved]
 
 
 def configure_agent(aid, name, slug, apply):
@@ -281,7 +290,12 @@ def configure_agent(aid, name, slug, apply):
     intended = instructions(name, slug)
     if entry["content"] != intended and entry["content"].strip() not in GENERIC and MARKER not in entry["content"]:
         raise ValueError(f"{name} has custom instructions; preserve and reconcile.")
+    model_name = profile.get("model", {}).get("default")
+    if not isinstance(model_name, str) or not model_name.strip():
+        raise ValueError(f"Explicit profile model not proven for {name}.")
     config = copy.deepcopy(a.get("adapterConfig", {}))
+    if config.get("model") not in (None, "auto", model_name) or config.get("provider") not in (None, "auto"):
+        raise ValueError(f"{name} has a custom adapter model/provider; preserve and reconcile.")
     if config.get("hermesCommand") not in (None, HERMES) or config.get("command") not in (None, "hermes", HERMES):
         raise ValueError(f"{name} has a custom Hermes command; preserve and reconcile.")
     if apply:
@@ -311,17 +325,20 @@ def configure_agent(aid, name, slug, apply):
         result["changes"].append("instructions")
         result["instruction_revision"] = saved["revision"]["id"]
     sync = copy.deepcopy(config.get("paperclipSkillSync", {}))
-    sync["desiredSkills"] = pinned
-    if config.get("paperclipSkillSync") != sync or config.get("command") != HERMES:
+    beta_enabled = request("/instance/settings/experimental").get("enableBetaSkills") is True
+    sync["desiredSkills"] = assignment_selections(pinned, beta_enabled)
+    adapter_changes = {"paperclipSkillSync": sync, "command": HERMES,
+                       "provider": "auto", "model": model_name, "persistSession": False}
+    if any(config.get(k) != v for k, v in adapter_changes.items()):
         fresh = request(f"/agents/{aid}")
         if fresh.get("adapterConfig") != config:
             raise RuntimeError("Concurrent adapter configuration change; preserve it.")
-        request(f"/agents/{aid}", {"adapterConfig": {"paperclipSkillSync": sync, "command": HERMES}}, "PATCH")
+        request(f"/agents/{aid}", {"adapterConfig": adapter_changes}, "PATCH")
         saved = request(f"/agents/{aid}")["adapterConfig"]
-        expected = {**config, "paperclipSkillSync": sync, "command": HERMES}
+        expected = {**config, **adapter_changes}
         if saved != expected:
             raise RuntimeError("Adapter configuration readback mismatch.")
-        result["changes"].append("pinned_skills_and_hermes_command")
+        result["changes"].append("skill_assignments_and_fresh_profile_context")
     fresh = request(f"/agents/{aid}")
     runtime = copy.deepcopy(fresh.get("runtimeConfig", {}))
     heartbeat = runtime.setdefault("heartbeat", {})
@@ -335,7 +352,8 @@ def configure_agent(aid, name, slug, apply):
         result["changes"].append("feedback_skill_filter")
     result.update(
         instructions_ready=True, max_concurrent_runs=1, hermes_command=HERMES,
-        feedback_disabled=True, instruction_sha256=hashlib.sha256(intended.encode()).hexdigest(),
+        feedback_disabled=True, model=model_name, provider_selection="profile", persist_session=False,
+        instruction_sha256=hashlib.sha256(intended.encode()).hexdigest(),
     )
     return result
 
