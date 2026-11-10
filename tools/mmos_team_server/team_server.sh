@@ -277,7 +277,8 @@ cmd_status() {
   echo "label=$LABEL loaded=$(label_loaded "$LABEL" && echo yes || echo no)"
   _pid=""
   if label_loaded "$LABEL"; then
-    _pid=$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n 's/^\s*pid = \([0-9]*\).*/\1/p' | head -1)
+    _pid=$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null \
+           | grep -E '^[[:space:]]*pid = [0-9]+' | head -1 | grep -oE '[0-9]+')
   fi
   echo "pid=${_pid:-none}"
   if [ "$PORT" != "?" ]; then
