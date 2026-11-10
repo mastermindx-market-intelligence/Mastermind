@@ -193,9 +193,10 @@ class T3Thread:
     def _run(self, args, stdin_text=None):
         env = dict(os.environ)
         env["T3CODE_HOME"] = self._home
+        # text=True: subprocess wants str input, not bytes
         proc = subprocess.run(  # noqa: S603 - fixed binary, fixed args
             [self._bin, *args],
-            input=(stdin_text.encode("utf-8") if stdin_text is not None else None),
+            input=stdin_text,
             capture_output=True, text=True, cwd=self._cwd, env=env, timeout=1200,
         )
         return proc

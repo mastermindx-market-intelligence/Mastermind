@@ -279,3 +279,14 @@ def test_unexpected_exception_still_releases_the_issue():
     kinds = [c[0] for c in pc.calls]
     assert "comment" in kinds  # release note posted
     assert pc.issues["is-1"]["status"] == "todo"  # released, visible
+
+
+def test_t3thread_run_passes_str_stdin_and_expands_paths(tmp_path):
+    # real subprocess: /bin/cat echoes stdin back; catches the text=True +
+    # bytes-input crash the fakes cannot see, and the ~ expansion.
+    th = wc.T3Thread("~/_no_such_home_bin", "~", "th-1", str(tmp_path))
+    assert th._bin == os.path.expanduser("~/_no_such_home_bin")
+    cat = wc.T3Thread("/bin/cat", "~", "th-1", str(tmp_path))
+    proc = cat._run(["-"], stdin_text="hello carrier")
+    assert proc.returncode == 0
+    assert proc.stdout == "hello carrier"
