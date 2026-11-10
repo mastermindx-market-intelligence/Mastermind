@@ -1,0 +1,468 @@
+{
+  "schema": "mastermind.t3_admitted_canary_receipt/v1",
+  "revision": "r1",
+  "label": "MMOS L1 admitted canary",
+  "recorded_at": "2026-11-10T02:25:06.434027+00:00",
+  "started_at": "2026-11-10T02:19:14.694926+00:00",
+  "outcome": "DONE",
+  "blocked_gate": null,
+  "code": {
+    "trunk_commit_sha": "2573752c7dc5a6f18c390df1111b210a256b7178",
+    "harness_file_sha256": "9c7746fa2e7ef8bab1100e4871655dae5fd6a9905438ef7fd0543f64a76e3fc4",
+    "runtime_file_sha256": "97eb151689f609e1afb4c4c63a4e62d8f0ac53facf52f6c9760ca3325d5f8674",
+    "adapter_file_sha256": "6e5cd4ac85768e71d28c9197c22c315031d69e337ba32e8bf0334d0783c470e7",
+    "composition_file_sha256": "396b90b790fde52dc68e74893d002355ff8a6250f90e859654e08f2e6c65d6cd",
+    "source_tree_clean": false
+  },
+  "trunk_commit_sha": "2573752c7dc5a6f18c390df1111b210a256b7178",
+  "environment": {
+    "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+    "serverInfo": {
+      "name": "T3 Code",
+      "version": "0.1.7"
+    },
+    "endpoint": "http://127.0.0.1:3773/mcp"
+  },
+  "project": {
+    "project_id": "bc18d268-d100-484a-8952-3ce2b0b0a66b",
+    "title": "Mastermind",
+    "workspace_root": "~/Documents/Cluade/Mastermind",
+    "canonical_key": "github.com/mastermindx-market-intelligence/mastermind",
+    "duplicate_project_ids": [
+      "bc18d268-d100-484a-8952-3ce2b0b0a66b",
+      "3134eb93-2213-49b9-be45-9dd5a4e60814"
+    ]
+  },
+  "identities": {
+    "root_ref": "roots/mmos-l1-admitted-canary-20261109",
+    "immediate_parent_run_ref": "parents/l1-lane-lead",
+    "logical_child_keys": [
+      "l1-admitted-canary-main",
+      "l1-admitted-canary-interrupt"
+    ],
+    "requester_basis": "Hermes engineering seat originated this program (T3_HANDOFF_V2 section 9 reporting thread); NOT a live Hermes tool call - Hermes->Executive ingress (ledger R8) is not enabled",
+    "executive_generation": "trunk source in-process, scratch data dir; installed Executive dd45d111 untouched",
+    "worker_id": "worker-t3-l1-canary",
+    "quota_resource_ref": "glm:l1-canary",
+    "repository": "mastermindx-market-intelligence/Mastermind"
+  },
+  "deviations": [
+    "branch derives from the child request digest (job.branch is fixed at create_job, BEFORE the attempt id is minted at claim; the runtime has no Job.branch update API) - the brief's 'first 8 chars of attempt id' would be unknowable at the only moment branch is set",
+    "fabric placement intent ids are slash-free tokens (fabric_placement_policy _require_token): the intent projects root_ref/immediate_parent_run_ref by stripping their refs//parents/ prefixes; the ChildExecutionRequest keeps the exact refs",
+    "model selection is harness-fixed through the spec's model field; the scratch route row is a provider descriptor with no alias->model mapping, so no route->T3 modelSelection translation exists yet",
+    "launch arguments (projectId + workspaceStrategy/worktree) ride the production T3McpToolPort launch_arguments seam via port_factory; the default port construction in compose_t3_native_adapter does not pass them",
+    "return delivery is an honest typed REFUSAL (NATIVE_SESSION_UNAVAILABLE): the Hermes Secretary seam is R9-BLOCKED; no sink is invented"
+  ],
+  "route_row": {
+    "scratch_path": "~/.cache/mmos-l1-canary/executive_worker_routes.l1_canary_scratch.json",
+    "scratch_sha256": "286684e6721561727940c28245012a7a90534a9af6f503e88f9c22a72aa593a2",
+    "live_file_untouched": true,
+    "t3_row_source": "integrations/mmos/T3_NATIVE_ROUTE_ROW_PROPOSAL.md (verbatim)",
+    "provider_adapter_id": "t3-native",
+    "provider_enabled": false,
+    "provider_autonomous_allowed": false
+  },
+  "explain_route": {
+    "schema": "mastermind.model_route_explanation/v1",
+    "decision_mode": "worker",
+    "t3_alias_rows": [],
+    "providers": [
+      {
+        "provider_alias": "anthropic",
+        "enabled_in_source": false,
+        "autonomous_allowed_in_source": false
+      },
+      {
+        "provider_alias": "t3",
+        "enabled_in_source": false,
+        "autonomous_allowed_in_source": false
+      }
+    ],
+    "note": "the proposed t3 row is a provider descriptor; no model alias maps to it yet"
+  },
+  "provider": {
+    "providerInstanceId": "capacity_fabric",
+    "model": "glm-5.3-flash",
+    "selection_rule": "harness-fixed (see deviations)"
+  },
+  "model_selection_basis": "harness-fixed; route->T3 modelSelection mapping absent",
+  "authenticated_namespace": {
+    "attestation": "T3McpToolPort.from token claims: client:<auth session id>",
+    "client_a_upstream_namespace_sha256": "5d8bcd675ad9d2c416f31666ef636a5ba35c8f1a62988b4343f09de489f45634",
+    "client_a_qualified_namespace_sha256": "67a608ce155631263ffe364476b71601e9ba19b6a1704e173ffafb4f028d1e34"
+  },
+  "namespace_scenario": {
+    "client_b_upstream_namespace_sha256": "0dac5730529ffefc6a517131428815519fbc7c17a0553857bd40cf4f52530c46",
+    "client_a_upstream_namespace_sha256": "5d8bcd675ad9d2c416f31666ef636a5ba35c8f1a62988b4343f09de489f45634"
+  },
+  "store": {
+    "runtime_root": "~/.cache/mmos-l1-canary/runtime",
+    "adapter_state": "~/.cache/mmos-l1-canary/runtime/data/control_plane/t3_adapter_state.sqlite3",
+    "implementation": "RuntimeStore executive.sqlite3 + SQLiteT3AdapterStateStore (sibling)",
+    "note": "scratch data dir; the installed Executive db is untouched"
+  },
+  "scenarios": {
+    "main": {
+      "name": "admission boundary inward: one real request, one real T3 thread, sealed, honest refused return",
+      "outcome": "PASS",
+      "p1_crash": "PASS",
+      "p2_recovery_seal": "PASS",
+      "attempt_id": "ATT-f0a189d3dedd4bce9758fad90466842f",
+      "job_id": "JOB-002",
+      "thread_id": "mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce",
+      "native_run_id": "run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1",
+      "branch": "t3/mmos-l1-canary-eaacc05d",
+      "branch_remote_sha": "e25a5a5cf10d2c9a1614dc1b006b6c198b9c6ea3",
+      "recent_runs_count": 1,
+      "delivery": {
+        "state": "refused",
+        "refusal_code": "NATIVE_SESSION_UNAVAILABLE",
+        "return_id": "execret-d8a266df4f66b849244a01300755038d",
+        "conversation_id": "slack:1794196323.978899",
+        "stage": "branch_pushed"
+      },
+      "processes": {
+        "p1": {
+          "role": "main-p1",
+          "pid": 76012,
+          "crash_point": "after_receipt_persist_before_ack",
+          "client_request_id": "2d93ade224fa4a6e812267f2666812acf2ceed62869430cec226da671c53a4ce",
+          "upstream_echo_proven": true,
+          "native": {
+            "thread_id": "mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce",
+            "run_id": "run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1",
+            "project_id": "bc18d268-d100-484a-8952-3ce2b0b0a66b",
+            "launch_status": "preparing"
+          },
+          "durable_state": "intent+receipt+original_ref COMMITTED",
+          "crashed_at": "2026-11-10T02:19:15.439508+00:00"
+        },
+        "p2": {
+          "role": "main-p2",
+          "outcome": "OK",
+          "attempt_id": "ATT-f0a189d3dedd4bce9758fad90466842f",
+          "job_id": "JOB-002",
+          "thread_id": "mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce",
+          "native_run_id": "run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1",
+          "reattach": {
+            "returned_retained_ref": true,
+            "native_calls": 0,
+            "port_calls_after_reattach": 0,
+            "census_after_reattach": [],
+            "reattach_elapsed_s": 0.002
+          },
+          "second_start": {
+            "refused": true,
+            "error": "T3LaunchClaimConflictError",
+            "native_calls_after": 0
+          },
+          "recovery": {
+            "path": "reattach -> record_process(provider-managed) -> adopt_attempt -> complete_attempt",
+            "adopted_fence_generation": 2,
+            "adopted_status": "CLAIMED"
+          },
+          "status_sequence": [
+            "STARTING",
+            "RUNNING",
+            "SUCCEEDED"
+          ],
+          "final_state": "SUCCEEDED",
+          "collect": {
+            "collect_ok": true,
+            "collected_status": "SUCCEEDED",
+            "result_text_tail": "L1-CANARY-OK ATT-f0a189d3dedd4bce9758fad90466842f e25a5a5cf10d2c9a1614dc1b006b6c198b9c6ea3",
+            "result_ledgered": true,
+            "result_ref": "t3://thread/mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce/run/run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1/item/turn-item:provider:claudeAgent:native-item:9530f4e3-c815-4b1e-b78f-0c128e11e7c7",
+            "head_read_item_count": 2,
+            "final_assistant_item_id": "turn-item:provider:claudeAgent:native-item:9530f4e3-c815-4b1e-b78f-0c128e11e7c7",
+            "ledger_names_final_assistant_item": true,
+            "marker_in_collected_text": true,
+            "marker_in_final_item": true,
+            "replied_commit_sha": "e25a5a5cf10d2c9a1614dc1b006b6c198b9c6ea3",
+            "thread_run_count": 1,
+            "recent_runs": [
+              {
+                "run_id": "run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1",
+                "ordinal": 1,
+                "status": "completed"
+              }
+            ],
+            "replied_commit_sha_source": "recomputed from the recorded result_text_tail after the harness f-string brace bug fix (no new reads; same recorded evidence)"
+          },
+          "recent_runs": [
+            {
+              "run_id": "run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1",
+              "ordinal": 1,
+              "status": "completed"
+            }
+          ],
+          "recent_runs_count": 1,
+          "thread_run_count": 1,
+          "ps_census": {
+            "pattern": "capacity_fabric|glm-5.3 (case-insensitive)",
+            "matched_lines": 38
+          },
+          "branch": "t3/mmos-l1-canary-eaacc05d",
+          "branch_remote_sha": "e25a5a5cf10d2c9a1614dc1b006b6c198b9c6ea3",
+          "branch_pushed": true,
+          "branch_sha_matches_reply": true,
+          "seal": {
+            "job_status": "COMPLETED",
+            "current_attempt_id": "ATT-f0a189d3dedd4bce9758fad90466842f"
+          },
+          "delivery_receipt": {
+            "state": "refused",
+            "refusal_code": "NATIVE_SESSION_UNAVAILABLE",
+            "return_id": "execret-d8a266df4f66b849244a01300755038d",
+            "conversation_id": "slack:1794196323.978899",
+            "stage": "branch_pushed"
+          },
+          "execution_return_projection": {
+            "acceptance": "not_accepted",
+            "acceptance_claim_refused": false,
+            "attempt": {
+              "attempt_id": "ATT-f0a189d3dedd4bce9758fad90466842f",
+              "authenticated_namespace": "mastermind.control_plane.t3_execution_adapter/v1:client:a38f3c12-15ba-4f41-b46f-98bc0fab3da4",
+              "idempotency_key": "child-request:5f5791b89bc9e03781cc27af4e8ab7f920fdc5f24fa3feada7d7a8cee6597927",
+              "root_id": "JOB-002",
+              "seal_digest": "23c6ca61102ea52271b73148c2b1d6bc2d98f3e7f5ff3e7cd22bd444b19f4fd7",
+              "t3_run_id": "ATT-f0a189d3dedd4bce9758fad90466842f",
+              "t3_thread_id": "mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce"
+            },
+            "digest": "d8a266df4f66b849244a01300755038df67811a80dd10405e67e265862676f51",
+            "github": {
+              "branch": "t3/mmos-l1-canary-eaacc05d",
+              "checks": null,
+              "checks_state": "unknown",
+              "installation": "none_claimed",
+              "merge_state": "unknown",
+              "pr_number": null,
+              "pr_url": null
+            },
+            "original_requester": {
+              "authenticated_namespace": "mastermind.control_plane.t3_execution_adapter/v1:client:a38f3c12-15ba-4f41-b46f-98bc0fab3da4",
+              "conversation_id": "slack:1794196323.978899",
+              "project_id": "mmos-rev5",
+              "teammate_id": "hermes:engineering"
+            },
+            "result": {
+              "artifact_refs": [
+                "branch:t3/mmos-l1-canary-eaacc05d",
+                "thread:mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce",
+                "t3://thread/mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce/run/run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1/item/turn-item:provider:claudeAgent:native-item:9530f4e3-c815-4b1e-b78f-0c128e11e7c7"
+              ],
+              "text": "L1 admitted canary: one real Executive-path request sealed"
+            },
+            "return_id": "execret-d8a266df4f66b849244a01300755038d",
+            "schema": "mastermind.execution_return/v1",
+            "stage": "branch_pushed"
+          },
+          "native_census_final": [
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read",
+            "t3_thread_read"
+          ],
+          "port_counts_final": 11,
+          "finished_at": "2026-11-10T02:21:18.469643+00:00"
+        }
+      }
+    },
+    "namespace": {
+      "name": "wrong OAuth client (namespace) refused with zero native calls, no thread minted",
+      "outcome": "PASS",
+      "processes": {
+        "p": {
+          "role": "namespace-p3",
+          "outcome": "OK",
+          "client_b_upstream_namespace_sha256": "0dac5730529ffefc6a517131428815519fbc7c17a0553857bd40cf4f52530c46",
+          "client_a_upstream_namespace_sha256": "5d8bcd675ad9d2c416f31666ef636a5ba35c8f1a62988b4343f09de489f45634",
+          "distinct_oauth_clients": true,
+          "attempts": [
+            {
+              "operation": "reattach",
+              "refused": true,
+              "reason": "PRINCIPAL_MISMATCH",
+              "error": "T3NamespaceAttestationError",
+              "native_calls": 0
+            },
+            {
+              "operation": "start",
+              "refused": true,
+              "error": "T3LaunchClaimConflictError",
+              "native_calls": 0
+            }
+          ],
+          "refused_with_zero_native_calls": true,
+          "reattach_reason_principal_mismatch": true,
+          "thread_minted": false,
+          "native_census": [],
+          "port_calls": 0,
+          "finished_at": "2026-11-10T02:21:19.718158+00:00"
+        }
+      }
+    },
+    "interrupt": {
+      "name": "exact-run interrupt on a sibling child: requested vs settled, never inferred",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:1a178e15d6b0aaea86c438f610307ee8b7ff1928010728a00cf623e9bf051f05",
+      "processes": {
+        "p": {
+          "role": "interrupt",
+          "outcome": "OK",
+          "attempt_id": "ATT-51996ea6ae6847739960a4a0cf193d93",
+          "thread_id": "mcp:launch:1a178e15d6b0aaea86c438f610307ee8b7ff1928010728a00cf623e9bf051f05",
+          "native_run_id": "run:thread:mcp%3Alaunch%3A1a178e15d6b0aaea86c438f610307ee8b7ff1928010728a00cf623e9bf051f05:ordinal:1",
+          "was_live_at_interrupt": true,
+          "pre_interrupt_states": [
+            "STARTING",
+            "RUNNING"
+          ],
+          "interrupt": {
+            "payload_thread_matches": true,
+            "payload_run_matches": true,
+            "upstream_echo_verified": true,
+            "error": "",
+            "signal_sent": true,
+            "already_exited": false
+          },
+          "ledger_after_cancel": {
+            "requested": true,
+            "signal_sent": true,
+            "already_exited": false,
+            "settled": false,
+            "settled_state": null,
+            "requested_at": "2026-11-10T02:21:21.470417+00:00",
+            "settled_at": null
+          },
+          "ledger_final": {
+            "requested": true,
+            "signal_sent": true,
+            "already_exited": false,
+            "settled": true,
+            "settled_state": "CANCELLED",
+            "requested_at": "2026-11-10T02:21:21.470417+00:00",
+            "settled_at": "2026-11-10T02:21:26.542096+00:00"
+          },
+          "status_sequence_after_interrupt": [
+            "CANCELLING",
+            "CANCELLED"
+          ],
+          "final_state": "CANCELLED",
+          "honesty": {
+            "settle_claimed_without_terminal_observation": false,
+            "requested_before_settle": true
+          },
+          "finished_at": "2026-11-10T02:21:26.557141+00:00"
+        }
+      }
+    }
+  },
+  "delivery": {
+    "projection_schema": "mastermind.execution_return/v1",
+    "receipt_state": "refused",
+    "refusal_code": "NATIVE_SESSION_UNAVAILABLE",
+    "github_stage": "branch_pushed",
+    "projection": {
+      "acceptance": "not_accepted",
+      "acceptance_claim_refused": false,
+      "attempt": {
+        "attempt_id": "ATT-f0a189d3dedd4bce9758fad90466842f",
+        "authenticated_namespace": "mastermind.control_plane.t3_execution_adapter/v1:client:a38f3c12-15ba-4f41-b46f-98bc0fab3da4",
+        "idempotency_key": "child-request:5f5791b89bc9e03781cc27af4e8ab7f920fdc5f24fa3feada7d7a8cee6597927",
+        "root_id": "JOB-002",
+        "seal_digest": "23c6ca61102ea52271b73148c2b1d6bc2d98f3e7f5ff3e7cd22bd444b19f4fd7",
+        "t3_run_id": "ATT-f0a189d3dedd4bce9758fad90466842f",
+        "t3_thread_id": "mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce"
+      },
+      "digest": "d8a266df4f66b849244a01300755038df67811a80dd10405e67e265862676f51",
+      "github": {
+        "branch": "t3/mmos-l1-canary-eaacc05d",
+        "checks": null,
+        "checks_state": "unknown",
+        "installation": "none_claimed",
+        "merge_state": "unknown",
+        "pr_number": null,
+        "pr_url": null
+      },
+      "original_requester": {
+        "authenticated_namespace": "mastermind.control_plane.t3_execution_adapter/v1:client:a38f3c12-15ba-4f41-b46f-98bc0fab3da4",
+        "conversation_id": "slack:1794196323.978899",
+        "project_id": "mmos-rev5",
+        "teammate_id": "hermes:engineering"
+      },
+      "result": {
+        "artifact_refs": [
+          "branch:t3/mmos-l1-canary-eaacc05d",
+          "thread:mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce",
+          "t3://thread/mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce/run/run:thread:mcp%3Alaunch%3A980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce:ordinal:1/item/turn-item:provider:claudeAgent:native-item:9530f4e3-c815-4b1e-b78f-0c128e11e7c7"
+        ],
+        "text": "L1 admitted canary: one real Executive-path request sealed"
+      },
+      "return_id": "execret-d8a266df4f66b849244a01300755038d",
+      "schema": "mastermind.execution_return/v1",
+      "stage": "branch_pushed"
+    },
+    "basis": "Hermes engineering seat originated this program (T3_HANDOFF_V2 section 9 reporting thread); NOT a live Hermes tool call - Hermes->Executive ingress (ledger R8) is not enabled"
+  },
+  "processes": [
+    {
+      "role": "prep",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-10T02:19:14.736226+00:00",
+      "finished_at": "2026-11-10T02:19:14.983904+00:00"
+    },
+    {
+      "role": "main-p1",
+      "returncode": 90,
+      "expected_returncode": 90,
+      "ok": true,
+      "started_at": "2026-11-10T02:19:14.984664+00:00",
+      "finished_at": "2026-11-10T02:19:15.451621+00:00"
+    },
+    {
+      "role": "main-p2",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-10T02:19:15.451904+00:00",
+      "finished_at": "2026-11-10T02:21:18.524540+00:00"
+    },
+    {
+      "role": "namespace-p3",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-10T02:21:18.529404+00:00",
+      "finished_at": "2026-11-10T02:21:19.744781+00:00"
+    },
+    {
+      "role": "interrupt",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "started_at": "2026-11-10T02:21:19.747251+00:00",
+      "finished_at": "2026-11-10T02:21:26.653581+00:00"
+    }
+  ],
+  "threads_minted_ids": [
+    "mcp:launch:980f38b78237ee0ed6a35cf9d277ee8d0419fc5e1a3a92b538066d2fc31c4dce",
+    "mcp:launch:1a178e15d6b0aaea86c438f610307ee8b7ff1928010728a00cf623e9bf051f05"
+  ],
+  "threads_minted": 2,
+  "thread_budget": 2,
+  "budget_reservations": [
+    "main-p1",
+    "interrupt"
+  ],
+  "assembled_from": "existing batch side files (no roles spawned, nothing launched)"
+}

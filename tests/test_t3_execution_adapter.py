@@ -30,6 +30,7 @@ from control_plane.t3_execution_adapter import (
     T3ExecutionAdapterError,
     T3InterruptOutcome,
     T3LaunchEffectUnknownError,
+    T3ModelRouteDriftError,
     T3UnknownOutcomeError,
     T3ThreadLaunchReceipt,
     T3ThreadReadResult,
@@ -70,13 +71,15 @@ def _launch_spec(
     worker_id: str = "workers/12",
     prompt: str = "do the work",
     run_dir: Path | None = None,
+    model: str = "gpt-5.6-sol",
 ) -> WorkerLaunchSpec:
     if run_dir is None:
         run_dir = Path("/tmp/mmos-t3-run")
     return WorkerLaunchSpec(
         run_id=run_id, job_id="jobs/77", worker_id=worker_id,
         workspace_path=Path("/tmp/mmos-t3-ws"), run_dir=run_dir,
-        prompt=prompt, result_schema_path=Path("/tmp/mmos-t3-run/input/schema.json"),
+        prompt=prompt, model=model,
+        result_schema_path=Path("/tmp/mmos-t3-run/input/schema.json"),
     )
 
 
@@ -351,6 +354,62 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
             await adapter.start(_launch_spec())
         self.assertEqual(port.launch_calls, [])
         self.assertIsNone(adapter.launch_intent("run-1"))
+
+    # --- G2: Model Router -> T3 modelSelection follows the CLAIM -------------
+
+    async def test_model_selection_follows_the_claimed_route(self) -> None:
+        # When the claimed binding carries a route model (model_ref from the
+        # worker's quota-class capacity), the envelope's model_selection is
+        # derived FROM THE CLAIM as the T3 modelSelection object (the port
+        # parses a JSON selection verbatim) — the instance id from the
+        # binding's provider_instance_ref ONLY.  provider_ref is the
+        # Executive capacity alias (another namespace) and is never used.
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3",
+                           provider_instance_ref="capacity_fabric")
+        adapter, port, _ = _t3_adapter(binding=binding)
+        await adapter.start(_launch_spec(model="glm-5.3"))
+        envelope = port.launch_calls[0]
+        self.assertEqual(
+            envelope.model_selection,
+            '{"instanceId":"capacity_fabric","model":"glm-5.3"}',
+        )
+        self.assertEqual(envelope.model_selection_basis, "CLAIMED_ROUTE")
+
+    async def test_executive_provider_alias_is_never_a_t3_instance(self) -> None:
+        # Lead review L1: provider_ref ("t3") is the Executive capacity
+        # provider alias, not a T3 provider instance; with no
+        # provider_instance_ref the envelope carries the model only.
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3")
+        adapter, port, _ = _t3_adapter(binding=binding)
+        await adapter.start(_launch_spec(model="glm-5.3"))
+        envelope = port.launch_calls[0]
+        self.assertEqual(envelope.model_selection, '{"model":"glm-5.3"}')
+        self.assertEqual(envelope.model_selection_basis, "CLAIMED_ROUTE")
+
+    async def test_spec_model_drift_from_claimed_route_refused_before_send(
+        self,
+    ) -> None:
+        # Fail-closed law: a spec naming a model the claim did not authorize
+        # is refused typed BEFORE the intent claim — nothing persisted,
+        # nothing sent, no native call.
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3")
+        adapter, port, _ = _t3_adapter(binding=binding)
+        with self.assertRaises(T3ModelRouteDriftError):
+            await adapter.start(_launch_spec())  # default model gpt-5.6-sol
+        self.assertEqual(port.launch_calls, [])
+        self.assertEqual(port.trace, [])
+        self.assertIsNone(adapter.launch_intent("run-1"))
+        self.assertIsNone(adapter.retained_original_ref("run-1"))
+
+    async def test_binding_without_route_model_keeps_spec_model_honestly(self) -> None:
+        # A binding whose quota-class metadata declares no model keeps the
+        # previous behaviour (the spec's model field) with the basis recorded
+        # honestly as SPEC_FALLBACK — never a fabricated route claim.
+        adapter, port, _ = _t3_adapter(binding=_binding())
+        await adapter.start(_launch_spec())
+        envelope = port.launch_calls[0]
+        self.assertEqual(envelope.model_selection, "gpt-5.6-sol")
+        self.assertEqual(envelope.model_selection_basis, "SPEC_FALLBACK")
 
     async def test_client_request_id_deterministic_and_stable(self) -> None:
         binding = _binding()
@@ -961,6 +1020,57 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(T3ExecutionAdapterError):
             await port.launch_thread(envelope)
         self.assertEqual(transport.calls, [])
+
+    async def test_claimed_route_model_selection_rides_the_launch_arguments(
+        self,
+    ) -> None:
+        # G2 end-to-end over the real port: a claimed route model becomes the
+        # t3_thread_launch modelSelection object (the donor shape pinned in
+        # tests/test_t3_native_client.py) riding the launch arguments.
+        transport = FakeMcpTransport()
+        binding = _binding(model_ref="glm-5.3", provider_ref="codex",
+                           provider_instance_ref="capacity_fabric")
+        adapter, port = _live_adapter(transport, binding=binding)
+        await adapter.start(_launch_spec(model="glm-5.3"))
+        self.assertEqual(len(transport.calls), 1)
+        tool, arguments = transport.calls[0]
+        self.assertEqual(tool, "t3_thread_launch")
+        self.assertEqual(
+            arguments["modelSelection"],
+            {"instanceId": "capacity_fabric", "model": "glm-5.3"},
+        )
+
+    async def test_host_configured_instance_fills_a_claimed_model(self) -> None:
+        # The claim names the model; the host's launch arguments name the T3
+        # provider instance (providerInstanceId, never sent top-level).
+        transport = FakeMcpTransport()
+        port = _t3m.T3McpToolPort.from_access_token(
+            transport, _session_token(),
+            launch_arguments={"scratch": True,
+                              "providerInstanceId": "capacity_fabric"},
+        )
+        adapter = T3ExecutionAdapter(
+            port, lambda spec: _binding(model_ref="glm-5.3", provider_ref="t3"),
+            FakeInspector(), clock=_clock,
+        )
+        await adapter.start(_launch_spec(model="glm-5.3"))
+        _, arguments = transport.calls[0]
+        self.assertNotIn("providerInstanceId", arguments)
+        self.assertEqual(
+            arguments["modelSelection"],
+            {"instanceId": "capacity_fabric", "model": "glm-5.3"},
+        )
+
+    async def test_claimed_model_without_any_instance_refused_before_send(
+        self,
+    ) -> None:
+        transport = FakeMcpTransport()
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3")
+        adapter, port = _live_adapter(transport, binding=binding)
+        with self.assertRaises(T3ExecutionAdapterError):
+            await adapter.start(_launch_spec(model="glm-5.3"))
+        self.assertEqual(
+            [c for c in transport.calls if c[0] == "t3_thread_launch"], [])
 
     # --- #4: lost replies are unknown outcomes, never clean refusals --------
 

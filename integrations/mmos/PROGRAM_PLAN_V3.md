@@ -55,6 +55,12 @@ structural, not a lack of effort.
    module template, the scoreboard and the backlog of harness defects. Every lane
    ends by writing what slowed it into that backlog.
 
+9. **One initiator per effect.** Paperclip holds the work item people see: owner,
+   objective, discussion, blockers, outputs. It does not become a second company
+   execution authority. For each kind of work exactly one system starts it and
+   recovers it (table in section 8a). A work item marked done in the shell is not
+   company acceptance.
+
 ## 3. What stops
 
 - Auth0 login repair, token persistence and refresh work in the app.
@@ -93,6 +99,16 @@ structural, not a lack of effort.
    tool can be called from the command line.
 8. The improvement loop exists and has been used once: backlog, scoreboard, skill
    updated from a real lane's findings.
+9. The journey in 4 and 5 works with the app window closed, and an interrupted
+   coding job is recovered by a fresh process as the original job, with no second
+   launch.
+10. One real blocker shows in the shell with its reason, the person who can clear
+    it, the action and its age; taking the action clears only that item.
+11. One real output (a pull request or a document) can be opened from the task that
+    produced it and from the conversation that asked for it, after a reconnect.
+    Produced, delivered, reviewed and accepted are shown as four separate states.
+12. One routine has run once on schedule with one start and one result, and has one
+    named trigger owner.
 
 ## 6. Lanes
 
@@ -120,6 +136,59 @@ structural, not a lack of effort.
 - Desktop captures are scoped to the product's own window. One GUI-driving child at
   a time.
 - Protected `master`, review and release controls are unchanged.
+
+## 8a. Revision 6 (Paperclip donor reconciliation) merged into this plan
+
+Revision 6 of the earlier master plan (`docs/plans/2026-11-08-paperclip-donor-reconciliation.md`,
+open documentation PR) was written on 8 November, before Paperclip was installed on
+the M2 with the company and its Hermes agents, and before the Chairman ruled that
+Paperclip is the project shell. This is how the two fit.
+
+**Overtaken.** Revision 6 said: do not run a Paperclip company beside Mastermind;
+rebuild its task, inbox, artifact, routine, dashboard and cost features inside the
+custom app by extending the design boards. The company now runs as a service and is
+the shell by ruling, and the custom app is frozen. We do not rebuild those features;
+we use them.
+
+**Kept as binding.** The reason behind that rejection still holds: two systems that
+both assign, schedule, approve and recover the same work will disagree. So:
+
+| Fact | Owner | In the shell |
+| --- | --- | --- |
+| The work item: owner, objective, discussion, blockers, outputs | Paperclip | the task itself |
+| Running a task on an agent's Hermes profile | Paperclip run on the Hermes adapter | run history on the task |
+| A coding job: admission, attempts, effects, recovery | Executive, executed in T3 | a tab on the task, bound by ids |
+| Capacity, quotas, placement | Capacity Fabric | a module widget that reads Fabric, never its own figures |
+| Bot identity, memory, conversations | Hermes profiles | agent pages and conversations |
+| Workstream continuity, decisions, handoffs | Agent OS | links from the task |
+| Code, pull requests, evidence | GitHub | outputs on the task |
+| A routine's trigger | one named owner per routine | the routine's history |
+
+- Identities stay separate and are joined explicitly: work item, coding job and
+  attempt, native run, conversation, routine occurrence, output. One work item can
+  have several jobs; one conversation can cover several work items.
+- Work already running on an older path keeps its original owner until it finishes
+  or is reconciled. Showing it in the shell starts nothing and admits nothing.
+- A module never reports "nothing needs you" unless it observed every source it
+  claims to cover. Counts of configured roles, enrolled agents, reachable agents
+  and agents with active work are four different numbers.
+- A routine is defined in one place. The same routine is never defined in the
+  Hermes scheduler, Executive and Paperclip at once.
+
+**Work packages.** Revision 6's six packages become this plan's backlog and tests:
+
+| Package | Here |
+| --- | --- |
+| PC0 recover execution | The durable T3 adapter state Revision 6 asked for is already on trunk (file-backed store, durability tests, durable canary receipt). Remaining: return to a Paperclip task, and DONE_WHEN 9. Lanes L1 then L10. |
+| PC1 team and project | Provided by the shell. Module work: roster truth (the four counts) and the coding tab on a task. |
+| PC2 actionable inbox | Shell inbox plus module items for coding-job and capacity blockers. DONE_WHEN 10. |
+| PC3 deliverables and return | Shell artifacts plus pull-request outputs written by the coding-job module. DONE_WHEN 11. |
+| PC4 routines | Shell routines with one trigger owner each. DONE_WHEN 12. |
+| PC5 today and the full journey | Shell dashboard plus module widgets. DONE_WHEN 4, 5, 9. |
+
+**Not adopted.** Paperclip's experimental native Runner, and Paperclip agent chat as
+a replacement for Hermes conversations. Copying Paperclip source into the custom app
+is moot while the shell itself is in use.
 
 ## 8. Fallback
 

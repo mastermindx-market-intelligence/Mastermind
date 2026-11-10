@@ -1,9 +1,13 @@
-# T3-native route row proposal (verbatim; PROTECTED file unchanged)
+# T3-native route row proposal (verbatim)
+
+**Status:** R5 APPLIED-in-source (enabled=false, branch `t3/l1b-r5`,
+2026-11-10). Rollback = revert the one commit. Source repo only: the installed
+Executive's copy of the file is untouched, and the row selects nothing.
 
 `config/executive_worker_routes.json` is protected (#2177). This document is
-the exact proposed row — nothing in this proposal has been applied to the
-live file. Owner of the live edit: the normal protected-change path for that
-file, after the installed-Executive canary (see *Remaining live steps*).
+the exact row. Lane L1 R5 added it under `providers` with `enabled: false`;
+the row stays unselected until the installed-Executive canary passes (see
+*Remaining live steps*).
 
 Audit lane: item #14 closeout (AUDIT_T3_DURABLE_ADAPTER_OPUS_20261109;
 REAUDIT_T3_ADAPTER_A3_OPUS_20261109; REAUDIT3_T3_ADAPTER_A4_OPUS_20261110
@@ -101,6 +105,15 @@ an alias row — deferred with the alias, above.
 the_real_router` copies the live file to a temp path, inserts this row
 verbatim under `providers`, and loads it through the real
 `ModelRouter.load()`. The live file is never written.
+
+Known follow-up after R5 (do not re-add the row; update the guard): two
+pre-application guards assert the live file has **no** `t3` provider row and
+now fail by construction —
+`tests/test_t3_native_composition.py::test_route_row_proposal_loads_through_\
+the_real_router` (`assert "t3" not in live["providers"]`) and
+`tests/test_t3_admitted_canary_receipt.py::L1ReceiptStructureTests::\
+test_scratch_route_row_never_touched_the_live_file`. They should assert the
+approved disabled row instead (adapter_id `t3-native`, `enabled: false`).
 
 ## Remaining live steps (beyond this lane's source-only work)
 
