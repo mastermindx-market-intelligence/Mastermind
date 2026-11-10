@@ -40,7 +40,7 @@ There is no minimum number of children and no maximum other than the limits belo
 |---|---|---|
 | Fan-out and join | Disjoint slices, each with its own check (boards, test rows, files, producers) | One worker per slice in one batch. The lead owns the join and runs the joined suite. |
 | Driver and side crew | A stateful chain (live ladder, install, migration) | One driver holds the state and runs the chain alone. Everything off the chain runs beside it: the next step's preconditions, receipts, tests, rollback, the decision memo for the next gate. The driver may be the lead. |
-| Two investigators | The cause or the right design is unknown | Two cheap models answer the same question independently, each with raw evidence files. Agreement is accepted. Disagreement goes to `gemini-4-argon` with both files. Then execute. |
+| Two investigators | The cause or the right design is unknown | Two cheap models answer the same question independently, each with raw evidence files. Agreement is accepted. Disagreement goes to `glm-5.3` at effort high with both files (or the lead decides on the raw evidence). Then execute. |
 | Writer and attacker | A diff on a risky surface | One model writes, a different model attacks and must return a reproducing command for each finding. Two rounds at most (V2 stop rule). |
 
 Depth: two levels below the principal (lead, workers) by default. A sub-lead is added only
@@ -65,16 +65,16 @@ loses detail and a verification hop that costs the parent.
 |---|---|---|
 | A diff with a test that passes | Run the test | `deepseek-v4.1-flash` first, `glm-5.3`, `grok-4.7` |
 | An attack on a diff | The reproducing command | `grok-4.7`, `glm-5.3` (a different model from the writer) |
-| A statement: census, diagnosis, "I observed X" | Raw output files the parent opens; two independent models when it gates a decision | `glm-5.3`, `gemini-4-argon`; `grok-4.7` only as the second investigator |
-| A design or a decision memo | The principal or lead reads it; options carry exact commands | `gemini-4-argon` |
-| Desktop or app driving, visual comparison | Window-scoped capture plus accessibility text on disk | `grok-4.7`, `gemini-4-argon`, `minimax-m3` |
+| A statement: census, diagnosis, "I observed X" | Raw output files the parent opens; two independent models when it gates a decision | `glm-5.3`; `grok-4.7` only as the second investigator |
+| A design or a decision memo | The principal or lead reads it; options carry exact commands | `glm-5.3` at effort high; `deepseek-v4-pro` as the second read |
+| Desktop or app driving, visual comparison | Window-scoped capture plus accessibility text on disk | `grok-4.7`, `minimax-m3` |
 | Lane leadership (long reading, briefing, joining) | The lane's joined suite and its ledger | `glm-5.3` |
 | CI steward | Run conclusion | `deepseek-v4.1-flash`, `glm-5.3-flash` |
 | The one CRITICAL review bundle at the release candidate | Findings with reproductions | `claude-opus-5-5`, effort high |
 | Escalation after two failures of the tier below | Same check | one tier up; `kimi-k3.1-pro` last |
 
 Cheap tokens are spent on redundancy (a second independent attempt, a cross-model check), not
-on depth. Never inherit a model: every `delegate_task` names
+on depth. `gemini-4-argon` is not dispatched (Chairman ruling, 2026-11-10). Never inherit a model: every `delegate_task` names
 `target: {providerInstanceId: "capacity_fabric", model: <id>}`.
 
 ## Commissions
@@ -93,7 +93,7 @@ on depth. Never inherit a model: every `delegate_task` names
 | `claude-opus-5-5` | 26 | not recorded | not recorded | 0 | 985 min; 674 on one loop |
 | `glm-5.3` | 21 + wave 2 | not recorded | not recorded | 0 known | one wrong outage verdict (probe of a path the edge drops) |
 | `grok-4.7` | 2 + wave 2 | 0 | 2 | 2 | both statement-type tasks |
-| `gemini-4-argon` | wave 2 (3 running) | pending | pending | pending | no evidence yet in this program |
+| `gemini-4-argon` | withdrawn | n/a | n/a | n/a | **Not used from 2026-11-10 (Chairman ruling): flaky and inconsistently priced.** Dispatches also died mid-run on a provider function-call error. |
 | `deepseek-v4.1-flash` | wave 2 (4 running) | pending | pending | pending | no evidence yet in this program |
 
 Routing moves with these numbers. A model with two false reports on one output type loses that
