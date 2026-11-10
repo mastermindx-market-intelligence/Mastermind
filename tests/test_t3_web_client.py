@@ -150,7 +150,8 @@ class NativeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.run_id, RUN)
         self.assertEqual(len(runner.calls), 1)
         call = runner.calls[0]
-        self.assertEqual(call.argv[-2:], (PROJECT, '-'))
+        self.assertEqual(call.argv[-4:-2], (PROJECT, '-'))
+        self.assertEqual(call.argv[-2:], ('--log-level', 'error'))
         self.assertEqual(call.stdin, brief().render())
         self.assertNotIn(brief().objective, call.argv)
         for flag in ('--provider', '--model', '--wait', '--token', '--runtime-mode'):
@@ -176,7 +177,7 @@ class NativeClientTests(unittest.IsolatedAsyncioTestCase):
         client, runner = self.make([dict(threadId=THREAD, projectId=PROJECT, status='running')])
         rows = await client.list_threads(PROJECT)
         self.assertEqual(rows[0]['threadId'], THREAD)
-        self.assertEqual(runner.calls[0].argv, ('/native/t3', 'thread', 'list', '--project', PROJECT, '--json'))
+        self.assertEqual(runner.calls[0].argv, ('/native/t3', 'thread', 'list', '--project', PROJECT, '--json', '--log-level', 'error'))
         client, _ = self.make([dict(threadId=THREAD, projectId='foreign')])
         with self.assertRaises(NativeUnavailable):
             await client.list_threads(PROJECT)
@@ -242,7 +243,7 @@ class NativeClientTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(next_receipt.thread_id, THREAD)
                 self.assertEqual(next_receipt.run_id, NEXT)
                 self.assertEqual(next_receipt.delivery, delivery)
-                self.assertEqual(runner.calls[0].argv, ('/native/t3', 'thread', 'send', '--json', THREAD, '-'))
+                self.assertEqual(runner.calls[0].argv, ('/native/t3', 'thread', 'send', '--json', THREAD, '-', '--log-level', 'error'))
                 self.assertNotIn('interrupt', runner.calls[0].argv)
 
     async def test_followup_rejects_wrong_thread_steer_or_old_run(self):
@@ -271,7 +272,7 @@ class NativeClientTests(unittest.IsolatedAsyncioTestCase):
         value = observation();client, runner = self.make(value)
         read = await client.read(receipt(), messages=3)
         self.assertEqual(read, value)
-        self.assertEqual(runner.calls[0].argv, ('/native/t3', 'thread', 'show', THREAD, '--messages', '3', '--json'))
+        self.assertEqual(runner.calls[0].argv, ('/native/t3', 'thread', 'show', THREAD, '--messages', '3', '--json', '--log-level', 'error'))
         self.assertEqual(T3CliClient.original_answer(receipt(), read), 'original answer')
 
     async def test_read_wrong_thread_project_or_shape_refuses(self):
