@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary', 'session_web_observation'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary', 'session_web_observation', 'local_operator'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
@@ -57,6 +57,13 @@ def validate_document(raw):
     enabled = raw.get('os_executive_transport', False)
     if type(enabled) is not bool or (enabled and profile != 'web_ceo_v3'):
         raise ValueError('OS Executive transport requires an explicit v3 boolean opt-in')
+    from integrations.executive_mcp.local_operator import parse_local_operator_config
+    try:
+        parse_local_operator_config(raw.get('local_operator'))
+    except ValueError as error:
+        raise ValueError('local operator configuration refused') from error
+    if 'local_operator' in raw and profile != 'web_ceo_v3':
+        raise ValueError('local operator socket requires the Web-CEO v3 profile')
     from integrations.executive_mcp.release_control import RELEASE_CONTROL_PROFILE
     if profile == PERSONAL_READ_PROFILE and ({'workspace', 'steward', 'coo'} & set(raw)):
         raise ValueError('Personal read profile refuses optional mounts')
@@ -1015,8 +1022,40 @@ def main(argv=None):
                     principal_ruling_target=build_installed_principal_ruling_target(raw), **mounts)
         else:
             app = build_executive_mcp_app(settings, audit_sink=sink, **mounts)
-        uvicorn.run(app, host='127.0.0.1', port=raw['port'], access_log=False,
-                    proxy_headers=True, forwarded_allow_ips='127.0.0.1')
+        # L4 local operator door: off unless the sealed config carries the
+        # block. A separate app instance serves ONLY the Unix socket; the
+        # TCP app above and its uvicorn configuration are byte-identical.
+        from integrations.executive_mcp.local_operator import (
+            LocalOperatorListener, parse_local_operator_config,
+        )
+        operator_config = parse_local_operator_config(raw.get('local_operator'))
+        listener = None
+        if operator_config is not None:
+            from integrations.executive_mcp.server import build_local_operator_mcp_app
+            listener = LocalOperatorListener(
+                operator_config,
+                build_local_operator_mcp_app(settings, local_operator_config=operator_config))
+        network = uvicorn.Config(app, host='127.0.0.1', port=raw['port'], access_log=False,
+                                 proxy_headers=True, forwarded_allow_ips='127.0.0.1')
+        server = uvicorn.Server(network)
+
+        async def _serve_both():
+            import asyncio
+
+            socket_task = None
+            if listener is not None:
+                listener.bind()  # fail closed: a live/stale conflict exits before serving
+                socket_task = asyncio.create_task(listener.serve_forever())
+            try:
+                await server.serve()
+            finally:
+                if listener is not None:
+                    listener.stop()
+                if socket_task is not None:
+                    await asyncio.gather(socket_task, return_exceptions=True)
+
+        import asyncio
+        asyncio.run(_serve_both())
     finally:
         sink.close()
     return 0
