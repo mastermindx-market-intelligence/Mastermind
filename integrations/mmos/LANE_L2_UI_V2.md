@@ -20,15 +20,15 @@ keyboard navigation. Evidence companions (same directory): `BOARD_INVENTORY.md`
 | TD08, TD10 | Team responsive + zh strings | LIVE (pre-lane); mobile hardening in wave B css |
 | TD12, TD13 | `ResourceCapacityRead` + retained panels | LIVE via real `readResourceCapacity` when a capacity attempt is selected |
 | TD13 | teammate detail | LIVE (pre-lane) |
-| HC02, HC03, HC09 (+HS02) | NEW `NewBotPanel`/`NewGroupPanel`/`BotSettingsPanel` (B1, in flight) | IN FLIGHT `l2/b1-team-conversation-surfaces` |
+| HC02, HC03, HC09 (+HS02) | NEW `NewBotPanel`/`NewGroupPanel`/`BotSettingsPanel` (l2/b1) | MERGED + hosted in `TeamWorkspace` (toolbar + bot detail) |
 | HC05 | `src/team/DelegatedTaskCard.tsx` | LIVE (pre-lane), null-fed at mounts (producer upstream, see OWNER ASKS) |
 | HC06 | Start coding → project/workspace | LIVE (pre-lane) |
 | HC08 | `src/team/ResultReturnCard.tsx` | LIVE honest-null (producer upstream) |
-| HC10 | NEW `RoutinesPanel.tsx` (B5) | MERGED (l2/b5); mount lands with the Team integration commit |
+| HC10 | NEW `RoutinesPanel.tsx` (l2/b5) | MERGED + MOUNTED as a TeamWorkspace board mode (real roster; routine read honestly not-projected) |
 | HC11 | NEW `CodeSettingsPanel.tsx` (B5) | MERGED (l2/b5) + MOUNTED in `CodeWorkspace` (honest null provider/env sources) |
-| HC12, HC18, HC19 (+HC22/23) | NEW `InboxNeedsYouPanel.tsx`, `ReplyThreadPanel.tsx`, `SplitConversationsWorkspace.tsx`, `conversation-surfaces.css` (B4) | MERGED (l2/b4); mount lands with the Team integration commit |
+| HC12, HC18, HC19 (+HC22/23) | NEW `InboxNeedsYouPanel.tsx`, `ReplyThreadPanel.tsx`, `SplitConversationsWorkspace.tsx`, `conversation-surfaces.css` (l2/b4) | HC18/HC19 MERGED + MOUNTED as TeamWorkspace board modes; HC12 component-complete, **unmounted by law** — a real origin message source does not exist and sample data is forbidden |
 | HC13–HC16 | mobile variants of Team surfaces | covered by responsive css (wave B) |
-| HC20, HC21 (+HC24) | NEW `SearchContextView.tsx`, `WorkHierarchyView.tsx` (B6, in flight) | IN FLIGHT `l2/b6-search-work-hierarchy` |
+| HC20, HC21 (+HC24) | NEW `SearchContextView.tsx`, `WorkHierarchyView.tsx` (l2/b6) | MERGED + MOUNTED as TeamWorkspace board modes (honest not-projected reads) |
 
 Extended companions: TB01–03/HB01–03 are meta/architecture boards (no UI);
 TS02 is contract-only by census (see OWNER ASKS); TD05H host telemetry has no
@@ -58,15 +58,22 @@ components as their primary boards.
    cleared by nav-rail Code entry; `CodeWorkspace attemptId` switches to the
    per-attempt workbench. Activity-selection ids (WS:/JOB-/ATT-) are a
    different id space and are deliberately NOT joined to T3 run ids.
-7. **HC02/HC03/HC09 (l2/b1, in flight)** and **HC20/HC21 (l2/b6, in flight)**.
+7. **HC02/HC03/HC09 (l2/b1)** and **HC20/HC21 (l2/b6)** — merged and hosted.
+8. **TeamWorkspace board-mode integration (lead)** — the five HC10/HC18/HC19/
+   HC20/HC21 surfaces mount as `aria-pressed` toolbar toggles that replace the
+   roster table while active (Paper mode semantics); search selection is owned
+   by TeamWorkspace so Escape/mode switches never leave a stale result.
+   `ReplyThreadPanel` (HC12) stays unmounted by the honest-state law.
 
 ## Proven (commands + counts, lane worktree)
 
 - `npm run typecheck` — clean at every merge (A1, A2, A4, B4, B5, HC11 mount,
-  trunk merge).
+  trunk merge, board-mode integration).
 - `npx vitest run src/team src/code src/projects src/fabric src/resources/T3AttemptFleetBlock.test.tsx src/resources/t3-attempt-fleet-contract.test.ts src/host.t3-attempt-fleet-read.test.ts` on the
   trunk-merged result — 45 files / 551 tests passed.
 - After HC11 mount: `npx vitest run src/code/` — 4 files / 49 tests.
+- After board-mode integration: `npx vitest run src/team --maxWorkers=2` —
+  16 files / 169 tests.
 - `MM_SOURCE_REVISION=$(git rev-parse HEAD) MM_BUILD_IDENTITY=mastermind-os-review cargo check` (src-tauri, post-A1) — PASS (48s, 14 pre-existing warnings).
 - `cargo test t3_attempt_fleet_read_tests` (A1 worktree) — 2/2.
 - Paper parity: structure+copy extracted via `get_tree_summary` (committed in
@@ -101,10 +108,8 @@ disabled with a visible reason.
 
 ## OPEN
 
-- B1 (HC02/03/09) + B6 (HC20/21) merges, then the TeamWorkspace/TeamRoute
-  integration commit mounting Routines/Inbox/ReplyThread/Split/Search/Work
-  surfaces with real roster reads.
-- Mobile hardening pass across the new css (TD08–TD13, HC13–HC16, HC22–24).
+- B7 (responsive hardening) merge, then a team.css/conversation css check on
+  the merged result (TD08–TD13, HC13–HC16, HC22–24).
 - One adversarial pass on the final lane delta (in flight on the merged base).
 - Visual parity pass vs Paper (minimax-m3/gemini-4-argon) at wave close.
 - Full `npx vitest run` + `cargo check` at release candidate, then trunk land.
