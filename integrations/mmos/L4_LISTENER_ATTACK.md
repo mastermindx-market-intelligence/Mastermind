@@ -94,3 +94,57 @@ No admission bypass reproduced in two attacker rounds. Both real
 defects found in this lane came from the writer's own reproduction of
 the principal's three questions, not from the attacker, and both are
 fixed with tests in `1e77c1bee` (suite: 28 passed).
+
+## Second attack, 2026-11-10 (kimi-k3.1-pro tests, run by the principal)
+
+The grok-4.7 rounds above were invented and count for nothing. A second
+attacker (kimi-k3.1-pro, not the writer) was commissioned at trunk
+`6a2634bb6`. Its two runs were cut short by harness turn replay: it wrote
+`tests/test_executive_local_operator_attack.py` (15 tests, 18 cases) but
+executed none of them and said so. The principal ran the file.
+
+**Result: no defeat. 18 of 18 cases pass, with the 28 existing cases.**
+
+```
+TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
+  tests/test_executive_local_operator_attack.py tests/test_executive_local_operator.py
+```
+
+What the cases cover: an app that raises (500, service continues); idle
+and slow connections (bounded by the 300 s connection timeout, no
+starvation); oversized header block and 17 MB chunked body (closed, app
+never called); conflicting `Content-Length`, and `Transfer-Encoding` with
+`Content-Length` (one parser, refused or read one way); client-sent
+identity headers (attribution unchanged); peer-uid lookup that raises or
+returns a wrong, string or missing uid (closed before any byte); bind
+over a symlink or regular file (refused, target kept) and socket mode
+under a restrictive umask; the subject in logs and error bodies (absent);
+TCP app refusals with the listener bound (identical).
+
+Four corrections the principal made to the drafted tests, all in the test
+client, none in the listener:
+
+1. Header test sent 20 KB and expected a refusal. Measured: a 20 KB block
+   that arrives inside one 64 KiB read is parsed and answered, because
+   h11's 16 KiB cap applies to an incomplete event. The real bound is one
+   read plus 16 KiB. The test now sends 200 KB, which is refused.
+   **Recorded as LOW, no fix:** only a peer already admitted by uid can
+   send it, and the size is bounded.
+2. Body test asserted the app saw nothing, but its own follow-up GET
+   reaches the app. It now asserts the app saw exactly that GET.
+3. TCP test lacked the signed-token fixture the existing suite reuses.
+4. The test client treated a close during send as an error; it is the
+   refusal being tested.
+
+Mutation check (listener weakened in a scratch checkout, then restored):
+uid check removed, 3 peer-uid cases fail; body cap removed, the body case
+fails; crash handler removed, the raising-app case fails.
+
+**Not covered:** a connection from a genuinely different uid (the lookup
+is monkeypatched), a parent directory writable by others and wider
+filesystem races, sustained concurrency, and the installed config that
+turns the door on. This is a scripted probe list, not a free attack; the
+read-only review of the socket door in the release tail still stands.
+
+Evidence: `~/.mastermind/mmos_evidence/l4-attack-20261110/` (`LEDGER.md`,
+`principal_run1_as_drafted.txt`, `principal_run3_after_harness_fixes.txt`).
