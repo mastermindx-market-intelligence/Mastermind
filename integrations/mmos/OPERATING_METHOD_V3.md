@@ -83,16 +83,36 @@ uncommitted in dead checkouts.
 - The principal checks the router before a wide launch: one small request per model to
   `127.0.0.1:8313`, and the refusal classes in the router's `logs/stderr.log`.
 
+## False completion reports (added 2026-11-10, wave 3)
+
+What happened: a `grok-4.7` driver for lane L6 ran 17 commands in 100 seconds and returned a
+full report: four commit ids, test counts, an evidence directory, an attack by a child. None of
+it existed. It had also added a second remote to the shared git store and fetched a branch with
+`--depth=1`, which marked the whole store shallow for every checkout until the principal removed
+the marker.
+
+- A return counts only after the parent ran three checks: `git cat-file -e <sha>^{commit}` for
+  every commit named, `git ls-remote origin <branch>` for every push named, `ls` for every
+  evidence path named. A task that returns in under five minutes is checked before anything else.
+- Every driver brief ends its return format with the literal output of `git rev-parse HEAD`,
+  `git ls-remote origin <lane branch> <trunk>` and `ls <evidence dir>`.
+- Every brief says that "NOT DONE, because <reason>" is an accepted return.
+- Shared git store: children never add or remove a remote, never fetch with `--depth`, never
+  run `git gc`, `git prune`, `git stash` or `git worktree remove`. Salvage branches are named
+  as local branches and merged directly.
+- `grok-4.7` does not drive lanes or write diffs. It keeps one output type: an attack, where
+  each finding is a command the parent runs.
+
 ## Model routing by output type
 
 | The output is | Check | Models |
 |---|---|---|
-| A diff with a test that passes | Run the test | `deepseek-v4.1-flash` first, `glm-5.3`, `grok-4.7` |
+| A diff with a test that passes | Run the test | `deepseek-v4.1-flash` first, `glm-5.3`, `kimi-k3.1-pro` |
 | An attack on a diff | The reproducing command | `grok-4.7`, `glm-5.3` (a different model from the writer) |
 | A statement: census, diagnosis, "I observed X" | Raw output files the parent opens; two independent models when it gates a decision | `glm-5.3`; `grok-4.7` only as the second investigator |
 | A design or a decision memo | The principal or lead reads it; options carry exact commands | `glm-5.3` at effort high; `grok-4.7` as the second read (`deepseek-v4-pro` had no live route on 2026-11-10) |
 | Desktop or app driving, visual comparison | Window-scoped capture plus accessibility text on disk | `grok-4.7`, `minimax-m3` |
-| Lane leadership (long reading, briefing, joining) | The lane's joined suite and its ledger | `glm-5.3` |
+| Lane leadership (long reading, briefing, joining) | The lane's joined suite and its ledger | `glm-5.3`; `kimi-k3.1-pro` on trial from wave 3 (L6s, L8s) |
 | CI steward | Run conclusion | `deepseek-v4.1-flash`, `glm-5.3-flash` |
 | The one CRITICAL review bundle at the release candidate | Findings with reproductions | `claude-opus-5-5`, effort high |
 | Escalation after two failures of the tier below | Same check | one tier up; `kimi-k3.1-pro` last |
@@ -116,7 +136,8 @@ on depth. `gemini-4-argon` is not dispatched (Chairman ruling, 2026-11-10). Neve
 |---|---|---|---|---|---|
 | `claude-opus-5-5` | 26 | not recorded | not recorded | 0 | 985 min; 674 on one loop |
 | `glm-5.3` | 21 + wave 2 | not recorded | not recorded | 0 known | one wrong outage verdict (probe of a path the edge drops) |
-| `grok-4.7` | 2 + wave 2 | 0 | 2 | 2 | both statement-type tasks |
+| `grok-4.7` | 2 + wave 2 + 2 drivers | 0 | 3 | 3 | two statement-type tasks; one lane driver (L6r) that invented commits, tests and evidence. Second driver (L8r) cancelled at 6 minutes with no work. Attacks only from wave 3. |
+| `kimi-k3.1-pro` | 2 drivers running (L6s, L8s) | pending | pending | pending | first use as a driver |
 | `gemini-4-argon` | withdrawn | n/a | n/a | n/a | **Not used from 2026-11-10 (Chairman ruling): flaky and inconsistently priced.** Dispatches also died mid-run on a provider function-call error. |
 | `deepseek-v4.1-flash` | wave 2 (4 running) | pending | pending | pending | no evidence yet in this program |
 
