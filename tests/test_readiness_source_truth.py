@@ -306,7 +306,8 @@ def test_real_prediction_failure_is_unknown_and_default_reader_stays_compatible(
     p._LEDGER.parent.mkdir(parents=True, exist_ok=True)
     p._LEDGER.write_bytes(raw)
 
-    assert p._load_ledger() == legacy
+    # #812 made the strict reader the default; the lenient legacy read is the explicit opt-out.
+    assert p._load_ledger(strict=False) == legacy
     with pytest.raises((ValueError, UnicodeDecodeError)):
         p._load_ledger(strict=True)
     payload = r.status()
@@ -326,7 +327,8 @@ def test_real_dangling_prediction_ledger_is_unknown(tmp_path, monkeypatch):
     missing = tmp_path / "missing-predictions.jsonl"
     p._LEDGER.symlink_to(missing)
 
-    assert p._load_ledger() == []
+    # #812 made the strict reader the default; the lenient legacy read is the explicit opt-out.
+    assert p._load_ledger(strict=False) == []
     with pytest.raises(FileNotFoundError):
         p._load_ledger(strict=True)
     _assert_unknown(r.status(), "prediction_xsec")
@@ -362,7 +364,8 @@ def test_real_inaccessible_prediction_ledger_is_unknown(tmp_path, monkeypatch):
     mode = stat.S_IMODE(hidden.stat().st_mode)
     try:
         hidden.chmod(0)
-        assert p._load_ledger() == []
+        # #812 made the strict reader the default; the lenient legacy read is the explicit opt-out.
+        assert p._load_ledger(strict=False) == []
         with pytest.raises(PermissionError):
             p._load_ledger(strict=True)
         _assert_unknown(r.status(), "prediction_xsec")
