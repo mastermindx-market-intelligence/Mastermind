@@ -70,7 +70,8 @@ class FakePaperclip:
     def add_comment(self, issue_id, body):
         self._guard("comment")
         self.calls.append(("comment", issue_id, body))
-        self.comment_rows.setdefault(issue_id, []).append({"body": body})
+        self.comment_rows.setdefault(issue_id, []).append(
+            {"body": body, "authorType": "agent"})
 
     def interactions(self, issue_id):
         return [dict(row) for row in self.interaction_rows]
@@ -737,3 +738,140 @@ def test_blocked_parent_with_pending_child_reconciles_ask_not_return():
     assert run_with_roster(pc, t3, {"Atlas-TEST": "ag-atlas"}) == 0
     assert t3.sends == []  # no return send while the child is not done
     assert [c for c in pc.calls if c[0] == "create_issue"] == []
+
+
+# --- item 5: board feedback (reject-with-comment) on an in_review issue -----
+
+def feedback_issue():
+    return {"is-1": {"identifier": "MMO-1", "status": "in_review",
+                     "title": "Summarize file X",
+                     "description": "Write a three-line summary."}}
+
+
+def fb_op():
+    return wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+
+
+def run_bound(pc, t3, opts=None):
+    """run_carrier with the wake bound to issue is-1 (PAPERCLIP_ISSUE_ID)."""
+    os.environ["PAPERCLIP_AGENT_ID"] = "ag-1"
+    os.environ["PAPERCLIP_ISSUE_ID"] = "is-1"
+    try:
+        return wc.run_carrier(pc, lambda tid: t3, opts or {})
+    finally:
+        os.environ.pop("PAPERCLIP_ISSUE_ID", None)
+
+
+def test_board_feedback_detection():
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "the numbers were wrong", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "line count is off"}}]
+    issue = pc.issue("is-1")
+    assert wc.board_feedback(pc, issue) == ("line count is off",
+                                            "the numbers were wrong")
+    # a rejection with no board comment is still feedback
+    pc.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
+    assert wc.board_feedback(pc, issue) == ("line count is off", None)
+    # a pending confirmation means the current round already answered: no-op
+    pc.interaction_rows.append(
+        {"kind": "request_confirmation", "status": "pending",
+         "idempotencyKey": "pc-is-1-x-rev1-confirm"})
+    assert wc.board_feedback(pc, issue) is None
+    # no rejection at all -> a user comment alone is not a round trigger
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "pending",
+         "idempotencyKey": "k"}]
+    assert wc.board_feedback(pc, issue) is None
+
+
+def test_feedback_round_sends_revision_not_original_task():
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "the numbers were wrong", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "line count is off"}}]
+    t3 = FakeT3(replies=["answer v2, now correct"])
+    assert run_bound(pc, t3) == 0
+    assert len(t3.sends) == 1
+    assert f"[{op}-rev1]" in t3.sends[0]        # fresh revision marker...
+    assert t3.sends[0].count("[pc-") == 1       # ...exactly one marker, one send
+    assert "line count is off" in t3.sends[0]   # decline reason reaches the turn
+    assert "the numbers were wrong" in t3.sends[0]  # board comment reaches it
+    seq = [c[0] for c in pc.calls]
+    assert seq.index("comment") < seq.index("interaction") < seq.index("status")
+    keys = [c[2] for c in pc.calls if c[0] == "interaction"]
+    assert keys == [f"{op}-rev1-confirm"]       # per-round confirmation key
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_feedback_replay_after_crash_never_resends():
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "the numbers were wrong", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "line count is off"}}]
+    # the rev1 turn already answered, but the crash lost the delivery
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}-rev1] board declined"),
+                          ("assistant", "r1", "answer v2, now correct")])
+    assert run_bound(pc, t3) == 0
+    assert t3.sends == []  # marker rule: no resend of the revision
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies == ["answer v2, now correct"]  # delivery repaired exactly once
+
+
+def test_second_feedback_round_gets_rev2():
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "first decline", "authorType": "user"},
+        {"body": "answer v2", "authorType": "agent"},
+        {"body": "second decline", "authorType": "user"}]
+    # round 1 delivered (its confirmation existed) and the board rejected it
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "idempotencyKey": f"{op}-rev1-confirm",
+         "result": {"reason": "still off"}}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}-rev1] board declined"),
+                          ("assistant", "r1", "answer v2")],
+                replies=["answer v3"])
+    assert run_bound(pc, t3) == 0
+    assert len(t3.sends) == 1 and f"[{op}-rev2]" in t3.sends[0]
+    assert "second decline" in t3.sends[0] and "still off" in t3.sends[0]
+    keys = [c[2] for c in pc.calls if c[0] == "interaction"]
+    assert keys == [f"{op}-rev2-confirm"]
+
+
+def test_in_review_without_feedback_is_a_noop():
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "pending",
+         "idempotencyKey": "k"}]
+    t3 = FakeT3()
+    assert run_bound(pc, t3) == 0
+    assert t3.sends == [] and pc.calls == []
+
+
+def test_bound_todo_issue_falls_through_to_the_inbox_path():
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=["line1\nline2\nline3"])
+    os.environ["PAPERCLIP_AGENT_ID"] = "ag-1"
+    os.environ["PAPERCLIP_ISSUE_ID"] = "is-1"
+    try:
+        assert wc.run_carrier(pc, lambda tid: t3, {}) == 0
+    finally:
+        os.environ.pop("PAPERCLIP_ISSUE_ID", None)
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    assert len(t3.sends) == 1 and f"[{op}]" in t3.sends[0]  # original task op
+    assert pc.issues["is-1"]["status"] == "in_review"

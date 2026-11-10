@@ -599,6 +599,115 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     return True
 
 
+def board_feedback(pc, issue):
+    """Unaddressed board feedback on an in_review issue: (reason, comment).
+
+    A rejection is unaddressed exactly while NO pending request_confirmation
+    exists: the carrier's own delivery always creates the next pending one,
+    so pending present means the current round already answered the board.
+    reason: the newest rejected request_confirmation's decline reason.
+    comment: the newest USER comment posted after the last agent comment
+    (the board's note on the answer). None when nothing new awaits."""
+    reason = None
+    try:
+        rows = pc.interactions(issue["id"])
+    except CarrierError:
+        rows = []
+    if isinstance(rows, dict):
+        rows = rows.get("interactions") or rows.get("rows") or []
+    pending = False
+    for row in rows:  # oldest-first; the newest rejection wins
+        if row.get("kind") != "request_confirmation":
+            continue
+        if row.get("status") == "pending":
+            pending = True
+        elif row.get("status") == "rejected":
+            text = ((row.get("result") or {}).get("reason") or "").strip()
+            reason = text or reason
+    if pending:
+        return None  # the current round's delivery already answered the board
+    comment = None
+    try:
+        rows = pc.comments(issue["id"])
+    except CarrierError:
+        rows = []
+    if isinstance(rows, dict):
+        rows = rows.get("comments") or rows.get("rows") or []
+    last_agent = -1
+    newest_user = None
+    for idx, row in enumerate(rows):
+        if row.get("authorType", "agent") == "agent":
+            last_agent = idx
+        elif idx > last_agent:
+            newest_user = row
+    if newest_user is not None:
+        comment = (newest_user.get("body") or "").strip() or None
+    if reason or comment:
+        return reason, comment
+    return None
+
+
+def handle_feedback(pc, t3, issue, opts):
+    """The reject-with-comment edge: the board declined the teammate's answer
+    on an in_review issue and left words for it. The board's comment wake
+    bound this run to the issue (the inbox skips in_review rows, so the run
+    binding in PAPERCLIP_ISSUE_ID is the only route to it).
+
+    Sends ONE fresh revision marker op per feedback round — never a resend of
+    the original task op — quoting the decline reason and the board's comment,
+    then delivers the corrected answer like any task: comment, a NEW pending
+    confirmation keyed to the round, status stays in_review."""
+    feedback = board_feedback(pc, issue)
+    if feedback is None:
+        log(f"in_review issue {issue.get('identifier')} is bound to this run "
+            "but has no board feedback; nothing to do")
+        return 0
+    reason, comment = feedback
+    content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
+    op = op_id(issue["id"], content)
+    messages = t3.messages()[1]
+    # A round is closed once its delivery created its confirmation; the live
+    # round is the highest numbered one whose marker exists but whose
+    # delivery never completed (crash between the thread turn and deliver).
+    rounds = 0
+    while True:
+        candidate = f"{op}-rev{rounds + 1}"
+        if scan_marker(messages, candidate)[0] is None:
+            break
+        if confirmation_already_present(pc, issue["id"], candidate):
+            rounds += 1  # that round delivered; the next feedback is n + 1
+            continue
+        break  # started but undelivered: reconcile THIS round, no new round
+    rev_op = f"{op}-rev{rounds + 1}"
+    state, existing = scan_marker(messages, rev_op)
+    if state is None:
+        message = (f"[{rev_op}]\n\n"
+                   f"The board declined the current answer on "
+                   f"{issue.get('identifier')} and sent it back.\n")
+        if reason:
+            message += f"\nDecline reason: \"{reason}\"\n"
+        if comment:
+            message += f"\nThe board wrote on the issue:\n\n{comment}\n"
+        message += ("\nSend a corrected final answer. Your reply to this "
+                    "message is posted as the issue comment and re-enters "
+                    "review.")
+        log(f"sending {rev_op} (board feedback round {rounds + 1}) to the "
+            "thread")
+        result = t3.send(message)
+        reply = result.get("reply") or ""
+    elif state == "pending":
+        log(f"{rev_op} already in the thread and still pending; waiting, no "
+            "resend")
+        reply = wait_for_reply(t3, rev_op, opts)
+    else:
+        log(f"{rev_op} already answered in the thread; reconciling, no resend")
+        reply = existing
+    if not reply.strip():
+        raise CarrierError("thread reply was empty")
+    deliver(pc, issue, reply, rev_op)
+    return 0
+
+
 def run_carrier(pc, t3_factory, opts):
     """One wake. Returns an exit code; raises nothing."""
     crash_after = opts.get("crash_after")
@@ -608,6 +717,24 @@ def run_carrier(pc, t3_factory, opts):
     binding = binding_of(me)
     thread_id = binding["primaryThreadId"]
     t3 = t3_factory(thread_id)
+
+    # An in_review issue is not in the inbox (inbox-lite serves
+    # todo/in_progress/blocked only), so a board reply on one reaches this run
+    # through the run binding: PAPERCLIP_ISSUE_ID names the issue the wake was
+    # created for.
+    bound = (os.environ.get("PAPERCLIP_ISSUE_ID") or "").strip()
+    if bound:
+        try:
+            bound_issue = pc.issue(bound)
+        except CarrierError as exc:
+            log(f"bound issue {bound} unreadable ({exc}); continuing via the "
+                "inbox")
+            bound_issue = None
+        if bound_issue is not None:
+            if bound_issue.get("status") == "in_review":
+                return handle_feedback(pc, t3, bound_issue, opts)
+            log(f"bound issue {bound_issue.get('identifier')} is "
+                f"{bound_issue.get('status')}; continuing via the inbox")
 
     candidates = choose_issue(pc.inbox(), pc.run_id)
     if not candidates:
