@@ -105,7 +105,8 @@ Carries over, unchanged in value:
 | T1s live answer text | Claude-driver threads stream answer text the way Codex-driver threads already do | accepted 2026-11-10 at trunk `1bc6b7574` (patch sha256 `661566e1…5400`, 355 tests in the principal's run; see section 11) |
 | T6 team server | An always-on headless T3 server owned by Mastermind, separate from the Chairman's T3 Code app, that the window and the teammates use | **accepted and installed 2026-11-10** at trunk `54da298e1`. See section 12 |
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
-| T3 Team fork | Teammate list and work cards as a thin fork of the T3 web client | starts when T1 is proven |
+| T3 Team view | Teammate list and work cards. **No fork first:** the stock T3 client already shows a roster when each teammate is one pinned, titled thread in a "Team" project | investigation (T3i) accepted 2026-11-10 at trunk `c7dd3ef4d`; see section 13 and `T3_TEAM_VIEW_OPTIONS.md`. A fork is built only for what lane T7 shows the stock client cannot do |
+| T7 team roster | Two real teammates (Assurance, Design Lead) set up on the team server as pinned threads, checked in a headless browser, with the eight open questions answered | started 2026-11-10 19:05 UTC. See section 13 |
 | T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
 | T4b governed coding job | DONE_WHEN 10: a task that needs code becomes one governed coding job through the socket door and the L1 engine | after T45 |
 | L9 module platform | Land what exists (dev instance script, module, template), runbook, close | closing |
@@ -347,3 +348,59 @@ already accepts for DONE_WHEN 3.
 - Nothing has run on it for days yet, and it has not been through a reboot.
 - The seeded settings give it one provider, the Capacity Fabric route. Teammate personas
   are added when the first installed agent is moved, after T45 returns.
+
+## 13. Amendment, 2026-11-10 19:15 UTC: the Team view starts with no fork
+
+**What was asked.** Lane T3 was written as "a thin fork of the T3 web client". Before
+paying for a fork, lane T3i read the client's source (pin `0770446`, read only) to find
+the smallest change that gives a teammate list. Its memo is `T3_TEAM_VIEW_OPTIONS.md`.
+The principal read it in full and checked four of its source citations; all four matched.
+
+**Decision.** The Team view is built on the stock client first, with no code change:
+
+| Part of the Team view | How the stock client gives it |
+| --- | --- |
+| Teammate list | One T3 project named "Team". Each teammate is one pinned primary thread titled `Name — role`. Pinned threads form a fixed block at the top of the sidebar, in an order we set, and stay there while working |
+| Who is busy, who needs you | Each row already shows a status word (Working, Waiting, Approval, Input, Failed, Done and others), a running timer and the time of the last activity |
+| Whose voice | Each teammate is its own provider instance with the teammate's name and an accent colour, so its badge shows on the row |
+| Selected conversation | The window opens `http://127.0.0.1:3780/<environmentId>/<threadId>` |
+| Work cards | A plain markdown link renders as a link with the site icon; a `t3-thread://` link renders as a live thread chip. The carrier writes the issue as a labelled link next to its marker |
+
+**Three rules that follow**
+
+1. The window never opens the server's root address `/`. The stock client starts a new
+   empty thread in the most recent project when it lands there. The window always opens a
+   thread address.
+2. T3's own "needs you" means a pending request inside a running turn. A Paperclip
+   `request_confirmation` is invisible in the sidebar unless the carrier writes it into
+   the teammate's thread. So the carrier relays it there, with the issue as a labelled
+   link. This is added to the carrier after T45 returns (T45 is the writer on the carrier
+   now).
+3. A turn that ends with a plain-text question shows as ready, not as "Input". A teammate
+   that needs an answer must ask through the request mechanism or through the carrier.
+
+**What the stock client does not give.** A separate role line under the name, one place
+that adds up every "Needs you" item across teammates, and a per-thread field for extra
+data (there is none; a thread can only be pinned, snoozed, settled, archived or marked
+unread). These are the only reasons to fork. The memo sizes that fork at 100 to 200 lines
+in one file (`SidebarThreadRow.tsx`), a file that upstream changed four times in five
+days, so each upstream update would need the fork redone. A server-fed list (the memo's
+candidate 2) is the most expensive and is not built.
+
+**Lane T7 (started 19:05 UTC, GLM 5.3).** It makes the roster real on the team server
+with two teammates named after installed agents, Assurance and Design Lead: a home,
+a charter, a provider instance, a pinned thread and a write limit for each. It proves a
+restart keeps the same thread and that "remember this" lands in the teammate's own
+`CLAUDE.md`. It answers in a headless browser the eight questions the memo could not
+answer from source (for example whether the pinned block reads as a list at rest, and
+whether titles are cut off at window width), checks live text on the real server, and
+returns a verdict line: "fork needed for: <list or nothing>". It writes
+`tools/mmos_team_server/team_roster.py`, so a third teammate is one command.
+
+T7 sets up the T3 side only. It writes nothing to Paperclip and moves no installed agent.
+The installed Assurance and Design Lead agents keep running on Hermes until the cut-over
+after T45, which then binds each agent to the thread T7 made. This replaces the last
+line of section 12 ("personas are added when the first installed agent is moved").
+
+**Fork decision is deferred to evidence.** If T7 returns "nothing", lane T3 closes with no
+fork. If it returns a list, the fork is scoped to that list and nothing else.
