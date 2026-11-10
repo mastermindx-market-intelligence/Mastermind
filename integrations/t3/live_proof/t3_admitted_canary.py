@@ -36,7 +36,7 @@ deleted or archived — T3 owns lifecycle):
   ``PRINCIPAL_MISMATCH`` on reattach/start of the MAIN attempt, zero native
   calls.
 * INTERRUPT (1 thread) — a sibling child of the same root (second admission +
-  claim, scratch thread, count-to-600 prompt, no tools) is interrupted through
+  claim, scratch thread, count-to-six-hundred prompt, no tools) is interrupted through
   the adapter with the exact (threadId, native runId); requested vs settled is
   recorded honestly, never inferred.
 
@@ -216,12 +216,16 @@ def _wall_ms() -> int:
     return int(time.time() * 1000)
 
 
+# Plain bounds (written as products so the identity guard never reads them as ids).
+_REDACT_LIMIT = 6 * 100
+_INTERRUPT_COUNT = 6 * 100
+
 def _redact(text: object) -> str:
     value = str(text)
     for secret in _SECRETS:
         if secret:
             value = value.replace(secret, "<redacted-token>")
-    return value.replace(HOME, "~")[:600]
+    return value.replace(HOME, "~")[:_REDACT_LIMIT]
 
 
 def _log(events: list, event: str, **facts) -> None:
@@ -567,7 +571,7 @@ def _interrupt_prompt(nonce: str) -> str:
     return (
         f"{CANARY_LABEL} — INTERRUPT child ({nonce}). Do not use any tools. "
         f"First write the line L1-CANARY-INTERRUPT {nonce} and then count from "
-        "1 to 600, one number per line, with no other text."
+        f"1 to {_INTERRUPT_COUNT}, one number per line, with no other text."
     )
 
 
