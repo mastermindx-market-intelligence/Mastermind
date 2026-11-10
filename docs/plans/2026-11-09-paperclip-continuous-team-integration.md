@@ -22,9 +22,9 @@ Runtime service replacement, unpausing agents, enabling heartbeats, production d
 
 ## Phase ladder
 
-- **I1 — Architecture and exact interface census (in progress):** inspect current OS host, Hermes runtime and pinned Paperclip API/adapter seams. Define replace/retain mapping and capability-by-capability cutover. Reuse existing owner interfaces and state the actual gaps.
-- **I2 — Host and runtime integration:** implement configured, bounded, typed Paperclip access; scoped company read/write operations where supported; preserved Hermes profile/session mapping; fail-closed handling of missing bindings, changed identities and uncertain writes. No new persistent dispatcher or retry ledger.
-- **I3 — Mastermind OS composition:** mount connected company/people/projects/work/activity and useful supported actions in the accepted shell. Keep existing conversations, Code, project plan and resource context reachable. Make absent/unconfigured service and deferred cutover explicit, not fixture data.
+- **I1 — Architecture and exact interface census (source complete):** inspect current OS host, Hermes runtime and pinned Paperclip API/adapter seams. Define replace/retain mapping and capability-by-capability cutover. Reuse existing owner interfaces and state the actual gaps.
+- **I2 — Host and runtime integration (source complete for bound management and migration preparation):** implement configured, bounded, typed Paperclip access; scoped company read/write operations where supported; preserved Hermes profile/session mapping; fail-closed handling of missing bindings, changed identities and uncertain writes. No new persistent dispatcher or retry ledger.
+- **I3 — Mastermind OS composition (source complete):** mount connected company/people/projects/work/activity and useful supported actions in the accepted shell. Keep existing conversations, Code, project plan and resource context reachable. Make absent/unconfigured service and deferred cutover explicit, not fixture data.
 - **I4 — Source delivery and adoption map:** document configuration, donor pin, runtime cutover order, retained services and remaining native bindings; self-review source/diff, save and read back, publish one implementation PR. Do not wait on CI or claim tests/live acceptance.
 
 ## Retained inputs and evidence
@@ -40,3 +40,26 @@ First acquisition returned `REPOSITORY_SOURCE_UNAVAILABLE / NOT_APPLIED`. A boun
 ## Do not redo / scope boundary
 
 Retain accepted Paper C01–C09, JT01–JT08/JT01M and CW15, original source-reader custody, original 21 reference boards, existing source plan/Agent OS continuity and live fleet writers. Do not turn this into a redesign pass, provider enrollment, fleet rollout, a second scheduler or a takeover of active native sessions. The current phase targets executable company integration, not another research-only handoff.
+
+## Engineering result and current adoption boundary
+
+Implemented the connected source path, not another design-only guide:
+
+- Primary **Team** route, loaded separately from the app's startup bundle, with company overview, people, goals, projects, source work list/board, original task discussion and outputs, execution summaries, routines/run/revision history, artifacts and activity.
+- Typed `MissionHost.company`, existing web-auth transport, fixed macOS/Tauri commands, authenticated Workspace routes, outer audited path-fence entries and sealed installed-configuration composition.
+- One configured company and explicit existing principal/source credential binding. No private bearer/adapterConfig/environment/raw runtime-log projection. Existing project/profile joins are released only for source-visible records.
+- An explicitly enabled unassigned backlog-create command using the upstream native idempotency key and one new closed record variant in the **existing** pending-pointer store. Unknown outcomes are not retried or cleared from an editable marker.
+- Existing-agent runtime inspector with a concrete retain/replace map, official `hermes_gateway` target, issue-scoped work contexts and retained original supervisor. It prepares the relationship without mutating, cloning, unpausing or restarting a bot.
+- Canonical [continuous-team architecture and cutover guide](../architecture/PAPERCLIP_CONTINUOUS_TEAM.md), package entry guide and an inert complete configuration example.
+
+Implementation API pin: Paperclip `d69631b01b9c658f80bf8bed389863dce82643e1` / `2026.1106.0`. The exact company, issue/filter, agent, routine, artifact, activity and gateway source interfaces were inspected. The actual official HTTP/SSE adapter is distinct from the existing private `hermes-gateway-v1` native bridge. The pinned general agent adapter PATCH lacks a general expected-revision CAS, so the integration does not invent one or silently overwrite an active configuration writer.
+
+Source checks performed: TypeScript compilation; production Vite bundling; syntax-only parsing of ten changed/new Python files plus the inert JSON; rustfmt parse/format of the new Rust module; exact tracked mounting-diff review; `git diff --check`. These are source checks, **not unit/integration tests, native Rust type acceptance, browser proof, canaries or live bot results**. No test suite or model run was invoked. Existing large-bundle/mixed-import warnings remain outside this new lazy route.
+
+Affected-source freshness was checked against protected master `ebc48690f20bb5c0554f91ec7cf2b4533f641f5a`: no movement in the owned OS/Workspace/Executive mounting paths or selected governing procedure paths relative to the implementation base. The original procedure pin is retained; no ancestry-only rebase, duplicate workspace or displaced writer was needed.
+
+The largest coherent current-source slice is packaged for one implementation PR. Source delivery/queue receipts belong to that PR; neither an accepted push nor pending CI is an installed-runtime claim. Manual tests/canaries/live-result demonstration remain deferred under the current instruction; actually enforced repository checks still bind.
+
+Remaining **installed/consumer** work is explicit: bind the real current service origin/company/principal credential, reconcile the native/HTTP gateway and existing configuration writer, connect actual Executive/Capacity admission to Paperclip-originated work, perform capability-specific work/wake cutover, establish authoritative readback for all uncertain native create receipts, and consume actual T3/room results in the original parent. These are not provided by owner labels, mock data or a new dispatcher. Existing agents, schedules, credentials, services and sibling source writers were not changed.
+
+DO_NOT_REDO: the complete Team/read/write/recovery source contribution, source-pinned donor inspection, and accepted native Paper design. Next consumer action is reconcile the installed source and existing gateway/admission bindings on the current canonical release carrier—not recreate the company or enroll another bot fleet.
