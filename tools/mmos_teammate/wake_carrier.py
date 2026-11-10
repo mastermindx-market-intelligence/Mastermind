@@ -49,6 +49,48 @@ class NeedsHuman(Exception):
     """The teammate is waiting for an answer in its T3 thread."""
 
 
+OUTPUT_BLOCK = "paperclip-output"
+
+
+def parse_output_block(reply):
+    """The LAST ```paperclip-output fenced block in a reply, if any.
+
+        ```paperclip-output
+        key: summary
+        title: One-page summary
+        <markdown body lines...>
+        ```
+
+    -> {"key", "title", "body"} or None. A malformed block is ignored (the
+    reply is still delivered as a comment); it can never fail the run."""
+    lines = (reply or "").splitlines()
+    start = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") and OUTPUT_BLOCK in stripped:
+            start = idx
+    if start is None:
+        return None
+    key, title, body_lines, closed = None, None, [], False
+    for line in lines[start + 1:]:
+        if line.strip().startswith("```"):
+            closed = True
+            break
+        if key is None and line.strip().startswith("key:"):
+            key = line.split(":", 1)[1].strip()
+            continue
+        if title is None and line.strip().startswith("title:"):
+            title = line.split(":", 1)[1].strip()
+            continue
+        body_lines.append(line)
+    if not closed or not key:
+        return None
+    if not key.replace("-", "").replace("_", "").isalnum():
+        return None  # document keys stay safe identifiers
+    return {"key": key, "title": title or key,
+            "body": "\n".join(body_lines).strip() + "\n"}
+
+
 def log(message: str) -> None:
     print(f"[t2-carrier] {message}", flush=True)  # secrets are never logged
 
@@ -217,6 +259,23 @@ class PaperclipClient:
     def set_status(self, issue_id, status):
         return self._request("PATCH", f"/api/issues/{issue_id}", {"status": status})
 
+    def issue_document(self, issue_id, key):
+        """GET one issue document; None if absent (a 404 from this build)."""
+        try:
+            return self._request("GET", f"/api/issues/{issue_id}/documents/{key}")
+        except CarrierError as exc:
+            if "HTTP 404" in str(exc):
+                return None
+            raise
+
+    def put_issue_document(self, issue_id, key, title, body):
+        """Upsert one markdown document on the issue (this build's existing
+        output surface; PUT is keyed, so a re-run is a no-op revision)."""
+        return self._request(
+            "PUT", f"/api/issues/{issue_id}/documents/{key}",
+            {"format": "markdown", "title": title, "body": body,
+             "changeSummary": f"teammate output via {OUTPUT_BLOCK} block"})
+
 
 class T3Thread:
     """The teammate's primary thread, driven through the stock `t3` CLI.
@@ -312,6 +371,17 @@ def deliver(pc, issue, reply, op, crash_after=None):
             "The teammate answered in its T3 thread and the answer is posted as a "
             "comment. Confirm it completes this issue (accept) or send it back "
             "(reject with a reason).")
+    doc = parse_output_block(reply)
+    if doc:
+        existing = pc.issue_document(issue["id"], doc["key"])
+        if existing and (existing.get("body") or "") == doc["body"]:
+            log(f"output document {doc['key']} already on "
+                f"{issue.get('identifier')} with the same body; skipped")
+        else:
+            pc.put_issue_document(issue["id"], doc["key"],
+                                  doc["title"], doc["body"])
+            log(f"output document {doc['key']} written on "
+                f"{issue.get('identifier')}")
     pc.set_status(issue["id"], "in_review")
     log(f"posted reply as comment on {issue.get('identifier')}; "
         "request_confirmation pending; status -> in_review")

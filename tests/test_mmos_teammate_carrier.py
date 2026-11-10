@@ -27,6 +27,7 @@ class FakePaperclip:
         self.issues = issues or {}
         self.comment_rows = dict(comments or {})
         self.interaction_rows = list(interactions or [])
+        self.documents = {}
         self.calls = []
         self.fail = set(fail)
         self.metadata = metadata
@@ -88,6 +89,16 @@ class FakePaperclip:
         self._guard("status")
         self.calls.append(("status", issue_id, status))
         self.issues[issue_id]["status"] = status
+
+    def issue_document(self, issue_id, key):
+        self._guard("document")
+        return self.documents.get((issue_id, key))
+
+    def put_issue_document(self, issue_id, key, title, body):
+        self._guard("document")
+        self.documents[(issue_id, key)] = {"key": key, "title": title,
+                                           "body": body}
+        self.calls.append(("document", issue_id, key))
 
 
 class FakeT3:
@@ -431,3 +442,56 @@ def test_confirmation_replay_is_skipped_not_409():
     assert [c for c in pc.calls if c[0] == "interaction"] == []  # no re-POST, no 409
     assert [c for c in pc.calls if c[0] == "comment"] == []      # no release note
     assert pc.issues["is-1"]["status"] == "in_review"            # completes cleanly
+
+
+def test_parse_output_block_takes_last_wellformed_block():
+    reply = ("Summary text.\n\n"
+             "```paperclip-output\nkey: summary\ntitle: One-pager\nline one\nline two\n```\n")
+    doc = wc.parse_output_block(reply)
+    assert doc == {"key": "summary", "title": "One-pager",
+                   "body": "line one\nline two\n"}
+    # a later block wins over an earlier one
+    two = ("```paperclip-output\nkey: first\ntitle: A\nx\n```\n"
+           "middle\n"
+           "```paperclip-output\nkey: second\ntitle: B\ny\n```\n")
+    assert wc.parse_output_block(two)["key"] == "second"
+
+
+def test_parse_output_block_malformed_is_none_never_throws():
+    assert wc.parse_output_block("no block here") is None
+    assert wc.parse_output_block("```paperclip-output\nno key\n```\n") is None
+    assert wc.parse_output_block("```paperclip-output\nkey: bad key!\nx\n```\n") is None
+    assert wc.parse_output_block("```paperclip-output\nkey: k\nnever closed") is None
+    assert wc.parse_output_block(None) is None
+
+
+def test_output_block_becomes_issue_document_once():
+    reply = ("Wrote outputs/summary.md\n\n"
+             "```paperclip-output\nkey: mmo-summary\ntitle: Summary\n# S\nbody\n```\n")
+    pc, t3 = FakePaperclip(issues=one_issue()), FakeT3(replies=[reply])
+    assert run(pc, t3) == 0
+    docs = [c for c in pc.calls if c[0] == "document"]
+    assert [(c[1], c[2]) for c in docs] == [("is-1", "mmo-summary")]
+    assert pc.documents[("is-1", "mmo-summary")]["body"] == "# S\nbody\n"
+    # a re-run with the same thread answer does not write it again
+    pc2 = FakePaperclip(issues={"is-1": {"identifier": "MMO-1", "status": "in_progress",
+                                         "title": "Summarize file X",
+                                         "description": "Write a three-line summary."}},
+                        comments={"is-1": [{"body": reply}]},
+                        interactions=[{"id": "ix-1", "kind": "request_confirmation",
+                                       "status": "pending",
+                                       "idempotencyKey":
+                                       wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.") + "-confirm"}])
+    pc2.documents[("is-1", "mmo-summary")] = {"key": "mmo-summary",
+                                              "title": "Summary",
+                                              "body": "# S\nbody\n"}
+    t3.messages_store = [("user", "r1", "task"),
+                         ("assistant", "r1", reply)]
+    assert run(pc2, t3) == 0
+    assert [c for c in pc2.calls if c[0] == "document"] == []  # idempotent
+
+
+def test_reply_without_output_block_writes_no_document():
+    pc, t3 = FakePaperclip(issues=one_issue()), FakeT3(replies=["plain answer"])
+    assert run(pc, t3) == 0
+    assert [c for c in pc.calls if c[0] == "document"] == []
