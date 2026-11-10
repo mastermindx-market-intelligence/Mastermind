@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mastermind OS Dev",
+  "identifier": "com.mastermind.os.dev",
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "com.mastermind.os.dev"
+        ]
+      }
+    }
+  }
+}

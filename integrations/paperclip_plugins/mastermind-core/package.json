@@ -1,0 +1,12 @@
+{
+  "name": "mastermind-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "First Mastermind OS module: roster-truth widget, page, sidebar entry, agent tool and health check.",
+  "paperclipPlugin": {
+    "manifest": "dist/manifest.js",
+    "worker": "dist/worker.js",
+    "ui": "dist/ui"
+  }
+}

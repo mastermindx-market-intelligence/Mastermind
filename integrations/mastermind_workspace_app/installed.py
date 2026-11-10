@@ -78,6 +78,7 @@ class CeoIngressWorkspaceClient:
         from common import workspace_capacity_fabric_contract as capacity_fabric_wire
         from common import workspace_t3_attempt_fleet_contract as t3_fleet_wire
         from common import workspace_t3_thread_projection_contract as t3_thread_wire
+        from common import workspace_execution_return_contract as execution_return_wire
         from common import workspace_byok_read_contract as byok_wire
         from common import workspace_source_operation_wire as source_wire
         discovery_context = type(frame) is dict and frame.get("schema") == context_wire.DISCOVERY_FRAME_SCHEMA
@@ -115,6 +116,9 @@ class CeoIngressWorkspaceClient:
         elif type(frame) is dict and frame.get("schema") == t3_thread_wire.FRAME_SCHEMA:
             t3_thread_wire.validate_frame(frame)
             ceiling = t3_thread_wire.MAX_RESPONSE_BYTES
+        elif type(frame) is dict and frame.get("schema") == execution_return_wire.FRAME_SCHEMA:
+            execution_return_wire.validate_frame(frame)
+            ceiling = execution_return_wire.MAX_RESPONSE_BYTES
         elif type(frame) is dict and frame.get("schema") == model_configuration_wire.FRAME_SCHEMA:
             model_configuration_wire.validate_frame(frame)
             ceiling = model_configuration_wire.MAX_RESPONSE_BYTES

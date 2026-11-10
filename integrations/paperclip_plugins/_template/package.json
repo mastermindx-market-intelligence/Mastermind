@@ -1,0 +1,11 @@
+{
+  "name": "REPLACE-ME",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "paperclipPlugin": {
+    "manifest": "dist/manifest.js",
+    "worker": "dist/worker.js",
+    "ui": "dist/ui"
+  }
+}
