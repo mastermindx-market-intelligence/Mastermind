@@ -85,6 +85,12 @@ test('tool metadata is closed read-only status', () => {
     [true, false, true, false],
   );
   assert.deepEqual(STUDIO_FLEET_STATUS_TOOL.inputSchema.required, []);
+  const description = STUDIO_FLEET_STATUS_TOOL.description;
+  assert.match(description, /unselected Desktop Commander tools target local M2/);
+  assert.match(description, /studio_select_host selects only operator-configured REMOTE routes/);
+  assert.match(description, /M2 is the local default and is not a remote route/);
+  assert.match(description, /physicalFleet view is advisory Fabric inventory/);
+  assert.match(description, /failed remote-selection preflight does not prove/);
 });
 
 test('config is opt-in and closed', () => {

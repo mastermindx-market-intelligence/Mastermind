@@ -19,6 +19,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: meta-ceo-seat-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   source-only-launch-preflight:
     name: Offline launcher tests (Python ${{ matrix.python-version }})

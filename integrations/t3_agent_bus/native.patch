@@ -1,0 +1,2315 @@
+diff --git a/apps/server/src/cli/thread.native.test.ts b/apps/server/src/cli/thread.native.test.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/server/src/cli/thread.native.test.ts
+@@ -0,0 +1,588 @@
++import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
++import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
++import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
++import * as NodePath from "@effect/platform-node/NodePath";
++import * as NodeTerminal from "@effect/platform-node/NodeTerminal";
++import { assert, it } from "@effect/vitest";
++import { AuthSessionId } from "@t3tools/contracts";
++import * as NetService from "@t3tools/shared/Net";
++import * as ConfigProvider from "effect/ConfigProvider";
++import * as DateTime from "effect/DateTime";
++import * as Deferred from "effect/Deferred";
++import * as Effect from "effect/Effect";
++import * as FileSystem from "effect/FileSystem";
++import * as Fiber from "effect/Fiber";
++import * as Layer from "effect/Layer";
++import * as Option from "effect/Option";
++import * as Path from "effect/Path";
++import * as Result from "effect/Result";
++import * as Stdio from "effect/Stdio";
++import * as Stream from "effect/Stream";
++import * as TestConsole from "effect/testing/TestConsole";
++import { Command } from "effect/cli";
++import { beforeEach, vi } from "vite-plus/test";
++
++import * as McpBridge from "../mcp/AcpMcpStdioBridge.ts";
++import type { McpToolSession } from "../mcp/AcpMcpStdioBridge.ts";
++import {
++  makePersistedServerRuntimeState,
++  persistServerRuntimeState,
++} from "../serverRuntimeState.ts";
++import { readNativeCatalog, threadCommand } from "./thread.ts";
++
++const auth = vi.hoisted(() => ({ issues: 0, revokes: 0 }));
++
++vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("../auth/EnvironmentAuth.ts")>();
++  return {
++    ...actual,
++    layerRuntime: Layer.mock(actual.EnvironmentAuth)({
++      issueMcpClientSession: () =>
++        Effect.map(DateTime.now, (expiresAt) => {
++          auth.issues += 1;
++          return {
++            sessionId: AuthSessionId.make("test-session"),
++            token: "synthetic-token",
++            expiresAt,
++          };
++        }),
++      revokeSession: () =>
++        Effect.sync(() => {
++          auth.revokes += 1;
++          return true;
++        }),
++    }),
++  };
++});
++
++beforeEach(() => {
++  auth.issues = 0;
++  auth.revokes = 0;
++});
++
++const encoder = new TextEncoder();
++
++// NodeServices.layer would pin Stdio to the real process stdin; these pieces leave Stdio free.
++const cliLayers = Layer.mergeAll(
++  NodeFileSystem.layer,
++  NodePath.layer,
++  NodeTerminal.layer,
++  NodeCrypto.layer,
++  NetService.layer,
++  ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_PORT: "3773" } })),
++);
++
++const makeBaseDir = Effect.fn("threadNativeTest.makeBaseDir")(function* () {
++  const fs = yield* FileSystem.FileSystem;
++  const path = yield* Path.Path;
++  const root = yield* fs
++    .makeTempDirectoryScoped({ prefix: "t3-thread-native-" })
++    .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
++  const baseDir = path.join(root, "state");
++  yield* persistServerRuntimeState({
++    path: path.join(baseDir, "userdata", "server-runtime.json"),
++    state: yield* makePersistedServerRuntimeState({
++      config: { host: "127.0.0.1", devUrl: undefined },
++      port: 3_773,
++    }),
++  });
++  return baseDir;
++});
++
++const runNative = (baseDir: string, tool: string, environment?: string) =>
++  Command.runWith(threadCommand, { version: "0.0.0" })([
++    "native",
++    tool,
++    ...(environment === undefined ? [] : ["--expected-environment-id", environment]),
++    "--json",
++    "--base-dir",
++    baseDir,
++  ]);
++
++const provideCli = <A, E, R>(effect: Effect.Effect<A, E, R>, stdin: string) =>
++  effect.pipe(
++    Effect.scoped,
++    Effect.provide(
++      Layer.provideMerge(
++        NodeChildProcessSpawner.layer,
++        Layer.mergeAll(cliLayers, Stdio.layerTest({ stdin: Stream.make(encoder.encode(stdin)) })),
++      ),
++    ),
++  );
++
++/** TestConsole.logLines entries are unknown; the CLI only ever logs JSON strings. */
++const lastLoggedLine = Effect.map(TestConsole.logLines, (lines) => String(lines.at(-1) ?? ""));
++
++/** Runs to a Result and hands back the failure, dying when the command succeeds. */
++const failWith = <A, E>(effect: Effect.Effect<A, E, never>) =>
++  Effect.flatMap(Effect.result(effect), (result) =>
++    Result.isSuccess(result)
++      ? Effect.die("expected this command to fail")
++      : Effect.succeed(Option.getOrThrow(Result.getFailure(result))),
++  );
++
++const failureTag = (failure: unknown) => (failure as { _tag: string })._tag;
++const failureDetail = (failure: unknown) => (failure as { detail: string }).detail;
++
++/** One session whose single call the test scripts; records what it was asked. */
++const scriptSession = (behavior: {
++  readonly result?: unknown;
++  readonly failure?: McpBridge.AcpMcpBridgeError;
++  readonly suspend?: Deferred.Deferred<void>;
++}) => {
++  const calls: Array<{ readonly tool: string; readonly args: unknown }> = [];
++  const session = {
++    call: (tool: string, args: Readonly<Record<string, unknown>>) => {
++      calls.push({ tool, args });
++      if (behavior.failure !== undefined) return Effect.fail(behavior.failure);
++      if (behavior.suspend !== undefined) {
++        return Effect.andThen(Deferred.succeed(behavior.suspend, void 0), Effect.never);
++      }
++      return Effect.succeed(behavior.result);
++    },
++    listTools: () => Effect.die("unexpected tools/list call"),
++  } satisfies McpToolSession;
++  return { session, calls };
++};
++
++it.effect("native rejects a known but non-allowlisted tool before any session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_project_create"), "{}"));
++    assert.strictEqual(failureTag(failure), "ThreadUsageError");
++    assert.isTrue(failureDetail(failure).includes("not allowlisted"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects an unknown tool name before any session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(provideCli(runNative(baseDir, "definitely_not_a_tool"), "{}"));
++    assert.isTrue(failureDetail(failure).includes("not allowlisted"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects malformed stdin JSON without contacting the server", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(runNative(baseDir, "t3_thread_read"), `{"threadId": `),
++    );
++    assert.strictEqual(failureTag(failure), "ThreadUsageError");
++    assert.isTrue(failureDetail(failure).includes("one JSON object"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects stdin past its byte cap without contacting the server", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(runNative(baseDir, "t3_thread_read"), `{"text": "${"x".repeat(300_000)}"}`),
++    );
++    assert.isTrue(failureDetail(failure).includes("262144-byte stdin limit"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects a JSON array instead of an arguments object", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_queue"), "[1, 2]"));
++    assert.isTrue(failureDetail(failure).includes("one JSON object"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native prints the server's success envelope unchanged", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const envelope = {
++      structuredContent: { environmentId: "env-1", label: "Studio" },
++      content: [{ type: "text", text: '{"environmentId":"env-1"}' }],
++      extraField: { kept: true },
++    };
++    const { session, calls } = scriptSession({ result: envelope });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    yield* provideCli(runNative(baseDir, "t3_environment_read"), "{}");
++
++    assert.deepStrictEqual(calls, [{ tool: "t3_environment_read", args: {} }]);
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), envelope);
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native prints the server's error envelope for missing required args, unchanged", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const envelope = {
++      isError: true,
++      content: [{ type: "text", text: `{"message":"t3_thread_read requires threadId"}` }],
++    };
++    const { session, calls } = scriptSession({ result: envelope });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    yield* provideCli(runNative(baseDir, "t3_thread_read"), "{}");
++
++    assert.deepStrictEqual(calls, [{ tool: "t3_thread_read", args: {} }]);
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), envelope);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native makes exactly one call and fails plainly when transport fails", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const before = (yield* TestConsole.logLines).length;
++    const { session, calls } = scriptSession({
++      failure: new McpBridge.AcpMcpBridgeError({ message: "HTTP 500." }),
++    });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_thread_list"), "{}"));
++
++    assert.strictEqual(failureTag(failure), "ThreadToolFailedError");
++    assert.lengthOf(calls, 1);
++    assert.lengthOf((yield* TestConsole.logLines).slice(before), 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native interrupts the one call and still revokes its session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const before = (yield* TestConsole.logLines).length;
++    const started = yield* Deferred.make<void>();
++    const { session } = scriptSession({ suspend: started });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    const fiber = yield* Effect.forkChild(provideCli(runNative(baseDir, "t3_thread_list"), "{}"));
++    yield* Deferred.await(started);
++    yield* Fiber.interrupt(fiber);
++
++    assert.strictEqual(auth.revokes, 1);
++    assert.lengthOf((yield* TestConsole.logLines).slice(before), 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native refuses t3_thread_launch that would inherit a provider default", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(
++        runNative(baseDir, "t3_thread_launch"),
++        `{"projectId": "p", "title": "T", "message": "m"}`,
++      ),
++    );
++    assert.isTrue(failureDetail(failure).includes("capacity_fabric"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native refuses a modelSelection naming any other provider instance", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const args = JSON.stringify({
++      modelSelection: { instanceId: "glm2_direct", model: "glm-5.3" },
++    });
++
++    const launch = yield* failWith(provideCli(runNative(baseDir, "t3_thread_launch"), args));
++    assert.isTrue(failureDetail(launch).includes("capacity_fabric"));
++
++    const configure = yield* failWith(provideCli(runNative(baseDir, "t3_thread_configure"), args));
++    assert.isTrue(failureDetail(configure).includes("capacity_fabric"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native forwards an explicit capacity_fabric selection and reads without one", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const { session, calls } = scriptSession({ result: { structuredContent: {} } });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    const launchArgs = {
++      projectId: "p",
++      title: "T",
++      message: "m",
++      modelSelection: { instanceId: "capacity_fabric", model: "model-x" },
++    };
++    yield* provideCli(runNative(baseDir, "t3_thread_launch"), JSON.stringify(launchArgs));
++    yield* provideCli(runNative(baseDir, "t3_thread_configure"), `{"threadId": "t"}`);
++
++    assert.deepStrictEqual(calls, [
++      { tool: "t3_thread_launch", args: launchArgs },
++      { tool: "t3_thread_configure", args: { threadId: "t" } },
++    ]);
++    assert.strictEqual(auth.issues, 2);
++    assert.strictEqual(auth.revokes, 2);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++const allowlistedEntry = (name: string) => ({
++  name,
++  description: `${name} description`,
++  inputSchema: { type: "object" as const, properties: { threadId: { type: "string" } } },
++  annotations: { title: name, readOnlyHint: name === "t3_environment_read" },
++});
++
++const catalogSession = (pages: ReadonlyArray<unknown>) => {
++  const queue = [...pages];
++  const requests: Array<{ readonly cursor?: string }> = [];
++  const session = {
++    call: () => Effect.die("unexpected tools/call"),
++    listTools: (params: { readonly cursor?: string } = {}) => {
++      requests.push(params);
++      const page = queue.shift();
++      return page === undefined ? Effect.die("unscripted tools/list page") : Effect.succeed(page);
++    },
++  } satisfies McpToolSession;
++  return { session, requests };
++};
++
++it.effect("native-catalog follows pages and keeps only allowlisted schemas verbatim", () =>
++  Effect.gen(function* () {
++    const projectCreate = { name: "t3_project_create", inputSchema: { type: "object" } };
++    const nameless = { description: "no name" };
++    const secret = { name: "request_secret" };
++    const queue = allowlistedEntry("t3_queue");
++    const environment = allowlistedEntry("t3_environment_read");
++    const { session, requests } = catalogSession([
++      { tools: [queue, projectCreate, nameless], nextCursor: "page-2" },
++      { tools: [secret, environment] },
++    ]);
++
++    const catalog = yield* readNativeCatalog(session);
++
++    assert.deepStrictEqual(catalog, [queue, environment]);
++    assert.deepStrictEqual(requests, [{}, { cursor: "page-2" }]);
++  }),
++);
++
++it.effect("native-catalog stops at its page bound instead of looping forever", () =>
++  Effect.gen(function* () {
++    const { session, requests } = catalogSession(
++      Array.from({ length: 20 }, (_, index) => ({
++        tools: [{ name: `filtered-${index}` }],
++        nextCursor: `page-${index + 1}`,
++      })),
++    );
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.strictEqual(failureTag(failure), "ThreadToolFailedError");
++    assert.isTrue(failureDetail(failure).includes("exceeded 8 pages"));
++    assert.lengthOf(requests, 8);
++  }),
++);
++
++it.effect("native-catalog stops at its tool-count bound on an oversized catalog", () =>
++  Effect.gen(function* () {
++    const filler = Array.from({ length: 201 }, (_, index) => ({ name: `filler-${index}` }));
++    const { session } = catalogSession([{ tools: filler }]);
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.isTrue(failureDetail(failure).includes("exceeded 200 tools"));
++  }),
++);
++
++it.effect("native-catalog stops at its byte bound when schemas are huge", () =>
++  Effect.gen(function* () {
++    const huge = {
++      name: "t3_queue",
++      inputSchema: { type: "object" as const, description: "x".repeat(1024 * 1024) },
++    };
++    const { session } = catalogSession([
++      { tools: [huge], nextCursor: "page-2" },
++      { tools: [{ ...huge }] },
++    ]);
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.isTrue(failureDetail(failure).includes("exceeded 2097152 bytes"));
++  }),
++);
++
++it.effect("native-catalog rejects a page that is not a tools/list result", () =>
++  Effect.gen(function* () {
++    const { session } = catalogSession([{ tools: "not an array" }]);
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.isTrue(failureDetail(failure).includes("not a tools/list result"));
++  }),
++);
++
++it.effect("native-catalog prints the filtered catalog from the running server", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const entry = allowlistedEntry("t3_environment_read");
++    const { session } = catalogSession([{ tools: [entry, { name: "t3_project_delete" }] }]);
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    yield* provideCli(
++      Command.runWith(threadCommand, { version: "0.0.0" })([
++        "native-catalog",
++        "--json",
++        "--base-dir",
++        baseDir,
++      ]),
++      "",
++    );
++
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), {
++      tools: [entry],
++    });
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native environment guard checks the same session before the requested action", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const calls: Array<string> = [];
++    const envelope = { structuredContent: { sequence: 23 }, isError: false };
++    const session = {
++      call: (tool: string) => {
++        calls.push(tool);
++        return Effect.succeed(
++          tool === "t3_environment_read"
++            ? { structuredContent: { environmentId: "env-1" }, isError: false }
++            : envelope,
++        );
++      },
++      listTools: () => Effect.die("unexpected catalog"),
++    } satisfies McpToolSession;
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++    yield* provideCli(
++      runNative(baseDir, "t3_thread_send", "env-1"),
++      '{"threadId":"t","message":"m"}',
++    );
++    assert.deepStrictEqual(calls, ["t3_environment_read", "t3_thread_send"]);
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), envelope);
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("wrong native environment never sends the requested action", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const { session, calls } = scriptSession({
++      result: { structuredContent: { environmentId: "foreign" } },
++    });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++    const failure = yield* failWith(
++      provideCli(runNative(baseDir, "t3_thread_send", "env-1"), "{}"),
++    );
++    assert.isTrue(failureDetail(failure).includes("does not match"));
++    assert.deepStrictEqual(calls, [{ tool: "t3_environment_read", args: {} }]);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("qualified environment read reuses its one original envelope", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const envelope = {
++      structuredContent: { environmentId: "env-1" },
++      isError: false,
++      nativeMeta: "kept",
++    };
++    const { session, calls } = scriptSession({ result: envelope });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++    yield* provideCli(runNative(baseDir, "t3_environment_read", "env-1"), "{}");
++    assert.lengthOf(calls, 1);
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), envelope);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native output counts UTF-8 bytes and never retries an oversized modifying result", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const { session, calls } = scriptSession({
++      result: { structuredContent: { text: "\u4e2d".repeat(100_000) } },
++    });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++    const before = (yield* TestConsole.logLines).length;
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_thread_send"), "{}"));
++    assert.isTrue(failureDetail(failure).includes("reconciled, not repeated"));
++    assert.lengthOf(calls, 1);
++    assert.lengthOf(yield* TestConsole.logLines, before);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("lifecycle selection rejects a foreign provider before any native session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(
++        runNative(baseDir, "t3_thread_lifecycle"),
++        '{"action":"set_model","modelSelection":{"instanceId":"other","model":"model"}}',
++      ),
++    );
++    assert.isTrue(failureDetail(failure).includes("capacity_fabric"));
++    assert.lengthOf(session.mock.calls, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("catalog rejects duplicate allowlisted names without picking a winning schema", () =>
++  Effect.gen(function* () {
++    const entry = allowlistedEntry("t3_queue");
++    const { session } = catalogSession([{ tools: [entry, entry] }]);
++    const failure = yield* failWith(readNativeCatalog(session));
++    assert.isTrue(failureDetail(failure).includes("repeated an allowlisted tool name"));
++  }),
++);
++
++it.effect("catalog rejects repeated cursors before the page bound", () =>
++  Effect.gen(function* () {
++    const { session, requests } = catalogSession([
++      { tools: [], nextCursor: "same" },
++      { tools: [], nextCursor: "same" },
++    ]);
++    const failure = yield* failWith(readNativeCatalog(session));
++    assert.isTrue(failureDetail(failure).includes("invalid or repeated cursor"));
++    assert.lengthOf(requests, 2);
++  }),
++);
++
++it.effect("catalog bounds filtered entries too using actual UTF-8 bytes", () =>
++  Effect.gen(function* () {
++    const { session } = catalogSession([
++      { tools: [{ name: "excluded", description: "\u4e2d".repeat(800_000) }] },
++    ]);
++    const failure = yield* failWith(readNativeCatalog(session));
++    assert.isTrue(failureDetail(failure).includes("exceeded 2097152 bytes"));
++  }),
++);
++
++it.effect("catalog rejects malformed cursor instead of silently dropping later tools", () =>
++  Effect.gen(function* () {
++    for (const nextCursor of [null, 0, "", "x".repeat(4097)]) {
++      const { session } = catalogSession([{ tools: [], nextCursor }]);
++      const failure = yield* failWith(readNativeCatalog(session));
++      assert.isTrue(failureDetail(failure).includes("invalid or repeated cursor"));
++    }
++  }),
++);
+diff --git a/apps/server/src/cli/thread.test.ts b/apps/server/src/cli/thread.test.ts
+--- a/apps/server/src/cli/thread.test.ts
++++ b/apps/server/src/cli/thread.test.ts
+@@ -90,6 +90,7 @@
+                 return Effect.die(`unexpected ${tool} call`);
+             }
+           },
++          listTools: () => Effect.die("unexpected tools/list call"),
+         }),
+       );
+ 
+diff --git a/apps/server/src/cli/thread.ts b/apps/server/src/cli/thread.ts
+--- a/apps/server/src/cli/thread.ts
++++ b/apps/server/src/cli/thread.ts
+@@ -139,6 +139,7 @@
+ 
+ const decodeFailureText = Schema.decodeUnknownOption(Schema.fromJsonString(OrchestratorMcpFailure));
+ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
++const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+ const printJson = (value: unknown) => Console.log(encodeJson(value));
+ 
+ const ToolResult = Schema.Struct({
+@@ -205,7 +206,7 @@
+  */
+ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E, R>(
+   flags: { readonly baseDir: Option.Option<string> },
+-  run: (tools: ThreadTools) => Effect.Effect<A, E, R>,
++  run: (tools: ThreadTools, session: McpToolSession) => Effect.Effect<A, E, R>,
+ ) {
+   const logLevel = yield* GlobalFlag.LogLevel;
+   const config = yield* resolveCliAuthConfig(flags, logLevel);
+@@ -233,7 +234,7 @@
+       authorization: `Bearer ${issued.token}`,
+       clientName: "t3-thread-cli",
+     }).pipe(Effect.mapError((cause) => new ThreadServerUnreachableError({ origin, cause })));
+-    return yield* run(makeThreadTools(session, origin));
++    return yield* run(makeThreadTools(session, origin), session);
+   }).pipe(
+     Effect.scoped,
+     Effect.provide(
+@@ -765,6 +766,310 @@
+   ),
+ );
+ 
++/**
++ * `thread native` forwards one MCP tool call to the running server and prints
++ * its envelope verbatim. The allowlist is closed: secrets, auth, scheduling,
++ * projects, previews, and workspaces stay with their own owners.
++ */
++const NATIVE_TOOL_ALLOWLIST = [
++  "t3_environment_read",
++  "orchestrator_capabilities",
++  "t3_project_list",
++  "t3_thread_list",
++  "t3_thread_read",
++  "t3_thread_launch",
++  "t3_thread_send",
++  "t3_thread_wait",
++  "t3_thread_interrupt",
++  "t3_thread_configure",
++  "t3_thread_organize",
++  "t3_queue",
++  "t3_pending_request",
++  "t3_thread_lifecycle",
++] as const satisfies ReadonlyArray<string>;
++const nativeToolNames = new Set<string>(NATIVE_TOOL_ALLOWLIST);
++
++/** New runs through `native` name their provider explicitly; project defaults are never inherited. */
++const NATIVE_PROVIDER_INSTANCE = "capacity_fabric";
++const NATIVE_SELECTION_TOOLS = new Set([
++  "t3_thread_launch",
++  "t3_thread_configure",
++  "t3_thread_lifecycle",
++]);
++
++/** Room for the server's largest single argument (120 000 characters), and nothing more. */
++const NATIVE_ARGS_MAX_BYTES = 256 * 1024;
++
++const readNativeArguments = Effect.fn("cli.thread.readNativeArguments")(function* (tool: string) {
++  const stdio = yield* Stdio.Stdio;
++  let bytes = 0;
++  const chunks = yield* stdio.stdin.pipe(
++    Stream.mapError(
++      () => new ThreadUsageError({ detail: "Could not read native arguments from stdin." }),
++    ),
++    Stream.mapEffect((chunk) => {
++      bytes += chunk.byteLength;
++      return bytes > NATIVE_ARGS_MAX_BYTES
++        ? Effect.fail(
++            new ThreadUsageError({
++              detail: `'${tool}' arguments exceed the ${NATIVE_ARGS_MAX_BYTES}-byte stdin limit.`,
++            }),
++          )
++        : Effect.succeed(chunk);
++    }),
++    Stream.runFold(
++      () => [] as Array<Uint8Array>,
++      (chunks, chunk) => {
++        chunks.push(chunk);
++        return chunks;
++      },
++    ),
++  );
++  const text = yield* Effect.try({
++    try: () => new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)),
++    catch: () => new ThreadUsageError({ detail: "Native arguments must be valid UTF-8." }),
++  });
++  const parsed = Option.filter(
++    decodeJsonText(text),
++    (value): value is Record<string, unknown> =>
++      typeof value === "object" && value !== null && !Array.isArray(value),
++  );
++  if (Option.isNone(parsed)) {
++    return yield* new ThreadUsageError({
++      detail: `Pass '${tool}' arguments as one JSON object on stdin.`,
++    });
++  }
++  return parsed.value;
++});
++
++const guardNativeProviderSelection = Effect.fn("cli.thread.guardNativeProviderSelection")(
++  function* (tool: string, args: Record<string, unknown>) {
++    if (!NATIVE_SELECTION_TOOLS.has(tool)) return;
++    const selection = args.modelSelection;
++    if (selection === undefined) {
++      if (
++        tool === "t3_thread_launch" ||
++        (tool === "t3_thread_lifecycle" && args.action === "set_model")
++      ) {
++        return yield* new ThreadUsageError({
++          detail: `'${tool}' through 'thread native' needs modelSelection with instanceId '${NATIVE_PROVIDER_INSTANCE}'; a project default is never inherited here.`,
++        });
++      }
++      return;
++    }
++    const instanceId =
++      typeof selection === "object" &&
++      selection !== null &&
++      typeof (selection as { instanceId?: unknown }).instanceId === "string"
++        ? (selection as { instanceId: string }).instanceId
++        : undefined;
++    if (instanceId !== NATIVE_PROVIDER_INSTANCE) {
++      return yield* new ThreadUsageError({
++        detail: `'${tool}' through 'thread native' must select provider instance '${NATIVE_PROVIDER_INSTANCE}'.`,
++      });
++    }
++  },
++);
++
++const nativeEnvironmentFlag = Flag.String("expected-environment-id").pipe(
++  Flag.withDescription(
++    "Refuse before the requested action unless this same native session observes the exact environment.",
++  ),
++  Flag.optional,
++);
++const NATIVE_RESULT_MAX_BYTES = 256 * 1024;
++const boundedNativeJson = Effect.fn("cli.thread.boundedNativeJson")(function* (
++  tool: string,
++  value: unknown,
++) {
++  const encoded = yield* Effect.try({
++    try: () => encodeJson(value),
++    catch: () =>
++      new ThreadToolFailedError({ tool, detail: "The native result is not valid JSON." }),
++  });
++  if (Buffer.byteLength(encoded, "utf8") > NATIVE_RESULT_MAX_BYTES) {
++    return yield* new ThreadToolFailedError({
++      tool,
++      detail: `The native result exceeded ${NATIVE_RESULT_MAX_BYTES} bytes. A modifying outcome must be reconciled, not repeated.`,
++    });
++  }
++  return encoded;
++});
++const qualifyNativeEnvironment = Effect.fn("cli.thread.qualifyNativeEnvironment")(function* (
++  session: McpToolSession,
++  expected: Option.Option<string>,
++) {
++  if (Option.isNone(expected)) return undefined;
++  const envelope = yield* session
++    .call("t3_environment_read", {})
++    .pipe(
++      Effect.mapError(
++        () =>
++          new ThreadToolFailedError({
++            tool: "t3_environment_read",
++            detail:
++              "The native environment could not be qualified. The requested action was not sent.",
++          }),
++      ),
++    );
++  yield* boundedNativeJson("t3_environment_read", envelope);
++  const record =
++    typeof envelope === "object" && envelope !== null
++      ? (envelope as Record<string, unknown>)
++      : undefined;
++  const body = record?.structuredContent;
++  if (
++    (record?.isError !== undefined && record.isError !== false) ||
++    typeof body !== "object" ||
++    body === null ||
++    (body as Record<string, unknown>).environmentId !== expected.value
++  ) {
++    return yield* new ThreadToolFailedError({
++      tool: "t3_environment_read",
++      detail:
++        "The native environment does not match the original target. The requested action was not sent.",
++    });
++  }
++  return envelope;
++});
++
++const threadNativeCommand = Command.make("native", {
++  ...projectLocationFlags,
++  expectedEnvironmentId: nativeEnvironmentFlag,
++  tool: Argument.String("tool").pipe(
++    Argument.withDescription(`Allowlisted tool name: one of ${NATIVE_TOOL_ALLOWLIST.join(", ")}.`),
++  ),
++  json: jsonFlag,
++}).pipe(
++  Command.withDescription(
++    "Call one allowlisted MCP tool with bounded JSON stdin/output. Optional same-session environment qualification; one requested action, no retry.",
++  ),
++  Command.withHandler((flags) =>
++    Effect.gen(function* () {
++      if (!nativeToolNames.has(flags.tool)) {
++        return yield* new ThreadUsageError({
++          detail: `'${flags.tool}' is not allowlisted for 't3 thread native'. Allowed: ${NATIVE_TOOL_ALLOWLIST.join(", ")}.`,
++        });
++      }
++      const args = yield* readNativeArguments(flags.tool);
++      yield* guardNativeProviderSelection(flags.tool, args);
++      yield* withThreadTools(
++        flags,
++        Effect.fn("cli.thread.native")(function* (_tools, session) {
++          const observed = yield* qualifyNativeEnvironment(session, flags.expectedEnvironmentId);
++          const envelope =
++            observed !== undefined && flags.tool === "t3_environment_read"
++              ? observed
++              : yield* session
++                  .call(flags.tool, args)
++                  .pipe(
++                    Effect.mapError(
++                      () =>
++                        new ThreadToolFailedError({
++                          tool: flags.tool,
++                          detail:
++                            "The native call failed. A modifying outcome must be reconciled, not repeated.",
++                        }),
++                    ),
++                  );
++          yield* Console.log(yield* boundedNativeJson(flags.tool, envelope));
++        }),
++      );
++    }).pipe(reportThreadErrors),
++  ),
++);
++
++/** A healthy server's catalog fits in one page far under these bounds. */
++const NATIVE_CATALOG_MAX_PAGES = 8;
++const NATIVE_CATALOG_MAX_TOOLS = 200;
++const NATIVE_CATALOG_MAX_BYTES = 2 * 1024 * 1024;
++
++const nativeCatalogEntry = (entry: unknown): Record<string, unknown> | null => {
++  if (typeof entry !== "object" || entry === null) return null;
++  const { name } = entry as { name?: unknown };
++  return typeof name === "string" && nativeToolNames.has(name)
++    ? (entry as Record<string, unknown>)
++    : null;
++};
++
++export const readNativeCatalog = Effect.fn("cli.thread.readNativeCatalog")(function* (
++  session: McpToolSession,
++) {
++  const catalogFailure = (detail: string) =>
++    new ThreadToolFailedError({ tool: "tools/list", detail });
++  const tools: Array<Record<string, unknown>> = [];
++  let seen = 0;
++  let bytes = 0;
++  let pages = 0;
++  let cursor: string | undefined;
++  const cursors = new Set<string>();
++  const names = new Set<string>();
++  while (true) {
++    if (pages >= NATIVE_CATALOG_MAX_PAGES) {
++      return yield* catalogFailure(`The catalog exceeded ${NATIVE_CATALOG_MAX_PAGES} pages.`);
++    }
++    const page = yield* session
++      .listTools(cursor === undefined ? {} : { cursor })
++      .pipe(
++        Effect.mapError(
++          (cause) => new ThreadToolFailedError({ tool: "tools/list", detail: cause.message }),
++        ),
++      );
++    if (
++      typeof page !== "object" ||
++      page === null ||
++      !Array.isArray((page as { tools?: unknown }).tools)
++    ) {
++      return yield* catalogFailure("The server sent a page that is not a tools/list result.");
++    }
++    pages += 1;
++    for (const entry of (page as { tools: ReadonlyArray<unknown> }).tools) {
++      seen += 1;
++      if (seen > NATIVE_CATALOG_MAX_TOOLS) {
++        return yield* catalogFailure(`The catalog exceeded ${NATIVE_CATALOG_MAX_TOOLS} tools.`);
++      }
++      bytes += Buffer.byteLength(encodeJson(entry), "utf8");
++      if (bytes > NATIVE_CATALOG_MAX_BYTES) {
++        return yield* catalogFailure(
++          `The native catalog exceeded ${NATIVE_CATALOG_MAX_BYTES} bytes.`,
++        );
++      }
++      const allowed = nativeCatalogEntry(entry);
++      if (allowed === null) continue;
++      const name = allowed.name as string;
++      if (names.has(name))
++        return yield* catalogFailure("The native catalog repeated an allowlisted tool name.");
++      names.add(name);
++      tools.push(allowed);
++    }
++    const next = (page as { nextCursor?: unknown }).nextCursor;
++    if (next === undefined) return tools;
++    if (typeof next !== "string" || next.length === 0 || next.length > 4096 || cursors.has(next)) {
++      return yield* catalogFailure("The native catalog returned an invalid or repeated cursor.");
++    }
++    cursors.add(next);
++    cursor = next;
++  }
++});
++
++const threadNativeCatalogCommand = Command.make("native-catalog", {
++  ...projectLocationFlags,
++  expectedEnvironmentId: nativeEnvironmentFlag,
++  json: jsonFlag,
++}).pipe(
++  Command.withDescription(
++    "Print the running server's tools/list schemas for the 't3 thread native' allowlist, verbatim. Read-only.",
++  ),
++  Command.withHandler((flags) =>
++    withThreadTools(flags, (_tools, session) =>
++      Effect.gen(function* () {
++        yield* qualifyNativeEnvironment(session, flags.expectedEnvironmentId);
++        yield* printJson({ tools: yield* readNativeCatalog(session) });
++      }),
++    ).pipe(reportThreadErrors),
++  ),
++);
++
+ export const threadCommand = Command.make("thread").pipe(
+   Command.withDescription("Start, message, and read threads on the running server."),
+   Command.withSubcommands([
+@@ -772,5 +1077,7 @@
+     threadStartCommand,
+     threadSendCommand,
+     threadShowCommand,
++    threadNativeCommand,
++    threadNativeCatalogCommand,
+   ]),
+ );
+diff --git a/apps/server/src/mcp/AcpMcpStdioBridge.test.ts b/apps/server/src/mcp/AcpMcpStdioBridge.test.ts
+--- a/apps/server/src/mcp/AcpMcpStdioBridge.test.ts
++++ b/apps/server/src/mcp/AcpMcpStdioBridge.test.ts
+@@ -120,6 +120,49 @@
+       expect(requests[1]?.headers.get("mcp-session-id")).toBe("session-42");
+       expect(requests[1]?.headers.get("mcp-protocol-version")).toBe("2025-06-18");
+     }),
++  );
++
++  it.effect("mcpToolSession exposes tools/list results and forwards the cursor", () =>
++    Effect.gen(function* () {
++      const requests: Array<string> = [];
++      const session = yield* mcpToolSession({
++        endpoint: "http://127.0.0.1:1/mcp",
++        authorization: "Bearer bridge-test",
++        clientName: "bridge-test",
++        fetchImplementation: async (_url, init) => {
++          const body = String(init?.body ?? "");
++          requests.push(body);
++          const message = JSON.parse(body) as { id?: string; method: string };
++          if (message.method === "notifications/initialized") {
++            return new Response(null, { status: 202 });
++          }
++          const result =
++            message.method === "initialize"
++              ? { protocolVersion: "2025-06-18" }
++              : {
++                  tools: [{ name: "t3_queue" }],
++                  nextCursor: message.id?.endsWith("2") ? undefined : "page-2",
++                };
++          return Response.json(
++            { jsonrpc: "2.0", id: message.id, result },
++            {
++              headers: { "mcp-session-id": "session-42" },
++            },
++          );
++        },
++      });
++
++      const first = yield* session.listTools();
++      const second = yield* session.listTools({ cursor: "page-2" });
++
++      expect(first).toEqual({ tools: [{ name: "t3_queue" }], nextCursor: "page-2" });
++      expect(second).toEqual({ tools: [{ name: "t3_queue" }] });
++      expect(JSON.parse(requests[2]!)).toMatchObject({ method: "tools/list", params: {} });
++      expect(JSON.parse(requests[3]!)).toMatchObject({
++        method: "tools/list",
++        params: { cursor: "page-2" },
++      });
++    }).pipe(Effect.scoped),
+   );
+ 
+   it.effect("acknowledges notifications silently and synthesizes errors for failed requests", () =>
+diff --git a/apps/server/src/mcp/AcpMcpStdioBridge.ts b/apps/server/src/mcp/AcpMcpStdioBridge.ts
+--- a/apps/server/src/mcp/AcpMcpStdioBridge.ts
++++ b/apps/server/src/mcp/AcpMcpStdioBridge.ts
+@@ -71,6 +71,10 @@
+     tool: string,
+     args: Readonly<Record<string, unknown>>,
+   ) => Effect.Effect<unknown, AcpMcpBridgeError>;
++  /** Resolves to the JSON-RPC `result` of `tools/list`, a `ListToolsResult`. */
++  readonly listTools: (params?: {
++    readonly cursor?: string;
++  }) => Effect.Effect<unknown, AcpMcpBridgeError>;
+ }
+ 
+ /**
+@@ -159,6 +163,8 @@
+         request("tools/call", { name: tool, arguments: args }).pipe(
+           Effect.map((envelope) => envelope.result),
+         ),
++      listTools: (params = {}) =>
++        request("tools/list", params).pipe(Effect.map((envelope) => envelope.result)),
+     } satisfies McpToolSession;
+   });
+ };
+diff --git a/apps/server/src/mcp/toolkits/thread/handlers.test.ts b/apps/server/src/mcp/toolkits/thread/handlers.test.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/server/src/mcp/toolkits/thread/handlers.test.ts
+@@ -0,0 +1,337 @@
++import { expect, it } from "@effect/vitest";
++import {
++  EnvironmentId,
++  ProviderInstanceId,
++  type OrchestrationV2ServerCommand,
++  type OrchestrationV2ThreadProjection,
++  type OrchestrationV2ThreadShell,
++  ThreadId,
++} from "@t3tools/contracts";
++import * as DateTime from "effect/DateTime";
++import * as SecureRandom from "effect/crypto/SecureRandom";
++import * as Effect from "effect/Effect";
++import * as Layer from "effect/Layer";
++import * as Ref from "effect/Ref";
++import * as Stream from "effect/Stream";
++
++import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
++import * as McpInvocationContext from "../../McpInvocationContext.ts";
++import * as McpToolAccess from "../../McpToolAccess.ts";
++import { idleThreadProjection, liveThreadShell } from "../../McpToolAccess.testkit.ts";
++import * as ThreadHandlers from "./handlers.ts";
++import { ThreadToolkit } from "./tools.ts";
++
++const CALLER_ID = ThreadId.make("thread:lifecycle-caller");
++const TARGET_ID = ThreadId.make("thread:lifecycle-target");
++const PROVIDER = ProviderInstanceId.make("capacity_fabric");
++const CLAUDE = ProviderInstanceId.make("claude");
++// Matches McpToolAccess.testkit's liveThreadShell epoch.
++const SNAPSHOT_AT = "2026-01-01T00:00:00.000Z";
++
++const testCrypto = SecureRandom.make((size) => new Uint8Array(size).fill(7));
++
++const threadInvocation: McpInvocationContext.McpInvocationScope = {
++  environmentId: EnvironmentId.make("environment:lifecycle"),
++  requestNamespace: "provider:lifecycle-caller",
++  thread: {
++    threadId: CALLER_ID,
++    providerSessionId: "provider:lifecycle-caller",
++    providerInstanceId: PROVIDER,
++  },
++  client: undefined,
++  capabilities: new Set(["orchestration" as const]),
++  issuedAt: 0,
++};
++
++const clientInvocation: McpInvocationContext.McpInvocationScope = {
++  environmentId: EnvironmentId.make("environment:lifecycle"),
++  requestNamespace: "client:lifecycle-caller",
++  thread: undefined,
++  client: undefined,
++  capabilities: new Set(["orchestration" as const]),
++  issuedAt: 0,
++};
++
++interface HarnessInput {
++  readonly invocation?: McpInvocationContext.McpInvocationScope;
++  readonly target?: Partial<OrchestrationV2ThreadShell>;
++}
++
++const projectionOf = (shell: OrchestrationV2ThreadShell) =>
++  idleThreadProjection(shell) as unknown as OrchestrationV2ThreadProjection;
++
++const makeHarness = (input: HarnessInput = {}) =>
++  Effect.gen(function* () {
++    const caller = {
++      ...liveThreadShell(CALLER_ID),
++      providerInstanceId: input.invocation?.thread?.providerInstanceId ?? PROVIDER,
++    };
++    const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
++    // Dispatch commits move `updatedAt`, as a real commit would, so replays read a moved snapshot.
++    const target = yield* Ref.make<OrchestrationV2ThreadShell>({
++      ...liveThreadShell(TARGET_ID, { activeRunId: null }),
++      providerInstanceId: PROVIDER,
++      modelSelection: { instanceId: PROVIDER, model: "logical-model" },
++      ...input.target,
++    });
++    const layerDependencies = Layer.mergeAll(
++      Layer.succeed(
++        McpInvocationContext.McpInvocationContext,
++        input.invocation ?? threadInvocation,
++      ),
++      Layer.succeed(SecureRandom.SecureRandom, testCrypto),
++      Layer.mock(ThreadManagement.ThreadManagementService)({
++        getThreadShell: (threadId: ThreadId) =>
++          threadId === TARGET_ID ? Ref.get(target) : Effect.succeed(caller),
++        getProjectThreadRecords: () =>
++          Ref.get(target).pipe(Effect.map((shell) => projectionOf(shell))),
++        getThreadSnapshotWindow: () =>
++          Ref.get(target).pipe(
++            Effect.map((shell) => ({
++              schemaVersion: 1,
++              snapshotSequence: 40,
++              projection: projectionOf(shell),
++            })),
++          ),
++        dispatch: (command: OrchestrationV2ServerCommand) =>
++          Ref.update(target, (shell) => ({
++            ...shell,
++            updatedAt: DateTime.add(shell.updatedAt, { seconds: 1 }),
++          })).pipe(
++            Effect.andThen(Ref.update(commands, (existing) => [...existing, command])),
++            Effect.as({ sequence: 41, storedEvents: [] }),
++          ),
++      }),
++    );
++    const toolkit = yield* ThreadToolkit.pipe(
++      Effect.provide(
++        McpToolAccess.HandlersLayer.layer(ThreadHandlers.layer).pipe(
++          Layer.provide(layerDependencies),
++        ),
++      ),
++    );
++    const call = (params: Parameters<typeof toolkit.handle<"t3_thread_lifecycle">>[1]) =>
++      toolkit.handle("t3_thread_lifecycle", params).pipe(
++        Stream.unwrap,
++        Stream.runCollect,
++        Effect.map((chunk) => chunk.at(-1)!.result),
++        Effect.provide(layerDependencies),
++      );
++    return { commands, call };
++  });
++
++it.effect("delete passes its exact-target preconditions to one native command", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({
++      action: "delete",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: SNAPSHOT_AT,
++      expectedSequence: 40,
++      expectedTitle: TARGET_ID,
++    });
++    expect(result).toMatchObject({ sequence: 41, commandId: expect.stringMatching(/^mcp:/) });
++    const dispatched = yield* Ref.get(harness.commands);
++    expect(dispatched).toHaveLength(1);
++    const [deleteCommand] = dispatched;
++    expect(deleteCommand).toMatchObject({
++      type: "thread.delete",
++      threadId: TARGET_ID,
++      expectedTitle: TARGET_ID,
++      expectedSequence: 40,
++      onlyIfIdle: true,
++    });
++    expect(deleteCommand).toBeDefined();
++    if (deleteCommand?.type !== "thread.delete") throw new Error("expected thread.delete");
++    expect(DateTime.toEpochMillis(deleteCommand.expectedUpdatedAt!)).toBe(
++      DateTime.toEpochMillis(DateTime.makeUnsafe(SNAPSHOT_AT)),
++    );
++    expect(deleteCommand.commandId).toBe((result as { commandId: string }).commandId);
++  }),
++);
++
++it.effect("set_model dispatches one same-instance model selection with idle preconditions", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({
++      action: "set_model",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: SNAPSHOT_AT,
++      expectedSequence: 40,
++      modelSelection: { instanceId: PROVIDER, model: "gpt-5.2" },
++    });
++    expect(result).toMatchObject({ sequence: 41 });
++    const dispatched = yield* Ref.get(harness.commands);
++    expect(dispatched).toHaveLength(1);
++    const [selection] = dispatched;
++    expect(selection).toMatchObject({
++      type: "thread.model-selection.set",
++      threadId: TARGET_ID,
++      modelSelection: { instanceId: PROVIDER, model: "gpt-5.2" },
++      expectedSequence: 40,
++      onlyIfIdle: true,
++    });
++    expect(selection).toBeDefined();
++    if (selection?.type !== "thread.model-selection.set") {
++      throw new Error("expected thread.model-selection.set");
++    }
++    expect(DateTime.toEpochMillis(selection.expectedUpdatedAt!)).toBe(
++      DateTime.toEpochMillis(DateTime.makeUnsafe(SNAPSHOT_AT)),
++    );
++  }),
++);
++
++it.effect("set_model refuses a selection targeting another provider instance", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({
++      action: "set_model",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: SNAPSHOT_AT,
++      expectedSequence: 40,
++      modelSelection: { instanceId: CLAUDE, model: "claude-opus-4" },
++    });
++    expect(result).toMatchObject({
++      _tag: "OrchestratorMcpFailure",
++      code: "invalid_request",
++      message: expect.stringContaining("cannot switch providers"),
++    });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("set_model refuses a target thread running another provider instance", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness({
++      target: {
++        providerInstanceId: CLAUDE,
++        modelSelection: { instanceId: CLAUDE, model: "claude-opus-4" },
++      },
++    });
++    const result = yield* harness.call({
++      action: "set_model",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: SNAPSHOT_AT,
++      expectedSequence: 40,
++      modelSelection: { instanceId: PROVIDER, model: "gpt-5.2" },
++    });
++    expect(result).toMatchObject({
++      _tag: "OrchestratorMcpFailure",
++      code: "invalid_request",
++      message: expect.stringContaining("cannot switch providers"),
++    });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("authorized external client can select Capacity without impersonating a thread", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness({
++      invocation: clientInvocation,
++      target: { runtimeMode: "approval-required" },
++    });
++    const result = yield* harness.call({
++      action: "set_model",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: SNAPSHOT_AT,
++      expectedSequence: 40,
++      modelSelection: { instanceId: PROVIDER, model: "gpt-5.2" },
++    });
++    expect(result).toMatchObject({ sequence: 41 });
++    expect(yield* Ref.get(harness.commands)).toHaveLength(1);
++  }),
++);
++
++it.effect("a malformed expectedUpdatedAt is refused before any dispatch", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({
++      action: "delete",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: "not-a-timestamp",
++      expectedSequence: 40,
++      expectedTitle: TARGET_ID,
++    });
++    expect(result).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "invalid_request" });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("inspect returns a native event revision and never dispatches", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({ action: "inspect", threadId: TARGET_ID });
++    expect(result).toMatchObject({
++      threadId: TARGET_ID,
++      expectedSequence: 40,
++      archived: false,
++      deleted: false,
++      modelSelection: { instanceId: PROVIDER },
++    });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("timestamp alone cannot authorize a lifecycle mutation", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({
++      action: "delete",
++      threadId: TARGET_ID,
++      expectedUpdatedAt: SNAPSHOT_AT,
++      expectedTitle: TARGET_ID,
++    });
++    expect(result).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "invalid_request" });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("delete still requires exact-title confirmation", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness();
++    const result = yield* harness.call({
++      action: "delete",
++      threadId: TARGET_ID,
++      expectedSequence: 40,
++    });
++    expect(result).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "invalid_request" });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("Capacity restriction survives a caller that legitimately uses another provider", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness({
++      invocation: {
++        ...threadInvocation,
++        thread: { ...threadInvocation.thread!, providerInstanceId: CLAUDE },
++      },
++    });
++    const result = yield* harness.call({
++      action: "set_model",
++      threadId: TARGET_ID,
++      expectedSequence: 40,
++      modelSelection: { instanceId: PROVIDER, model: "logical-model" },
++    });
++    expect(result).toMatchObject({ sequence: 41 });
++    expect((yield* Ref.get(harness.commands))[0]).toMatchObject({
++      requiredProviderInstanceId: PROVIDER,
++    });
++  }),
++);
++
++it.effect("lifecycle does not bypass native orchestration capability denial", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness({
++      invocation: { ...threadInvocation, capabilities: new Set() },
++    });
++    const result = yield* harness.call({
++      action: "delete",
++      threadId: TARGET_ID,
++      expectedSequence: 40,
++      expectedTitle: TARGET_ID,
++    });
++    expect(result).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "capability_denied" });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
+diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
+--- a/apps/server/src/mcp/toolkits/thread/handlers.ts
++++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
+@@ -2,12 +2,15 @@
+   type CommandId,
+   type RuntimeRequestId,
+   ThreadId,
++  ProviderInstanceId,
+   type OrchestrationV2ThreadProjection,
+   type RunId,
+   OrchestratorMcpFailure,
+   type OrchestrationV2Command,
+ } from "@t3tools/contracts";
++import * as DateTime from "effect/DateTime";
+ import * as Effect from "effect/Effect";
++import * as Option from "effect/Option";
+ import { modelSelectionCommandType } from "@t3tools/shared/model";
+ 
+ import * as McpInvocationContext from "../../McpInvocationContext.ts";
+@@ -332,6 +335,84 @@
+       }),
+     ),
+   ),
++  t3_thread_lifecycle: McpToolAccess.either(
++    (input) => input.action === "inspect",
++    McpToolAccess.reads((input) =>
++      Effect.gen(function* () {
++        const { threads, projection } = yield* readThread(input.threadId, []);
++        const snapshot = yield* threads
++          .getThreadSnapshotWindow(projection.thread.id, {
++            rowLimit: 1,
++            userTurnLimit: 1,
++            deferWork: true,
++          })
++          .pipe(Effect.mapError(unavailable));
++        const thread = snapshot.projection.thread;
++        return {
++          threadId: thread.id,
++          projectId: thread.projectId,
++          title: thread.title,
++          expectedSequence: snapshot.snapshotSequence,
++          updatedAt: DateTime.formatIso(thread.updatedAt),
++          modelSelection: thread.modelSelection,
++          archived: thread.archivedAt !== null,
++          deleted: thread.deletedAt !== null,
++        };
++      }),
++    ),
++    writesThread((input) =>
++      Effect.gen(function* () {
++        const expectedSequence = yield* required(input.expectedSequence, "expectedSequence");
++        let expectedUpdatedAt: DateTime.Utc | undefined;
++        if (input.expectedUpdatedAt !== undefined) {
++          const parsed = DateTime.make(input.expectedUpdatedAt);
++          if (Option.isNone(parsed)) {
++            return yield* new OrchestratorMcpFailure({
++              code: "invalid_request",
++              message: "Invalid expectedUpdatedAt.",
++            });
++          }
++          expectedUpdatedAt = parsed.value;
++        }
++        const commandId = yield* newCommandId();
++        const { threads, projection } = yield* readThread(input.threadId, []);
++        const common = {
++          commandId,
++          threadId: projection.thread.id,
++          expectedSequence,
++          onlyIfIdle: true,
++          ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }),
++        };
++        if (input.action === "delete") {
++          const expectedTitle = yield* required(input.expectedTitle, "expectedTitle");
++          const result = yield* threads
++            .dispatch({ type: "thread.delete", ...common, expectedTitle })
++            .pipe(Effect.mapError(dispatchFailure));
++          return { commandId, sequence: result.sequence };
++        }
++        const modelSelection = yield* required(input.modelSelection, "modelSelection");
++        const capacity = ProviderInstanceId.make("capacity_fabric");
++        if (
++          modelSelection.instanceId !== capacity ||
++          projection.thread.providerInstanceId !== capacity
++        ) {
++          return yield* new OrchestratorMcpFailure({
++            code: "invalid_request",
++            message: "set_model requires capacity_fabric and cannot switch providers.",
++          });
++        }
++        const result = yield* threads
++          .dispatch({
++            type: "thread.model-selection.set",
++            ...common,
++            modelSelection,
++            requiredProviderInstanceId: capacity,
++          })
++          .pipe(Effect.mapError(dispatchFailure));
++        return { commandId, sequence: result.sequence };
++      }),
++    ),
++  ),
+   t3_thread_organize: writesThread((input) =>
+     Effect.gen(function* () {
+       const { threads, projection, caller } = yield* readThread(input.threadId);
+diff --git a/apps/server/src/mcp/toolkits/thread/tools.ts b/apps/server/src/mcp/toolkits/thread/tools.ts
+--- a/apps/server/src/mcp/toolkits/thread/tools.ts
++++ b/apps/server/src/mcp/toolkits/thread/tools.ts
+@@ -1,4 +1,5 @@
+ import {
++  CommandId,
+   OrchestratorMcpEnvironmentTarget,
+   ScheduledTaskId,
+   ScheduledTask,
+@@ -162,6 +163,37 @@
+   success: Schema.Union([threadConfiguration, OrchestrationV2DispatchCommandResult]),
+ }).annotate(Tool.Destructive, true);
+ 
++const ThreadLifecycleTool = Tool.make("t3_thread_lifecycle", {
++  ...commandTool,
++  description:
++    "Inspect a thread's exact native event revision, or delete/change its model with that revision. inspect is read-only and returns bounded target metadata and expectedSequence. Mutations require that sequence and fail if any native thread event raced the read, including within the same millisecond; the check also runs inside the native commit transaction. delete additionally needs exact expectedTitle, creates only the native tombstone, never removes files/worktrees. set_model requires explicit capacity_fabric modelSelection and a target already using that instance. Both mutations require no live/queued run, pending request, or active child. Existing native permissions and model availability still apply. One original command, no automatic retry; retain its commandId/sequence and reconcile uncertain effects. Use t3_thread_organize for archive/unarchive.",
++  parameters: Schema.Struct({
++    environmentId: OrchestratorMcpEnvironmentTarget,
++    threadId: Schema.optional(ThreadId),
++    action: Schema.Literals(["inspect", "delete", "set_model"]),
++    expectedSequence: Schema.optional(NonNegativeInt),
++    expectedUpdatedAt: Schema.optional(IsoDateTime),
++    expectedTitle: Schema.optional(Schema.String),
++    modelSelection: Schema.optional(ModelSelection),
++  }),
++  success: Schema.Union([
++    Schema.Struct({ commandId: CommandId, sequence: NonNegativeInt }),
++    Schema.Struct({
++      threadId: ThreadId,
++      projectId: ProjectId,
++      title: Schema.String,
++      expectedSequence: NonNegativeInt,
++      updatedAt: IsoDateTime,
++      modelSelection: ModelSelection,
++      archived: Schema.Boolean,
++      deleted: Schema.Boolean,
++    }),
++  ]),
++})
++  .annotate(Tool.Title, "Inspect or safely change a thread")
++  .annotate(Tool.Strict, true)
++  .annotate(Tool.Destructive, true);
++
+ const ThreadTransferTool = Tool.make("t3_thread_transfer", {
+   ...commandTool,
+   description:
+@@ -241,6 +273,7 @@
+   ScheduledTaskRunTool,
+   ThreadSearchTool,
+   ThreadConfigureTool,
++  ThreadLifecycleTool,
+   ThreadTransferTool,
+   ThreadOrganizeTool,
+   PendingRequestTool,
+diff --git a/apps/server/src/orchestration-v2/EventSink.ts b/apps/server/src/orchestration-v2/EventSink.ts
+--- a/apps/server/src/orchestration-v2/EventSink.ts
++++ b/apps/server/src/orchestration-v2/EventSink.ts
+@@ -168,6 +168,8 @@
+     readonly threadId: ThreadId;
+     readonly commandType: string;
+     readonly acceptedAt: DateTime.Utc;
++    /** Compare in the same SQL transaction as the receipt, events and outbox writes. */
++    readonly expectedThreadSequence?: number;
+     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+     readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;
+     readonly cancelUnsettledEffects?: {
+@@ -681,6 +683,27 @@
+             return { ...existing, committed: false as const, cancelledEffectIds: [] };
+           }
+ 
++          if (input.expectedThreadSequence !== undefined) {
++            const currentSequence = yield* eventStore.latestSequence({ threadId: input.threadId });
++            if (currentSequence !== input.expectedThreadSequence) {
++              const receipt: CommandReceiptStore.CommandReceiptV2 = {
++                commandId: input.commandId,
++                threadId: input.threadId,
++                commandType: input.commandType,
++                acceptedAt: input.acceptedAt,
++                resultSequence: currentSequence,
++                status: "rejected",
++                error: "Thread event revision changed before the atomic command commit.",
++              };
++              yield* commandReceipts.upsert(receipt);
++              return {
++                receipt,
++                storedEvents: [],
++                committed: false as const,
++                cancelledEffectIds: [],
++              };
++            }
++          }
+           const runId = input.updateDelegatedCompletionOnlyRunId;
+           const normalized = yield* normalizeEvents(
+             runId === undefined
+diff --git a/apps/server/src/orchestration-v2/Orchestrator.ts b/apps/server/src/orchestration-v2/Orchestrator.ts
+--- a/apps/server/src/orchestration-v2/Orchestrator.ts
++++ b/apps/server/src/orchestration-v2/Orchestrator.ts
+@@ -550,6 +550,28 @@
+         run.status !== "rolled_back",
+     ) || records.runtimeRequests.some((request) => request.status === "pending")
+   );
++}
++
++const ACTIVE_SUBAGENT_STATUSES: ReadonlySet<string> = new Set([
++  "idle",
++  "pending",
++  "running",
++  "waiting",
++]);
++
++/** Unfinished runs, open requests, or active child agents block an `onlyIfIdle` command. */
++function threadIdleWorkBlocker(records: {
++  readonly runs: ReadonlyArray<{ readonly status: string }>;
++  readonly runtimeRequests: ReadonlyArray<{ readonly status: string }>;
++  readonly subagents?: ReadonlyArray<{ readonly status: string }> | undefined;
++}): string | null {
++  if (threadHasUnfinishedWork(records)) {
++    return "still has unfinished work. Finish or stop it first.";
++  }
++  if ((records.subagents ?? []).some((task) => ACTIVE_SUBAGENT_STATUSES.has(task.status))) {
++    return "has an active child agent. Let it finish or stop it first.";
++  }
++  return null;
+ }
+ 
+ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
+@@ -3466,6 +3488,55 @@
+           commandType: command.type,
+           cause: `Thread ${command.threadId} is no longer empty.`,
+         });
++    }
++    if (
++      command.type === "thread.model-selection.set" &&
++      command.requiredProviderInstanceId !== undefined &&
++      (thread.providerInstanceId !== command.requiredProviderInstanceId ||
++        command.modelSelection.instanceId !== command.requiredProviderInstanceId)
++    ) {
++      return yield* new OrchestratorDispatchError({
++        commandId: command.commandId,
++        commandType: command.type,
++        cause: "The target and selected model must remain on the required provider instance.",
++      });
++    }
++    if (command.type === "thread.model-selection.set" && command.expectedSequence !== undefined) {
++      const currentSequence = yield* eventSink
++        .latestSequence({ threadId: command.threadId })
++        .pipe(mapDispatchError(command));
++      if (currentSequence !== command.expectedSequence) {
++        return yield* new OrchestratorDispatchError({
++          commandId: command.commandId,
++          commandType: command.type,
++          cause: "The thread event revision changed before the model selection could be applied.",
++        });
++      }
++    }
++    // Checked under the thread lock: a change committed since the caller's read refuses here.
++    if (
++      command.type === "thread.model-selection.set" &&
++      command.expectedUpdatedAt !== undefined &&
++      DateTime.toEpochMillis(thread.updatedAt) !== DateTime.toEpochMillis(command.expectedUpdatedAt)
++    ) {
++      return yield* new OrchestratorDispatchError({
++        commandId: command.commandId,
++        commandType: command.type,
++        cause: `Thread ${command.threadId} changed before the model selection could be applied.`,
++      });
++    }
++    if (command.type === "thread.model-selection.set" && command.onlyIfIdle === true) {
++      const records = yield* projectionStore
++        .getThreadRecords(command.threadId, ["runs", "runtimeRequests", "subagents"])
++        .pipe(mapDispatchError(command));
++      const blocker = threadIdleWorkBlocker(records);
++      if (blocker !== null) {
++        return yield* new OrchestratorDispatchError({
++          commandId: command.commandId,
++          commandType: command.type,
++          cause: `Thread ${command.threadId} ${blocker}`,
++        });
++      }
+     }
+     if (command.type === "thread.archive" && thread.archivedAt !== null) {
+       return yield* new OrchestratorDispatchError({
+@@ -13516,6 +13587,64 @@
+             return { events: [], effects: [] };
+           }
+         }
++        if (command.expectedSequence !== undefined) {
++          const currentSequence = yield* eventSink
++            .latestSequence({ threadId: command.threadId })
++            .pipe(mapDispatchError(command));
++          if (currentSequence !== command.expectedSequence) {
++            return yield* new OrchestratorDispatchError({
++              commandId: command.commandId,
++              commandType: command.type,
++              cause: "The thread event revision changed before deletion could be confirmed.",
++            });
++          }
++        }
++        // Checked under the thread lock: a change committed since the caller's read refuses here,
++        // so a delete cannot act on a stale confirmation of the target.
++        if (
++          command.expectedTitle !== undefined ||
++          command.expectedUpdatedAt !== undefined ||
++          command.onlyIfIdle === true
++        ) {
++          const target = yield* projectionStore
++            .getThread(command.threadId)
++            .pipe(
++              Effect.mapError(
++                (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
++              ),
++            );
++          if (
++            command.expectedUpdatedAt !== undefined &&
++            DateTime.toEpochMillis(target.updatedAt) !==
++              DateTime.toEpochMillis(command.expectedUpdatedAt)
++          ) {
++            return yield* new OrchestratorDispatchError({
++              commandId: command.commandId,
++              commandType: command.type,
++              cause: `Thread ${command.threadId} changed before the deletion could be confirmed.`,
++            });
++          }
++          if (command.expectedTitle !== undefined && target.title !== command.expectedTitle) {
++            return yield* new OrchestratorDispatchError({
++              commandId: command.commandId,
++              commandType: command.type,
++              cause: `Thread ${command.threadId} no longer matches the expected title.`,
++            });
++          }
++          if (command.onlyIfIdle === true) {
++            const records = yield* projectionStore
++              .getThreadRecords(command.threadId, ["runs", "runtimeRequests", "subagents"])
++              .pipe(mapDispatchError(command));
++            const blocker = threadIdleWorkBlocker(records);
++            if (blocker !== null) {
++              return yield* new OrchestratorDispatchError({
++                commandId: command.commandId,
++                commandType: command.type,
++                cause: `Thread ${command.threadId} ${blocker}`,
++              });
++            }
++          }
++        }
+         // The dispatch wrapper holds each side chat's lock, so none can commit after this plan.
+         const plans = [
+           yield* planDeletion(command),
+@@ -14036,6 +14165,10 @@
+         acceptedAt,
+         events: plan.events,
+         effects: plan.effects,
++        ...((command.type === "thread.delete" || command.type === "thread.model-selection.set") &&
++        command.expectedSequence !== undefined
++          ? { expectedThreadSequence: command.expectedSequence }
++          : {}),
+         ...(plan.cancelUnsettledEffects === undefined
+           ? {}
+           : { cancelUnsettledEffects: plan.cancelUnsettledEffects }),
+diff --git a/apps/server/src/orchestration-v2/runtimeLayer.test.ts b/apps/server/src/orchestration-v2/runtimeLayer.test.ts
+--- a/apps/server/src/orchestration-v2/runtimeLayer.test.ts
++++ b/apps/server/src/orchestration-v2/runtimeLayer.test.ts
+@@ -364,6 +364,7 @@
+   RuntimeLayer.layerProjectService,
+   RuntimeLayer.layerEventSink,
+   ThreadCommandExecutor.layer,
++  EffectOutbox.layer,
+ ).pipe(
+   Layer.provide(
+     Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({
+@@ -626,6 +627,527 @@
+         ),
+       );
+     }),
++  );
++
++  const makeRevisionTarget = Effect.fn("test.makeRevisionTarget")(function* (name: string) {
++    const projects = yield* ProjectService.ProjectService;
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    const projectId = ProjectId.make(`revision-${name}-project`);
++    const threadId = ThreadId.make(`revision-${name}-thread`);
++    yield* projects.create({
++      commandId: CommandId.make(`revision-${name}-project-create`),
++      projectId,
++      title: "Revision guarded lifecycle",
++      workspaceRoot: `/work/revision-${name}`,
++    });
++    yield* orchestrator.dispatch({
++      type: "thread.create",
++      commandId: CommandId.make(`revision-${name}-create`),
++      createdBy: "user",
++      creationSource: "web",
++      threadId,
++      projectId,
++      title: "Exact target",
++      modelSelection,
++      runtimeMode: "full-access",
++      interactionMode: "default",
++      branch: null,
++      worktreePath: null,
++    });
++    return { orchestrator, threadId, snapshot: yield* orchestrator.getThreadSnapshot(threadId) };
++  });
++
++  it.effect("sequence guard rejects same-millisecond ABA for delete and model selection", () =>
++    Effect.gen(function* () {
++      const { orchestrator, threadId, snapshot } = yield* makeRevisionTarget("same-tick-aba");
++      for (const [index, title] of ["Temporary title", "Exact target"].entries()) {
++        yield* orchestrator.dispatch({
++          type: "thread.metadata.update",
++          threadId,
++          title,
++          commandId: CommandId.make(`revision-aba-${index}`),
++        });
++      }
++      const current = yield* orchestrator.getThreadSnapshot(threadId);
++      assert.equal(
++        DateTime.toEpochMillis(current.projection.thread.updatedAt),
++        DateTime.toEpochMillis(snapshot.projection.thread.updatedAt),
++      );
++      assert.equal(current.projection.thread.title, snapshot.projection.thread.title);
++      assert.isAbove(current.snapshotSequence, snapshot.snapshotSequence);
++      const deletion = yield* orchestrator
++        .dispatch({
++          type: "thread.delete",
++          threadId,
++          commandId: CommandId.make("revision-aba-delete"),
++          expectedSequence: snapshot.snapshotSequence,
++          expectedUpdatedAt: snapshot.projection.thread.updatedAt,
++          expectedTitle: "Exact target",
++          onlyIfIdle: true,
++        })
++        .pipe(Effect.flip);
++      assert.instanceOf(deletion, Orchestrator.OrchestratorDispatchError);
++      const selection = yield* orchestrator
++        .dispatch({
++          type: "thread.model-selection.set",
++          threadId,
++          commandId: CommandId.make("revision-aba-model"),
++          expectedSequence: snapshot.snapshotSequence,
++          modelSelection,
++          onlyIfIdle: true,
++        })
++        .pipe(Effect.flip);
++      assert.instanceOf(selection, Orchestrator.OrchestratorDispatchError);
++      assert.isNull((yield* orchestrator.getThreadProjection(threadId)).thread.deletedAt);
++    }),
++  );
++
++  it.effect(
++    "native commit rejects a race after decision without any deletion event or outbox effect",
++    () =>
++      Effect.gen(function* () {
++        const { orchestrator, threadId, snapshot } = yield* makeRevisionTarget("commit-race");
++        const sink = yield* EventSink.EventSinkV2;
++        const commandId = CommandId.make("revision-commit-race-delete");
++        const commit = sink.commitCommand;
++        const spy = vi
++          .spyOn(sink, "commitCommand")
++          .mockImplementation((input) =>
++            input.commandId !== commandId
++              ? commit(input)
++              : sink
++                  .write({
++                    events: [
++                      {
++                        type: "thread.metadata-updated",
++                        id: EventId.make("revision-race-event"),
++                        threadId,
++                        providerInstanceId: snapshot.projection.thread.providerInstanceId,
++                        occurredAt: snapshot.projection.thread.updatedAt,
++                        payload: {
++                          ...snapshot.projection.thread,
++                          title: "Changed between decision and commit",
++                        },
++                      },
++                    ],
++                  })
++                  .pipe(Effect.andThen(commit(input))),
++          );
++        yield* Effect.gen(function* () {
++          const error = yield* orchestrator
++            .dispatch({
++              type: "thread.delete",
++              threadId,
++              commandId,
++              expectedSequence: snapshot.snapshotSequence,
++              expectedTitle: "Exact target",
++              onlyIfIdle: true,
++            })
++            .pipe(Effect.flip);
++          assert.instanceOf(error, Orchestrator.OrchestratorCommandPreviouslyRejectedError);
++          const current = yield* orchestrator.getThreadProjection(threadId);
++          assert.isNull(current.thread.deletedAt);
++          assert.equal(current.thread.title, "Changed between decision and commit");
++          const committed = yield* sink.readByCommandId({ commandId }).pipe(Stream.runCollect);
++          assert.lengthOf(committed, 0);
++          const outbox = yield* EffectOutbox.EffectOutboxV2;
++          assert.lengthOf(yield* outbox.listByCommandId(commandId), 0);
++        }).pipe(Effect.ensuring(Effect.sync(() => spy.mockRestore())));
++      }),
++  );
++
++  it.effect("sequence guarded deletion succeeds only at the observed native revision", () =>
++    Effect.gen(function* () {
++      const { orchestrator, threadId, snapshot } = yield* makeRevisionTarget("accepted");
++      const result = yield* orchestrator.dispatch({
++        type: "thread.delete",
++        threadId,
++        commandId: CommandId.make("revision-accepted-delete"),
++        expectedSequence: snapshot.snapshotSequence,
++        expectedTitle: "Exact target",
++        onlyIfIdle: true,
++      });
++      assert.isAbove(result.sequence, snapshot.snapshotSequence);
++      assert.isNotNull((yield* orchestrator.getThreadProjection(threadId)).thread.deletedAt);
++    }),
++  );
++
++  it.effect("native model guard rejects a target on a different required provider", () =>
++    Effect.gen(function* () {
++      const { orchestrator, threadId, snapshot } = yield* makeRevisionTarget("provider-guard");
++      const error = yield* orchestrator
++        .dispatch({
++          type: "thread.model-selection.set",
++          threadId,
++          commandId: CommandId.make("revision-provider-guard-model"),
++          expectedSequence: snapshot.snapshotSequence,
++          requiredProviderInstanceId: ProviderInstanceId.make("capacity_fabric"),
++          modelSelection,
++          onlyIfIdle: true,
++        })
++        .pipe(Effect.flip);
++      assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
++      assert.include(String(error.cause), "required provider instance");
++      assert.equal(
++        (yield* orchestrator.getThreadSnapshot(threadId)).snapshotSequence,
++        snapshot.snapshotSequence,
++      );
++    }),
++  );
++
++  it.effect("refuses a thread.delete whose expected state lost a race to a committed update", () =>
++    Effect.gen(function* () {
++      const projects = yield* ProjectService.ProjectService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      const eventSink = yield* EventSink.EventSinkV2;
++      const projectId = ProjectId.make("runtime-thread-delete-stale");
++      const threadId = ThreadId.make("runtime-thread-delete-stale-thread");
++      const updateCommandId = CommandId.make("runtime-thread-delete-stale-update");
++      yield* projects.create({
++        commandId: CommandId.make("runtime-thread-delete-stale-create-project"),
++        projectId,
++        title: "Concurrent deletion preconditions",
++        workspaceRoot: "/work/concurrent-deletion-preconditions",
++      });
++      yield* orchestrator.dispatch({
++        type: "thread.create",
++        commandId: CommandId.make("runtime-thread-delete-stale-create-thread"),
++        createdBy: "user",
++        creationSource: "web",
++        threadId,
++        projectId,
++        title: "Original title",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        branch: null,
++        worktreePath: null,
++      });
++      const before = yield* orchestrator.getThreadProjection(threadId);
++      yield* TestClock.adjust("1 second");
++
++      // Park the update inside its commit, holding the thread lock, then dispatch the
++      // delete concurrently: the serialized boundary must order its precondition reads
++      // after the update's commit, so the stale confirmation refuses instead of deleting.
++      const updateReady = yield* Deferred.make<void>();
++      const releaseUpdate = yield* Deferred.make<void>();
++      const commitCommand = eventSink.commitCommand;
++      const commitSpy = vi
++        .spyOn(eventSink, "commitCommand")
++        .mockImplementation((input) =>
++          input.commandId === updateCommandId
++            ? Deferred.succeed(updateReady, undefined).pipe(
++                Effect.andThen(Deferred.await(releaseUpdate)),
++                Effect.andThen(commitCommand(input)),
++              )
++            : commitCommand(input),
++        );
++      yield* Effect.gen(function* () {
++        const updateFiber = yield* orchestrator
++          .dispatch({
++            type: "thread.metadata.update",
++            commandId: updateCommandId,
++            threadId,
++            title: "Updated before deletion",
++          })
++          .pipe(Effect.forkChild({ startImmediately: true }));
++        yield* Effect.raceFirst(
++          Deferred.await(updateReady),
++          Fiber.join(updateFiber).pipe(
++            Effect.andThen(Effect.die("The update completed before reaching its commit barrier.")),
++          ),
++        );
++        const deleteFiber = yield* orchestrator
++          .dispatch({
++            type: "thread.delete",
++            commandId: CommandId.make("runtime-thread-delete-stale-delete"),
++            threadId,
++            expectedTitle: "Original title",
++            expectedUpdatedAt: before.thread.updatedAt,
++            onlyIfIdle: true,
++          })
++          .pipe(Effect.forkChild({ startImmediately: true }));
++        yield* Deferred.succeed(releaseUpdate, undefined);
++        yield* Fiber.join(updateFiber);
++        const error = yield* Fiber.join(deleteFiber).pipe(Effect.flip);
++        assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
++        assert.equal(
++          error.cause,
++          `Thread ${threadId} changed before the deletion could be confirmed.`,
++        );
++        const projection = yield* orchestrator.getThreadProjection(threadId);
++        assert.isNull(projection.thread.deletedAt);
++        assert.equal(projection.thread.title, "Updated before deletion");
++      }).pipe(Effect.ensuring(Effect.sync(() => commitSpy.mockRestore())));
++    }),
++  );
++
++  it.effect("deletes an idle thread when its exact expected state still holds", () =>
++    Effect.gen(function* () {
++      const projects = yield* ProjectService.ProjectService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      const projectId = ProjectId.make("runtime-thread-delete-confirmed");
++      const threadId = ThreadId.make("runtime-thread-delete-confirmed-thread");
++      yield* projects.create({
++        commandId: CommandId.make("runtime-thread-delete-confirmed-project"),
++        projectId,
++        title: "Confirmed deletion",
++        workspaceRoot: "/work/confirmed-deletion",
++      });
++      yield* orchestrator.dispatch({
++        type: "thread.create",
++        commandId: CommandId.make("runtime-thread-delete-confirmed-create"),
++        createdBy: "user",
++        creationSource: "web",
++        threadId,
++        projectId,
++        title: "Exact target",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        branch: null,
++        worktreePath: null,
++      });
++      const before = yield* orchestrator.getThreadProjection(threadId);
++      yield* orchestrator.dispatch({
++        type: "thread.delete",
++        commandId: CommandId.make("runtime-thread-delete-confirmed-delete"),
++        threadId,
++        expectedTitle: "Exact target",
++        expectedUpdatedAt: before.thread.updatedAt,
++        onlyIfIdle: true,
++      });
++      const projection = yield* orchestrator.getThreadProjection(threadId);
++      assert.isNotNull(projection.thread.deletedAt);
++    }),
++  );
++
++  it.effect("refuses a thread.delete whose expectedTitle no longer matches the thread", () =>
++    Effect.gen(function* () {
++      const projects = yield* ProjectService.ProjectService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      const projectId = ProjectId.make("runtime-thread-delete-title");
++      const threadId = ThreadId.make("runtime-thread-delete-title-thread");
++      yield* projects.create({
++        commandId: CommandId.make("runtime-thread-delete-title-project"),
++        projectId,
++        title: "Title mismatch deletion",
++        workspaceRoot: "/work/title-mismatch-deletion",
++      });
++      yield* orchestrator.dispatch({
++        type: "thread.create",
++        commandId: CommandId.make("runtime-thread-delete-title-create"),
++        createdBy: "user",
++        creationSource: "web",
++        threadId,
++        projectId,
++        title: "Original title",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        branch: null,
++        worktreePath: null,
++      });
++      yield* orchestrator.dispatch({
++        type: "thread.metadata.update",
++        commandId: CommandId.make("runtime-thread-delete-title-update"),
++        threadId,
++        title: "Renamed meanwhile",
++      });
++      const renamed = yield* orchestrator.getThreadProjection(threadId);
++      const error = yield* orchestrator
++        .dispatch({
++          type: "thread.delete",
++          commandId: CommandId.make("runtime-thread-delete-title-delete"),
++          threadId,
++          expectedTitle: "Original title",
++          expectedUpdatedAt: renamed.thread.updatedAt,
++          onlyIfIdle: true,
++        })
++        .pipe(Effect.flip);
++      assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
++      assert.equal(error.cause, `Thread ${threadId} no longer matches the expected title.`);
++      const projection = yield* orchestrator.getThreadProjection(threadId);
++      assert.isNull(projection.thread.deletedAt);
++      assert.equal(projection.thread.title, "Renamed meanwhile");
++    }),
++  );
++
++  it.effect("refuses a thread.delete with onlyIfIdle while the thread has live work", () =>
++    Effect.gen(function* () {
++      const projects = yield* ProjectService.ProjectService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      const projectId = ProjectId.make("runtime-thread-delete-busy");
++      const threadId = ThreadId.make("runtime-thread-delete-busy-thread");
++      yield* projects.create({
++        commandId: CommandId.make("runtime-thread-delete-busy-project"),
++        projectId,
++        title: "Busy deletion",
++        workspaceRoot: "/work/busy-deletion",
++      });
++      yield* orchestrator.dispatch({
++        type: "thread.create",
++        commandId: CommandId.make("runtime-thread-delete-busy-create"),
++        createdBy: "user",
++        creationSource: "web",
++        threadId,
++        projectId,
++        title: "Busy target",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        branch: null,
++        worktreePath: null,
++      });
++      yield* orchestrator.dispatch({
++        type: "message.dispatch",
++        commandId: CommandId.make("runtime-thread-delete-busy-message"),
++        createdBy: "user",
++        creationSource: "web",
++        threadId,
++        messageId: MessageId.make("runtime-thread-delete-busy-message-id"),
++        text: "Start working so the thread is not idle.",
++        attachments: [],
++        dispatchMode: { type: "start_immediately" },
++      });
++      const busy = yield* orchestrator.getThreadProjection(threadId);
++      assert.isNotEmpty(busy.runs);
++      const error = yield* orchestrator
++        .dispatch({
++          type: "thread.delete",
++          commandId: CommandId.make("runtime-thread-delete-busy-delete"),
++          threadId,
++          expectedTitle: "Busy target",
++          expectedUpdatedAt: busy.thread.updatedAt,
++          onlyIfIdle: true,
++        })
++        .pipe(Effect.flip);
++      assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
++      assert.equal(
++        error.cause,
++        `Thread ${threadId} still has unfinished work. Finish or stop it first.`,
++      );
++      const projection = yield* orchestrator.getThreadProjection(threadId);
++      assert.isNull(projection.thread.deletedAt);
++    }),
++  );
++
++  it.effect(
++    "refuses a model selection whose expected state lost a race, and one on live work",
++    () =>
++      Effect.gen(function* () {
++        const projects = yield* ProjectService.ProjectService;
++        const orchestrator = yield* Orchestrator.OrchestratorV2;
++        const eventSink = yield* EventSink.EventSinkV2;
++        const projectId = ProjectId.make("runtime-model-selection-stale");
++        const threadId = ThreadId.make("runtime-model-selection-stale-thread");
++        const updateCommandId = CommandId.make("runtime-model-selection-stale-update");
++        yield* projects.create({
++          commandId: CommandId.make("runtime-model-selection-stale-project"),
++          projectId,
++          title: "Concurrent model selection",
++          workspaceRoot: "/work/concurrent-model-selection",
++        });
++        yield* orchestrator.dispatch({
++          type: "thread.create",
++          commandId: CommandId.make("runtime-model-selection-stale-create"),
++          createdBy: "user",
++          creationSource: "web",
++          threadId,
++          projectId,
++          title: "Selection target",
++          modelSelection,
++          runtimeMode: "full-access",
++          interactionMode: "default",
++          branch: null,
++          worktreePath: null,
++        });
++        const before = yield* orchestrator.getThreadProjection(threadId);
++        yield* TestClock.adjust("1 second");
++
++        const updateReady = yield* Deferred.make<void>();
++        const releaseUpdate = yield* Deferred.make<void>();
++        const commitCommand = eventSink.commitCommand;
++        const commitSpy = vi
++          .spyOn(eventSink, "commitCommand")
++          .mockImplementation((input) =>
++            input.commandId === updateCommandId
++              ? Deferred.succeed(updateReady, undefined).pipe(
++                  Effect.andThen(Deferred.await(releaseUpdate)),
++                  Effect.andThen(commitCommand(input)),
++                )
++              : commitCommand(input),
++          );
++        yield* Effect.gen(function* () {
++          const updateFiber = yield* orchestrator
++            .dispatch({
++              type: "thread.metadata.update",
++              commandId: updateCommandId,
++              threadId,
++              title: "Updated before selection",
++            })
++            .pipe(Effect.forkChild({ startImmediately: true }));
++          yield* Effect.raceFirst(
++            Deferred.await(updateReady),
++            Fiber.join(updateFiber).pipe(
++              Effect.andThen(
++                Effect.die("The update completed before reaching its commit barrier."),
++              ),
++            ),
++          );
++          const selectionFiber = yield* orchestrator
++            .dispatch({
++              type: "thread.model-selection.set",
++              commandId: CommandId.make("runtime-model-selection-stale-set"),
++              threadId,
++              modelSelection: { ...modelSelection, model: "gpt-5.4-mini" },
++              expectedUpdatedAt: before.thread.updatedAt,
++              onlyIfIdle: true,
++            })
++            .pipe(Effect.forkChild({ startImmediately: true }));
++          yield* Deferred.succeed(releaseUpdate, undefined);
++          yield* Fiber.join(updateFiber);
++          const error = yield* Fiber.join(selectionFiber).pipe(Effect.flip);
++          assert.instanceOf(error, Orchestrator.OrchestratorDispatchError);
++          assert.equal(
++            error.cause,
++            `Thread ${threadId} changed before the model selection could be applied.`,
++          );
++          const raced = yield* orchestrator.getThreadProjection(threadId);
++          assert.equal(raced.thread.modelSelection.model, modelSelection.model);
++
++          yield* orchestrator.dispatch({
++            type: "message.dispatch",
++            commandId: CommandId.make("runtime-model-selection-stale-message"),
++            createdBy: "user",
++            creationSource: "web",
++            threadId,
++            messageId: MessageId.make("runtime-model-selection-stale-message-id"),
++            text: "Start working so the thread is not idle.",
++            attachments: [],
++            dispatchMode: { type: "start_immediately" },
++          });
++          const busy = yield* orchestrator.getThreadProjection(threadId);
++          assert.isNotEmpty(busy.runs);
++          const busyError = yield* orchestrator
++            .dispatch({
++              type: "thread.model-selection.set",
++              commandId: CommandId.make("runtime-model-selection-stale-busy-set"),
++              threadId,
++              modelSelection: { ...modelSelection, model: "gpt-5.4-mini" },
++              expectedUpdatedAt: busy.thread.updatedAt,
++              onlyIfIdle: true,
++            })
++            .pipe(Effect.flip);
++          assert.instanceOf(busyError, Orchestrator.OrchestratorDispatchError);
++          assert.equal(
++            busyError.cause,
++            `Thread ${threadId} still has unfinished work. Finish or stop it first.`,
++          );
++          const after = yield* orchestrator.getThreadProjection(threadId);
++          assert.equal(after.thread.modelSelection.model, modelSelection.model);
++        }).pipe(Effect.ensuring(Effect.sync(() => commitSpy.mockRestore())));
++      }),
+   );
+ 
+   it.effect(
+diff --git a/apps/server/src/provider/agentContextBudget.json b/apps/server/src/provider/agentContextBudget.json
+--- a/apps/server/src/provider/agentContextBudget.json
++++ b/apps/server/src/provider/agentContextBudget.json
+@@ -1,5 +1,5 @@
+ {
+   "claudeSystemAppendBytes": 5350,
+   "codexAdditionalContextBytes": 7080,
+-  "mcpToolListJsonBytes": 48116
++  "mcpToolListJsonBytes": 49470
+ }
+diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
+--- a/packages/contracts/src/orchestrationV2.ts
++++ b/packages/contracts/src/orchestrationV2.ts
+@@ -2985,6 +2985,14 @@
+     threadId: ThreadId,
+     /** Delete only a thread with no runs and no messages; otherwise succeed without a change. */
+     onlyIfUnused: Schema.optional(Schema.Boolean),
++    /** Refuse unless the thread's title still equals this exact value. */
++    expectedTitle: Schema.optional(TrimmedNonEmptyString),
++    /** Refuse unless the thread's last update still equals this exact value. */
++    expectedUpdatedAt: Schema.optional(Schema.DateTimeUtc),
++    /** Exact native event revision; also checked inside the commit transaction. */
++    expectedSequence: Schema.optional(NonNegativeInt),
++    /** Refuse while a run is live or queued, a request is pending, or a child agent is active. */
++    onlyIfIdle: Schema.optional(Schema.Boolean),
+   }),
+   Schema.Struct({
+     type: Schema.Literal("thread.settle"),
+@@ -3163,6 +3171,14 @@
+     commandId: CommandId,
+     threadId: ThreadId,
+     modelSelection: ModelSelection,
++    /** Optional integration fence, checked against both the target and selection. */
++    requiredProviderInstanceId: Schema.optional(ProviderInstanceId),
++    /** Refuse unless the thread's last update still equals this exact value. */
++    expectedUpdatedAt: Schema.optional(Schema.DateTimeUtc),
++    /** Exact native event revision; also checked inside the commit transaction. */
++    expectedSequence: Schema.optional(NonNegativeInt),
++    /** Refuse while a run is live or queued, a request is pending, or a child agent is active. */
++    onlyIfIdle: Schema.optional(Schema.Boolean),
+   }),
+   Schema.Struct({
+     type: Schema.Literal("provider-session.detach"),

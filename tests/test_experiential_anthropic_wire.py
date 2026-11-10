@@ -13,7 +13,7 @@ from functools import wraps
 import httpx
 import pytest
 
-from control_plane.experiential_plan_policy import (
+from ops.native_fabric.experiential_proxy.anthropic_policy import (
     anthropic_policy_digest,
     parse_anthropic_models,
 )

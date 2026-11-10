@@ -193,7 +193,7 @@ def test_project_kernel_explicit_all_tier_web_waiver_and_handoff_exemption():
         "never self-approve/self-merge/falsify/bypass",
         "No independent review solely for handoff",
         "HANDOFF_SOURCE_LINK_V1",
-        "9A. ONE-PASS DELIVERY",
+        "9A. TASK FIRST",
     ):
         assert guard in block, f"required actual Project-fence clause missing: {guard}"
     numbered = [line.split(".", 1)[0] for line in block.splitlines() if line[:1].isdigit()]

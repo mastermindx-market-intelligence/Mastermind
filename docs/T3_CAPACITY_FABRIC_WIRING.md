@@ -1,149 +1,89 @@
-# T3 Code — Capacity Fabric wiring
+# T3 Code — Capacity Fabric source wiring
 
 Parent: [#983](https://github.com/mastermindx-market-intelligence/Mastermind/issues/983).
-Carrier: the Capacity Fabric OS integration branch (this PR). Runtime acceptance
-for the `t3_code` consumer remains under #983; this document records the source
-wiring, the installed registration and its exact boundaries.
+This source candidate connects the native T3 provider format to existing local
+gateway owners. Installed activation and `t3_code` consumer acceptance remain
+under the original programme and its receipts.
 
-## Outcome
+## Retained source behavior
 
-T3 Code can now select fabric capacity natively: the fabric's local serving
-gateways appear as first-class T3 providers (`claudeAgent` driver instances
-`fabric_claude` and `fabric_experiential`), each exposing the gateway's live
-authenticated catalogue as T3-custom models. **The fabric owns every routing,
-admission, pool-rotation and load-balancing decision**; T3 only chooses a model
-slug. No T3-side fallback, retry ladder or second provider is configured: a
-fabric refusal (budget window, cooldown, queue deadline, plan policy) surfaces
-to the thread unchanged.
+The defaults prepare `fabric_claude` and `fabric_experiential` entries for the
+existing Anthropic and Experiential gateways. T3 selects a model within that
+explicit provider binding. Gateway owners retain admission, credentials,
+request effects and provider-refusal handling. The adapter introduces no
+cross-pool chooser, alias cascade, independent cooldown or retry owner.
 
-## The unified router (all pools, all keys, smart routing)
+| Component | Existing responsibility used by this source |
+|---|---|
+| `endpoints.py` | Fixed default gateway locations, local token inputs and catalogue reads |
+| `registration.py` / `__main__.py` | `status`, `plan`, authorized `apply`, and `verify` over those bindings |
+| `t3_config.py` | T3's provider settings format, backup/atomic write and separate provider homes |
+| Experiential gateway | Existing durable admission, bounded queue, key selection and one upstream send |
+| Capacity Fabric view | Read-only current observations, with `admission_authorized=false` |
 
-`ops/native_fabric/unified_router` (launchd `ai.mastermind.fabric-router`,
-`127.0.0.1:8313`) is the fabric's single intelligent edge. T3's provider
-**Capacity Fabric** (`capacity_fabric`) points at it and exposes the union
-catalogue (36 models + `fabric/frontier|balanced|fast` routing aliases).
+Default registrations point to `127.0.0.1:8312` and `127.0.0.1:8311`.
+Registration preserves unrelated providers and the existing default model.
+A configuration write does not establish that a running thread used it.
 
-- **Every pool, every key, no new custody**: routes compose the incumbent
-  owners — the two local gateways (their own loopback tokens), the GLM coding
-  plan (`~/.glm/config.json`), the Bailian token plan (3-key rotation,
-  `~/.bailian/config.json`), the MiniMax token plan (`~/.minimax/config.json`),
-  the BytePlus coding plan key and the OpenCode Go plan (2-key rotation,
-  `x-api-key` + `x-opencode-session` per-route headers) — each read live at
-  request time through the same pointers the incumbents use. PAYG keys
-  (Z.AI `paas`) are deliberately not routed: subscription surfaces only, no
-  silent spend.
-- **Smart routing**: exact slugs resolve to all serving routes in priority
-  tiers; within a tier, weighted selection with caller affinity
-  (`metadata.user_id`) preserves prompt-cache locality. `fabric/*` aliases are
-  ordered family cascades, so an exhausted pool transparently uses the next
-  family. 429/5xx benches a route locally (30s x failures, capped) and the
-  next request fails over — admission-time only, never a replay after a
-  possible effect.
-- **Wire coverage**: all default pools speak Anthropic wire natively
-  (passthrough, streaming untouched); OpenAI-wire pools route through the
-  closed translator (`wire.py`: tools, SSE events, usage round trips).
-- **Truthful capacity**: the Bailian monthly exhaustion surfaced above is a
-  real vendor quota state passed through verbatim — the router never invents
-  headroom.
+## Experiential Anthropic Messages surface
 
-`GET /statusz` reports per-route health/counters (never keys); `GET /v1/models`
-is the unified catalogue. Remaining un-routed capacity: Codex ChatGPT seats
-(backend protocol owned by the codex CLI lane), xAI OAuth (token-refresh lane)
-and the Cursor pool — each drops in as one more route entry plus key pointer.
+The incumbent gateway adds `POST /v1/messages` and
+`POST /v1/messages/count_tokens` through its existing admission owner.
+The operator-deployed `EXPLABS_ANTHROPIC_MODELS` list is the exact model
+boundary for this wire surface:
 
-## Pool wiring for the flash/uncensored family (2026-11-09)
+- Empty configuration refuses before RPM/slot reservation.
+- The request model must exactly match an admitted slug.
+- Routing overrides and invalid/duplicate JSON are refused.
+- An optional `x-fabric-plan-policy` header binds to the deployed catalogue;
+  a mismatched digest is refused before admission.
+- Streaming, typed refusals and the single-send boundary stay with the
+  existing gateway. No new model/pool fallback is introduced.
 
-DeepSeek/GLM flash and uncensored variants load-balance across every pool
-that serves them, in priority tiers (admission-time failover, no replay):
+The new wire helpers are in
+`ops/native_fabric/experiential_proxy/anthropic_policy.py`. They reuse the
+incumbent strict JSON and refusal types; the historically sealed
+`control_plane/experiential_plan_policy.py` and provider profile retain their
+original bytes. The existing paired CI archive includes the new leaf module
+alongside the gateway so it executes the complete source closure.
 
-| model | tier 1 | tier 2 | tier 3 |
-|---|---|---|---|
-| `glm-5.3` | GLM coding plan (z.ai, 3 keys) | labs Max plan | OpenCode Go |
-| `glm-5.3-flash` | GLM coding plan (z.ai) | labs | OpenCode Go → BytePlus |
-| `deepseek-v4.1-flash` | labs | OpenCode Go | BytePlus |
-| `glm-5.3-uncensored` | labs | — | — |
-| `glm-5.3-flash-uncensored` | labs | — | — |
-| `deepseek-v4.1-flash-uncensored` | labs | — | — |
+## Source-scope correction
 
-`glm-5.3-uncensored` was admitted to the labs gateway's deployed
-`EXPLABS_ANTHROPIC_MODELS` catalogue (vendor catalog carries the slug);
-uncensored variants exist only on the labs plan — z.ai, BytePlus and
-OpenCode Go serve standard models only. OpenCode Go workspaces enforce a
-5-hour usage window surfaced as 429; the router benches the route and fails
-over to the next tier without inventing headroom.
+The later branch proposal at
+[`ecbbbc0563c74db0945972ac4cd4481f0853a55f`](https://github.com/mastermindx-market-intelligence/Mastermind/commit/ecbbbc0563c74db0945972ac4cd4481f0853a55f)
+introduced a separate `unified_router` service and a default port8313 entry.
+Its implementation independently selected pools/models, maintained route
+cooldown eligibility and could read provider keys for direct dispatch without
+an incumbent placement/admission decision. It is excluded from this source
+delivery, together with its dedicated tests and default registration.
 
-## Architecture
+The inspected implementation sent once per HTTP request; its failure state
+affected later requests. The exclusion concerns control ownership, not a
+claim that the same request was automatically replayed. Any broader all-pools
+feature must be integrated through existing placement, admission and
+credential owners, with their original grant and effect semantics.
 
-```
-T3 Code (claudeAgent driver, Claude Code CLI)
-  └─ ANTHROPIC_BASE_URL → http://127.0.0.1:8312   fabric: anthropic_oauth_proxy
-       │  Anthropic Messages wire, bearer = FABRIC_PROXY_TOKEN
-       ├─ admission: rolling 5h + weekly weighted budgets per account
-       ├─ pool rotation: round-robin max-* OAuth accounts, cooldowns, in-flight caps
-       └─ model weights (fable 2.0 / opus 1.5 / rest 1.0) — capacity-aware LB
-  └─ ANTHROPIC_BASE_URL → http://127.0.0.1:8311   fabric: experiential_proxy
-       │  Anthropic Messages wire (new `/v1/messages` + `/v1/messages/count_tokens`)
-       ├─ admission: durable sliding-window RPM per key + optional org ceiling
-       ├─ key rotation: round-robin over operator-configured keys
-       └─ funding boundary: operator-deployed EXPLABS_ANTHROPIC_MODELS catalogue
-```
+This correction preserves the original Capacity Fabric monitor/read feature
+and the independently scoped existing-gateway protocol/registration work.
+The monitor cannot supply execution or routing authority.
 
-Registration is performed by `integrations/t3_capacity_fabric` (pure stdlib):
+## Historical claims and remaining acceptance
 
-- `endpoints.py` — the installed fabric serving endpoints and their env-file
-  token locations; catalogues are read from each gateway's authenticated
-  `GET /v1/models`. Nothing is invented locally.
-- `t3_config.py` — idempotent, backup-first writes into T3's live-watched
-  `~/.t3/userdata/settings.json` (tightened to 0600 because it carries gateway
-  tokens). The T3 UI's Keychain secret store is never hand-authored.
-- `registration.py` / `__main__.py` — `status | plan | apply | verify`; every
-  apply backs up `settings.json` before an atomic replace and refuses to
-  register an unhealthy gateway.
+The earlier branch document reported November9 gateway deployment,
+registration and backups, with receipts said to be in its delivery thread.
+This source recovery has not verified those installed effects and does not
+relabel those claims as current acceptance. Their original provenance is
+preserved at the immutable commit above and remains with #983.
 
-## Experiential edge: Anthropic Messages surface
+Source/default removal does not attest that a port8313 service was stopped,
+that an installed `capacity_fabric` entry was removed, or that a selected
+runtime changed. Existing provider entries are preserved by registration;
+any live reconciliation requires the original owner, exact receipts and
+current authority. The pre-existing direct Experiential provider is likewise
+outside this source correction.
 
-`ops/native_fabric/experiential_proxy/gateway.py` previously spoke only the
-OpenAI wire. It now also accepts `POST /v1/messages` and
-`POST /v1/messages/count_tokens` through the **same** durable RPM admission,
-key rotation, bounded queue and streaming passthrough as the existing
-endpoints. The funding boundary for this surface is the operator-deployed
-`EXPLABS_ANTHROPIC_MODELS` catalogue (`control_plane/experiential_plan_policy.py`):
-
-- unset/empty → every Anthropic request is refused `PLAN_ANTHROPIC_NOT_ENABLED`
-  **before** RPM/slot reservation (zero spend, zero queue use);
-- the request `model` must be an exact member of the deployed list
-  (`PLAN_MODEL_NOT_ADMITTED` otherwise);
-- routing-override body fields are refused; JSON is parsed as a closed object;
-- an optional `x-fabric-plan-policy: <anthropic_policy_digest(models)>` header
-  binds a caller to the exact deployed catalogue (409 on mismatch);
-- no model rewrite, no idempotency forwarding, no replay: single attempt.
-
-`GET /statusz` discloses `anthropic_surface` and its digest, never the slugs or
-keys.
-
-## Installed registration (this host, 2026-11-09)
-
-- `ai.mastermind.anthropic-gateway` (8312): registered as T3 provider
-  `fabric_claude` — 12-model Claude catalogue over the pooled `max-*` accounts.
-- `ai.mastermind.experiential-gateway` (8311): deployed a new release
-  generation extending the gateway with the Anthropic surface;
-  `EXPLABS_ANTHROPIC_MODELS` set to the vendor's Anthropic-wire catalogue
-  (16 multi-vendor slugs: Claude/GPT/GLM/DeepSeek/Qwen/Kimi/Grok/Gemini/MiniMax);
-  registered as T3 provider `fabric_experiential`.
-- Both gateway env files and `settings.json` were backed up before any change;
-  receipts are in the delivery thread, not in this repository.
-
-The pre-existing T3 `experiential` provider (direct to
-`https://api.experientiallabs.ai`) is left untouched: retiring it in favour of
-the fabric edge is an operator decision, not this wiring's to take.
-
-## Boundaries and remaining work
-
-- Pools not yet served by a local fabric gateway (GLM canonical paid lease
-  gateway, grok47 quota pools, native application pools behind the lease
-  broker) register through the same `FabricEndpoint` seam once their serving
-  surface is installed; the registration tooling does not create gateways.
-- The fabric view panel from this PR keeps `admission_authorized=false`: it is
-  a monitor. Actual admission is the gateways' budget/RPM/lease logic above.
-- Consumer acceptance for `t3_code` (thread launch behaviour, occupancy,
-  result consumption under load) stays with #983's acceptance matrix.
+The original release boundary remains: select and verify the exact source,
+prove installed gateway bindings and fresh runtime observations, then retain
+real T3 launch, occupancy and result-consumption evidence under #983.
+#2182's original uncertain publication and all credential/runtime holds remain
+unchanged. No provider call, installation or consumer activation is claimed.

@@ -33,21 +33,11 @@ class FabricEndpoint:
 def default_endpoints(home: Path = _DEFAULT_HOME) -> tuple[FabricEndpoint, ...]:
     """The installed fabric serving endpoints, in stable registration order.
 
-    The unified router comes first: it is the fabric's single intelligent edge
-    (every pool, cross-pool load balancing, ``fabric/*`` routing aliases). The
-    per-pool gateways remain registered as direct escape hatches.
+    Each default points to an existing gateway owner. Registration supplies
+    its local consumer binding; it does not choose across pools or introduce
+    another placement, cooldown or provider-credential owner.
     """
     return (
-        FabricEndpoint(
-            endpoint_id="unified_router",
-            instance_id="capacity_fabric",
-            display_name="Capacity Fabric",
-            base_url="http://127.0.0.1:8313",
-            env_file=home / "fabric-router" / "router.env",
-            accent_color="emerald",
-            token_env_name="FABRIC_ROUTER_TOKEN",
-            preferred_fast_model="glm-5.3-flash",
-        ),
         FabricEndpoint(
             endpoint_id="anthropic_oauth",
             instance_id="fabric_claude",

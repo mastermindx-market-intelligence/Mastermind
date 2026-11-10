@@ -585,6 +585,7 @@ _WORKSPACE_SOURCE_OPERATION_POST_ROUTES: tuple[str, ...] = (
 # Fixed already-owned inner routes. These are transport classifications only;
 # the Workspace App retains each original READ/action principal and grant gate.
 _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
+    "/workspace/company/current",
     "/workspace/project-session/current",
     "/workspace/project-admission/current",
     "/workspace/project-admission/operation",
@@ -600,6 +601,7 @@ _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
     "/workspace/resources/models/current",
+    "/workspace/resources/fabric/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
@@ -610,7 +612,7 @@ _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
 )
 _WORKSPACE_ACTION_ROUTES = (
     _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
-    + _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES
+    + _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES + ("/workspace/company/command",)
 )
 
 

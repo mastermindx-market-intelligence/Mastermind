@@ -916,13 +916,13 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
     assert job["name"] == "test"
     assert job["runs-on"] == "ubuntu-latest"
     assert job["if"] == "${{ always() }}"
-    assert job["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -930,6 +930,8 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
+    assert gate["env"]["GUARDS_STATUS"] == "${{ needs.pin_guards.result }}"
+    assert '[ "$GUARDS_STATUS" != success ]' in gate["run"]
     assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
     assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
     assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]

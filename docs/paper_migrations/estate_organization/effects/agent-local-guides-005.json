@@ -1,0 +1,2388 @@
+{
+  "schema": "paper.estate.receipts.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "observed_at": "2026-11-09T11:36:37.447Z",
+  "note": "Compact canonical receipts: exact call arguments, response result, effect state, identities and drift snapshots. No replay.",
+  "count": 47,
+  "operations": [
+    {
+      "operation_id": "peo-20261109-c1-local-01-header",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HBU-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:100%;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Sector Intelligence · R4 · Working Design</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6FAXA774QT1VRDMAG7DFQ2W<br/>PAGE_ID: p-9-0<br/>FILE_ROLES: working_design<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "c33c4396c9eaf7e1408f03fa49d133c72d5e8530f6689656ba3d90fc22553690",
+      "after_snapshot": "b9ae46af8dec05056f9d1bb1e8cf7016c30b3c521cd59666b76ced24765df588",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HD9-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "HDA-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "HDB-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "HDC-0",
+            "name": "Sector Intelligence …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "HDD-0",
+            "name": "FILE_ID: 01M6FAXA774…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-route-1",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · READ</b> — Provisional D05 journey and build contract<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6FAXA774QT1VRDMAG7DFQ2W · PAGE_ID: p-3-0 · BOARD_IDS: BML-0<br/>https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-3-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "b9ae46af8dec05056f9d1bb1e8cf7016c30b3c521cd59666b76ced24765df588",
+      "after_snapshot": "9a48e25df253d17a1cbf427ecee1344f531564108aead9de314a4bbd30490174",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDF-0",
+            "name": "READ_NEXT 1 | READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-route-2",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | DESIGN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · DESIGN</b> — Native R4 M1 suite and state variants<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6FAXA774QT1VRDMAG7DFQ2W · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "9a48e25df253d17a1cbf427ecee1344f531564108aead9de314a4bbd30490174",
+      "after_snapshot": "655c43962df052c103151b712b8fbad838905dee6e77feaef2ff30a958f45d19",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDH-0",
+            "name": "READ_NEXT 2 | DESIGN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-route-3",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | BUILD_READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · BUILD_READ</b> — Models, interaction and exact return<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6FAXA774QT1VRDMAG7DFQ2W · PAGE_ID: p-5-0 · BOARD_IDS: GPI-0<br/>https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-5-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "655c43962df052c103151b712b8fbad838905dee6e77feaef2ff30a958f45d19",
+      "after_snapshot": "73659ec56c21061649443905264dfe4fd4666478bb024d40371f8e8fae8c6f67",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDJ-0",
+            "name": "READ_NEXT 3 | BUILD_READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-route-4",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 4 | PRESERVE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>04 · PRESERVE</b> — R3 Research/Watches/states; Produced/GAP disagreement<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3Z73MXTN3MDX5661VV0KB · PAGE_ID: p-1-0 · BOARD_IDS: 4ED-0, 3DN-0, 4OO-0<br/>https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "73659ec56c21061649443905264dfe4fd4666478bb024d40371f8e8fae8c6f67",
+      "after_snapshot": "4fd2f5139916e311ce0012e60640474368f480a27f46c1a7bbd82eb17a56eacf",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDL-0",
+            "name": "READ_NEXT 4 | PRESERVE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-route-5",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 5 | RECORDED_REFERENCE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>05 · RECORDED_REFERENCE</b> — R2 selection dated 27 September 2026<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3K1SSX1M108ZY90KJX382 · PAGE_ID: p-1-0 · BOARD_IDS: 1-0, 11-0<br/>https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "4fd2f5139916e311ce0012e60640474368f480a27f46c1a7bbd82eb17a56eacf",
+      "after_snapshot": "e54899644a9937264ddaddf42b4cb0177dd5570d164896867b7f92c6edce4acb",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDN-0",
+            "name": "READ_NEXT 5 | RECORDED_REFERENCE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-qualification",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Provisional R4/D05 direction; local guide links native M1 suite, R3 Research/Watches/states and dated R2 build direction. Existing acceptance holds remain. R3 labels offline/uncertain-save behavior Produced; R4's retained state catalogue calls local queue/write bindings GAP. This unresolved status claim requires the existing watch owner's source and consumer evidence.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "e54899644a9937264ddaddf42b4cb0177dd5570d164896867b7f92c6edce4acb",
+      "after_snapshot": "d9b134b171e757d530d42bd76abced3d1e19762975fce7937c1fad553b438cda",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDP-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-footer",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "targetNodeId": "HD9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Choose the route matching the current assignment. A route identifies evidence to read; it does not approve implementation or release. Read the returned page result, then select its actual product board for UI extraction. This guide and other internal contracts are not product UI.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · https://github.com/mastermindx-market-intelligence/Mastermind/blob/48afb662d4b57c487c3ff771b654e43f015adc08/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "d9b134b171e757d530d42bd76abced3d1e19762975fce7937c1fad553b438cda",
+      "after_snapshot": "0b6cec0565b642314194fd8dc2fe67d18c12692cfc2b84c39e43f103d3cd0767",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "createdNodes": [
+          {
+            "id": "HDR-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-guide-first",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "move_nodes",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "moves": [
+          {
+            "nodeId": "HD9-0",
+            "parentId": "HBU-0",
+            "index": 0
+          }
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0b6cec0565b642314194fd8dc2fe67d18c12692cfc2b84c39e43f103d3cd0767",
+      "after_snapshot": "0b6cec0565b642314194fd8dc2fe67d18c12692cfc2b84c39e43f103d3cd0767",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "moves": [
+          {
+            "nodeId": "HD9-0",
+            "parentId": "HBU-0",
+            "index": 0
+          }
+        ],
+        "affectedParents": [
+          {
+            "parentId": "HBU-0",
+            "childIds": [
+              "HD9-0",
+              "HBV-0",
+              "HC0-0",
+              "HC7-0",
+              "HCC-0",
+              "HCI-0",
+              "HCN-0",
+              "HCS-0",
+              "HCX-0",
+              "HD3-0"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-page-label",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "update_pages",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "updates": [
+          {
+            "pageId": "p-9-0",
+            "name": "00 · AGENT README · Scope & routes",
+            "icon": "arrow"
+          }
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0b6cec0565b642314194fd8dc2fe67d18c12692cfc2b84c39e43f103d3cd0767",
+      "after_snapshot": "55ef6d80db6987ef20baa6bf3c1f3b0ede893d6144521435f26be8ba53704391",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "pageId": "p-9-0",
+            "name": "00 · AGENT README · Scope & routes",
+            "icon": "arrow"
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-01-finish",
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+        "nodeIds": [
+          "HBU-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "55ef6d80db6987ef20baa6bf3c1f3b0ede893d6144521435f26be8ba53704391",
+      "after_snapshot": "55ef6d80db6987ef20baa6bf3c1f3b0ede893d6144521435f26be8ba53704391",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6FAXA774QT1VRDMAG7DFQ2W"
+      },
+      "result": {
+        "file": {
+          "id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+          "name": "Sector Intelligence · R4 · Working Design"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-page",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "cc66cc8ca0c120ddefabf1779cd3f3695f1b46e0d3436a375ed8d57a1001f64f",
+      "after_snapshot": "0a365e13c2531769a7935f0b2052c6d96ae7e5d124916acc182ffd0d6093b8f2",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-5-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-header",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "root_node_p-5-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Crypto Intelligence · R4 References and Archive</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y3F0NXNDPAKJMJGCAD759Z<br/>PAGE_ID: p-5-0<br/>FILE_ROLES: retained_reference, proposal<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a365e13c2531769a7935f0b2052c6d96ae7e5d124916acc182ffd0d6093b8f2",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3L1-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3L2-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3L3-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3L4-0",
+            "name": "Crypto Intelligence …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3L5-0",
+            "name": "FILE_ID: 01M6Y3F0NXN…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-route-1",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "3L1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · READ</b> — R4 scorecard and exact replacement scope<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3F0NXNDPAKJMJGCAD759Z · PAGE_ID: p-1-0 · BOARD_IDS: QI-0<br/>https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3L7-0",
+            "name": "READ_NEXT 1 | READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-route-2",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "3L1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | PROPOSAL\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · PROPOSAL</b> — Relative comparison and window contract<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3F0NXNDPAKJMJGCAD759Z · PAGE_ID: p-3-0 · BOARD_IDS: 2ZJ-0<br/>https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-3-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3L9-0",
+            "name": "READ_NEXT 2 | PROPOSAL",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-route-3",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "3L1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | PROPOSAL\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · PROPOSAL</b> — Saved-case identity and exact return<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3F0NXNDPAKJMJGCAD759Z · PAGE_ID: p-4-0 · BOARD_IDS: 3IP-0<br/>https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-4-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3LB-0",
+            "name": "READ_NEXT 3 | PROPOSAL",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-route-4",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "3L1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 4 | PRESERVE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>04 · PRESERVE</b> — R1/R2 source and behavior contracts<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3F0NXNDPAKJMJGCAD759Z · PAGE_ID: p-2-0 · BOARD_IDS: Z1-0, 251-0<br/>https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3LD-0",
+            "name": "READ_NEXT 4 | PRESERVE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-qualification",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "3L1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>R4 scorecard QI-0 explicitly replaces seven archived R3 boards; R1/R2 behavior contracts Z1-0/251-0 remain retained. Relative comparison p-3-0 and saved-case runtime amendment p-4-0 remain proposed; public-route cutover and alerts remain gated.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3LF-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-footer",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "targetNodeId": "3L1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/48afb662d4b57c487c3ff771b654e43f015adc08/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3LH-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-page-first",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "order": [
+          "p-5-0",
+          "p-1-0",
+          "p-4-0",
+          "p-3-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3a2b448329b075375bf9a7cd12218155bcb98beea448d6d2178626a0e1db0bd6",
+      "after_snapshot": "26a597de6effa7028e0e0f44c71ab5b59b60b8547ae7871cbfa1a6415bd8b493",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-5-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Crypto Intelligence · R4 · Design References",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "Proposed · Saved case & historical return",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "Proposed · Relative comparison basis",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "Archive · Crypto R1–R3 · Not for Build",
+            "icon": "paper",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-02-finish",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "nodeIds": [
+          "3L1-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "26a597de6effa7028e0e0f44c71ab5b59b60b8547ae7871cbfa1a6415bd8b493",
+      "after_snapshot": "26a597de6effa7028e0e0f44c71ab5b59b60b8547ae7871cbfa1a6415bd8b493",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3F0NXNDPAKJMJGCAD759Z"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+          "name": "Crypto Intelligence · R4 References and Archive"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-page",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0588093b6b3ef41630b236e9c729f7d1ae505d8b3971afd8d260a33732957459",
+      "after_snapshot": "a5b175a3013b0fb6a93e78862e12dd901575e6204f014a18c8f0c87fcf3d5fa2",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-3-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-header",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "targetNodeId": "root_node_p-3-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Commodities · Journeys &amp; Research Studies</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y3GS3GDTC3Q1J64QCGZHJ8<br/>PAGE_ID: p-3-0<br/>FILE_ROLES: recorded_contract, proposal, retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a5b175a3013b0fb6a93e78862e12dd901575e6204f014a18c8f0c87fcf3d5fa2",
+      "after_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "52A-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "52B-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "52C-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "52D-0",
+            "name": "Commodities · Journe…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "52E-0",
+            "name": "FILE_ID: 01M6Y3GS3GD…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-route-1",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "targetNodeId": "52A-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · READ</b> — R2 journey map and measure contract<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3GS3GDTC3Q1J64QCGZHJ8 · PAGE_ID: p-2-0 · BOARD_IDS: B9-0, 4GX-0<br/>https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "after_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "52G-0",
+            "name": "READ_NEXT 1 | READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-route-2",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "targetNodeId": "52A-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | COMPARE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · COMPARE</b> — Later R3/R4 studies; adoption unresolved<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3GS3GDTC3Q1J64QCGZHJ8 · PAGE_ID: p-2-0 · BOARD_IDS: 4I0-0, 4LS-0, 4OS-0, 4VP-0<br/>https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "after_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "52I-0",
+            "name": "READ_NEXT 2 | COMPARE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-route-3",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "targetNodeId": "52A-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | PRESERVE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · PRESERVE</b> — Legacy instrument, roll, negative-price and recovery obligations<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3GS3GDTC3Q1J64QCGZHJ8 · PAGE_ID: p-1-0 · BOARD_IDS: 9F-0, AE-0<br/>https://app.paper.design/file/01M6Y3GS3GDTC3Q1J64QCGZHJ8/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "after_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "52K-0",
+            "name": "READ_NEXT 3 | PRESERVE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-qualification",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "targetNodeId": "52A-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Start at B9-0 and 4GX-0 on p-2-0. R2 routes remain the recorded implementation reference; R3/R4 and North Star adoption is unestablished. Retain legacy 90–94 source/recovery/negative-price/roll requirements on p-1-0. Inspect each later study's source before selecting it as a replacement. Different dated fixture values do not prove lost behavior.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "after_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "52M-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-footer",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "targetNodeId": "52A-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/48afb662d4b57c487c3ff771b654e43f015adc08/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "after_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "52O-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-page-first",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "order": [
+          "p-3-0",
+          "p-2-0",
+          "p-1-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "395bb85792aca68b9109eb3bfe718d869b0836949160cb2272f5bc92ed16218d",
+      "after_snapshot": "dfb633241e71b266c4e1ed3a94580a388adc200d5e72000e8f6071a650490d2f",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "00 · Start here · Journeys, studies & build contracts",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Archive · Legacy 90–94 · Not for Build",
+            "icon": "paper",
+            "isActive": true
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-03-finish",
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "nodeIds": [
+          "52A-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "dfb633241e71b266c4e1ed3a94580a388adc200d5e72000e8f6071a650490d2f",
+      "after_snapshot": "dfb633241e71b266c4e1ed3a94580a388adc200d5e72000e8f6071a650490d2f",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "name": "Commodities · Journeys & Research Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-page",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "2f026f83509682dc2b0030f772952b99a260de8466a58ece3b5fd731f5d330b0",
+      "after_snapshot": "170a2d478fd239da9db116b48d40ecd0688c8c96a712bf98d46231aa79c301be",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-2-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-header",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "targetNodeId": "root_node_p-2-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Sector Intelligence · R3 · Retained Completion Reference</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y3Z73MXTN3MDX5661VV0KB<br/>PAGE_ID: p-2-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "170a2d478fd239da9db116b48d40ecd0688c8c96a712bf98d46231aa79c301be",
+      "after_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "5G9-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "5GA-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "5GB-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "5GC-0",
+            "name": "Sector Intelligence …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "5GD-0",
+            "name": "FILE_ID: 01M6Y3Z73MX…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-route-1",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "targetNodeId": "5G9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · READ</b> — Substantive Research, Watches and state matrix<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3Z73MXTN3MDX5661VV0KB · PAGE_ID: p-1-0 · BOARD_IDS: 4ED-0, 3DN-0, 4OO-0<br/>https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "after_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "5GF-0",
+            "name": "READ_NEXT 1 | READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-route-2",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "targetNodeId": "5G9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | LINEAGE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · LINEAGE</b> — Dated supersession table, not exhaustive preservation proof<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3Z73MXTN3MDX5661VV0KB · PAGE_ID: p-1-0 · BOARD_IDS: 56C-0<br/>https://app.paper.design/file/01M6Y3Z73MXTN3MDX5661VV0KB/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "after_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "5GH-0",
+            "name": "READ_NEXT 2 | LINEAGE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-route-3",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "targetNodeId": "5G9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | SCOPE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · SCOPE</b> — R4 scope guide; R3 is a retained substantive layer<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6FAXA774QT1VRDMAG7DFQ2W · PAGE_ID: p-9-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "after_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "5GJ-0",
+            "name": "READ_NEXT 3 | SCOPE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-qualification",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "targetNodeId": "5G9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Retain Research 4ED-0, Watches 3DN-0, states 4OO-0 and historical supersession 56C-0. Produced versus R4 GAP is an unresolved implementation-status disagreement.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "after_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "5GL-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-footer",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "targetNodeId": "5G9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/48afb662d4b57c487c3ff771b654e43f015adc08/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "after_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "5GN-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-page-first",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "order": [
+          "p-2-0",
+          "p-1-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a15aa7cf14d35a3f3a29ede420c7a4776e7c81c497978b9018e508e6e41e3572",
+      "after_snapshot": "4a6047bd82c929eb68f5851096ca6eb39a558bc1c13e53e23a589fe557c55d3b",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "R3 · Retained requirements · 2026-10-21",
+            "icon": "design",
+            "isActive": true
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-04-finish",
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "nodeIds": [
+          "5G9-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "4a6047bd82c929eb68f5851096ca6eb39a558bc1c13e53e23a589fe557c55d3b",
+      "after_snapshot": "4a6047bd82c929eb68f5851096ca6eb39a558bc1c13e53e23a589fe557c55d3b",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3Z73MXTN3MDX5661VV0KB"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+          "name": "Sector Intelligence · R3 · Retained Completion Reference"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-page",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "4d4cd2d608cc7bb1d4fb9e499b0537c02cf4850fbaf474ab29f0d8d47cb6d488",
+      "after_snapshot": "7f09465585ed577c3a53d9596ee216fcd57dcbc8eb112a2bc3332ff2f682320c",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-5-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-header",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "targetNodeId": "root_node_p-5-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Sector Intelligence · R2 · Build Direction &amp; Retained Studies</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y3K1SSX1M108ZY90KJX382<br/>PAGE_ID: p-5-0<br/>FILE_ROLES: recorded_contract, retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7f09465585ed577c3a53d9596ee216fcd57dcbc8eb112a2bc3332ff2f682320c",
+      "after_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2ZU-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2ZV-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2ZW-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2ZX-0",
+            "name": "Sector Intelligence …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2ZY-0",
+            "name": "FILE_ID: 01M6Y3K1SSX…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-route-1",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "targetNodeId": "2ZU-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · READ</b> — Dated R2 selection and build/data contracts<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3K1SSX1M108ZY90KJX382 · PAGE_ID: p-1-0 · BOARD_IDS: 1-0, 11-0<br/>https://app.paper.design/file/01M6Y3K1SSX1M108ZY90KJX382/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "after_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "300-0",
+            "name": "READ_NEXT 1 | READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-route-2",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "targetNodeId": "2ZU-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SCOPE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SCOPE</b> — R4 guide links all three substantive Sector layers<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6FAXA774QT1VRDMAG7DFQ2W · PAGE_ID: p-9-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6FAXA774QT1VRDMAG7DFQ2W/p-9-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "after_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "302-0",
+            "name": "READ_NEXT 2 | SCOPE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-qualification",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "targetNodeId": "2ZU-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Recorded R2 build selection over earlier studies, dated 2026-09-27. Preserve source/evidence/behavior contracts; current operative implementation selection is not re-certified.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "after_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "304-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-footer",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "targetNodeId": "2ZU-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. For a page-only route, inspect that requested page's result to select an exact board. Export UI only from product boards, excluding this guide and internal contracts.<br/><b>PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>SCOPE EVIDENCE</b> · Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/48afb662d4b57c487c3ff771b654e43f015adc08/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "after_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "306-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-page-first",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "order": [
+          "p-5-0",
+          "p-1-0",
+          "p-2-0",
+          "p-3-0",
+          "p-4-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "1521e4e93f20f895aa89972b7462d6f2658e137238a97dc5629f409b76c3fc7a",
+      "after_snapshot": "90970adc78278ad87e57029a55dd8bbd4cea84c36bfbe2ec09774601f1be0d2a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-5-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "R2 · Build direction & evidence contracts · 2026-09-27",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "HISTORICAL REDIRECT SNAPSHOT - Sector Intelligence · vNext Study · 2026-09-24",
+            "icon": "paper",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "HISTORICAL REDIRECT SNAPSHOT - Sector Intelligence · Unified Detail · 2026-09-21",
+            "icon": "paper",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "HISTORICAL REDIRECT SNAPSHOT - Sector Central · Redesign · 2026-09-21",
+            "icon": "paper",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-05-finish",
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "nodeIds": [
+          "2ZU-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "90970adc78278ad87e57029a55dd8bbd4cea84c36bfbe2ec09774601f1be0d2a",
+      "after_snapshot": "90970adc78278ad87e57029a55dd8bbd4cea84c36bfbe2ec09774601f1be0d2a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3K1SSX1M108ZY90KJX382"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3K1SSX1M108ZY90KJX382",
+          "name": "Sector Intelligence · R2 · Build Direction & Retained Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    }
+  ],
+  "completed_local_guides": [
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-9-0",
+      "board_id": "HBU-0",
+      "node_id": "HD9-0",
+      "kind": "reused_guidance_page",
+      "steps": [
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "route-5",
+        "qualification",
+        "footer",
+        "guide-first",
+        "page-label",
+        "finish"
+      ],
+      "proof": {
+        "exact_jsx": true,
+        "preserved_original_nodes": 42,
+        "screenshot": "visually verified; no clipping or overlap"
+      }
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "3L1-0",
+      "board_id": "3L1-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4
+      }
+    },
+    {
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "52A-0",
+      "board_id": "52A-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    },
+    {
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "5G9-0",
+      "board_id": "5G9-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1
+      }
+    },
+    {
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "2ZU-0",
+      "board_id": "2ZU-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4
+      }
+    }
+  ]
+}

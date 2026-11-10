@@ -70,6 +70,9 @@ include = [
 ]
 namespaces = false
 
+[tool.setuptools.package-data]
+"integrations.hermes_github_plugin" = ["plugin.yaml"]
+
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::Warning"]
 addopts = "-q"

@@ -27,14 +27,16 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 import httpx
 
 from control_plane.experiential_plan_policy import (
-    ANTHROPIC_ENDPOINTS,
     PLAN_MODES,
     PlanRequestRefused,
+    plan_policy_digest,
+    validate_plan_request,
+)
+from ops.native_fabric.experiential_proxy.anthropic_policy import (
+    ANTHROPIC_ENDPOINTS,
     anthropic_policy_digest,
     parse_anthropic_models,
-    plan_policy_digest,
     validate_anthropic_plan_request,
-    validate_plan_request,
 )
 
 UPSTREAM = "https://api.experientiallabs.ai/v1"

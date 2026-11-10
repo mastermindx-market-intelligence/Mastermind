@@ -290,6 +290,8 @@ def _validate_lease_for_authorize(lease, claims, now):
 _APPLICATION_TOKEN = re.compile(r"^app1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
 _APPLICATION_DOMAIN = b"mastermind.go.application-lease-capability/v1\x00"
 _APPLICATION_HTTP_TOKEN = re.compile(r"^app2\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$")
+_APPLICATION_GLM_TOKEN = re.compile('^app4\\.([A-Za-z0-9_-]+)\\.([A-Za-z0-9_-]+)$')
+_APPLICATION_GLM_DOMAIN = b'mastermind.glm.application-lease-capability/v4\x00'
 _APPLICATION_HTTP_DOMAIN = b"mastermind.bailian.application-lease-capability/v2\x00"
 NATIVE_APPLICATION_KIND = "native_cli_operation_v1"
 NATIVE_APPLICATION_POOLS = frozenset({
@@ -307,71 +309,49 @@ _APPLICATION_FIELDS = frozenset({
 
 def _validate_application_claims(claims):
     if not isinstance(claims, dict):
-        raise CapabilityError("invalid application capability")
-    native = type(claims.get("pool")) is str and claims["pool"] in NATIVE_APPLICATION_POOLS
-    http = claims.get("pool") == "bailian"
-    fields = (_APPLICATION_FIELDS | {"recipe_digest", "transport_kind"} if native else
-              _APPLICATION_FIELDS | {"recipe_digest"} if http else _APPLICATION_FIELDS)
-    if (set(claims) != fields
-            or type(claims["v"]) is not int or claims["v"] != (3 if native else 2 if http else 1)
-            or claims["purpose"] != "APPLICATION"
-            or not native and claims["pool"] != ("bailian" if http else "go")
-            or native and claims["transport_kind"] != NATIVE_APPLICATION_KIND):
-        raise CapabilityError("invalid application capability")
-    if (http or native) and (not isinstance(claims["recipe_digest"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", claims["recipe_digest"]) is None):
-        raise CapabilityError("invalid application capability")
-    for key in ("lease_id", "root", "pool", "account", "principal_id", "host", "workload", "turn_id"):
-        _identifier(claims[key], "application capability")
-    if (not isinstance(claims["model"], str)
-            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}", claims["model"]) is None
-            or not isinstance(claims["grant_digest"], str)
-            or re.fullmatch(r"[0-9a-f]{64}", claims["grant_digest"]) is None):
-        raise CapabilityError("invalid application capability")
-    for key in ("issued_at", "expires_at", "lease_generation"):
-        _timestamp(claims[key], "application capability")
-    if (claims["lease_generation"] > claims["issued_at"]
-            or not 0 < claims["expires_at"] - claims["issued_at"] <= 900):
-        raise CapabilityError("invalid application capability")
+        raise CapabilityError('invalid application capability')
+    native = (type(claims.get('pool')) is str and claims['pool'] in NATIVE_APPLICATION_POOLS) and (not (claims.get('pool') == 'glm' and claims.get('v') == 4))
+    http = claims.get('pool') == 'bailian' or (claims.get('pool') == 'glm' and claims.get('v') == 4)
+    fields = _APPLICATION_FIELDS | {'recipe_digest', 'transport_kind'} if native else _APPLICATION_FIELDS | {'recipe_digest'} if http else _APPLICATION_FIELDS
+    if set(claims) != fields or type(claims['v']) is not int or claims['v'] != (3 if native else (4 if claims.get('pool') == 'glm' else 2) if http else 1) or (claims['purpose'] != 'APPLICATION') or (not native and claims['pool'] != (('glm' if claims['v'] == 4 else 'bailian') if http else 'go')) or (native and claims['transport_kind'] != NATIVE_APPLICATION_KIND):
+        raise CapabilityError('invalid application capability')
+    if (http or native) and (not isinstance(claims['recipe_digest'], str) or re.fullmatch('[0-9a-f]{64}', claims['recipe_digest']) is None):
+        raise CapabilityError('invalid application capability')
+    for key in ('lease_id', 'root', 'pool', 'account', 'principal_id', 'host', 'workload', 'turn_id'):
+        _identifier(claims[key], 'application capability')
+    if not isinstance(claims['model'], str) or re.fullmatch('[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}', claims['model']) is None or (not isinstance(claims['grant_digest'], str)) or (re.fullmatch('[0-9a-f]{64}', claims['grant_digest']) is None):
+        raise CapabilityError('invalid application capability')
+    for key in ('issued_at', 'expires_at', 'lease_generation'):
+        _timestamp(claims[key], 'application capability')
+    if claims['lease_generation'] > claims['issued_at'] or not 0 < claims['expires_at'] - claims['issued_at'] <= 900:
+        raise CapabilityError('invalid application capability')
 
 
 def _validate_application_binding(lease, turn, claims, now, *, recovery_only=False):
     if not isinstance(lease, dict) or not isinstance(turn, dict):
-        raise CapabilityError("application lease unavailable")
+        raise CapabilityError('application lease unavailable')
     try:
-        if (lease["purpose"] != "APPLICATION" or lease["pid"] != 0
-                or lease["state"] not in {"held", "rented", "released", "expired"}
-                or turn["state"] not in {"open", "closing", "closed"}
-                or lease["id"] != claims["lease_id"] or turn["lease_id"] != claims["lease_id"]
-                or lease["orchestrator_id"] != claims["root"]
-                or turn["admission_root"] != claims["root"]
-                or lease["granted_at"] != claims["lease_generation"]
-                or turn["created_at"] != claims["lease_generation"]
-                or turn["caller_host"] != claims["host"] or lease["host"] != claims["host"]):
-            raise CapabilityError("application lease unavailable")
-        for key in ("pool", "account", "model"):
+        if lease['purpose'] != 'APPLICATION' or lease['pid'] != 0 or lease['state'] not in {'held', 'rented', 'released', 'expired'} or (turn['state'] not in {'open', 'closing', 'closed'}) or (lease['id'] != claims['lease_id']) or (turn['lease_id'] != claims['lease_id']) or (lease['orchestrator_id'] != claims['root']) or (turn['admission_root'] != claims['root']) or (lease['granted_at'] != claims['lease_generation']) or (turn['created_at'] != claims['lease_generation']) or (turn['caller_host'] != claims['host']) or (lease['host'] != claims['host']):
+            raise CapabilityError('application lease unavailable')
+        for key in ('pool', 'account', 'model'):
             if lease[key] != claims[key] or turn[key] != claims[key]:
-                raise CapabilityError("application lease unavailable")
-        for key in ("principal_id", "turn_id", "workload", "grant_digest"):
+                raise CapabilityError('application lease unavailable')
+        for key in ('principal_id', 'turn_id', 'workload', 'grant_digest'):
             if turn[key] != claims[key]:
-                raise CapabilityError("application lease unavailable")
-        native = claims["v"] == 3
-        if ((claims["pool"] == "bailian" or native) and turn["recipe_digest"] != claims["recipe_digest"]
-                or native and turn.get("transport_kind") != NATIVE_APPLICATION_KIND
-                or not native and turn.get("transport_kind") is not None):
-            raise CapabilityError("application lease unavailable")
-        _timestamp(lease["granted_at"], "application lease")
-        _finite_number(lease["ttl"], "application lease")
-        _timestamp(turn["expires_at"], "application lease")
-        deadline = min(turn["expires_at"], lease["granted_at"] + lease["ttl"])
-        if (lease["ttl"] <= 0 or now < lease["granted_at"]
-                or claims["expires_at"] > deadline):
-            raise CapabilityError("application lease unavailable")
-        if not recovery_only and (now >= deadline or lease["state"] not in {"held", "rented"}
-                                  or turn["state"] != "open"):
-            raise CapabilityError("application lease unavailable")
+                raise CapabilityError('application lease unavailable')
+        native = claims['v'] == 3
+        if ((claims['pool'] == 'bailian' or (claims['pool'] == 'glm' and claims['v'] == 4)) or native) and turn['recipe_digest'] != claims['recipe_digest'] or (native and turn.get('transport_kind') != NATIVE_APPLICATION_KIND) or (not native and turn.get('transport_kind') is not None):
+            raise CapabilityError('application lease unavailable')
+        _timestamp(lease['granted_at'], 'application lease')
+        _finite_number(lease['ttl'], 'application lease')
+        _timestamp(turn['expires_at'], 'application lease')
+        deadline = min(turn['expires_at'], lease['granted_at'] + lease['ttl'])
+        if lease['ttl'] <= 0 or now < lease['granted_at'] or claims['expires_at'] > deadline:
+            raise CapabilityError('application lease unavailable')
+        if not recovery_only and (now >= deadline or lease['state'] not in {'held', 'rented'} or turn['state'] != 'open'):
+            raise CapabilityError('application lease unavailable')
     except (KeyError, TypeError, OverflowError):
-        raise CapabilityError("application lease unavailable") from None
+        raise CapabilityError('application lease unavailable') from None
 
 
 def mint_application(signing_key, lease, turn, *, now):
@@ -379,64 +359,51 @@ def mint_application(signing_key, lease, turn, *, now):
     _validate_key(signing_key)
     _validate_now(now)
     try:
-        claims = {"v": 1, "purpose": "APPLICATION", "lease_id": turn["lease_id"],
-                  "root": turn["admission_root"], "pool": turn["pool"], "account": turn["account"],
-                  "model": turn["model"], "principal_id": turn["principal_id"], "host": turn["caller_host"],
-                  "workload": turn["workload"], "turn_id": turn["turn_id"], "grant_digest": turn["grant_digest"],
-                  "issued_at": now, "expires_at": min(turn["expires_at"], lease["granted_at"] + lease["ttl"]),
-                  "lease_generation": lease["granted_at"]}
-        if turn["pool"] == "bailian":
-            claims.update(v=2, recipe_digest=turn["recipe_digest"])
-        elif turn.get("transport_kind") == NATIVE_APPLICATION_KIND:
-            claims.update(v=3, recipe_digest=turn["recipe_digest"], transport_kind=NATIVE_APPLICATION_KIND)
+        claims = {'v': 1, 'purpose': 'APPLICATION', 'lease_id': turn['lease_id'], 'root': turn['admission_root'], 'pool': turn['pool'], 'account': turn['account'], 'model': turn['model'], 'principal_id': turn['principal_id'], 'host': turn['caller_host'], 'workload': turn['workload'], 'turn_id': turn['turn_id'], 'grant_digest': turn['grant_digest'], 'issued_at': now, 'expires_at': min(turn['expires_at'], lease['granted_at'] + lease['ttl']), 'lease_generation': lease['granted_at']}
+        if turn['pool'] == 'bailian':
+            claims.update(v=2, recipe_digest=turn['recipe_digest'])
+        elif turn.get('transport_kind') == NATIVE_APPLICATION_KIND:
+            claims.update(v=3, recipe_digest=turn['recipe_digest'], transport_kind=NATIVE_APPLICATION_KIND)
+        if turn['pool'] == 'glm' and turn.get('transport_kind') is None:
+            claims.update(v=4, recipe_digest=turn['recipe_digest'])
         _validate_application_claims(claims)
         _validate_application_binding(lease, turn, claims, now)
         raw = _canonical_json_bytes(claims)
-        domain = {1: _APPLICATION_DOMAIN, 2: _APPLICATION_HTTP_DOMAIN, 3: _APPLICATION_NATIVE_DOMAIN}[claims["v"]]
-        prefix = {1: b"app1.", 2: b"app2.", 3: b"app3."}[claims["v"]]
+        domain = {1: _APPLICATION_DOMAIN, 2: _APPLICATION_HTTP_DOMAIN, 3: _APPLICATION_NATIVE_DOMAIN, 4: _APPLICATION_GLM_DOMAIN}[claims['v']]
+        prefix = {1: b'app1.', 2: b'app2.', 3: b'app3.', 4: b'app4.'}[claims['v']]
         signature = hmac.new(signing_key, domain + raw, hashlib.sha256).digest()
-        token = prefix + _base64url_encode(raw) + b"." + _base64url_encode(signature)
+        token = prefix + _base64url_encode(raw) + b'.' + _base64url_encode(signature)
         if len(token) > _MAX_TOKEN_LENGTH:
-            raise CapabilityError("invalid application capability")
-        return token.decode("ascii")
+            raise CapabilityError('invalid application capability')
+        return token.decode('ascii')
     except (KeyError, TypeError, ValueError, OverflowError, RecursionError):
-        raise CapabilityError("invalid application capability") from None
+        raise CapabilityError('invalid application capability') from None
 
 
-def authorize_application(token, signing_key, lease_lookup, turn_lookup, *, principal_id, host, turn_id, model, now,
-                          recovery_only=False, expected_pool="go"):
+def authorize_application(token, signing_key, lease_lookup, turn_lookup, *, principal_id, host, turn_id, model, now, recovery_only=False, expected_pool='go'):
     _validate_key(signing_key)
     _validate_now(now)
-    if (type(recovery_only) is not bool or not isinstance(token, str) or len(token) > _MAX_TOKEN_LENGTH
-            or type(expected_pool) is not str
-            or expected_pool not in ({"go", "bailian"} | NATIVE_APPLICATION_POOLS)):
-        raise CapabilityError("invalid application capability")
-    native = expected_pool in NATIVE_APPLICATION_POOLS
-    pattern = _APPLICATION_NATIVE_TOKEN if native else _APPLICATION_TOKEN if expected_pool == "go" else _APPLICATION_HTTP_TOKEN
-    domain = _APPLICATION_NATIVE_DOMAIN if native else _APPLICATION_DOMAIN if expected_pool == "go" else _APPLICATION_HTTP_DOMAIN
+    if type(recovery_only) is not bool or not isinstance(token, str) or len(token) > _MAX_TOKEN_LENGTH or (type(expected_pool) is not str) or (expected_pool not in {'go', 'bailian'} | NATIVE_APPLICATION_POOLS):
+        raise CapabilityError('invalid application capability')
+    native = expected_pool in NATIVE_APPLICATION_POOLS and (not (expected_pool == 'glm' and isinstance(token, str) and token.startswith('app4.')))
+    pattern = _APPLICATION_GLM_TOKEN if expected_pool == 'glm' and isinstance(token, str) and token.startswith('app4.') else _APPLICATION_NATIVE_TOKEN if native else (_APPLICATION_GLM_TOKEN if expected_pool == 'glm' and isinstance(token, str) and token.startswith('app4.') else _APPLICATION_TOKEN) if expected_pool == 'go' else _APPLICATION_HTTP_TOKEN
+    domain = _APPLICATION_GLM_DOMAIN if expected_pool == 'glm' and isinstance(token, str) and token.startswith('app4.') else _APPLICATION_NATIVE_DOMAIN if native else (_APPLICATION_GLM_DOMAIN if expected_pool == 'glm' and isinstance(token, str) and token.startswith('app4.') else _APPLICATION_DOMAIN) if expected_pool == 'go' else _APPLICATION_HTTP_DOMAIN
     match = pattern.fullmatch(token)
     if match is None:
-        raise CapabilityError("invalid application capability")
-    encoded, signature_part = (part.encode("ascii") for part in match.groups())
-    raw, signature = _base64url_decode(encoded), _base64url_decode(signature_part)
-    if (encoded != _base64url_encode(raw) or signature_part != _base64url_encode(signature)
-            or len(signature) != hashlib.sha256().digest_size
-            or not hmac.compare_digest(signature, hmac.new(signing_key, domain + raw, hashlib.sha256).digest())):
-        raise CapabilityError("invalid application capability")
+        raise CapabilityError('invalid application capability')
+    encoded, signature_part = (part.encode('ascii') for part in match.groups())
+    raw, signature = (_base64url_decode(encoded), _base64url_decode(signature_part))
+    if encoded != _base64url_encode(raw) or signature_part != _base64url_encode(signature) or len(signature) != hashlib.sha256().digest_size or (not hmac.compare_digest(signature, hmac.new(signing_key, domain + raw, hashlib.sha256).digest())):
+        raise CapabilityError('invalid application capability')
     claims = _parse_payload(raw)
     _validate_application_claims(claims)
-    if (claims["pool"] != expected_pool or raw != _canonical_json_bytes(claims) or now < claims["issued_at"]
-            or (not recovery_only and now >= claims["expires_at"])
-            or any(claims[key] != value for key, value in (("principal_id", principal_id),
-                    ("host", host), ("turn_id", turn_id), ("model", model)))):
-        raise CapabilityError("invalid application capability")
+    if claims['pool'] != expected_pool or raw != _canonical_json_bytes(claims) or now < claims['issued_at'] or (not recovery_only and now >= claims['expires_at']) or any((claims[key] != value for key, value in (('principal_id', principal_id), ('host', host), ('turn_id', turn_id), ('model', model)))):
+        raise CapabilityError('invalid application capability')
     try:
-        lease = lease_lookup(claims["lease_id"])
+        lease = lease_lookup(claims['lease_id'])
         turn = turn_lookup(principal_id, turn_id)
     except Exception:
-        raise CapabilityError("application lease unavailable") from None
-    # Recovery authenticates only the immutable original scope. It never grants
-    # dispatch permission, even if the original execution authority has expired.
+        raise CapabilityError('application lease unavailable') from None
     _validate_application_binding(lease, turn, claims, now, recovery_only=recovery_only)
     return dict(claims)
 

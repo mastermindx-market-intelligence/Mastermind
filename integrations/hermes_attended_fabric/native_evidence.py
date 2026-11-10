@@ -131,20 +131,96 @@ def read_enrollment(home: Path) -> dict[str, Any]:
     return contract
 
 
+def _native_arguments(call: Any) -> dict[str, Any] | None:
+    """Project one native intent without replacing its durable outer identity.
+
+    Hermes's public lazy broker persists tool_call and forwards the original
+    call ID with the single local entry's arguments. Batches, nested wrappers
+    and legacy coercions are not native intent evidence.
+    """
+    if type(call) is not dict or type(call.get("function")) is not dict:
+        return None
+    function = call["function"]
+    value = function.get("arguments")
+    try:
+        value = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return None
+    if type(value) is not dict:
+        return None
+    if function.get("name") == TOOL:
+        return value
+    if function.get("name") != "tool_call" or set(value) != {"calls"}:
+        return None
+    entries = value["calls"]
+    if type(entries) is not list or len(entries) != 1:
+        return None
+    entry = entries[0]
+    if (type(entry) is not dict or set(entry) != {"name", "arguments"}
+            or entry["name"] != TOOL or type(entry["arguments"]) is not dict):
+        return None
+    return entry["arguments"]
+
+
 def _calls(db: Any, session_ids: list[str], task_key: str,
            action: str) -> list[Any]:
     marks = ",".join("?" for _ in session_ids)
+    # Candidate selection is conservative: retain matching broker compatibility
+    # forms and batches as conflicts, although _native_arguments admits only the
+    # canonical single local call. Filter by task before applying the copy bound.
+    # The broker strips Python whitespace from names; SQLite trim needs that set.
+    broker_space = (" \t\n\r\v\f\x1c\x1d\x1e\x1f\x85\xa0\u1680"
+                    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+                    "\u2028\u2029\u202f\u205f\u3000")
     return db._read_all(
-        f"""SELECT m.id, m.tool_call_uids, call.value AS tool_call
-            FROM messages AS m, json_each(m.tool_calls) AS call
-            WHERE m.session_id IN ({marks})
-              AND json_extract(call.value, '$.function.name')=?
-              AND json_extract(json_extract(call.value, '$.function.arguments'),
-                               '$.action')=?
-              AND json_extract(json_extract(call.value, '$.function.arguments'),
-                               '$.task_key')=?
-            ORDER BY m.id LIMIT ?""",
-        (*session_ids, TOOL, action, task_key, _MAX_COPIES + 1))
+        f"""WITH durable AS (
+                SELECT m.id, m.tool_call_uids, call.value AS tool_call,
+                       json_extract(call.value, '$.function.name') AS name,
+                       json_extract(call.value, '$.function.arguments') AS raw_args
+                FROM messages AS m, json_each(m.tool_calls) AS call
+                WHERE m.session_id IN ({marks})
+            ), payloads AS (
+                SELECT *, CASE WHEN json_valid(raw_args)
+                               THEN raw_args ELSE '{{}}' END AS args
+                FROM durable
+            ), broker_raw AS (
+                SELECT *, CASE WHEN json_extract(args, '$.calls') IS NULL
+                    THEN json_object('name', json_extract(args, '$.name'),
+                                     'arguments', json_extract(args, '$.arguments'))
+                    ELSE json_extract(args, '$.calls') END AS raw_calls
+                FROM payloads WHERE name='tool_call'
+            ), broker_json AS (
+                SELECT *, CASE WHEN json_valid(raw_calls)
+                               THEN raw_calls ELSE '[]' END AS calls
+                FROM broker_raw
+            ), broker_entries AS (
+                SELECT broker_json.id, broker_json.tool_call_uids, broker_json.tool_call,
+                       CASE WHEN entry.type='object'
+                            THEN entry.value ELSE '{{}}' END AS entry_json
+                FROM broker_json, json_each(
+                    CASE json_type(calls)
+                        WHEN 'object' THEN json_array(json(calls))
+                        WHEN 'array' THEN calls ELSE '[]' END) AS entry
+            ), broker_args AS (
+                SELECT id, tool_call_uids, tool_call,
+                       trim(json_extract(entry_json, '$.name'), ?) AS entry_name,
+                       CASE WHEN json_valid(json_extract(entry_json, '$.arguments'))
+                            THEN json_extract(entry_json, '$.arguments')
+                            ELSE '{{}}' END AS entry_args
+                FROM broker_entries
+            ), matches AS (
+                SELECT id, tool_call_uids, tool_call FROM payloads
+                WHERE name=? AND json_extract(args, '$.action')=?
+                             AND json_extract(args, '$.task_key')=?
+                UNION
+                SELECT id, tool_call_uids, tool_call FROM broker_args
+                WHERE entry_name=? AND json_extract(entry_args, '$.action')=?
+                                   AND json_extract(entry_args, '$.task_key')=?
+            )
+            SELECT id, tool_call_uids, tool_call FROM matches
+            ORDER BY id LIMIT ?""",
+        (*session_ids, broker_space, TOOL, action, task_key, TOOL,
+         action, task_key, _MAX_COPIES + 1))
 
 
 def qualify_native_intent(db: Any, grant: SessionGrant, call_id: str,
@@ -167,8 +243,7 @@ def qualify_native_intent(db: Any, grant: SessionGrant, call_id: str,
         if call.get("id") != call_id and not original_submit:
             continue
         uid = json.loads(row["tool_call_uids"] or "{}").get(call.get("id"))
-        stored = call.get("function", {}).get("arguments")
-        stored = json.loads(stored) if isinstance(stored, str) else stored
+        stored = _native_arguments(call)
         if (type(row["id"]) is not int or type(uid) is not str or not uid
                 or call.get("id") != call_id or stored != dict(arguments)):
             return False
@@ -264,8 +339,7 @@ def verify_origin(home: Path, action: str, arguments: Mapping[str, Any],
         for row in rows:
             call = json.loads(row["tool_call"])
             if call.get("id") == proof["tool_call_id"]:
-                value = call.get("function", {}).get("arguments")
-                candidates.append(json.loads(value) if isinstance(value, str) else value)
+                candidates.append(_native_arguments(call))
         if (not candidates or len(rows) > _MAX_COPIES
                 or any(type(x) is not dict or digest(x) != proof["arguments_digest"]
                        for x in candidates)):

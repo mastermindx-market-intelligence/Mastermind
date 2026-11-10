@@ -2,6 +2,7 @@
 //! receives fixed read results and sanitized state, never credential material.
 pub mod host_observation;
 pub mod hermes_native;
+pub mod paperclip;
 pub mod control_room_read;
 pub mod company_priorities;
 mod draft_continuity;
@@ -23,6 +24,8 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 pub mod instruction_admission;
+pub mod primary_account;
+pub mod work_authorization;
 pub mod project_access;
 use url::Url;
 
@@ -95,6 +98,12 @@ struct Token {
     // Derived from the exact validated Executive grant; stays in the native owner.
     executive_send: bool,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignInIntent {
+    LegacyFull,
+    PrimaryAccount,
+}
+
 struct Pending {
     state: String,
     verifier: String,
@@ -102,6 +111,7 @@ struct Pending {
     expires: Instant,
     generation: u64,
     continuation: Option<authorization_continuation::ContentContinuation>,
+    intent: SignInIntent,
 }
 struct Inner {
     draft_continuity: draft_continuity::DraftContinuity,
@@ -264,7 +274,14 @@ impl Inner {
         self.reason = None;
         self.content_timeout = None;
     }
+    #[cfg(test)]
     fn transaction(&mut self, resource: Resource) -> Result<String> {
+        self.transaction_for(resource, SignInIntent::LegacyFull)
+    }
+    fn transaction_for(&mut self, resource: Resource, intent: SignInIntent) -> Result<String> {
+        if intent == SignInIntent::PrimaryAccount && resource == Resource::Executive {
+            return Err("PRIMARY_AUTH_SCOPE_REFUSED".into());
+        }
         if resource == Resource::Executive {
             if self.executive_resource.is_none() { return Err("EXECUTIVE_UNCONFIGURED".into()); }
             self.clear_executive();
@@ -287,15 +304,19 @@ impl Inner {
             expires: Instant::now() + TRANSACTION_TTL,
             generation: self.generation,
             continuation: None,
+            intent,
         });
         Ok(url)
     }
     fn initial_sign_in_transaction(&mut self) -> Result<String> {
+        self.initial_sign_in_transaction_for(SignInIntent::LegacyFull)
+    }
+    fn initial_sign_in_transaction_for(&mut self, intent: SignInIntent) -> Result<String> {
         // Request a fresh login UI on explicit Sign in so an unrelated browser
         // SSO session can be changed. This hint is not identity
         // proof; the normal trusted issuer and resource checks still apply.
         // Only this initial handoff requests it. Chained grants keep SSO.
-        let url = self.transaction(Resource::Acquisition)?;
+        let url = self.transaction_for(Resource::Acquisition, intent)?;
         Ok(format!("{url}&prompt=login"))
     }
     fn expire_transaction(&mut self, generation: u64, expires: Instant, now: Instant) -> bool {
@@ -330,6 +351,9 @@ impl Inner {
             self.fail_transaction(pending.resource, "AUTHORIZATION_REFUSED");
             return Err("AUTHORIZATION_REFUSED".into());
         }
+        if pending.intent == SignInIntent::PrimaryAccount && pending.resource == Resource::Executive {
+            return Err("PRIMARY_AUTH_SCOPE_REFUSED".into());
+        }
         self.exchanging = true;
         self.continuation_exchange_guard(&pending)?;
         if pending.resource == Resource::Executive { self.executive_reason = ExecutiveReason::Exchanging; }
@@ -344,25 +368,34 @@ impl Inner {
     }
     fn finish_exchange(
         &mut self,
-        generation: u64,
-        resource: Resource,
+        pending: &Pending,
         token: Result<Token>,
     ) -> Option<String> {
-        if self.generation != generation || !self.exchanging {
+        let resource = pending.resource;
+        if self.generation != pending.generation || !self.exchanging {
             return None;
         }
         self.exchanging = false;
+        if pending.intent == SignInIntent::PrimaryAccount && pending.expires <= Instant::now() {
+            self.reason = Some("AUTH_TRANSACTION_EXPIRED");
+            return None;
+        }
+        if pending.intent == SignInIntent::PrimaryAccount && resource == Resource::Executive {
+            return None;
+        }
         match token {
             Ok(token) if resource == Resource::Acquisition => {
                 self.acquisition = Some(token);
                 self.draft_continuity.unqualified();
                 self.reason = None;
-                self.transaction(Resource::Content).ok()
+                self.transaction_for(Resource::Content, pending.intent).ok()
             }
             Ok(token) if resource == Resource::Content => {
                 self.content = Some(token);
                 self.reason = None;
-                if self.executive_resource.is_some() { self.transaction(Resource::Executive).ok() } else { None }
+                if pending.intent == SignInIntent::LegacyFull && self.executive_resource.is_some() {
+                    self.transaction_for(Resource::Executive, pending.intent).ok()
+                } else { None }
             }
             Ok(token) => {
                 if self.executive_resource.is_some() && self.advance_executive() {
@@ -697,6 +730,11 @@ pub async fn callback(app: AppHandle, raw: String) {
         emit(&app);
         return;
     }
+    if pending.intent == SignInIntent::PrimaryAccount && state.lock()
+        .and_then(|mut inner| inner.primary_exchange_current(&pending, &client)).is_err() {
+        emit(&app);
+        return;
+    }
     let response = state
         .http
         .post(format!("{ISSUER}oauth/token"))
@@ -711,6 +749,9 @@ pub async fn callback(app: AppHandle, raw: String) {
         .await;
     let token = match response {
         Ok(r) => bounded_json(r, 32768).await.and_then(|v| {
+            if pending.intent == SignInIntent::PrimaryAccount {
+                state.lock()?.primary_exchange_current(&pending, &client)?;
+            }
             let access = parse_token(v.clone(), pending.resource)?;
             if pending.continuation.is_none() && pending.resource.persistent() {
                 let refresh = v.get("refresh_token").and_then(Value::as_str)
@@ -718,7 +759,10 @@ pub async fn callback(app: AppHandle, raw: String) {
                     .ok_or("REFRESH_TOKEN_NOT_ISSUED")?;
                 let _keychain = state.keychain_lock.lock()
                     .map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
-                let inner = state.lock()?;
+                let mut inner = state.lock()?;
+                if pending.intent == SignInIntent::PrimaryAccount {
+                    inner.primary_exchange_current(&pending, &client)?;
+                }
                 if inner.generation != pending.generation || !inner.exchanging {
                     return Err("AUTHENTICATION_CHANGED".into());
                 }
@@ -737,7 +781,7 @@ pub async fn callback(app: AppHandle, raw: String) {
         Ok(i) => i,
         Err(_) => return,
     };
-    let next = inner.finish_exchange(pending.generation, pending.resource, token);
+    let next = inner.finish_exchange(&pending, token);
     drop(inner);
     emit(&app);
     if let Some((expires, wall_expires)) = expiry {
@@ -3250,7 +3294,7 @@ mod tests {
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         let next = i
-            .finish_exchange(p.generation, p.resource, Ok(token("acquisition")))
+            .finish_exchange(&p, Ok(token("acquisition")))
             .unwrap();
         assert!(next.contains("mastermind.workspace.content.read"));
         assert!(i.status().acquisition);
@@ -3258,7 +3302,7 @@ mod tests {
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         assert!(i
-            .finish_exchange(p.generation, p.resource, Ok(token("content")))
+            .finish_exchange(&p, Ok(token("content")))
             .is_none());
         assert_eq!(i.token(Resource::Acquisition).unwrap().value, "acquisition");
         assert_eq!(i.token(Resource::Content).unwrap().value, "content");
@@ -3276,7 +3320,7 @@ mod tests {
             let state = pending.state.clone();
             let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
             assert_eq!(pending.resource, resource);
-            i.finish_exchange(pending.generation, resource, Ok(token("grant")));
+            i.finish_exchange(&pending, Ok(token("grant")));
         }
         let generation = i.generation;
         let executive_generation = i.executive_generation;
@@ -3302,7 +3346,7 @@ mod tests {
         assert!(!i.expire_transaction(pending.generation, pending.expires, pending.expires));
         assert!(i.exchanging);
         assert!(i.reason.is_none());
-        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_some());
+        assert!(i.finish_exchange(&pending, Ok(token("grant"))).is_some());
         assert!(i.status().acquisition);
     }
 
@@ -3364,7 +3408,7 @@ mod tests {
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         i.invalidate();
         assert!(i
-            .finish_exchange(p.generation, p.resource, Ok(token("late")))
+            .finish_exchange(&p, Ok(token("late")))
             .is_none());
         assert!(!i.status().acquisition);
         assert!(i.pending.is_none());
@@ -3377,7 +3421,7 @@ mod tests {
         i.transaction(Resource::Content).unwrap();
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
-        i.finish_exchange(p.generation, p.resource, Err("failure".into()));
+        i.finish_exchange(&p, Err("failure".into()));
         assert!(i.status().acquisition);
         assert!(!i.status().content);
         assert_eq!(i.status().status, "error");
@@ -3460,7 +3504,7 @@ mod tests {
             let state = i.pending.as_ref().unwrap().state.clone();
             let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
             assert_eq!(pending.resource, completed);
-            let raw = i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).unwrap();
+            let raw = i.finish_exchange(&pending, Ok(token("grant"))).unwrap();
             let url = Url::parse(&raw).unwrap();
             let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
             assert!(!pairs.contains_key("prompt"));
@@ -3474,7 +3518,7 @@ mod tests {
         }
         let state = i.pending.as_ref().unwrap().state.clone();
         let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
-        assert!(i.finish_exchange(pending.generation, pending.resource, Ok(token("grant"))).is_none());
+        assert!(i.finish_exchange(&pending, Ok(token("grant"))).is_none());
         assert!(i.token(Resource::Executive).is_some());
     }
     #[test]
@@ -3688,7 +3732,7 @@ mod tests {
         assert_eq!(pending.resource, resource);
         let raw = callback_url(&pending.state);
         let (p, _, _) = i.consume(&raw).unwrap();
-        i.finish_exchange(p.generation, p.resource, Ok(token("fixture-private-token")))
+        i.finish_exchange(&p, Ok(token("fixture-private-token")))
     }
     fn at_executive_pending() -> Inner {
         let mut i = executive_inner();
@@ -3788,7 +3832,7 @@ mod tests {
                 assert!(i.consume(&format!("{CALLBACK}?state={state}&error=access_denied")).is_err());
             } else {
                 let (p, _, _) = i.consume(&callback_url(&state)).unwrap();
-                assert!(i.finish_exchange(p.generation, p.resource, Err("fixture".into())).is_none());
+                assert!(i.finish_exchange(&p, Err("fixture".into())).is_none());
             }
             assert!(i.token(Resource::Acquisition).is_some());
             assert!(i.token(Resource::Content).is_some());
@@ -3808,7 +3852,7 @@ mod tests {
             i.invalidate();
             assert!(i.executive_generation > old);
             if let Some(p) = consumed {
-                assert!(i.finish_exchange(p.generation, p.resource, Ok(token("late"))).is_none());
+                assert!(i.finish_exchange(&p, Ok(token("late"))).is_none());
             } else { assert!(i.consume(&callback_url(&state)).is_err()); }
             assert!(!i.executive_status().available);
             assert_eq!(i.status().status, "signed_out");
@@ -3889,8 +3933,7 @@ mod tests {
     fn install_native_executive_token(inner: &mut Inner, scope: &str) {
         let pending_state = inner.pending.as_ref().unwrap().state.clone();
         let (pending, _, _) = inner.consume(&callback_url(&pending_state)).unwrap();
-        inner.finish_exchange(pending.generation, pending.resource,
-            Ok(parsed_native_executive_token(scope)));
+        inner.finish_exchange(&pending, Ok(parsed_native_executive_token(scope)));
     }
 
     fn native_executive_state(scope: &str) -> NativeAuth {
