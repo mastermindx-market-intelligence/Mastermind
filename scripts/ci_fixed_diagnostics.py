@@ -27,6 +27,20 @@ PUBLIC_PATH = re.compile(r'tests/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+[.]py\Z')
 NATIVE_PUBLIC_PATH = re.compile(r'ops/native_fabric/quota_continuity/(?:tests|rollout)/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+[.]py\Z')
 IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,127}\Z')
 
+# Closed process-exit facts from the required H1 workflow, not exception text,
+# Docker output or JUnit contents. GitHub retains these annotations against
+# the emitting check-run/job and its exact run/head metadata, including in a
+# .git-less, read-only Docker snapshot. They are cooperative diagnostics only.
+H1_GATE_PHASES = {
+    'SOURCE_PREPARATION': 'public_source_archive',
+    'DOCKER_BUILD': 'tests/h1_ci_fixture/Dockerfile',
+    'DOCKER_RUN': 'tests/h1_ci_fixture',
+    'INITIALIZER_PYTEST': 'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
+    'INITIALIZER_POSITIVE_VALIDATOR': 'tests/h1_ci_fixture/require_positive.py',
+    'PROVIDER_PYTEST': 'tests/test_paid_provider_entry_linux.py',
+    'PROVIDER_POSITIVE_VALIDATOR': 'tests/h1_ci_fixture/require_provider_entry.py',
+}
+
 
 def _integer(value, maximum=1000000):
     return type(value) is int and 0 <= value <= maximum
@@ -443,3 +457,33 @@ class FixedDiagnostics:
                         pass
             if fd is not None:
                 os.close(fd)
+
+
+def h1_gate_failure(phase, exit_code):
+    """One bounded failure annotation; no files, logs, environment or authority.
+
+    The caller preserves its original exit code even if this optional reporter
+    cannot run. A phase identifies the nonzero process, never its inner cause
+    or a successful positive journey. Unknown/dynamic facts remain suppressed.
+    """
+    if (type(phase) is not str or phase not in H1_GATE_PHASES
+            or type(exit_code) is not int or not 1 <= exit_code <= 255):
+        return False
+    value = dict(schema='mastermind.ci.h1_gate_failure.v1', phase=phase,
+                 target=H1_GATE_PHASES[phase], exit_code=exit_code)
+    print('::error file=.github/workflows/ci.yml,title=H1 required gate phase failure::'
+          + json.dumps(value, sort_keys=True, separators=(',', ':')), flush=True)
+    return True
+
+
+def main(argv=None):
+    arguments = sys.argv[1:] if argv is None else argv
+    if (len(arguments) != 3 or arguments[0] != 'h1-gate-failure'
+            or type(arguments[2]) is not str
+            or re.fullmatch(r'[1-9][0-9]{0,2}', arguments[2]) is None):
+        return 2
+    return 0 if h1_gate_failure(arguments[1], int(arguments[2])) else 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
