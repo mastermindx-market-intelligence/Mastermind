@@ -150,10 +150,12 @@ cmd_install() {
   if [ -f "$PLIST" ] && [ "$REPLACE" -ne 1 ]; then
     die "plist $PLIST already exists; pass --replace to replace it"
   fi
-  # One label per root: refuse a second plist (any label) pointing at this root.
+  # One label per root: refuse a second plist (any label) pointing at this
+  # root. Match the exact runner path, not a bare root substring (t3-team is a
+  # prefix of t3-team-b and must not collide).
   for _p in "$(plist_dir)"/*.plist; do
     [ -f "$_p" ] || continue
-    grep -q "<string>$ROOT" "$_p" 2>/dev/null || continue
+    grep -q "<string>$ROOT/bin/server_runner.sh</string>" "$_p" 2>/dev/null || continue
     _pl=$(basename "$_p" .plist)
     [ "$_pl" = "$LABEL" ] || die "root already used by label $_pl ($_p); one label per root"
   done
