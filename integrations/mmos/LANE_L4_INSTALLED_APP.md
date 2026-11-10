@@ -65,6 +65,35 @@ aborts.
   Decisive A-vs-B evidence = that diagnostics reading; C unlikely for this
   read (path is edge-proxied per principal's 401-without-token).
 
+- **s2 ACCEPTED** (deepseek-v4.1-flash; artifact + verbatim Caddy block opened by
+  lead; rows spot-checked against principal's measurements). Census: 83
+  (method,path) pairs at trunk / 82 at installed; edge proxies only 6 GET +
+  3 POST; **74 ABORTED (89%)** — every project-detail surface
+  (`project-plan`, `projects/archive`, `direction/journal/session/admission/
+  access/knowledge/memory/source`, all `project-planning|execution|session|
+  conversation` Executive routes). One revision delta: trunk-only
+  `GET /workspace/resources/t3/attempts/current` (also aborted). Single
+  literal origin `https://mcp.mastermind-x.com` (auth.rs:33); no separate
+  Acquisition host (audience = same host, auth.rs:68).
+- **Lead verification (test home read directly):** the failing string is
+  driven by `read_programs` rejecting (`App.projects-read-state.test.tsx`
+  line ~30: held `read_programs` reject `SOURCE_UNAVAILABLE` → exact
+  string). `read_programs` = `GET /workspace/programs/current` = edge
+  **ALLOWED** → hypothesis C does NOT explain the Projects-tab string.
+  Test 3: `mastermind-auth-state` `{signed_out, NATIVE_TOKEN_EXPIRED,
+  acquisition:false}` → rows withheld + `.auth-entry` shown — the truthful
+  sign-in-again UI already exists; it fires only if expiry is DETECTED and
+  emitted. Discriminator still open: live diagnostics phase
+  (`AUTH_UNAVAILABLE` vs `HTTP_FAILURE 401/403` vs `NETWORK_FAILURE`).
+
+## Systemic finding (owner-ask material, evidence: slice2-path-census.md)
+
+The installed app issues 74 paths the fixed edge aborts by design. Even with
+perfect auth, project-detail surfaces cannot load through
+`mcp-os-edge.caddy`. Not an outage — policy. Any widening of the allowlist is
+a VPS change (hard boundary): this lane prepares the exact change +
+validation command for decision, never applies it.
+
 ## Fix / land / install (to be filled)
 
 - Writer: glm-5.3 (worktree branch); attacker: grok-4.7 (diff review, different model).
