@@ -201,3 +201,64 @@ not a hidden side effect of installing this skill.
 ## Exact-run versus thread-final settlement
 
 The native T3 `ThreadManagementService.wait` at upstream 0770446 can, with `untilDelegatedWorkSettled`, nominate a thread-wide `resultRun`. That can be a later independently queued user turn. The client therefore keeps `original_result` on exact-run completion (`untilDelegatedWorkSettled=false`) and never substitutes another final run. `wait(..., include_children=true)` remains available as an explicitly separate thread-settlement observation; its returned final-run identity is not silently treated as the original answer. A native restart that changes the run identity remains a visible lineage conflict requiring explicit native recovery rather than a guessed match. Large timeline pages bound their per-item text request and retain exact item expansion.
+
+## Resumed Agent Bus integration - v4
+
+Current Chairman assignment resumes Design Agent Bus Architecture: complete the
+read / message / queue / steer / start / stop / archive / delete / Capacity-model
+selection / shared-notes / long-horizon delegation journey. Original acceptance
+is not reduced to a source patch, CLI catalog or merged PR.
+
+Source operation: `t3-agent-bus-v4-20261109`, isolated managed branch
+`sol/web-t3-agent-bus-v4-20261109`. Governing protected pin:
+`f357bd0b3c31ee40f028590909678f01a3a9d413`. Parent remains
+`WS:EXECUTIVE-ECOSYSTEM-COMPLETION`; this extends this existing plan, not a new
+programme or lifecycle store.
+
+### Recovered evidence and custody
+
+- Predecessor #2372 is protected-merged at
+  `6fc220a1770b196f7b1e79add63698fbed022756`; #2374 is protected-merged at
+  `0450fba70006ece6a260d3d606ca2503bb8d9f89`. Preserve their accepted Python
+  client, notes and original-run proof; do not recreate those conversations.
+- Original lifecycle thread `mcp:f7fefa69-16ce-4d02-a95d-8a8ea0f7ca93`,
+  ordinal 7, and CLI coordinator `mcp:5b3b360e-1842-4b27-b510-e38b9546941b`,
+  ordinal 4, both returned completed with no active run or pending question.
+  Their source-only artifacts remain in their original T3 scratch locations.
+  The coordinator consumed its original single child's ordinal-2 result;
+  the prior failed ordinal-1 transport attempt remains distinct.
+- Both candidates target upstream `pingdotgg/t3code` at
+  `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`. No candidate was installed.
+  Preserve upstream MIT licensing and original native auth/command owners.
+- Current review does not accept same-provider-as-caller as Capacity-only,
+  millisecond timestamp equality as a strict revision guard, or unbounded
+  output as a bounded native bridge. Repair the relevant original source seams.
+- Preserve #2375 continuity, #2394 team graph, #2338 runtime/admission,
+  #2401 computer/browser and #2367 live Capacity policy/service writers.
+  No provider config, credential, live user thread, server restart or child
+  replacement is authorized merely by this plan.
+
+### Implementation and acceptance frontier
+
+| Node | Dependency | Outcome and discriminating acceptance |
+| --- | --- | --- |
+| AB1 | recovered #2374 | Qualify original CLI bridge, real native catalog/read and exact envelope/error behavior; reject absent/duplicate/malformed capability data and bound transport output. |
+| AB2 | AB1 | Compose an injected native-CLI transport with the existing Python client; no subprocess/auth/queue owner added. Preserve cancellation, unknown effects and original request identity. |
+| AB3 | original lifecycle patch | Strict native delete/model changes at the existing serialized command boundary: exact target, robust expected state, Capacity-only selection, native permissions and original receipts. Race/foreign-provider/active-child/queued-work tests must fail before effect. |
+| AB4 | AB2, AB3 | Expose only actually discovered strict capabilities; explicit delete confirmation and retained-tombstone-only semantics, no filesystem deletion. |
+| AB5 | AB1-AB4 | Deterministic exact-base donor package plus focused native/Python security/concurrency tests and a reviewable protected-release candidate. |
+| AB6 | AB5, actual installation owner | Non-disruptive eligible CLI installation and native server maintenance only after original work is protected; prove loaded bytes, rollback and actual controls on newly owned disposable targets. |
+| AB7 | existing notes/mission/team owners | Consume a real delegated long-horizon result with retained parent/child/run identity, shared-source CAS, queued continuation and original-parent acceptance, without duplicating prior accepted proof. |
+| AB8 | actual native connection/event owners | Direct cloud OAuth and signed event return only through existing supported owners and real consent/readback; ordinary ChatGPT foreground reads are not unsolicited wake-up. |
+
+DONE_WHEN: the original authorized user can perform the complete journey through
+qualified native owners, Capacity is the sole new-execution/model-selection
+route, effects/results remain recoverable under concurrency and disconnection,
+and the original parent consumes actual outcomes. Source, protected merge,
+installation, native execution and parent acceptance remain separate claims.
+
+Current phase is AB1-AB4 source integration and qualification. The principal
+retains the atomic-boundary judgment and direct integration under
+`PRINCIPAL_JUDGMENT` / `LOWER_TOTAL_OVERHEAD`; no substitute native labor child is
+started. Existing original workers are not resumed or duplicated. All live
+activation, actual platform permission and release controls remain binding.
