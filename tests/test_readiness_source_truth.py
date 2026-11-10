@@ -299,18 +299,16 @@ def test_inaccessible_optional_source_is_unknown(tmp_path, monkeypatch, family):
     pytest.param(b"\xff\n", [], id="invalid-utf8"),
     pytest.param(b"[]\n", [[]], id="nonmapping-row"),
 ])
-def test_real_prediction_failure_is_unknown_and_nonstrict_reader_stays_compatible(
+def test_real_prediction_failure_is_unknown_and_default_reader_stays_compatible(
     tmp_path, monkeypatch, raw, legacy,
 ):
     r, p = _wire(tmp_path, monkeypatch)
     p._LEDGER.parent.mkdir(parents=True, exist_ok=True)
     p._LEDGER.write_bytes(raw)
 
-    # #812 made the owned reader strict by default (crash-safe writes must fail closed).
-    # The legacy compatibility read is still available, but only when asked for explicitly.
     assert p._load_ledger(strict=False) == legacy
     with pytest.raises((ValueError, UnicodeDecodeError)):
-        p._load_ledger(strict=True)
+        p._load_ledger()
     payload = r.status()
     _assert_unknown(payload, "prediction_xsec")
     assert payload["detail"]["prediction_xsec"]["need"] == p._MIN_DATES
@@ -330,7 +328,7 @@ def test_real_dangling_prediction_ledger_is_unknown(tmp_path, monkeypatch):
 
     assert p._load_ledger(strict=False) == []
     with pytest.raises(FileNotFoundError):
-        p._load_ledger(strict=True)
+        p._load_ledger()
     _assert_unknown(r.status(), "prediction_xsec")
     assert p._LEDGER.is_symlink()
     assert p._LEDGER.readlink() == missing
@@ -366,7 +364,7 @@ def test_real_inaccessible_prediction_ledger_is_unknown(tmp_path, monkeypatch):
         hidden.chmod(0)
         assert p._load_ledger(strict=False) == []
         with pytest.raises(PermissionError):
-            p._load_ledger(strict=True)
+            p._load_ledger()
         _assert_unknown(r.status(), "prediction_xsec")
         assert p._LEDGER.is_symlink()
     finally:
