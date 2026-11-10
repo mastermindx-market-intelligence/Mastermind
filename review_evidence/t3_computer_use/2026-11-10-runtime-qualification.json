@@ -46,6 +46,16 @@
       "native-action-proof.json": "8239c944a66a91ea2c694ba0037a1a3553216f4c0e5147a1e66cd70f05050dde",
       "native-reconciliation.json": "0b77cc26ba716505f7d934305bb2e054cdf3d56a5a9a56d9cde17116427083bc",
       "pointer-observer.json": "da2fd3cffaebd31ec5155cc9bcf66708f7f393d27dfe464379cfee1b929fa271"
+    },
+    "strict_sdk_startup": {
+      "state": "CONNECTED",
+      "protocol": "2025-11-25",
+      "tools_discovered": 14,
+      "input_actions": 0,
+      "adapter_changed": false,
+      "prior_startup_timeouts_observed": true,
+      "cause": "UNRESOLVED_INTERMITTENT_BACKEND_STARTUP",
+      "evidence_sha256": "ed598ad46f0d0bbcc44865c69444fc77099813984647bb850f2a924ed26601d2"
     }
   },
   "t3_baseline": {
@@ -66,7 +76,7 @@
     "host_ref": "m2",
     "profile": "mastermindx / Profile 12",
     "status": "connected; control/screenshot/download/advanced grants present",
-    "ordinary_snapshots": "BROWSER_UNAVAILABLE / NOT_APPLIED on both task-owned loopback tabs",
+    "ordinary_snapshots": "BROWSER_UNAVAILABLE / NOT_APPLIED on two task-owned loopback tabs and one independent public-origin tab",
     "browser_input_attempted": false,
     "live_extension_changed": false,
     "unknown_effect_replays": 0,
@@ -76,7 +86,41 @@
       "elements": 6,
       "title": "Mastermind CDP fixture",
       "user_profiles_touched": false,
-      "browser_mutations": 0
+      "browser_mutations": 0,
+      "browser_version": "Chrome for Testing 151.0.7922.34"
+    },
+    "diagnostic_source": {
+      "change": "Fixed stage/API/category for injection and document-message failures",
+      "contract_test": "node tests/browser_control_contract.cjs",
+      "passed": true,
+      "effect_and_permission_rules_changed": false,
+      "activated": false
+    },
+    "branded_chrome_diagnostic": {
+      "browser_version": "157.0.8103.51",
+      "state": "HARNESS_EXTENSION_LOAD_UNAVAILABLE",
+      "observed": "No service worker appeared before timeout; no snapshot or input attempted",
+      "reference": "https://developer.chrome.com/blog/extension-news-june-2025",
+      "user_profiles_touched": false
+    },
+    "latest_registration": {
+      "state": "PROFILE_IDENTITY_MISMATCH",
+      "observed_at": "2026-11-10T04:00:00Z",
+      "profile": "Profile12/mastermindx",
+      "observed_loaded_package": "Mastermind-Browser-0.4.0/Chrome-Default",
+      "previous_loaded_package": "Mastermind-Browser-0.5.0/Chrome-mastermindx",
+      "secure_preferences_mtime": "2026-11-10T03:40:36.973999+00:00",
+      "response_effect": "REFUSED_BEFORE_REQUEST_REFERENCE",
+      "writer": "UNKNOWN; no preferences or enrollment changed by this task",
+      "original_tabs_cleanup": "HELD_AT_ORIGINAL_OWNER"
+    },
+    "other_work_profile_status": {
+      "profile": "Profile17/chatgpt1",
+      "state": "CONNECTED",
+      "control": true,
+      "screenshot": true,
+      "advanced_cdp": true,
+      "input_proof": false
     }
   },
   "fleet": {
@@ -87,14 +131,15 @@
     "ubuntu1": "enabled T3 capacity_fabric; no discovered MCP or new skills",
     "ubuntu2": "enabled T3 capacity_fabric; no discovered MCP or new skills",
     "ubuntu3": "enabled T3 capacity_fabric; no discovered MCP or new skills",
-    "reverse_transport_to_m2": "unprobed; no inferred reverse authority"
+    "reverse_transport_to_m2": "M1 existing m2-recovery SSH route proven with strict host keys and batch authentication; no credentials, aliases or provider configuration changed",
+    "m1_sdk": "Existing official Python mcp 1.28.1 imports successfully under Python3.12.13"
   },
   "ci_dependency": {
     "prior_fixture": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
     "qualified_successor": "0c0521169260d87889da8a7711a90460982eefa2",
     "owner_proof": "https://github.com/mastermindx-market-intelligence/macro/pull/10740#issuecomment-6757956429",
     "whole_cohorts_preserved": true,
-    "owner_focused_passes": 412,
+    "focused_tests_passed": 412,
     "consumer_change": ".github/workflows/ci.yml paired fixture ref only",
     "macro_runtime_release_changed": false,
     "local_contract_projection": {
@@ -102,7 +147,8 @@
       "repository_discovery_unavailable": 6,
       "reason": "Source projection lacks full repository/exclusion manifest",
       "required_ci_relaxed": false
-    }
+    },
+    "candidate_guard_repair": "Rename numeric test-count key to focused_tests_passed; preserve412 and unchanged identity guard"
   },
   "pending": [
     "Protected source delivery",

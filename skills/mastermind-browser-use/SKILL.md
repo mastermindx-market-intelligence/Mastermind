@@ -14,6 +14,14 @@ description: Control authorized browser tabs across the Mastermind fleet from T3
 
 Do not create another CDP listener, browser launcher, profile clone, credential store or browser registry. The Mastermind Browser extension, installed native host and existing bindings own fleet browser identity and transport. T3's private preview is a different browser from the user's Chrome profile.
 
+## Built-in T3 preview workflow
+
+For an authorized development URL, use `preview_open` and retain the returned preview identity. Use `t3_preview_list` or `preview_status` to recover an existing preview instead of opening duplicates. Read each tool's live schema; preview identifiers and fleet browser identifiers are not interchangeable.
+
+Use `preview_snapshot` to ground an interaction, then `preview_act` for the intended control. Use `preview_evaluate` for bounded application-state assertions when needed. Observe after each mutation, handle an expected dialog through `preview_dialog`, and use `preview_resize` to check the requested viewport. Close only this task's preview through `t3_preview_close` after saving the result. Keep unrelated previews and active development sessions intact.
+
+Preview input runs in its own browser surface and ordinarily needs no physical mouse takeover. It does not grant access to a fleet profile's authentication or native OS dialogs; use the route that owns those tasks.
+
 ## Discover and bind
 
 1. Call `mmx_browser` with `{"action":"browsers"}` and, when needed, `{"action":"hosts"}`. Inventory membership or `LOADED` does not prove an active connection.

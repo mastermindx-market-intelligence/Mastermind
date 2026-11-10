@@ -59,7 +59,9 @@ Live acceptance must separately establish:
 4. A task-owned browser tab on the intended fleet profile, grounded interaction and DOM/screenshot proof.
 5. Correct target-drift/unknown-effect handling and host/profile-specific unavailable states.
 
-The read-only MCP qualification uses protocol `2025-03-26`; an older `2024-11-05` probe timed out against this Peekaboo build. Preserve successful current-protocol evidence rather than describing that older negotiation failure as a current permission failure.
+The original native action proof used MCP `2025-03-26`. The official Python SDK subsequently connected through the unchanged adapter and negotiated `2025-11-25`, discovering all 14 restricted tools. Earlier initialization attempts and one direct backend startup timed out. The intermittent startup cause remains unresolved; no version or request-ID rewrite was justified. Classify connection failure separately from an action permission refusal, and retain the original target after any possible input dispatch.
+
+The browser controller also reports bounded page-channel failure details: script injection versus document-targeted messaging, the Chrome API involved, and a fixed error category. It does not return raw exceptions or private URLs, retry the operation, change grants, or convert a possible input effect into `NOT_APPLIED`. This diagnostic source change requires its own qualified extension activation; a source merge alone does not update the live browser.
 
 ## Rollback
 
