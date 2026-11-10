@@ -68,6 +68,7 @@ def test_well_formed_block_parses():
 
 
 import asyncio
+import json
 import os
 import socket
 import stat
@@ -314,3 +315,71 @@ def test_allowed_uid_reads_os_and_workspace_routes_no_bearer(tmp_path):
     assert payload["programs"] == []
     assert payload["principal_scope"] == LocalOperatorAuthenticator(config).principal_scope()
     assert seen and seen[0] == LocalOperatorAuthenticator(config).subject_digest
+
+
+# --------------------------------------------------------------------------
+# (4) TCP with forged loopback/forwarded/invented local-operator headers
+
+from tests import test_mastermind_os_executive_transport as _os_fixture
+
+rsa_key = _os_fixture.rsa_key  # the existing signed-token fixture, reused
+
+
+def test_tcp_forged_headers_get_exactly_todays_refusal(rsa_key, tmp_path, short_socket_root):
+    """(4) No header can open or influence the TCP path; refusals are exact."""
+    import dataclasses
+    from tests import test_mastermind_os_executive_transport as os_fixture
+
+    mastermind = tmp_path / "mastermind"
+    macro = tmp_path / "macro"
+    os_fixture.fixture._git_repo(mastermind)
+    (macro / "scripts").mkdir(parents=True)
+    (macro / "scripts" / "agentos.py").write_text("")
+    (macro / "agentos").mkdir()
+    (macro / "agentos" / ".keep").write_text("")
+    os_fixture.fixture._git_repo(macro)
+    base = os_fixture.fixture._real_app_settings(
+        rsa_key, mastermind_root=mastermind, macro_root=macro,
+        ceo_ingress_socket_path=short_socket_root / "ceo-ingress.sock")
+    settings = dataclasses.replace(base, read_from_ceo_ingress=True)
+    app = os_fixture._v3_app(settings)  # the real TCP app object
+
+    def drive(headers):
+        events = []
+
+        async def send(event):
+            events.append(event)
+
+        async def receive():
+            return {"type": "http.request", "body": b"{}", "more_body": False}
+
+        asyncio.run(app({
+            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1", "scheme": "https", "method": "POST",
+            "path": "/os/executive/context", "raw_path": b"/os/executive/context",
+            "query_string": b"", "headers": headers,
+            "client": ("127.0.0.1", 9000), "server": ("127.0.0.1", 9001),
+        }, receive, send))
+        return events
+
+    forged = [
+        (b"host", b"mcp.mastermind-x.com"),
+        (b"content-type", b"application/json"),
+        (b"x-forwarded-for", b"127.0.0.1"),
+        (b"x-local-operator", b"1"),
+        (b"x-mastermind-local-operator", b"admit"),
+    ]
+    events = drive(forged)  # no authorization at all
+    start = events[0]
+    body = json.loads(b"".join(e.get("body", b"") for e in events[1:]))
+    assert start["status"] == 403
+    assert body == {"ok": False, "error": {"code": "transport_refused",
+                                           "message": "fixed OS transport refused"}}
+
+    events = drive(forged + [(b"authorization", b"Bearer forged.token.value")])
+    start = events[0]
+    body = json.loads(b"".join(e.get("body", b"") for e in events[1:]))
+    assert start["status"] == 401
+    assert body == {"ok": False, "error": {"code": "authentication_required",
+                                           "message": "authentication required"}}
+    assert (b"www-authenticate", b"Bearer") in [tuple(h) for h in start["headers"]]
