@@ -505,6 +505,7 @@ class CodingJobDoor:
                       "title": issue_row.get("title"),
                       "assigneeAgentId": issue_row.get("assigneeAgentId")},
             "envelope": request.to_dict(),
+            "command": command,  # the entry's own id (a person reads it on a blocker)
             "frozen_at": _now(),
         }
         self._save_frozen()
