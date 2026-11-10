@@ -179,6 +179,12 @@ jobs:
       - name: Checkout event source
         uses: actions/checkout@v4
         with:
+          # Queue-shadow fix (#2390): on the push lane the workspace must be
+          # master, not a speculative queue-ref head. With this pin the
+          # existing `git rev-parse HEAD == $GITHUB_SHA` assert below becomes
+          # fail-closed for a shadow push; pull_request/full-mode keep the
+          # event head and still satisfy it.
+          ref: ${{ github.event_name == 'push' && 'refs/heads/master' || '' }}
           fetch-depth: 0
           persist-credentials: false
 

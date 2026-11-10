@@ -44,6 +44,12 @@ jobs:
         working-directory: app/mastermind_os
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Queue-shadow fix (#2390): a merge-queue ref push can hand this job
+          # a speculative head as the workspace while event-metadata guards
+          # still pass. Pin only the push lane; pull_request/merge_group keep
+          # the queue head they are meant to validate.
+          ref: ${{ github.event_name == 'push' && 'refs/heads/master' || '' }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.3"
@@ -134,6 +140,11 @@ jobs:
       MM_BUILD_IDENTITY: ci-native-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Queue-shadow fix (#2390): same class as the frontend job -- the
+          # release archive must be built from master on push, not from a
+          # speculative queue-ref workspace.
+          ref: ${{ github.event_name == 'push' && 'refs/heads/master' || '' }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22.23.3"

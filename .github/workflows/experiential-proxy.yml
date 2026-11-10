@@ -28,6 +28,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Queue-shadow fix (#2390): pin the push lane to master so the
+          # installed requirements and proxy sources under test come from the
+          # real branch, not a speculative queue-ref workspace. pull_request
+          # lane keeps the event head.
+          ref: ${{ github.event_name == 'push' && 'refs/heads/master' || '' }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

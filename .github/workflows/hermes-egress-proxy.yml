@@ -2,6 +2,9 @@ name: Hermes vendor CONNECT proxy
 
 on:
   push:
+    # Queue-shadow fix (#2390): an unfiltered push also matches
+    # refs/heads/gh-readonly-queue/**, so restrict to the real branch.
+    branches: [master]
     paths:
       - 'ops/hermes_egress/**'
       - '.github/workflows/hermes-egress-proxy.yml'
@@ -20,6 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Queue-shadow fix (#2390): a merge-queue ref push can hand this job
+          # a speculative head as the workspace while event-metadata guards
+          # still pass. Pin the push lane to master; the pull_request lane
+          # keeps the event head it is meant to test.
+          ref: ${{ github.event_name == 'push' && 'refs/heads/master' || '' }}
           persist-credentials: false
       - name: Verify static role access matrix
         run: python3 -m unittest discover -s ops/hermes_egress/tests -v
