@@ -664,3 +664,7 @@
     text-align: left;
   }
 }
+
+/* HC11 settings entry/back affordance (lead wiring) */
+.mm-code-settings-entry { margin: 0 0 12px; }
+.mm-code-settings-entry button { font: inherit; background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
