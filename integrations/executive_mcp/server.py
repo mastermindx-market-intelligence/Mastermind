@@ -596,6 +596,10 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
     # Per-attempt T3 fleet projection: fixed literal path, strict v2 query
     # param ``attempt_id`` (run ids contain ``/`` and cannot ride the path).
     "/workspace/resources/t3/attempts/current",
+    # Per-attempt execution-return delivery read (L6 P1): same fixed-literal
+    # path + strict v2 query param shape — the persisted delivery receipt for
+    # one attempt, served honestly (absence is a 200 document, not an error).
+    "/workspace/resources/execution-returns/current",
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
