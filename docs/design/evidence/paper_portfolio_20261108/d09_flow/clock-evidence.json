@@ -1,0 +1,162 @@
+{
+  "schema": "PAPER_BOUNDED_COPY_EVIDENCE_V1",
+  "mission_date": "2026-11-08",
+  "target": {
+    "file_id": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+    "page_id": "p-1-0",
+    "url": "https://app.paper.design/file/01M6Y2QK8TQZRN8T4BHG10CJXT/p-1-0"
+  },
+  "finding": "Unqualified 15-minute delay text conflicts with current-price-unavailable recorded fixtures; no nominal provider-delay contract was established.",
+  "changes": [
+    {
+      "board": "1-0",
+      "nodeId": "A-0",
+      "before": "≈15-min delayed",
+      "after": "Recorded view"
+    },
+    {
+      "board": "3S-0",
+      "nodeId": "41-0",
+      "before": "Board built 2 Nov 10:21 UTC · ≈15-min delayed",
+      "after": "Board built 2 Nov 10:21 UTC · Recorded view"
+    },
+    {
+      "board": "53-0",
+      "nodeId": "5P-0",
+      "before": "约延迟15分钟",
+      "after": "记录视图"
+    },
+    {
+      "board": "7D-0",
+      "nodeId": "7N-0",
+      "before": "约延迟15分钟",
+      "after": "记录视图"
+    }
+  ],
+  "source": {
+    "repository": "mastermindx-market-intelligence/Macro",
+    "ref": "5eb1603edb4486f06c74df7c43a1082427a59b6e",
+    "path": "templates/intraday_flow.html.j2",
+    "blob": "8832ceba22068eccc65704f7bf6d7bbe027a9e45",
+    "static_delay_line": 380,
+    "independent_status_lines": [
+      1065,
+      1088
+    ],
+    "code_changed": false
+  },
+  "verification": {
+    "boards": [
+      {
+        "domain": "d09",
+        "node": "1-0",
+        "exact": true,
+        "changed": true
+      },
+      {
+        "domain": "d09",
+        "node": "3S-0",
+        "exact": true,
+        "changed": true
+      },
+      {
+        "domain": "d09",
+        "node": "53-0",
+        "exact": true,
+        "changed": true
+      },
+      {
+        "domain": "d09",
+        "node": "7D-0",
+        "exact": true,
+        "changed": true
+      },
+      {
+        "domain": "d09",
+        "node": "9F-0",
+        "exact": true,
+        "changed": false
+      },
+      {
+        "domain": "d09",
+        "node": "AP-0",
+        "exact": true,
+        "changed": false
+      },
+      {
+        "domain": "d09",
+        "node": "CG-0",
+        "exact": true,
+        "changed": false
+      },
+      {
+        "domain": "d09",
+        "node": "DX-0",
+        "exact": true,
+        "changed": false
+      },
+      {
+        "domain": "d09",
+        "node": "FE-0",
+        "exact": true,
+        "changed": false
+      },
+      {
+        "domain": "d09",
+        "node": "GN-0",
+        "exact": true,
+        "changed": false
+      }
+    ],
+    "visual": "Root inspected representative desktop EN and mobile ZH before/after captures. All four changed boards and six unchanged companion boards have exact intended JSX readback.",
+    "preserved": "All known source/build timestamps, unavailable state copy, R3 received/delayed illustrations and R4 recorded-evidence guides remain exact.",
+    "runtime": "Not exercised; source remains unchanged."
+  },
+  "operations": [
+    {
+      "operation_id": "paper-portfolio-d09-recorded-clock-20261108-01",
+      "tool": "set_text_content",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "arguments": {
+        "fileId": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+        "updates": [
+          {
+            "nodeId": "A-0",
+            "html": "Recorded view"
+          },
+          {
+            "nodeId": "41-0",
+            "html": "Board built 2 Nov 10:21 UTC · Recorded view"
+          },
+          {
+            "nodeId": "5P-0",
+            "html": "记录视图"
+          },
+          {
+            "nodeId": "7N-0",
+            "html": "记录视图"
+          }
+        ]
+      },
+      "expected_snapshot": "447f781a5a18810f8c3f7dd79d7ed697f74f81fb95ed2a9b605eb0004dd971de",
+      "retry_allowed": false
+    },
+    {
+      "operation_id": "paper-portfolio-d09-clarity-20261108-finish",
+      "tool": "finish_working_on_nodes",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "arguments": {
+        "fileId": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+        "nodeIds": [
+          "1-0",
+          "3S-0",
+          "53-0",
+          "7D-0"
+        ]
+      },
+      "expected_snapshot": "447f781a5a18810f8c3f7dd79d7ed697f74f81fb95ed2a9b605eb0004dd971de",
+      "retry_allowed": false
+    }
+  ],
+  "unknown_effects": 0
+}

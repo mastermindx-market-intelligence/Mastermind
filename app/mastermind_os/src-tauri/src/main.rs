@@ -172,6 +172,8 @@ fn main() {
             auth::read_retained_activity,
             auth::read_resource_capacity,
             auth::read_model_configuration,
+            auth::paperclip::read_company_workspace,
+            auth::paperclip::create_company_backlog,
             auth::host_observation::read_host_observation,
             auth::read_fabric_catalog,
             auth::read_fabric_status,

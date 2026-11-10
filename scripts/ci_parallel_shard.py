@@ -20,6 +20,21 @@ from scripts import ci_pytest
 
 _REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
 _REQUIRED_PR_FAST_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
+_REQUIRED_PIN_GUARDS_IF = "${{ !cancelled() }}"
+
+_PIN_GUARDS_RUN_STEP = "Run pinned source-identity guard suite"
+
+_EXPECTED_PIN_GUARDS_STEPS = [
+    {"uses": "actions/checkout@v4",
+     "with": {"fetch-depth": 0, "persist-credentials": False}},
+    {"uses": "actions/setup-python@v5",
+     "with": {"python-version": "3.12", "cache": "pip"}},
+    {"name": "Install project",
+     "run": "python -m pip install --upgrade pip\n"
+            'python -m pip install -e ".[dev]"'},
+    {"name": _PIN_GUARDS_RUN_STEP,
+     "run": "python -m scripts.ci_pin_guards"},
+]
 
 _EXPECTED_SHARD_SOURCE_STEPS = [
     {"name": "Acquire immutable corpus fixture anchor", "uses": "actions/checkout@v4",
@@ -104,13 +119,44 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
          'npm --prefix app/mastermind_os run typecheck\n'}]
 
 
-# Jobs that execute the test suite run on a GitHub-hosted image only. In this
+# Full pytest shards and the PR fast lane use a GitHub-hosted image. In this
 # organization `ubuntu-latest` can also select persistent, multi-slot
 # self-hosted runners, where this suite's single-tenant host assertions
 # (ancestor directory identity, modes, ACLs, private temp tree) fail
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+
+
+def _validate_pin_guards_lane(jobs: dict) -> None:
+    """Strict structure for the early source-identity guard job; no bypass."""
+    guards = jobs["pin_guards"]
+    if not isinstance(guards, dict):
+        raise ci_pytest.PolicyError("pin guards job must be a mapping")
+    if (
+        guards.get("name") != "Pin and identity guards"
+        or guards.get("if") != _REQUIRED_PIN_GUARDS_IF
+        or guards.get("needs") is not None
+        or guards.get("permissions") != {"contents": "read"}
+        or guards.get("runs-on") != "ubuntu-latest"
+        or guards.get("continue-on-error") is not None
+    ):
+        raise ci_pytest.PolicyError(
+            "pin guards must run on every non-cancelled CI event"
+        )
+    timeout = guards.get("timeout-minutes")
+    if type(timeout) is not int or not 1 <= timeout <= 15:
+        raise ci_pytest.PolicyError("pin guards timeout must be finite and bounded")
+    steps = guards.get("steps")
+    if not isinstance(steps, list) or len(steps) != len(_EXPECTED_PIN_GUARDS_STEPS):
+        raise ci_pytest.PolicyError("pin guards steps missing or duplicated")
+    if steps != _EXPECTED_PIN_GUARDS_STEPS:
+        raise ci_pytest.PolicyError("pin guards lane source or commands drifted")
+    for step in steps:
+        if not isinstance(step, dict) or step.get("continue-on-error") is not None:
+            raise ci_pytest.PolicyError("pin guards may not bypass failures")
+        if step.get("if") is not None:
+            raise ci_pytest.PolicyError("pin guards steps must be unconditional")
 
 
 def _validate_pr_fast_lane(jobs: dict) -> None:
@@ -214,6 +260,10 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '    echo "trusted source risk qualification unavailable"\n'
  '    exit 1\n'
  '  fi\n'
+ '  if [ "$GUARDS_STATUS" != success ]; then\n'
+ '    echo "pinned source-identity guards must pass"\n'
+ '    exit 1\n'
+ '  fi\n'
  '  case "$PR_SCOPE_MODE" in\n'
  '    full)\n'
  '      if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then\n'
@@ -234,8 +284,11 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '  esac\n'
  'else\n'
  '  # Protected pushes and deliberate manual CI always run all shards.\n'
+ '  # Excluded guard modules must pass here too: manual runs and\n'
+ '  # pushes without reusable proof still require complete coverage.\n'
  '  if [ "$SHARDS_STATUS" != success ] ||\n'
- '     [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then\n'
+ '     [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||\n'
+ '     [ "$GUARDS_STATUS" != success ]; then\n'
  '    echo "integration/release CI must pass the full matrix"\n'
  '    exit 1\n'
  '  fi\n'
@@ -255,9 +308,10 @@ def validate_parallel_workflow(text: str) -> None:
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
     jobs = payload.get("jobs")
-    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pytest_shards", "test"}:
-        raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, shards, and test gate")
+    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"}:
+        raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, pin guards, shards, and test gate")
     _validate_pr_fast_lane(jobs)
+    _validate_pin_guards_lane(jobs)
     shards, gate = jobs["pytest_shards"], jobs["test"]
     if not isinstance(shards, dict) or not isinstance(gate, dict):
         raise ci_pytest.PolicyError("parallel CI job configuration is invalid")
@@ -285,7 +339,7 @@ def validate_parallel_workflow(text: str) -> None:
         raise ci_pytest.PolicyError("pytest shards must run on the GitHub-hosted test image")
     if (
         gate.get("name") != "test"
-        or gate.get("needs") != ["pr_scope", "pr_fast", "pytest_shards"]
+        or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
         or gate.get("if") != "${{ always() }}"
         or gate.get("continue-on-error") is not None
     ):
@@ -319,7 +373,8 @@ def validate_parallel_workflow(text: str) -> None:
     # global uniqueness across both CI jobs rather than depending on runner
     # behavior for duplicate IDs.
     seen_step_ids: set[str] = set()
-    for step in (*jobs["pr_scope"]["steps"], *jobs["pr_fast"]["steps"], *shard_steps, *gate_steps):
+    for step in (*jobs["pr_scope"]["steps"], *jobs["pr_fast"]["steps"],
+                 *jobs["pin_guards"]["steps"], *shard_steps, *gate_steps):
         if not isinstance(step, dict):
             raise ci_pytest.PolicyError("parallel CI steps must be mappings")
         if "id" not in step:
@@ -486,6 +541,7 @@ def validate_parallel_workflow(text: str) -> None:
             "PR_SCOPE_STATUS": "${{ needs.pr_scope.result }}",
             "PR_SCOPE_MODE": "${{ needs.pr_scope.outputs.mode }}",
             "PR_FAST_STATUS": "${{ needs.pr_fast.result }}",
+            "GUARDS_STATUS": "${{ needs.pin_guards.result }}",
             "SHARDS_STATUS": "${{ needs.pytest_shards.result }}",
         }
         or code != _REQUIRED_GATE_RUN
