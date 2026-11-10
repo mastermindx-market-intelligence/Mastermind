@@ -11,7 +11,8 @@ the canonical pytest module-selection policy.
 
 ## Fail-closed rule
 
-The CI workflow still starts all six real runner **jobs** on every event,
+The CI workflow still starts all six pytest shard **jobs** plus the
+pin-guard and qualification jobs on every event,
 always runs the source-bound release preflight on each shard, the
 Paper/Fabric/compile/shell gates in the parallel `Non-pytest qualification
 gates` job (CI Lightning F3; formerly on shard zero), both shard-two H1 Linux
