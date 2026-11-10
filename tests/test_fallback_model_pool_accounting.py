@@ -221,8 +221,15 @@ def test_opencode_luna_long_context_rate_uses_reseller_source():
     ) == Decimal("2.74")
     doc = _document()
     assert doc["sources"]["opencode-go-models-20261005"]["url"] == "https://opencode.ai/zen/go/v1/models"
-    for record in doc["models"].values():
+    for model_key, record in doc["models"].items():
         for row in record["api_rates"]:
             if row["surface"] == "opencode_go":
-                assert row["source_id"] == "opencode-go-20261005"
+                expected_source = (
+                    "opencode-go-20261110" if model_key == "opencode.minimax-m3.1-flash"
+                    else "opencode-go-20261005"
+                )
+                assert row["source_id"] == expected_source
                 assert "not an independent per-model quota" in row["notes"]
+    assert doc["sources"]["opencode-go-20261110"] == {
+        "url": "https://opencode.ai/docs/console/go/", "verified_at": "2026-11-10",
+    }

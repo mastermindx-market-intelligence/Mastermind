@@ -13,7 +13,7 @@ import type {
   WindowDocument,
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { readFreshConversationLocation } from "./conversations/fresh-conversation-location";
 import { useFreshConversationDraftState } from "./conversations/new-conversation/useFreshConversationDraftState";
 import { useFreshConversationJourney } from "./conversations/new-conversation/useFreshConversationJourney";
@@ -185,8 +185,11 @@ import {
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
 import { nativeAuthFeedback, nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
+const CompanyWorkspace = lazy(() => import("./company/CompanyWorkspace").then(module => ({ default: module.CompanyWorkspace })));
+
 export const navigation = [
   "Today",
+  "Team",
   "Projects",
   "Inbox",
   "Conversations",
@@ -209,6 +212,7 @@ export const navigation = [
 type View = (typeof navigation)[number];
 const primaryNavigation: readonly View[] = [
   "Today",
+  "Team",
   "Projects",
   "Inbox",
   "Conversations",
@@ -250,6 +254,7 @@ const navigationPaths: Record<View, string> = {
 
   "Session Estate": "M4 4h16v12H4zM8 20h8M12 16v4",
   Today: "M3 10 12 3l9 7v11H3zM9 21v-7h6v7",
+  Team: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
   Projects: "M3 6h6l2 2h10v12H3z", Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
   Conversations: "M4 4h16v12H9l-5 4z", Knowledge: "M4 3h7v17H4zM14 3h6v17h-6z",
   "Meta-CEO": "M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5",
@@ -264,7 +269,7 @@ function NavigationIcon({ view }: { view: View }) {
 }
 function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
   if (locale === "en") return view === "Fleet & Capacity" ? "Resources & systems" : view;
-  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "资源与系统", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Team: "团队", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "资源与系统", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
   return labels[view];
 }
 
@@ -5025,7 +5030,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       />
     ) : null;
   const newProjectRoute = active === "Projects" && (projectJourney.shown || projectJourney.invalidLink);
-  const quietHeader = active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = active === "Team" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const independentProjectRead =
@@ -5334,6 +5339,21 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <p>{locale === "zh-CN" ? "当前来源未提供项目操作接口。" : "The current source has not supplied the project operation interface."}</p></section>}
       {retainedProjectGoal}
     </>;
+  else if (active === "Team")
+    content = <Suspense fallback={<p role="status">{locale === "zh-CN" ? "正在加载团队工作区…" : "Loading the team workspace…"}</p>}><CompanyWorkspace key={authRevision} transport={window.MastermindMissionHost?.company}
+      authGeneration={authRevision} canRead={Boolean(authState?.status === "signed_in" && authState.acquisition)} locale={locale}
+      onNavigate={destination => { setProjectTab(null); setActive(destination); }}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return false;
+        const matches = index.programs.filter(card => card.workRef === workRef);
+        if (matches.length !== 1) return false;
+        const card = matches[0];
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return true;
+        }
+        setCatalogueProject({ workRef, authRevision, epoch: programIndexEpoch });
+        setProjectTab("More"); setActive("Projects"); return true;
+      }}/></Suspense>;
   else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
       currentCatalogue={{value: index, current: currentTodayCatalogue}}
@@ -6117,7 +6137,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
+            {active === "Team" ? null : active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
           </div>
         </header>
         {nativeGoalNotice}
@@ -6139,7 +6159,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && active !== "Sources" && !directRoute &&
+        {active !== "Team" && active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && active !== "Sources" && !directRoute &&
           !((active === "Meta-CEO" || active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice &&
           !(active === "Projects" && (projectJourney.shown || projectJourney.invalidLink) && reading.readinessDiagnostic !== null) ? (

@@ -547,11 +547,11 @@ describe("Executive OS convergence surfaces", () => {
 });
 
 describe("native and interaction contracts", () => {
-  it("keeps five Company destinations and readable advanced operational routes", async () => {
+  it("keeps six Company destinations and readable advanced operational routes", async () => {
     render(<App />);
     const company = screen.getByRole("navigation", { name: "Company navigation" });
     expect(within(company).getAllByRole("button").map(button => button.textContent?.trim().replace(/^[^A-Za-z]+/, ""))).toEqual([
-      "Today", "Projects", "Inbox", "Conversations", "Knowledge",
+      "Today", "Team", "Projects", "Inbox", "Conversations", "Knowledge",
     ]);
     const operations = screen.getByRole("navigation", { name: "Mission navigation" });
     expect(within(operations).getByRole("button", { name: "Work queue" })).toBeTruthy();

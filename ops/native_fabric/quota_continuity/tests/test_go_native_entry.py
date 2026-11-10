@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-from test_go_native_stage import builds, native_stage, published, loaded_entry
+from test_go_native_stage import builds, native_stage, published, loaded_entry, ROOT
 
 
 def inspect(entry, published):
@@ -40,7 +40,22 @@ def clean_environment(monkeypatch, published):
     monkeypatch.setenv("GO_STATE_DIR", str(published.ext / "go_shim"))
 
 
-def test_import_and_inspection_have_no_database_network_secret_or_service_effect(published):
+def helper_bytes(cohort):
+    path = (ROOT.parent / "paid_canonical_glm/source/glm_shim.py"
+            if cohort == "historical"
+            else ROOT / "tests/fixtures/glm_helper_531198.py")
+    raw = path.read_bytes()
+    expected = {
+        "historical": "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc",
+        "observed": "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2",
+    }
+    assert hashlib.sha256(raw).hexdigest() == expected[cohort]
+    return raw
+
+
+@pytest.mark.parametrize("cohort", ["historical", "observed"])
+def test_import_and_inspection_have_no_database_network_secret_or_service_effect(published, cohort):
+    (published.ext / "glm_shim/glm_shim.py").write_bytes(helper_bytes(cohort))
     before = {str(p): p.read_bytes() for p in (published.profile,
         published.ext / "broker/leases.sqlite", published.ext / "go_shim/.token")}
     with loaded_entry(published) as entry, \
@@ -51,7 +66,7 @@ def test_import_and_inspection_have_no_database_network_secret_or_service_effect
         assert Path(startup.handler.__file__) == published.release / "ext/go_application_handler.py"
         assert Path(startup.broker_module.__file__) == published.release / "ext/lease_broker.py"
         codec = sys.modules["go_lease_capability"]
-        assert codec is entry._LOADED_MODULES["go_lease_capability"]
+        assert codec is entry._LOADED_MODULES["go_lease_capability"][0]
         assert Path(codec.__file__) == published.release / "ext/go_lease_capability.py"
         assert startup.paths["db_path"] == published.ext / "broker/leases.sqlite"
         assert startup.paths["accounts_path"] == published.ext.parent / "orch/fabric/accounts.yaml"
@@ -61,7 +76,7 @@ def test_import_and_inspection_have_no_database_network_secret_or_service_effect
                 mock.patch.object(startup.handler, "Router", side_effect=AssertionError("inspection constructed router")):
             assert inspect(entry, published).handler is startup.handler
             assert sys.modules["go_lease_capability"] is codec
-            assert entry._LOADED_MODULES["go_lease_capability"] is codec
+            assert entry._LOADED_MODULES["go_lease_capability"][0] is codec
     assert before == {str(Path(p)): Path(p).read_bytes() for p in before}
     assert not (published.ext / "go_shim/shim.pid").exists()
     assert not (published.ext / "go_shim/shim.lock").exists()
@@ -76,6 +91,34 @@ def test_matching_filename_foreign_module_is_not_adopted(published, name):
         sys.modules[name] = foreign
         with pytest.raises(ValueError, match="module conflict"):
             inspect(entry, published)
+
+
+@pytest.mark.parametrize("cohort", ["historical", "observed"])
+def test_unknown_external_helper_bytes_refuse_before_helper_execution(published, cohort):
+    path = published.ext / "glm_shim/glm_shim.py"
+    path.write_bytes(helper_bytes(cohort) + b'\nraise AssertionError("unqualified helper executed")\n')
+    with loaded_entry(published) as entry:
+        with pytest.raises(ValueError, match="source identity refused"):
+            inspect(entry, published)
+        assert "glm_shim" not in sys.modules
+        assert "glm_shim" not in entry._LOADED_MODULES
+
+
+@pytest.mark.parametrize("first,second", [
+    ("historical", "observed"), ("observed", "historical"),
+])
+def test_accepted_helper_swap_cannot_reuse_a_differently_loaded_module(published, first, second):
+    path = published.ext / "glm_shim/glm_shim.py"
+    path.write_bytes(helper_bytes(first))
+    with loaded_entry(published) as entry:
+        inspect(entry, published)
+        loaded = sys.modules["glm_shim"]
+        assert entry._LOADED_MODULES["glm_shim"] == (
+            loaded, hashlib.sha256(helper_bytes(first)).hexdigest())
+        path.write_bytes(helper_bytes(second))
+        with pytest.raises(ValueError, match="module conflict: glm_shim"):
+            inspect(entry, published)
+        assert sys.modules["glm_shim"] is loaded
 
 
 @pytest.mark.parametrize("value", [None, [], {}, False])

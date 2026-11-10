@@ -17,6 +17,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-workspace-oauth-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   original-oauth-engine:
     name: Pinned OAuth and Streamable HTTP engine

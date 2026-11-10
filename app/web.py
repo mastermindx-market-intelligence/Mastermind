@@ -34,6 +34,11 @@ def _cached_zh(text: str):
 
 router = APIRouter()
 
+# Additive, operator-authenticated scenario lab routes travel through the
+# incumbent web router; the security-reviewed app/main.py remains byte-pinned.
+from app import portfolio_scenarios as _portfolio_scenarios
+router.include_router(_portfolio_scenarios.router)
+
 _STATIC = Path(__file__).parent / "static"
 
 # The Mastermind project root is two levels up from app/web.py
@@ -2756,6 +2761,7 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
+        _log.warning("Self-Directed book unavailable: %s", type(exc).__name__)
         # A read we could not perform renders `unavailable` — never a fabricated funded book
         # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
         try:
@@ -2767,7 +2773,8 @@ def api_self_directed() -> JSONResponse:
                    "reason_code": "self_directed_book_unreadable",
                    "nav": None, "cash": None, "invested": None,
                    "starting_nav": None, "positions": [], "pending": [],
-                   "allocation": None, "market": market, "error": str(exc)}
+                   "allocation": None, "market": market, "valuation_complete": False,
+                   "error": "self_directed_unavailable"}
         # E13: the typed invalid-account error keeps its own reason code and evidence instead
         # of collapsing into the generic unreadable string.
         reason_code = getattr(exc, "reason_code", None)
