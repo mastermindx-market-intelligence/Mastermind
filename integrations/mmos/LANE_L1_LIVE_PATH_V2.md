@@ -51,3 +51,27 @@ release and no origin branch implemented it: the producer
 Live owner acts for R8 (Hermes seat, exact commands): `/tmp/l1_owner_acts_20261109.md` §A —
 copied into §4 below. Enabling the plugin alone is NOT enough: the installed Executive MCP
 (:8443, `dd45d111`) mounts neither `child_request_admit` nor `/mcp/coo`, so R8 also waits on R6.
+
+### R1-R4 live admitted canary — PASS (2026-11-10 02:19-02:24 UTC)
+
+Harness `integrations/t3/live_proof/t3_admitted_canary.py` (glm-5.3 worker, commit `baa3ab409`), receipt
+`integrations/t3/live_proof/t3_admitted_canary_receipt.json` (secret-free; pinned by
+`tests/test_t3_admitted_canary_receipt.py`). Scratch root `~/.cache/mmos-l1-canary` (outside `~/.hermes`).
+Executive generation: trunk source in-process over a scratch data dir; installed Executive `dd45d111` untouched.
+
+| Rung | Result | Decisive evidence |
+|---|---|---|
+| R1 | DONE | two dedicated T3 OAuth clients (`mmos-l1-admitted-canary-client-{a,b}`), tokens 0600 in scratch; namespaces distinct (sha256 only in receipt) |
+| R2 | DONE | scratch copy of routes + proposal `t3` row → real `ModelRouter.load(path)` + `explain_route` recorded; live file untouched; t3 aliases honestly empty |
+| R3 | DONE (live, scratch Executive) | v1.2 request (requester `hermes:engineering` / `slack:1794196323.978899` / `mmos-rev5`, basis recorded: not a live Hermes tool call) → `compose_child_execution` ADMITTED → `claim_job` → attempt `ATT-f0a189d3dedd4bce9758fad90466842f` (job `JOB-002`) → production `compose_t3_native_adapter` over the token file → ONE T3 thread `mcp:launch:980f38b7…c4dce` (capacity_fabric / glm-5.3-flash, `runCount 1`, T3-managed worktree) → commit `e25a5a5cf10d` pushed as `t3/mmos-l1-canary-eaacc05d` → reply `L1-CANARY-OK ATT-f0a189d3… e25a5a5c…` → `collect_result` → `complete_attempt` COMPLETED → `execution_return/v1` (real `GhCliEvidencePort`, stage `branch_pushed`, acceptance `not_accepted`) → `HermesExecutionReturnDeliverer` honest REFUSED `NATIVE_SESSION_UNAVAILABLE` (R9) |
+| R4 | DONE (live) | P1 `os._exit(90)` after intent+receipt+original ref COMMITTED, before ACK; cold P2 reattach **0 native calls**, second start refused `T3LaunchClaimConflictError` with 0 calls, `adopt_attempt` fence 2, RUNNING→SUCCEEDED, `recentRuns == 1`; client b reattach/start refused `PRINCIPAL_MISMATCH` with 0 calls, no thread; sibling child `ATT-51996ea6…` thread `mcp:launch:1a178e15…1f05` exact-run interrupt (thread+run echo verified) requested 02:21:21.470 unsettled → observed CANCELLED 02:21:26.542 |
+
+Thread budget 2/2, reserved durably before each mint; no retry/delete/archive. Lead verified the
+thread, run count, model, branch and remote sha directly in T3/GitHub.
+
+Production gaps the canary exposed (fixing on `t3/mmos-v2-l1-gaps`): G1 `compose_t3_native_adapter`
+passes no launch arguments (projectId/workspaceStrategy) — the installed service could not launch;
+G2 no Model-Router-route → T3 `modelSelection` derivation (model harness-fixed, disclosed);
+G3 `execution_return_wiring.py:347` projects `root_id = JOB-002` rather than the request root (contract check).
+Deviations recorded in the receipt: branch derives from the request digest (Job.branch fixed at create_job);
+placement-intent ids strip `roots/`/`parents/` prefixes (slash-free token law).
