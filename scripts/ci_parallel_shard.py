@@ -76,7 +76,8 @@ _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth':
          "  echo 'CI_SCOPE source not in protected base: required full suite'\n"
          'fi\n'}]
 _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
- {'uses': 'actions/setup-python@v5', 'with': {'python-version': '3.12', 'cache': 'pip'}},
+ {'uses': 'actions/setup-python@v5',
+  'with': {'python-version': '3.12', 'cache': 'pip'}},
  {'name': 'Verify exact changed source without executing untrusted PR text',
   'env': {'PR_BASE_SHA': '${{ needs.pr_scope.outputs.source_base }}',
           'PR_HEAD_SHA': '${{ needs.pr_scope.outputs.source_head }}'},
@@ -393,7 +394,7 @@ def validate_parallel_workflow(text: str) -> None:
         or set(runner) != {"name", "if", "run", "timeout-minutes"}
         or type(runner.get("timeout-minutes")) is not int
         or runner.get("timeout-minutes") != 45
-        or runner.get("run") != ("umask 077\n"
+        or runner.get("run") != ("umask 022\n"
                                  "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n")
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):

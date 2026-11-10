@@ -339,7 +339,7 @@ def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() 
         "name": "Run repository test shard",
         "if": "${{ steps.previous_ci.outputs.reuse != 'true' }}",
         "timeout-minutes": 45,
-        "run": "umask 077\npython -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n",
+        "run": "umask 022\npython -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n",
     }
     assert "env" not in shard_step  # Do not expose the Actions token to pytest.
     assert data["jobs"]["test"]["if"] == fan._REQUIRED_GATE_IF
@@ -590,8 +590,10 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
     import yaml
 
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
-    scope = next(step for step in workflow["jobs"]["pr_scope"]["steps"]
-                 if step.get("id") == "scope")
+    scope = next(
+        step for step in workflow["jobs"]["pr_scope"]["steps"]
+        if step.get("id") == "scope"
+    )
     fallback = [
         line.strip() for line in scope["run"].splitlines()
         if line.strip().startswith("printf 'mode=full")
@@ -804,8 +806,8 @@ def test_python_bootstrap_cannot_be_removed_delayed_or_bypassed(job_name, mutati
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
-@pytest.mark.parametrize("mutation", ["missing", "group-write", "public", "late"])
-def test_shard_private_fixture_creation_cannot_be_removed_or_delayed(mutation):
+@pytest.mark.parametrize("mutation", ["missing", "group-write", "overrestrict", "late"])
+def test_shard_fixture_mode_defaults_cannot_be_removed_or_delayed(mutation):
     import yaml
 
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
@@ -813,24 +815,25 @@ def test_shard_private_fixture_creation_cannot_be_removed_or_delayed(mutation):
     step = next(s for s in workflow["jobs"]["pytest_shards"]["steps"]
                 if s.get("name") == "Run repository test shard")
     command = step["run"]
-    assert command.splitlines()[0] == "umask 077"
+    assert command.splitlines()[0] == "umask 022"
     if mutation == "missing":
-        step["run"] = command.removeprefix("umask 077\n")
+        step["run"] = command.removeprefix("umask 022\n")
     elif mutation == "group-write":
-        step["run"] = command.replace("umask 077", "umask 002")
-    elif mutation == "public":
-        step["run"] = command.replace("umask 077", "umask 022")
+        step["run"] = command.replace("umask 022", "umask 002")
+    elif mutation == "overrestrict":
+        step["run"] = command.replace("umask 022", "umask 077")
     else:
-        step["run"] = command.removeprefix("umask 077\n") + "umask 077\n"
+        step["run"] = command.removeprefix("umask 022\n") + "umask 022\n"
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
 @pytest.mark.parametrize("runner_exit", [0, 17])
-def test_actual_shard_shell_sets_private_creation_and_preserves_runner_exit(tmp_path, runner_exit):
-    """Run the actual shell prelude from a permissive parent; no real test runner."""
+def test_actual_shard_shell_preserves_requested_modes_and_runner_exit(tmp_path, runner_exit):
+    """Exercise the real prelude, including modes that an overstrict mask destroys."""
     import os
     import stat
+    import sys
     import yaml
 
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
@@ -846,17 +849,34 @@ def test_actual_shard_shell_sets_private_creation_and_preserves_runner_exit(tmp_
         "printf '%s\\n' \"$*\" > \"$PROBE_ROOT/observed-argv\"\n"
         "mkdir \"$PROBE_ROOT/created-directory\"\n"
         "printf probe > \"$PROBE_ROOT/created-file\"\n"
+        "\"$PROBE_PYTHON\" -I -B - <<'MODE_PROBE'\n"
+        "import os\n"
+        "from pathlib import Path\n"
+        "root = Path(os.environ['PROBE_ROOT'])\n"
+        "for name, mode in (('private-directory', 0o700), ('shared-read-directory', 0o750), ('public-read-directory', 0o755)):\n"
+        "    os.mkdir(root / name, mode)\n"
+        "for name, mode in (('private-file', 0o600), ('executable-file', 0o755)):\n"
+        "    fd = os.open(root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)\n"
+        "    os.close(fd)\n"
+        "MODE_PROBE\n"
         "exit \"$RUNNER_EXIT\"\n"
     )
     python.chmod(0o700)
     env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
-           "PROBE_ROOT": str(tmp_path), "RUNNER_EXIT": str(runner_exit)}
+           "PROBE_ROOT": str(tmp_path), "PROBE_PYTHON": sys.executable,
+           "RUNNER_EXIT": str(runner_exit)}
     result = subprocess.run(["bash", "-e", "-c", "umask 0002\n" + command],
                             env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == runner_exit, result.stderr
-    assert int((tmp_path / "observed-mask").read_text().strip(), 8) == 0o77
+    for name, mode in (
+        ("private-directory", 0o700), ("shared-read-directory", 0o750),
+        ("public-read-directory", 0o755), ("private-file", 0o600),
+        ("executable-file", 0o755),
+    ):
+        assert stat.S_IMODE((tmp_path / name).stat().st_mode) == mode, name
+    assert int((tmp_path / "observed-mask").read_text().strip(), 8) == 0o22
     assert (tmp_path / "observed-argv").read_text().strip() == (
         "-m scripts.ci_parallel_shard --jobs 6 --index 3"
     )
-    assert stat.S_IMODE((tmp_path / "created-directory").stat().st_mode) == 0o700
-    assert stat.S_IMODE((tmp_path / "created-file").stat().st_mode) == 0o600
+    assert stat.S_IMODE((tmp_path / "created-directory").stat().st_mode) == 0o755
+    assert stat.S_IMODE((tmp_path / "created-file").stat().st_mode) == 0o644

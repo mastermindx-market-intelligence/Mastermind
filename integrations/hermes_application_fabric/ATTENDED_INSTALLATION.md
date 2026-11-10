@@ -58,14 +58,14 @@ only the exact Macro commit's `config`, `engine` and `lib` trees. It reads Git
 objects and ignores uncommitted workspace bytes.
 
 Current Macro source is
-`25ba92bb52120fae550b54c29f82929c0b77d37b`, tree
-`c2a4d629c87dec9381460560a31dffa4e2550917`. The reviewed
+`8077a32cbc36ffffc4b95dd2ec0acdfe0e8c2394`, tree
+`af50deaef75502310848a0c04a5c59cd802259ac`. The reviewed
 `macro-source.json` binds the repository, commit/tree, projection, material
 manifest, archive size and SHA256. Reproduce the artifact using the reviewed
 builder:
 
 ```sh
-python3 ops/executive_os/capacity_host_artifacts.py build-hermes-attended-source --source-repository "$MACRO_SOURCE_REPOSITORY" --commit 25ba92bb52120fae550b54c29f82929c0b77d37b --output "$HERMES_ATTENDED_SOURCE_ARCHIVE"
+python3 ops/executive_os/capacity_host_artifacts.py build-hermes-attended-source --source-repository "$MACRO_SOURCE_REPOSITORY" --commit 8077a32cbc36ffffc4b95dd2ec0acdfe0e8c2394 --output "$HERMES_ATTENDED_SOURCE_ARCHIVE"
 ```
 
 The original Executive installer accepts the absolute archive path through
@@ -201,17 +201,19 @@ a later newly admitted turn may select a different eligible route.
 | Native 20-file patch | SHA256 631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541; previous 15 postimages unchanged |
 | Attended 17-file runtime list | SHA256 7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376 |
 | Original role 11-file publication | SHA256 c801409819ce3cbc2e95414d685ccc7663753bd992e81158448488fd4ac06be2 |
-| Macro source archive | SHA256 339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e; 75,634,300 bytes |
+| Macro source archive | SHA256 8af88c49e64de06b401a62162af99dfc5f9f014b336b40a09d84e5cf89224bfa; 76,028,293 bytes |
 
 The attended runtime list and existing role publication are different contracts;
 one digest never substitutes for the other. PM build configuration is retained
 by the existing PM snapshot and release commitment.
 
-The current package proof uses the actual patched native PM with two disposable
+The retained historical package proof used the actual patched native PM with two disposable
 homes and its real environment builder. An isolated Python process imports the
 installed canonical package without the developer checkout on its path, confirms
 shared class identity, exact Macro commitment, JSON Schema 4.26.0 and PyYAML 6.0.3.
-This proves ordinary packaging, not installation into a live selected Hermes
+That receipt proves packaging for its recorded source; the current Macro archive
+and installed-source checks have separate receipts. It does not prove installation
+into a live selected Hermes
 environment.
 
 Source support is enabled for the fixed and automatic attended descriptors.

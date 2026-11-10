@@ -233,10 +233,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Isolated CAP-S1 observers must see every installed pytest dependency.
+      # Ignore runner user-site packages during dependency resolution.
       - name: Install project
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -I -m pip install --upgrade pip
+          python -I -m pip install -e ".[dev]"
 
       # Fast deterministic release-source checks before expensive hosted work.
       # Reuse the incumbent strict EVAL changed-path and fixed-role package
@@ -589,10 +591,11 @@ jobs:
         # runner loss can still prevent artifact delivery. No exit is inferred
         # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
-        # New test fixtures inherit private permissions; runtime ownership and
-        # mode checks remain unchanged, and no existing files are chmodded.
+        # Default fixtures must not be writable by group or other users.
+        # Preserve requested 0750/0755 modes; private fixtures request 0700/0600.
+        # Runtime ownership checks and existing file modes remain unchanged.
         run: |
-          umask 077
+          umask 022
           python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
       - name: Upload fixed test diagnostics
