@@ -123,7 +123,7 @@ it("joins existing Work and explicit selected-project Journal, then returns with
     target: { value: "Keep this exact Office draft." },
   });
   fireEvent.click(
-    within(office).getByText("Returns, critical path and journal", {
+    within(office).getByText("Returns, dependencies and journal", {
       selector: "summary",
     }),
   );
@@ -155,7 +155,7 @@ it.each(["host", "auth", "generation"] as const)(
   async (damage) => {
     const f = await setup("journal");
     fireEvent.click(
-      screen.getByText("Returns, critical path and journal", {
+      screen.getByText("Returns, dependencies and journal", {
         selector: "summary",
       }),
     );
@@ -195,7 +195,7 @@ it("rejects a foreign project journal response without touching the Office draft
     target: { value: "Original private Office text" },
   });
   fireEvent.click(
-    screen.getByText("Returns, critical path and journal", {
+    screen.getByText("Returns, dependencies and journal", {
       selector: "summary",
     }),
   );

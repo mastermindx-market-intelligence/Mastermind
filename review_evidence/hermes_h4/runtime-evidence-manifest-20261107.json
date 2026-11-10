@@ -1,0 +1,25 @@
+{
+  "schema": "mastermind.hermes_h4_runtime_evidence.v1",
+  "operation_id": "hermes-capacity-routing-completion-20261107-c4",
+  "implementation_commit": "f008b67333ecf627270a7d8378720f1f034864ce",
+  "files": {
+    "capacity-bridge-predecessor-20261107.py": {
+      "sha256": "4d3f88a1b0ef0cbb501439acacebcbb5aa874cbd84c27755e87becda4b8a245c"
+    },
+    "capacity-bridge-source-install-20261107.json": {
+      "sha256": "28cd93c3521d615b85ea70d7cba1330c3aded05a0cb5727a9358bf55657d0b0a"
+    },
+    "capacity-default-startup-20261107.json": {
+      "sha256": "f131969f1203c5f9eb33e48edb5f2eacac66410da813d85776d113c317389bfe"
+    },
+    "capacity-mcp-owner-reload-20261107.json": {
+      "sha256": "93c0b0284125e7571a827a4957273e9335ee45d019b4cbdda045fa992078ea17"
+    },
+    "installed-diagnostic-native-proof-20261107.json": {
+      "sha256": "af32bf1118b00ee914e05c7775b40948f032f2570bd5f31e011a326d1b6e6749"
+    },
+    "native-writer-delta-20261107.json": {
+      "sha256": "b378d4f5b7194c8a05d7e52fe412c8db28139f16c8ed18ea4f60cca00b1a9340"
+    }
+  }
+}

@@ -49,6 +49,9 @@ class _ProfileReader:
         self.reserved_paths = reserved_paths
 
     async def __call__(self, scope, receive, send):
+        await self._dispatch(scope, receive, send, identity=False)
+
+    async def _dispatch(self, scope, receive, send, *, identity):
         config = self.config
         code = AuthErrorCode.SCOPE_REFUSED.value
         try:
@@ -94,7 +97,11 @@ class _ProfileReader:
         else:
             # The accepted Reader authenticates again, owns HTTP guards and
             # audit, checks access before/after reading, and releases the bytes.
-            await reader(scope, receive, send)
+            if identity:
+                from integrations.mastermind_workspace_app.native_authorization_identity import content_identity_app
+                await content_identity_app(reader)(scope, receive, send)
+            else:
+                await reader(scope, receive, send)
             return
         try:
             config.audit_sink.emit(AuthAuditEvent(
@@ -107,3 +114,29 @@ class _ProfileReader:
             (b'content-type', b'application/json'), (b'cache-control', b'no-store'),
         ]})
         await send({'type': 'http.response.body', 'body': b'{"error":"authentication_required"}'})
+
+
+def native_content_identity_app(reader):
+    """Use the same installed Content profiles; no new enrollment or selector."""
+    from common.native_authorization_identity_contract import RESOURCES, ROUTES
+    from integrations.mastermind_workspace_app.native_authorization_identity import (
+        content_identity_app, _request_valid, _response)
+    from integrations.mastermind_window_reader.owner_read_resource import NativeOutputReadResource
+    from starlette.requests import Request
+    if type(reader) is NativeOutputReadResource:
+        try:
+            return content_identity_app(reader)
+        except TypeError:
+            return None
+    if (type(reader) is not _ProfileReader
+        or reader.policy.resource != RESOURCES["CONTENT"]
+        or reader.config.allowed_origin != "https://mcp.mastermind-x.com"
+        or ROUTES["CONTENT"] in reader.reserved_paths):
+        return None
+    async def app(scope, receive, send):
+        request = Request(scope, receive)
+        if not _request_valid(request, "CONTENT"):
+            await _response(400, {"error": "invalid_input"})(scope, receive, send)
+            return
+        await reader._dispatch(scope, receive, send, identity=True)
+    return app

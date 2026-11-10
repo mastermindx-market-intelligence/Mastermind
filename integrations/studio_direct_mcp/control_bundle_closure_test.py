@@ -37,6 +37,56 @@ EXPECTED_FILES = {
     "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
+    "control_plane/provider_protocols.py",
+    "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py",
+    "ops/native_fabric/provider_plans/maintenance_guard/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/maintenance_guard/remote_sub_exec.py.patch",
+    "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
+    "ops/native_fabric/provider_plans/memory118/lease_broker.after-maintenance.py.patch",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_contract.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_owner.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/run_observation_delivery.py",
+    "ops/native_fabric/provider_plans/memory118_support_status/after_terminal_diagnostics/profile.json",
+    "ops/native_fabric/provider_plans/memory118_support_status/artifact_delivery.py.patch",
+    "ops/native_fabric/provider_plans/memory118_support_status/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    "ops/native_fabric/provider_plans/profile.json",
+    "ops/native_fabric/provider_plans/remote_placement/profile.json",
+    "ops/native_fabric/provider_plans/router_admission.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/component.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/current40/profile.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/candidate/application_http_transports.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/candidate/go_shim.py",
+    "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+    "ops/native_fabric/quota_continuity/rollout/application_http_realm_projection.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_bridge.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_host_context.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_plan_policy.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_transport.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native_plan_worker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/remote-placement.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/source/application_http_transports.py.preimage",
+    "ops/native_fabric/quota_continuity/source/codex_provider_realm.py.preimage",
+    "ops/native_fabric/quota_continuity/source/glm_keys.py",
+    "ops/native_fabric/quota_continuity/source/go_shim.py",
+    "ops/native_fabric/support_policy_status/reader.py",
 }
 
 LOAD = r"""
@@ -94,23 +144,63 @@ class InstalledClosureTests(unittest.TestCase):
             capture_output=True, text=True, timeout=timeout,
         )
 
-    def _captured_ten_member_fixture(self):
+    def _predecessor_member_fixture(self, names):
         # This models the existing owner's exact membership and seal for
         # migration; the new runtime must not execute this older membership.
         self._install()
         path = self.control / "manifest.json"
         manifest = json.loads(path.read_text())
         manifest["files"] = {
-            name: manifest["files"][name] for name in bundle.CAPTURED_CONTROL_FILES}
+            name: manifest["files"][name] for name in names}
         manifest["bundleDigest"] = bundle._bundle_digest(
             manifest["files"], manifest["launcherHash"])
         path.write_text(json.dumps(manifest))
-        for name in set(bundle.CONTROL_FILES) - set(bundle.CAPTURED_CONTROL_FILES):
+        for name in set(bundle.CONTROL_FILES) - set(names):
             (self.control / name).unlink()
         for path in sorted(self.control.rglob("*"), key=lambda p: len(p.parts), reverse=True):
             if path.is_dir() and not any(path.iterdir()):
                 path.rmdir()
         return manifest
+
+    def _captured_ten_member_fixture(self):
+        return self._predecessor_member_fixture(bundle.CAPTURED_CONTROL_FILES)
+
+    def _review_thirteen_member_fixture(self):
+        return self._predecessor_member_fixture(bundle.REVIEW_CONTROL_FILES)
+
+    def test_review_thirteen_member_bundle_upgrades_only_under_original_cas(self):
+        prior = self._review_thirteen_member_fixture()
+        verified = bundle.verify(control_root=self.control, launcher=self.launcher)
+        self.assertEqual(set(verified["files"]), set(bundle.REVIEW_CONTROL_FILES))
+        before = self._snapshot()
+        with self.assertRaises(bundle.Refusal):
+            bundle.install(source=HERE, control_root=self.control,
+                           launcher=self.launcher)
+        self.assertEqual(self._snapshot(), before)
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CAS_MISMATCH"):
+            bundle.install(source=HERE, control_root=self.control,
+                           launcher=self.launcher, expected_bundle_digest="0" * 64)
+        self.assertEqual(self._snapshot(), before)
+        result = bundle.install(source=HERE, control_root=self.control,
+                                launcher=self.launcher,
+                                expected_bundle_digest=prior["bundleDigest"])
+        self.assertEqual(set(result["files"]), EXPECTED_FILES)
+        self.assertEqual(bundle.verify(control_root=self.control,
+                                      launcher=self.launcher)["bundleDigest"],
+                         result["bundleDigest"])
+
+    def test_review_thirteen_member_verification_keeps_lock_and_cache_fences(self):
+        self._review_thirteen_member_fixture()
+        cache = self.control / "__pycache__"
+        cache.mkdir(mode=0o700)
+        (cache / "private_service.fixture.pyc").write_bytes(b"not executable")
+        (cache / "private_service.fixture.pyc").chmod(0o600)
+        with self.assertRaises(bundle.Refusal):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+        shutil.rmtree(cache)
+        (self.control / ".control-bundle.lock").unlink()
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_LOCK_REQUIRED"):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
 
     def test_captured_ten_member_bundle_upgrades_only_under_original_cas(self):
         prior = self._captured_ten_member_fixture()
@@ -161,7 +251,8 @@ print("authenticated compiler snapshot")
 
     def test_actual_payload_installs_exact_closed_runtime(self):
         installed = self._install()
-        self.assertEqual(len(bundle.CONTROL_FILES), 13)
+        self.assertEqual(len(bundle.CONTROL_FILES), 63)
+        self.assertEqual(len(bundle.REVIEW_CONTROL_FILES), 13)
         self.assertEqual(len(bundle.CAPTURED_CONTROL_FILES), 10)
         self.assertIn("fleet_git_failure_compat.py", bundle.CONTROL_FILES)
         self.assertIn(
@@ -172,7 +263,7 @@ print("authenticated compiler snapshot")
         self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
         import private_service as source_service
         self.assertEqual(set(source_service.CONTROL_BUNDLE_FILES), set(bundle.CONTROL_FILES))
-        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 13)
+        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 63)
         verified = bundle.verify(control_root=self.control, launcher=self.launcher)
         self.assertEqual(verified["bundleDigest"], installed["bundleDigest"])
         for name, digest in installed["files"].items():
@@ -296,7 +387,7 @@ print(json.dumps({"real_native_imports":len(seen),"fixture_refusal":"invalid lau
         path = self.control / "manifest.json"
         raw = path.read_bytes()
         for names in (bundle.LEGACY_CONTROL_FILES, bundle.STATUS_CONTROL_FILES,
-                      bundle.CAPTURED_CONTROL_FILES):
+                      bundle.CAPTURED_CONTROL_FILES, bundle.REVIEW_CONTROL_FILES):
             with self.subTest(members=len(names)):
                 manifest = json.loads(raw)
                 manifest["files"] = {name: manifest["files"][name] for name in names}
@@ -772,7 +863,7 @@ print(json.dumps(value))
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-    def test_lockless_legacy_verify_cannot_admit_a_concurrent_ten_file_upgrade(self):
+    def test_lockless_legacy_verify_cannot_admit_a_concurrent_current_upgrade(self):
         self._install()
         manifest_path = self.control / "manifest.json"
         legacy = json.loads(manifest_path.read_text())
@@ -781,7 +872,9 @@ print(json.dumps(value))
         manifest_path.write_text(json.dumps(legacy))
         for name in EXPECTED_FILES - set(bundle.LEGACY_CONTROL_FILES):
             (self.control / name).unlink()
-        shutil.rmtree(self.control / "ops")
+        for path in sorted(self.control.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
         (self.control / ".control-bundle.lock").unlink()
         actual = bundle._read_manifest
         transitions = []
@@ -789,14 +882,14 @@ print(json.dumps(value))
         def install_between_reads(path):
             observed = actual(path)
             if not transitions:
-                transitions.append("legacy-to-ten")
+                transitions.append("legacy-to-current")
                 self.assertEqual(set(self._install()["files"]), EXPECTED_FILES)
             return observed
 
         with mock.patch.object(bundle, "_read_manifest", side_effect=install_between_reads):
             with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CHANGED"):
                 bundle.verify(control_root=self.control, launcher=self.launcher)
-        self.assertEqual(transitions, ["legacy-to-ten"])
+        self.assertEqual(transitions, ["legacy-to-current"])
         self.assertTrue((self.control / ".control-bundle.lock").is_file())
         self.assertEqual(set(bundle.verify(
             control_root=self.control, launcher=self.launcher)["files"]), EXPECTED_FILES)

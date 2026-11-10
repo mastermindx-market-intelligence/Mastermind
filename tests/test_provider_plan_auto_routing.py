@@ -33,13 +33,8 @@ def source_stage(tmp_path_factory):
         assert fixture["schema"] == "mastermind.provider_plan_test_predecessor.v1"
         assert fixture["files"] == profile["base_files"]
         base = target/"base"
-        for relative, spec in fixture["sources"].items():
-            raw = ((ROOT/spec["source"]).read_bytes() if "source" in spec
-                   else zlib.decompress(base64.b64decode(spec["zlib_base64"], validate=True)))
-            assert hashlib.sha256(raw).hexdigest() == fixture["files"][relative]
-            path = base/relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+        from tests.provider_plan_current116_fixture import materialize_predecessor
+        materialize_predecessor(base, fixture)
         (base/"RELEASE.json").write_text(json.dumps({
             "digest":profile["base_selection"]["generation"], "files":profile["base_files"]}))
         built=target/"composed"
