@@ -399,7 +399,9 @@ _REQUIRED_STEPS = [
     # Auxiliary jobs whose single mandatory step is pinned inline in _jobs().
     (7, "Classify integrated source diff using protected base code"),
     (8, "Run pinned source-identity guard suite"),
-    (9, "Verify Paper direct pinned MCP SDK"),
+] + [
+    # Every one of the five qualification gates is individually mandatory.
+    (9, step["name"]) for step in _qualification_steps()
 ]
 
 

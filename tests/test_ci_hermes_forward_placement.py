@@ -35,12 +35,15 @@ def check_f3_contract(included):
     evidence = json.loads((ROOT / F3_EVIDENCE).read_text())
     assert evidence['source_run'] == F3_SOURCE_RUN
     assert evidence['pinned_modules'] == len(pins)
-    # The LPT pins are exactly the 150 slowest measured included modules
-    # (deterministic tie-break); TARGET is not among them and keeps shard 4.
-    included_set = set(included)
+    # The LPT pins are exactly the 150 slowest modules the frozen evidence
+    # measured, minus the canonical exclusions (deterministic tie-break);
+    # TARGET is not among them and keeps shard 4. Derived from the frozen
+    # evidence, not today's inclusion set, so deleting or renaming a pinned
+    # module cannot promote an unpinned one into the comparison.
+    excluded = set(cip.resolve_gate(ROOT)['excluded'])
     measured = {
         path: seconds for path, seconds in evidence['modules'].items()
-        if path in included_set and path != TARGET
+        if path not in excluded and path != TARGET
     }
     slowest = sorted(measured.items(), key=lambda item: (-item[1], item[0]))[:150]
     assert {path for path in pins if path != TARGET} == {path for path, _ in slowest}
@@ -49,7 +52,9 @@ def check_f3_contract(included):
     cip.verify_partition(included, shards)
     placed = positions(shards)
     assert sorted(placed) == sorted(included)
-    assert all(placed[path] == shard for path, shard in pins.items())
+    assert placed[TARGET] == 4
+    # A pin whose module was since removed is inert; every present one holds.
+    assert all(placed[path] == shard for path, shard in pins.items() if path in placed)
     return placed
 
 
@@ -71,6 +76,15 @@ def test_forward_pin_cannot_change_other_job_counts(jobs):
     for path, index in positions(shards).items():
         expected = cip._MEASURED_THREE_JOB_PLACEMENT.get(path, hashed(path, jobs)) if jobs == 3 else hashed(path, jobs)
         assert index == expected
+
+
+def test_removed_pinned_module_does_not_break_the_contract():
+    included = cip.resolve_gate(ROOT)['included']
+    pins = pinned_table()
+    gone = next(path for path in sorted(pins) if path != TARGET)
+    before = check_f3_contract(included)
+    after = check_f3_contract(tuple(path for path in included if path != gone))
+    assert all(after[path] == index for path, index in before.items() if path != gone)
 
 
 def test_new_module_does_not_reshuffle_existing_assignments():

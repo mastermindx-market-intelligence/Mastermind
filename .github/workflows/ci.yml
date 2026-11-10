@@ -185,13 +185,18 @@ jobs:
   # (push, dispatch, and full-mode PR/merge group), including pushes that
   # reuse a same-SHA merge-group pytest proof -- reuse may skip only the
   # pytest step, never a qualification gate.
+  # Hosted-only label: the Fabric gate installs from the checkout and
+  # refuses group/other-writable or foreign-owned source directories
+  # (control_bundle SOURCE_DIRECTORY_INVALID), which the shared persistent
+  # self-hosted "ubuntu-latest" hosts produced on 2026-11-10. ubuntu-24.04
+  # selects a clean GitHub-hosted runner every time.
   qualification:
     name: Non-pytest qualification gates
     needs: [pr_scope]
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

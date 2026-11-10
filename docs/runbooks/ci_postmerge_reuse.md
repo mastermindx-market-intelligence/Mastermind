@@ -12,19 +12,22 @@ the canonical pytest module-selection policy.
 ## Fail-closed rule
 
 The CI workflow still starts all six real runner **jobs** on every event,
-always runs the source-bound release preflight on each shard, shard-zero
-Paper/Fabric/compile/shell gates, both shard-two H1 Linux gates, and the
-required aggregate `test` job. The real H1 no-ACL fixture and its exact
+always runs the source-bound release preflight on each shard, the
+Paper/Fabric/compile/shell gates in the parallel `Non-pytest qualification
+gates` job (CI Lightning F3; formerly on shard zero), both shard-two H1 Linux
+gates, and the required aggregate `test` job. The real H1 no-ACL fixture and its exact
 initializer/provider assertions are unchanged. Immediately before each pytest
 step, one bounded read-only proof check returns `reuse=true` only for a
 `push` to `refs/heads/master` with the current exact `GITHUB_SHA`.
 
 The proof requires the sole matching native `merge_group` CI workflow run
 for that SHA to have finished successfully, and verifies the exact current
-attempt's seven unique successful jobs **and** their executed required
-steps: `pytest shard 0..5`, the required `test` gate, every shard's full
-pytest and release-preflight steps, the four shard-zero qualifications,
-and both shard-two H1 Linux qualification steps. Missing, skipped or
+attempt's exact eleven-job inventory **and** its executed required steps:
+`pytest shard 0..5`, the required `test` gate, `PR test scope`, `Pin and
+identity guards`, `Non-pytest qualification gates` (all successful) and
+`PR fast checks` (skipped); every shard's full pytest and release-preflight
+steps, all five qualification gates in the qualification job, and both
+shard-two H1 Linux qualification steps. Missing, skipped or
 duplicate mandatory steps fail closed; legacy three-shard proof is not
 accepted. The workflow run is re-read
 after the job check to reject attempt/generation movement.
@@ -82,7 +85,7 @@ source/security review and native `merge_group` checks. The final
 production-path acceptance after merge should show the same-SHA `push`
 workflow with each `Run repository test shard` step omitted **only after**
 a logged verified merge-group run, original Paper/Fabric/compile/shell steps
-still successful on shard zero, source-bound preflights successful on all
+still successful in the qualification job, source-bound preflights successful on all
 six shards, both real H1 gates successful on shard two, and final `test`
 successful. The existing finite job/pytest-step timeouts and best-effort
 fixed-diagnostics upload are retained; a reused pytest step does not invent
@@ -132,11 +135,12 @@ This is the sole eighth changed path beyond the original seven-path repair.
 ## Released Paper prepare guard composition (2026-11-03)
 
 The six-shard adaptation also retains protected source's exact
-`Verify Paper Studio prepare guard` step on shard zero. It runs
+`Verify Paper Studio prepare guard` step, now in the parallel `Non-pytest
+qualification gates` job (CI Lightning F3; formerly shard zero). It runs
 `node --test paper-design.test.mjs` in `integrations/studio_direct_mcp`
-before reuse proof, regardless of whether full pytest can be omitted.
-The workflow validator rejects omission, duplication, reuse-based suppression,
-wrong command/directory, continued failure, or moving this gate after the proof.
+on every full CI run; that job has no reuse step, so reuse can never suppress it.
+The workflow validator rejects omission, duplication, conditional execution,
+wrong command/directory, continued failure, or a copy back inside a shard.
 The prior-run proof requires exactly one completed/successful copy of this step;
 a successful job with its Paper guard missing, skipped, failed, pending or
 duplicated cannot qualify. Existing redirect refusal, six-shard/H1 safeguards,

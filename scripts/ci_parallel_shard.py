@@ -165,13 +165,18 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
          'npm --prefix app/mastermind_os run typecheck\n'}]
 
 
-# Full pytest shards and the PR fast lane use a GitHub-hosted image. In this
-# organization `ubuntu-latest` can also select persistent, multi-slot
-# self-hosted runners, where this suite's single-tenant host assertions
-# (ancestor directory identity, modes, ACLs, private temp tree) fail
+# Full pytest shards, the PR fast lane and the non-pytest qualification gates
+# use a GitHub-hosted image. In this organization `ubuntu-latest` can also
+# select persistent, multi-slot self-hosted runners, where this suite's
+# single-tenant host assertions (ancestor directory identity, modes, ACLs,
+# private temp tree) and the Fabric gate's source-directory custody fail
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+_PIN_GUARDS_JOB_KEYS = frozenset(
+    {"name", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
+_QUALIFICATION_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
 
 
 def _validate_pin_guards_lane(jobs: dict) -> None:
@@ -179,6 +184,10 @@ def _validate_pin_guards_lane(jobs: dict) -> None:
     guards = jobs["pin_guards"]
     if not isinstance(guards, dict):
         raise ci_pytest.PolicyError("pin guards job must be a mapping")
+    # Exact job keys: env/defaults/container/strategy/services could change
+    # what the pinned step text actually executes.
+    if set(guards) != _PIN_GUARDS_JOB_KEYS:
+        raise ci_pytest.PolicyError("pin guards job keys drifted")
     if (
         guards.get("name") != "Pin and identity guards"
         or guards.get("if") != _REQUIRED_PIN_GUARDS_IF
@@ -210,16 +219,25 @@ def _validate_qualification_lane(jobs: dict) -> None:
     qual = jobs["qualification"]
     if not isinstance(qual, dict):
         raise ci_pytest.PolicyError("qualification job must be a mapping")
+    # Exact job keys: env/defaults/container/strategy/services could change
+    # what the pinned gate text actually executes.
+    if set(qual) != _QUALIFICATION_JOB_KEYS:
+        raise ci_pytest.PolicyError("qualification job keys drifted")
     if (
         qual.get("name") != "Non-pytest qualification gates"
         or qual.get("if") != _REQUIRED_QUALIFICATION_IF
         or qual.get("needs") != ["pr_scope"]
         or qual.get("permissions") != {"contents": "read"}
-        or qual.get("runs-on") != "ubuntu-latest"
         or qual.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError(
             "qualification gates must run exactly when the pytest shards run"
+        )
+    # Hosted-only: the Fabric gate refuses the shared self-hosted hosts'
+    # group-writable checkouts, and those hosts also carry "ubuntu-latest".
+    if qual.get("runs-on") != HOSTED_TEST_RUNNER:
+        raise ci_pytest.PolicyError(
+            "qualification gates must run on a clean GitHub-hosted runner"
         )
     timeout = qual.get("timeout-minutes")
     if type(timeout) is not int or not 5 <= timeout <= 20:

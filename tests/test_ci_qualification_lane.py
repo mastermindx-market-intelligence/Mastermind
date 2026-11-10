@@ -41,6 +41,9 @@ def test_qualification_lane_is_pinned_by_the_validator() -> None:
     qual = workflow["jobs"]["qualification"]
     assert qual["name"] == "Non-pytest qualification gates"
     assert qual["needs"] == ["pr_scope"]
+    # Hosted-only: the shared self-hosted hosts also answer "ubuntu-latest"
+    # and their checkouts fail the Fabric gate's source-directory check.
+    assert qual["runs-on"] == "ubuntu-24.04"
     # The lane runs exactly when the pytest shards run: same gate expression.
     assert qual["if"] == workflow["jobs"]["pytest_shards"]["if"]
     assert [step.get("name") for step in qual["steps"]][4:] == list(_GATE_NAMES)
@@ -84,6 +87,8 @@ def test_proof_schema_requires_the_qualification_job_and_its_steps() -> None:
     "wrong-if", "needs-scope", "timeout-low", "timeout-high", "continue-on-error",
     "missing-gate", "gate-conditional", "gate-continue-on-error", "wrong-directory",
     "cut-command", "extra-step", "permissions", "moved-into-shard",
+    "shard-copy", "runner-latest", "runner-self-hosted", "runner-expression",
+    "job-env", "job-defaults", "container", "strategy", "services",
 ])
 def test_validator_rejects_qualification_lane_drift(mutation: str) -> None:
     import copy
@@ -127,5 +132,40 @@ def test_validator_rejects_qualification_lane_drift(mutation: str) -> None:
         gate["if"] = "matrix.index == 0"
         qual["steps"].pop(5)
         shards["steps"].append(gate)
+    elif mutation == "shard-copy":
+        # Lane left intact: only the shard-side "no copy" rule can fire.
+        gate = copy.deepcopy(qual["steps"][5])
+        gate["if"] = "matrix.index == 0"
+        shards["steps"].append(gate)
+    elif mutation == "runner-latest":
+        qual["runs-on"] = "ubuntu-latest"
+    elif mutation == "runner-self-hosted":
+        qual["runs-on"] = ["self-hosted", "linux"]
+    elif mutation == "runner-expression":
+        qual["runs-on"] = "${{ vars.HOSTED_TEST_RUNNER || 'ubuntu-latest' }}"
+    elif mutation == "job-env":
+        qual["env"] = {"PYTHONPATH": "/tmp/shadow"}
+    elif mutation == "job-defaults":
+        qual["defaults"] = {"run": {"working-directory": "integrations"}}
+    elif mutation == "container":
+        qual["container"] = "ubuntu:24.04"
+    elif mutation == "strategy":
+        qual["strategy"] = {"matrix": {"index": [0, 1]}}
+    elif mutation == "services":
+        qual["services"] = {"cache": {"image": "redis"}}
     with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("index", range(5))
+def test_any_single_shard_side_gate_copy_is_rejected(index: int) -> None:
+    import copy
+
+    import yaml
+
+    workflow = _workflow()
+    gate = copy.deepcopy(workflow["jobs"]["qualification"]["steps"][4 + index])
+    assert gate["name"] == _GATE_NAMES[index]
+    workflow["jobs"]["pytest_shards"]["steps"].append(gate)
+    with pytest.raises(cip.PolicyError, match="only in the qualification job"):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
