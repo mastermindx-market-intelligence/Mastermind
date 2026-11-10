@@ -134,7 +134,9 @@ class FakeT3:
     """Thread memory + a send() that appends the marker turn and answers.
     Each send() gets its own runId, exactly like real T3 turns."""
 
-    def __init__(self, replies=None, messages=None, send_error=None):
+    def __init__(self, replies=None, messages=None, send_error=None,
+                 pending_requests=0):
+        self.pending_requests = pending_requests
         self.messages_store = list(messages or [])
         self.replies = list(replies or [])
         self.send_error = send_error
@@ -159,7 +161,9 @@ class FakeT3:
                 "error": None}
 
     def messages(self, count=60):
-        return {"threadId": "th-1"}, list(self.messages_store)
+        return ({"threadId": "th-1",
+                 "pendingRequestCount": self.pending_requests},
+                list(self.messages_store))
 
 
 def metadata_with(binding):
@@ -1070,3 +1074,32 @@ def test_revision_carries_the_task_when_the_thread_never_had_it():
                  replies=["answer v2"])
     assert run_bound(pc2, t3b) == 0
     assert "Write a three-line summary." not in t3b.sends[0]
+
+
+def test_nothing_is_sent_while_a_question_waits_and_the_note_is_said_once():
+    # Seen on the installed app (MAS-9): a turn waiting for a person held the
+    # thread, so each wake queued the same revision again and added the same
+    # "waiting" line to the issue.
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(pending_requests=1)
+    for _ in range(3):
+        with pytest.raises(wc.NeedsHuman):
+            run(pc, t3)
+    assert t3.sends == []
+    notes = [c for c in pc.calls if c[0] == "comment"]
+    assert [c[2] for c in notes] == [wc.WAITING_NOTE]
+    # once the question is answered the task goes out exactly once
+    t3.pending_requests = 0
+    assert run(pc, t3) == 0
+    assert len(t3.sends) == 1
+
+
+def test_waiting_note_is_repeated_after_the_board_writes():
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(pending_requests=1)
+    with pytest.raises(wc.NeedsHuman):
+        run(pc, t3)
+    pc.comment_rows["is-1"].append({"body": "any news?", "authorType": "user"})
+    with pytest.raises(wc.NeedsHuman):
+        run(pc, t3)
+    assert [c[2] for c in pc.calls if c[0] == "comment"] == [wc.WAITING_NOTE] * 2

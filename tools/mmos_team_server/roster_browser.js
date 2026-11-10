@@ -13,6 +13,10 @@
 //   livetext <profileDir> <threadUrl> <promptFile> <outJson>
 //       Send a prompt in the thread and record every distinct state of the
 //       answer text in the DOM (sample interval 120 ms).
+//   answer <profileDir> <threadUrl> <answerFile> <outJson> <shotPng> [keepQueued]
+//       Answer the question a teammate is waiting on in its thread (the T3
+//       CLI has no command for this); optionally drop duplicate queued
+//       messages first.
 const fs = require("fs");
 const path = require("path");
 const { chromium } = require(path.join(
@@ -270,8 +274,80 @@ async function modeLivetext(profileDir, threadUrl, promptFile, outJson) {
   console.log(`LIVETEXT_DONE states=${states.length}`);
 }
 
+async function pendingState(page) {
+  return page.evaluate(() => {
+    const queued = document.querySelectorAll(
+      '[aria-label^="Queued message"]').length;
+    const text = document.body.innerText;
+    return {
+      queued,
+      needsInput: text.includes("Needs your input"),
+      inputRequested: text.includes("Input requested"),
+    };
+  });
+}
+
+// answer <profileDir> <threadUrl> <answerFile> <outJson> <shotPng> [keepQueued]
+//     Answer the question a teammate is waiting on in its thread, with the
+//     text in <answerFile>. With keepQueued (a number), first remove queued
+//     messages from the end until that many are left — the wake carrier can
+//     queue the same message more than once behind a waiting turn.
+async function modeAnswer(profileDir, threadUrl, answerFile, outJson, shotPng,
+                          keepQueued) {
+  const answer = fs.readFileSync(answerFile, "utf8").trim();
+  if (!answer) throw new Error("empty answer");
+  const context = await launch(profileDir);
+  const page = context.pages()[0] || (await context.newPage());
+  await openThread(page, threadUrl);
+  await page.waitForTimeout(2500);
+  const before = await pendingState(page);
+  let removed = 0;
+  if (keepQueued !== undefined) {
+    const keep = Number(keepQueued);
+    const items = page.locator('[aria-label^="Queued message"]');
+    while ((await items.count()) > keep) {
+      const n = await items.count();
+      await items.nth(n - 1).getByRole("button", { name: /^Remove/ }).click();
+      await page.waitForTimeout(800);
+      if ((await items.count()) >= n) throw new Error("queued message not removed");
+      removed += 1;
+    }
+  }
+  if (!before.inputRequested && !before.needsInput) {
+    await context.close();
+    throw new Error("no question is waiting in this thread");
+  }
+  // The answer box is the thread's own editor (a contenteditable), which
+  // shows an "answer" hint while a question is waiting.
+  const box = page.locator('[data-testid="composer-editor"]');
+  await box.waitFor({ state: "visible", timeout: 20000 });
+  await box.click();
+  await page.keyboard.type(answer, { delay: 2 });
+  const submit = page.getByRole("button", { name: "Submit", exact: true });
+  await submit.waitFor({ state: "visible", timeout: 10000 });
+  await page.waitForFunction(
+    () => [...document.querySelectorAll("button")]
+      .some((b) => b.textContent.trim() === "Submit" && !b.disabled),
+    null, { timeout: 10000 });
+  await submit.click();
+  await page.waitForTimeout(6000);
+  const after = await pendingState(page);
+  await page.screenshot({ path: shotPng });
+  await context.close();
+  await writeOut(outJson, {
+    when: new Date().toISOString(),
+    url: safeUrl(threadUrl),
+    answerLength: answer.length,
+    queuedRemoved: removed,
+    before,
+    after,
+  });
+  console.log(`ANSWER_DONE removed=${removed} needsInputAfter=${after.needsInput}`);
+}
+
 (async () => {
   const [mode, ...args] = process.argv.slice(2);
+  if (mode === "answer") return modeAnswer(...args);
   if (mode === "pair") return modePair(...args);
   if (mode === "pin") return modePin(...args);
   if (mode === "snapshot") return modeSnapshot(...args);

@@ -484,6 +484,27 @@ class T3Thread:
         return data.get("thread") or {}, out
 
 
+WAITING_NOTE = ("[t2-carrier] teammate is waiting for an answer in its T3 "
+                "thread; issue left in_progress")
+
+
+def send_once(t3, message):
+    """Send `message` unless a question is already waiting in the thread.
+
+    A turn that waits for a person holds the thread: anything sent now is
+    queued behind it, is not in what `messages()` returns, and so would be
+    sent again by every later wake (seen on the installed app: one revision
+    queued three times). Nothing is sent until the question is answered."""
+    thread = t3.messages(1)[0] or {}
+    try:
+        waiting = int(thread.get("pendingRequestCount") or 0)
+    except (TypeError, ValueError):
+        waiting = 0
+    if waiting > 0:
+        raise NeedsHuman(getattr(t3, "thread_id", None) or thread.get("threadId"))
+    return t3.send(message)
+
+
 def binding_of(agent_record):
     binding = (agent_record.get("metadata") or {}).get("teammate", {}).get("t3")
     if not binding or not binding.get("primaryThreadId"):
@@ -591,7 +612,7 @@ def handle_return(pc, t3, issue, ask_op, opts):
             "is posted as the issue comment and completes the issue."
         )
         log(f"sending {ret_op} to the asker's thread")
-        result = t3.send(message)
+        result = send_once(t3, message)
         reply = result.get("reply") or ""
     elif state == "pending":
         log(f"{ret_op} already in the thread and still pending; waiting, no resend")
@@ -795,7 +816,7 @@ def handle_feedback(pc, t3, issue, opts):
                     "review.")
         log(f"sending {rev_op} (board feedback round {rounds + 1}) to the "
             "thread")
-        result = t3.send(message)
+        result = send_once(t3, message)
         reply = result.get("reply") or ""
     elif state == "pending":
         log(f"{rev_op} already in the thread and still pending; waiting, no "
@@ -928,7 +949,7 @@ def run_carrier(pc, t3_factory, opts):
                               os.environ.get("PAPERCLIP_AGENT_ID")),
                 notes=board_notes(pc, issue))
             log(f"sending {op} to thread {thread_id}")
-            result = t3.send(message)
+            result = send_once(t3, message)
             reply = result.get("reply") or ""
         elif state == "pending":
             log(f"{op} already in the thread and still pending; waiting, no resend")
@@ -947,9 +968,11 @@ def run_carrier(pc, t3_factory, opts):
         return 0
     except NeedsHuman:
         try:
-            pc.add_comment(issue["id"],
-                           "[t2-carrier] teammate is waiting for an answer in its "
-                           "T3 thread; issue left in_progress")
+            # Say it once: Paperclip retries the wake, and each retry would
+            # otherwise add the same line to the issue.
+            rows = comment_rows(pc, issue)
+            if not rows or (rows[-1].get("body") or "") != WAITING_NOTE:
+                pc.add_comment(issue["id"], WAITING_NOTE)
         except CarrierError:
             pass
         raise
