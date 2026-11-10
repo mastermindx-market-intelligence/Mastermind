@@ -414,6 +414,9 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     from control_plane.executive_runtime import Runtime
     from ops.executive_os import autonomy_control as ac
     from tests.test_executive_acceptance_maintenance_v2 import _terminal_fixture
+    # This helper freezes the complete historical v5 contract for this test.
+    # Use one monkeypatch scope so teardown cannot restore a nested v5 vector
+    # over the current schema and leak it into later tests.
     runtime, root, before, config, prior, material, proof, _, _ = _terminal_fixture(tmp_path, monkeypatch)
     accepted, selected_sha, successor = 'b'*40, 'e'*40, 'f'*40
     root = dataclasses.replace(root, constraints={**root.constraints, 'operator_harness_armed': False})
@@ -525,6 +528,9 @@ def test_only_exact_legacy_sealed_empty_wal_pair_is_admitted(tmp_path, monkeypat
     shm.write_bytes(b'X'*32768)
     wal.chmod(0o400)
     shm.chmod(0o400)
+    # Match the fixture's simulated trusted group, not macOS temp's wheel group.
+    os.chown(wal, -1, os.getgid())
+    os.chown(shm, -1, os.getgid())
     if fault == 'wal-nonempty':
         wal.chmod(0o600)
         wal.write_bytes(b'committed transaction')

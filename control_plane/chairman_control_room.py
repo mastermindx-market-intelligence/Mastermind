@@ -170,6 +170,7 @@ executive_placement_selection = _optional_control_plane_module(
     "executive_placement_selection", requires=_SELECTOR_CONTROL_PLANE_REQUIRES
 )
 executive_steward = _optional_control_plane_module("executive_steward")
+sol_capability_status = _optional_control_plane_module("sol_capability_status")
 
 #: CR1A's autonomy consumer is loaded through the SAME protected mechanism as
 #: the selector above, and for the same reason.  A static
@@ -306,7 +307,7 @@ _BINDING_SUMMARY_KEYS = (
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "sources", "degraded", "attention", "work",
     "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
-    "placement_selection", "autonomy",
+    "placement_selection", "autonomy", "runtime_capability_status",
 })
 
 
@@ -812,6 +813,7 @@ def compose_control_room(
     binding_problems: Sequence[str] = (),
     placement_selection: dict[str, Any] | None = None,
     dispatch_evidence: Sequence[Mapping[str, Any]] | None = None,
+    runtime_capability_status: Any = None,
     generated_at: str,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of every already-collected source.
@@ -1079,6 +1081,20 @@ def compose_control_room(
             "disagreements": _disagreements(agent_os_entry, jobs, prs),
         })
 
+    # C1 runtime-capability evidence is injected owner output only. The
+    # compositor never acquires or refreshes Studio/Terminal evidence. Accept
+    # only the existing typed CAP1 envelope; absent evidence remains absent.
+    runtime_capability_status_out: dict[str, Any] | None = None
+    if runtime_capability_status is not None:
+        if sol_capability_status is None:
+            degraded.append("runtime_capability_status: owner module not shipped")
+        elif not isinstance(
+            runtime_capability_status, sol_capability_status.CapabilityStatusEnvelope
+        ):
+            degraded.append("runtime_capability_status: typed CAP1 envelope required")
+        else:
+            runtime_capability_status_out = runtime_capability_status.to_dict()
+
     # --- placement selection (CAP-C1) ---------------------------------------
     # Optional pure input: a wire dict already produced by
     # executive_placement_selection.select_placement().to_dict() (or `None`
@@ -1216,6 +1232,7 @@ def compose_control_room(
         "binding_conflicts": binding_conflicts,
         "placement_selection": placement_selection_out,
         "autonomy": autonomy,
+        "runtime_capability_status": runtime_capability_status_out,
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: no "overall" field, closed set
     return doc
@@ -2114,6 +2131,7 @@ def build_control_room(
     bindings_path: str | Path | None = None,
     placement_selection_path: str | Path | None = None,
     active_builds_snapshot: Any = _ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+    runtime_capability_status: Any = None,
 ) -> dict[str, Any]:
     """Collect every source and hand them to :func:`compose_control_room`.
 
@@ -2216,6 +2234,7 @@ def build_control_room(
                 bindings=bindings,
                 binding_problems=binding_problems,
                 placement_selection=placement_selection,
+                runtime_capability_status=runtime_capability_status,
                 generated_at=generated_at,
             )
             precursor_autonomy = precursor.get("autonomy")
@@ -2240,6 +2259,7 @@ def build_control_room(
         binding_problems=binding_problems,
         placement_selection=placement_selection,
         dispatch_evidence=dispatch_evidence,
+        runtime_capability_status=runtime_capability_status,
         generated_at=generated_at,
     )
 

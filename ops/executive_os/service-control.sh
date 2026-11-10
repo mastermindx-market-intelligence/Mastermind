@@ -23,9 +23,17 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|prepare-mcp-selected-child|plan-control-component|apply-control-component|reconcile-control-component|resume-control-component|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
+  /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent; a successor also requires --expected-predecessor-receipt-sha256 <64 lowercase hex> with the existing grant digest" >&2
+  /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
+  /bin/echo "plan-mcp-component requires --expected-sha <40 lowercase hex> and optionally --set-public-mcp-resource; apply-mcp-component additionally requires --plan-sha256 <64 lowercase hex>; reconcile-mcp-component requires only --expected-sha" >&2
+  /bin/echo "plan-mcp-component and apply-mcp-component optionally accept the PAIRED --selected-child-target-input <absolute canonical path> and --selected-child-target-sha256 <64 lowercase hex>; both or neither" >&2
+  /bin/echo "prepare-mcp-selected-child requires --expected-sha <40 lowercase hex characters> --work-ref <work reference> --root-job-id <job id> and one or more --child-job-id <job id>; no destination, output path, account, label, port or resource value is accepted" >&2
+  /bin/echo "plan-control-component and reconcile-control-component require --expected-sha <40 lowercase hex>; apply-control-component additionally requires --plan-sha256 <64 lowercase hex>" >&2
+  /bin/echo "resume-control-component requires --expected-sha <sealed recovery release> --target-sha <original target> --transaction-id <original transaction> --plan-sha256 <original plan>" >&2
+  /bin/echo "plan-control-component and apply-control-component optionally accept the PAIRED --hermes-role-metadata-read-input <absolute canonical path> and --hermes-role-metadata-read-sha256 <64 lowercase hex>; both or neither" >&2
   exit 64
 }
 
@@ -465,6 +473,408 @@ qualify_gateway_refresh_preflight() {
 }
 
 
+# Closed OS gateway publication argv walk. Every flag is accepted at most
+# once, every value is a bounded digest or the original transaction id, and
+# any unknown word or missing required flag refuses. No path, account, label,
+# port, grant text or verified boolean is ever accepted here.
+GATEWAY_EXPECTED_SHA=""
+os_gateway_args() {
+  local verb="$1" flag value seen="" sha="" bundle=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$seen" in
+      *"|$flag|"*) return 1 ;;
+    esac
+    case "$flag" in
+      --expected-sha|--expected-bundle-digest) ;;
+      --expected-grant-absent)
+        [ "$verb" = "publish-os-gateway" ] || return 1
+        seen="$seen|$flag|"
+        continue
+        ;;
+      --expected-mcp-config-sha256|--expected-mcp-plist-sha256|--expected-grant-sha256|--expected-predecessor-receipt-sha256)
+        [ "$verb" = "publish-os-gateway" ] || return 1
+        ;;
+      --transaction-id) [ "$verb" = "reconcile-os-gateway" ] || return 1 ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      --transaction-id) [[ "$value" =~ ^autonomy-[0-9a-f]{12}$ ]] || return 1 ;;
+      *) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1 ;;
+    esac
+    case "$flag" in --expected-bundle-digest) bundle="$value" ;; esac
+  done
+  [ -n "$sha" ] && [ -n "$bundle" ] || return 1
+  if [ "$verb" = "publish-os-gateway" ]; then
+    case "$seen" in
+      *"|--expected-mcp-config-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    case "$seen" in
+      *"|--expected-mcp-plist-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    # Exactly one grant expectation: the prior digest or explicit absence.
+    case "$seen" in
+      *"|--expected-grant-absent|"*)
+        case "$seen" in *"|--expected-grant-sha256|"*) return 1 ;; esac
+        ;;
+      *"|--expected-grant-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    case "$seen" in
+      *"|--expected-predecessor-receipt-sha256|"*)
+        case "$seen" in *"|--expected-grant-sha256|"*) ;; *) return 1 ;; esac
+        ;;
+    esac
+  else
+    case "$seen" in
+      *"|--transaction-id|"*) ;;
+      *) return 1 ;;
+    esac
+  fi
+  GATEWAY_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_os_gateway() {
+  local verb="$1" gateway_dir
+  if ! os_gateway_args "$@"; then
+    usage
+  fi
+  # The publishing owner must be this exact installed release's controller:
+  # a copied or relocated service-control never publishes.
+  gateway_dir="$MCP_RELEASE_ROOT/$GATEWAY_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$gateway_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$gateway_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$gateway_dir/service-control.sh" ]] || exit 65
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$gateway_dir/autonomy_control.py" "$@"
+}
+
+# Closed MCP component-update argv walk. Every flag is accepted at most once and
+# every value is a bounded digest, except the ONE paired selected-child
+# publication input: the exact qualified input path and the exact digest of
+# its raw bytes, which are ONE selection. The helper's argv is rebuilt from
+# fixed words plus the validated values, so no caller text reaches it. No
+# output destination, label, account, port, resource value or verified
+# boolean is ever accepted here.
+MCP_COMPONENT_ARGV=()
+mcp_component_args() {
+  local verb="$1" flag value seen="" sha="" plan="" public=0 helper_verb
+  local child_input="" child_sha="" canary_input="" canary_sha=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$seen" in
+      *"|$flag|"*) return 1 ;;
+    esac
+    case "$flag" in
+      --set-public-mcp-resource)
+        [ "$verb" != "reconcile-mcp-component" ] || return 1
+        seen="$seen|$flag|"
+        public=1
+        continue
+        ;;
+      --expected-sha) ;;
+      --plan-sha256) [ "$verb" = "apply-mcp-component" ] || return 1 ;;
+      --selected-child-target-input|--selected-child-target-sha256|--chris-dot-canary-input|--chris-dot-canary-sha256)
+        [ "$verb" = "plan-mcp-component" ] || [ "$verb" = "apply-mcp-component" ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      --selected-child-target-input)
+        valid_component_input_path "$value" || return 1
+        child_input="$value"
+        ;;
+      --selected-child-target-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        child_sha="$value"
+        ;;
+      --chris-dot-canary-input)
+        valid_component_input_path "$value" || return 1
+        canary_input="$value"
+        ;;
+      --chris-dot-canary-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        canary_sha="$value"
+        ;;
+      *)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        plan="$value"
+        ;;
+    esac
+  done
+  [ -n "$sha" ] || return 1
+  # The selected-child publication input is PAIRED: one coordinate alone is
+  # a refusal, never an absent selection.
+  if [ -n "$child_input" ] || [ -n "$child_sha" ]; then
+    [ -n "$child_input" ] || return 1
+    [ -n "$child_sha" ] || return 1
+  fi
+  # The root-sealed Chris account input and its byte digest are one
+  # selection; no model, caller or helper can supply identity fields in argv.
+  if [ -n "$canary_input" ] || [ -n "$canary_sha" ]; then
+    [ -n "$canary_input" ] && [ -n "$canary_sha" ] || return 1
+  fi
+  case "$verb" in
+    plan-mcp-component) helper_verb="plan" ;;
+    apply-mcp-component)
+      [ -n "$plan" ] || return 1
+      helper_verb="apply"
+      ;;
+    *) helper_verb="reconcile" ;;
+  esac
+  MCP_COMPONENT_ARGV=("$helper_verb" --release-sha "$sha")
+  [ "$public" -eq 0 ] || MCP_COMPONENT_ARGV+=(--set-public-mcp-resource)
+  [ -z "$plan" ] || MCP_COMPONENT_ARGV+=(--plan-sha256 "$plan")
+  if [ -n "$child_input" ]; then
+    MCP_COMPONENT_ARGV+=(--selected-child-target-input "$child_input")
+    MCP_COMPONENT_ARGV+=(--selected-child-target-sha256 "$child_sha")
+  fi
+  if [ -n "$canary_input" ]; then
+    MCP_COMPONENT_ARGV+=(--chris-dot-canary-input "$canary_input")
+    MCP_COMPONENT_ARGV+=(--chris-dot-canary-sha256 "$canary_sha")
+  fi
+  GATEWAY_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_mcp_component() {
+  local component_dir
+  if ! mcp_component_args "$@"; then
+    usage
+  fi
+  # The updating owner must be this exact installed release's controller: a
+  # copied or relocated service-control never plans, applies or reconciles.
+  component_dir="$MCP_RELEASE_ROOT/$GATEWAY_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$component_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$component_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$component_dir/service-control.sh" ]] || exit 65
+  # The helper is a regular, non-symlink file of this release (the same shape
+  # the gateway preflight demands of its controller and helper).
+  [[ -f "$component_dir/mcp_component_update.py" && ! -L "$component_dir/mcp_component_update.py" ]] || exit 65
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$component_dir/mcp_component_update.py" "${MCP_COMPONENT_ARGV[@]}"
+}
+
+# The finite selected-child preparation entry: it qualifies the installed
+# source/config/principal association and the explicit work/root/child
+# selectors, issues exactly one request through the existing admitted App
+# identity, and materializes the closed returned capture with the existing
+# exclusive root-owned 0600 input writer.  No destination, output path,
+# account, label, port or resource value is ever accepted here: the
+# destination is derived by the helper from the work reference, and the
+# helper's own source/config qualification decides the installed release.
+PREPARATION_ARGV=()
+PREPARATION_CHILD_IDS=()
+preparation_args() {
+  local verb="$1" flag value seen="" sha="" work_ref="" root_job_id=""
+  shift
+  PREPARATION_CHILD_IDS=()
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    # Only the child selector may repeat; every other flag is single.
+    if [ "$flag" != "--child-job-id" ]; then
+      case "$seen" in
+        *"|$flag|"*) return 1 ;;
+      esac
+    fi
+    case "$flag" in
+      --expected-sha|--work-ref|--root-job-id|--child-job-id) ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      --work-ref)
+        [[ "$value" =~ ^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$ ]] || return 1
+        work_ref="$value"
+        ;;
+      --root-job-id)
+        [[ "$value" =~ ^JOB-[0-9]{1,9}$ ]] || return 1
+        root_job_id="$value"
+        ;;
+      --child-job-id)
+        [[ "$value" =~ ^JOB-[0-9]{1,9}$ ]] || return 1
+        PREPARATION_CHILD_IDS+=("$value")
+        ;;
+    esac
+  done
+  [ -n "$sha" ] || return 1
+  [ -n "$work_ref" ] || return 1
+  [ -n "$root_job_id" ] || return 1
+  [ "${#PREPARATION_CHILD_IDS[@]}" -gt 0 ] || return 1
+  PREPARATION_ARGV=("prepare-selected-child" --work-ref "$work_ref" --root-job-id "$root_job_id")
+  for child in "${PREPARATION_CHILD_IDS[@]}"; do
+    PREPARATION_ARGV+=(--child-job-id "$child")
+  done
+  GATEWAY_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_preparation() {
+  local component_dir child
+  if ! preparation_args "$@"; then
+    usage
+  fi
+  # The preparing owner must be this exact installed release's controller.
+  component_dir="$MCP_RELEASE_ROOT/$GATEWAY_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$component_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$component_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$component_dir/service-control.sh" ]] || exit 65
+  [[ -f "$component_dir/mcp_component_update.py" && ! -L "$component_dir/mcp_component_update.py" ]] || exit 65
+  # The preparation itself qualifies the INSTALLED generation: the helper
+  # derives the installed release from the configuration it reads, so the
+  # installed source is never the operator's choice.
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$component_dir/mcp_component_update.py" "${PREPARATION_ARGV[@]}"
+}
+
+# Closed Control component-update argv walk. Every flag is accepted at most
+# once and every value is a bounded digest. The helper's argv is rebuilt from
+# fixed words plus the two validated digests, so no caller text reaches it.
+# No path, label, account, port, resource value or verified boolean is ever
+# accepted here, and no installed configuration or credential content is ever
+# placed in the argv.
+CONTROL_COMPONENT_ARGV=()
+CONTROL_COMPONENT_EXPECTED_SHA=""
+
+# The PAIRED Hermes host-read selection.  The input path is only ever a
+# QUALIFIED INPUT the operator staged: it is read through the incumbent's own
+# bounded, no-follow, identity-joined pinned read and bound to the exact
+# digest supplied beside it.  It is never a destination and never an output
+# path.  The path is validated here as a canonical absolute path with no
+# traversal, no empty component and no character outside the closed set, so
+# the rebuilt argv carries one validated value and no caller text.
+valid_component_input_path() {
+  local candidate="$1" part
+  case "$candidate" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$candidate" in
+    *//*) return 1 ;;
+  esac
+  case "$candidate" in
+    *[!A-Za-z0-9/._\ -]*) return 1 ;;
+  esac
+  local IFS='/'
+  for part in $candidate; do
+    if [ "$part" = ".." ]; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+control_component_args() {
+  local verb="$1" flag value seen="" sha="" plan="" helper_verb
+  local hermes_input="" hermes_sha=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$seen" in
+      *"|$flag|"*) return 1 ;;
+    esac
+    case "$flag" in
+      --expected-sha) ;;
+      --plan-sha256) [ "$verb" = "apply-control-component" ] || return 1 ;;
+      --hermes-role-metadata-read-input|--hermes-role-metadata-read-sha256)
+        [ "$verb" = "plan-control-component" ] || [ "$verb" = "apply-control-component" ] || return 1
+        ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      --hermes-role-metadata-read-input)
+        valid_component_input_path "$value" || return 1
+        hermes_input="$value"
+        ;;
+      --hermes-role-metadata-read-sha256)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        hermes_sha="$value"
+        ;;
+      *)
+        [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1
+        plan="$value"
+        ;;
+    esac
+  done
+  [ -n "$sha" ] || return 1
+  # The selection is PAIRED: one coordinate alone is a refusal, never an
+  # absent selection.
+  if [ -n "$hermes_input" ] || [ -n "$hermes_sha" ]; then
+    [ -n "$hermes_input" ] || return 1
+    [ -n "$hermes_sha" ] || return 1
+  fi
+  case "$verb" in
+    plan-control-component) helper_verb="plan-control-component" ;;
+    apply-control-component)
+      [ -n "$plan" ] || return 1
+      helper_verb="apply-control-component"
+      ;;
+    *) helper_verb="reconcile-control-component" ;;
+  esac
+  CONTROL_COMPONENT_ARGV=("$helper_verb" --expected-sha "$sha")
+  [ -z "$plan" ] || CONTROL_COMPONENT_ARGV+=(--plan-sha256 "$plan")
+  if [ -n "$hermes_input" ]; then
+    CONTROL_COMPONENT_ARGV+=(--hermes-role-metadata-read-input "$hermes_input")
+    CONTROL_COMPONENT_ARGV+=(--hermes-role-metadata-read-sha256 "$hermes_sha")
+  fi
+  CONTROL_COMPONENT_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_control_component() {
+  local component_dir
+  if ! control_component_args "$@"; then
+    usage
+  fi
+  # The updating owner must be this exact staged release's controller: a
+  # copied or relocated service-control never plans, applies or reconciles.
+  component_dir="$MCP_RELEASE_ROOT/$CONTROL_COMPONENT_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$component_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$component_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$component_dir/service-control.sh" ]] || exit 65
+  # The owner is the existing Executive transaction controller of that release.
+  [[ -f "$component_dir/autonomy_control.py" && ! -L "$component_dir/autonomy_control.py" ]] || exit 65
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$component_dir/autonomy_control.py" "${CONTROL_COMPONENT_ARGV[@]}"
+}
+
+
 require_gateway_enabled() {
   local output
   if ! output="$(/bin/launchctl print-disabled system 2>/dev/null)"; then
@@ -586,6 +996,14 @@ readside_postflight() {
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
+  prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid)
+    [ "$#" -ge 3 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
+  start-restored-a2-readside)
+    [ "$#" -eq 15 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
   start-finite|stop-finite|status-finite)
     [ "$#" -eq 5 ] && [ "$2" = "--expected-sha" ] && [ "$4" = "--expected-manifest-sha256" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{64}$ ]] || usage
@@ -594,9 +1012,28 @@ case "$1" in
     [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
     ;;
+  publish-os-gateway|reconcile-os-gateway)
+    [ "$#" -ge 2 ] || usage
+    ;;
+  plan-mcp-component|apply-mcp-component|reconcile-mcp-component)
+    [ "$#" -ge 3 ] || usage
+    ;;
+  prepare-mcp-selected-child)
+    [ "$#" -ge 3 ] || usage
+    ;;
+  plan-control-component|apply-control-component|reconcile-control-component|resume-control-component)
+    [ "$#" -ge 3 ] || usage
+    ;;
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
+  prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid)
+    require_root
+    paid_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$paid_dir/service-control.sh" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$paid_dir" ]] && [[ "$SCRIPT_PATH" == "$paid_dir/service-control.sh" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$paid_dir/canonical_paid_actions.py" "$@"
+    ;;
   stop-incident-broker)
     require_root
     exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$SCRIPT_DIR/../../scripts/executive_os_incident_maintenance.py"
@@ -607,6 +1044,39 @@ case "$1" in
     [[ "$SCRIPT_SOURCE" == "$finite_dir/service-control.sh" ]] || exit 65
     [[ "$SCRIPT_DIR" == "$finite_dir" ]] && [[ "$SCRIPT_PATH" == "$finite_dir/service-control.sh" ]] || exit 65
     exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$finite_dir/finite_service_lifecycle.py" "$@"
+    ;;
+  publish-os-gateway|reconcile-os-gateway)
+    require_root
+    dispatch_os_gateway "$@"
+    ;;
+  plan-mcp-component|apply-mcp-component|reconcile-mcp-component)
+    require_root
+    dispatch_mcp_component "$@"
+    ;;
+  prepare-mcp-selected-child)
+    require_root
+    dispatch_preparation "$@"
+    ;;
+  resume-control-component)
+    [ "$#" -eq 9 ] && [ "$2" = "--expected-sha" ] \
+      && [ "$4" = "--target-sha" ] && [ "$6" = "--transaction-id" ] \
+      && [ "$8" = "--plan-sha256" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$7" =~ ^autonomy-[0-9a-f]{12}$ ]] && [[ "$9" =~ ^[0-9a-f]{64}$ ]] || usage
+    require_root
+    recovery_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$recovery_dir/service-control.sh" ]] \
+      && [[ "$SCRIPT_DIR" == "$recovery_dir" ]] \
+      && [[ "$SCRIPT_PATH" == "$recovery_dir/service-control.sh" ]] || exit 65
+    [[ -f "$SCRIPT_PATH" && ! -L "$SCRIPT_PATH" ]] \
+      && [[ -f "$recovery_dir/autonomy_control.py" && ! -L "$recovery_dir/autonomy_control.py" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$recovery_dir/autonomy_control.py" \
+      resume-control-component --expected-sha "$5" --recovery-sha "$3" \
+      --transaction-id "$7" --plan-sha256 "$9"
+    ;;
+  plan-control-component|apply-control-component|reconcile-control-component)
+    require_root
+    dispatch_control_component "$@"
     ;;
   start)
     require_root
@@ -684,6 +1154,71 @@ case "$1" in
     stop_one "$CONTROL_LABEL"
     stop_one "$RELAY_LABEL"
     readside_postflight
+    ;;
+  start-restored-a2-readside)
+    # Same fixed-label service owner; A2 CAS and Control restore settled first.
+    [ "$#" -eq 15 ] \
+      && [ "$2" = "--expected-sha" ] \
+      && [ "$4" = "--expected-control-sha256" ] \
+      && [ "$6" = "--expected-previous-release-sha" ] \
+      && [ "$8" = "--expected-previous-tree-sha" ] \
+      && [ "${10}" = "--expected-previous-config-sha256" ] \
+      && [ "${12}" = "--expected-previous-plist-sha256" ] \
+      && [ "${14}" = "--expected-bot-user-id" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$5" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "$7" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$9" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "${11}" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "${13}" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "${15}" =~ ^U[0-9A-Z]{9,}$ ]] || usage
+    require_root
+    local_release_root="$MCP_RELEASE_ROOT/$3"
+    local_release_dir="$local_release_root/ops/executive_os"
+    local_recovery_script="$local_release_dir/service-control.sh"
+    # Root Python import must bind to the exact installed service controller.
+    [[ "$SCRIPT_SOURCE" == "$local_recovery_script" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$local_release_dir" ]] || exit 65
+    [[ "$SCRIPT_PATH" == "$local_recovery_script" ]] || exit 65
+    [[ -f "$local_recovery_script" && ! -L "$local_recovery_script" ]] || exit 65
+    validate_plist "$AGENT_RELAY_PLIST"
+    validate_plist "$RELAY_PLIST"
+    validate_plist "$CONTROL_PLIST"
+    readside_preflight
+    require_absent "$AGENT_RELAY_LABEL"
+    require_absent "$RELAY_LABEL"
+    require_absent "$CONTROL_LABEL"
+    [ "$(agent_relay_disabled_state)" = "disabled" ] || {
+      /bin/echo "A2 must be unloaded and disabled before restoration" >&2
+      exit 65
+    }
+    "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B - "$local_release_root" "$@" <<'PY_RESTORED_A2'
+import sys
+sys.path.insert(0, sys.argv[1])
+from ops.executive_os.autonomy_control import main
+raise SystemExit(main(["a2-restored-readside-preflight", *sys.argv[3:]]))
+PY_RESTORED_A2
+    if ! start_agent_relay; then
+      /bin/echo "a2_restore_effect_unknown stage=agent-relay-start" >&2
+      exit 75
+    fi
+    if ! require_running "$AGENT_RELAY_LABEL"; then
+      /bin/echo "a2_restore_effect_unknown stage=agent-relay-running" >&2
+      exit 75
+    fi
+    if ! ensure_running "$RELAY_LABEL" "$RELAY_PLIST"; then
+      /bin/echo "a2_restore_effect_unknown stage=c1-start" >&2
+      exit 75
+    fi
+    if ! ensure_running "$CONTROL_LABEL" "$CONTROL_PLIST"; then
+      /bin/echo "a2_restore_effect_unknown stage=control-start" >&2
+      exit 75
+    fi
+    if ! readside_postflight; then
+      /bin/echo "a2_restore_effect_unknown stage=readside-postflight" >&2
+      exit 75
+    fi
+    /bin/echo "a2_restored_readside=running release=$3 previous_a2_release=$7 live_slack_return=unverified"
     ;;
   start-agent-relay)
     require_root

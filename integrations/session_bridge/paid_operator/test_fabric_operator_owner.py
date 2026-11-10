@@ -135,7 +135,14 @@ class OwnerChecks(unittest.TestCase):
         with self.assertRaises(DelegationRefused):self.owner.reserve(self.cap['token'],self.request)
 
     def test_changed_launch_rejected(self):
-        with self.assertRaises(DelegationRefused):self.owner.issue(dict(self.launch,run_id='other',pool='grok'),2)
+        # This inert fixture exercises the real alias parser and guard without
+        # depending on a provisioned account file outside the source closure.
+        accounts = self.here / 'inert-accounts.yaml'
+        accounts.write_text('providers:\n  glm-frontier:\n    pool_aliases: []\n')
+        accounts.chmod(0o600)
+        with patch('lease_broker.DEFAULT_ACCOUNTS', str(accounts)):
+            with self.assertRaisesRegex(DelegationRefused, '^operator_pool_alias_unbound$'):
+                self.owner.issue(dict(self.launch, run_id='other', pool='grok'), 2)
 
     def test_wrong_parent_and_override_refused(self):
         for request in [dict(self.request,parent='other'),dict(self.request,host='ubuntu2'),dict(self.request,task_class='domain_orchestration')]:

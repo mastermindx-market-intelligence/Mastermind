@@ -263,6 +263,18 @@ _claude_worker_profile() {
     echo "POOL_MAX_TURNS must not exceed 400" >&2
     return 2
   fi
+  # Request ceilings attenuate this profile; they never raise an incumbent
+  # operator limit or a model/complexity default. This is the existing CLI fuse,
+  # not a second token counter, retry policy, or acceptance decision.
+  local request_turns="${POOL_REQUEST_MAX_TURNS:-}"
+  if [ -n "$request_turns" ]; then
+    case "$request_turns" in ''|*[!0-9]*|0*) echo "invalid POOL_REQUEST_MAX_TURNS" >&2; return 2 ;; esac
+    if [ "${#request_turns}" -gt 3 ] || [ "$request_turns" -gt 400 ]; then
+      echo "POOL_REQUEST_MAX_TURNS must not exceed 400" >&2
+      return 2
+    fi
+    [ "$turns" -le "$request_turns" ] || turns="$request_turns"
+  fi
   CLAUDE_WORKER_MAX_TURNS="$turns"
 }
 
@@ -455,6 +467,17 @@ if [ "$DENIED" = "1" ]; then
   exit 78
 fi
 
+# Normalise the already-qualified Grok Build default before the economic
+# filter and before invoking the native CLI. Explicit historical 4.6 pins remain
+# valid; unknown models cannot silently inherit a provider-side default.
+if [ "$POOL" = grok ]; then
+  case "$MODEL" in
+    '') MODEL=grok-4.7 ;;
+    grok-4.6|grok-4.7) ;;
+    *) echo "LOCAL_GROK_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+  esac
+fi
+
 # Additive economic filter; all physical/project/provider gates still apply.
 # Recheck leased children too: a broker lease is not a cost-policy exemption.
 case "$POOL" in
@@ -534,21 +557,26 @@ def main():
         raise LaneRuntimeConfigError("grok_local_host_policy_required")
     config = load_runtime_config(env)
     complexity = str(env.get("POOL_TASK_COMPLEXITY") or "").strip().upper()
-    default_worker_timeout = 7200.0 if complexity == "C3_FRONTIER_JUDGMENT" else 3600.0
+    default_worker_timeout = 14400.0 if complexity == "C3_FRONTIER_JUDGMENT" else (7200.0 if complexity == "C2_COMPLEX_BOUNDED" else 3600.0)
     worker_timeout = parse_bounded_seconds(
         env.get("POOL_CHILD_TIMEOUT_SECONDS"),
         default=default_worker_timeout,
         minimum=60.0,
-        maximum=7200.0,
+        maximum=14400.0,
         key="POOL_CHILD_TIMEOUT_SECONDS",
     )
     # Match the remote fabric's reviewed runtime-floor semantics: a stale caller
     # may tighten C0/C1 intentionally, but must not silently collapse already
     # classified long work below its custody-safe execution window.
-    if complexity == "C2_COMPLEX_BOUNDED":
-        worker_timeout = max(worker_timeout, 3600.0)
-    elif complexity == "C3_FRONTIER_JUDGMENT":
-        worker_timeout = max(worker_timeout, 7200.0)
+    # Classification raises only the *default* opportunity, never a shorter
+    # explicitly admitted commission budget. The existing owner supplies the
+    # deadline; this layer must not turn an inherited 20-minute child into 4h.
+    explicit_child_budget = str(env.get("POOL_CHILD_TIMEOUT_SECONDS") or "").strip()
+    if not explicit_child_budget:
+        if complexity == "C2_COMPLEX_BOUNDED":
+            worker_timeout = max(worker_timeout, 7200.0)
+        elif complexity == "C3_FRONTIER_JUDGMENT":
+            worker_timeout = max(worker_timeout, 14400.0)
 
     default_turns = 140
     if complexity == "C2_COMPLEX_BOUNDED":
@@ -591,6 +619,19 @@ def main():
                    "--reasoning-effort", env.get("LANE_GROK_EFFORT") or "high"]
         if model:
             command += ["-m", model]
+        # Pass the validated existing Grok worker budget into the nested
+        # slot supervisor. Merely raising slot's maximum leaves its default
+        # at two hours and prematurely terminates a qualified C3 worker.
+        # Preserve an explicit shorter limit; never globally change slot.
+        slot_timeout = worker_timeout
+        for name in ("SLOT_CHILD_TIMEOUT_SECONDS",):
+            raw = env.get(name)
+            if raw is not None and str(raw).strip():
+                slot_timeout = min(slot_timeout, parse_bounded_seconds(
+                    raw, default=7200.0, minimum=1.0, maximum=14400.0,
+                    key=name,
+                ))
+        env["SLOT_CHILD_TIMEOUT_SECONDS"] = str(slot_timeout)
         # Host LaneLease is not a provider lease: slot keeps broker+heartbeat.
         result = run_owned_process(
             command, cwd=cwd, env=env, timeout=worker_timeout, nice=config.nice,
@@ -903,8 +944,15 @@ exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --d
     python3 "$HERE/pool_ledger.py" append --pool ocfree --task-class oc-free --model "$model" --rc "$_rc" --signal ok 2>/dev/null || true
     exit "$_rc" ;;
   cursor)
+    # This direct legacy launcher may forward an explicitly validated model,
+    # but cannot enroll new Cursor models or rewrite the default.  In particular
+    # Grok 4.7 selection is separately held pending provider qualification.
+    case "$MODEL" in
+      ''|composer-2.5|cursor-grok-4.6-high) ;;
+      *) echo "LOCAL_CURSOR_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+    esac
     _rc=0
-    python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" && exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null' _ "$CWD" "$PROMPT" || _rc=$?
+    python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" || exit 2; if [ -n "$3" ]; then exec cursor-agent -p --trust --force --sandbox disabled --output-format text --model "$3" "$2" </dev/null; else exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null; fi' _ "$CWD" "$PROMPT" "$MODEL" || _rc=$?
     python3 "$HERE/pool_ledger.py" append --pool cursor --task-class cursor --rc "$_rc" --signal ok 2>/dev/null || true
     exit "$_rc" ;;
   *) echo "pool must be grok, qwen, minimax, glm, minimax-codex, glm-codex, go-codex, go-claude, oc-free or cursor" >&2; exit 2 ;;

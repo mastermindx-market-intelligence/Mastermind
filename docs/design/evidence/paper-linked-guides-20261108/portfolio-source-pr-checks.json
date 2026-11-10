@@ -1,0 +1,32 @@
+[
+  {
+    "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10703",
+    "kind": "github-pr",
+    "readable": true,
+    "number": 10703,
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "head": "9fc460ff36345387c3a2c5435b079852e8488da0"
+  },
+  {
+    "url": "https://github.com/mastermindx-market-intelligence/macro/pull/10707",
+    "kind": "github-pr",
+    "readable": true,
+    "number": 10707,
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "head": "74930f6931773b23072f91590319dc39fe5a7d07"
+  },
+  {
+    "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/778",
+    "kind": "github-pr",
+    "readable": true,
+    "number": 778,
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "head": "88f2919a5c2222bcf05f452f2549b9af180dcae6"
+  }
+]

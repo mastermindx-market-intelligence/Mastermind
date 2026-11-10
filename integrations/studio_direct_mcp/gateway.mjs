@@ -69,7 +69,7 @@
  */
 
 import { TextOutputPager, OUTPUT_PAGE_TOOL, projectOutputSafely } from './output-budget.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +79,8 @@ import { isLegacyRequest } from '@modelcontextprotocol/server';
 import { toNodeHandler, toWebRequest } from '@modelcontextprotocol/node';
 import { createModernFabricHandler } from './modern-fabric-http.mjs';
 import { createCommissionService } from './commission-service.mjs';
+import { originalCollectionConfig, createOriginalDelivery, ORIGINAL_ACCOUNT,
+  ORIGINAL_PRINCIPAL, ORIGINAL_TOOLS, ORIGINAL_TOOL_NAMES } from './original-delivery.mjs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -159,6 +161,20 @@ const CLASSIFICATION = Object.freeze({
   BAD_HOST: 'bad_host',
   BAD_ORIGIN: 'bad_origin',
 });
+
+// Never infer the absence of a Git effect from an exception: a failed commit
+// or push response may arrive *after* the source ref was updated. This layer
+// sees no authoritative stage receipt, so it reports unqualified mutations
+// as unknown while an exclusively read-only status retains NOT_APPLIED.
+// The exception object is deliberately not inspected or serialized.
+function classifyStudioGitFailure(_error, { modifying = false } = {}) {
+  return {
+    schema: 'mastermind.studio_git_tool_error.v1',
+    status: modifying ? 'UNKNOWN' : 'REFUSED',
+    effect_state: modifying ? 'EFFECT_UNKNOWN' : 'NOT_APPLIED',
+    code: modifying ? 'TYPED_GIT_EFFECT_UNQUALIFIED' : 'TYPED_GIT_READONLY_INSPECTION_REFUSED',
+  };
+}
 
 /** JSON-RPC error codes in the server-defined range (-32000..-32099). */
 const CODE = Object.freeze({
@@ -372,6 +388,22 @@ export function resolveConfig(partial = {}) {
     throw new TypeError('config.stateDir must be a string when provided');
   }
 
+  // Validate the copied input before capability resolvers can normalize
+  // disabled or malformed fields. A Fabric-only profile must be explicitly
+  // closed, including direct loads that bypass the private installer.
+  if (Object.hasOwn(cfg, 'fabricOnly') && typeof cfg.fabricOnly !== 'boolean') {
+    throw new TypeError('config.fabricOnly must be boolean when supplied');
+  }
+  if (cfg.fabricOnly === true && (
+    !Object.hasOwn(cfg, 'gitPublish') || cfg.gitPublish !== false ||
+    !Object.hasOwn(cfg, 'paperDesign') || cfg.paperDesign !== false ||
+    Object.hasOwn(cfg, 'fleetStatus') ||
+    Object.hasOwn(cfg, 'repositoryWorkspaces') ||
+    Object.hasOwn(cfg, 'commissionPublication')
+  )) {
+    throw new TypeError('Fabric-only gateway refuses unrelated host capabilities');
+  }
+
   cfg.gitPublish = resolveGitPublishConfig(cfg.gitPublish);
   cfg.repositoryWorkspaces = resolveRepositoryWorkspaceConfig(cfg.repositoryWorkspaces);
   if (cfg.repositoryWorkspaces && !cfg.gitPublish) throw new TypeError('repositoryWorkspaces requires configured typed Git');
@@ -388,9 +420,6 @@ export function resolveConfig(partial = {}) {
   }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
-  if (cfg.fabricOnly !== undefined && typeof cfg.fabricOnly !== "boolean") {
-    throw new TypeError("config.fabricOnly must be boolean when supplied");
-  }
   if (cfg.fabricOnly === true && (cfg.gitPublish || cfg.repositoryWorkspaces ||
       cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus)) {
     throw new TypeError("Fabric-only gateway refuses unrelated host capabilities");
@@ -404,6 +433,7 @@ export function resolveConfig(partial = {}) {
     throw new TypeError('modern Fabric protocol requires the private Fabric-only shared backend');
   }
 
+  cfg.originalCollection = originalCollectionConfig(cfg);
   return cfg;
 }
 
@@ -469,6 +499,29 @@ function log(level, event, fields = {}) {
     logSink(JSON.stringify({ ts: new Date().toISOString(), level, event, ...fields }));
   } catch {
     /* logging must never break the request path */
+  }
+}
+
+// Correlation-only metadata: no packet bytes, credential values, or full hashes
+// enter gateway logs. This is not a security scanner, admission check or proof.
+export function fabricRequestLogFields(name, args) {
+  if (name !== 'fabric_request' || !args || typeof args !== 'object' || Array.isArray(args)) return {};
+  try {
+    // The Fabric request schema is flat. Sort names so client JSON property
+    // ordering cannot change the fingerprint of an otherwise identical call.
+    const canonical = JSON.stringify(Object.fromEntries(
+      Object.keys(args).sort().map(key => [key, args[key]])));
+    const fields = {
+      request_fingerprint: createHash('sha256').update(canonical).digest('hex').slice(0, 12),
+    };
+    if (typeof args.run_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(args.run_id))
+      fields.run_id = args.run_id;
+    if (['mechanical', 'fix_build', 'review', 'census', 'audit'].includes(args.task_class))
+      fields.task_class = args.task_class;
+    return fields;
+  } catch {
+    // Logging must never reject or alter a request.
+    return {};
   }
 }
 
@@ -798,6 +851,8 @@ class BackendOwner {
     Object.assign(this, { principalKey, principalTag, cfg, stats });
     this.generation = randomUUID();
     this.outputPager = new TextOutputPager();
+    this.originalDelivery = cfg.originalCollection
+      ? createOriginalDelivery(cfg.originalCollection, principalKey) : null;
     this.outputToolSchemas = new Map();
     this.state = 'idle';
     this.client = null;
@@ -864,6 +919,9 @@ class BackendOwner {
     this.state = 'broken';
     this.limiter.drain('Backend closed');
     this.closePromise = (async () => {
+      // A disposable HTTP exchange never closes this owner. Even an actual
+      // owner shutdown waits for its original helper, without replaying it.
+      await this.originalDelivery?.close();
       try { await this.client?.close(); } catch {}
       try { await this.transport?.close(); } catch {}
       // A connecting child must finish cleanup before its owner is released.
@@ -1081,7 +1139,14 @@ class GatewaySession {
         signal: extra?.signal,
       });
       const tools = sanitizeToolList(result.tools);
+      if (tools.some(tool => ORIGINAL_TOOL_NAMES.has(tool.name))) {
+        throw new McpError(ErrorCode.InternalError, 'Backend exposed a reserved original collection tool');
+      }
       const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+      if (this.owner?.originalDelivery && this.principalKey === ORIGINAL_PRINCIPAL &&
+          this.owner.principalKey === this.principalKey) {
+        localTools.push(...ORIGINAL_TOOLS.map(tool => ({ ...tool })));
+      }
       if (this.fleetStatus) {
         localTools.push({ ...STUDIO_FLEET_STATUS_TOOL });
       }
@@ -1119,7 +1184,28 @@ class GatewaySession {
 
   async callTool(request, extra) {
     const name = request?.params?.name;
+    const requestLog = fabricRequestLogFields(name, request?.params?.arguments);
     const started = Date.now();
+
+    if (ORIGINAL_TOOL_NAMES.has(name)) {
+      if (!this.owner?.originalDelivery || this.principalKey !== ORIGINAL_PRINCIPAL ||
+          this.owner.principalKey !== this.principalKey) {
+        throw new McpError(ErrorCode.InvalidParams, 'Original collection is not enabled for this owner');
+      }
+      return this.withBackendSlot(async () => {
+        this.bumpTool(name);
+        let result;
+        try {
+          // No request metadata, user-supplied identity or abort signal enters
+          // the fixed helper. The owner retains work across exchange churn.
+          result = await this.owner.originalDelivery.call(name,
+            request?.params?.arguments ?? {}, this.principalKey);
+        } catch {
+          throw new McpError(ErrorCode.InvalidParams, 'Original collection arguments or principal refused');
+        }
+        return projectOutputSafely(this.outputPager, result, { toolName: name, hasOutputSchema: false });
+      }, { kind: 'tools/call', tool: name, started });
+    }
 
     if (name === OUTPUT_PAGE_TOOL.name) {
       this.touch();
@@ -1208,17 +1294,19 @@ class GatewaySession {
           effect: typeof data?.effect_state === 'string' ? data.effect_state : undefined,
         });
         return gitToolResult(data, isError);
-      } catch {
-        log('info', 'tool_call', {
+      } catch (error) {
+        // A thrown mutation is not proof of a preflight refusal. The original
+        // owner might have updated its ref before a lost return. Only a typed
+        // closed-selector refusal proves that publisher dispatch never began.
+        const modifying = name !== STUDIO_GIT_PUBLISH_STATUS_TOOL.name;
+        const data = classifyStudioGitFailure(error, { modifying });
+        if (data.effect_state === 'EFFECT_UNKNOWN') this.taint('typed git mutation return unqualified');
+        log('warn', 'tool_call', {
           sid: this.tag, tool: name, durationMs: Date.now() - started,
           classification: CLASSIFICATION.TOOL_ERROR,
+          effect: data.effect_state,
         });
-        return gitToolResult({
-          schema: 'mastermind.studio_git_tool_error.v1',
-          status: 'REFUSED',
-          effect_state: 'NOT_APPLIED',
-          code: 'TYPED_GIT_PRECHECK_REFUSED',
-        }, true);
+        return gitToolResult(data, true);
       }
     }
 
@@ -1249,7 +1337,7 @@ class GatewaySession {
           ? CLASSIFICATION.TOOL_ERROR
           : CLASSIFICATION.OK;
         log('info', 'tool_call', {
-          sid: this.tag, tool: name, durationMs: Date.now() - started, classification,
+          sid: this.tag, tool: name, ...requestLog, durationMs: Date.now() - started, classification,
         });
         // Retain only catalogued, untyped text results under the existing owner.
         // Paging never dispatches the backend or changes the original effect.
@@ -1258,7 +1346,7 @@ class GatewaySession {
           hasOutputSchema: this.outputToolSchemas.get(name) !== false,
         });
       } catch (err) {
-        return this.handleToolFailure(err, name, started);
+        return this.handleToolFailure(err, name, started, requestLog);
       }
     }, { kind: 'tools/call', tool: name, started });
   }
@@ -1276,7 +1364,7 @@ class GatewaySession {
    * arguments) is deterministic — the tool provably did not run — so it is
    * forwarded as an `isError` result without tainting the session.
    */
-  handleToolFailure(err, toolName, started) {
+  handleToolFailure(err, toolName, started, requestLog = {}) {
     const durationMs = Date.now() - started;
     const message = String(err?.message ?? '');
     const timedOut = err?.code === ErrorCode.RequestTimeout || err?.code === 'RequestTimeout' || /timed?\s*out/i.test(message);
@@ -1291,7 +1379,7 @@ class GatewaySession {
     if (timedOut && !backendGone && this.isTimeoutSafeReadTool(toolName)) {
       this.stats.requests.timeouts += 1;
       log('warn', 'tool_call_read_timeout', {
-        sid: this.tag, tool: toolName, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
+        sid: this.tag, tool: toolName, ...requestLog, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
       });
       return {
         content: [{ type: 'text', text: 'READ_TIMEOUT: backend read exceeded the gateway deadline; no retry was performed.' }],
@@ -1304,7 +1392,7 @@ class GatewaySession {
       this.taint(reason);
       if (timedOut) this.stats.requests.timeouts += 1;
       log('warn', 'tool_call_effect_unknown', {
-        sid: this.tag, tool: toolName, durationMs,
+        sid: this.tag, tool: toolName, ...requestLog, durationMs,
         reason: timedOut ? 'timeout' : 'backend_lost',
       });
       throw new McpError(
@@ -1321,7 +1409,7 @@ class GatewaySession {
 
     // Deterministic failure from a live backend: no taint, no retry.
     log('info', 'tool_call', {
-      sid: this.tag, tool: toolName, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
+      sid: this.tag, tool: toolName, ...requestLog, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
     });
     return {
       content: [{ type: 'text', text: `Error: ${message || 'backend tool call failed'}` }],
@@ -1581,6 +1669,10 @@ class GatewaySession {
  */
 export async function startGateway(partialConfig = {}, auth = {}) {
   const cfg = resolveConfig(partialConfig);
+  if (cfg.originalCollection && (auth.accountLabel !== ORIGINAL_ACCOUNT ||
+      auth.principal !== 'tunnel:' + ORIGINAL_ACCOUNT)) {
+    throw new TypeError('original collection requires its installed private tunnel principal');
+  }
   if (cfg.modernFabricProtocol && !cfg.testMode &&
       (auth.accountLabel !== cfg.accountLabel || typeof auth.accountLabel !== 'string' ||
        !auth.accountLabel || auth.principal !== 'tunnel:' + auth.accountLabel)) {
@@ -1713,8 +1805,9 @@ export async function startGateway(partialConfig = {}, auth = {}) {
   // Stateless HTTP views detach at exchange completion. The existing shared
   // BackendOwner retains Fabric controllers/results until gateway shutdown.
   const modernToolNames = new Set(['fabric_capabilities', 'fabric_request', 'fabric_status',
-    'fabric_wait', 'fabric_result', 'fabric_accept', 'fabric_controller_output',
+    'fabric_wait', 'fabric_result', 'fabric_result_page', 'fabric_accept', 'fabric_controller_output',
     'studio_ping', 'studio_output_page']);
+  if (cfg.originalCollection) for (const name of ORIGINAL_TOOL_NAMES) modernToolNames.add(name);
   const modernHandler = cfg.modernFabricProtocol ? createModernFabricHandler({
     serverInfo: { name: 'mastermind-subagent-fabric', version: GATEWAY_VERSION },
     acquireScope: async ({ authInfo }) => {
@@ -2403,7 +2496,7 @@ async function main() {
     testMode: cfg.testMode,
   });
 
-  const gateway = await startGateway(cfg, auth);
+  const gateway = await startGateway(raw, auth);
   process.stderr.write(`gateway: listening on ${gateway.url}\n`);
 
   let shuttingDown = false;

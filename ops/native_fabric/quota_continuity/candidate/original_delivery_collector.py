@@ -6,6 +6,7 @@ caller correlation and retained evidence, never authentication or a new grant.
 """
 from __future__ import annotations
 import argparse
+from datetime import datetime
 import base64
 import hashlib
 import inspect
@@ -22,9 +23,13 @@ import artifact_reader as reader
 import artifact_production as production
 
 DirectoryChain = delivery.DirectoryChain
+validate_remote_lane_layout = delivery.validate_remote_lane_layout
+observe_remote_lane_layout = delivery.observe_remote_lane_layout
+verify_remote_lane_release = delivery.verify_remote_lane_release
 HERE = Path(__file__).resolve().parent
 SCHEMA = 'mastermind.original_delivery_read.v1'
 PLAIN_SCHEMA = 'mastermind.original_plain_result_contract.v1'
+PLAIN_SCHEMA_V2 = 'mastermind.original_plain_result_contract.v2'
 PLAIN_SCOPES = {'fabric-manifest-framing-review-01a11e90-v1': {'root': '01a11e90-4b5d-7f53-b966-8aaaad38701f',
                                                 'parent': '01a11e90-4b5d-7f53-b966-8aaaad38701f',
                                                 'host': 'mb',
@@ -118,7 +123,15 @@ PLAIN_SCOPES.update({'mm-l0-price-metadata-review-20261015-01a1333c-v1': {'desti
                                                       'source_pins': {'log': 'b1a89114c36ed8133306a4c654e0995ae2799d9bc77fcf64a24d0d7698c3b954',
                                                                       'support': 'fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2'},
                                                       'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
+# Two reviewed historical returns. This adds reader correlation, not producer
+# authentication, a prelaunch record, acceptance, or lease settlement.
+GATEWAY_ORIGINAL_RUNS = frozenset(('fabric-app-native-drivers-j-20261105-01',
+    'fabric-app-application-process-carrier-20261105-01'))
+PLAIN_SCOPES.update({'fabric-app-native-drivers-j-20261105-01': {'root': 'fabric-application-integration-20261104-sol', 'parent': 'fabric-application-integration-20261104-sol', 'host': 'ubuntu1', 'mode': 'minimax', 'requested_model': 'MiniMax-M3', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/fabric-app-native-drivers-j-20261105-01.request.packet', 'packet_sha256': 'a2117a47f6f8325014cd8118d8bd22de8b242a7e6c7b22ff16d4f83b95ed80d0', 'support_digest': '6cdf2f96fb780ef08e8bac21c55cc91418bbfe080252f18479c7bfb70cff5a80', 'source_pins': {'log': '35e3fb7dcd3f4d020df4d405f40aaf18290aac04a5f158b63973924bc48acd6c', 'support': '7e6b9e31f538786e43cf646fe48a3745f000bf4bb2e8ed5ad2c8ef894ac9328a'}, 'destination': '/Volumes/Mastermind/evidence/fabric-application-integration-20261104-sol/original-collections/fabric-app-native-drivers-j-20261105-01-collection-v1'}, 'fabric-app-application-process-carrier-20261105-01': {'root': 'fabric-application-integration-20261104-sol', 'parent': 'fabric-application-integration-20261104-sol', 'host': 'ubuntu1', 'mode': 'minimax', 'requested_model': 'MiniMax-M3', 'packet_path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/fabric-app-application-process-carrier-20261105-01.request.packet', 'packet_sha256': '6cf782cc7ccf1124f39d821a24305f15cd78f5aaabb268b72ec3a2635af9dcdb', 'support_digest': '6cdf2f96fb780ef08e8bac21c55cc91418bbfe080252f18479c7bfb70cff5a80', 'source_pins': {'log': '41071b8c0acd26f6ef050bdf22225a20d46d6ced6b778dbf99633315dc7eeffb', 'support': '7e6b9e31f538786e43cf646fe48a3745f000bf4bb2e8ed5ad2c8ef894ac9328a'}, 'destination': '/Volumes/Mastermind/evidence/fabric-application-integration-20261104-sol/original-collections/fabric-app-application-process-carrier-20261105-01-collection-v1'}})
 BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
+PLAIN_BINDING_SCHEMA = 'mastermind.fabric_plain_launch_binding.v1'
+PLAIN_BINDING_SCHEMA_V2 = 'mastermind.fabric_plain_launch_binding.v2'
+PLAIN_BINDING_SCHEMA_V3 = 'mastermind.fabric_plain_launch_binding.v3'
 RECEIPT_SCHEMA = 'mastermind.original_delivery_receipt.v1'
 MAX_STDOUT = 8 * 1024 * 1024
 MAX_RESPONSE = 14 * 1024 * 1024
@@ -183,9 +196,246 @@ def verify_plain_lease_witness(run_id, plain):
         raise ValueError('plain_original_lease_witness_changed')
 
 
+# Retained controller control-plane events. Every one of them must appear
+# exactly once, in exactly this order, for a NEW plain run to qualify.
+TRACKED_EVENT_NAMES = ('RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
+                       'TRANSPORT_VERIFIED', 'LAUNCH_BINDING', 'LAUNCH_ATTEMPT',
+                       'LAUNCH')
+PLAIN_TRANSPORT_FIELDS = {'packet_sha256', 'support_digest', 'policy_sha256',
+                          'files', 'lease_id', 'account',
+                          'acquire_response_sha256', 'phase', 'verified_at'}
+FORBIDDEN_LOG_MARKERS = ('REFUSED', 'FAILED', 'EFFECT_UNKNOWN', 'UNPROVEN',
+                         'LEASE_PRESERVED')
+
+
+def tracked_control_events(events):
+    """Classify retained log events by tracked name, preserving file order."""
+    tracked=[]
+    for event in events:
+        for name in TRACKED_EVENT_NAMES:
+            if event.startswith(name+' '):
+                tracked.append((name,event)); break
+    return tracked
+
+
+def plain_acquisition_pool(record, *, collected=False):
+    """Read an explicitly versioned observation; never upgrade legacy evidence."""
+    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
+            'lease_id','account','packet_sha256','support_digest',
+            'acquire_response_sha256','source','phase','transport'}
+    if type(record) is not dict:
+        raise ValueError('plain_launch_binding_invalid')
+    if record.get('schema') == PLAIN_BINDING_SCHEMA_V3:
+        fields.add('acquisition_pool')
+    elif record.get('schema') not in {PLAIN_BINDING_SCHEMA, PLAIN_BINDING_SCHEMA_V2}:
+        raise ValueError('plain_launch_binding_invalid')
+    if collected:
+        fields.add('binding_sha256')
+    if set(record) != fields:
+        raise ValueError('plain_launch_binding_invalid')
+    if record['schema'] in {PLAIN_BINDING_SCHEMA, PLAIN_BINDING_SCHEMA_V2}:
+        return record['pool']
+    from remote_sub_helpers import validate_acquisition_pool
+    return validate_acquisition_pool(record['mode'], record['requested_model'],
+                                     record['acquisition_pool'])
+
+
+def validate_plain_transport(record):
+    """Strict bounded shape and cross-binding of the transport receipt view."""
+    transport=record.get('transport') if type(record) is dict else None
+    fields=set(PLAIN_TRANSPORT_FIELDS)
+    schema=record.get('schema') if type(record) is dict else None
+    if schema == PLAIN_BINDING_SCHEMA_V2:
+        fields.add('lane_root')
+    elif schema == PLAIN_BINDING_SCHEMA_V3:
+        fields.update({'acquisition_pool', 'lane_root'})
+    elif schema != PLAIN_BINDING_SCHEMA:
+        raise ValueError('plain_launch_binding_invalid')
+    if (type(transport) is not dict or set(transport)!=fields
+            or (schema == PLAIN_BINDING_SCHEMA_V3
+                and transport['acquisition_pool'] != record['acquisition_pool'])
+            or transport['packet_sha256']!=record['packet_sha256']
+            or transport['support_digest']!=record['support_digest']
+            or transport['lease_id']!=record['lease_id']
+            or transport['account']!=record['account']
+            or transport['acquire_response_sha256']!=record['acquire_response_sha256']
+            or transport['phase']!='PRE_LAUNCH'
+            or type(transport['policy_sha256']) is not str or not HEX.fullmatch(transport['policy_sha256'])
+            or type(transport['verified_at']) is not str
+            or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z',transport['verified_at'])
+            or type(transport['files']) is not dict or not 1<=len(transport['files'])<=256
+            or any(type(n) is not str or not n or Path(n).name!=n
+                   or type(v) is not str or not HEX.fullmatch(v)
+                   for n,v in transport['files'].items())):
+        raise ValueError('plain_launch_binding_invalid')
+    if schema == PLAIN_BINDING_SCHEMA_V2 or (
+            schema == PLAIN_BINDING_SCHEMA_V3 and transport['lane_root'] is not None):
+        layout = validate_remote_lane_layout(transport['lane_root'])
+        if layout['binding']['host'] != record['host']:
+            raise ValueError('plain_launch_binding_lane_root_invalid')
+    return transport
+
+
+def retained_plain_binding(events, value, source):
+    """Qualify one NEW ordinary plain run only from its retained record.
+
+    Exactly one LAUNCH_BINDING line in this same producer log — written by the
+    original controller before the worker started — is the only source of the
+    plain contract. Labels, the binding file and PLAIN_SCOPES never mint one,
+    and a missing or duplicated record leaves the run unqualified (fail closed).
+
+    The record must carry the actual prelaunch transport verification (exact
+    packet/support/acquire readback), and the retained log must be the complete
+    strict sequence RUN_RESERVED → LEASE_OK → SUPPORT_VERSION_READY →
+    TRANSPORT_VERIFIED → LAUNCH_BINDING → LAUNCH → LAUNCH_ATTEMPT attempt=1,
+    each exactly once in that order with no foreign, moved, duplicate or failed
+    event. A crash cut before the acquire, after an unconfirmed transfer, or
+    after a confirmed transfer but before the fsynced binding leave a log that
+    cannot qualify the run. Later controller/lease uncertainty does not undo
+    this original evidence or settle lifecycle state. The acquire observation is validated by
+    reconstructing the exact acquired bytes from the record itself; a current
+    broker row would be mutable, post-hoc state and is never consulted.
+    """
+    log_text=source['log'].decode('utf-8')
+    if not log_text.endswith('\n'):
+        raise ValueError('plain_launch_binding_log_truncated')
+    launch_index=next((i for i,event in enumerate(events) if event.startswith('LAUNCH ')),len(events))
+    if any(marker in event for event in events[:launch_index]
+           for marker in FORBIDDEN_LOG_MARKERS):
+        raise ValueError('plain_launch_binding_forbidden_event')
+    records=[e[len('LAUNCH_BINDING '):] for e in events if e.startswith('LAUNCH_BINDING ')]
+    if len(records)!=1:
+        # A pure crash cut before the confirmed transfer leaves the run simply
+        # unqualified. But a log that already shows a verified transfer or a
+        # launch while the single retained record is missing, moved or
+        # duplicated is a broken evidence sequence, never a qualification.
+        if len(records)>1 or any(name in ('TRANSPORT_VERIFIED','LAUNCH_BINDING',
+                                          'LAUNCH','LAUNCH_ATTEMPT')
+                                 for name,_ in tracked_control_events(events)):
+            raise ValueError('plain_launch_binding_event_sequence_invalid')
+        return None
+    record=reader.strict_json(records[0].encode('utf-8'))
+    acquisition_pool=plain_acquisition_pool(record)
+    if (record['source']!='controller_original_acquire_return'
+            or record['phase']!='PRE_LAUNCH'
+            or any(record[k]!=value[k] for k in ('run_id','root','parent','host','mode','requested_model'))
+            or record['mode'] not in production.ORDINARY_MODES
+            or record['pool']!={'glm':'glm','qwen':'bailian'}[record['mode']]
+            or value['artifact_names']!=[]
+            or any(type(record[k]) is not str or not IDENT.fullmatch(record[k])
+                   for k in ('run_id','root','parent','host','requested_model','lease_id','account'))
+            or any(type(record[k]) is not str or not HEX.fullmatch(record[k])
+                   for k in ('packet_sha256','support_digest','acquire_response_sha256'))):
+        raise ValueError('plain_launch_binding_invalid')
+    transport=validate_plain_transport(record)
+    if record['packet_sha256']!=sha(source['packet']):
+        raise ValueError('plain_launch_binding_packet_mismatch')
+    reconstructed=(f'LEASE={record["lease_id"]} ACCOUNT={record["account"]}'.encode('ascii'),
+                   f'LEASE={record["lease_id"]} ACCOUNT={record["account"]}\n'.encode('ascii'))
+    if record['acquire_response_sha256'] not in {sha(raw) for raw in reconstructed}:
+        raise ValueError('plain_launch_binding_acquire_unverified')
+    expected=[
+        'RUN_RESERVED explicit=1',
+        'LEASE_OK pool='+acquisition_pool,
+        'SUPPORT_VERSION_READY digest='+record['support_digest']
+            +' policy='+transport['policy_sha256'],
+        'TRANSPORT_VERIFIED packet='+record['packet_sha256']
+            +' support='+record['support_digest']
+            +' policy='+transport['policy_sha256']
+            +' lease='+record['lease_id']
+            +' account='+record['account']
+            +' acquire='+record['acquire_response_sha256']
+            +(' lane_root='+transport['lane_root']['sha256']
+              if transport.get('lane_root') is not None else ''),
+        'LAUNCH_BINDING '+records[0],
+        f"LAUNCH stdout=lanes_{record['run_id']}.stdout"
+            +f" rc_file=ext/lanes_{record['run_id']}.rc cwd=~",
+        'LAUNCH_ATTEMPT attempt=1',
+    ]
+    if [event for _name,event in tracked_control_events(events)]!=expected:
+        raise ValueError('plain_launch_binding_event_sequence_invalid')
+    record['binding_sha256']=sha(records[0].encode('utf-8'))
+    return record
+
+
+def retained_artifact_acquisition_pool(events, value, source, contract):
+    """Use a v2 tag only after validating its original artifact binding.
+
+    Untagged v1/no-binding evidence keeps the incumbent logical-pool rule.
+    This is controller correlation, not broker, acceptance or retry authority.
+    """
+    v1='mastermind.fabric_launch_binding.v1'
+    v2='mastermind.fabric_launch_binding.v2'
+    payloads=[event[len('LAUNCH_BINDING '):] for event in events
+              if event.startswith('LAUNCH_BINDING ')]
+    if not payloads:
+        return None
+    records=[reader.strict_json(payload.encode('utf-8')) for payload in payloads]
+    if all(type(record) is dict and record.get('schema') == v1
+           and 'acquisition_pool' not in record for record in records):
+        return None
+    if len(records) != 1:
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    record=records[0]
+    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
+            'acquisition_pool','lease_id','account','packet_sha256','support_digest',
+            'acquire_response_sha256','source','phase'}
+    if (type(record) is not dict or set(record) != fields
+            or any(type(item) is not str for item in record.values())
+            or record['schema'] != v2
+            or record['source'] != 'controller_original_acquire_return'
+            or record['phase'] != 'PRE_LAUNCH'
+            or record['mode'] not in {'glm','qwen'}
+            or record['pool'] != {'glm':'glm','qwen':'bailian'}[record['mode']]
+            or any(record[key] != value[key] for key in
+                   ('run_id','root','parent','host','mode','requested_model'))
+            or any(not IDENT.fullmatch(record[key]) for key in
+                   ('run_id','root','parent','host','requested_model'))
+            or not re.fullmatch(r'[a-f0-9]{12}',record['lease_id'])
+            or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',record['account'])
+            or any(not HEX.fullmatch(record[key]) for key in
+                   ('packet_sha256','support_digest','acquire_response_sha256'))):
+        raise ValueError('artifact_launch_binding_invalid')
+    from remote_sub_helpers import validate_acquisition_pool
+    validate_acquisition_pool(record['mode'],record['requested_model'],
+                              record['acquisition_pool'])
+    if record['packet_sha256'] != sha(source['packet']):
+        raise ValueError('artifact_launch_binding_packet_mismatch')
+    if record['support_digest'] != contract['support_digest']:
+        raise ValueError('artifact_launch_binding_support_mismatch')
+    acquired=(f'LEASE={record["lease_id"]} ACCOUNT={record["account"]}').encode('ascii')
+    if record['acquire_response_sha256'] not in {sha(acquired),sha(acquired+b'\n')}:
+        raise ValueError('artifact_launch_binding_acquire_unverified')
+    if (not source['log'].endswith(b'\n')
+            or len(source['log'].decode('utf-8').splitlines()) != len(events)):
+        raise ValueError('artifact_launch_binding_log_truncated_or_foreign')
+    support=[event for event in events if event.startswith('SUPPORT_VERSION_READY ')]
+    if (len(support) != 1 or not re.fullmatch('SUPPORT_VERSION_READY digest='
+            + record['support_digest'] + r' policy=[a-f0-9]{64}',support[0])):
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    expected=['RUN_RESERVED explicit=1','LEASE_OK pool='+record['acquisition_pool'],
+              support[0],'LAUNCH_BINDING '+payloads[0],
+              f"LAUNCH stdout=lanes_{record['run_id']}.stdout"
+              + f" rc_file=ext/lanes_{record['run_id']}.rc cwd=~",
+              'LAUNCH_ATTEMPT attempt=1']
+    if [event for _,event in tracked_control_events(events)] != expected:
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    before_launch=events[:events.index(expected[4])]
+    if (any(marker in event for event in before_launch for marker in FORBIDDEN_LOG_MARKERS)
+            or any(event.startswith(('DONE','REMOTE_DONE','LEASE_PRESERVED'))
+                   for event in before_launch)):
+        raise ValueError('artifact_launch_binding_forbidden_event')
+    return record['acquisition_pool']
+
+
 def load_binding(path, *, run_id, root, parent):
     require_caller(root)
     raw = delivery.local_file(Path(path), 65536)
+    return _validate_binding_bytes(raw, run_id=run_id, root=root, parent=parent)
+
+
+def _validate_binding_bytes(raw, *, run_id, root, parent):
+    """Common evidence validation; entrypoints separately establish authority."""
     value = reader.strict_json(raw)
     fields = {'schema','run_id','root','parent','host','mode','requested_model',
               'cwd','artifact_names','sources'}
@@ -214,7 +464,8 @@ def load_binding(path, *, run_id, root, parent):
         else:
             allowed_path = (delivery.owner_path(p, HERE).parent ==
                             delivery.owner_path(HERE/'state/remote_sub', HERE) and
-                ((name == 'packet' and re.fullmatch(re.escape(run_id)+r'\.packet\.[A-Za-z0-9_]+',p.name)) or
+                ((name == 'packet' and (p.name == run_id + '.request.packet'
+                                        or re.fullmatch(re.escape(run_id)+r'\.packet\.[A-Za-z0-9_]+',p.name))) or
                  (name != 'packet' and p.name == run_id + ('.log' if name=='log' else '.support.json'))))
         if not allowed_path:
             raise ValueError('original_source_path_invalid')
@@ -235,15 +486,45 @@ def load_binding(path, *, run_id, root, parent):
         original_validator = delivery.original_validator_context(manifest)
     validator = original_validator if original_validator is not None else production
     contract = validator.parse_packet(source['packet'].decode('utf-8'))
+    if contract is not None and plain is None and re.fullmatch(
+            re.escape(run_id)+r'\.packet\.[A-Za-z0-9_]+',
+            Path(value['sources']['packet']['path']).name) is None:
+        # Existing artifact runs keep their exact <run>.packet.* retention
+        # naming; the plain <run>.request.packet name never qualifies one.
+        raise ValueError('original_source_path_invalid')
     if plain is not None:
         if contract is not None:
             raise ValueError('plain_original_artifact_contract_conflict')
         contract = dict(schema=PLAIN_SCHEMA, run_id=run_id, root=root, parent=parent,
             names=[], packet_sha256=plain['packet_sha256'], support_digest=plain['support_digest'])
+    prefix = (r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(run_id)
+              + r' host=' + re.escape(value['host']) + r'\] (.*)')
+    events=[]
+    for line in source['log'].decode('utf-8').splitlines():
+        match = re.fullmatch(prefix,line)
+        if match: events.append(match[1])
+        elif '[remote_sub id=' in line: raise ValueError('original_log_scope_mismatch')
+    plain_binding = None
     if contract is None:
         # Old plaintext packets have no producer-bound root/parent/digest.
-        # Do not manufacture that missing provenance from this new binding.
-        raise ValueError('original_producer_contract_unavailable')
+        # Do not manufacture that missing provenance from this new binding: a
+        # future ordinary plain run qualifies only through the controller's
+        # retained prelaunch record in this same producer log.
+        plain_binding = retained_plain_binding(events, value, source)
+        if plain_binding is None:
+            raise ValueError('original_producer_contract_unavailable')
+        if Path(value['sources']['packet']['path']).name != run_id + '.request.packet':
+            # A NEW plain run qualifies only through its retained original
+            # <run>.request.packet; artifact-style pin names never carry one.
+            raise ValueError('plain_launch_binding_source_pin_invalid')
+        contract = dict(schema=PLAIN_SCHEMA, run_id=run_id, root=root, parent=parent,
+            names=[], packet_sha256=plain_binding['packet_sha256'],
+            support_digest=plain_binding['support_digest'],
+            binding_sha256=plain_binding['binding_sha256'],
+            acquire_response_sha256=plain_binding['acquire_response_sha256'])
+        if plain_binding['transport'].get('lane_root') is not None:
+            contract['schema'] = PLAIN_SCHEMA_V2
+            contract['lane_root'] = plain_binding['transport']['lane_root']
     if (any(contract[k] != value[k] for k in ('run_id','root','parent'))
             or contract['names'] != value['artifact_names']):
         raise ValueError('original_packet_scope_mismatch')
@@ -255,19 +536,23 @@ def load_binding(path, *, run_id, root, parent):
         for name in ('artifact_production.py','artifact_reader.py'):
             if manifest.get(name) != sha(delivery.local_file(HERE/name, 128*1024)):
                 raise ValueError('original_producer_validator_changed')
-    prefix = (r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(run_id)
-              + r' host=' + re.escape(value['host']) + r'\] (.*)')
-    events=[]
-    for line in source['log'].decode('utf-8').splitlines():
-        match = re.fullmatch(prefix,line)
-        if match: events.append(match[1])
-        elif '[remote_sub id=' in line: raise ValueError('original_log_scope_mismatch')
+    if plain is not None and any(e.startswith('LAUNCH_BINDING ') for e in events):
+        # Historical scopes keep their exact evidence set; a retained prelaunch
+        # binding never qualifies older missing evidence.
+        raise ValueError('plain_launch_binding_unexpected')
+    expected_acquisition_pool={'glm':'glm','qwen':'bailian','minimax':'minimax'}[value['mode']]
+    if plain_binding is not None:
+        expected_acquisition_pool=plain_acquisition_pool(plain_binding, collected=True)
+    elif plain is None and contract.get('schema') != PLAIN_SCHEMA:
+        observed=retained_artifact_acquisition_pool(events,value,source,contract)
+        if observed is not None:
+            expected_acquisition_pool=observed
     launches=[e for e in events if e.startswith('LAUNCH ')]
     support=[e for e in events if e.startswith('SUPPORT_VERSION_READY ')]
     if (launches != [f'LAUNCH stdout=lanes_{run_id}.stdout rc_file=ext/lanes_{run_id}.rc cwd=~']
             or [e for e in events if e.startswith('LAUNCH_ATTEMPT ')] != ['LAUNCH_ATTEMPT attempt=1']
             or len(support)!=1 or not re.fullmatch('SUPPORT_VERSION_READY digest='+contract['support_digest']+r' policy=[a-f0-9]{64}',support[0])
-            or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool='+{'glm':'glm','qwen':'bailian','minimax':'minimax'}[value['mode']]]):
+            or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool='+expected_acquisition_pool]):
         raise ValueError('original_launch_evidence_unqualified')
     delivery.assert_capsule_family(run_id)
     registry_raw=delivery.local_file(HERE/'hosts.json')
@@ -277,10 +562,15 @@ def load_binding(path, *, run_id, root, parent):
             or type(host.get('ssh_alias')) is not str
             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',host['ssh_alias'])):
         raise ValueError('original_host_registry_unavailable')
-    return value, raw, source, contract, host['ssh_alias'], registry_raw, original_validator
+    if contract.get('schema') == PLAIN_SCHEMA_V2:
+        layout = validate_remote_lane_layout(contract['lane_root'])
+        current = delivery.configured_remote_lane_root(value['host'], host)
+        if current != layout['binding']:
+            raise ValueError('original_lane_root_registry_changed')
+    return value, raw, source, contract, host['ssh_alias'], registry_raw, original_validator, plain_binding
 
 
-def remote_read(request, *, home=None):
+def remote_read(request, *, home=None, diagnostic=None):
     """Fixed read-only paths. home is an inert-test seam, never in the request."""
     if (type(request) is not dict or set(request) != {'schema','run_id','root','parent','host','contract'}
             or request['schema'] != SCHEMA
@@ -288,16 +578,35 @@ def remote_read(request, *, home=None):
                    for k in ('run_id','root','parent','host'))):
         raise ValueError('read_request_invalid')
     contract=request['contract']
-    plain = contract.get('schema') == PLAIN_SCHEMA if type(contract) is dict else False
+    plain = contract.get('schema') in {PLAIN_SCHEMA, PLAIN_SCHEMA_V2} if type(contract) is dict else False
+    bound = plain and contract['schema'] == PLAIN_SCHEMA_V2
     if request['run_id'] in PLAIN_SCOPES and not plain:
         raise ValueError('read_contract_invalid')
     if plain:
         expected = PLAIN_SCOPES.get(rid := request['run_id'])
-        if (expected is None or any(request[k] != expected[k] for k in ('root','parent','host'))
-                or contract != dict(schema=PLAIN_SCHEMA, run_id=rid, root=expected['root'],
-                    parent=expected['parent'], names=[], packet_sha256=expected['packet_sha256'],
-                    support_digest=expected['support_digest'])):
-            raise ValueError('read_contract_invalid')
+        if expected is not None:
+            if (any(request[k] != expected[k] for k in ('root','parent','host'))
+                    or contract != dict(schema=PLAIN_SCHEMA, run_id=rid, root=expected['root'],
+                        parent=expected['parent'], names=[], packet_sha256=expected['packet_sha256'],
+                        support_digest=expected['support_digest'])):
+                raise ValueError('read_contract_invalid')
+        else:
+            # New producer-bound plain group. The remote reader never consults
+            # a local scope table: it re-verifies the contract's own scope, the
+            # transported packet digest below, and that the contract is bound
+            # to a retained prelaunch binding digest and to the host's actual
+            # published support generation.
+            fields = {'schema','run_id','root','parent','names','packet_sha256',
+                      'support_digest','binding_sha256','acquire_response_sha256'}
+            if bound:
+                fields.add('lane_root')
+            if (set(contract) != fields
+                    or any(contract[k] != request[k] for k in ('run_id','root','parent'))
+                    or contract['names'] != []
+                    or any(type(contract[k]) is not str or not HEX.fullmatch(contract[k])
+                           for k in ('packet_sha256','support_digest','binding_sha256',
+                                     'acquire_response_sha256'))):
+                raise ValueError('read_contract_invalid')
     # Local original source qualification validates the full contract. Recheck
     # path-bearing fields here before deriving exact artifact names remotely.
     if not plain and (type(contract) is not dict or set(contract) != {'schema','run_id','root','parent','names','body_sha256','support_digest'}
@@ -308,15 +617,24 @@ def remote_read(request, *, home=None):
             or any(type(n) is not str or not reader.COMPONENT.fullmatch(n) or n in {'request.json','receipt.json'} for n in contract['names'])
             or any(type(contract[k]) is not str or not HEX.fullmatch(contract[k]) for k in ('body_sha256','support_digest'))):
         raise ValueError('read_contract_invalid')
-    root=Path(home if home is not None else pwd.getpwuid(os.geteuid()).pw_dir)
+    lane_root=Path(home if home is not None else pwd.getpwuid(os.geteuid()).pw_dir)/'lanes'
+    lane_layout = None
+    if bound:
+        lane_layout = validate_remote_lane_layout(contract['lane_root'])
+        if lane_layout['binding']['host'] != request['host']:
+            raise ValueError('read_contract_lane_root_invalid')
+        observe_remote_lane_layout(lane_layout['binding'], lane_layout)
+        lane_root = Path(lane_layout['binding']['path'])
     rid=request['run_id']; held=[]
-    def read(chain,name,limit):
+    def read(chain,name,limit,*,allow_empty=False,private=False):
         chain.verify()
         fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=chain.fd)
         held.append((chain,name,fd,None))
         before=os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
-                or before.st_nlink!=1 or before.st_mode&0o022 or not 0<before.st_size<=limit):
+                or before.st_nlink!=1 or before.st_mode&0o022
+                or (private and stat.S_IMODE(before.st_mode)!=0o600)
+                or not (0 if allow_empty else 1)<=before.st_size<=limit):
             raise ValueError('original_file_owner_mode_type_or_size')
         data=b''
         while len(data)<=limit:
@@ -332,26 +650,97 @@ def remote_read(request, *, home=None):
             chain.verify()
             if ident is None or ident!=reader.identity(os.fstat(fd)) or ident!=reader.identity(os.stat(name,dir_fd=chain.fd,follow_symlinks=False)):
                 raise ValueError('original_file_changed')
+        if lane_layout is not None:
+            observe_remote_lane_layout(lane_layout['binding'], lane_layout)
+            if release_meta is not None:
+                verify_remote_lane_release(lane_layout, contract['support_digest'], release_meta)
     result={'schema':SCHEMA,'request_sha256':sha(canonical(request)),'state':'PENDING','files':{},'artifacts':[]}
     packet_dir = None
+    release_chains = []
+    release_meta = None
     try:
         if plain:
-            packet_dir = DirectoryChain(root/'lanes/tmp')
+            packet_dir = DirectoryChain(lane_root/'tmp')
             packet = read(packet_dir, rid+'.txt', 2*1024*1024)
             if packet['sha256'] != contract['packet_sha256']:
                 raise ValueError('read_contract_invalid')
+            if type(contract.get('binding_sha256')) is str:
+                # Verify the contract's support generation against the host's
+                # published release directory; a plain contract never qualifies
+                # a run whose support version was never published. The full
+                # published generation is checked — RELEASE.json must carry the
+                # contract's exact digest and every published code file must
+                # still hash to its manifest entry — not just a nonempty
+                # remote_sub_exec file.
+                try:
+                    release_base=DirectoryChain(lane_root/'support-releases'
+                                                /contract['support_digest'])
+                    release_ext=DirectoryChain(lane_root/'support-releases'
+                                               /contract['support_digest']/'ext')
+                except (FileNotFoundError,NotADirectoryError):
+                    raise ValueError('read_contract_invalid')
+                release_chains.extend((release_base,release_ext))
+                try:
+                    release_raw=read(release_base,'RELEASE.json',65536)
+                except FileNotFoundError:
+                    release_base.verify();raise ValueError('read_contract_invalid')
+                release_meta=reader.strict_json(base64.b64decode(
+                    release_raw['data_base64'],validate=True))
+                files=release_meta.get('files') if type(release_meta) is dict else None
+                if (type(files) is not dict or not 1<=len(files)<=256
+                        or release_meta.get('digest')!=contract['support_digest']
+                        or sha(canonical({'schema':'remote-support-code.v1','files':files}))!=contract['support_digest']
+                        or any(type(n) is not str or not n or Path(n).name!=n
+                               or type(v) is not str or not HEX.fullmatch(v)
+                               for n,v in files.items())):
+                    raise ValueError('read_contract_invalid')
+                if lane_layout is not None:
+                    verify_remote_lane_release(lane_layout, contract['support_digest'], release_meta)
+                for name,want in files.items():
+                    release_ext.verify()
+                    support_fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=release_ext.fd)
+                    held.append((release_ext,name,support_fd,None))
+                    info=os.fstat(support_fd)
+                    if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid()
+                            or info.st_nlink!=1 or info.st_mode&0o022
+                            or not 0<info.st_size<=2*1024*1024):
+                        raise ValueError('read_contract_invalid')
+                    code=b''
+                    while len(code)<=2*1024*1024:
+                        part=os.read(support_fd,min(65536,2*1024*1024+1-len(code)))
+                        if not part:break
+                        code+=part
+                    held[-1]=(release_ext,name,support_fd,reader.identity(info))
+                    if len(code)!=info.st_size or sha(code)!=want:
+                        raise ValueError('read_contract_invalid')
+                release_ext.verify()
             verify()
-        with DirectoryChain(root/'lanes/ext') as ext:
-            try: rc=read(ext,'lanes_'+rid+'.rc',32)
+        with DirectoryChain(lane_root/'ext') as ext:
+            try: rc=read(ext,'lanes_'+rid+'.rc',32,allow_empty=bound)
             except FileNotFoundError:
                 ext.verify();return result
             rcraw=base64.b64decode(rc['data_base64'],validate=True)
+            if bound and rcraw == b'':
+                # The v2 launch holds an exclusively created RC descriptor.
+                # Empty is its running reservation, never terminal evidence.
+                verify();return result
             if not re.fullmatch(rb'(0|[1-9][0-9]{0,2})\n?',rcraw) or int(rcraw)>255:
                 raise ValueError('original_rc_invalid')
             result['files']['rc']=rc
+            if diagnostic is not None:
+                if not plain or not bound and type(contract.get('binding_sha256')) is not str:
+                    raise ValueError('diagnostic_unavailable')
+                if int(rcraw)!=diagnostic['command_rc']:
+                    raise ValueError('diagnostic_unavailable')
+                with DirectoryChain(lane_root/'ext/lanes') as lanes:
+                    projection=diagnostic_from_files(request,diagnostic,read,lanes)
+                    verify()
+                    return {'schema':DIAGNOSTIC_SCHEMA,
+                        'request_sha256':sha(canonical(dict(request,diagnostic=diagnostic))),
+                        'state':'DIAGNOSED','projection':projection}
             if int(rcraw)!=0:
                 verify();result['state']='NONZERO';return result
-            with DirectoryChain(root/'lanes/ext/lanes') as lanes:
+            with DirectoryChain(lane_root/'ext/lanes') as lanes:
                 result['files']['process']=read(lanes,rid+'.process.jsonl',65536)
                 result['files']['stdout']=read(ext,'lanes_'+rid+'.stdout',MAX_STDOUT)
                 scope={k:request[k] for k in ('root','parent','run_id')}
@@ -364,12 +753,15 @@ def remote_read(request, *, home=None):
                 verify();result['state']='READ';return result
     finally:
         for _chain,_name,fd,_ident in reversed(held):os.close(fd)
+        for _chain in release_chains:_chain.close()
         if packet_dir is not None:packet_dir.close()
 
 
-def remote_envelope(request):
+def remote_envelope(request, *, home=None):
+    if type(request) is dict and 'diagnostic' in request:
+        return remote_diagnostic_envelope(request,home=home)
     try:
-        return remote_read(request)
+        return remote_read(request,home=home)
     except (OSError, ValueError, TypeError, KeyError) as error:
         reason = str(error) if isinstance(error, ValueError) else 'filesystem_refused'
         allowed = {'read_request_invalid','read_contract_invalid','directory_owner_or_mode',
@@ -380,18 +772,315 @@ def remote_envelope(request):
             'reason':reason if reason in allowed else 'filesystem_refused'}
 
 
+# This is a distinct diagnostic read, never a result/acceptance path. Labels
+# correlate the original owner's commission; they do not authenticate a reader.
+DIAGNOSTIC_SCHEMA = 'mastermind.original_provider_diagnostics.v1'
+DIAGNOSTIC_ERRORS = frozenset({'rate_limit','authentication_failed','oauth_org_not_allowed',
+    'account_on_hold','verification_required','cloud_credential_error','billing_error',
+    'invalid_request','server_error','overloaded','model_not_found','unknown','max_output_tokens'})
+DIAGNOSTIC_FIELDS = frozenset({'error_types','dns_error','api_status','initial_rejection',
+    'cli_subtype','terminal_reason','num_turns','is_error','model_refusal_evidence'})
+MAX_DIAGNOSTIC_CAPTURE = 64 * 1024 * 1024
+
+
+def validate_diagnostic_projection(value):
+    if (type(value) is not dict or set(value) != DIAGNOSTIC_FIELDS
+            or type(value['error_types']) is not list
+            or any(type(v) is not str or v not in DIAGNOSTIC_ERRORS for v in value['error_types'])
+            or value['error_types'] != sorted(set(value['error_types']))
+            or value['dns_error'] not in (None, 'EAI_AGAIN')
+            or (value['api_status'] is not None and (type(value['api_status']) is not int or not 100 <= value['api_status'] <= 599))
+            or any(value[k] is not None and type(value[k]) is not bool for k in ('initial_rejection','is_error'))
+            or value['cli_subtype'] not in (None,'success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries')
+            or value['terminal_reason'] not in (None,'completed','prompt_too_long','max_turns','budget_exhausted','structured_output_retry_exhausted','aborted_streaming','aborted_tools','hook_stopped','stop_hook_prevented')
+            or (value['num_turns'] is not None and (type(value['num_turns']) is not int or not 0 <= value['num_turns'] <= 1000000))
+            or value['model_refusal_evidence'] not in ('unknown','typed_model_not_found_http_4xx')):
+        raise ValueError('diagnostic_unavailable')
+    if value['initial_rejection'] is True and not (
+            value['error_types']==['rate_limit'] and value['is_error'] is True
+            and type(value['num_turns']) is int and value['num_turns']<=1):
+        raise ValueError('diagnostic_unavailable')
+    expected = ('typed_model_not_found_http_4xx' if 'model_not_found' in value['error_types']
+                and value['api_status'] in (400,404) else 'unknown')
+    if value['model_refusal_evidence'] != expected:
+        raise ValueError('diagnostic_unavailable')
+    return value
+
+
+def project_provider_capture(raw, outcome):
+    """Closed projection only: no messages, arbitrary error strings or URLs."""
+    if type(raw) is not bytes or not 0 < len(raw) <= MAX_DIAGNOSTIC_CAPTURE:
+        raise ValueError('diagnostic_unavailable')
+    try:
+        events = reader.strict_json(raw)
+    except (ValueError, UnicodeError):
+        events = [reader.strict_json(line) for line in raw.splitlines() if line.strip()]
+    if type(events) is dict:
+        events = [events]
+    if (type(events) is not list or not 1 <= len(events) <= 100000
+            or any(type(e) is not dict or type(e.get('type')) is not str for e in events)):
+        raise ValueError('diagnostic_unavailable')
+    finals = [e for e in events if e['type'] == 'result']
+    if len(finals) != 1 or finals[0] is not events[-1]:
+        raise ValueError('diagnostic_unavailable')
+    final = finals[0]
+    status = final.get('api_error_status')
+    if status is not None and (type(status) is not int or not 100 <= status <= 599):
+        raise ValueError('diagnostic_unavailable')
+    if 'api_status' in outcome and outcome['api_status'] != status:
+        raise ValueError('diagnostic_unavailable')
+    subtype=final.get('subtype')
+    subtype=subtype if subtype in ('success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries') else ('other' if subtype is not None else None)
+    if 'cli_subtype' in outcome and outcome['cli_subtype']!=subtype:
+        raise ValueError('diagnostic_unavailable')
+    terminal=final.get('terminal_reason')
+    terminal=terminal if terminal in ('completed','prompt_too_long','max_turns','budget_exhausted','structured_output_retry_exhausted','aborted_streaming','aborted_tools','hook_stopped','stop_hook_prevented') else ('other' if terminal is not None else None)
+    if 'cli_terminal_reason' in outcome and outcome['cli_terminal_reason']!=terminal:
+        raise ValueError('diagnostic_unavailable')
+    initial = outcome.get('initial_rejection')
+    if initial is not None and type(initial) is not bool:
+        raise ValueError('diagnostic_unavailable')
+    errors = [e.get('error') for e in events if e['type'] == 'assistant']
+    typed = sorted({e for e in errors if type(e) is str and e in DIAGNOSTIC_ERRORS})
+    dns = any(e == 'EAI_AGAIN' if type(e) is str else
+              type(e) is dict and e.get('code') == 'EAI_AGAIN' for e in errors)
+    turns = final.get('num_turns')
+    if turns is not None and (type(turns) is not int or not 0 <= turns <= 1000000):
+        raise ValueError('diagnostic_unavailable')
+    if initial is True and not (
+            outcome.get('kind') in ('rate_limit','quota_exhausted')
+            and final.get('is_error') is True and type(turns) is int and turns <= 1
+            and len(errors) == 1 and errors[0] == 'rate_limit'
+            and any(e['type'] == 'system' and e.get('subtype') == 'init' for e in events)
+            and not final.get('permission_denials')
+            and all((e['type']=='system' and e.get('subtype')=='init')
+                or (e['type']=='assistant' and e.get('error')=='rate_limit'
+                    and not e.get('parent_tool_use_id') and type(e.get('message')) is dict
+                    and type(e['message'].get('content')) is list
+                    and all(type(b) is dict and b.get('type')=='text' for b in e['message']['content']))
+                or e['type'] in ('result','rate_limit_event') for e in events)):
+        raise ValueError('diagnostic_unavailable')
+    value = {'error_types':typed,'dns_error':'EAI_AGAIN' if dns else None,
+        'api_status':status,'initial_rejection':initial,
+        'cli_subtype':final.get('subtype') if final.get('subtype') in (
+            'success','error_during_execution','error_max_turns','error_max_budget_usd','error_max_structured_output_retries') else None,
+        'terminal_reason':final.get('terminal_reason') if final.get('terminal_reason') in (
+            'completed','prompt_too_long','max_turns','budget_exhausted','structured_output_retry_exhausted','aborted_streaming','aborted_tools','hook_stopped','stop_hook_prevented') else None,
+        'num_turns':turns,'is_error':final.get('is_error') if type(final.get('is_error')) is bool else None,
+        'model_refusal_evidence':'typed_model_not_found_http_4xx' if 'model_not_found' in typed and status in (400,404) else 'unknown'}
+    return validate_diagnostic_projection(value)
+
+
+def validate_capture_metadata(value, run_id):
+    if (type(value) is not dict or set(value) != {'file','sha256','bytes','source_bytes','truncated'}
+            or value['file'] != run_id + '.provider.capture.jsonl'
+            or type(value['sha256']) is not str or not HEX.fullmatch(value['sha256'])
+            or type(value['bytes']) is not int or not 0 < value['bytes'] <= MAX_DIAGNOSTIC_CAPTURE
+            or type(value['source_bytes']) is not int or value['source_bytes'] != value['bytes']
+            or value['truncated'] is not False):
+        raise ValueError('diagnostic_unavailable')
+
+
+def validate_diagnostic_request(request):
+    if (type(request) is not dict or set(request) != {'schema','run_id','root','parent','host','contract','diagnostic'}
+            or request['schema'] != SCHEMA
+            or any(type(request[k]) is not str or not IDENT.fullmatch(request[k]) for k in ('run_id','root','parent','host'))):
+        raise ValueError('diagnostic_unavailable')
+    spec = request['diagnostic']
+    if (type(spec) is not dict or set(spec) != {'schema','scope','provider_sha256','process_sha256','lease_id','account','model','command_rc','capture','lane_root'}
+            or spec['schema'] != DIAGNOSTIC_SCHEMA
+            or type(request['contract']) is not dict
+            or spec['lane_root'] != request['contract'].get('lane_root')
+            or spec['scope'] != {k:request[k] for k in ('run_id','root','parent','host')}
+            or any(type(spec[k]) is not str or not HEX.fullmatch(spec[k]) for k in ('provider_sha256','process_sha256'))
+            or type(spec['lease_id']) is not str or not re.fullmatch(r'[a-f0-9]{12}',spec['lease_id'])
+            or any(type(spec[k]) is not str or not IDENT.fullmatch(spec[k]) for k in ('account','model'))
+            or type(spec['command_rc']) is not int or not 1 <= spec['command_rc'] <= 255):
+        raise ValueError('diagnostic_unavailable')
+    validate_capture_metadata(spec['capture'], request['run_id'])
+    return spec
+
+
+def diagnostic_no_marker(chain, run_id):
+    chain.verify()
+    try:
+        os.stat(run_id, dir_fd=chain.fd, follow_symlinks=False)
+    except FileNotFoundError:
+        chain.verify()
+        return
+    raise ValueError('diagnostic_unavailable')
+
+
+def diagnostic_from_files(request, spec, read, lanes):
+    process_item=read(lanes,request['run_id']+'.process.jsonl',65536,private=True)
+    process_raw=base64.b64decode(process_item['data_base64'],validate=True)
+    if sha(process_raw)!=spec['process_sha256']:raise ValueError('diagnostic_unavailable')
+    process=reader.strict_json(process_raw)
+    outcome_raw=base64.b64decode(read(lanes,request['run_id']+'.provider.json',65536,private=True)['data_base64'],validate=True)
+    if sha(outcome_raw)!=spec['provider_sha256']:raise ValueError('diagnostic_unavailable')
+    outcome=reader.strict_json(outcome_raw)
+    expected={'schema':'mastermind.provider_outcome.v1','run_id':request['run_id'],'root_id':request['root'],
+        'host':request['host'],'provider':'glm','lease_id':spec['lease_id'],'account':spec['account'],'model':spec['model'],
+        'command_rc':spec['command_rc'],'diagnostic_capture':spec['capture'],
+        'capture_sha256':spec['capture']['sha256'],'capture_bytes':spec['capture']['bytes']}
+    if type(outcome) is not dict or any(outcome.get(k)!=v for k,v in expected.items()):
+        raise ValueError('diagnostic_unavailable')
+    validate_diagnostic_process(outcome,process,request['run_id'])
+    metadata=reader.strict_json(base64.b64decode(read(lanes,request['run_id']+'.provider.capture.json',65536,private=True)['data_base64'],validate=True))
+    if metadata!=spec['capture']:raise ValueError('diagnostic_unavailable')
+    raw=base64.b64decode(read(lanes,metadata['file'],MAX_DIAGNOSTIC_CAPTURE,private=True)['data_base64'],validate=True)
+    if len(raw)!=metadata['bytes'] or sha(raw)!=metadata['sha256']:
+        raise ValueError('diagnostic_unavailable')
+    return project_provider_capture(raw,outcome)
+
+
+def read_provider_diagnostics(request, *, home=None):
+    spec=validate_diagnostic_request(request)
+    lane_root=Path(home if home is not None else pwd.getpwuid(os.geteuid()).pw_dir)/'lanes'
+    if spec['lane_root'] is not None:
+        layout=validate_remote_lane_layout(spec['lane_root'])
+        if layout['binding']['host']!=request['host']:raise ValueError('diagnostic_unavailable')
+        observe_remote_lane_layout(layout['binding'],layout)
+        lane_root=Path(layout['binding']['path'])
+    # The incumbent remote reader rechecks original packet, parent-bound
+    # contract, complete published support generation, RC and held process.
+    # Already-cleaned historical operations are unavailable, never rebuilt.
+    with DirectoryChain(lane_root/'ext/active') as active:
+        diagnostic_no_marker(active,request['run_id'])
+        original={k:v for k,v in request.items() if k!='diagnostic'}
+        result=remote_read(original,home=home,diagnostic=spec)
+        diagnostic_no_marker(active,request['run_id'])
+        return result
+
+
+def remote_diagnostic_envelope(request, *, home=None):
+    try:
+        return read_provider_diagnostics(request,home=home)
+    except Exception:
+        return {'schema':DIAGNOSTIC_SCHEMA,'request_sha256':sha(canonical(request)),
+                'state':'UNAVAILABLE','reason':'diagnostic_unavailable'}
+
+
+def validate_diagnostic_process(outcome, process, run_id):
+    if (type(outcome) is not dict or type(process) is not dict
+            or outcome.get('schema')!='mastermind.provider_outcome.v1' or outcome.get('run_id')!=run_id
+            or process.get('schema')!='mastermind.local_owned_process_receipt.v1' or process.get('label')!=run_id
+            or process.get('timed_out') is not False
+            or process.get('stdout_truncated') is not False or process.get('stderr_truncated') is not False
+            or process.get('stdout_sha256')!=outcome.get('stdout_sha256')
+            or process.get('returncode')!=outcome.get('command_rc')):
+        raise ValueError('diagnostic_unavailable')
+    if (type(process.get('returncode')) is not int or not 1 <= process['returncode'] <= 255
+            or 'runtime_failure_code' not in process or process['runtime_failure_code'] is not None
+            or type(process.get('pid')) is not int or process['pid']<=0
+            or type(process.get('pgid')) is not int or process['pgid']!=process['pid']
+            or any(type(process.get(k)) is not int or process[k]<0 for k in ('stdout_bytes','stderr_bytes'))):
+        raise ValueError('diagnostic_unavailable')
+    start=datetime.fromisoformat(process['started_at'].replace('Z','+00:00'))
+    end=datetime.fromisoformat(process['ended_at'].replace('Z','+00:00'))
+    if start.tzinfo is None or end.tzinfo is None or end<start:raise ValueError('diagnostic_unavailable')
+    cleanup=process['cleanup']
+    if (type(cleanup.get('residual_count')) is not int or cleanup['residual_count']!=0
+            or cleanup.get('identity_verified') is not True or cleanup.get('census_proven') is not True
+            or cleanup.get('status') not in ('not_needed','terminated')
+            or cleanup.get('error_code') is not None or any(cleanup.get(k+'_complete') is not True
+            or cleanup.get(k+'_error') is not None for k in ('stdout_capture','stderr_capture','stdin_delivery'))
+            or (cleanup.get('status')=='terminated' and cleanup.get('session_id')!=process['pgid'])):
+        raise ValueError('diagnostic_unavailable')
+
+
+def qualify_provider_diagnostics(path, *, run_id, root, parent):
+    value,binding_raw,source,contract,alias,registry,validator,plain_binding = load_binding(path,run_id=run_id,root=root,parent=parent)
+    # Only the existing fully producer-bound ordinary lineage qualifies. Older
+    # scopes or missing original acquisition evidence are never reconstructed.
+    if plain_binding is None or value['mode'] != 'glm':
+        raise ValueError('diagnostic_unavailable')
+    import fabric_task
+    state=fabric_task.inspect_run(run_id, owner_ext=delivery.owner_path(HERE,HERE))
+    if ((state.get('state') != 'TERMINAL' or state.get('lineage_state') != 'VERIFIED_TERMINAL') or state.get('root_id') != root
+            or state.get('parent_run_id') != parent):raise ValueError('diagnostic_unavailable')
+    base=HERE/'state/remote_sub'
+    outcome_raw=delivery.local_file(base/(run_id+'.provider.json'),65536)
+    process_raw=delivery.local_file(base/(run_id+'.process.jsonl'),65536)
+    outcome=reader.strict_json(outcome_raw);process=reader.strict_json(process_raw)
+    validate_diagnostic_process(outcome,process,run_id)
+    expected={'root_id':root,'host':value['host'],'provider':'glm','model':value['requested_model'],
+              'lease_id':plain_binding['lease_id'],'account':plain_binding['account']}
+    if any(outcome.get(k)!=v for k,v in expected.items()):raise ValueError('diagnostic_unavailable')
+    lease=delivery.retained_lease(plain_binding['lease_id'],include_pool=True)
+    lease_expected={'id':plain_binding['lease_id'],'orchestrator_id':root,'host':value['host'],
+        'account':plain_binding['account'],'model':value['requested_model'],'pool':plain_binding['acquisition_pool'],'state':'released'}
+    if lease is None or any(lease[k]!=v for k,v in lease_expected.items()):raise ValueError('diagnostic_unavailable')
+    with DirectoryChain(HERE/'active') as active:diagnostic_no_marker(active,run_id)
+    capture=outcome.get('diagnostic_capture');validate_capture_metadata(capture,run_id)
+    if outcome.get('capture_sha256')!=capture['sha256'] or outcome.get('capture_bytes')!=capture['bytes']:
+        raise ValueError('diagnostic_unavailable')
+    request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract,
+        'diagnostic':{'schema':DIAGNOSTIC_SCHEMA,'scope':{k:value[k] for k in ('run_id','root','parent','host')},
+            'provider_sha256':sha(outcome_raw),'process_sha256':sha(process_raw),
+            'lease_id':plain_binding['lease_id'],'account':plain_binding['account'],
+            'model':value['requested_model'],'command_rc':process['returncode'],'capture':capture,
+            'lane_root':plain_binding['transport'].get('lane_root')}}
+    validate_diagnostic_request(request)
+    return request,alias,sha(binding_raw),sha(registry),{k:sha(v) for k,v in source.items()}
+
+
+def _collect_provider_diagnostics(path, *, run_id, root, parent, destination):
+    """Explicit source-qualified diagnostic read. Never called automatically."""
+    original=qualify_provider_diagnostics(path,run_id=run_id,root=root,parent=parent)
+    request,alias,binding_hash,registry_hash,sources=original
+    with delivery.reserve_destination(destination) as chain:
+        try:
+            response=delivery.transport(alias,request)
+            if len(response)>8192:raise ValueError('diagnostic_unavailable')
+            row=reader.strict_json(response)
+            if (type(row) is not dict or set(row)!={'schema','request_sha256','state','projection'}
+                    or row['schema']!=DIAGNOSTIC_SCHEMA or row['state']!='DIAGNOSED'
+                    or row['request_sha256']!=sha(canonical(request))):raise ValueError('diagnostic_unavailable')
+            projection=validate_diagnostic_projection(row['projection'])
+            def verify_source():
+                if qualify_provider_diagnostics(path,run_id=run_id,root=root,parent=parent)!=original:
+                    raise ValueError('diagnostic_unavailable')
+            verify_source()
+            data=canonical(projection)
+            delivery.write_exclusive(chain.fd,'diagnostics.json',data)
+            receipt={'schema':DIAGNOSTIC_SCHEMA,'state':'DIAGNOSED','run_id':run_id,'root':root,'parent':parent,
+                'request_sha256':sha(canonical(request)),'binding_sha256':binding_hash,'registry_sha256':registry_hash,
+                'source_sha256':sources,'process_sha256':request['diagnostic']['process_sha256'],
+                'provider_sha256':request['diagnostic']['provider_sha256'],'capture_sha256':request['diagnostic']['capture']['sha256'],
+                'producer_root_authenticated':False,'acceptance':'NOT_RECORDED','original_operation_mutated':False,
+                'files':[{'local_name':'diagnostics.json','bytes':len(data),'sha256':sha(data)}]}
+            delivery.publish_receipt(chain,receipt,{'paths':[]},verify_source=verify_source)
+            if receipt['state']!='DIAGNOSED':raise ValueError('diagnostic_unavailable')
+            return receipt
+        except Exception:
+            # No raw response, exception text, SSH stderr, or untrusted reason is
+            # written or printed on a failed diagnostic export.
+            raise ValueError('diagnostic_unavailable') from None
+
+
+def collect_provider_diagnostics(path, *, run_id, root, parent, destination):
+    try:
+        return _collect_provider_diagnostics(path,run_id=run_id,root=root,parent=parent,destination=destination)
+    except Exception:
+        raise ValueError('diagnostic_unavailable') from None
+
+
 def code_for_request(request):
     # Fixed reviewed code, not caller-selected commands/paths/imports. The same
     # incumbent bounded SSH reader transports it; no remote write or probe.
     source=delivery.local_file(HERE/'artifact_reader.py',65536).decode()
-    code='import base64, hashlib, json, os, pwd, re, stat, sys\nfrom pathlib import Path\nfrom types import SimpleNamespace\n'
+    code='import base64, hashlib, json, os, pwd, re, stat, sys\nfrom datetime import datetime\nfrom pathlib import Path\nfrom types import SimpleNamespace\n'
     code+="_reader_ns={'__name__':'fixed_original_artifact_reader'}\nexec("+repr(source)+",_reader_ns)\nreader=SimpleNamespace(**_reader_ns)\n"
     remote_scopes = {key: {field: scope[field] for field in (
         'root', 'parent', 'host', 'packet_sha256', 'support_digest')}
         for key, scope in PLAIN_SCOPES.items()}
-    code+='PLAIN_SCHEMA='+repr(PLAIN_SCHEMA)+'\nPLAIN_SCOPES='+repr(remote_scopes)+'\n'
+    code+='PLAIN_SCHEMA='+repr(PLAIN_SCHEMA)+'\nPLAIN_SCHEMA_V2='+repr(PLAIN_SCHEMA_V2)+'\nPLAIN_SCOPES='+repr(remote_scopes)+'\n'
     code+='SCHEMA='+repr(SCHEMA)+'\nMAX_STDOUT='+str(MAX_STDOUT)+'\nIDENT=re.compile('+repr(IDENT.pattern)+')\nHEX=re.compile('+repr(HEX.pattern)+')\n'
-    code+=delivery.remote_directory_chain_source()+'\n'+inspect.getsource(canonical)+'\n'+inspect.getsource(sha)+'\n'+inspect.getsource(remote_read)+'\n'+inspect.getsource(remote_envelope)
+    code+='DIAGNOSTIC_SCHEMA='+repr(DIAGNOSTIC_SCHEMA)+'\nDIAGNOSTIC_ERRORS='+repr(DIAGNOSTIC_ERRORS)+'\nDIAGNOSTIC_FIELDS='+repr(DIAGNOSTIC_FIELDS)+'\nMAX_DIAGNOSTIC_CAPTURE='+str(MAX_DIAGNOSTIC_CAPTURE)+'\n'
+    for fn in (validate_diagnostic_projection,project_provider_capture,validate_capture_metadata,validate_diagnostic_request,diagnostic_no_marker,validate_diagnostic_process,diagnostic_from_files,read_provider_diagnostics,remote_diagnostic_envelope):
+        code+=inspect.getsource(fn)+'\n'
+    code+=delivery.remote_lane_root_source()+'\n'+inspect.getsource(canonical)+'\n'+inspect.getsource(sha)+'\n'+inspect.getsource(remote_read)+'\n'+inspect.getsource(remote_envelope)
     code+="\ntry:\n raw=sys.stdin.buffer.read(65537)\n if len(raw)>65536:raise ValueError('request_limit')\n request=reader.strict_json(raw)\n result=remote_envelope(request)\n sys.stdout.buffer.write(canonical(result))\nexcept (OSError,ValueError,TypeError,KeyError):\n raise SystemExit(76)\n"
     return code
 
@@ -418,10 +1107,13 @@ def validate_response(raw,request,mode,*,original_validator=None):
             raise ValueError('collection_file_integrity')
         blobs[name]=data
     if blobs['rc'] not in (b'0',b'0\n'):raise ValueError('collection_rc_mismatch')
-    if request['contract'].get('schema') == PLAIN_SCHEMA:
-        plain = PLAIN_SCOPES.get(request['run_id'])
-        if (plain is None or row['artifacts']
-                or mode != plain.get('mode', 'minimax')):
+    if request['contract'].get('schema') in {PLAIN_SCHEMA, PLAIN_SCHEMA_V2}:
+        contract=request['contract']
+        bound=type(contract) is dict and type(contract.get('binding_sha256')) is str
+        plain=None if bound else PLAIN_SCOPES.get(request['run_id'])
+        if ((plain is None and not bound) or row['artifacts']
+                or (plain is not None and mode != plain.get('mode', 'minimax'))
+                or (bound and mode not in production.ORDINARY_MODES)):
             raise ValueError('plain_artifact_conflict')
         delivery.validate_capsule_process(blobs['process'],blobs['stdout'],request['run_id'])
         process=reader.strict_json(blobs['process'])
@@ -451,9 +1143,16 @@ class LocalBindingRefused(ValueError):
 
 def collect(path,*,run_id,root,parent,destination):
     try:
-        value,binding_raw,source,contract,alias,registry,original_validator=load_binding(path,run_id=run_id,root=root,parent=parent)
+        bound=load_binding(path,run_id=run_id,root=root,parent=parent)
     except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
         raise LocalBindingRefused(str(error)) from error
+    return _collect_validated(bound, destination=destination,
+        revalidate=lambda: load_binding(path,run_id=run_id,root=root,parent=parent))
+
+
+def _collect_validated(bound, *, destination, revalidate, transport_start=None):
+    value,binding_raw,source,contract,alias,registry,original_validator,plain_binding=bound
+    run_id,root,parent=(value[k] for k in ('run_id','root','parent'))
     if run_id in PLAIN_SCOPES and str(destination)!=PLAIN_SCOPES[run_id]['destination']:
         raise ValueError('plain_original_destination_changed')
     request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract}
@@ -462,6 +1161,8 @@ def collect(path,*,run_id,root,parent,destination):
     with delivery.reserve_destination(destination) as chain:
         delivery.write_exclusive(chain.fd,'read-request.json',canonical(request))
         try:
+            if transport_start is not None:
+                transport_start()
             response=delivery.transport(alias,request)
         except (OSError,ValueError) as error:
             allowed={'transport_timeout','transport_output_limit','transport_unavailable'}
@@ -476,8 +1177,9 @@ def collect(path,*,run_id,root,parent,destination):
             delivery.write_exclusive(chain.fd,f'read-response.{index:03d}',response[offset:offset+reader.MAX_FILE])
         verified=validate_response(response,request,value['mode'],original_validator=original_validator)
         def verify_source():
-            current=load_binding(path,run_id=run_id,root=root,parent=parent)
-            if current[1:4]!=(binding_raw,source,contract) or current[5]!=registry:
+            current=revalidate()
+            if (current[1:4]!=(binding_raw,source,contract) or current[5]!=registry
+                    or current[7]!=plain_binding):
                 raise ValueError('original_source_changed_during_collection')
         verify_source()
         receipt={'schema':RECEIPT_SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host','mode')},
@@ -489,6 +1191,21 @@ def collect(path,*,run_id,root,parent,destination):
         if run_id in PLAIN_SCOPES:
             receipt['plain_provenance']={
                 'scope':'retained_packet_and_process_capture_at_collection',
+                'producer_root_authenticated':False,
+                'producer_packet_consumption_attested':False,
+                'served_model_and_historical_physical_host_authenticated':False}
+        if plain_binding is not None:
+            # New producer-bound plain group: retain the controller's prelaunch
+            # record and the exact digests it bound. Honest flags only — this is
+            # retained correlation evidence, never authentication or acceptance.
+            receipt['requested_model']=value['requested_model']
+            receipt['plain_launch_binding']=plain_binding
+            receipt['plain_provenance']={
+                'scope':'retained_prelaunch_binding_and_remote_packet_capture',
+                'binding_sha256':plain_binding['binding_sha256'],
+                'packet_sha256':plain_binding['packet_sha256'],
+                'support_digest':plain_binding['support_digest'],
+                'acquire_response_sha256':plain_binding['acquire_response_sha256'],
                 'producer_root_authenticated':False,
                 'producer_packet_consumption_attested':False,
                 'served_model_and_historical_physical_host_authenticated':False}
@@ -514,6 +1231,11 @@ def collect(path,*,run_id,root,parent,destination):
 
 def read_collection(path,*,expected_sha256,run_id,root,parent):
     require_caller(root)
+    return _read_collection_validated(path,expected_sha256=expected_sha256,
+        run_id=run_id,root=root,parent=parent)
+
+
+def _read_collection_validated(path,*,expected_sha256,run_id,root,parent):
     plain = PLAIN_SCOPES.get(run_id)
     if plain is not None and (str(path) != str(Path(plain['destination'])/'receipt.json')
             or root != plain['root'] or parent != plain['parent']):
@@ -530,10 +1252,53 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
     chunks=receipt['stdout_chunks']
     if (not isinstance(chunks,list) or not 1<=len(chunks)<=32
             or chunks!=[f'stdout.{i:03d}' for i in range(len(chunks))]):raise ValueError('collection_chunks_invalid')
-    if plain is not None:
+    record=receipt.get('plain_launch_binding') if type(receipt.get('plain_launch_binding')) is dict else None
+    plain_shape=(plain is None and record is not None
+                 and receipt.get('artifacts')==[] and receipt.get('artifact_manifest') is None)
+    if plain_shape:
+        # New producer-bound plain group. Scope comes from the receipt's
+        # retained record plus the caller's verified root/parent; no local
+        # PLAIN_SCOPES entry is consulted.
+        plain_acquisition_pool(record, collected=True)
+        if (record.get('source')!='controller_original_acquire_return'
+                or record.get('phase')!='PRE_LAUNCH'
+                or any(record.get(k)!=v for k,v in {
+                    'run_id':run_id,'root':root,'parent':parent,
+                    'host':receipt.get('host'),'mode':receipt.get('mode'),
+                    'requested_model':receipt.get('requested_model')}.items())
+                or record.get('mode') not in production.ORDINARY_MODES
+                or record.get('pool')!={'glm':'glm','qwen':'bailian'}[record['mode']]
+                or any(type(record.get(k)) is not str or not IDENT.fullmatch(record[k])
+                       for k in ('run_id','root','parent','host','requested_model','lease_id','account'))
+                or any(type(record.get(k)) is not str or not HEX.fullmatch(record[k])
+                       for k in ('packet_sha256','support_digest','acquire_response_sha256'))
+                or type(record.get('binding_sha256')) is not str
+                or not HEX.fullmatch(record['binding_sha256'])):
+            raise ValueError('plain_collection_binding_invalid')
+        # The retained record must still carry the exact prelaunch transport
+        # verification bound to the same packet/support/acquire observation.
+        validate_plain_transport(record)
+        provenance=receipt.get('plain_provenance')
+        if (type(provenance) is not dict
+                or set(provenance)!={'scope','binding_sha256','packet_sha256','support_digest',
+                                     'acquire_response_sha256','producer_root_authenticated',
+                                     'producer_packet_consumption_attested',
+                                     'served_model_and_historical_physical_host_authenticated'}
+                or provenance['scope']!='retained_prelaunch_binding_and_remote_packet_capture'
+                or provenance['binding_sha256']!=record['binding_sha256']
+                or provenance['packet_sha256']!=record['packet_sha256']
+                or provenance['support_digest']!=record['support_digest']
+                or provenance['acquire_response_sha256']!=record['acquire_response_sha256']
+                or provenance['producer_root_authenticated'] is not False
+                or provenance['producer_packet_consumption_attested'] is not False
+                or provenance['served_model_and_historical_physical_host_authenticated'] is not False):
+            raise ValueError('plain_collection_provenance_invalid')
+    if plain is not None or plain_shape:
         files=receipt.get('files')
         names=['binding.json',*chunks,'process.json','returncode.txt']
-        if (receipt.get('host')!=plain['host'] or receipt.get('mode')!=plain.get('mode', 'minimax')
+        expected_host=plain['host'] if plain is not None else record['host']
+        expected_mode=plain.get('mode', 'minimax') if plain is not None else record['mode']
+        if (receipt.get('host')!=expected_host or receipt.get('mode')!=expected_mode
                 or receipt.get('artifacts')!=[] or receipt.get('artifact_manifest') is not None
                 or type(files) is not list or len(files)!=len(names)
                 or any(type(item) is not dict or set(item)!={'local_name','bytes','sha256'}
@@ -543,19 +1308,54 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
             raise ValueError('plain_collection_files_or_scope_invalid')
     with delivery.DirectoryChain(Path(path).parent) as chain:
         delivery.verify_delivered(chain,receipt['files'])
-        if plain is not None:
+        if plain is not None or plain_shape:
             binding_raw=delivery.read_local_at(chain,'binding.json',65536)
             binding=reader.strict_json(binding_raw)
+            if plain is not None:
+                expected={'schema':BINDING_SCHEMA,'run_id':run_id,'root':root,'parent':parent,
+                    'host':plain['host'],'mode':plain.get('mode', 'minimax'),
+                    'requested_model':plain.get('requested_model', 'MiniMax-M3'),
+                    'cwd':'~','artifact_names':[]}
+                packet_pin={'path':plain['packet_path'],'sha256':plain['packet_sha256']}
+                exact_packet_pin=True
+            else:
+                expected={'schema':BINDING_SCHEMA,'run_id':run_id,'root':root,'parent':parent,
+                    'host':record['host'],'mode':record['mode'],
+                    'requested_model':record['requested_model'],
+                    'cwd':'~','artifact_names':[]}
+                packet_pin={'sha256':record['packet_sha256']}
+                exact_packet_pin=False
             if (sha(binding_raw)!=receipt.get('binding_sha256') or type(binding) is not dict
-                    or any(binding.get(k)!=v for k,v in {
-                        'schema':BINDING_SCHEMA,'run_id':run_id,'root':root,'parent':parent,
-                        'host':plain['host'],'mode':plain.get('mode', 'minimax'),
-                        'requested_model':plain.get('requested_model', 'MiniMax-M3'),
-                        'cwd':'~','artifact_names':[]}.items())
+                    or any(binding.get(k)!=v for k,v in expected.items())
                     or type(binding.get('sources')) is not dict
-                    or binding['sources'].get('packet')!={'path':plain['packet_path'],'sha256':plain['packet_sha256']}):
+                    or not isinstance(binding['sources'].get('packet'),dict)
+                    or binding['sources']['packet'].get('sha256')!=packet_pin['sha256']
+                    or (exact_packet_pin and binding['sources']['packet']!=packet_pin)):
                 raise ValueError('plain_collection_binding_invalid')
-            for name, digest in plain.get('source_pins', {}).items():
+            if plain_shape:
+                # Close the loop against the retained producer log: the
+                # receipt's record must still match the one retained prelaunch
+                # record pinned by this binding's log source.
+                log_source=binding['sources'].get('log')
+                if (type(log_source) is not dict or set(log_source)!={'path','sha256'}
+                        or type(log_source['sha256']) is not str or not HEX.fullmatch(log_source['sha256'])
+                        or delivery.owner_path(Path(log_source['path']), HERE) !=
+                           delivery.owner_path(HERE/'state/remote_sub'/(run_id+'.log'), HERE)):
+                    raise ValueError('plain_collection_source_pin_changed')
+                log_raw=delivery.local_file(Path(log_source['path']), 2*1024*1024)
+                if sha(log_raw)!=log_source['sha256']:
+                    raise ValueError('plain_collection_source_pin_changed')
+                retained_prefix=(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id='
+                                 + re.escape(run_id) + r' host=' + re.escape(record['host'])
+                                 + r'\] LAUNCH_BINDING (.*)')
+                retained=[m.group(1) for m in (re.fullmatch(retained_prefix,line)
+                          for line in log_raw.decode('utf-8').splitlines()) if m]
+                if (len(retained)!=1
+                        or sha(retained[0].encode('utf-8'))!=record['binding_sha256']
+                        or dict(reader.strict_json(retained[0].encode('utf-8')),
+                                binding_sha256=record['binding_sha256'])!=record):
+                    raise ValueError('plain_collection_binding_invalid')
+            for name, digest in (plain or {}).get('source_pins', {}).items():
                 filename = run_id + ('.log' if name == 'log' else '.support.json')
                 source = binding['sources'].get(name)
                 if (type(source) is not dict or set(source) != {'path', 'sha256'}
@@ -567,6 +1367,167 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
         if len(stdout)!=receipt['stdout_bytes'] or sha(stdout)!=receipt['stdout_sha256']:
             raise ValueError('collection_stdout_integrity')
         chain.verify();return stdout
+
+
+def _gateway_scope(run_id):
+    if type(run_id) is not str or run_id not in GATEWAY_ORIGINAL_RUNS:
+        raise ValueError('gateway_original_scope_refused')
+    return PLAIN_SCOPES[run_id]
+
+
+def _gateway_binding(run_id):
+    plain = _gateway_scope(run_id)
+    retained = Path(plain['packet_path']).parent
+    value = {'schema': BINDING_SCHEMA, 'run_id': run_id,
+        **{key: plain[key] for key in ('root','parent','host','mode','requested_model')},
+        'cwd': '~', 'artifact_names': [], 'sources': {
+            'packet': {'path': plain['packet_path'], 'sha256': plain['packet_sha256']},
+            'log': {'path': str(retained / (run_id + '.log')),
+                    'sha256': plain['source_pins']['log']},
+            'support': {'path': str(retained / (run_id + '.support.json')),
+                        'sha256': plain['source_pins']['support']}}}
+    return _validate_binding_bytes(canonical(value), run_id=run_id,
+        root=plain['root'], parent=plain['parent'])
+
+
+def _gateway_collection_status(run_id):
+    """Read only this destination. Absence or partial evidence permits no retry."""
+    plain = _gateway_scope(run_id)
+    result = {'run_id': run_id, 'retry_authorized': False,
+        'lease_settlement': 'UNKNOWN', 'controller_state': 'UNKNOWN',
+        'acceptance': 'NOT_RECORDED', 'original_operation_mutated': False}
+    opened = False
+    try:
+        with delivery.DirectoryChain(Path(plain['destination'])) as chain:
+            opened = True
+            try:
+                raw = delivery.read_local_at(chain, 'receipt.json', 65536)
+            except FileNotFoundError:
+                chain.verify()
+                return dict(result, state='UNKNOWN', destination_reserved=True,
+                    reason='original_collection_receipt_missing')
+            receipt = reader.strict_json(raw)
+            if (type(receipt) is not dict or receipt.get('schema') != RECEIPT_SCHEMA
+                    or any(receipt.get(key) != value for key, value in {
+                        'run_id': run_id, 'root': plain['root'], 'parent': plain['parent'],
+                        'host': plain['host'], 'mode': plain['mode']}.items())
+                    or receipt.get('original_operation_mutated') is not False
+                    or receipt.get('state') not in ('COMPLETE', 'PENDING')):
+                raise ValueError('gateway_original_receipt_unqualified')
+            digest = sha(raw)
+            if receipt['state'] == 'COMPLETE':
+                _read_collection_validated(Path(plain['destination']) / 'receipt.json',
+                    expected_sha256=digest, run_id=run_id,
+                    root=plain['root'], parent=plain['parent'])
+            if delivery.read_local_at(chain, 'receipt.json', 65536) != raw:
+                raise ValueError('collection_receipt_changed')
+            chain.verify()
+            return dict(result, state=receipt['state'], destination_reserved=True,
+                receipt_sha256=digest, delivery_verified=receipt['state'] == 'COMPLETE')
+    except FileNotFoundError:
+        if opened:
+            return dict(result, state='UNKNOWN', destination_reserved=True,
+                effect_state='UNKNOWN', reason='original_collection_evidence_missing')
+        return dict(result, state='ABSENT', destination_reserved=False,
+            effect_state='UNKNOWN', reason='destination_absence_is_not_execution_absence')
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            reason='original_collection_evidence_unqualified')
+
+
+def _gateway_reconcile(run_id):
+    """One explicitly typed, collection-only subordinate observation.
+
+    The same fixed final leaf, the same names:[] read and the same existing
+    DirectoryChain reservation and fsync fences as an ordinary collection.
+    An existing leaf, a replaced or unsafe parent and a scope mismatch all
+    refuse with zero transport. No launch, lease, controller, retry or
+    acceptance effect is implied by the observation.
+    """
+    plain = _gateway_scope(run_id)
+    result = {'run_id': run_id, 'retry_authorized': False,
+        'lease_settlement': 'UNKNOWN', 'controller_state': 'UNKNOWN',
+        'acceptance': 'NOT_RECORDED', 'original_operation_mutated': False}
+    try:
+        bound = _gateway_binding(run_id)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(result, state='REFUSED', effect_state='NOT_APPLIED',
+            failure_phase='original_local_binding',
+            this_invocation_remote_read_started=False,
+            reason='original_binding_unconfirmed')
+    remote_started = False
+    def transport_start():
+        nonlocal remote_started
+        remote_started = True
+    try:
+        _collect_validated(bound, destination=plain['destination'],
+            revalidate=lambda: _gateway_binding(run_id), transport_start=transport_start)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+        if not remote_started:
+            return dict(result, state='REFUSED', effect_state='NOT_APPLIED',
+                failure_phase='before_remote_read', this_invocation_remote_read_started=False,
+                reason=('original_reconciliation_destination_exists' if isinstance(error, FileExistsError)
+                        else 'original_reconciliation_refused'))
+        # A later exception or missing leaf cannot retract this invocation's
+        # transport attempt. No status probe can turn it into NOT_APPLIED.
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            failure_phase='after_remote_read_started', this_invocation_remote_read_started=True,
+            reason='original_reconciliation_outcome_unqualified')
+    observed = _gateway_collection_status(run_id)
+    if remote_started and (
+            observed.get('state') != 'COMPLETE'
+            or observed.get('delivery_verified') is not True):
+        # A completed transport can lose its local evidence before this final
+        # status read. Retain this invocation's uncertainty in that race too.
+        return dict(result, state='UNKNOWN', effect_state='UNKNOWN',
+            failure_phase='after_remote_read_started', this_invocation_remote_read_started=True,
+            reason='original_reconciliation_outcome_unqualified')
+    return observed
+
+
+def _gateway_original_delivery(action, run_id, receipt_sha256=None):
+    """Fixed internal machine-owner operation, never a public native CLI mode.
+
+    The enrolled private gateway authorizes its invocation. These selectors
+    carry no identity or permission; all original evidence guards are shared
+    with native delivery. Same-UID access is the existing service trust model.
+    """
+    plain = _gateway_scope(run_id)
+    if (action not in ('collect', 'status', 'result', 'reconcile')
+            or (action == 'result' and (type(receipt_sha256) is not str
+                                       or not HEX.fullmatch(receipt_sha256)))
+            or (action != 'result' and receipt_sha256 is not None)):
+        raise ValueError('gateway_original_arguments_refused')
+    if action == 'status':
+        return _gateway_collection_status(run_id)
+    if action == 'result':
+        stdout = _read_collection_validated(Path(plain['destination']) / 'receipt.json',
+            expected_sha256=receipt_sha256, run_id=run_id,
+            root=plain['root'], parent=plain['parent'])
+        return {'run_id': run_id, 'state': 'COMPLETE', 'receipt_sha256': receipt_sha256,
+            'stdout_bytes': len(stdout), 'stdout_sha256': sha(stdout),
+            'stdout_base64': base64.b64encode(stdout).decode('ascii'),
+            'acceptance': 'NOT_RECORDED'}
+    if action == 'reconcile':
+        return _gateway_reconcile(run_id)
+    observed = _gateway_collection_status(run_id)
+    if observed['state'] != 'ABSENT':
+        return observed
+    try:
+        bound = _gateway_binding(run_id)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return {'run_id': run_id, 'state': 'REFUSED', 'retry_authorized': False,
+            'failure_phase': 'original_local_binding',
+            'this_invocation_remote_read_started': False,
+            'reason': 'original_binding_unconfirmed'}
+    try:
+        # Existing reserve_destination is the only persistent effect fence.
+        # A racing caller or a restart cannot re-observe an existing target.
+        _collect_validated(bound, destination=plain['destination'],
+            revalidate=lambda: _gateway_binding(run_id))
+    except (OSError,ValueError,TypeError,KeyError,RecursionError):
+        return dict(_gateway_collection_status(run_id), effect_state='UNKNOWN')
+    return _gateway_collection_status(run_id)
 
 
 def main(argv=None):

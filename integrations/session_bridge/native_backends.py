@@ -203,8 +203,8 @@ class ExecutiveSummonAdapter:
         self._submit_intent = submit_intent
 
     def __call__(self, arguments: Mapping[str, Any]) -> Any:
-        from .schemas import validate_tool_arguments
-        return self._submit_intent(validate_tool_arguments("session_summon", arguments))
+        from .schemas import validate_installed_summon_arguments
+        return self._submit_intent(validate_installed_summon_arguments(arguments))
 
 
 __all__ = [

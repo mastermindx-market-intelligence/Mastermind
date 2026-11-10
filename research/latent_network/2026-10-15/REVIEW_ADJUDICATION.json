@@ -1,0 +1,26 @@
+{
+  "review_run": "lp-network08-method-review",
+  "experiment": "LP-NETWORK-08",
+  "root": "latent-pressure-research-20261014-chatgpt4-001",
+  "terminal_process_receipt": "Original controller observed rc0 and retained return; consumed from original run",
+  "scope": "Analytical review of the supplied design only; reviewer explicitly ran no code and accessed no data",
+  "acceptance": "ADJUDICATED_NOT_ACCEPTED_AS_AN_UNQUALIFIED_VERDICT",
+  "useful_limits": [
+    "Identity-permuted graphs test peer identity, not the direction of transmission. A transpose/reversed-direction control would be needed before any strong leadership interpretation.",
+    "Shared omitted exposures or clustered mean reversion can give real-neighbor forecasts an advantage without causal propagation.",
+    "Annual graph refresh can miss within-year relationship changes; trailing residual betas change the definition of innovations.",
+    "Matched early-alert precision and conditional lead are descriptive without their own dependence-aware comparison; graph-return ranking is not calibrated pivot timing.",
+    "Four fixed placebo graphs are a sensitivity check, not an exact randomization test."
+  ],
+  "principal_corrections": [
+    "Using peer information observed at t to predict a target future at t+h is a lagged prediction. The claim that same-date peer features cannot distinguish selected incoming from outgoing peers is too strong: transposing scores can change peer membership and predictions. Causality nevertheless remains unproven.",
+    "The frozen implementation ce5b1a25c explicitly applies Holm4 to IC-gain p-values before result inspection. Rank-MSE and precision are additional prespecified gates, not opportunistically selected p-value metrics.",
+    "Train-only standardization and clipping were explicit in the protocol and implemented before tests. The reviewer scaling concern is not a discovered code defect.",
+    "The first counterexample incorrectly says all five selected peers receive0.2 weights. The actual method uses proportional positive scores; scores .31,.27,.22,.18,.11 normalize by1.09, not equal weighting.",
+    "Descriptive precision4/4 is not arithmetically wrong because observations are dependent; independence matters for uncertainty/generalization, which is not established by that count.",
+    "Reconstructed data do not establish original live availability, but this does not erase the validity of a carefully qualified retrospective comparison."
+  ],
+  "no_empirical_approval": true,
+  "new_tests_or_models_after_result_access_block": false,
+  "followup_before_any_causal_claim": "Direction-reversal and factor/sector-preserving control design, separately fixed and judged only under permitted future research; no additional run launched to recover the blocked output"
+}

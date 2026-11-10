@@ -46,13 +46,19 @@ def test_company_plist_projection_is_optional_and_uses_existing_worker_identity(
 @pytest.mark.parametrize("native_armed", [False, True])
 @pytest.mark.parametrize("armed", [None, False, True])
 @pytest.mark.parametrize("dialogue_armed", [False, True])
-def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
-    tmp_path, monkeypatch, armed, dialogue_armed, native_armed,
+@pytest.mark.parametrize("legacy_restored", [False, True])
+def test_installed_company_factory_has_one_runtime_and_selected_a2_relay_scope(
+    tmp_path, monkeypatch, armed, dialogue_armed, native_armed, legacy_restored,
 ):
     from integrations import company_consultation_host
     from ops.executive_os.a2_agent_relay_enrollment import SLACK_WORKSPACE_ID, SLACK_CHANNEL_ID
     raw = _raw(tmp_path)
     raw.update(control_uid=450, worker_uid=451, worker_gid=451)
+    if legacy_restored:
+        # load_control_config resolves macOS /var to /private/var before
+        # handing a disarmed historical rollback configuration to this service.
+        raw.update(terminal_return_armed=False,
+                   terminal_return_socket_path=cli._LEGACY_A2_RECOVERY_SOCKET.resolve(strict=False))
     if dialogue_armed:
         from control_plane.wake_ledger import WakeRetryPolicy
         raw.update(
@@ -104,8 +110,12 @@ def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
             dialogue_owner = captured["dialogue_wake_handler"]
             assert dialogue_owner.canary_profile.grant is None
             assert answer_owners[0] is not dialogue_owner
+        expected_relay = (
+            cli._LEGACY_A2_RECOVERY_SOCKET.resolve(strict=False)
+            if legacy_restored else cli._CANONICAL_AGENT_RELAY_SOCKET
+        )
         assert hosts == [dict(runtime=runtime, repository_root=raw["proof_source_repository"],
-                             worker_uid=451, relay_socket_path=cli._CANONICAL_AGENT_RELAY_SOCKET,
+                             worker_uid=451, relay_socket_path=expected_relay,
                              workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
                              native_return_armed=native_armed, product_acceptance_host=None)]
         assert binding.worker_uid == binding.group_gid == 451

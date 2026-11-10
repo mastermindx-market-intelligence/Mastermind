@@ -7,6 +7,9 @@ only send/dedup owner; this module creates no endpoint, retry or session store.
 from __future__ import annotations
 
 import dataclasses
+import base64
+import hmac
+import secrets
 from contextlib import contextmanager
 import hashlib
 import json
@@ -15,7 +18,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
+from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE, AppPolicies
+from integrations.business_mcp_auth.contracts import validate_resource_policy
 from control_plane.executive_runtime import Runtime
 from control_plane.native_continuation import (
     _ACTOR,
@@ -39,6 +43,7 @@ from control_plane.native_continuation import (
     stored_continuation_request,
 )
 from control_plane.principal_projection import NeutralPrincipalProjection
+from control_plane.installed_principal_read_binding import read_matches_original as _read_matches_original
 from integrations.slack_agent_dialogue.contract_v2 import validate_message_v2, validate_parent_v2
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.service import CONTROL_VERSION_V2, RELAY_PARENT_ATTESTATION, call_service
@@ -75,18 +80,440 @@ def _principal(principal: NeutralPrincipalProjection, *, submit: bool = False) -
     return identity
 
 
+def _trusted_read_pair(policies: AppPolicies | None):
+    """Validate exactly one owner-supplied OAuth read/submit policy pair.
+
+    The private caller may provide a verified principal, NEVER the pairing
+    authority. Without a trusted pair only exact-policy original reads work.
+    No new durable identity/authorization registry is introduced.
+    """
+    if policies is None:
+        return None
+    if type(policies) is not AppPolicies:
+        raise TypeError("trusted read and submit policy pair required")
+    try:
+        read = validate_resource_policy(policies.read)
+        submit = validate_resource_policy(policies.submit)
+        if (tuple(read.required_scopes) != (READ_SCOPE,)
+                or tuple(submit.required_scopes) != tuple(sorted((READ_SCOPE, SUBMIT_SCOPE)))
+                or read.policy_id == submit.policy_id
+                or read.resource != submit.resource
+                or read.issuer != submit.issuer
+                or read.allowed_subject_digests != submit.allowed_subject_digests):
+            raise ValueError
+    except Exception:
+        raise ValueError("trusted read and submit policy pair invalid") from None
+    return read, submit
+
+
+
+
+def _validate_original_writer(value, facts) -> None:
+    if (_generation(facts) != value["generation"]
+            or (facts.job_id, facts.worker_id) != (value["job_id"], value["worker_id"])):
+        raise ValueError("original writer changed")
+
+
+def _validate_original_epoch(value, current) -> None:
+    if _epoch(current) != value["epoch"]:
+        raise ValueError("original session changed")
+
+
+def _validate_original_dialogue_source(value, source) -> None:
+    commission = (source.commission_ref.to_dict() if hasattr(source.commission_ref,"to_dict")
+                  else dict(source.commission_ref))
+    if (source.work_ref != value["context"]["work_ref"]
+            or commission != value["context"]["commission_ref"]
+            or source.watch_mode != value["context"]["watch_mode"]):
+        raise ValueError("original dialogue source changed")
+
+
+def _validate_original_physical_events(value, events, *, parent_fingerprint=None) -> None:
+    if len(events) > 1024:
+        raise ValueError("physical source evidence exceeds bound")
+    found = False
+    for event in events:
+        if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
+            continue
+        physical = event.payload.get("physical_source")
+        if not isinstance(physical, dict) or physical.get("operation_key") != value["context"]["operation_key"]:
+            continue
+        record = wake_record_from_event(event)
+        physical, obligation = record.physical_source, record.obligation
+        if (physical is None or obligation is None
+                or {k:getattr(physical,k) for k in ("workspace_id","channel_id","thread_ts")} != value["carrier"]
+                or (parent_fingerprint is not None
+                    and physical.parent_fingerprint != parent_fingerprint)
+                or physical.candidate.root_job_id != value["root_job_id"]
+                or physical.candidate.job_id != value["job_id"]
+                or physical.candidate.attempt_id != value["attempt_id"]
+                or physical.candidate.worker_id != value["worker_id"]
+                or obligation.job_id != value["job_id"] or obligation.attempt_id != value["attempt_id"]
+                or obligation.source_workstream != value["context"]["work_ref"]):
+            raise ValueError("original physical carrier changed")
+        found = True
+    if not found:
+        raise ValueError("original physical carrier absent")
+
+
 class RuntimeSessionReturn:
     """Stateless joins over immutable request events and the current writer."""
 
     def __init__(self, runtime: Runtime, *, fabric: RuntimeFabricTargetProjector,
                  codex: RuntimeCodexTargetProjector, socket_path: Path,
-                 service_call=call_service):
+                 service_call=call_service, authorized_policies: AppPolicies | None = None,
+                 reference_cursor_key: bytes | None = None, hermes: Any | None = None):
         if (type(runtime) is not Runtime or type(fabric) is not RuntimeFabricTargetProjector
                 or type(codex) is not RuntimeCodexTargetProjector
                 or not Path(socket_path).is_absolute() or not callable(service_call)):
             raise TypeError("existing Runtime and canonical owners are required")
+        from .hermes_native import HermesNativeSession
+        if hermes is not None and type(hermes) is not HermesNativeSession:
+            raise TypeError("installed native Secretary owner required")
+        self.hermes = hermes
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
         self.socket_path, self.service_call = Path(socket_path), service_call
+        self._trusted_read_pair = _trusted_read_pair(authorized_policies)
+        if reference_cursor_key is not None and (
+                type(reference_cursor_key) is not bytes or len(reference_cursor_key) != 32):
+            raise TypeError("trusted 32-byte session composition cursor key required")
+        # The installed Control composition shares this key across its
+        # per-frame providers; process restart rotates it automatically.
+        self._reference_cursor_key = (
+            reference_cursor_key if reference_cursor_key is not None
+            else secrets.token_bytes(32))
+
+    def _original_principals(self, principal):
+        """The current principal and its explicitly installed READ/SEND pair."""
+        identity = _principal(principal)
+        identities = [tuple(identity[key] for key in _IDENTITY)]
+        if self._trusted_read_pair is not None:
+            original = {**identity, "policy_id": self._trusted_read_pair[1].policy_id}
+            if _read_matches_original(original, identity, principal,
+                                      trusted_pair=self._trusted_read_pair):
+                paired = tuple(original[key] for key in _IDENTITY)
+                if paired not in identities:
+                    identities.append(paired)
+        return tuple(identities)
+
+    def _original_command_present(self, operation_key):
+        """Only a successfully closed, unique metadata lookup proves absence."""
+        with self.runtime.store.read() as connection:
+            row = connection.execute(
+                "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+                "FROM events WHERE command_id=? LIMIT 1",
+                (_PREFIX + _request_key(operation_key),)).fetchone()
+            if row is not None and row["payload_bytes"] > 65536:
+                raise ValueError("original request exceeds its bound")
+        return row is not None
+
+    @staticmethod
+    def _hermes_command_event(connection, command_id):
+        from control_plane.executive_runtime import _event_from_row
+        row = connection.execute(
+            "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+            "FROM events WHERE command_id=? LIMIT 1", (command_id,)).fetchone()
+        if row is None:
+            return None
+        if row["payload_bytes"] > 65536:
+            raise ValueError("original event exceeds its bound")
+        event = connection.execute(
+            "SELECT * FROM events WHERE event_id=?", (row["event_id"],)).fetchone()
+        if event is None:
+            raise ValueError("original event disappeared")
+        return _event_from_row(event)
+
+    @staticmethod
+    def _hermes_root_on_connection(connection, binding):
+        from control_plane.executive_runtime import _event_from_row
+        from control_plane.native_continuation import _hermes_root_event
+        rows = connection.execute(
+            "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+            "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
+            "ORDER BY event_id LIMIT 2", (binding["root_job_id"],)).fetchall()
+        if len(rows) != 1 or rows[0]["payload_bytes"] > 65536:
+            raise ValueError("original root cardinality or size changed")
+        row = connection.execute(
+            "SELECT * FROM events WHERE event_id=?", (rows[0]["event_id"],)).fetchone()
+        if row is None:
+            raise ValueError("original root disappeared")
+        return _hermes_root_event(_event_from_row(row), binding)
+
+    @staticmethod
+    def _require_hermes_workstream(connection, binding):
+        # These are the existing Runtime admission owners on this transaction,
+        # not a second read connection or a new permission registry.
+        from control_plane.executive_runtime import (
+            _admission_root_workstream, _assert_workstream_admission_open,
+        )
+        from control_plane.workstream_admission_contract import canonical_work_ref
+        selected = canonical_work_ref(binding["work_ref"])
+        actual = _admission_root_workstream(connection, binding["root_job_id"])
+        if actual != selected:
+            raise ValueError("Secretary responsibility differs from the admitted root")
+        _assert_workstream_admission_open(connection, actual)
+
+    def _hermes_transaction_evidence(self, principal, read_ref, connection):
+        from control_plane.native_continuation import (
+            validate_hermes_continuation_request_event,
+            hermes_continuation_commit_evidence,
+        )
+        match = _READ.fullmatch(read_ref) if type(read_ref) is str else None
+        if match is None:
+            raise ValueError("original reference is malformed")
+        event = self._hermes_command_event(connection, _PREFIX + match[1])
+        value = validate_hermes_continuation_request_event(
+            event, original_principals=self._original_principals(principal))
+        if value["read_ref"] != read_ref:
+            raise ValueError("original reference changed")
+        root = self._hermes_root_on_connection(connection, value["binding"])
+        if (root.event_id != value["root_event_id"]
+                or _digest(root.to_dict()) != value["root_event_sha256"]):
+            raise ValueError("original root changed")
+        events = tuple(self.runtime.store.bounded_aggregate_events(
+            event.aggregate_type, event.aggregate_id, connection=connection,
+            max_events=2, max_total_bytes=131072))
+        indexed = self._hermes_command_event(connection, _COMMIT_PREFIX + match[1])
+        legacy = self._hermes_command_event(connection, _NATIVE_COMMIT_PREFIX + match[1])
+        commit = hermes_continuation_commit_evidence(event, events, indexed, legacy)
+        return event, value, commit
+
+    def _hermes_evidence(self, principal, read_ref):
+        from control_plane.native_continuation import (
+            HERMES_REQUEST_SCHEMAS, hermes_continuation_commit_evidence,
+        )
+        identity = _principal(principal)
+        if self.hermes is not None:
+            self.hermes.require_read()
+        with self.runtime.observe_bounded_read() as observation:
+            event, value, events, indexed, legacy = (
+                observation.read_session_reply_evidence_bounded(
+                    read_ref=read_ref, original_principals=self._original_principals(principal)))
+        _ = observation.receipt
+        if (value.get("schema") not in HERMES_REQUEST_SCHEMAS
+                or not _read_matches_original(value["principal"], identity, principal,
+                                              trusted_pair=self._trusted_read_pair)
+                or _principal(principal) != identity):
+            raise ValueError("original Secretary request is unavailable")
+        if self.hermes is not None:
+            self.hermes.require_read()
+        return event, value, hermes_continuation_commit_evidence(event, events, indexed, legacy)
+
+    def original_request_schema(self, *, principal, read_ref):
+        """Choose the existing original-result reader by immutable provenance."""
+        identity = _principal(principal)
+        with self.runtime.observe_bounded_read() as observation:
+            _, value = observation.read_session_original_request_bounded(
+                read_ref=read_ref, original_principals=self._original_principals(principal))
+        _ = observation.receipt
+        if (not _read_matches_original(value["principal"], identity, principal,
+                                      trusted_pair=self._trusted_read_pair)
+                or _principal(principal) != identity):
+            raise BridgeError("reply_unavailable", "authorized canonical reply is unavailable")
+        return value["schema"]
+
+    async def hermes_targets(self, principal, *, kind="hermes_secretary"):
+        from control_plane.native_continuation import build_hermes_continuation_target, hermes_family
+        family = hermes_family(kind)
+        identity = _principal(principal)
+        if self.hermes is None:
+            return []
+        binding = self.hermes.selected_binding(kind=family.kind)
+        if binding is None:
+            return []
+        root = self.runtime.store.unique_root_created_event(binding["root_job_id"])
+        native_target = await self.hermes.observe(binding)
+        self.hermes.require_binding(binding)
+        after = self.runtime.store.unique_root_created_event(binding["root_job_id"])
+        if (_principal(principal) != identity
+                or _canonical(after.to_dict()) != _canonical(root.to_dict())):
+            raise BridgeError("binding_unavailable", "Secretary target changed during observation")
+        return [build_hermes_continuation_target(
+            binding=binding, root_event=root, native_target=native_target)]
+
+    @staticmethod
+    def _same_hermes_arguments(value, args, identity):
+        if (value["principal"] != identity or value["target_ref"] != args["target_ref"]
+                or value["operation_key"] != args["operation_key"]
+                or value["input"] != {key: args[key] for key in ("instruction", "stop_condition")}):
+            raise BridgeError("operation_carrier_conflict", "original Secretary request differs")
+
+    async def _bind_hermes_request(self, principal, args):
+        from control_plane.native_continuation import build_hermes_continuation_request, hermes_family_for_target
+        family = hermes_family_for_target(args["target_ref"])
+        identity = _principal(principal, submit=True)
+        if self.hermes is None:
+            raise BridgeError("backend_unavailable", "installed Secretary owner is unavailable")
+        binding = self.hermes.selected_binding(kind=family.kind)
+        if binding is None:
+            raise BridgeError("binding_unavailable", "Secretary selection is unavailable")
+        self.hermes.require_submit(binding)
+        root = self.runtime.store.unique_root_created_event(binding["root_job_id"])
+        key = _request_key(args["operation_key"])
+        read_ref = "session-reply-" + key
+        try:
+            native_target = await self.hermes.observe(binding)
+        except Exception:
+            # An overlapping invocation may have won while observation awaited.
+            # Recover only that proven original; failure is never absence.
+            if not self._original_command_present(args["operation_key"]):
+                raise
+            event, original, commit = self._hermes_evidence(principal, read_ref)
+            self._same_hermes_arguments(original, args, identity)
+            return event, original, commit
+        if self._original_command_present(args["operation_key"]):
+            event, original, commit = self._hermes_evidence(principal, read_ref)
+            self._same_hermes_arguments(original, args, identity)
+            return event, original, commit
+        with self.runtime.store.transaction() as connection:
+            prior = self._hermes_command_event(connection, _PREFIX + key)
+            if prior is not None:
+                event, original, commit = self._hermes_transaction_evidence(
+                    principal, read_ref, connection)
+                self._same_hermes_arguments(original, args, identity)
+            else:
+                # Fresh target and submit gates are evaluated only after the
+                # original-command race has been reconciled on this connection.
+                if _principal(principal, submit=True) != identity:
+                    raise ValueError("Executive authorization changed")
+                self.hermes.require_submit(binding)
+                current_root = self._hermes_root_on_connection(connection, binding)
+                if _canonical(current_root.to_dict()) != _canonical(root.to_dict()):
+                    raise ValueError("Secretary root changed")
+                self._require_hermes_workstream(connection, binding)
+                value = build_hermes_continuation_request(
+                    principal=identity, binding=binding, root_event=root,
+                    native_target=native_target, arguments=args)
+                self.runtime.store.append_event(
+                    connection, aggregate_type="session_bridge_continue", aggregate_id=key,
+                    event_type=_EVENT, actor=_ACTOR, job_id=binding["root_job_id"],
+                    attempt_id=None, worker_id=None, payload=value, command_id=_PREFIX + key)
+                event, original, commit = self._hermes_transaction_evidence(
+                    principal, read_ref, connection)
+        return event, original, commit
+
+    def _begin_hermes_commit(self, principal, args, original_event, *,
+                            operation_name, native_request):
+        from control_plane.native_continuation import build_hermes_continuation_commit
+        identity = _principal(principal, submit=True)
+        if self.hermes is None:
+            raise BridgeError("backend_unavailable", "installed Secretary owner is unavailable")
+        binding = original_event.payload["binding"]
+        self.hermes.require_submit(binding)
+        with self.runtime.store.transaction() as connection:
+            event, value, commit = self._hermes_transaction_evidence(
+                principal, original_event.payload["read_ref"], connection)
+            self._same_hermes_arguments(value, args, identity)
+            if _canonical(event.to_dict()) != _canonical(original_event.to_dict()):
+                raise ValueError("original Secretary request changed")
+            if commit is not None:
+                raise BridgeError("effect_unknown", "read the original Secretary submission")
+            self._require_hermes_workstream(connection, binding)
+            if _principal(principal, submit=True) != identity:
+                raise ValueError("Executive authorization changed")
+            self.hermes.require_submit(binding)
+            payload = build_hermes_continuation_commit(
+                event, operation_name=operation_name, native_request=native_request)
+            self.runtime.store.append_event(
+                connection, aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id,
+                event_type=_COMMIT_EVENT, actor=_ACTOR, job_id=event.job_id,
+                attempt_id=None, worker_id=None, payload=payload,
+                command_id=_COMMIT_PREFIX + event.aggregate_id)
+            self._hermes_transaction_evidence(principal, value["read_ref"], connection)
+        # The transaction has committed before the transport may write bytes.
+        return None
+
+    async def read_hermes(self, principal, read_ref):
+        from control_plane.native_continuation import hermes_continuation_read_request
+        from .hermes_native import public_result
+        try:
+            identity = _principal(principal)
+            event, value, commit = self._hermes_evidence(principal, read_ref)
+            native_result = None
+            if commit is not None and self.hermes is not None:
+                # This is original-only recovery. No target observation, current
+                # native revision check, submit guard, session creation or send.
+                try:
+                    native_result = await self.hermes.request(
+                        value["binding"], hermes_continuation_read_request(value))
+                except Exception:
+                    # Retain journal facts if the original selected route cannot
+                    # currently answer. Do not invent a native refusal or absence.
+                    native_result = None
+            after, current, current_commit = self._hermes_evidence(principal, read_ref)
+            if (_principal(principal) != identity
+                    or _canonical(after.to_dict()) != _canonical(event.to_dict())
+                    or current != value
+                    or (None if current_commit is None else _canonical(current_commit.to_dict()))
+                    != (None if commit is None else _canonical(commit.to_dict()))):
+                raise ValueError("original Secretary evidence changed during read")
+            return public_result(event, value, commit_started=commit is not None,
+                                 native_result=native_result)
+        except BridgeError:
+            raise
+        except Exception:
+            raise BridgeError("reply_unavailable", "authorized original Secretary result is unavailable") from None
+
+    async def send_hermes(self, principal, arguments):
+        from .hermes_native import public_result
+        args = validate_tool_arguments("session_send", arguments)
+        identity = _principal(principal, submit=True)
+        from control_plane.native_continuation import hermes_family_for_target
+        try:
+            hermes_family_for_target(args["target_ref"])
+        except ValueError:
+            raise BridgeError("invalid_input", "native conversation target is malformed") from None
+        read_ref = "session-reply-" + _request_key(args["operation_key"])
+        try:
+            # An original commit wins before any live native observation or
+            # fresh submit gate. Reconnect never becomes a second submission.
+            if self._original_command_present(args["operation_key"]):
+                event, value, commit = self._hermes_evidence(principal, read_ref)
+                self._same_hermes_arguments(value, args, identity)
+                if commit is not None:
+                    return await self.read_hermes(principal, read_ref)
+            else:
+                event, value, commit = await self._bind_hermes_request(principal, args)
+                if commit is not None:
+                    return await self.read_hermes(principal, read_ref)
+            if self.hermes is None:
+                raise BridgeError("backend_unavailable", "installed Secretary owner is unavailable")
+            result = None
+            try:
+                self.hermes.require_submit(value["binding"])
+                if _principal(principal, submit=True) != identity:
+                    raise ValueError("Executive authorization changed")
+                result = await self.hermes.request(
+                    value["binding"], value["native_request"],
+                    before_write=lambda operation_name, native_request: self._begin_hermes_commit(
+                        principal, args, event, operation_name=operation_name,
+                        native_request=native_request))
+            except Exception:
+                # The original marker, not a transport NO_EFFECT classification,
+                # determines recovery after the synchronous callback committed.
+                _, _, commit = self._hermes_evidence(principal, read_ref)
+                if commit is None:
+                    raise
+                return await self.read_hermes(principal, read_ref)
+            after, current, commit = self._hermes_evidence(principal, read_ref)
+            if (_principal(principal, submit=True) != identity
+                    or _canonical(after.to_dict()) != _canonical(event.to_dict())
+                    or current != value):
+                raise BridgeError("effect_unknown", "reconcile the original Secretary submission")
+            if commit is None:
+                raise BridgeError("effect_unknown", "native boundary was not qualified")
+            try:
+                return public_result(event, value, commit_started=True, native_result=result)
+            except BridgeError:
+                raise
+            except Exception:
+                # Withhold an unqualified native reply while retaining the exact
+                # original request and its proven modifying boundary.
+                return public_result(event, value, commit_started=True)
+        except BridgeError:
+            raise
+        except Exception:
+            raise BridgeError("effect_unknown", "reconcile the original Secretary submission") from None
 
     def _target(self, target_ref):
         if target_ref.startswith("codex:"):
@@ -200,6 +627,11 @@ class RuntimeSessionReturn:
         """
         command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
         indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        return self._native_commit_admission_from_events(event, events, indexed)
+
+    def _native_commit_admission_from_events(self, event, events, indexed):
+        """Validate detached facts with the incumbent native admission law."""
+        command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
         native = [item for item in events if item.event_type == _NATIVE_COMMIT_EVENT]
         if not native and indexed is None:
             return None
@@ -228,15 +660,19 @@ class RuntimeSessionReturn:
 
     def _commit_started(self, event, message, *, connection=None):
         """Validate the sole commit-start fact on the existing request aggregate."""
-        events = self.runtime.store.list_events(
-            aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
-            connection=connection)
+        events = self.runtime.store.bounded_aggregate_events(
+            "session_bridge_continue", event.aggregate_id, connection=connection)
         others = [item for item in events if item.event_id != event.event_id]
         native = self._native_commit_admission(event, others, connection=connection)
         if native is not None:
             others = [item for item in others if item.event_id != native.event_id]
         command = _COMMIT_PREFIX + event.aggregate_id
         indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        return self._commit_started_from_events(event, message, others, native, indexed)
+
+    def _commit_started_from_events(self, event, message, others, native, indexed):
+        """Match already acquired/pruned aggregate facts to the exact message."""
+        command = _COMMIT_PREFIX + event.aggregate_id
         if not others and indexed is None and native is None:
             return False
         if (len(others) != 1 or indexed is None or others[0].to_dict() != indexed.to_dict()
@@ -382,19 +818,11 @@ class RuntimeSessionReturn:
     def _request(self, read_ref: str):
         event, value = self._stored_request(read_ref)
         facts = self.runtime.current_harness_binding_source(value["attempt_id"])
-        if (_generation(facts) != value["generation"]
-                or (facts.job_id, facts.worker_id) != (value["job_id"], value["worker_id"])):
-            raise ValueError("original writer changed")
+        _validate_original_writer(value, facts)
         current = _read_current_target(self.runtime, value["context"]["operation_key"])
-        if _epoch(current) != value["epoch"]:
-            raise ValueError("original session changed")
+        _validate_original_epoch(value, current)
         source = _read_dialogue_source(self.runtime, value["root_job_id"])
-        commission = (source.commission_ref.to_dict() if hasattr(source.commission_ref,"to_dict")
-                      else dict(source.commission_ref))
-        if (source.work_ref != value["context"]["work_ref"]
-                or commission != value["context"]["commission_ref"]
-                or source.watch_mode != value["context"]["watch_mode"]):
-            raise ValueError("original dialogue source changed")
+        _validate_original_dialogue_source(value, source)
         self._same_thread(value)
         return event, value, facts
 
@@ -402,31 +830,8 @@ class RuntimeSessionReturn:
         # Parent messages may advance on this thread. No second physical thread
         # may be substituted; every matching Wake source is validated by its owner.
         events = self.runtime.events.list_events(job_id=value["job_id"], attempt_id=value["attempt_id"])
-        if len(events) > 1024:
-            raise ValueError("physical source evidence exceeds bound")
-        found = False
-        for event in events:
-            if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
-                continue
-            physical = event.payload.get("physical_source")
-            if not isinstance(physical, dict) or physical.get("operation_key") != value["context"]["operation_key"]:
-                continue
-            record = wake_record_from_event(event)
-            physical, obligation = record.physical_source, record.obligation
-            if (physical is None or obligation is None
-                    or {k:getattr(physical,k) for k in ("workspace_id","channel_id","thread_ts")} != value["carrier"]
-                    or (parent_fingerprint is not None
-                        and physical.parent_fingerprint != parent_fingerprint)
-                    or physical.candidate.root_job_id != value["root_job_id"]
-                    or physical.candidate.job_id != value["job_id"]
-                    or physical.candidate.attempt_id != value["attempt_id"]
-                    or physical.candidate.worker_id != value["worker_id"]
-                    or obligation.job_id != value["job_id"] or obligation.attempt_id != value["attempt_id"]
-                    or obligation.source_workstream != value["context"]["work_ref"]):
-                raise ValueError("original physical carrier changed")
-            found = True
-        if not found:
-            raise ValueError("original physical carrier absent")
+        _validate_original_physical_events(
+            value, events, parent_fingerprint=parent_fingerprint)
 
     @staticmethod
     def _continuation_messages(value, result):
@@ -498,6 +903,126 @@ class RuntimeSessionReturn:
             raise BridgeError("source_unavailable",
                               "authorized canonical continuation is unavailable") from None
 
+    async def resolve_original_reply_grant(self, *, principal, request_ref):
+        """Fresh READ admission for the original CONTINUE before its reply.
+
+        Request text is only a lookup key. The immutable original caller and
+        current Runtime/Dialogue/physical-source owners authorize this read.
+        Committed reply recovery remains separate in resolve_read; this method
+        cannot grant fresh subscriptions using a retired writer's provenance.
+        """
+        from .web_reply_subscription_owner import OriginalReplyGrant, owner_key
+
+        try:
+            identity = _principal(principal)
+            if (type(request_ref) is not str or re.fullmatch(
+                    re.escape(_PREFIX) + r"[0-9a-f]{64}", request_ref) is None):
+                raise ValueError("invalid original request reference")
+            indexed = self.runtime.events.get_event_by_command_id(request_ref)
+            if indexed is None or indexed.command_id != request_ref:
+                raise ValueError("original request unavailable")
+            event, value = self._stored_request(indexed.payload["read_ref"])
+            if (event.to_dict() != indexed.to_dict()
+                    or event.command_id != request_ref or value["principal"] != identity):
+                raise ValueError("original request ownership changed")
+            source = await self.read_continuation_source(read_ref=value["read_ref"])
+            after, current, _ = self._request(value["read_ref"])
+            indexed_after = self.runtime.events.get_event_by_command_id(request_ref)
+            if (indexed_after is None or after.to_dict() != event.to_dict()
+                    or indexed_after.to_dict() != event.to_dict()
+                    or current != value or source["event"] != event.to_dict()
+                    or source["request"] != value or _principal(principal) != identity):
+                raise ValueError("original request changed during read")
+            revision = _digest({
+                "request_event_sha256": _digest(event.to_dict()),
+                "generation": current["generation"], "epoch": current["epoch"],
+                "parent_fingerprint": source["parent"]["fingerprint"],
+            })
+            # The canonical request schema has no independent authority expiry.
+            # Bound this fresh admission to the current verified READ token only.
+            return OriginalReplyGrant(
+                owner_key=owner_key(principal), request_ref=event.command_id,
+                read_ref=value["read_ref"], revision=revision,
+                access_current=True, expires_at=principal.expires_at,
+            )
+        except Exception:
+            raise BridgeError("reply_unavailable",
+                              "authorized original request is unavailable") from None
+
+    def session_reply_references(
+        self, *, principal, work_ref: str, root_job_id: str | None = None,
+        cursor: str | None = None, page_size: int = 16,
+    ) -> dict:
+        """READ-only bounded projection from immutable original request Events.
+
+        Rows are REFERENCE_ONLY, never COMMIT, reply availability or parent ACK.
+        Process-local signed cursors expire on composition restart. This method
+        does not allocate an active operation slot or issue any Dialogue effects.
+        """
+        try:
+            identity = _principal(principal)
+            if (type(work_ref) is not str or _TOKEN.fullmatch(work_ref) is None
+                    or (root_job_id is not None and
+                        (type(root_job_id) is not str or _TOKEN.fullmatch(root_job_id) is None))
+                    or type(page_size) is not int or not 1 <= page_size <= 32):
+                raise ValueError("invalid reference selector")
+            scope = hashlib.sha256(_canonical({
+                "principal": identity, "scopes": tuple(principal.scopes),
+                "work_ref": work_ref, "root_job_id": root_job_id,
+            })).hexdigest()
+            if cursor is None:
+                watermark, before = None, None
+            else:
+                if type(cursor) is not str or len(cursor) > 2048:
+                    raise ValueError("invalid cursor")
+                raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+                # Python's permissive decoder can ignore or normalize trailing
+                # material. Require the single canonical encoding before HMAC
+                # verification: every byte of the supplied cursor is bound.
+                if base64.urlsafe_b64encode(raw).decode("ascii") != cursor:
+                    raise ValueError("noncanonical cursor")
+                if len(raw) > 384 or len(raw) < 33:
+                    raise ValueError("invalid cursor size")
+                body, mac = raw[:-32], raw[-32:]
+                expected = hmac.digest(self._reference_cursor_key, body, "sha256")
+                if not hmac.compare_digest(mac, expected):
+                    raise ValueError("invalid cursor authentication")
+                state = json.loads(body)
+                if (type(state) is not dict or set(state) != {"v", "s", "w", "p"}
+                        or state["v"] != 1 or state["s"] != scope
+                        or type(state["w"]) is not int or state["w"] < 0
+                        or type(state["p"]) is not int or state["p"] < 1):
+                    raise ValueError("invalid cursor binding")
+                watermark, before = state["w"], state["p"]
+            original_principals = self._original_principals(principal)
+            with self.runtime.observe_bounded_read() as observation:
+                watermark, position, references = observation.read_session_reply_references_bounded(
+                    work_ref=work_ref, root_job_id=root_job_id,
+                    original_principals=tuple(original_principals),
+                    high_water=watermark, before_event_id=before, page_size=page_size,
+                )
+            # A failed close/finalization cannot release a partial public page.
+            # Unbound Runtime's finalized UNKNOWN receipt remains admissible.
+            _ = observation.receipt
+            rows = list(references)
+            # Never claim completeness when a partial metadata window exists.
+            more = position is not None and position > 1
+            next_cursor = None
+            if more:
+                body = _canonical({"v": 1, "s": scope, "w": watermark, "p": position})
+                next_cursor = base64.urlsafe_b64encode(
+                    body + hmac.digest(self._reference_cursor_key, body, "sha256")
+                ).decode("ascii")
+            if _principal(principal) != identity:
+                raise ValueError("authorization changed")
+            return {"schema": "mastermind.session_reply_references.v1",
+                    "status": "PARTIAL" if more else "COMPLETE",
+                    "references": rows, "next_cursor": next_cursor,
+                    "high_water": watermark}
+        except Exception:
+            raise BridgeError("reply_unavailable",
+                              "authorized canonical reply references unavailable") from None
+
     def resolve_operation_read_ref(self, *, principal, operation_key):
         """Recover an original caller's reference using immutable provenance only."""
         try:
@@ -505,8 +1030,14 @@ class RuntimeSessionReturn:
             if not isinstance(operation_key, str) or _TOKEN.fullmatch(operation_key) is None:
                 raise ValueError("invalid original operation")
             read_ref = "session-reply-" + _request_key(operation_key)
-            _, value = self._stored_request(read_ref)
-            if value["principal"] != identity or value["operation_key"] != operation_key:
+            with self.runtime.observe_bounded_read() as observation:
+                _, value = observation.read_session_original_request_bounded(
+                    read_ref=read_ref, original_principals=self._original_principals(principal))
+            # Provenance-only recovery does not require COMMIT or a live target.
+            # Closing/finalization failures withhold the reference; UNKNOWN is valid.
+            _ = observation.receipt
+            if not _read_matches_original(value["principal"], identity, principal,
+                    trusted_pair=self._trusted_read_pair) or value["operation_key"] != operation_key:
                 raise ValueError("foreign original operation")
             return value["read_ref"]
         except Exception:
@@ -520,13 +1051,31 @@ class RuntimeSessionReturn:
         proves COMMIT admission only; the exact canonical reply must also be
         read and matched before any result can be returned.
         """
-        event, value = self._stored_request(read_ref)
-        events = self.runtime.events.list_events(
-            aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
-        admission = self._native_commit_admission(event, events)
+        if not isinstance(read_ref, str) or _READ.fullmatch(read_ref) is None:
+            raise ValueError("invalid read reference")
+        with self.runtime.observe_bounded_read() as observation:
+            event, value, events, indexed, native_indexed = (
+                observation.read_session_reply_evidence_bounded(read_ref=read_ref))
+        # No acquired fact escapes a failed physical close/finalization. This
+        # immutable selection requires a receipt, never a SAME state assertion.
+        _ = observation.receipt
+        admission = self._native_commit_admission_from_events(event, events, native_indexed)
+        others = tuple(item for item in events if item.event_id != event.event_id
+                       and (admission is None or item.event_id != admission.event_id))
         if admission is None:
-            event, value, _ = self._request(read_ref)
-        return event, value, admission
+            # The live fallback acquires its own fresh original request.
+            # Close and finalize that separate observation before validating
+            # or exposing its material through the shared provenance rules.
+            with self.runtime.observe_bounded_read() as live_observation:
+                live_event, live_value, facts, current, source, scoped_events = (
+                    live_observation.read_session_live_writer_bounded(read_ref=read_ref))
+            _ = live_observation.receipt
+            _validate_original_writer(live_value, facts)
+            _validate_original_epoch(live_value, current)
+            _validate_original_dialogue_source(live_value, source)
+            _validate_original_physical_events(live_value, scoped_events)
+            event, value = live_event, live_value
+        return event, value, admission, others, indexed
 
     async def require_committed_native_reply(self, *, read_ref):
         """Internal owner read of the exact reply; grants no parent identity."""
@@ -538,8 +1087,8 @@ class RuntimeSessionReturn:
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("canonical carrier unavailable")
             messages, request = self._continuation_messages(value, response["result"])
-            events = self.runtime.events.list_events(
-                aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+            events = self.runtime.store.bounded_aggregate_events(
+                event.aggregate_type, event.aggregate_id)
             admission = self._native_commit_admission(event, events)
             if admission is None or not self._commit_started(event, request):
                 raise ValueError("native COMMIT unavailable")
@@ -554,8 +1103,8 @@ class RuntimeSessionReturn:
                         "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("exact canonical native reply unavailable")
             after, after_value, _ = self._request(read_ref)
-            after_events = self.runtime.events.list_events(
-                aggregate_type=after.aggregate_type, aggregate_id=after.aggregate_id)
+            after_events = self.runtime.store.bounded_aggregate_events(
+                after.aggregate_type, after.aggregate_id)
             after_admission = self._native_commit_admission(after, after_events)
             if (after.to_dict() != event.to_dict() or after_value != value
                     or after_admission is None or after_admission.to_dict() != admission.to_dict()
@@ -568,8 +1117,9 @@ class RuntimeSessionReturn:
     async def resolve_read(self, *, principal, read_ref):
         try:
             identity = _principal(principal)
-            event, value, admission = self._read_request(read_ref)
-            if value["principal"] != identity:
+            event, value, admission, others, indexed = self._read_request(read_ref)
+            if not _read_matches_original(value["principal"], identity, principal,
+                    trusted_pair=self._trusted_read_pair):
                 raise ValueError("foreign principal")
             response = await self.service_call(self.socket_path, {
                 "version": CONTROL_VERSION_V2, "operation": "read_thread",
@@ -577,7 +1127,8 @@ class RuntimeSessionReturn:
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("carrier unavailable")
             messages, request = self._continuation_messages(value, response["result"])
-            if admission is not None and not self._commit_started(event, request):
+            if admission is not None and not self._commit_started_from_events(
+                    event, request, others, admission, indexed):
                 raise ValueError("original continuation COMMIT is unavailable")
             expected_reply_key = "asd-native-reply-" + hashlib.sha256(
                 ("mastermind.session_bridge.native_reply.v1\n" + value["operation_key"]).encode()
@@ -598,13 +1149,15 @@ class RuntimeSessionReturn:
                     or any(request[k] != value["context"][k] for k in (
                         "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("reply context changed")
-            after, after_value, after_admission = self._read_request(read_ref)
+            after, after_value, after_admission, after_others, after_indexed = self._read_request(read_ref)
             if (after.to_dict() != event.to_dict()
                     or (None if admission is None else admission.to_dict())
                     != (None if after_admission is None else after_admission.to_dict())
-                    or after_value["principal"] != _principal(principal)):
+                    or not _read_matches_original(after_value["principal"], _principal(principal),
+                        principal, trusted_pair=self._trusted_read_pair)):
                 raise ValueError("authorization changed")
-            if after_admission is not None and not self._commit_started(after, request):
+            if after_admission is not None and not self._commit_started_from_events(
+                    after, request, after_others, after_admission, after_indexed):
                 raise ValueError("original continuation COMMIT changed during read")
             return NativeReplyReadBinding(
                 authorized_principal=principal, read_ref=read_ref,
@@ -791,3 +1344,18 @@ class RuntimeSessionReturn:
                 request_message_key=in_reply_to, reply_operation_key=operation_key)
         except Exception:
             raise BridgeError("binding_unavailable", "exact native return binding unavailable") from None
+
+
+class RuntimeOriginalRequestResolver:
+    """Opt-in projection of the concrete Runtime return owner for subscriptions."""
+
+    __slots__ = ("_owner",)
+
+    def __init__(self, owner: RuntimeSessionReturn):
+        if type(owner) is not RuntimeSessionReturn:
+            raise TypeError("canonical Runtime return owner required")
+        self._owner = owner
+
+    async def resolve(self, principal, request_ref):
+        return await self._owner.resolve_original_reply_grant(
+            principal=principal, request_ref=request_ref)

@@ -199,8 +199,8 @@ def build_workspace_composer(
     bounded_runtime: Callable[[], Any],
     bindings_path: Path | str | None,
     timeout: float = 240.0,
-) -> Callable[[str], dict[str, Any]]:
-    """Return the ``compose_inputs(generated_at)`` callback for ServerConfig.
+) -> Callable[..., dict[str, Any]]:
+    """Return the installed ``compose_inputs`` callback for ServerConfig.
 
     ``packet_collector`` is the existing
     ``integrations.executive_mcp.installed.InstalledBootPacketCollector``
@@ -211,7 +211,10 @@ def build_workspace_composer(
     explicit unavailable binding — the default HOME location is never
     expanded.  The returned callable raises on failed collection; the
     chairman seam turns that failure into explicit unavailable source inputs
-    and never falls back to the legacy gather.
+    and never falls back to the legacy gather. An explicitly supplied detached
+    ``active_builds_snapshot`` replaces only the active-builds artifact read;
+    omission alone retains that bounded reader. An unavailable supplied value
+    reaches the canonical compositor without an artifact substitution.
     """
     from control_plane import chairman_control_room as ccr
     from control_plane import executive_inbox
@@ -220,11 +223,16 @@ def build_workspace_composer(
     repo = Path(repo_root)
     macro = None if macro_root is None else os.fspath(macro_root)
 
-    def compose_inputs(generated_at: str) -> dict[str, Any]:
+    def compose_inputs(
+        generated_at: str, *, active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+    ) -> dict[str, Any]:
         packet = packet_collector(
             repo_root=repo, macro_root_flag=macro, now=generated_at, timeout=timeout)
-        active_builds, builds_error = _read_installed_document(
-            ccr._read_active_builds, macro)
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            active_builds, builds_error = _read_installed_document(
+                ccr._read_active_builds, macro)
+        else:
+            active_builds, builds_error = active_builds_snapshot, None
         agent_os_state, state_error = _read_installed_document(
             ccr._read_agent_os_state, macro)
         if bindings_path is None:

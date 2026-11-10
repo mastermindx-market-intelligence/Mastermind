@@ -106,6 +106,8 @@ def normalize_principal_request(
     """
 
     raw = _exact_public_keys(payload)
+    if raw.get("execution_profile") == "native_research_only":
+        raise CooPrincipalRequestInvalid("native research requires authenticated App admission")
     if not isinstance(expected_work_ref, str) or not expected_work_ref:
         raise CooPrincipalRequestInvalid("expected_work_ref is invalid")
 

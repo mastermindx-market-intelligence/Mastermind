@@ -1,0 +1,34 @@
+{
+  "schema": "soxx.five_minute_failure_hazard.v18",
+  "date": "2026-10-11",
+  "precommitted_before_5m_fetch": true,
+  "authorized_sources": "existing public read-only Terminal /api/intraday?sym=TICKER&tf=5m&ext=0; NO direct paid vendor API",
+  "frozen_cohort": [
+    "SOXX",
+    "SMH",
+    "QQQ",
+    "AMD"
+  ],
+  "data_requirements": "Market-local ET display epoch convert to actual aware ET; OHLCV source provenance, coverage, strict 3x5m->15m aggregation identity; if incomplete, only matched entry dates, exclude censored episode for every policy",
+  "timing": "Completed 3h negative but rising MACD histogram/Stoch K>=D after 2x extension, next recorded 15m open; hypothetical 15m stop-first/partial at 2%",
+  "goals": [
+    "measure first 1,2,3,6 RTH-hour 5m MFE/MAE and close return prior to exit",
+    "compare evidence known at 1h/2h vs subsequent winning vs failed entry with all originally eligible entries",
+    "measure stop hazard within first 1/3h and overnight gap by 5m sampling",
+    "test 5m confirmed price structural failure known before stop; count winner harm and losses avoided without optimization",
+    "separately compute 5m/15m OHLC high-low ordering uncertainty; no quotes or real fills"
+  ],
+  "default_stop_pct": 1.5,
+  "partial_at_gain": 2,
+  "partial_fraction": 0.25,
+  "horizon_RTH_h": 52,
+  "fees_bp_per_side": 5,
+  "positive_label": "Final same-entry 52h timed-exit with 1.5% stop net_pct>0; outcome label not used to trigger trades",
+  "measure_at": "fixed 1h/2h/3h/6h RTH after entry; calculate only when not yet stopped and data complete",
+  "no_feature_threshold_search": true,
+  "allow_diagnostic_model_without_selection": false,
+  "no_pit": true,
+  "source_price_adjustment_not_proven": true,
+  "no_live_trading": true,
+  "publication": "Only aggregate statistics and code; underlying venue source values stay private"
+}

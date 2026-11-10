@@ -3,9 +3,11 @@
 The broker is deliberately smaller than a scheduler or control plane.  It runs
 as the dedicated Codex worker account, accepts requests only from the configured
 Executive control UID over a Unix-domain socket, and exposes five typed
-operations around :class:`CodexWorkerAdapter`:
+operations around :class:`CodexWorkerAdapter` plus one optional, requestless
+capacity observation owned by the existing Capacity evidence adapter:
 
-``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``.
+``start`` -> ``status`` -> ``collect`` / ``cancel`` and ``validate``;
+``capacity-observe/v1`` is read-only and available only while the broker is idle.
 
 There is no generic command or shell endpoint.  Validation argv must be frozen
 in the start request and is matched byte-for-byte before execution.  The
@@ -91,7 +93,9 @@ from control_plane.operator_harness_contract import (
     compare_launch,
 )
 from control_plane.operator_harness_wire import (
+    CONTINUATION_OPERATION_PREFIX,
     OperatorHarnessWireError,
+    RetainedPlainInputEvidence,
     event_cursor as wire_event_cursor,
     launch_comparison as wire_launch_comparison,
     operation_id as wire_operation_id,
@@ -99,6 +103,7 @@ from control_plane.operator_harness_wire import (
     process_identity_observation as wire_process_identity_observation,
     process_generation_ref as wire_process_generation_ref,
     requested_execution_profile as wire_requested_execution_profile,
+    retained_plain_input_evidence as wire_retained_plain_input_evidence,
     session_epoch_ref as wire_session_epoch_ref,
     provider_session_handoff as wire_provider_session_handoff,
     to_wire as operator_to_wire,
@@ -191,8 +196,8 @@ _OHF_OPERATIONS = frozenset(
 )
 _ALLOWED_OPERATIONS = frozenset(
     {"start", "status", "collect", "cancel", "validate", "autonomy-canary",
-     "interactive-canary", "assignment-seal-prepare", "assignment-seal-commit",
-     "assignment-seal-finalize"}
+     "interactive-canary", "capacity-observe/v1", "assignment-seal-prepare",
+     "assignment-seal-commit", "assignment-seal-finalize"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -975,6 +980,14 @@ class _BrokerOperatorRun:
     materialization_receipt: OperatorMaterializationReceipt | None = None
     resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
+    # Transient begin-turn marks for the retained plain-input digest
+    # observation: the exact immutable TurnRef accepted at ohf-begin-turn under
+    # the continuation prefix, bound to the generation that accepted it.  This
+    # is process-local observation selection only, never ACK authority, and it
+    # dies with the run instead of any durable store.
+    retained_plain_turns: dict[TurnRef, ProcessGenerationRef] = dataclasses.field(
+        default_factory=dict
+    )
     terminal_error: str | None = None
     busy: bool = False
 
@@ -1399,11 +1412,13 @@ class ExecutiveWorkerBroker:
         operator_resource_factory: OperatorResourceFactory | None = None,
         operator_harness_armed: bool = False,
         autonomy_guard: Callable[[], None] | None = None,
+        native_realm_guard: Callable[[], None] | None = None,
         autonomy_canary_factory: Callable[
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
         subscription_realm_owner: Any | None = None,
+        capacity_observer: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self._operator_only = adapter is None
         self._operator_binary_attestation = operator_binary_attestation
@@ -1492,6 +1507,14 @@ class ExecutiveWorkerBroker:
         self.operator_resource_factory = operator_resource_factory
         self.operator_harness_armed = bool(operator_harness_armed)
         self.autonomy_guard = autonomy_guard
+        # Consume the incumbent host-owned native-realm check. Do not invent a
+        # second provider identity, credential source, or Operator arm.
+        if self.adapter_id == "claude-code":
+            if self.operator_harness_armed or not callable(native_realm_guard):
+                raise WorkerBrokerError("flat Claude requires native realm guard")
+        elif native_realm_guard is not None:
+            raise WorkerBrokerError("native realm guard requires flat Claude")
+        self.native_realm_guard = native_realm_guard
         self.autonomy_canary_factory = autonomy_canary_factory
         if subscription_realm_owner is not None:
             from control_plane.codex_provider_realm import SubscriptionRealmOwner
@@ -1501,6 +1524,9 @@ class ExecutiveWorkerBroker:
                     "subscription_realm_owner must be a SubscriptionRealmOwner"
                 )
         self.subscription_realm_owner = subscription_realm_owner
+        if capacity_observer is not None and not callable(capacity_observer):
+            raise WorkerBrokerError("capacity observer must be callable")
+        self.capacity_observer = capacity_observer
         if self.operator_harness_armed and self.operator_adapter_factory is None:
             raise WorkerBrokerError(
                 "armed Operator Harness requires a reviewed worker-local adapter factory"
@@ -1537,6 +1563,24 @@ class ExecutiveWorkerBroker:
         self.startup_sweep: UIDSweepReceipt | None = None
         self.last_sweep: UIDSweepReceipt | None = None
 
+    def _require_current_native_realm(self) -> None:
+        """Recheck the existing host realm immediately before native flat admission.
+
+        A revoked realm is quarantined against later starts; cancellation and
+        collection remain available for any previously admitted process.
+        """
+        if self.adapter_id != "claude-code":
+            return
+        if self._quarantined_reason == "native_realm_refused":
+            raise BrokerStateError("native realm refused")
+        try:
+            if not callable(self.native_realm_guard):
+                raise RuntimeError("native realm guard unavailable")
+            self.native_realm_guard()
+        except Exception:
+            self._quarantined_reason = "native_realm_refused"
+            raise BrokerStateError("native realm refused") from None
+
     def _require_current_autonomy(self) -> None:
         """Revalidate current arm authority without exposing receipt diagnostics."""
 
@@ -1558,6 +1602,7 @@ class ExecutiveWorkerBroker:
             return self.startup_sweep
         if self._quarantined_reason is not None:
             raise BrokerStateError("worker startup requires original-owner reconciliation")
+        self._require_current_native_realm()
         self._require_current_autonomy()
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
@@ -1634,6 +1679,8 @@ class ExecutiveWorkerBroker:
         *,
         peer: PeerCredentials | None = None,
     ) -> Any:
+        if operation == "capacity-observe/v1":
+            return await self._capacity_observe(payload)
         if operation == "start":
             return await self._start(payload)
         if operation == "status":
@@ -1689,6 +1736,38 @@ class ExecutiveWorkerBroker:
         if operation == "ohf-reconcile-absence":
             return await self._ohf_reconcile_absence(payload)
         raise AssertionError(operation)  # pragma: no cover
+
+    async def _capacity_observe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return one trusted, requestless Capacity observation while idle.
+
+        The callback is construction-owned and accepts no caller payload.  The
+        broker contributes only its existing peer/worker admission and the
+        same state lock used by modifying operations; it does not sample, rank,
+        persist, reserve, retry, or choose another host.
+        """
+
+        if payload:
+            raise BrokerProtocolError("capacity-observe/v1 payload must be empty")
+        observer = self.capacity_observer
+        if observer is None:
+            raise BrokerStateError("capacity observer is not configured")
+        self._require_current_autonomy()
+        async with self._state_lock:
+            # Waiting for the shared lock may outlive the pre-lock authority.
+            # Revalidate before the first observer read, not after its result.
+            self._require_current_autonomy()
+            if (
+                self._active_run_id is not None
+                or self._operator_run is not None
+                or self._starting
+                or self._validation_busy
+                or self._status_sweep_busy
+            ):
+                raise BrokerStateError("capacity observation requires an idle broker")
+            observed = observer()
+            if not isinstance(observed, Mapping):
+                raise BrokerStateError("capacity observer returned an invalid projection")
+            return dict(observed)
 
     async def _autonomy_canary(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Issue one fixed, non-provider boot canary while the broker is idle."""
@@ -2452,11 +2531,24 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator begin-turn returned an untyped observation"
                 )
+            if (operation.command_id.startswith(CONTINUATION_OPERATION_PREFIX)
+                    and observation.acknowledged is True
+                    and type(observation.provider_native_turn_id) is str
+                    and bool(observation.provider_native_turn_id)):
+                # Marked only after this ohf-begin-turn succeeded, for the
+                # existing operation id, under the immutable TurnRef and the
+                # current generation.  The prefix selects the bounded digest
+                # observation at collect; it never grants ACK authority.
+                state.retained_plain_turns[turn] = state.generation
             return {"observation": operator_to_wire(observation)}
         finally:
             await self._operator_release_busy(state)
 
     async def _ohf_observer_lifecycle(self, operation, payload):
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
         if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
             raise BrokerStateError("OBSERVER_CONFLICT")
@@ -2494,6 +2586,9 @@ class ExecutiveWorkerBroker:
                         code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
                         else "GRANT_INVALIDATED"
                     ) from None
+            if (operation == "ohf-observer-enroll" and release_profile
+                    and getattr(active.adapter, "supports_progress_metadata", False) is not True):
+                raise BrokerStateError("CONTENT_UNAVAILABLE")
             state = active.adapter._generations.get(payload["generation"])
             native = state.turns.get(payload["turn"]) if state else None
             if not native:
@@ -2504,7 +2599,8 @@ class ExecutiveWorkerBroker:
             try:
                 if operation == "ohf-observer-enroll":
                     turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
-                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    result = active.adapter.mint_observer_grant(turn, binding=binding,
+                        **({"progress_metadata": True} if release_profile else {}))
                     return result
                 projection = getattr(active.adapter, "visible_turn_projection", None)
                 if projection is None:
@@ -2516,6 +2612,10 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
 
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         expected = {
             "attempt",
             "epoch",
@@ -2812,14 +2912,56 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator collection returned untyped or oversized evidence"
                 )
-            return {
+            response = {
                 "events": operator_to_wire(events),
                 "cursor": operator_to_wire(next_cursor),
                 "candidate": operator_to_wire(candidate),
                 "raw_role_result": operator_to_wire(raw),
             }
+            if state.retained_plain_turns.get(turn) == state.generation:
+                # The accepted collector runs only for a turn marked at
+                # begin-turn; ordinary turns never incur an additional raw
+                # read.  Absence stays an explicit unavailable value.
+                response["retained_plain_input_evidence"] = (
+                    await self._retained_plain_input_evidence(state, turn)
+                )
+            return response
         finally:
             await self._operator_release_busy(state)
+
+    async def _retained_plain_input_evidence(
+        self, state: _BrokerOperatorRun, turn: TurnRef
+    ) -> dict[str, Any] | None:
+        """Reuse only the accepted extractor for one marked turn.
+
+        The only accepted producer is the adapter's own
+        ``collect_retained_plain_text_evidence``; a no-supported-method adapter,
+        an unsupported build or input, or any extraction refusal is the
+        explicit unavailable ``None``.  The optional emitted value must pass
+        the closed digest-only wire codec, so the
+        transport can never carry a prompt, an expected text, a caller build
+        attestation, an acceptance boolean, or ACK authority.
+        """
+
+        collector = getattr(
+            state.adapter, "collect_retained_plain_text_evidence", None
+        )
+        if not callable(collector):
+            return None
+        try:
+            evidence = await self._operator_call(
+                "retained plain input evidence", collector, turn
+            )
+        except WorkerBrokerError:
+            return None
+        if not isinstance(evidence, RetainedPlainInputEvidence):
+            return None
+        try:
+            encoded = operator_to_wire(evidence)
+            wire_retained_plain_input_evidence(encoded)
+        except OperatorHarnessWireError:
+            return None
+        return encoded
 
     async def _ohf_interrupt(self, payload: dict[str, Any]) -> dict[str, Any]:
         if set(payload) != {"operation_id", "turn"}:
@@ -3280,6 +3422,9 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError("the worker broker already has active work")
             if spec.run_id in self._runs:
                 raise BrokerStateError("run_id cannot be reused")
+            # Same host-owned identity check at every new START, not merely
+            # construction; do not gate post-revocation cancel/collect.
+            self._require_current_native_realm()
             self._starting = True
         started = False
         try:
@@ -4083,7 +4228,7 @@ class WorkerBrokerClient:
     ) -> dict[str, Any]:
         # Bridge-only read: this does not add the operation to the ordinary
         # Worker Broker server or grant a generic request-supplied data source.
-        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation"}:
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation", "native-fabric-status"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {

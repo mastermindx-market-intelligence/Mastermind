@@ -431,8 +431,8 @@ def validate_arguments(tool_name: object, arguments: object) -> dict[str, Any]:
 
 
 def result_wire_bytes(result: object) -> int:
-    compact = json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    rendered = json.dumps(result, indent=2).encode("utf-8")
+    compact = json.dumps(result, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+    rendered = json.dumps(result, indent=2, allow_nan=False).encode("utf-8")
     return len(compact) + len(rendered)
 
 

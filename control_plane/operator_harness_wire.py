@@ -14,6 +14,13 @@ import re
 from collections.abc import Mapping
 from typing import Any, Callable, TypeVar
 
+from control_plane.codex_operator_adapter import (
+    CONSUMPTION_EVIDENCE_PINNED_BINARY_DIGEST,
+    CONSUMPTION_EVIDENCE_PINNED_HARNESS_VERSION,
+    CONSUMPTION_EVIDENCE_SCOPE,
+    CONSUMPTION_EVIDENCE_SHAPE,
+    RetainedPlainInputEvidence,
+)
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
     ProviderHomeIdentityObservation,
@@ -57,6 +64,13 @@ from control_plane.operator_harness_contract import (
 
 class OperatorHarnessWireError(ValueError):
     """A broker value is outside the closed Operator Harness wire."""
+
+
+# Selects the retained plain-input digest observation on the existing
+# ohf-begin-turn/ohf-collect-turn path only.  It is never a request field, it
+# grants no ACK authority, and the parent uses the same prefix for trusted
+# capsule delivery.
+CONTINUATION_OPERATION_PREFIX = "ohf-op:continuation:"
 
 
 T = TypeVar("T")
@@ -435,6 +449,63 @@ def provider_home_observation(value: Any) -> ProviderHomeIdentityObservation:
     )
 
 
+def retained_plain_input_evidence(value: Any) -> RetainedPlainInputEvidence:
+    """Reconstruct the closed digest-only retained plain-input evidence.
+
+    The frozen value object is owned by the byte-identical accepted extractor,
+    so this codec reconstructs exactly that class and nothing else.  The wire
+    grammar is closed and digest-only: no acceptance boolean, no retained or
+    expected text, no caller build attestation, and no ACK authority field can
+    be expressed, because every other key is refused.  A canonical SHA-256
+    input digest, a positive byte length, and the accepted extractor's own
+    provenance constants are required; anything else is outside the wire.
+    """
+
+    evidence = _construct(
+        RetainedPlainInputEvidence, value, name="retained plain input evidence"
+    )
+    if any(
+        not isinstance(item, str) or not item
+        for item in (
+            evidence.attempt_id,
+            evidence.session_epoch_id,
+            evidence.process_generation_id,
+            evidence.turn_id,
+            evidence.provider_session_id,
+            evidence.provider_native_turn_id,
+            evidence.harness_version,
+        )
+    ):
+        raise OperatorHarnessWireError(
+            "retained plain input evidence identities must be nonempty strings"
+        )
+    if (
+        not isinstance(evidence.retained_input_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", evidence.retained_input_digest) is None
+    ):
+        raise OperatorHarnessWireError(
+            "retained input digest must be exact lowercase SHA-256"
+        )
+    length = evidence.retained_input_byte_length
+    if type(length) is not int or length <= 0:
+        raise OperatorHarnessWireError(
+            "retained input byte length must be a positive integer count"
+        )
+    if evidence.harness_version != CONSUMPTION_EVIDENCE_PINNED_HARNESS_VERSION:
+        raise OperatorHarnessWireError(
+            "retained input harness version pin is unknown"
+        )
+    if evidence.harness_binary_digest != CONSUMPTION_EVIDENCE_PINNED_BINARY_DIGEST:
+        raise OperatorHarnessWireError(
+            "retained input harness binary pin is unknown"
+        )
+    if evidence.input_shape != CONSUMPTION_EVIDENCE_SHAPE:
+        raise OperatorHarnessWireError("retained input shape constant is unknown")
+    if evidence.scope != CONSUMPTION_EVIDENCE_SCOPE:
+        raise OperatorHarnessWireError("retained input scope constant is unknown")
+    return evidence
+
+
 def _wire_text(value: Any) -> str:
     if not isinstance(value, str):
         raise OperatorHarnessWireError("wire text must be a string")
@@ -442,7 +513,9 @@ def _wire_text(value: Any) -> str:
 
 
 __all__ = [
+    "CONTINUATION_OPERATION_PREFIX",
     "OperatorHarnessWireError",
+    "RetainedPlainInputEvidence",
     "attention_turn_observation",
     "candidate_result",
     "event_cursor",
@@ -459,6 +532,7 @@ __all__ = [
     "raw_role_result_observation",
     "reconcile_observation",
     "requested_execution_profile",
+    "retained_plain_input_evidence",
     "session_epoch_ref",
     "session_start_observation",
     "to_wire",

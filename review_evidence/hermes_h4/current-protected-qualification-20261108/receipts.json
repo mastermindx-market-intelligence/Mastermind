@@ -1,0 +1,232 @@
+{
+  "schema": "mastermind.hermes_h4.current_protected_qualification.v1",
+  "created_at": "2026-11-08T06:18:04.859086+00:00",
+  "parents": {
+    "application": "46923d7187f426dfb0b998e0703f0ab1a96994f5",
+    "protected": "036e8d26cb2b158856f1250b2dfc9cca9700f28a"
+  },
+  "source_files": [
+    {
+      "path": "tests/test_h1_native100_packaging.py",
+      "sha256": "414895986567fd4531cddff49aef62fa74923ecadd18da401de7283e6b716df2"
+    },
+    {
+      "path": "tests/test_fabric_quiescence_source_cohort.py",
+      "sha256": "604f53c2db3bd9a912dac89816a0be5cff8ffb019ec2af40ed2c6240ee9c93c8"
+    },
+    {
+      "path": "tests/test_fabric_sparse_index_advice.py",
+      "sha256": "3f5a64898070d24866813539a9ded87cb326768a363ef8ba0fd49094853249a7"
+    },
+    {
+      "path": "tests/native107_source_fixtures.py",
+      "sha256": "0fe9255eb358be94c6fa19383f102dbe9fb0ce461b0fc7764b9a479b427ea5b6"
+    },
+    {
+      "path": "tests/fixtures/native-advice107-e256-manifest.json",
+      "sha256": "470305e48c164563b53626967c178d8c3c5cdaff5a58308aea0a9d838eef3e6d"
+    },
+    {
+      "path": "tests/fixtures/native-advice107-e256-inventory.json",
+      "sha256": "9c817e6406dd831542a14e591cf4cfa12cd1d6c54c4e8f496844c81415d20d84"
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+      "sha256": "afe4dce14b2c6f99bce7c2f95f6e02cbab6cb424845e0ab055e111201f57fd7e"
+    },
+    {
+      "path": "tests/executive_fabric_release_identity_review.py",
+      "sha256": "bd6069939095b17eb228ef872792ef81f3c1a361dba948d5b364a3d86622bfbe"
+    },
+    {
+      "path": "tests/test_workspace_control_room_review_pins.py",
+      "sha256": "d31483795715466943b3a0996355ea32455e6c6b56ad0ca2f20098d3e880b46c"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "8b488c1c01dbb593ec1111b5fa4688cdf399982866bc5c4dc40c16bcb6ed64e2"
+    }
+  ],
+  "builder_repair": {
+    "before_sha256": "73d356107480e099222050b837f741d91f25e3cb2331ecfd99a30140c29c4776",
+    "after_sha256": "afe4dce14b2c6f99bce7c2f95f6e02cbab6cb424845e0ab055e111201f57fd7e",
+    "only_ast_change": "Existing exact sparse-advice inverse wraps the single host-pull normalization input; all other AST nodes equal.",
+    "old_normalizer_ast": "f925436cb209516d911e99c0cdcdaaacfc690448f7282b3a5e3efb9cc80c47b8"
+  },
+  "studio469_owners_byte_preserved": true,
+  "macro_fixture": "f38c5b9ea25ea598094a309f0edf48e2722408be",
+  "ordinary_macro_vendor_and_runtime_projection_unchanged": true,
+  "runs": [
+    {
+      "receipt": "root469-native-source-cohorts.json",
+      "returncode": 0,
+      "counts": {
+        "tests": 61,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 5.11,
+      "log_sha256": "bfd3209c499263ef017892a0ae0db2d5f836f134429eb88669ddfa17ba5954a0"
+    },
+    {
+      "receipt": "root469-native-regression.json",
+      "returncode": 0,
+      "counts": {
+        "tests": 308,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 34.68,
+      "log_sha256": "3130ba8dd6b3c22711d71374bef3ef1b75220eccab66b442e2fe07598a9a053b"
+    },
+    {
+      "receipt": "root469-paper-home-fixture.json",
+      "returncode": 0,
+      "counts": {
+        "tests": 85,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 5
+      },
+      "seconds": 1.36,
+      "log_sha256": "f265b92e1186c3a5adf416304cc0061aa92f3d7b47bcb9261e1f501e1fa78a8d"
+    },
+    {
+      "receipt": "root469-protected-installer-identity.json",
+      "returncode": 1,
+      "counts": {
+        "tests": 235,
+        "failures": 4,
+        "errors": 127,
+        "skipped": 0
+      },
+      "seconds": 21.34,
+      "log_sha256": "aaa88e236146901aaa3605d3a52c3a2a2855405e93967e85b8c88c90bb1d7690"
+    },
+    {
+      "receipt": "root469-protected-installer-identity-v2.json",
+      "returncode": 1,
+      "counts": {
+        "tests": 235,
+        "failures": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 169.72,
+      "log_sha256": "58695987e2b9029dd1ca2723575ae5c774e2670d0763bdb4c4f62133097c240c"
+    },
+    {
+      "receipt": "root469-real-mcp-sdk.json",
+      "returncode": 1,
+      "counts": {
+        "tests": 0,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 0.04,
+      "log_sha256": "60108a03fa01fd702ed3793eb61898e0d472d9d9c843472371c47518fe6b91a1"
+    },
+    {
+      "receipt": "root469-real-mcp-sdk-v2.json",
+      "returncode": 0,
+      "counts": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 5.62,
+      "log_sha256": "99db33d5c94c6f7da021687c7391181685cc33299c5435b1c861e2db3be3ec87"
+    },
+    {
+      "receipt": "macro-root469-paired-and-deepseek.json",
+      "returncode": 1,
+      "counts": {
+        "tests": 434,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 35.44,
+      "log_sha256": "4c1278a5a80bcb0876d00edbda0df38be38f992cfe5444bccccb4be96f6b0925"
+    },
+    {
+      "receipt": "macro68-e3-git-provenance.json",
+      "returncode": 0,
+      "counts": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "seconds": 1.05,
+      "log_sha256": "2bade15899626e16ec4adcf3fdb1a5de5a3db3d01e257c7344c19516ff42be82"
+    }
+  ],
+  "run_interpretation": {
+    "root469-protected-installer-identity": "Initial HOME fixture inherited a macOS ACL; the real guard refused. Retained; not an implementation verdict.",
+    "root469-protected-installer-identity-v2": "Using a private temporary root,233 passed; two actual-SDK cases lacked mcp in that interpreter.",
+    "root469-real-mcp-sdk": "Existing PM interpreter had SDK but no pytest; zero collected. Retained as a test-environment precondition failure.",
+    "root469-real-mcp-sdk-v2": "Both actual-SDK cases passed with Homebrew Python3.14.7/pytest9.1.1 and the real PM-owned MCP 2.3.0 plus its dependencies.",
+    "root469-paper-home-fixture": "80 passed; five pre-existing not-a-newer-twelve-file-successor skips remain explicitly recorded.",
+    "macro-root469-paired-and-deepseek": "433 passed; one E3 provenance case lacked Git metadata in the immutable archive. The25 DeepSeek cases passed. Same test/implementation bytes as Macro68;7a/f38 change only the owner workflow.",
+    "macro68-e3-git-provenance": "The original one failing E3 case passed using an external read-only detached object view at actual68. Archive remains without .git; no Macro source authoring or publication context was created."
+  },
+  "ci_fixture_delta_after_test_execution": {
+    "from": "7a98aeba6d19f554714ab10a76f0c013859ca7df",
+    "to": "f38c5b9ea25ea598094a309f0edf48e2722408be",
+    "scope": "Existing separate CI fixture only; the target successor changes only its owner workflow. All paired implementation/test bytes identical."
+  },
+  "native_packages": [
+    {
+      "variant": "minimum",
+      "flags": [
+        "--include-provider-plan-application"
+      ],
+      "returncode": 0,
+      "seconds": 0.24,
+      "log_sha256": "2549ea46eb4676b443a3394a06518d3e5ae89f3a493f8be5ba3465576ceade3a",
+      "members": 116,
+      "payload_bytes": 3528894,
+      "manifest_sha256": "133db42ddc179d67e39db3ab1acb7642d879164c6ea751d31c612d1d8d85190d",
+      "inventory_sha256": "00d5e14e88efa0d8150f7397eaf738f8c56ecd2ea00dc7839333b8fee97dd6ef",
+      "every_staged_member_verified": true,
+      "matches_independently_qualified_original469_outputs": true
+    },
+    {
+      "variant": "full",
+      "flags": [
+        "--include-provider-plan-application",
+        "--include-go-application",
+        "--include-application-http",
+        "--include-quota-reset-recovery"
+      ],
+      "returncode": 0,
+      "seconds": 0.23,
+      "log_sha256": "e5c5d62dda5d880983f9daf554b39bd5de8b724e1c5026ef4dff300ff8198db9",
+      "members": 121,
+      "payload_bytes": 3902914,
+      "manifest_sha256": "9e27a0b991585f000165ef4932ea86d512ff90c0168242e184b512b022372cfd",
+      "inventory_sha256": "20662aafa9909a03260c33be30e780f20d8b434ea17f85053edded70c2288244",
+      "every_staged_member_verified": true,
+      "matches_independently_qualified_original469_outputs": true
+    }
+  ],
+  "current_old_host_tuple": {
+    "classification": "DECLARED_COMPATIBLE_INTERMEDIATE",
+    "input_sha256": "b5ceff4116f5407810bfe755151de69ca0ce4fe3276b3e76a10a93e13909a68c",
+    "declaration": "HOST_PULL_INTEGRITY_COMPOSED_HTTP_PARENT_MANIFEST_SHA256",
+    "normalized_sha256": "a68a4af9834da02d85ac00300ccaf0540c0fbccedd9c3a7c883157696558df35",
+    "destination_declaration": "APPLICATION_CARRIER_SUCCESSOR_BASE_SHA256",
+    "current_source_sha256": "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada",
+    "input_unchanged": true,
+    "current_and_historical_capture_refusals_retained": true,
+    "raw_helper_acceptance_is_not_runtime_admission": true
+  },
+  "installation": false,
+  "live_acceptance": false,
+  "committed_head_and_hosted_gates": "Reported separately on the original carrier after source publication."
+}

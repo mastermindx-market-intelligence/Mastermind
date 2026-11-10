@@ -48,6 +48,24 @@ export function validPlanSelection(value: unknown): value is PlanSelection {
     typeof value.root_job_id === "string" && /^JOB-[0-9]{1,9}$/.test(value.root_job_id);
 }
 
+function qualifiedSourceReceipts(observation: Record<string, unknown>): boolean {
+  const runtime = observation.runtime, controlRoom = observation.control_room;
+  return record(runtime) && record(controlRoom) &&
+    keys(runtime, ["schema", "state", "source_identity", "before", "after"]) &&
+    runtime.schema === "mastermind.runtime_read_observation.v1" && runtime.state === "SAME" &&
+    typeof runtime.source_identity === "string" && /^[0-9a-f]{32}$/.test(runtime.source_identity) &&
+    Number.isInteger(runtime.before) && Number(runtime.before) >= 0 &&
+    Number.isInteger(runtime.after) && runtime.before === runtime.after &&
+    keys(controlRoom, ["instance_before", "instance_after", "publication_before", "publication_after",
+      "document_digest", "source_validity_digest", "cache_currentness_digest"]) &&
+    typeof controlRoom.instance_before === "string" && controlRoom.instance_before.length > 0 &&
+    typeof controlRoom.instance_after === "string" && controlRoom.instance_before === controlRoom.instance_after &&
+    Number.isInteger(controlRoom.publication_before) && Number(controlRoom.publication_before) > 0 &&
+    Number.isInteger(controlRoom.publication_after) && controlRoom.publication_before === controlRoom.publication_after &&
+    isDigest(controlRoom.document_digest) && isDigest(controlRoom.source_validity_digest) &&
+    isDigest(controlRoom.cache_currentness_digest);
+}
+
 /** The caller already acquired an authorized owner document; never decode raw provider output. */
 export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): PlanRead {
   if (!validPlanSelection(expected) || !record(value) ||
@@ -56,20 +74,23 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
       value.selection.work_ref !== expected.work_ref || value.selection.root_job_id !== expected.root_job_id ||
       !Array.isArray(value.reason_codes) || !record(value.source_observation)) return refuse();
   const obs = value.source_observation;
-  if (obs.schema !== PLAN_OBSERVATION_SCHEMA || !validPlanSelection(obs.selection) ||
+  if (!keys(obs, ["schema", "state", "selection", "control_room", "runtime"]) ||
+      obs.schema !== PLAN_OBSERVATION_SCHEMA || !validPlanSelection(obs.selection) ||
       obs.selection.work_ref !== expected.work_ref || obs.selection.root_job_id !== expected.root_job_id ||
-      !["SAME", "UNKNOWN", "CONFLICT"].includes(String(obs.state))) return refuse();
+      typeof obs.state !== "string" || !["SAME", "UNKNOWN", "CONFLICT"].includes(obs.state)) return refuse();
   if (value.availability === "UNAVAILABLE") {
     if (value.plan !== null || value.reason_codes.length !== 1 ||
         !knownReasons.has(value.reason_codes[0]) ||
-        obs.state === "SAME" ||
+        obs.state === "SAME" || obs.control_room !== null || obs.runtime !== null ||
         (value.reason_codes[0] === "SOURCE_CHANGED") !== (obs.state === "CONFLICT")) return refuse();
     return { availability: "UNAVAILABLE", selection: { ...expected }, plan: null,
       observation: obs.state as "UNKNOWN" | "CONFLICT", reason_codes: [value.reason_codes[0]] };
   }
   if (value.availability !== "AVAILABLE" || value.reason_codes.length !== 0 ||
-      obs.state !== "SAME" || !record(value.plan)) return refuse();
+      obs.state !== "SAME" || !qualifiedSourceReceipts(obs) || !record(value.plan)) return refuse();
   const plan = value.plan;
+  const hierarchicalPlan = plan.plan_schema_version === "mastermind.execution_plan/v5";
+  const maximumSteps = hierarchicalPlan ? 16 : 8;
   if (!keys(plan, ["schema", "plan_schema_version", "admission_schema_version",
       "root_job_id", "plan_attempt_id", "policy_sha", "plan_digest", "reservation_digest",
       "admission_state", "steps"]) ||
@@ -77,13 +98,19 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
       !isId(plan.plan_attempt_id) || !isDigest(plan.policy_sha) ||
       !isDigest(plan.plan_digest) || !isDigest(plan.reservation_digest) ||
       plan.admission_state !== "ADMITTED" ||
+      typeof plan.plan_schema_version !== "string" ||
       !["mastermind.execution_plan/v1", "mastermind.execution_plan/v2",
-        "mastermind.execution_plan/v3", "mastermind.execution_plan/v4"].includes(String(plan.plan_schema_version)) ||
-      !["mastermind.coo_plan_admission/v1", "mastermind.coo_plan_admission/v2"].includes(String(plan.admission_schema_version)) ||
-      !Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > 8) return refuse();
+        "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+        "mastermind.execution_plan/v5"].includes(plan.plan_schema_version) ||
+      typeof plan.admission_schema_version !== "string" ||
+      !["mastermind.coo_plan_admission/v1", "mastermind.coo_plan_admission/v2",
+        "mastermind.coo_plan_admission/v3"].includes(plan.admission_schema_version) ||
+      !Array.isArray(plan.steps) || plan.steps.length < 1 || plan.steps.length > maximumSteps) return refuse();
   const dependencyPlan = plan.plan_schema_version === "mastermind.execution_plan/v3" ||
-    plan.plan_schema_version === "mastermind.execution_plan/v4";
-  if (plan.admission_schema_version !== (dependencyPlan ? "mastermind.coo_plan_admission/v2" : "mastermind.coo_plan_admission/v1")) return refuse();
+    plan.plan_schema_version === "mastermind.execution_plan/v4" || hierarchicalPlan;
+  const expectedAdmission = hierarchicalPlan ? "mastermind.coo_plan_admission/v3" :
+    dependencyPlan ? "mastermind.coo_plan_admission/v2" : "mastermind.coo_plan_admission/v1";
+  if (plan.admission_schema_version !== expectedAdmission) return refuse();
   const seen = new Set<string>();
   const steps: AdmittedStep[] = [];
   for (let i = 0; i < plan.steps.length; i++) {
@@ -92,9 +119,10 @@ export function decodeAdmittedPlan(value: unknown, expected: PlanSelection): Pla
         "review_required", "prerequisite_step_ids"]) ||
         step.ordinal !== i || !isId(step.step_id) || seen.has(step.step_id) ||
         typeof step.objective !== "string" || !step.objective.length || step.objective.length > 4096 ||
-        !["routine", "material", "critical"].includes(String(step.business_impact)) ||
+        typeof step.business_impact !== "string" ||
+        !["routine", "material", "critical"].includes(step.business_impact) ||
         typeof step.review_required !== "boolean" ||
-        !Array.isArray(step.prerequisite_step_ids) || step.prerequisite_step_ids.length > 8 ||
+        !Array.isArray(step.prerequisite_step_ids) || step.prerequisite_step_ids.length > maximumSteps - 1 ||
         !step.prerequisite_step_ids.every((d: unknown) => isId(d) && seen.has(d)) ||
         new Set(step.prerequisite_step_ids).size !== step.prerequisite_step_ids.length ||
         (!dependencyPlan && step.prerequisite_step_ids.length !== 0)) return refuse();

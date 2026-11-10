@@ -152,12 +152,12 @@ def test_active_review_reconciles_before_further_work(tmp_path):
     assert len([j for j in runtime.jobs.list_jobs() if j.orchestration_role == "review"]) == 1
 
 
-def _finish_review(runtime, root, review, target_dispatch, seal, verdict, *, same_worker=False):
+def _finish_review(runtime, root, review, target_dispatch, seal, verdict, *, same_principal=False):
     from test_executive_os_phase1fc import _complete_ohf_role, _review_body
     outcome = runtime.attempts.dispatch_cycle_job(
         review.job_id,
         command_id=f"coo-cycle:{root.job_id}:dispatch:{review.job_id}:attempt:1",
-        worker_id="worker-a" if same_worker else "worker-c",
+        worker_id="worker-c",
         quota_class="codex-hf1q-step",
     )
     assert isinstance(outcome, OrchestrationDispatchOutcome)
@@ -169,7 +169,12 @@ def _finish_review(runtime, root, review, target_dispatch, seal, verdict, *, sam
         target_result_digest=seal["role_result_digest"],
         repair_round=target.repair_round, verdict=verdict, plan_step_id=target.plan_step_id,
     )
-    _complete_ohf_role(runtime, outcome, body, identity_seed=7803)
+    # Fresh admission excludes the target worker/account. A distinct identity
+    # may still share its physical principal; terminal independence must void it.
+    _complete_ohf_role(
+        runtime, outcome, body, identity_seed=7803,
+        principal_identity_seed=7502 if same_principal else None,
+    )
 
 
 def test_independent_approval_releases_dependency_work(tmp_path):
@@ -181,10 +186,10 @@ def test_independent_approval_releases_dependency_work(tmp_path):
     assert runtime.jobs.get_job(outcome.selected_job_id).plan_step_id == "step-2"
 
 
-def test_same_worker_approval_does_not_clear_current_review_demand(tmp_path):
+def test_same_principal_approval_does_not_clear_current_review_demand(tmp_path):
     runtime, root, jobs, target, seal = _pending_review(tmp_path)
     review = _create_review(runtime, root, jobs["step-0"])
-    _finish_review(runtime, root, review, target, seal, "approve", same_worker=True)
+    _finish_review(runtime, root, review, target, seal, "approve", same_principal=True)
     outcome = CooCycle(runtime).run_once(root.job_id)
     assert outcome.action == "REVIEW_CREATED"
     assert outcome.command_id.endswith(":2")

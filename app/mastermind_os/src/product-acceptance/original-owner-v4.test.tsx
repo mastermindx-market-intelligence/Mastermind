@@ -101,6 +101,10 @@ describe('mounted private Workspace original-owner acquisition', () => {
     const ui = render(<App/>), user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Projects' }));
     await user.click(await screen.findByRole('button', { name: 'Open project Acceptance project' }));
+    await user.click(await screen.findByRole("button",{name:"Project details",exact:true}));
+    await user.click(screen.getByRole("button",{name:"Work controls",exact:true}));
+    const workDetails=within(screen.getByRole("region",{name:"Inspect Work controls",exact:true}));
+    await user.click(workDetails.getByText("More work details",{selector:"summary"}));
     await user.click(await screen.findByRole('tab', { name: 'Evidence' }));
     const panel = await screen.findByRole('region', { name: 'Product acceptance receipt' });
     await within(panel).findByText(status === 200 ? 'PRODUCT_ACCEPTED' : 'UNAVAILABLE');

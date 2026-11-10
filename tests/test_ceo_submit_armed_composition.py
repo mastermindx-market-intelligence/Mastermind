@@ -12,7 +12,9 @@ import re
 import subprocess
 import tokenize
 import unicodedata
+from bisect import bisect_right
 from decimal import Decimal, InvalidOperation
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -358,7 +360,10 @@ class _BindingScope:
 
 def _scope_language(path: str) -> str:
     suffix = Path(path).suffix.lower()
-    if suffix == ".py":
+    # Pinned donor archives are still Python source for this identity audit.
+    # Parse their strings/aliases exactly as executable .py postimages; this
+    # does not exempt them from changed-source or literal-identity checking.
+    if suffix == ".py" or path.lower().endswith(".py.source"):
         return "py"
     if suffix in {".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"}:
         return "js"
@@ -810,12 +815,41 @@ def _is_mkdir_mode_literal(line: str, token_text: str) -> bool:
     return modes == 1
 
 
+def _is_js_mkdir_mode_literal(line: str, token_text: str) -> bool:
+    """Admit only the reviewed, closed JS directory-permission statements.
+
+    Keep the existing recursive dir form and the publisher's nonrecursive
+    current/quarantineDir forms. These octal mode slots are permissions, not
+    UID/GID values. Operand shape, options and the complete single statement
+    remain closed; attached identities or other operations stay guarded.
+    """
+    if not re.fullmatch(r"0o[0-7]{3,4}", token_text):
+        return False
+    matched = re.fullmatch(
+        r"\s*await\s+mkdir\(\s*(dir|current|quarantineDir)\s*,\s*\{\s*"
+        r"(recursive\s*:\s*true\s*,\s*)?"
+        r"mode\s*:\s*(0o[0-7]{3,4})\s*\}\s*\)\s*;\s*",
+        line,
+    )
+    if matched is None or matched.group(3) != token_text:
+        return False
+    return (matched.group(1) == "dir" if matched.group(2)
+            else matched.group(1) in {"current", "quarantineDir"})
+
+
 def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bool:
     stripped = line.lstrip()
     if stripped.startswith(_COMMENT_PREFIXES):
         return True
+    # Squid's exact fixed HTTPS-port ACL is a source-reviewed service-port
+    # policy, not an OS UID/GID or peer identity. The identity guard otherwise
+    # rejects every modified value or line shape; this is not a port wildcard.
+    if stripped == "acl tls_only port 443" and token_text == "443":
+        return True
     if _line_mentions_identity_name(line):
         return False
+    if _is_js_mkdir_mode_literal(line, token_text):
+        return True
     # Recognize only the mode slot of this closed shell statement shape.
     # Additional commands, substitutions and unquoted operands stay guarded.
     chmod = re.fullmatch(
@@ -838,12 +872,17 @@ def _is_known_non_identity_numeric(line: str, token_text: str, value: int) -> bo
 
 def _scan_identity_source_lines(
     lines: list[str], *, path_identity: bool = False, identity_aliases: set[str] | None = None,
+    context_line: str | None = None,
 ) -> list[str]:
     flagged: list[str] = []
     identity_aliases = identity_aliases or set()
     for line in lines:
         normalized = unicodedata.normalize("NFKC", line)
-        line_identity = _line_mentions_identity_name(normalized)
+        # A classified CSS fragment keeps the identity/exemption meaning of its
+        # original physical line. All ordinary callers retain their own context.
+        context = (normalized if context_line is None
+                   else unicodedata.normalize("NFKC", context_line))
+        line_identity = _line_mentions_identity_name(context)
         alias_identity = bool(_source_identifiers(normalized) & identity_aliases)
         identity_context = path_identity or line_identity or alias_identity
         try:
@@ -856,7 +895,7 @@ def _scan_identity_source_lines(
                         continue
                     if (identity_context and 400 <= value <= 999
                             and not _is_known_non_identity_numeric(
-                        normalized, token.string, value
+                        context, token.string, value
                     )):
                         flagged.append(token.string)
                 elif token.type in {tokenize.NAME, tokenize.STRING}:
@@ -873,6 +912,19 @@ def _scan_identity_source_lines(
         except (IndentationError, tokenize.TokenError):
             continue
     return flagged
+
+
+def test_d8_fixed_vendor_tls_port_is_not_an_os_identity():
+    """Only the exact reviewed Squid TLS ACL has a 443 network-port exception."""
+    assert _scan_identity_source_lines(["acl tls_only port 443"]) == []
+    for line, number in (
+        ("acl tls_only port 444", "444"),
+        ("acl tls_only port 450", "450"),
+        ("acl api_user port 443", "443"),
+        ("acl tls_only uid 443", "443"),
+        ("acl tls_only port 443 extra", "443"),
+    ):
+        assert number in _scan_identity_source_lines([line]), line
 
 
 def _scan_added_identity_literals(added_lines: str) -> list[str]:
@@ -929,6 +981,141 @@ def _python_multiline_string_view(source: str) -> tuple[list[str], dict[int, lis
     return ["".join(line) for line in masked], accounts
 
 
+def _html_css_source_view(
+    source: str, *, path_identity: bool,
+) -> tuple[list[str], dict[int, list[str]]]:
+    """Separate proven CSS bodies from aliases using the complete HTML postimage.
+
+    This is not an HTML5 tree builder or a new JavaScript/dataflow parser. Only
+    closed, unambiguous style bodies lose executable alias context. Every other
+    byte stays unchanged; CSS retains direct/path identity and account checks.
+    Unsupported raw-text/foreign contexts and incomplete boundaries keep the
+    original conservative view. Quoted/encoded event attributes remain unchanged
+    and are not newly qualified by this CSS-only repair.
+    """
+    lines = source.splitlines()
+    physical = source.splitlines(keepends=True)
+    # HTMLParser positions count LF; do not project other line-separator dialects.
+    if any(part.rstrip("\r\n").find("\r") >= 0 for part in physical):
+        return lines, {}
+    starts, offset = [], 0
+    for part in physical:
+        starts.append(offset)
+        offset += len(part)
+    if len(starts) != source.count("\n") + bool(source and not source.endswith("\n")):
+        return lines, {}
+
+    class CssSpans(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=False)
+            self.raw_tag = None
+            self.style_start = None
+            self.spans = []
+            self.opaque = []
+            self.uncertain = False
+
+        def position(self):
+            row, column = self.getpos()
+            return starts[row - 1] + column
+
+        def handle_starttag(self, tag, attrs):
+            if tag in {"title", "textarea", "xmp", "iframe", "noembed",
+                       "noframes", "noscript", "plaintext", "svg", "math"}:
+                self.opaque.append(tag)
+            if tag in {"script", "style"}:
+                if self.raw_tag is not None or self.opaque:
+                    self.uncertain = True
+                # Only canonical HTML tag/attribute syntax proves a raw-text
+                # boundary. The tolerant parser accepts additional dialects.
+                space = r"[\t\n\r\f ]"
+                name = r"[^\t\n\r\f \x00\"'<>/=]+"
+                value = r'''(?:"[^"\x00]*"|'[^'\x00]*'|[^\t\n\r\f \x00"'=<>`]+)'''
+                attribute = space + "+" + name + "(?:" + space + "*=" + space + "*" + value + ")?"
+                if not re.fullmatch("<" + tag + "(?:" + attribute + ")*" + space + "*>",
+                                    self.get_starttag_text(), flags=re.IGNORECASE):
+                    self.uncertain = True
+                self.raw_tag = tag
+                if tag == "style":
+                    self.style_start = self.position() + len(self.get_starttag_text())
+
+        def handle_startendtag(self, tag, attrs):
+            # HTML ignores the self-closing flag on these non-void elements.
+            # HTMLParser's default start/end callback pair is not that boundary.
+            if tag in {"script", "style", "title", "textarea", "xmp", "iframe",
+                       "noembed", "noframes", "noscript", "plaintext", "svg", "math"}:
+                self.uncertain = True
+
+        def handle_endtag(self, tag):
+            if tag in {"script", "style"}:
+                if not re.match("</" + tag + r"[\t\n\r\f ]*>",
+                                source[self.position():], flags=re.IGNORECASE):
+                    self.uncertain = True
+                if tag != self.raw_tag:
+                    self.uncertain = True
+                elif tag == "style":
+                    self.spans.append((self.style_start, self.position()))
+                self.raw_tag = None
+                self.style_start = None
+            if tag in self.opaque:
+                if tag != self.opaque[-1]:
+                    self.uncertain = True
+                else:
+                    self.opaque.pop()
+
+        def handle_data(self, data):
+            # HTML script escaped/double-escaped states are outside this parser's
+            # raw-text contract; a premature </script> must not prove later CSS.
+            if self.raw_tag == "script" and "<!--" in data:
+                self.uncertain = True
+
+        def unknown_decl(self, data):
+            self.uncertain = True
+
+        def handle_comment(self, data):
+            # Some stdlib versions close comments at '-- >' and do not follow
+            # HTML's abrupt/alternate close states. Neither can prove CSS spans.
+            raw = "<!--" + data + "-->"
+            start = self.position()
+            if (source[start:start + len(raw)] != raw
+                    or data.startswith((">", "->"))
+                    or "<!--" in data or "--!>" in data):
+                self.uncertain = True
+
+        def handle_decl(self, decl):
+            if not re.fullmatch(r"DOCTYPE[\t\n\r\f ]+html[\t\n\r\f ]*", decl,
+                                flags=re.IGNORECASE):
+                self.uncertain = True
+
+        def handle_pi(self, data):
+            self.uncertain = True
+
+    parser = CssSpans()
+    try:
+        parser.feed(source)
+        parser.close()
+    except (AssertionError, IndexError, ValueError):
+        return lines, {}
+    if parser.uncertain or parser.raw_tag is not None or parser.opaque:
+        return lines, {}
+    masked = [list(line) for line in lines]
+    findings: dict[int, list[str]] = {}
+    for start, end in parser.spans:
+        if not (0 <= start <= end <= len(source)):
+            return lines, {}
+        for index in range(bisect_right(starts, start) - 1,
+                           bisect_right(starts, end - 1) if end > start else 0):
+            lower = max(0, start - starts[index])
+            upper = min(len(lines[index]), end - starts[index])
+            if upper <= lower:
+                continue
+            fragment = lines[index][lower:upper]
+            findings.setdefault(index + 1, []).extend(_scan_identity_source_lines(
+                [fragment], path_identity=path_identity, context_line=lines[index],
+            ))
+            masked[index][lower:upper] = " " * (upper - lower)
+    return ["".join(line) for line in masked], findings
+
+
 def _scan_added_identity_diff(
     diff: str, *, source_postimages: dict[str, str] | None = None,
 ) -> list[str]:
@@ -975,8 +1162,10 @@ def _scan_added_identity_diff(
     }
 
     string_accounts: dict[str, list[list[str]]] = {}
+    context_lines: dict[str, list[str]] = {}
     for path, lines in production.items():
-        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff")) and path not in REVIEWED_FILES) or source_postimages is None or path not in source_postimages:
+        is_html = Path(path).suffix.lower() in {".html", ".htm"}
+        if (_scope_language(path) != "py" and not path.endswith((".patch", ".diff")) and path not in REVIEWED_FILES and not is_html) or source_postimages is None or path not in source_postimages:
             continue
         source_lines = source_postimages[path].splitlines()
         numbers = added_numbers.get(path, [])
@@ -987,8 +1176,16 @@ def _scan_added_identity_diff(
         # projection. Only exact independently reviewed literal tokens can be
         # neutralized; surrounding code and all unreviewed identities stay visible.
         reviewed = mask_reviewed_identity_literals(path, source_postimages[path])
-        masked, accounts = (_python_multiline_string_view(reviewed) if _scope_language(path) == "py"
-                            else (reviewed.splitlines(), {}))
+        reviewed_lines = reviewed.splitlines()
+        if _scope_language(path) == "py":
+            masked, accounts = _python_multiline_string_view(reviewed)
+        elif is_html:
+            masked, accounts = _html_css_source_view(
+                reviewed, path_identity=bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS),
+            )
+            context_lines[path] = [reviewed_lines[number - 1] for number in numbers]
+        else:
+            masked, accounts = reviewed_lines, {}
         rendered, literal_flags = [], []
         for number in numbers:
             rendered.append(masked[number - 1])
@@ -1145,6 +1342,7 @@ def _scan_added_identity_diff(
                 [line],
                 path_identity=path_identity,
                 identity_aliases=_visible_aliased_names(scopes, line_scope[index]),
+                context_line=(context_lines[path][index] if path in context_lines else None),
             ))
             if path in string_accounts:
                 flagged.extend(string_accounts[path][index])
@@ -1385,18 +1583,37 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 355)]
+    # Pin the sole transport owner, not a line displaced by closed wire constants.
+    assert [path for path, _line in clients] == ["integrations/mastermind_executive_app/gateway.py"]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # Exact source review of the canonical installed wrapper. This does not
-    # exempt other run calls or imports, even inside the same function.
+    # Exact source review of the canonical installed wrapper. Keep a pinned
+    # full-source digest; never derive it during this test. The pinned digest
+    # covers the composed C18 Secretary and frozen selected-child target
+    # injection. The installed entry AST remains exactly the
+    # independently reviewed 060525... anchor checked below. This does not
+    # exempt other run calls or imports, even inside the same function. This
+    # static literal freezes the combined candidate, not independent review or
+    # release authority, and grants no native SEND or installed-release
+    # approval.
+    # The adopted-context read composition changes this full-file pin. The
+    # exact installed entry AST and all ten mutation refusals remain unchanged;
+    # no additional event loop or execution call is admitted.
+    # The optional sealed observation owner composes with those protected reads;
+    # only this final full-file fingerprint changes, never the wrapper AST.
+    # The attended configuration adds one optional digest and its strict
+    # validation. The installed event-loop anchor remains byte-for-byte the
+    # same AST; retain every path, membership and mutation refusal below.
+    # The reviewed pure Memory-validator extraction also preserves that
+    # anchor and the imports; only the full-source fingerprint changes.
     from tests.executive_identity_review import _reviewed_ast_dump
+    reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
-            or hashlib.sha256(source.encode()).hexdigest() !=
-            '5ff13f90499f44f04bbfba96bde1190085a9587cd1f7c742182a91618ddf4af3'):
+            or reviewed_source_sha !=
+            'dd09c1cfa20f75beee02dd9102356032bcfe6bdf813d55ab72451f1470fb35e1'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -1639,6 +1856,170 @@ def _d8_frozen_source_diff(path: str, source: str) -> str:
             f"@@ -0,0 +1,{len(lines)} @@",
             *(f"+{line}" for line in lines),
         ]
+    )
+
+
+@pytest.mark.parametrize("suffix", [".py", ".py.source"])
+def test_d8_python_archives_keep_prose_and_executable_identity_distinct(suffix):
+    path = "integrations/hermes_runtime/tests/fixtures/native_donor" + suffix
+    prose = 'def reserve_context():\n    """Reserving 0 lets the provider 400 before compaction."""\n    return None\n'
+    assert _identity_guard_source_path(path)
+    assert _scope_language(path) == "py"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, prose), source_postimages={path: prose}) == []
+    for executable in ("new_peer_uid = 471\n", "value = 471\npeer_uid = value\n", 'message = f"""peer {os.setuid(471)}"""\n'):
+        source = prose + executable
+        assert "471" in _scan_added_identity_diff(_d8_frozen_source_diff(path, source), source_postimages={path: source})
+
+
+_D8_PR1572_CSS = "\n".join([
+    ".mm-eval-value{font-weight:700;font-size:16px;line-height:1.5;overflow-wrap:anywhere}",
+    "@media(max-width:620px){.mm-eval-grid{gap:10px}.mm-eval-value{font-size:14px}}",
+    ".mm-da-value{font-weight:750;font-size:14px;line-height:1.5;margin-bottom:6px;overflow-wrap:anywhere}",
+])
+_D8_HTML_ALIAS_SOURCE = (
+    "<style>\n" + _D8_PR1572_CSS + "\n</style>\n<script>\n"
+    "const value = candidate;\nconst account = value;\n</script>\n"
+)
+
+
+def test_d8_pr1572_html_css_does_not_inherit_script_aliases():
+    # Actual three CSS sites from CI merge 4d4f8f04aff10aa36f24d9e5fd7661358a9b33c8,
+    # with a compact alias trigger. Full captured CI diff is replayed separately.
+    path = "app/static/index.html"
+    diff = _d8_frozen_source_diff(path, _D8_HTML_ALIAS_SOURCE)
+    assert _scan_added_identity_diff(diff) == ["700", "620", "750"]
+    assert _scan_added_identity_diff(
+        diff, source_postimages={path: _D8_HTML_ALIAS_SOURCE},
+    ) == []
+
+
+@pytest.mark.parametrize("path,source,expected", [
+    ("app/index.html", "<style>.peer_uid{--value:777}</style>", ["777"]),
+    ("app/index.html", "<style>* { --peer-uid:777; }</style>", ["777"]),
+    ("app/index.html", '<style data-peer-uid="x">.http_fallback{font-weight:501}</style>', ["501"]),
+    ("app/index.html", "<style>.value{font-family:'_mastermind_css';}</style>", ["_mastermind_css"]),
+    ("ops/identity/index.html", "<style>.value{font-weight:700}</style>", ["700"]),
+    ("app/INDEX.HTML", "<style>.value{font-weight:700}</style>\r\n", []),
+])
+def test_d8_html_css_preserves_identity_and_physical_line_exemptions(path, source, expected):
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == expected
+
+
+@pytest.mark.parametrize("source,expected", [
+    ("<script>\nconst initial = 501;\nconst alias = initial;\n</script>\n"
+     "<style>.value{font-weight:700}</style>\n"
+     "<script>\nconst peer_uid = alias;\n</script>", ["501"]),
+    ('<script>\nconst value = 777;\nconst marker = "<style>";\n'
+     'const peer_uid = value;\nconst closing = "</style>";\n</script>\n'
+     '<style>.value{font-weight:700}</style>', ["777"]),
+    ("<style>peer_uid = fallback;</style>\n<script>\nconst fallback = 777;\n</script>", []),
+    ("<style>.value{font-weight:700}</style><script>const peer_uid = 777;</script>", ["777", "700"]),
+    ("<style>.peer_uid{--value:100}</style><script>const value = 777;</script>", ["777"]),
+    ('<style>.value{content:"</style><script>const peer_uid = 777;</script>', ["777"]),
+])
+def test_d8_html_css_preserves_executable_and_cross_script_identities(source, expected):
+    path = "app/index.html"
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == expected
+
+
+@pytest.mark.parametrize("source", [
+    '<script/>const marker="<style>"; const peer_uid=777; const closing="</style>";</script>',
+    '<style/>.value{font-weight:700}</style><script>const peer_uid=777;</script>',
+    '<textarea><style></textarea><script>const peer_uid=777;</script></style>',
+    '<title><style></title><script>const peer_uid=777;</script></style>',
+    '<noscript><style>.peer_uid{--value:777}</style></noscript>',
+    '<svg><style>.peer_uid{--value:777}</style></svg>',
+    '<script><!--<script></script><style>const peer_uid=777;</style></script>',
+    '<style>\n.value{font-weight:700}\n<script>const peer_uid=777;</script>',
+    '<style>.value{font-weight:700}</style><script>const peer_uid=777;',
+])
+def test_d8_html_css_ambiguous_boundaries_keep_original_view(source):
+    assert _html_css_source_view(source, path_identity=False) == (source.splitlines(), {})
+    path = "app/index.html"
+    diff = _d8_frozen_source_diff(path, source)
+    assert _scan_added_identity_diff(diff, source_postimages={path: source}) == _scan_added_identity_diff(diff)
+
+
+@pytest.mark.parametrize("source", [
+    '<!-- -- ><style> -->\n<script>\nconst value = 777;\nconst peer_uid = value;\n</script>\n</style>',
+    '<!-->\n<script>\nconst marker = "-->";\nconst fake = "<style>";\n'
+    'const value = 777;\nconst peer_uid = value;\nconst closing = "</style>";\n</script>',
+    '<!--->\n<script>\nconst marker = "-->";\nconst fake = "<style>";\n'
+    'const value = 777;\nconst peer_uid = value;\nconst closing = "</style>";\n</script>',
+    '<!-- --!>\n<script>\nconst marker = "-->";\nconst fake = "<style>";\n'
+    'const value = 777;\nconst peer_uid = value;\nconst closing = "</style>";\n</script>',
+    '<script>\nconst marker = "</ script>";\nconst fake = "<style>";\n'
+    'const value = 777;\nconst peer_uid = value;\nconst closing = "</style>";\n</script>',
+])
+def test_d8_html_css_parser_recovery_cannot_hide_alias_identity(source):
+    assert _html_css_source_view(source, path_identity=False) == (source.splitlines(), {})
+    path = "app/index.html"
+    diff = _d8_frozen_source_diff(path, source)
+    assert "777" in _scan_added_identity_diff(diff)
+    assert "777" in _scan_added_identity_diff(diff, source_postimages={path: source})
+
+
+@pytest.mark.parametrize("source", [
+    '<!-- -- ><style> -->\n<script>\nconst value = 777;\nconst peer_uid = value;\n</script>\n</style>',
+    '<!-->\n<script>\nconst marker = "-->";\nconst fake = "<style>";\n'
+    'const value = 777;\nconst peer_uid = value;\nconst closing = "</style>";\n</script>',
+])
+def test_d8_html_css_legacy_comment_callback_retains_identity(source, monkeypatch):
+    # Exercise the stdlib's older permissive comment callback explicitly, even
+    # when this interpreter has a newer HTMLParser recovery implementation.
+    # This substitutes only that callback, not an entire historical interpreter.
+    from _markupbase import ParserBase
+    monkeypatch.setattr(HTMLParser, "parse_comment", ParserBase.parse_comment)
+    assert _html_css_source_view(source, path_identity=False) == (source.splitlines(), {})
+    path = "app/index.html"
+    assert "777" in _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    )
+
+
+@pytest.mark.parametrize("tag", ["style", 'STYLE type="text/css"', "style media='screen'", "style nonce=fixture", "style disabled"])
+def test_d8_html_css_canonical_tags_and_comments_still_qualify(tag):
+    source = '<!DOCTYPE html>\n<!-- normal comment -->\n<' + tag + '>\n' + _D8_PR1572_CSS + '\n</style>\n'
+    source += '<script>\nconst value = candidate;\nconst account = value;\n</script>\n'
+    path = "app/index.html"
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source), source_postimages={path: source},
+    ) == []
+
+
+def test_d8_html_css_keeps_attributes_and_non_css_bytes_unchanged():
+    # Decoded handler dataflow is not part of this CSS-only classifier repair.
+    source = '<style>.value{font-weight:700}</style>\n<button onclick="peer_uid=&#x37;&#x37;&#x37;">\n'
+    masked, flags = _html_css_source_view(source, path_identity=False)
+    assert masked == ['<style>' + ' ' * len('.value{font-weight:700}') + '</style>',
+                      '<button onclick="peer_uid=&#x37;&#x37;&#x37;">']
+    assert not any(flags.values())
+
+
+def test_d8_html_css_requires_exact_postimage_and_uses_disjoint_hunk_positions():
+    path = "app/index.html"
+    source = '<style>\n.value{font-weight:700}\n</style>\n<script>\nconst peer_uid = 777;\n</script>\n'
+    diff = ('--- a/app/index.html\n+++ b/app/index.html\n'
+            '@@ -2 +2 @@\n-old_css\n+.value{font-weight:700}\n'
+            '@@ -5 +5 @@\n-old_js\n+const peer_uid = 777;\n')
+    assert _scan_added_identity_diff(diff, source_postimages={path: source}) == ["777"]
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(diff, source_postimages={path: source.replace("700", "701")})
+    with pytest.raises(AssertionError, match="missing postimage line"):
+        _scan_added_identity_diff(diff, source_postimages={path: "<style>"})
+
+
+@pytest.mark.parametrize("with_identity", [False, True])
+def test_d8_html_css_real_git_collector(tmp_path, monkeypatch, with_identity):
+    source = _D8_HTML_ALIAS_SOURCE
+    if with_identity:
+        source += "<script>\nconst peer_uid = 777;\n</script>\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, "app/index.html", source, with_identity,
     )
 
 
@@ -2124,6 +2505,35 @@ def _d8_lowlevel_mkdir_chain_source(mkdir_line: str) -> str:
     ])
 
 
+def test_d8_js_mkdir_private_directory_mode_is_not_an_identity():
+    """The Studio publisher's exact private receipt mkdir uses an octal mode."""
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    source = "    await mkdir(dir, {recursive:true, mode:0o700});\n"
+    assert _scan_added_identity_diff(_d8_frozen_source_diff(path, source)) == []
+
+
+@pytest.mark.parametrize("source", [
+    "await mkdir(peer_uid, {recursive:true, mode:0o700});",
+    "await makedir(dir, {recursive:true, mode:0o700});",
+    "await mkdir(dir, {recursive:false, mode:0o700});",
+    "await mkdir(dir, {recursive:true, mode:0o700, peer_uid:501});",
+    "await mkdir(dir, {recursive:true, mode:0o700}); peer_uid = 501;",
+    "await mkdir(dir, {recursive:true, mode:0o700}); anotherEffect();",
+    "await mkdir(dir, {recursive:true, mode:0o700});\npeer_uid = 501;",
+])
+def test_d8_js_mkdir_near_misses_remain_guarded(source):
+    path = "integrations/studio_direct_mcp/git-publish.mjs"
+    assert not _is_js_mkdir_mode_literal(source, "0o700")
+    findings = _scan_added_identity_diff(_d8_frozen_source_diff(path, source))
+    # The D8 scanner is contextual; a shape alone is not an identity. Actual
+    # identity-bearing text remains guarded even beside a mkdir mode token.
+    if "peer_uid:501" in source or "peer_uid = 501" in source:
+        assert "501" in findings
+    if "mkdir(peer_uid" in source:
+        assert "0o700" in findings
+
+
+
 def test_d8_lowlevel_mkdir_mode_slot_with_dir_fd_is_not_identity():
     """RED before the repair: the f904 os.mkdir mode slot was misclassified.
 
@@ -2220,7 +2630,8 @@ def test_d8_template_topology_and_protected_defaults():
             check=True, capture_output=True, text=True,
         ).stdout
         source_diffs.append(diff)
-        if _scope_language(path) == "py" or path.endswith((".patch", ".diff")) or path in REVIEWED_FILES:
+        if (_scope_language(path) == "py" or path.endswith((".patch", ".diff"))
+                or Path(path).suffix.lower() in {".html", ".htm"} or path in REVIEWED_FILES):
             source_postimages[path] = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,
@@ -2743,3 +3154,441 @@ def test_d8_quota_continuity_reviewed_sha_in_reviewed_files_table():
             assert hashlib.sha256(raw.read()).hexdigest() == sha, (
                 f"{path} on-disk bytes do not match its pinned SHA"
             )
+
+
+# PR1917: the reviewed exact-origin parser uses HTTPS 443, not an OS identity.
+# Exercise the existing complete-postimage witness; never teach D8 that 443
+# or a line containing a port is generically safe.
+_HERMES_TAB_SWEEP_PATH = "integrations/hermes_secretary/tab_sweep.py"
+
+
+def _d8_hermes_tab_scan(source, *, path=_HERMES_TAB_SWEEP_PATH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_hermes_https_port_only_masks_reviewed_token():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46"
+    )
+    assert reviewed_literal_spans(_HERMES_TAB_SWEEP_PATH, source) == (
+        (19, 77, 80, "int"),
+    )
+    assert _d8_hermes_tab_scan(source) == []
+    line = source.splitlines()[18]
+    diff = (f"--- a/{_HERMES_TAB_SWEEP_PATH}\n+++ b/{_HERMES_TAB_SWEEP_PATH}\n"
+            f"@@ -19 +19 @@\n+{line}\n")
+    assert _scan_added_identity_diff(
+        diff, source_postimages={_HERMES_TAB_SWEEP_PATH: source},
+    ) == []
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _HERMES_TAB_SWEEP_PATH),
+    (True, "integrations/hermes_secretary/other_tab_sweep.py"),
+    (True, "control_plane/unreviewed_tab_sweep.py"),
+])
+def test_d8_hermes_https_port_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert _d8_hermes_tab_scan(source, path=path, postimage=postimage) == ["443"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("else 443", "else 444", ["444"]),
+    ("parsed.port in", "parsed.uid in", ["443"]),
+    ("80 if parsed.scheme", "501 if parsed.scheme", ["501", "443"]),
+    ("else 443)", "else 443, 501)", ["443", "501"]),
+    ("else 443)", "else 443, 443)", ["443", "443"]),
+    ('parsed.hostname == "chatgpt.com"',
+     'parsed.hostname == "chatgpt.com.attacker.invalid"', ["443"]),
+])
+def test_d8_hermes_https_port_context_or_numeric_drift_is_guarded(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_HERMES_TAB_SWEEP_PATH, changed) == ()
+    assert _d8_hermes_tab_scan(changed) == expected
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\npeer_uid = 443\n", ["443", "443"]),
+    ("\npeer_gid = 501\n", ["443", "501"]),
+    ('\naccount = "_mastermind_unreviewed"\n', ["443", "_mastermind_unreviewed"]),
+    ("\n# unrelated byte drift\n", ["443"]),
+])
+def test_d8_hermes_https_port_cannot_hide_added_identity_or_source_drift(suffix, expected):
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    assert _d8_hermes_tab_scan(source + suffix) == expected
+
+
+def test_d8_hermes_https_port_rejects_false_postimage():
+    source = (ROOT / _HERMES_TAB_SWEEP_PATH).read_text()
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_HERMES_TAB_SWEEP_PATH, source),
+            source_postimages={_HERMES_TAB_SWEEP_PATH: source.replace("else 443", "else 444")},
+        )
+
+
+def test_d8_s14_private_parent_mode_is_one_exact_source_bound_token():
+    path = 'ops/native_fabric/quota_continuity/candidate/post_failure_observation.py'
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == '80fc9d95068099fb797c9e7a05981a9650d50ec170935d748d92a8e7bcd04337'
+    assert REVIEWED_FILES[path]['sites'] == ((294, 79, 84, 'int', '0o700'),)
+    def scan(content, actual_path=path, postimage=True):
+        return _scan_added_identity_diff(_d8_frozen_source_diff(actual_path, content),
+            source_postimages={actual_path: content} if postimage else None)
+    assert scan(source) == []
+    assert scan(source, postimage=False) == ['0o700']
+    assert scan(source, actual_path='ops/other_account/post_failure_observation.py') == ['0o700']
+    for changed in (source.replace('!=0o700', '!=0o701', 1),
+                    source.replace('if parent_before', 'if  parent_before', 1),
+                    source + '\n# unrelated byte drift\n'):
+        assert scan(changed)
+    assert '777' in scan(source + '\npeer_uid = 777\n')
+
+
+_X_ENGAGEMENT_HTML = (
+    "research/competitive_intelligence/x_engagement/2026-10-30/"
+    "account_network_interactive.html"
+)
+_X_ENGAGEMENT_GEOMETRY = ["680", "900", "495", "535", "720", "922", "800"]
+
+
+def _d8_x_engagement_scan(source, *, path=_X_ENGAGEMENT_HTML, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_x_engagement_exact_geometry_is_frozen():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    assert hashlib.sha256(source.encode("utf-8")).hexdigest() == (
+        "62492c23f2d6a21d389268e51823f6b2f130e2e47a64f17bcfc38e886e9cc3d8"
+    )
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == (
+        (8, 77, 80, "int"), (37, 17, 20, "int"),
+        (70, 45, 48, "int"), (70, 51, 54, "int"),
+        (72, 45, 48, "int"), (74, 10, 13, "int"),
+        (79, 56, 59, "int"),
+    )
+    lines = source.splitlines()
+    for line, start, end, kind, token in REVIEWED_FILES[_X_ENGAGEMENT_HTML]["sites"]:
+        assert lines[line - 1].isascii()
+        assert lines[line - 1][start:end] == token
+        assert kind == "int"
+    assert _d8_x_engagement_scan(source) == []
+
+
+@pytest.mark.parametrize("path,postimage", [
+    (_X_ENGAGEMENT_HTML, False),
+    ("research/competitive_intelligence/x_engagement/unreviewed.html", True),
+    ("ops/identity/account_network_interactive.html", True),
+])
+def test_d8_x_engagement_requires_exact_path_and_postimage(path, postimage):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    if path != _X_ENGAGEMENT_HTML:
+        assert reviewed_literal_spans(path, source) == ()
+    findings = _d8_x_engagement_scan(source, path=path, postimage=postimage)
+    # The existing nonidentity-path CSS classifier still excludes dimensions.
+    expected = _X_ENGAGEMENT_GEOMETRY[2:] if path.endswith("/unreviewed.html") else _X_ENGAGEMENT_GEOMETRY
+    assert set(expected) <= set(findings)
+
+
+def test_d8_x_engagement_registry_removal_restores_geometry(monkeypatch):
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _X_ENGAGEMENT_HTML)
+    assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("min-height:680px", "min-height:681px", "681"),
+    ("x:495,y:535", "x:496,y:535", "496"),
+    ("x:1470,y:922", "x:1470,y:923", "923"),
+    ("x:495,y:535", "peer_uid:495,y:535", "495"),
+    ("x:495,y:535", "x:495,y:535,extra:495", "495"),
+    ("Additional group ", "Additional group changed ", "800"),
+    ("</body></html>", "</body></html>\n<!-- changed byte -->", "922"),
+])
+def test_d8_x_engagement_geometry_or_context_drift_is_not_repinned(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, changed) == ()
+    assert expected in _d8_x_engagement_scan(changed)
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n<script>const peer_uid=777;</script>", ["777"]),
+    ("\n<script>const allowed_peer_uids=[450,459];</script>", ["450", "459"]),
+    ('\n<script>const account="_mastermind_unreviewed";</script>', ["_mastermind_unreviewed"]),
+    ("\n<style>*{--peer-uid:777}</style>", ["777"]),
+    ("\n<button onclick=peer_uid(777)>Inspect</button>", ["777"]),
+    ("\n<button data-peer-uid=777>Inspect</button>", ["777"]),
+])
+def test_d8_x_engagement_pin_cannot_hide_new_identity(suffix, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
+    findings = _d8_x_engagement_scan(source)
+    for token in expected:
+        assert token in findings  # The injected identity itself must be exposed.
+
+
+def test_d8_x_engagement_false_postimage_is_rejected():
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_X_ENGAGEMENT_HTML, source),
+            source_postimages={_X_ENGAGEMENT_HTML: source.replace("x:495,y:535", "x:496,y:535")},
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_x_engagement_real_committed_git_collector(tmp_path, monkeypatch, identity):
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    if identity:
+        source += "\n<script>const peer_uid=777;</script>\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _X_ENGAGEMENT_HTML, source, identity,
+    )
+
+
+def test_d8_x_engagement_quoted_handler_cannot_reuse_geometry_pin():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _X_ENGAGEMENT_HTML).read_text(encoding="utf-8")
+    source += '\n<button onclick="peer_uid=777">Inspect</button>'
+    # Quoted handler dataflow is outside the existing scanner's contract. The
+    # source change still invalidates every frozen site and is rejected by D8.
+    assert reviewed_literal_spans(_X_ENGAGEMENT_HTML, source) == ()
+    assert _d8_x_engagement_scan(source) == _X_ENGAGEMENT_GEOMETRY
+
+
+def test_d8_nonrecursive_publisher_mkdir_modes_keep_identity_operands_guarded():
+    """Exercise the reviewed mode-only statements in real identity context."""
+    safe = (
+        "await mkdir(current, {mode: 0o700});",
+        "await mkdir(quarantineDir, {mode: 0o700});",
+    )
+    for line in safe:
+        assert _scan_identity_source_lines(
+            [line], identity_aliases={"current", "quarantineDir"}) == [], line
+    guarded = (
+        "await mkdir(current, {mode: 448});",
+        "await mkdir(current.uid, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700, owner: 501});",
+        "await other(current, {mode: 0o700});",
+        "await mkdir(current, {mode: 0o700}); uid = 501;",
+        "await mkdir(current, {mode: 0o700}); extra = 502;",
+        "await mkdir(current, {recursive: true, mode: 0o700});",
+        "await mkdir(unreviewed, {mode: 0o700});",
+    )
+    for line in guarded:
+        assert _scan_identity_source_lines([line], path_identity=True), line
+
+
+
+_WEB_OBSERVATION_PATH = "integrations/session_bridge/installed_web_observation.py"
+
+
+def _d8_web_observation_scan(source, *, path=_WEB_OBSERVATION_PATH, postimage=True):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_web_observation_exact_file_bound_masks_only_one_operand():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    # Exercise the real scanner before inspecting the finite review record.
+    assert _d8_web_observation_scan(source) == []
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22"
+    )
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == (
+        (252, 46, 49, "int"),
+    )
+    lines = source.splitlines(keepends=True)
+    assert lines[251][46:49] == "512"
+    tokens = [token for token in tokenize.generate_tokens(io.StringIO(source).readline)
+              if token.start == (252, 46) and token.end == (252, 49)]
+    assert len(tokens) == 1
+    assert tokens[0].type == tokenize.NUMBER and tokens[0].string == "512"
+    expected = list(lines)
+    expected[251] = lines[251][:46] + "0  " + lines[251][49:]
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, source) == "".join(expected)
+
+    owner = next(
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_path_custody"
+    )
+    bounds = [
+        node for node in ast.walk(owner)
+        if isinstance(node, ast.Compare)
+        and isinstance(node.left, ast.Attribute)
+        and isinstance(node.left.value, ast.Name)
+        and node.left.value.id == "info" and node.left.attr == "st_size"
+    ]
+    assert len(bounds) == 1
+    assert ast.dump(bounds[0], include_attributes=False) == ast.dump(
+        ast.parse("info.st_size > 512 * 1024", mode="eval").body,
+        include_attributes=False,
+    )
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _WEB_OBSERVATION_PATH),
+    (True, "integrations/session_bridge/other_web_observation.py"),
+    (True, "control_plane/unreviewed_observation.py"),
+])
+def test_d8_web_observation_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    assert _d8_web_observation_scan(source, path=path, postimage=postimage) == ["512"]
+
+
+def test_d8_web_observation_registry_removal_exposes_bound(monkeypatch):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _WEB_OBSERVATION_PATH)
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == ()
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, source) == source
+    assert _d8_web_observation_scan(source) == ["512"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("512 * 1024", "513 * 1024", "513"),
+    ("512 * 1024", "512 * 2048", "512"),
+    ("info.st_size > 512 * 1024", "info.st_uid > 512 * 1024", "512"),
+    ("info.st_size > 512 * 1024", "info.st_gid > 512 * 1024", "512"),
+    ("or (not socket and info.st_size > 512 * 1024)):",
+     "or (not socket and info.st_size > 512 * 1024) or uid == 777):", "777"),
+])
+def test_d8_web_observation_operand_and_identity_context_drift_is_guarded(old, new, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    ast.parse(changed)
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, changed) == ()
+    assert mask_reviewed_identity_literals(_WEB_OBSERVATION_PATH, changed) == changed
+    findings = _d8_web_observation_scan(changed)
+    assert expected in findings
+    if expected == "777":
+        assert "512" in findings
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n# unrelated source byte drift\n", "512"),
+    ("\npeer_uid = 777\n", "777"),
+    ("\npeer_gid = 777\n", "777"),
+    ("\npeer_port = 777\n", "777"),
+    ('\naccount = "_mastermind_unreviewed"\n', "_mastermind_unreviewed"),
+])
+def test_d8_web_observation_pin_cannot_hide_added_identity_or_source_drift(suffix, expected):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_WEB_OBSERVATION_PATH, source) == ()
+    findings = _d8_web_observation_scan(source)
+    assert "512" in findings
+    assert expected in findings
+
+
+@pytest.mark.parametrize("changed_diff", [False, True])
+def test_d8_web_observation_false_postimage_is_rejected(changed_diff):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    changed = source.replace("512 * 1024", "513 * 1024")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(_WEB_OBSERVATION_PATH, changed if changed_diff else source),
+            source_postimages={
+                _WEB_OBSERVATION_PATH: source if changed_diff else changed,
+            },
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_web_observation_real_committed_git_collector(tmp_path, monkeypatch, identity):
+    source = (ROOT / _WEB_OBSERVATION_PATH).read_text(encoding="utf-8")
+    if identity:
+        source += "\npeer_uid = 777\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _WEB_OBSERVATION_PATH, source, identity,
+    )
+
+
+def test_d8_glm_claim_lifetime_only_masks_the_exact_reviewed_token():
+    import difflib
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    path = "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py"
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"
+    )
+    predecessor = (ROOT / "ops/native_fabric/quota_continuity/rollout/"
+                   "preimages/glm_application_core_5c3d/go_lease_capability.py").read_text()
+    assert hashlib.sha256(predecessor.encode()).hexdigest() == (
+        "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940"
+    )
+
+    def introduced_diff(postimage, source_path=path):
+        return f"diff --git a/{source_path} b/{source_path}\n" + "".join(
+            difflib.unified_diff(predecessor.splitlines(keepends=True),
+                                 postimage.splitlines(keepends=True),
+                                 fromfile="a/" + source_path,
+                                 tofile="b/" + source_path, n=0))
+
+    spans = reviewed_literal_spans(path, source)
+    assert spans == ((326, 113, 116, "int"),)
+    line = source.splitlines()[325]
+    assert line[113:116] == "900"
+    diff = introduced_diff(source)
+    exact_findings = _scan_added_identity_diff(diff, source_postimages={path: source})
+    assert exact_findings == []
+    missing_findings = _scan_added_identity_diff(diff)
+    assert "900" in missing_findings
+
+    foreign = path.removesuffix(".py") + "_unreviewed.py"
+    foreign_findings = _scan_added_identity_diff(
+        introduced_diff(source, foreign), source_postimages={foreign: source})
+    assert "900" in foreign_findings
+
+    changed = source.replace(line, line[:113] + "901" + line[116:], 1)
+    changed_spans = reviewed_literal_spans(path, changed)
+    assert changed_spans == ()
+    changed_findings = _scan_added_identity_diff(
+        introduced_diff(changed), source_postimages={path: changed})
+    assert "901" in changed_findings
+
+    drifted = source + "\n# unrelated source drift\n"
+    drifted_spans = reviewed_literal_spans(path, drifted)
+    assert drifted_spans == ()
+    drifted_findings = _scan_added_identity_diff(
+        introduced_diff(drifted), source_postimages={path: drifted})
+    assert "900" in drifted_findings
+
+    peer_source = source + "peer_uid = 900\n"
+    peer_findings = _scan_added_identity_diff(
+        introduced_diff(peer_source), source_postimages={path: peer_source})
+    assert "900" in peer_findings

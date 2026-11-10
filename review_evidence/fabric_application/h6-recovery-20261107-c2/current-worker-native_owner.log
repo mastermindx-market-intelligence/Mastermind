@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import sys, runpy; sys.path.insert(0, '/Users/chriswong/.hermes/hermes-agent'); sys.argv = ['integrations/hermes_attended_fabric/tests/native_owner_qualification.py']; sys._hermes_relaunched = True; runpy.run_path('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/hermes_attended_fabric/tests/native_owner_qualification.py', run_name='__main__')
+                                                                                                                                                                                                           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen runpy>", line 294, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/hermes_attended_fabric/tests/native_owner_qualification.py", line 18, in <module>
+    from hermes_cli.plugins import (
+        LoadedPlugin, PluginContext, PluginManifest, get_plugin_manager,
+    )
+  File "/Users/chriswong/.hermes/hermes-agent/hermes_cli/plugins.py", line 31, in <module>
+    from utils import env_var_enabled
+  File "/Users/chriswong/.hermes/hermes-agent/utils.py", line 20, in <module>
+    import hermes_yaml as yaml
+  File "/Users/chriswong/.hermes/hermes-agent/hermes_yaml.py", line 10, in <module>
+    from ruamel.yaml import YAML
+ModuleNotFoundError: No module named 'ruamel'

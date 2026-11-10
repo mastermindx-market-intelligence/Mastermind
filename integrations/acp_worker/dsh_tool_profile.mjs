@@ -1,5 +1,6 @@
 import { createAdmittedPlugin } from '@deepseek-ai/dsh-mcp-client'
 import { compileDshMcpGrant } from './dsh_mcp_grant.mjs'
+import { compileDshAttemptOverlay } from './dsh_attempt_overlay.mjs'
 import { qualifyLoadedDispatchRuntime } from './dsh_dispatch_preflight.mjs'
 
 /**
@@ -48,10 +49,25 @@ function composeDshToolProfile({ admitGeneration, signal }, assertBeforeTranspor
  * Target checks precede preflight or transport creation. The original profile
  * and donor plugin still own activation, namespace, cancellation and disposal.
  */
-export function createDshGrantedToolProfile({ projection, isCurrentBinding, signal }) {
-  const grant = compileDshMcpGrant(projection, { isCurrentBinding, signal })
+export function createDshGrantedToolProfile({
+  projection, isCurrentBinding, signal, attemptOverlay,
+}) {
+  const bound = compileDshAttemptOverlay(projection, attemptOverlay)
+  // This remains the incumbent host's ONE binding callback, with the exact
+  // Attempt claim attached. A stale/widened Attempt cannot borrow this profile
+  // by changing the caller's config or by waiting through async preflight.
+  const current = bound
+    ? (binding, request) => bound.isLive() && isCurrentBinding(binding, Object.freeze({
+      ...request, attempt: bound.claim,
+    }))
+    : isCurrentBinding
+  const grant = compileDshMcpGrant(projection, { isCurrentBinding: current, signal })
+  const assertBeforeTransport = config => {
+    grant.assertConfig(config)
+    bound?.assertConfig(config)
+  }
   const profile = composeDshToolProfile(
-    { admitGeneration: grant.admitGeneration, signal }, grant.assertConfig,
+    { admitGeneration: grant.admitGeneration, signal }, assertBeforeTransport,
   )
   return Object.freeze({
     ...profile,
@@ -59,7 +75,11 @@ export function createDshGrantedToolProfile({ projection, isCurrentBinding, sign
       signal.throwIfAborted()
       const fixedConfig = structuredClone(config)
       grant.assertConfig(fixedConfig)
-      await profile.apply(ctx, fixedConfig)
+      // Only the trusted Python packet's immutable cwd/env may reach the
+      // existing DSH MCP transport. Never accept ambient or caller-selected
+      // server environment keys, and never alter command, args or tool grant.
+      const admittedConfig = bound ? bound.bind(fixedConfig) : fixedConfig
+      await profile.apply(ctx, admittedConfig)
     },
   })
 }

@@ -100,10 +100,19 @@ class DeadlineRequestCapability(unittest.TestCase):
         self.assertNotIn("required_platforms", seen[1])
 
     def test_direct_m2_deadline_refuses_before_local_slot_but_ordinary_call_is_unchanged(self):
-        with tempfile.TemporaryDirectory(prefix="fabric-local-deadline-") as raw:
+        # Exercise the real registry guard with its complete local dependency
+        # closure and an ordinary m2 entry beneath trusted fixture ancestry.
+        fixture_parent = os.environ.get("NATIVE_ROLLOUT_TEST_ROOT", str(Path.home()))
+        with tempfile.TemporaryDirectory(prefix="fabric-local-deadline-",
+                                         dir=fixture_parent) as raw:
             root = Path(raw)
-            for name in ("remote_sub.sh", "remote_sub_helpers.py", "commission_deadline.py"):
+            for name in ("remote_sub.sh", "remote_sub_helpers.py", "commission_deadline.py",
+                         "artifact_delivery.py", "native_runtime_bindings.py"):
                 shutil.copyfile(ROOT / "candidate" / name, root / name)
+            shutil.copyfile(ROOT / "source" / "artifact_reader.py", root / "artifact_reader.py")
+            registry = root / "hosts.json"
+            registry.write_text('{"m2":{"ssh_alias":"m2","local":true}}\n')
+            registry.chmod(0o600)
             packet = root / "packet.txt"
             packet.write_text("inert local fixture\n")
             local = root / "local-fixture"

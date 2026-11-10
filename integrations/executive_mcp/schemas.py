@@ -270,7 +270,13 @@ def loopback_bind_host(value: Any, field: str = "bind_host") -> str:
 #: kept alive for external readers (docs, the JSON-schema enum below, and any
 #: existing import of ``schemas.EXECUTION_PROFILES``) but is no longer an
 #: independent policy copy.
-EXECUTION_PROFILES: dict[str, tuple[str, ...]] = _ceo_request.EXECUTION_PROFILES
+# The frozen legacy catalog projects names only; capability values still come
+# from the one canonical law. Authenticated App-only profiles do not change this
+# advertised tool surface or acquire legacy submit admission.
+EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
+    name: _ceo_request.EXECUTION_PROFILES[name]
+    for name in ("research_only", "bounded_code_change")
+}
 
 #: Every capability any profile may ever emit.  A profile naming anything
 #: outside this set is a defect and is refused at derivation time.  Re-export
@@ -849,7 +855,8 @@ def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
     MAS-75 PR-A (P1 repair): this is a pure COMPATIBILITY WRAPPER over the one
     shared, transport-agnostic normalization law in ``control_plane.ceo_request``
-    — it holds no independent field/path/validation rule of its own.  The single
+    — it holds no independent field/path/validation rule of its own. The native
+    App-only profile is excluded from this frozen legacy transport. The shape
     check kept here (``arguments`` must be a ``Mapping``) exists only because
     ``validate_tool_arguments`` already guarantees this for every real call path
     but this function is also exercised directly (tests, and any future direct
@@ -862,8 +869,21 @@ def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
 
     if not isinstance(arguments, Mapping):
         raise GatewayError("invalid_input", "arguments must be an object")
+    if arguments.get("execution_profile") == "native_research_only":
+        raise GatewayError("invalid_input", "native research requires authenticated App admission")
     try:
         return _ceo_request.normalize_high_level_request(arguments)
+    except _ceo_request.CeoRequestError as exc:
+        _raise_as_gateway_error(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+def validate_app_submit_arguments(arguments: Any) -> dict[str, Any]:
+    """Explicit authenticated OS extension; does not widen the MCP tool."""
+    if not isinstance(arguments, Mapping):
+        raise GatewayError("invalid_input", "arguments must be an object")
+    try:
+        return _ceo_request.normalize_app_request(arguments)
     except _ceo_request.CeoRequestError as exc:
         _raise_as_gateway_error(exc)
         raise AssertionError("unreachable")  # pragma: no cover
@@ -1076,6 +1096,60 @@ def bound_job_document(
 
     current = _jsonable(data)
     receipts: list[dict[str, Any]] = []
+
+    # A pre-current historical requeue may retain an unqualified legacy
+    # SEALED_WORKER launch record. It is durable evidence, NOT a launch seal.
+    # Narrowly bound its read projection, retaining the Job/Attempt lifecycle
+    # and exact original-bytes receipts instead of certifying it for execution.
+    job = current.get("job") if isinstance(current, Mapping) else None
+    attempts = current.get("attempts") if isinstance(current, Mapping) else None
+    latest = current.get("latest_attempt") if isinstance(current, Mapping) else None
+    legacy_keys = {
+        "authorities", "authority_policy_hash", "launch_attestation",
+        "launch_attestation_path", "launch_attestation_sha256", "quota_class",
+        "routing", "schema_version", "worker_recovery_binding",
+    }
+    if (
+        type(job) is dict and job.get("status") == "QUEUED"
+        and job.get("current_attempt_id") is None
+        and job.get("assigned_worker_id") is None
+        and job.get("assigned_quota_class") is None
+        and job.get("result") is None
+        and type(job.get("attempt_count")) is int
+        and job["attempt_count"] == 1
+        and type(job.get("attempt_limit")) is int
+        and job["attempt_limit"] > 1
+        and type(attempts) is list and len(attempts) == 1
+        and type(attempts[0]) is dict and type(latest) is dict
+        and attempts[0] == latest
+        and attempts[0].get("status") == "LOST"
+        and attempts[0].get("execution_mode") == "SEALED_WORKER"
+        and type(attempts[0].get("launch_metadata")) is dict
+        and set(attempts[0]["launch_metadata"]) == legacy_keys
+        and attempts[0]["launch_metadata"].get("schema_version")
+            == "mastermind.executive_process_launch/v1"
+        and type(attempts[0]["launch_metadata"].get("launch_attestation")) is dict
+        and attempts[0]["launch_metadata"]["launch_attestation"].get("schema_version")
+            == "mastermind.executive_launch_attestation/v1"
+    ):
+        candidates = []
+        for parts, row in ((("attempts", 0, "launch_metadata"), attempts[0]),
+                           (("latest_attempt", "launch_metadata"), latest)):
+            encoded = canonical_json(row["launch_metadata"])
+            preview = encoded.decode("utf-8")[:BOUND_PREVIEW_CHARS]
+            receipt = {
+                "bounded": True,
+                "original_bytes": len(encoded),
+                "returned_bytes": len(preview.encode("utf-8")),
+                "field": _display_path(parts),
+            }
+            if receipt["returned_bytes"] >= receipt["original_bytes"]:
+                break  # Never label complete historical evidence as truncated.
+            candidates.append((row, receipt, preview))
+        if len(candidates) == 2:
+            for row, receipt, preview in candidates:
+                row["launch_metadata"] = {**receipt, "preview": preview}
+                receipts.append(receipt)
 
     def size() -> int:
         return len(canonical_json(current)) + len(canonical_json(receipts))

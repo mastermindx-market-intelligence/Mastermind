@@ -1,0 +1,1154 @@
+{
+  "assignment": "Read-only navigation and builder-reference reasoning",
+  "sourcePin": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+  "macroPin": "b5674d8ef898e503d6164922654f5ff89be9981c",
+  "files": 41,
+  "pages": 130,
+  "coverage": [
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "fileName": "MASTERMIND · Migration Directory · START HERE",
+      "pageId": "p-1-0",
+      "pageName": "00 · START HERE · Migration status and safe navigation",
+      "disposition": "navigation-directory",
+      "depth": "1-0: directory start JSX; append container inspected"
+    },
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "fileName": "MASTERMIND · Migration Directory · START HERE",
+      "pageId": "p-2-0",
+      "pageName": "01 - Existing product files - not migration receipts",
+      "disposition": "navigation-directory",
+      "depth": "J-0: page/board metadata only"
+    },
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "fileName": "MASTERMIND · Migration Directory · START HERE",
+      "pageId": "p-3-0",
+      "pageName": "02 - Migrated file locations - 1 of 3",
+      "disposition": "navigation-directory",
+      "depth": "24-0: directory index JSX"
+    },
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "fileName": "MASTERMIND · Migration Directory · START HERE",
+      "pageId": "p-4-0",
+      "pageName": "03 - Migrated file locations - 2 of 3",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "fileName": "MASTERMIND · Migration Directory · START HERE",
+      "pageId": "p-5-0",
+      "pageName": "04 - Migrated file locations - 3 of 3",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+      "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+      "pageId": "p-1-0",
+      "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "fileName": "Mastermind - BioCatalyst - Blueprint and Builder Contracts",
+      "pageId": "p-1-0",
+      "pageName": "BioCatalyst · Builder & Acceptance Contracts",
+      "disposition": "builder-reference",
+      "depth": "1-0: BioCatalyst builder JSX"
+    },
+    {
+      "fileId": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "fileName": "Mastermind - BioCatalyst - Blueprint and Builder Contracts",
+      "pageId": "p-2-0",
+      "pageName": "BioCatalyst · North Star + Build Blueprint · 2026-09-26",
+      "disposition": "builder-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+      "fileName": "Mastermind - Bonds and Transmission - Pre-R30 Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Bonds + Transmission · pre-R30",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3T1K3573JYPMBATASW1W5",
+      "fileName": "Mastermind - Bonds and Cross-Asset Transmission - Studies",
+      "pageId": "p-1-0",
+      "pageName": "Bonds · Decision & Credit Studies · Revision index",
+      "disposition": "study-or-reference",
+      "depth": "1-0: start JSX and screenshot; 11G-0: R33 implementation map JSX"
+    },
+    {
+      "fileId": "01M6Y3T1K3573JYPMBATASW1W5",
+      "fileName": "Mastermind - Bonds and Cross-Asset Transmission - Studies",
+      "pageId": "p-2-0",
+      "pageName": "Cross-Asset · Bonds × Forex Transmission & Confluence · Studies",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
+      "fileName": "Mastermind - Bonds - Decision Workspace R1",
+      "pageId": "p-1-0",
+      "pageName": "Bonds · Decision Workspace · R1 · 2026-09-26",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "fileName": "Mastermind - Market Breadth - Command Center R1",
+      "pageId": "p-1-0",
+      "pageName": "Market Breadth · Command Center · R1 · 2026-09-29",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "1-0: Breadth desktop JSX and screenshot"
+    },
+    {
+      "fileId": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "fileName": "Mastermind - Catalyst Intelligence - Decision Desk and Integration",
+      "pageId": "p-1-0",
+      "pageName": "Catalyst Intelligence · Decision Desk · R1 · 2026-10-18",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+      "fileName": "Mastermind - Catalyst Intelligence - Decision Desk and Integration",
+      "pageId": "p-2-0",
+      "pageName": "Catalyst-to-Opportunity · Source-bound integration · 2026-10-17",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y396T7MXR7VQXSRKMYS3RM",
+      "fileName": "Mastermind - China Intelligence - Historical Study",
+      "pageId": "p-1-0",
+      "pageName": "China Intelligence · vNext · 2026-09-21",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "fileName": "Mastermind - Commodities - R1 Source and Legacy Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Commodities Legacy 90–94 · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "fileName": "Mastermind - Commodities - R1 Source and Legacy Archive",
+      "pageId": "p-2-0",
+      "pageName": "Commodities · R1 Study · 2026-09-26",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
+      "fileName": "Mastermind - Company Intelligence - Archive Not for Build",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Company Intelligence · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "fileName": "Mastermind - Confluence Screener - R2 and Governed References",
+      "pageId": "p-1-0",
+      "pageName": "Confluence Screener · Governed Reference · 2026-09-22",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "fileName": "Mastermind - Confluence Screener - R2 and Governed References",
+      "pageId": "p-2-0",
+      "pageName": "Confluence Screener · R2 · 2026-09-26",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "fileName": "Mastermind - Crypto Intelligence - R4 References and Archive",
+      "pageId": "p-1-0",
+      "pageName": "Crypto Intelligence · R4 · Design References",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "fileName": "Mastermind - Crypto Intelligence - R4 References and Archive",
+      "pageId": "p-3-0",
+      "pageName": "Proposed · Relative comparison basis",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "fileName": "Mastermind - Crypto Intelligence - R4 References and Archive",
+      "pageId": "p-2-0",
+      "pageName": "ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+      "fileName": "Mastermind - Earnings and Dossiers - Source Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Earnings and Dossiers Original Source · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+      "fileName": "Mastermind - Earnings and Dossiers - Source Archive",
+      "pageId": "p-2-0",
+      "pageName": "HISTORICAL REDIRECT SNAPSHOT - Earnings + Dossiers · North Star Study · 2026-09-26",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+      "fileName": "Mastermind - Forex - Prior Studies Archive",
+      "pageId": "p-1-0",
+      "pageName": "Forex · Archive · Prior studies & build history",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+      "fileName": "Mastermind - Forex - Prior Studies Archive",
+      "pageId": "p-2-0",
+      "pageName": "ARCHIVE · Forex Duplicate Study · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3PVKKXC83MRGJYCX77959",
+      "fileName": "Mastermind - Forex - R17-R24 and Alternate Studies",
+      "pageId": "p-1-0",
+      "pageName": "Forex · Advanced Movement & Decision Studies · R17–R24",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3PVKKXC83MRGJYCX77959",
+      "fileName": "Mastermind - Forex - R17-R24 and Alternate Studies",
+      "pageId": "p-2-0",
+      "pageName": "REFERENCE · Forex Alternate R19–R21 Studies",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "fileName": "Mastermind - Forex Guided Intelligence - Source Revisions",
+      "pageId": "p-1-0",
+      "pageName": "Forex · Guided Intelligence · R1 · 2026-09-26",
+      "disposition": "study-or-reference",
+      "depth": "1-0: Forex guide builder JSX"
+    },
+    {
+      "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "fileName": "Mastermind - Design Foundations and Archetypes - Migrated References",
+      "pageId": "p-1-0",
+      "pageName": "Archetype Starters · Governed",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "fileName": "Mastermind - Design Foundations and Archetypes - Migrated References",
+      "pageId": "p-3-0",
+      "pageName": "Proposed · CAGR period and recovery",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "fileName": "Mastermind - Design Foundations and Archetypes - Migrated References",
+      "pageId": "p-2-0",
+      "pageName": "01 · Design Foundations · Components & Archetype Rules",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3397SE03G626MJ72N90PF",
+      "fileName": "Mastermind - Government Revenue - R5 and Builder Contracts",
+      "pageId": "p-1-0",
+      "pageName": "Gov Revenue · Builder Contracts & State Specimens",
+      "disposition": "builder-reference",
+      "depth": "1-0: Gov Revenue builder JSX"
+    },
+    {
+      "fileId": "01M6Y3397SE03G626MJ72N90PF",
+      "fileName": "Mastermind - Government Revenue - R5 and Builder Contracts",
+      "pageId": "p-2-0",
+      "pageName": "Gov Revenue · Signal Desk · R5 · 2026-09-26",
+      "disposition": "builder-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3X59BVYPETH1DRC4YSVAW",
+      "fileName": "Mastermind - Intelligence Hub - Earlier Archive and References",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Intelligence Hub · R1–R3 · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3X59BVYPETH1DRC4YSVAW",
+      "fileName": "Mastermind - Intelligence Hub - Earlier Archive and References",
+      "pageId": "p-2-0",
+      "pageName": "HISTORICAL REDIRECT SNAPSHOT - Intelligence Hub · Unified US + China · R4 · 2026-09-27",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3X59BVYPETH1DRC4YSVAW",
+      "fileName": "Mastermind - Intelligence Hub - Earlier Archive and References",
+      "pageId": "p-3-0",
+      "pageName": "HISTORICAL REDIRECT SNAPSHOT - Intelligence Hub · R1 Study · 2026-09-26",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y486E4X85MVP1AWS8H6E53",
+      "fileName": "Mastermind - Intelligence Hub - R4 Original Source Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Intelligence Hub R4 Original Source · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
+      "fileName": "Mastermind - International Markets - R9 Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · International Markets · R9 · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+      "fileName": "Mastermind - Intraday Flow - R1 Draft",
+      "pageId": "p-1-0",
+      "pageName": "Intraday Flow · R1 · Discovery workspace · DRAFT",
+      "disposition": "candidate-or-draft",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "fileName": "Mastermind - Legacy Navigation and Entry Designs - Reference",
+      "pageId": "p-1-0",
+      "pageName": "00 · START HERE · Product & File Navigation",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+      "fileName": "Mastermind - Market Memory - Evidence Workspace R1",
+      "pageId": "p-1-0",
+      "pageName": "Market Memory · Evidence workspace · R1 · 2026-10-18",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+      "fileName": "Mastermind - MedTech - Regulatory Catalyst R13 References",
+      "pageId": "p-1-0",
+      "pageName": "MedTech · Regulatory Catalyst R13 · Design References",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "fileName": "Mastermind - News Intelligence - September Source Study",
+      "pageId": "p-1-0",
+      "pageName": "News Intelligence · 2026-09-20",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "fileName": "Mastermind - Macro and Policy Watch - Reference Studies",
+      "pageId": "p-1-0",
+      "pageName": "Macro · Dark Flow · Implementation · 2026-10-17",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "fileName": "Mastermind - Macro and Policy Watch - Reference Studies",
+      "pageId": "p-2-0",
+      "pageName": "Policy Watch · Decision Desk · R1 Study · 2026-09-26",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2X53ABR4MME4ATS15B8SH",
+      "fileName": "Mastermind - Macro and Policy Watch - Reference Studies",
+      "pageId": "p-3-0",
+      "pageName": "REFERENCE · Policy Watch R2–R3 & HELD · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y39WH7QVTH07RTWHTSRP65",
+      "fileName": "Mastermind - Returns Calendar - Terminal and Dossier",
+      "pageId": "p-1-0",
+      "pageName": "Returns Calendar · Terminal + Dossier",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+      "fileName": "Mastermind - Ranked Search and Discovery - T47 Draft",
+      "pageId": "p-1-0",
+      "pageName": "DRAFT · T47 · Ranked snapshot search · 2026-11-04",
+      "disposition": "candidate-or-draft",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
+      "fileName": "Mastermind - Sector Intelligence - Legacy Archive",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Sector Intelligence · Legacy Studies · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+      "fileName": "Mastermind - Sector Intelligence - R2 and Study References",
+      "pageId": "p-1-0",
+      "pageName": "Sector Intelligence · R2 · Current Build · 2026-09-27",
+      "disposition": "study-or-reference",
+      "depth": "1-0: Sector R2 start JSX"
+    },
+    {
+      "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+      "fileName": "Mastermind - Sector Intelligence - R2 and Study References",
+      "pageId": "p-2-0",
+      "pageName": "HISTORICAL REDIRECT SNAPSHOT - Sector Intelligence · vNext Study · 2026-09-24",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+      "fileName": "Mastermind - Sector Intelligence - R2 and Study References",
+      "pageId": "p-3-0",
+      "pageName": "HISTORICAL REDIRECT SNAPSHOT - Sector Intelligence · Unified Detail · 2026-09-21",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+      "fileName": "Mastermind - Sector Intelligence - R2 and Study References",
+      "pageId": "p-4-0",
+      "pageName": "HISTORICAL REDIRECT SNAPSHOT - Sector Central · Redesign · 2026-09-21",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "fileName": "Mastermind - Sector Intelligence - R3 Completion",
+      "pageId": "p-1-0",
+      "pageName": "Sector Intelligence · R3 · Completion · 2026-10-21",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "fileName": "Mastermind - Shared Market - Research and Reading References",
+      "pageId": "p-1-0",
+      "pageName": "Shared Market · Prepared Research + Reading · Reference",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+      "fileName": "Mastermind - Shared Market - Search and Comparison",
+      "pageId": "p-1-0",
+      "pageName": "Shared Market · Search + Comparison · Reference",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "fileName": "Mastermind - Shared Shell - F01 Candidate and Integration",
+      "pageId": "p-1-0",
+      "pageName": "F01 · Shell system · v1 candidate · Review pending",
+      "disposition": "candidate-or-draft",
+      "depth": "UZ-0: F01 readme JSX; held provenance identified; no write"
+    },
+    {
+      "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "fileName": "Mastermind - Shared Shell - F01 Candidate and Integration",
+      "pageId": "p-3-0",
+      "pageName": "Proposed · Today comparison basis",
+      "disposition": "candidate-or-draft",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "fileName": "Mastermind - Shared Shell - F01 Candidate and Integration",
+      "pageId": "p-2-0",
+      "pageName": "Shared Shell · Completion & Integration · R1",
+      "disposition": "candidate-or-draft",
+      "depth": "30C-0: shell migration/acceptance builder JSX"
+    },
+    {
+      "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "fileName": "Mastermind - Shared Market - Tools and Research Launcher",
+      "pageId": "p-1-0",
+      "pageName": "Shared Market · All Tools + Research Launcher · Reference",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "fileName": "Mastermind - Shared Market - Watchlists and Save States",
+      "pageId": "p-1-0",
+      "pageName": "Shared Market · Watchlists + Save States · Reference",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "fileName": "Mastermind - Shared Market - Watchlists and Save States",
+      "pageId": "p-2-0",
+      "pageName": "Proposed · Saved item to exact watchlist",
+      "disposition": "working-study-needs-source-qualification",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "fileName": "Mastermind - Shared Shell - Earlier Design Studies",
+      "pageId": "p-1-0",
+      "pageName": "Mastermind · Shared Shell · Review 01 · 2026-09-24",
+      "disposition": "study-or-reference",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "fileName": "Mastermind - Shared Shell - Earlier Design Studies",
+      "pageId": "p-2-0",
+      "pageName": "Investor Shell · Market Overview · Design Candidates",
+      "disposition": "candidate-or-draft",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M6Y37BWE719DWW5Z0DQS6DS9",
+      "fileName": "Mastermind - Synthetic Catalyst Cases - Archive Not for Build",
+      "pageId": "p-1-0",
+      "pageName": "ARCHIVE · Synthetic Catalyst Investment Cases · Not for Build",
+      "disposition": "preserved-history",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1P-0",
+      "pageName": "00 · START HERE · Product & File Navigation",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-5-0",
+      "pageName": "Archetype Starters · Governed",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-27-0",
+      "pageName": "F01 · Shell system · v1 candidate · Review pending",
+      "disposition": "navigation-directory",
+      "depth": "74XL-0: exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-26-1",
+      "pageName": "Intraday Flow · R1 · Discovery workspace · DRAFT",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-25-0",
+      "pageName": "Options · Research Desk · R1 · 2026-11-02",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-24-0",
+      "pageName": "Sector Intelligence · R3 · Completion · 2026-10-21",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-29-0",
+      "pageName": "D06 · Market structure, stages and model allocation · R1",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-28-0",
+      "pageName": "DRAFT · T47 · Ranked snapshot search · 2026-11-04",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-23-0",
+      "pageName": "Shared Shell · Completion & Integration · R1",
+      "disposition": "navigation-directory",
+      "depth": "74Z6-0: exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-22-0",
+      "pageName": "Market Memory · Evidence workspace · R1 · 2026-10-18",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-20-0",
+      "pageName": "Catalyst Intelligence · Decision Desk · R1 · 2026-10-18",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1Z-1",
+      "pageName": "Catalyst-to-Opportunity · Source-bound integration · 2026-10-17",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1Y-1",
+      "pageName": "ARCHIVE · Bonds + Transmission · pre-R30",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1X-1",
+      "pageName": "Forex · Archive · Prior studies & build history",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1W-1",
+      "pageName": "Macro · Dark Flow · Implementation · 2026-10-17",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1U-0",
+      "pageName": "Shared Market · Prepared Research + Reading · Reference",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1T-0",
+      "pageName": "Shared Market · Watchlists + Save States · Reference",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1S-0",
+      "pageName": "Shared Market · Search + Comparison · Reference",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1R-0",
+      "pageName": "Shared Market · All Tools + Research Launcher · Reference",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1Q-0",
+      "pageName": "01 · Design Foundations · Components & Archetype Rules",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1N-0",
+      "pageName": "Gov Revenue · Builder Contracts & State Specimens",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1M-0",
+      "pageName": "BioCatalyst · Builder & Acceptance Contracts",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1L-0",
+      "pageName": "ARCHIVE · Synthetic Catalyst Investment Cases · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1K-0",
+      "pageName": "MedTech · Regulatory Catalyst R13 · Design References",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1J-0",
+      "pageName": "REFERENCE · Policy Watch R2–R3 & HELD · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1I-0",
+      "pageName": "ARCHIVE · Commodities Legacy 90–94 · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1H-0",
+      "pageName": "Bonds · Decision & Credit Studies · Revision index",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1F-0",
+      "pageName": "Forex · Advanced Movement & Decision Studies · R17–R24",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1E-0",
+      "pageName": "Cross-Asset · Bonds × Forex Transmission & Confluence · Studies",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1B-0",
+      "pageName": "ARCHIVE · Earnings and Dossiers Original Source · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-1A-0",
+      "pageName": "ARCHIVE · Intelligence Hub R4 Original Source · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-18-0",
+      "pageName": "Investor Shell · Market Overview · Design Candidates",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-17-0",
+      "pageName": "REFERENCE · Forex Alternate R19–R21 Studies",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-16-0",
+      "pageName": "ARCHIVE · Forex Duplicate Study · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-15-0",
+      "pageName": "Returns Calendar · Terminal + Dossier",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-14-0",
+      "pageName": "Bot Paper Portfolio · V3 Upgrade · 2026-10-09",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-Q-0",
+      "pageName": "Earnings + Dossiers · North Star Study · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-3-1",
+      "pageName": "News Intelligence · 2026-09-20",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-D-0",
+      "pageName": "Mastermind · Shared Shell · Review 01 · 2026-09-24",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-13-1",
+      "pageName": "Market Breadth · Command Center · R1 · 2026-09-29",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-A-0",
+      "pageName": "Confluence Screener · Governed Reference · 2026-09-22",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-H-1",
+      "pageName": "Confluence Screener · R2 · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-O-1",
+      "pageName": "Bonds · Decision Workspace · R1 · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-N-1",
+      "pageName": "Forex · Guided Intelligence · R1 · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-J-1",
+      "pageName": "Policy Watch · Decision Desk · R1 Study · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-8-1",
+      "pageName": "Live Site Baselines · Wave 1 · 2026-09-21",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-T-0",
+      "pageName": "Intelligence Hub · Unified US + China · R4 · 2026-09-27",
+      "disposition": "navigation-directory",
+      "depth": "61O3-0: Hub signpost JSX"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-10-0",
+      "pageName": "Crypto Intelligence · R4 · Design References",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-L-0",
+      "pageName": "Commodities · R1 Study · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-Y-0",
+      "pageName": "Sector Intelligence · R2 · Current Build · 2026-09-27",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-S-1",
+      "pageName": "Gov Revenue · Signal Desk · R5 · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "74P5-0: exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-K-0",
+      "pageName": "BioCatalyst · North Star + Build Blueprint · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "74VH-0: exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-Z-0",
+      "pageName": "ARCHIVE · Sector Intelligence · Legacy Studies · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-V-0",
+      "pageName": "ARCHIVE · Company Intelligence · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-11-0",
+      "pageName": "ARCHIVE · Crypto Intelligence · R1–R2 · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-X-0",
+      "pageName": "ARCHIVE · Intelligence Hub · R1–R3 · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-W-0",
+      "pageName": "ARCHIVE · International Markets · R9 · Not for Build",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-E-1",
+      "pageName": "Sector Intelligence · vNext Study · 2026-09-24",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-6-1",
+      "pageName": "Sector Intelligence · Unified Detail · 2026-09-21",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-I-1",
+      "pageName": "Intelligence Hub · R1 Study · 2026-09-26",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-9-0",
+      "pageName": "Sector Central · Redesign · 2026-09-21",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+      "pageId": "p-7-1",
+      "pageName": "China Intelligence · vNext · 2026-09-21",
+      "disposition": "navigation-directory",
+      "depth": "file-and-page inventory; not full content verification"
+    }
+  ],
+  "retainedContentReads": [
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "directory start JSX; append container inspected"
+    },
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "pageId": "p-2-0",
+      "nodeId": "J-0",
+      "depth": "page/board metadata only"
+    },
+    {
+      "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "pageId": "p-3-0",
+      "nodeId": "24-0",
+      "depth": "directory index JSX"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "pageId": "p-T-0",
+      "nodeId": "61O3-0",
+      "depth": "Hub signpost JSX"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "pageId": "p-23-0",
+      "nodeId": "74Z6-0",
+      "depth": "exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "pageId": "p-27-0",
+      "nodeId": "74XL-0",
+      "depth": "exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "pageId": "p-K-0",
+      "nodeId": "74VH-0",
+      "depth": "exact destination text read"
+    },
+    {
+      "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+      "pageId": "p-S-1",
+      "nodeId": "74P5-0",
+      "depth": "exact destination text read"
+    },
+    {
+      "fileId": "01M6Y3T1K3573JYPMBATASW1W5",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "start JSX and screenshot"
+    },
+    {
+      "fileId": "01M6Y3T1K3573JYPMBATASW1W5",
+      "pageId": "p-1-0",
+      "nodeId": "11G-0",
+      "depth": "R33 implementation map JSX"
+    },
+    {
+      "fileId": "01M6Y34XE4JKS3A40GMMZ954JE",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "BioCatalyst builder JSX"
+    },
+    {
+      "fileId": "01M6Y3397SE03G626MJ72N90PF",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "Gov Revenue builder JSX"
+    },
+    {
+      "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "pageId": "p-1-0",
+      "nodeId": "UZ-0",
+      "depth": "F01 readme JSX; held provenance identified; no write"
+    },
+    {
+      "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "pageId": "p-2-0",
+      "nodeId": "30C-0",
+      "depth": "shell migration/acceptance builder JSX"
+    },
+    {
+      "fileId": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "Forex guide builder JSX"
+    },
+    {
+      "fileId": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "Breadth desktop JSX and screenshot"
+    },
+    {
+      "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+      "pageId": "p-1-0",
+      "nodeId": "1-0",
+      "depth": "Sector R2 start JSX"
+    }
+  ],
+  "limitation": "41 files / 130 pages inventoried and classified; 12 boards read in JSX; two representative screenshots (Bonds start and Market Breadth desktop); four original-page destination nodes read. Other pages are metadata classification only. No full visual, interaction, browser, native-link, production or empirical-usability acceptance claimed. Earlier interrupted read-only bulk metadata loop discarded temporary results; those results are not used."
+}

@@ -16,6 +16,7 @@ from ops.executive_os import autonomy_control as owner
 
 PUBLICATION_PHASE = 'CONTROL_OBSERVATION_PUBLICATION_STARTED'
 ROLLBACK_PUBLICATION_PHASE = 'ROLLBACK_OBSERVATION_PUBLICATION_STARTED'
+COMPONENT_PUBLICATION_PHASE = 'CONTROL_COMPONENT_PUBLICATION_STARTED'
 
 
 def _source(expected_sha):
@@ -105,6 +106,23 @@ def publish_for_install(expected_sha):
     # The installer already owns its maintenance interval; this is not an
     # independently callable recovery/refresh operation.
     return _publish(expected_sha, allow_publication=True)
+
+
+def publish_for_macro_adoption(held):
+    """Publish only inside the actual live, locked offline adoption interval.
+
+    The exact type alone is insufficient: the owner re-proves process-local
+    creation, its held canonical marker inode/flock, durable publication phase,
+    stopped/quiescent Runtime custody and exact installed source/config bytes.
+    No serialized receipt or caller digest can construct that interval.
+    """
+    from ops.executive_os.macro_adoption import _HeldAdoption
+    if type(held) is not _HeldAdoption:
+        raise owner.TransactionEffectUnknown()
+    expected_sha, config_sha256 = held.observation_publication_binding()
+    _source(expected_sha)
+    return _publish(expected_sha, allow_publication=True,
+                    control_sha256=config_sha256)
 
 
 def publish_for_transaction(host, transaction):
@@ -211,12 +229,44 @@ def _publish_for_transaction(host, transaction):
                 transaction.transaction_id, transaction.expected_sha)
     restored = (getattr(host, '_control_observation_rollback_proven', None) is transaction
                 and manifest.get('phase') in {'ROLLBACK_CONTROL_PROVEN', 'CONTROL_OVERRIDE_RESTORED'})
-    fresh = (getattr(host, '_control_observation_fresh_transaction', None) is transaction
-             and (getattr(host, '_control_observation_origin', None) == identity
-                  or (restored and getattr(host, '_control_observation_recovery_owner', None) == identity))
-             and manifest.get('phase') not in {PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE})
+    # A2 return-route restoration may reclaim its ORIGINAL global marker
+    # after a proven complete Config + DISARMED receipt pair, but ONLY before
+    # any earlier observation publication was attempted. The original marker
+    # and exact recovered process/held-inode identity fence this one effect.
+    # Publication-attempt phase is durable BEFORE _publish can be invoked.
+    a2_restore_admitted = (
+        manifest.get('operation') == 'A2_RETURN_SOCKET_RESTORE'
+        and manifest.get('phase') == 'A2_CONTROL_RESTORED'
+        and getattr(host, '_a2_restore_observation_recovery_proven', None) is transaction
+        and getattr(host, '_control_observation_recovery_owner', None) == identity
+        and getattr(host, '_control_observation_fresh_transaction', None) is not transaction
+    )
+    # A Control component update owes exactly ONE publication.  Its
+    # same-operation reconciliation may perform it only after the owner has
+    # proved every retained postimage exactly, and only while the retained
+    # phase still says the publication was never attempted: once this phase
+    # is recorded, the publication is never repeated.
+    component_admitted = (
+        manifest.get('operation') == owner.CONTROL_COMPONENT_UPDATE
+        and manifest.get('phase') in owner._CONTROL_COMPONENT_PUBLICATION_ADMISSIBLE_PHASES
+        and getattr(host, '_component_observation_recovery_owner', None) == identity
+        and getattr(host, '_control_observation_fresh_transaction', None) is not transaction
+    )
+    fresh = (
+        (getattr(host, '_control_observation_fresh_transaction', None) is transaction
+         and (getattr(host, '_control_observation_origin', None) == identity
+              or (restored and getattr(host, '_control_observation_recovery_owner', None) == identity))
+         and manifest.get('phase') not in {PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE})
+        or a2_restore_admitted
+        or component_admitted
+    )
     if fresh:
-        phase = ROLLBACK_PUBLICATION_PHASE if restored else PUBLICATION_PHASE
+        if component_admitted:
+            phase = COMPONENT_PUBLICATION_PHASE
+        elif restored:
+            phase = ROLLBACK_PUBLICATION_PHASE
+        else:
+            phase = PUBLICATION_PHASE
         host._persist_phase(transaction, phase)
         reread = host._manifest()
         if (reread.get('phase') != phase

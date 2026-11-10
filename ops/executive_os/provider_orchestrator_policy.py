@@ -57,6 +57,56 @@ LEGACY_BLOCKS = (
 )
 BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 
+# Fixed source assets, not a role/identity/grant registry.
+ROLE_PACKAGE = "mastermind-fabric-orchestration"
+CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
+# Git blob digest of the separately reviewed local Skill source; not a runtime grant.
+CLAUDE_FABRIC_SKILL_BLOB_SHA = "3f9d0bbad57de0174b715f4186dc2d0be5ca58b7"
+# Keep the fixed bound explicit; this reviewed guide includes the upstream
+# read-only parent-recovery diagnostic and one short review-routing pointer.
+CLAUDE_FABRIC_SKILL_MAX_BYTES = 9216
+# Only the two exact prior protected Claude skill blobs may be upgraded.
+CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS = frozenset({
+    "41d9b46459138bfef4537ab6a32fa7cd3a0559d8",
+    "a4a29ba025db0e50f084179b248501fd27327bfb",
+})
+CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
+CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
+# Exact former canonical Codex source: installed on M2 before this review update.
+CODEX_FABRIC_PREVIOUS_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
+# Exact installed guide before the new Macro cwd clarification.
+CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA = "1ae788e373c93546ac4990e7ab48c1fa539561e9"
+CODEX_FABRIC_SKILL_BLOB_SHA = "21480522be625525f1569fbc0b1dec09d0f06160"
+CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
+CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
+CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
+CODEX_FABRIC_ENTRY_BODY = """<!-- mastermind-codex-fabric-entrypoint-v1 -->
+## Codex -> existing Subagent Fabric
+
+When assigned an authorized M2 Codex orchestration mission, load the existing
+`~/.codex/skills/mastermind-fabric-delegate/SKILL.md` for the original-root,
+child request/status/result/accept and admitted operator-to-leaf procedures.
+Native Codex child spawning is not paid Fabric admission. Preserve the current
+thread lineage, provider grants, root budget and active effects; no second router.
+<!-- /mastermind-codex-fabric-entrypoint-v1 -->
+"""
+FABRIC_ENTRY_BEGIN = "<!-- mastermind-claude-fabric-entrypoint-v1 -->"
+FABRIC_ENTRY_END = "<!-- /mastermind-claude-fabric-entrypoint-v1 -->"
+FABRIC_ENTRY_BODY = """<!-- mastermind-claude-fabric-entrypoint-v1 -->
+## M2 Claude: delegate through existing Mastermind Subagent Fabric
+
+When you are the currently assigned, authorized orchestrator and a bounded worker
+will save effort, read `~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`
+first. It gives the real M2 Fabric CLI/MCP request, status, result and acceptance
+path, as well as operator -> child return. Require verified original root and
+actual immediate parent, authorized tools and existing admission. No native
+Agent/Task or direct provider/SSH substitute and no inherited authorization.
+Leaf workers cannot fan out; only a separately admitted operator with the
+controller-issued child scope may request C0/C1 descendants.
+<!-- /mastermind-claude-fabric-entrypoint-v1 -->
+"""
+ROLE_SHA256 = {'SKILL.md': 'c8841ca9b18b0a2c559cfc3b39c019b2b7e479f36029eba608d43eb5e26a5b30', 'references/meta-ceo.md': '89aef416558151057aa02d21c1cafb37482f2968b663a3f698adaa50c6908809', 'references/program-ceo.md': '8cb99036eac3e033e6f65d318b29f6ad8934cac9409a4677b06eab3bceb35d01', 'references/operator.md': '64a93b5e7a480a2ef7c6fbd4755576feac8ea93897d10644e130ea1c81f62efc', 'references/worker.md': 'f9fbd9157ad44b4a6be417e8cadec868551031ea54cc148f4a9834309d84b574', 'references/reviewer.md': '3e9586f405e7f2e0c66188b1a1509fa655aa55042dcdd54438a2db8aa8a1f6ec'}
+
 POLICY_BODY = f"""{BEGIN}
 ## Mastermind CEO / orchestrator forward execution
 
@@ -66,31 +116,19 @@ agent count, tokens, elapsed time, tool calls, PR count, or administrative motio
 
 ### Operating shape
 
-- Sol is the default day-to-day project executive for decomposition, dispatch, ordinary repair,
-  integration, delivery, and return consumption inside the accepted charter.
-- Astra is optional strategic/meta principal capacity for architecture, materially conflicting
-  evidence, novel recovery, or strategic acceptance. Direct Astra -> routine worker fan-out is
-  exceptional for major programs rather than the default shape.
-- A qualified Fabric domain coordinator is optional only when it owns a complete bounded subsystem
-  outcome and removes real integration load. It may not exist merely to relay summaries.
-- Do not force a ceremonial hierarchy. If one principal plus bounded Fabric leaves is sufficient,
-  omit the extra COO/coordinator. Insert Sol below Astra only when Sol owns real decomposition,
-  integration, return consumption, or multiple workstreams; never use Sol as a message relay.
-- When Astra hands sustained delivery to Sol, transmit a compact frozen mission/frontier capsule and
-  exact artifact refs rather than cloning the parent transcript. Astra returns to strategic exceptions
-  and acceptance instead of shadow-executing the same worker mechanics.
-- Classify every delegated child under the current protected task-complexity/routing law. Prefer
-  deterministic execution for mechanical work, then the least-scarce admitted worker for bounded
-  labor. Frontier capacity requires a concrete FRONTIER_WITNESS; program prestige, child/reviewer
-  status, free slots, or unused premium quota are not witnesses.
-- Consequential builder output receives independent review when current law requires it. Review is
-  not permission for the reviewer to self-start repair or become a second source writer.
-- Routine independently executable labor routes through the existing Executive/Subagent Fabric.
-  Native provider children are not the routine worker pool. A native-child exception requires a
-  concrete principal-judgment or unique-native-access reason under the current provider rules.
-- Every descendant preserves the original root identity, effective grant, source/effect fences,
-  admitted depth, provider/host limits, and root budget. Never mint a new root/session to reset
-  accounting, and never treat free slots as a utilization target.
+__OPERATOR_FIRST_CORE__
+
+### M2 Claude delegation discovery
+
+- For an assigned M2 Claude CEO/orchestrator, read the installed
+  `~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md` before external
+  worker submission. It gives the exact incumbent Fabric CLI/MCP path and
+  same-root submit, collect, review and acceptance sequence. A missing skill,
+  session identity, or authenticated entrypoint is not a delegation grant.
+- Paid Fabric operators spawned as `domain_orchestration` receive a separate
+  per-run capability and auto-injected instructions only when admitted. They use
+  the existing `mastermindStudio` `fabric_operator_scope` and `fabric_child_*`
+  tools, never native subagents, raw SSH or borrowed parent credentials.
 
 ### Forward-execution and burn guards
 
@@ -340,7 +378,8 @@ def _managed_text(original: str) -> str:
         raise OrchestratorPolicyError(
             "managed orchestrator policy v2 markers are malformed/duplicated"
         )
-    block = POLICY_BODY.rstrip() + "\n"
+    core = _canonical_role_files()["SKILL.md"].decode("utf-8").split("---", 2)[2].strip()
+    block = POLICY_BODY.replace("__OPERATOR_FIRST_CORE__", core).rstrip() + "\n"
     if begins == 1:
         start = text.index(BEGIN)
         finish = text.index(END, start) + len(END)
@@ -492,6 +531,16 @@ def _render_codex_config(raw: bytes) -> bytes:
     if len(starts) > 1:
         raise OrchestratorPolicyError("Codex config contains duplicate [agents] tables")
     native_reset = _native_codex_isolation(parsed)
+    if (
+        native_reset is None
+        and bool(starts)
+        and isinstance(agents, dict)
+        and agents.get("enabled") is True
+    ):
+        raise OrchestratorPolicyError(
+            "Codex native capacity differs from managed policy; "
+            "refusing to change existing provider capacity during quality rollout"
+        )
     if native_reset is not None:
         if not starts or native_reset is False:
             raise OrchestratorPolicyError(
@@ -570,7 +619,7 @@ def _render_codex_hooks(raw: bytes, guard: Path) -> bytes:
 
 def _paths(home: Path) -> dict[str, Path]:
     home = home.expanduser().resolve()
-    return {
+    paths = {
         "codex_doc": home / ".codex" / "AGENTS.md",
         "claude_doc": home / ".claude" / "CLAUDE.md",
         "codex_hooks": home / ".codex" / "hooks.json",
@@ -580,16 +629,95 @@ def _paths(home: Path) -> dict[str, Path]:
         "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
     }
 
+    for provider, directory in (("codex", ".agents"), ("claude", ".claude")):
+        for index, relative in enumerate(ROLE_SHA256):
+            paths[f"{provider}_role_{index}"] = home / directory / "skills" / ROLE_PACKAGE / relative
+    paths["claude_fabric_skill"] = (home / ".claude" / "skills" /
+                                    CLAUDE_FABRIC_SKILL_PACKAGE / "SKILL.md")
+    paths["codex_fabric_skill"] = (home / ".codex" / "skills" /
+                                   CODEX_FABRIC_SKILL_PACKAGE / "SKILL.md")
+    return paths
+
 
 def _canonical_guard(source: Path | None = None) -> bytes:
     path = source or Path(__file__).with_name("provider_orchestrator_guard.py")
     return _regular_bytes(path)
 
 
+def _canonical_role_files() -> dict[str, bytes]:
+    """Read a fixed reviewed instruction closure, never discover or select roles.
+
+    Presence/digest is installation evidence only. The existing launch/capability
+    owner must separately bind and attest one actual role for each Attempt.
+    """
+    source_root = Path(__file__).resolve().parents[2]
+    root = source_root / "skills" / ROLE_PACKAGE
+    rows: dict[str, bytes] = {}
+    for relative, expected in ROLE_SHA256.items():
+        path = root / relative
+        _preflight_destination(path, source_root)
+        payload = _regular_bytes(path)
+        if len(payload) > 8192 or _sha256(payload) != expected:
+            raise OrchestratorPolicyError("orchestration role source digest mismatch")
+        rows[relative] = payload
+    return rows
+
+
+def _canonical_claude_fabric_skill() -> bytes:
+    """Pin the audited invocation instructions, not an account or tool entitlement."""
+    source_root = Path(__file__).resolve().parents[2]
+    path = source_root / "skills" / CLAUDE_FABRIC_SKILL_PACKAGE / "SKILL.md"
+    _preflight_destination(path, source_root)
+    payload = _regular_bytes(path)
+    blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
+    if not 0 < len(payload) <= CLAUDE_FABRIC_SKILL_MAX_BYTES or blob != CLAUDE_FABRIC_SKILL_BLOB_SHA:
+        raise OrchestratorPolicyError("Claude Fabric Skill source digest mismatch")
+    return payload
+
+
+def _canonical_codex_fabric_skill() -> bytes:
+    """The existing M2 Codex skill, with a reviewed operator-tool quickstart."""
+    root = Path(__file__).resolve().parents[2]
+    source = root / "skills" / CODEX_FABRIC_SKILL_PACKAGE / "SKILL.md"
+    _preflight_destination(source, root)
+    payload = _regular_bytes(source)
+    blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
+    if not 0 < len(payload) <= 24576 or blob != CODEX_FABRIC_SKILL_BLOB_SHA:
+        raise OrchestratorPolicyError("Codex Fabric Skill source digest mismatch")
+    return payload
+
+
+def _refuse_existing_claude_native_limit_reset(raw: bytes) -> None:
+    """Do not silently downshift incumbent Claude native capacity.
+
+    Quality instruction installation does not authorize a capacity change.
+    Existing non-default caps require a separately accepted release.
+    """
+    obj = _json_object(raw, "Claude settings")
+    env = obj.get("env", {})
+    if not isinstance(env, dict):
+        raise OrchestratorPolicyError("Claude env must be an object")
+    expected = {
+        "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "2",
+        "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1",
+    }
+    if any(k in env and env[k] != v for k, v in expected.items()):
+        raise OrchestratorPolicyError(
+            "Claude native limit differs from managed policy; "
+            "refusing to change existing provider capacity during quality rollout"
+        )
+
+
 def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
     resolved_home = Path(home).expanduser().resolve()
     paths = _paths(resolved_home)
     guard = _canonical_guard(guard_source)
+    roles = _canonical_role_files()
+    claude_fabric_skill = _canonical_claude_fabric_skill()
+    _preflight_destination(paths["claude_settings"], resolved_home)
+    _refuse_existing_claude_native_limit_reset(
+        _regular_bytes(paths["claude_settings"], missing=b"{}\n")
+    )
 
     # Reject known unsafe path shapes before any managed file can change. Unexpected
     # I/O failure can still interrupt a multi-file apply and is handled separately.
@@ -623,6 +751,14 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
         ("codex_hooks", rendered["codex_hooks"]),
         ("codex_config", rendered["codex_config"]),
     ]
+    # Supporting references stay discoverable/on-demand. Only the shared core is
+    # embedded into the managed parent block; no role body is concatenated there.
+    role_operations = [
+        (f"{provider}_role_{index}", roles[relative])
+        for provider in ("codex", "claude")
+        for index, relative in enumerate(ROLE_SHA256)
+    ]
+    operations = operations[:2] + role_operations + [("claude_fabric_skill", claude_fabric_skill)] + operations[2:]
     modified: list[str] = []
     try:
         for key, payload in operations:
@@ -704,12 +840,39 @@ def _managed_hook_reference_count(raw: bytes) -> int:
     return count
 
 
-def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
+def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str = "all") -> dict[str, object]:
+    if provider not in ("all", "codex", "claude"):
+        raise OrchestratorPolicyError("provider must be all, codex or claude")
+    selected = ("codex", "claude") if provider == "all" else (provider,)
     paths = _paths(home)
     canonical = _canonical_guard(guard_source)
     issues: list[str] = []
+    roles = _canonical_role_files()
+    claude_fabric_skill = _canonical_claude_fabric_skill() if "claude" in selected else None
+    for enrolled_provider in selected:
+        for index, relative in enumerate(ROLE_SHA256):
+            key = f"{enrolled_provider}_role_{index}"
+            try:
+                _preflight_destination(paths[key], Path(home).expanduser().resolve())
+                installed = _regular_bytes(paths[key])
+            except OrchestratorPolicyError:
+                issues.append(f"{key}.missing_or_unsafe")
+                continue
+            if installed != roles[relative]:
+                issues.append(f"{key}.digest")
 
-    for name in ("codex_guard", "claude_guard"):
+
+    if "claude" in selected:
+        try:
+            _preflight_destination(paths["claude_fabric_skill"], Path(home).expanduser().resolve())
+            installed_skill = _regular_bytes(paths["claude_fabric_skill"])
+        except OrchestratorPolicyError:
+            issues.append("claude_fabric_skill.missing_or_unsafe")
+        else:
+            if installed_skill != claude_fabric_skill:
+                issues.append("claude_fabric_skill.digest")
+
+    for name in (f"{p}_guard" for p in selected):
         try:
             installed = _regular_bytes(paths[name])
         except OrchestratorPolicyError:
@@ -718,7 +881,7 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
         if installed != canonical:
             issues.append(f"{name}.digest")
 
-    for name in ("codex_doc", "claude_doc"):
+    for name in (f"{p}_doc" for p in selected):
         try:
             text = _regular_bytes(paths[name]).decode("utf-8")
         except (OrchestratorPolicyError, UnicodeError):
@@ -731,66 +894,361 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
         ):
             issues.append(f"{name}.managed_block")
 
-    try:
-        claude_raw = _regular_bytes(paths["claude_settings"])
-        claude_value = _json_object(claude_raw, "Claude settings")
-        claude_env = claude_value.get("env")
-        if not isinstance(claude_env, dict):
-            issues.append("claude_settings.env")
-        else:
-            if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
-                issues.append("claude_settings.max_concurrent_subagents")
-            if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
-                issues.append("claude_settings.max_subagent_spawn_depth")
-        if (
-            _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
-            or _managed_hook_reference_count(claude_raw) != 1
-        ):
-            issues.append("claude_settings.pretool")
-    except OrchestratorPolicyError:
-        issues.append("claude_settings.missing")
-
-    try:
-        codex_raw = _regular_bytes(paths["codex_hooks"])
-        if (
-            _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
-            or _managed_hook_reference_count(codex_raw) != 1
-        ):
-            issues.append("codex_hooks.pretool")
-    except OrchestratorPolicyError:
-        issues.append("codex_hooks.missing")
-
-    try:
-        codex_config_raw = _regular_bytes(paths["codex_config"])
+    if "claude" in selected:
         try:
-            codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
-        except (UnicodeError, tomllib.TOMLDecodeError) as exc:
-            raise OrchestratorPolicyError("Codex config is malformed") from exc
-        codex_agents = codex_config.get("agents")
-        if not isinstance(codex_agents, dict):
-            issues.append("codex_config.agents")
-        else:
-            native_reset = _native_codex_isolation(codex_config)
-            if native_reset is False:
-                issues.append("codex_config.native_message_isolation")
-            if native_reset is not True:
-                if codex_agents.get("enabled") is not False:
-                    issues.append("codex_config.agents_enabled")
-                if codex_agents.get("max_concurrent_threads_per_session") != 1:
-                    issues.append("codex_config.max_concurrent_threads")
-    except OrchestratorPolicyError:
-        issues.append("codex_config.missing_or_invalid")
+            claude_raw = _regular_bytes(paths["claude_settings"])
+            claude_value = _json_object(claude_raw, "Claude settings")
+            claude_env = claude_value.get("env")
+            if not isinstance(claude_env, dict):
+                issues.append("claude_settings.env")
+            else:
+                if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
+                    issues.append("claude_settings.max_concurrent_subagents")
+                if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
+                    issues.append("claude_settings.max_subagent_spawn_depth")
+            if (
+                _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
+                or _managed_hook_reference_count(claude_raw) != 1
+            ):
+                issues.append("claude_settings.pretool")
+        except OrchestratorPolicyError:
+            issues.append("claude_settings.missing")
+
+    if "codex" in selected:
+        try:
+            codex_raw = _regular_bytes(paths["codex_hooks"])
+            if (
+                _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
+                or _managed_hook_reference_count(codex_raw) != 1
+            ):
+                issues.append("codex_hooks.pretool")
+        except OrchestratorPolicyError:
+            issues.append("codex_hooks.missing")
+
+        try:
+            codex_config_raw = _regular_bytes(paths["codex_config"])
+            try:
+                codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
+            except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+                raise OrchestratorPolicyError("Codex config is malformed") from exc
+            codex_agents = codex_config.get("agents")
+            if not isinstance(codex_agents, dict):
+                issues.append("codex_config.agents")
+            else:
+                native_reset = _native_codex_isolation(codex_config)
+                if native_reset is False:
+                    issues.append("codex_config.native_message_isolation")
+                if native_reset is not True:
+                    if codex_agents.get("enabled") is not False:
+                        issues.append("codex_config.agents_enabled")
+                    if codex_agents.get("max_concurrent_threads_per_session") != 1:
+                        issues.append("codex_config.max_concurrent_threads")
+        except OrchestratorPolicyError:
+            issues.append("codex_config.missing_or_invalid")
 
     return {
         "state": "READY" if not issues else "DRIFT",
         "home": str(Path(home).expanduser().resolve()),
         "issues": issues,
         "guard_sha256": _sha256(canonical),
-        "managed_files": {key: str(value) for key, value in paths.items()},
+        "role_source_sha256": dict(ROLE_SHA256),
+        "claude_fabric_skill_blob_sha": CLAUDE_FABRIC_SKILL_BLOB_SHA if "claude" in selected else None,
+        "session_loading_proven": False,
+        "runtime_admission_proven": False,
+        "managed_files": {
+            key: str(value)
+            for key, value in paths.items()
+            if any(key.startswith(p + "_") for p in selected)
+        },
+        **({"provider_scope": provider} if provider != "all" else {}),
         "credentials_read": False,
         "permissions_changed": False,
         "lifecycle_created": False,
     }
+
+
+def verify_provider_policy(
+    home: Path, provider: str, *, guard_source: Path | None = None
+) -> dict[str, object]:
+    """Use the canonical verifier with one explicit provider scope."""
+    return verify_policy(home, guard_source=guard_source, provider=provider)
+
+
+def apply_provider_policy(
+    home: Path, provider: str, *, guard_source: Path | None = None
+) -> dict[str, object]:
+    """Install through the one canonical source owner into one provider scope.
+
+    This is an optional subset of apply_policy, not a separate override plane.
+    It never reads/changes native capacity or user files of the other provider.
+    """
+    if provider not in ("codex", "claude"):
+        raise OrchestratorPolicyError("provider must be codex or claude")
+    resolved_home = Path(home).expanduser().resolve()
+    paths = _paths(resolved_home)
+    selected = {k: path for k, path in paths.items() if k.startswith(provider + "_")}
+    guard = _canonical_guard(guard_source)
+    roles = _canonical_role_files()
+    claude_fabric_skill = _canonical_claude_fabric_skill() if provider == "claude" else None
+
+    # All destination and exact-config preconditions before a single write.
+    for path in selected.values():
+        _preflight_destination(path, resolved_home)
+    if provider == "claude":
+        original_settings = _regular_bytes(paths["claude_settings"], missing=b"{}\n")
+        _refuse_existing_claude_native_limit_reset(original_settings)
+        original_doc = _regular_bytes(paths["claude_doc"], missing=b"").decode("utf-8")
+        operations = [
+            ("claude_guard", guard),
+            ("claude_doc", _managed_text(original_doc).encode("utf-8")),
+            (
+                "claude_settings",
+                _render_claude_settings(original_settings, paths["claude_guard"]),
+            ),
+        ]
+    else:
+        original_doc = _regular_bytes(paths["codex_doc"], missing=b"").decode("utf-8")
+        original_hooks = _regular_bytes(paths["codex_hooks"], missing=b"{}\n")
+        original_config = _regular_bytes(paths["codex_config"], missing=b"")
+        operations = [
+            ("codex_guard", guard),
+            ("codex_doc", _managed_text(original_doc).encode("utf-8")),
+            ("codex_hooks", _render_codex_hooks(original_hooks, paths["codex_guard"])),
+            ("codex_config", _render_codex_config(original_config)),
+        ]
+    role_operations = [
+        (f"{provider}_role_{index}", roles[relative])
+        for index, relative in enumerate(ROLE_SHA256)
+    ]
+    operations = operations[:1] + role_operations + ([("claude_fabric_skill", claude_fabric_skill)] if provider == "claude" else []) + operations[1:]
+    modified: list[str] = []
+    try:
+        for key, payload in operations:
+            if _atomic_write(paths[key], payload):
+                modified.append(str(paths[key]))
+    except OrchestratorPolicyError as exc:
+        if modified:
+            try:
+                observed = verify_provider_policy(
+                    resolved_home, provider, guard_source=guard_source
+                )
+                verify_issues = tuple(str(item) for item in observed.get("issues", ()))
+            except Exception:
+                verify_issues = ("verify_after_partial_apply_failed",)
+            raise OrchestratorPolicyApplyIncomplete(
+                "provider-scoped policy apply stopped after partial write; "
+                "do not switch carrier or blindly replay; verify this same home",
+                modified_files=modified,
+                verify_issues=verify_issues,
+            ) from exc
+        raise
+    return verify_provider_policy(
+        resolved_home, provider, guard_source=guard_source
+    )
+
+
+
+def _render_claude_fabric_entry_doc(raw: bytes) -> bytes:
+    """Add one discoverable pointer without changing other Claude instructions."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise OrchestratorPolicyError("Claude instructions are not UTF-8") from exc
+    if text.count(FABRIC_ENTRY_BEGIN) != text.count(FABRIC_ENTRY_END) or text.count(FABRIC_ENTRY_BEGIN) > 1:
+        raise OrchestratorPolicyError("Claude Fabric entrypoint markers ambiguous")
+    # A successfully installed full managed policy already contains this entry.
+    if text.count(BEGIN) == text.count(END) == 1:
+        block = text[text.index(BEGIN):text.index(END) + len(END)]
+        if "mastermind-claude-fabric-delegation/SKILL.md" in block and FABRIC_ENTRY_BEGIN not in text:
+            return raw
+    if FABRIC_ENTRY_BEGIN in text:
+        start = text.index(FABRIC_ENTRY_BEGIN)
+        end = text.index(FABRIC_ENTRY_END, start) + len(FABRIC_ENTRY_END)
+        updated = text[:start] + FABRIC_ENTRY_BODY.rstrip() + text[end:]
+        return (updated.rstrip() + "\n").encode("utf-8")
+    return ((text.rstrip() + "\n\n") if text.strip() else "").encode("utf-8") + FABRIC_ENTRY_BODY.encode("utf-8")
+
+
+def verify_claude_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Verify only the delegated M2 Claude guide, not native capacity policy."""
+    paths = _paths(home)
+    expected_skill = _canonical_claude_fabric_skill()
+    issues: list[str] = []
+    try:
+        _preflight_destination(paths["claude_fabric_skill"], Path(home).expanduser().resolve())
+        actual_skill = _regular_bytes(paths["claude_fabric_skill"])
+    except OrchestratorPolicyError:
+        issues.append("claude_fabric_skill.missing_or_unsafe")
+    else:
+        if actual_skill != expected_skill:
+            issues.append("claude_fabric_skill.digest")
+    try:
+        raw_doc = _regular_bytes(paths["claude_doc"])
+        doc = raw_doc.decode("utf-8")
+        has_short = doc.count(FABRIC_ENTRY_BEGIN) == doc.count(FABRIC_ENTRY_END) == 1
+        has_full = doc.count(BEGIN) == doc.count(END) == 1
+        if has_full:
+            block = doc[doc.index(BEGIN):doc.index(END) + len(END)]
+            has_full = "mastermind-claude-fabric-delegation/SKILL.md" in block
+        if not has_short and not has_full:
+            issues.append("claude_fabric_entrypoint.missing")
+    except (OrchestratorPolicyError, UnicodeError, ValueError):
+        issues.append("claude_fabric_entrypoint.unreadable")
+    return {
+        "state": "READY" if not issues else "DRIFT",
+        "provider_scope": "claude-fabric",
+        "home": str(Path(home).expanduser().resolve()),
+        "issues": issues,
+        "claude_fabric_skill_blob_sha": CLAUDE_FABRIC_SKILL_BLOB_SHA,
+        "session_loading_proven": False,
+        "runtime_admission_proven": False,
+        "native_capacity_modified": False,
+        "provider_settings_modified": False,
+        "credentials_read": False,
+    }
+
+
+def apply_claude_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Install just the guide through the incumbent user-policy file owner.
+
+    In particular, do NOT normalize an existing native Claude concurrency of
+    twelve (or any other non-default value) to the older full-policy limit two.
+    """
+    resolved = Path(home).expanduser().resolve()
+    paths = _paths(resolved)
+    for key in ("claude_doc", "claude_fabric_skill"):
+        _preflight_destination(paths[key], resolved)
+    skill = _canonical_claude_fabric_skill()
+    existing_skill = _regular_bytes(paths["claude_fabric_skill"], missing=b"")
+    if existing_skill and existing_skill != skill:
+        old_blob = hashlib.sha1(b"blob " + str(len(existing_skill)).encode("ascii")
+                                 + bytes((0,)) + existing_skill).hexdigest()
+        if old_blob not in CLAUDE_FABRIC_PREVIOUS_BLOB_SHAS:
+            raise OrchestratorPolicyError("Claude Fabric installed Skill changed; refusing replacement")
+    original_doc = _regular_bytes(paths["claude_doc"], missing=b"")
+    new_doc = _render_claude_fabric_entry_doc(original_doc)
+    modified: list[str] = []
+    # Install skill before publishing the doc pointer; no identity/credential changes.
+    try:
+        for key, payload in (("claude_fabric_skill", skill), ("claude_doc", new_doc)):
+            # Re-read the same actual home before replacing either existing file.
+            observed = _regular_bytes(paths[key], missing=b"")
+            original = existing_skill if key == "claude_fabric_skill" else original_doc
+            if observed != original:
+                raise OrchestratorPolicyError("Claude Fabric install source drift; reconcile current home")
+            if _atomic_write(paths[key], payload):
+                modified.append(str(paths[key]))
+    except OrchestratorPolicyError as exc:
+        if modified:
+            try:
+                issues = verify_claude_fabric_entrypoint(resolved)["issues"]
+            except Exception:
+                issues = ["verify_after_partial_apply_failed"]
+            raise OrchestratorPolicyApplyIncomplete(
+                "Claude Fabric entrypoint install partial; verify original home before retry",
+                modified_files=modified, verify_issues=issues,
+            ) from exc
+        raise
+    return verify_claude_fabric_entrypoint(resolved)
+
+
+
+def _render_codex_fabric_entry_doc(raw: bytes) -> bytes:
+    """Preserve an existing Codex Fabric instruction pointer without duplication."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise OrchestratorPolicyError("Codex instructions are not UTF-8") from exc
+    if (text.count(CODEX_FABRIC_ENTRY_BEGIN) != text.count(CODEX_FABRIC_ENTRY_END)
+            or text.count(CODEX_FABRIC_ENTRY_BEGIN) > 1):
+        raise OrchestratorPolicyError("Codex Fabric entrypoint markers ambiguous")
+    if CODEX_FABRIC_ENTRY_BEGIN in text:
+        start = text.index(CODEX_FABRIC_ENTRY_BEGIN)
+        end = text.index(CODEX_FABRIC_ENTRY_END, start) + len(CODEX_FABRIC_ENTRY_END)
+        updated = text[:start] + CODEX_FABRIC_ENTRY_BODY.rstrip() + text[end:]
+        return (updated.rstrip() + "\n").encode("utf-8")
+    # The incumbent M2 AGENTS.md already names the exact installed skill.
+    if "~/.codex/skills/mastermind-fabric-delegate/SKILL.md" in text:
+        return raw
+    return ((text.rstrip() + "\n\n") if text.strip() else "").encode("utf-8") + CODEX_FABRIC_ENTRY_BODY.encode("utf-8")
+
+
+def verify_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Read back only this guide; never infer provider admission from files."""
+    paths = _paths(home)
+    expected = _canonical_codex_fabric_skill()
+    issues: list[str] = []
+    try:
+        _preflight_destination(paths["codex_fabric_skill"], Path(home).expanduser().resolve())
+        installed = _regular_bytes(paths["codex_fabric_skill"])
+    except OrchestratorPolicyError:
+        issues.append("codex_fabric_skill.missing_or_unsafe")
+    else:
+        if installed != expected:
+            issues.append("codex_fabric_skill.digest")
+    try:
+        doc = _regular_bytes(paths["codex_doc"]).decode("utf-8")
+        if (doc.count(CODEX_FABRIC_ENTRY_BEGIN) != doc.count(CODEX_FABRIC_ENTRY_END)
+                or doc.count(CODEX_FABRIC_ENTRY_BEGIN) > 1
+                or "~/.codex/skills/mastermind-fabric-delegate/SKILL.md" not in doc):
+            issues.append("codex_fabric_entrypoint.missing_or_ambiguous")
+    except (OrchestratorPolicyError, UnicodeError):
+        issues.append("codex_fabric_entrypoint.unreadable")
+    return {
+        "state": "READY" if not issues else "DRIFT",
+        "provider_scope": "codex-fabric",
+        "home": str(Path(home).expanduser().resolve()),
+        "issues": issues,
+        "codex_fabric_skill_blob_sha": CODEX_FABRIC_SKILL_BLOB_SHA,
+        "session_loading_proven": False, "runtime_admission_proven": False,
+        "native_capacity_modified": False, "provider_settings_modified": False,
+        "credentials_read": False,
+    }
+
+
+def apply_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Upgrade only the existing M2 Codex Fabric skill and optional discovery pointer.
+
+    Legacy preimage is exact SHA-bound; unknown content is never overwritten.
+    Keep the user's native agent 32/33 configuration, hooks, models and MCP untouched.
+    """
+    resolved = Path(home).expanduser().resolve()
+    paths = _paths(resolved)
+    for key in ("codex_doc", "codex_fabric_skill"):
+        _preflight_destination(paths[key], resolved)
+    candidate = _canonical_codex_fabric_skill()
+    existing = _regular_bytes(paths["codex_fabric_skill"], missing=b"")
+    if (existing and existing != candidate
+            and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256
+            and hashlib.sha1(b"blob " + str(len(existing)).encode("ascii")
+                             + bytes((0,)) + existing).hexdigest() not in (
+                                 CODEX_FABRIC_PRIOR_BLOB_SHA, CODEX_FABRIC_PREVIOUS_BLOB_SHA,
+                                 CODEX_FABRIC_CWD_PREVIOUS_BLOB_SHA)):
+        raise OrchestratorPolicyError("Codex Fabric installed Skill changed; refusing replacement")
+    original_doc = _regular_bytes(paths["codex_doc"], missing=b"")
+    updated_doc = _render_codex_fabric_entry_doc(original_doc)
+    modified: list[str] = []
+    try:
+        for key, payload in (("codex_fabric_skill", candidate), ("codex_doc", updated_doc)):
+            # Re-read exact preimage before a change; do not clobber concurrent edits.
+            current = _regular_bytes(paths[key], missing=b"")
+            expected = existing if key == "codex_fabric_skill" else original_doc
+            if current != expected:
+                raise OrchestratorPolicyError("Codex Fabric install source drift; reconcile current home")
+            if _atomic_write(paths[key], payload):
+                modified.append(str(paths[key]))
+    except OrchestratorPolicyError as exc:
+        if modified:
+            try:
+                issues = verify_codex_fabric_entrypoint(resolved)["issues"]
+            except Exception:
+                issues = ["verify_after_partial_apply_failed"]
+            raise OrchestratorPolicyApplyIncomplete(
+                "Codex Fabric install partially applied; verify the same home first",
+                modified_files=modified, verify_issues=issues,
+            ) from exc
+        raise
+    return verify_codex_fabric_entrypoint(resolved)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -798,17 +1256,31 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("mode", choices=("verify", "apply"))
     parser.add_argument("--home", type=Path, default=Path.home())
     parser.add_argument("--guard-source", type=Path)
+    parser.add_argument("--provider", choices=("all", "codex", "claude", "claude-fabric", "codex-fabric"), default="all")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        result = (
-            apply_policy(args.home, guard_source=args.guard_source)
-            if args.mode == "apply"
-            else verify_policy(args.home, guard_source=args.guard_source)
-        )
+        if args.provider == "codex-fabric":
+            result = (apply_codex_fabric_entrypoint(args.home) if args.mode == "apply"
+                      else verify_codex_fabric_entrypoint(args.home))
+        elif args.provider == "claude-fabric":
+            result = (apply_claude_fabric_entrypoint(args.home) if args.mode == "apply"
+                      else verify_claude_fabric_entrypoint(args.home))
+        elif args.provider == "all":
+            result = (
+                apply_policy(args.home, guard_source=args.guard_source)
+                if args.mode == "apply"
+                else verify_policy(args.home, guard_source=args.guard_source)
+            )
+        else:
+            result = (
+                apply_provider_policy(args.home, args.provider, guard_source=args.guard_source)
+                if args.mode == "apply"
+                else verify_provider_policy(args.home, args.provider, guard_source=args.guard_source)
+            )
     except OrchestratorPolicyApplyIncomplete as exc:
         print(
             json.dumps(

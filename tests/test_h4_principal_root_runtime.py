@@ -587,7 +587,10 @@ def _fabric_child(
 def test_fabric_work_join_refuses_foreign_plan_source_digest():
     from control_plane import fabric_job_view as fabric
 
-    root = SimpleNamespace(job_id="JOB-001", orchestration_provenance_digest="b" * 64)
+    root = SimpleNamespace(
+        job_id="JOB-001", root_job_id="JOB-001", depth=0,
+        orchestration_role="aggregation", orchestration_provenance_digest="b" * 64,
+    )
     valid = _fabric_child(
         role="work",
         job_id="JOB-002",
@@ -626,7 +629,10 @@ def test_fabric_work_join_refuses_foreign_plan_source_digest():
 def test_fabric_review_join_requires_exact_reviewed_target():
     from control_plane import fabric_job_view as fabric
 
-    root = SimpleNamespace(job_id="JOB-001", orchestration_provenance_digest="b" * 64)
+    root = SimpleNamespace(
+        job_id="JOB-001", root_job_id="JOB-001", depth=0,
+        orchestration_role="aggregation", orchestration_provenance_digest="b" * 64,
+    )
     work = _fabric_child(
         role="work",
         job_id="JOB-002",
@@ -667,7 +673,10 @@ def test_fabric_review_join_requires_exact_reviewed_target():
 def test_fabric_repair_join_requires_rejecting_review_of_superseded_revision():
     from control_plane import fabric_job_view as fabric
 
-    root = SimpleNamespace(job_id="JOB-001", orchestration_provenance_digest="b" * 64)
+    root = SimpleNamespace(
+        job_id="JOB-001", root_job_id="JOB-001", depth=0,
+        orchestration_role="aggregation", orchestration_provenance_digest="b" * 64,
+    )
     work = _fabric_child(
         role="work",
         job_id="JOB-002",

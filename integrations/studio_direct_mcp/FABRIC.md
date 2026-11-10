@@ -6,7 +6,7 @@ This is a typed interface for the **existing** attended M2 Fabric adapter, not a
 
 `ChatGPT -> enrolled private tunnel -> existing Studio gateway -> fabric-backend.mjs -> maintained Desktop Commander process owner -> installed fabric_task.py -> incumbent provider/host pool`.
 
-The backend exposes seven tools: `fabric_capabilities`, `fabric_request`, `fabric_status`, `fabric_wait`, `fabric_result`, `fabric_accept`, and `fabric_controller_output`. The outer gateway may expose its existing liveness and retained-output paging tools. The Fabric-only installer profile explicitly disables Git, Paper, repository workspaces and commission publication. It does not modify another account's installed service, access settings or sandbox.
+The backend exposes eight tools: `fabric_capabilities`, `fabric_request`, `fabric_status`, `fabric_wait`, `fabric_result`, `fabric_result_page`, `fabric_accept`, and `fabric_controller_output`. The outer gateway may expose its existing liveness and retained-output paging tools. The Fabric-only installer profile explicitly disables Git, Paper, repository workspaces and commission publication. It does not modify another account's installed service, access settings or sandbox.
 
 The existing Studio private service and tunnel supervisors retain lifecycle ownership. Desktop Commander retains adapter process handles; the Fabric retains run state and results. The facade's bounded, in-memory attempted-call and controller-handle indexes only prevent frontend replay and arbitrary PID access within their generation. They are not a second durable operation ledger, queue, watcher or retry mechanism. No provider credentials are read or passed by the facade.
 
@@ -16,9 +16,118 @@ This installation is for already-authorized **trusted machine-owner channels**. 
 
 Every request supplies a verified original operation root, the actual immediate parent, and one stable new child ID. A fresh attended operation may use the incumbent operation naming and source-custody convention; do not fabricate `CODEX_THREAD_ID`, borrow a host environment's sibling identity, or invent an identity registry. Nested work preserves the same original root. Existing Executive-submitted, active, accepted, or effect-unknown operations remain on their original carrier.
 
-The tools do not accept arbitrary shell commands, adapter paths, working directories, providers, models, hosts, accounts or credentials. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
+The tools do not accept arbitrary shell commands, adapter paths, working directories, hosts, accounts or credentials. An optional *closed-schema* provider-pool and exact-model constraint is available only on `fabric_request`, subject to the original native selection and admission policy; this does not grant arbitrary providers or models. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
 
-Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
+Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. Human-readable briefs use approximately 12 leading hex characters for SHA-256 file digests and 40-hex Git commit IDs. Keep complete values in fields or commands that actually need exact machine identity. Fabric run/root/parent IDs remain complete. The backend does not rewrite packets or perform secret/key content rejection; authorized key-bearing work retains the existing transport behavior. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
+
+## Opt-in strict provider and model constraints (source integration)
+
+Omitting `pool` and `model` retains the existing economical `AUTO` route, including the
+incumbent eligible pre-task capacity continuation. For a **new** run only, the Web
+`fabric_request` may set a closed `pool` from `grok`, `glm`, `minimax`, `bailian`,
+`cursor`, `ocfree`, `go`, `byteplus`, or `experiential`; `model` requires `pool` and selects an exact *already
+qualified* model within that pool. `model: "auto"` means only the provider is pinned.
+This is a strict constraint, not a suggestion, and it does not expose a host or account.
+
+Every manual request must pass the installed native adapter's `request --help`
+`--strict-manual-pin` check, an exact-origin `NOT_FOUND` observation, and a no-effect
+`preview` with matching run, pool, requested exact model (if any), and both native
+`selection_rechecked_at_request` and `strict_pin_enforced_at_request` witnesses.
+Unsupported, stale or malformed selection refuses `MANUAL_ROUTE_UNAVAILABLE` before
+controller dispatch. Native `request --strict-manual-pin` must independently recheck
+the same pool/model before launch. Preview does not reserve quota or prove a worker
+will start. Manual pins disable cross-provider/model quota continuation; a 429 cannot
+silently substitute another model.
+
+**Manual C2 review refusal diagnostics (source candidate, not installed):** Native
+economic/task-fit policy may require a factual `escalation_reason` for a
+`C2_COMPLEX_BOUNDED` review. Read-only preview can refuse with
+`NONE reason=bounded_complexity_requires_escalation` on **stderr**, not
+stdout, if it is absent. The candidate Web facade captures only one validated
+closed `native_reason` token for a nonzero read-only preview with empty stdout;
+it never forwards raw stderr, full provider output or arbitrary diagnostics.
+It preserves this pre-dispatch refusal as
+`MANUAL_ROUTE_PREFLIGHT_REFUSED` with a low-entropy `native_reason` and, for
+that exact reason only, `required_field: escalation_reason`. This is neither
+an adapter outage nor permission to invent an escalation or retry the refused
+run. No controller is launched for this refusal. Other well-formed native
+`NONE reason=<bounded-token>` refusals are surfaced without trusting arbitrary
+stdout. Unsupported native help or a malformed/mismatched preview still yields
+`MANUAL_ROUTE_UNAVAILABLE`. All declined requests retain
+`retry_allowed=false`; any future genuinely separate review needs a new,
+properly admitted run after the actual policy/capacity issue is resolved.
+
+Optional `max_turns` follows native wrapper compatibility: GLM and MiniMax use
+their existing limits; BytePlus permits at most 64. Other manual pools refuse it.
+`subject_pool` remains the separate author independence filter.
+
+### ModelArk and Experiential plan selectors
+
+The facade carries these closed selectors to the existing native owner. It does
+not read provider credentials, select an account, infer an entitlement, or own a
+budget counter.
+
+| Pool | Request model | Native behavior |
+| --- | --- | --- |
+| `byteplus` | `deepseek-v4.1-flash`, `glm-5.3-flash` | Exact Coding Plan model |
+| `byteplus` | omitted or `auto` | Native default; preview result becomes an exact request pin |
+| `experiential` | omitted or `free` | Native included-plan preference, subject to verified funding |
+| `experiential` | `uncensored` | Explicit paid Flash lane; native preference is DeepSeek, then GLM at new selection only |
+| `experiential` | Seven plain included IDs or the two Flash Uncensored IDs | Exact enrolled model, protocol and funding admission |
+| `experiential` | `glm-5.3-uncensored` | Historical explicit route, only if native policy admits it |
+
+The seven included IDs are `deepseek-v4.1-flash`,
+`deepseek-v4.1-flash-1017`, `gpt-6-luna`, `clef`, `clef-flash`,
+`jev-latest`, and `gpt-6-luna-decisions`. The two paid IDs are
+`deepseek-v4.1-flash-uncensored` and `glm-5.3-flash-uncensored`.
+Promotional `:free` IDs are not Max-plan selectors. The facade never converts
+included selection into paid selection. A selector's preview must resolve within
+its requested lane, and the exact model is forwarded to native strict request;
+neither another model nor another pool can be silently substituted.
+
+Both plan pools accept only the facade's bounded `mechanical` and `fix_build`
+classes. All Experiential manual requests require explicit
+`retention_opt_in: true`, `sensitive_data_opt_in: true`, and
+`code_exposure_opt_in: true`, even for public-looking packets. Experiential
+retains prompts and responses. The facade forwards the existing four native
+consent flags, including conservative proprietary-code treatment. Native help
+must advertise every flag before status, preview or launch, and native admission
+independently rechecks consent, funding and account identity.
+
+For unpinned `C0_MECHANICAL` / `C1_ROUTINE_BOUNDED` `mechanical` or
+`fix_build` work, `provider_plan_auto: true` selects one native AUTO attempt.
+It bypasses the incumbent pre-task continuation wrapper because that wrapper's
+deadline/preflight contract excludes these local plan consumers. Native may still
+choose another admitted incumbent pool; the field grants no provider, account,
+consent or paid-lane authority. It is not forwarded as a new native argument.
+Manual pools are incompatible with it. Other AUTO requests preserve the existing
+continuation behavior. Responses identify the single-attempt limit explicitly.
+
+For the same bounded unpinned AUTO classes, all three consents may be supplied together with
+`response_only: true`. This explicitly declares a task completed entirely from its submitted packet,
+with no worker tool actions or artifact requirements; it is never inferred from packet
+text. This form also selects one native attempt. The facade forwards `--experiential-response-only` and all four consent
+flags without adding a pool or model pin. Native AUTO may consider included
+chat models only. Paid Uncensored and native System One/Decisions protocols stay
+explicit selections. Without these fields, existing AUTO behavior is unchanged.
+Consent fields are refused on other explicit pools, and incomplete or nonboolean
+consents refuse before native access.
+
+Native funding gates remain controlling. Catalog presence is not Max funding
+proof, and a merged facade cannot make an unverified included lane eligible.
+No request, failed attempt or effect-unknown run is replayed by this change.
+
+`fabric_capabilities.manual_routing.available` is true only when the installed native
+adapter advertises both `preview` and `--strict-manual-pin`. The capability
+also reports the facade's closed pool list and consent requirements, with
+`tool_snapshot_verified: false`: it cannot attest ChatGPT's exposed schema.
+A source-merged Web
+facade or passing tests alone do not activate the feature in connected ChatGPT.
+Reconcile the pinned native generation, immutable service release, tool snapshot and
+actual originating parent; verify one new pinned-model START, useful result, parent
+consumption and acceptance before claiming `PROVEN_LIVE`. Never replay a held 429,
+failed, or effect-unknown reviewer or silently move an established carrier.
+
 
 ## Correct execution and recovery
 
@@ -26,12 +135,96 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 2. Select a stable child ID once. `fabric_request` reads that exact ID and submits only after a valid `NOT_FOUND` observation. Backend and adapter guards remain responsible for their respective concurrency boundaries.
 3. Retain the returned controller PID together with run/root and connection generation. `CONTROLLER_CREATED` is delivery to the process owner, **not proof of worker START**. A started provider must be established by actual Fabric evidence.
 4. Observe the same run with `fabric_status`, bounded `fabric_wait` (at most ten seconds), or the original `fabric_controller_output`. A `NOT_FOUND` observation after an interrupted request never proves no effect. A new backend generation cannot reconstruct the original PID binding.
-5. Retrieve only an available result whose ledger root matches. The adapter response must fit the requested result limit (default 8 KiB; maximum 64 KiB). The facade captures the original CLI stdout bytes on M2 before process-output formatting, verifies byte count/base64/SHA-256, and returns those bytes as UTF-8 plus their digest.
-6. Review the result and real evidence. Only then call `fabric_accept` with the reviewed digest, verification summary, and actual deterministic/reviewer method. It re-reads the current complete response and rejects a changed digest before calling incumbent acceptance; it verifies the ledger's accepted state afterward.
+5. Retrieve only an available result whose ledger root matches. `fabric_result` returns the complete adapter response when it fits the requested limit (default 8 KiB; maximum 64 KiB). For a larger response, use `fabric_result_page` as described below. Both reads follow the observed effective successor and return its `accept_run_id`; an unconfirmed continuation controller refuses result delivery. The facade captures the original CLI stdout bytes on M2 before process-output formatting and verifies byte count/base64/SHA-256.
+6. Review the result and real evidence. Only then call `fabric_accept` with the reviewed digest, verification summary, and actual deterministic/reviewer method. Use one fixed `verification_summary` evidence-basis code: deterministic_test_evidence, artifact_digest_comparison (with `by=deterministic`), manual_result_review or independent_review_evidence (with `by=reviewer`). No free-text review summary is accepted by the MCP boundary, so this field cannot carry classifier or workflow instructions. Preserve detailed review observations in the existing source/review evidence; the code is only caller-attested metadata and does not replace evidence or independent review. This does not guarantee every platform warning disappears. It re-reads the current complete response and rejects a changed digest before calling incumbent acceptance; it verifies the ledger's accepted state afterward.
 
 **Acceptance limit:** this digest identifies the complete adapter CLI response, not every referenced artifact. It does not make the legacy acceptance operation atomic or cryptographically attest the bytes originally reviewed. Do not claim stronger guarantees than the existing ledger supplies.
 
+### Retained result paging
+
+`fabric_result_page` reads the incumbent adapter's retained UTF-8 response, up to
+its existing 8 MiB ceiling. It accepts `offset` (default 0), `max_bytes` (1–4096,
+default 4096), and an optional `expected_response_sha256`. Each page contains
+`page_base64`, `page_bytes`, `page_sha256`, `next_offset`, the total
+`response_bytes` and the complete `response_sha256`. Every call re-reads, hashes
+and UTF-8 validates the complete adapter response before returning a bounded page.
+The facade does not open caller-selected artifact paths or retain another copy of
+the result. `studio_output_page` remains the separate gateway response-receipt
+mechanism; it does not replace reading every retained-result byte.
+
+Begin at offset 0, retain the returned effective leaf/`accept_run_id` and complete
+digest, and pass that digest on subsequent pages. Use `next_offset` for the next
+read and verify/reassemble the decoded bytes before accepting. A UTF-8 code point
+may cross a page boundary, so decode the assembled bytes rather than each page
+individually. `delivered_prefix_bytes` reports the contiguous prefix served for
+that exact leaf, root and digest; `full_result_delivered` becomes true only when
+all bytes have been served in order. A successor change starts a separate delivery
+record even when its bytes and digest are identical. Restart at offset 0 for the
+new leaf; its acceptance cannot inherit another leaf's delivery record.
+
+For responses larger than 64 KiB, `fabric_accept` requires full contiguous delivery
+in the current backend generation and rechecks the complete current digest before
+calling the incumbent acceptance operation. Use the explicit `accept_run_id` as
+`run_id`; accepting through a predecessor refuses `ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED`.
+Out-of-order pages, a backend restart or missing pages require completing the same
+leaf's reads, never rerunning its worker. The bounded, in-memory delivery record
+contains identity, digest, size and prefix length only; it is not durable custody
+or proof that a human or parent verified the returned artifacts.
+
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
+
+### Parent recovery projection is source-stage diagnostics, NOT an unattended consumer
+
+The proposed `fabric_status` / `fabric_wait` **Web facade source** may include a
+read-only `parent_recovery` sibling of the unchanged native `status` DTO. This
+projection is **staging-only**: it does not install a native adapter, connect to
+the Mastermind OS `AttendedFabricInspector` (which reads/validates the existing
+native DTO separately), arm the Executive Wake ledger, schedule a parent, deliver
+a message, prove a provider START, retry or accept a reviewer. Existing
+`config/wake_session_targets.json` is globally disarmed; this document does not
+change that or authorize any target. Source tests/green CI are not deployment.
+
+A `disposition` describes the observed **state to reconcile**, not a license to
+act. An adapter status may legitimately have `root_id:null`; the view still
+labels `EFFECT_UNKNOWN`, terminal failure, or an active original controller,
+but `root_verified:false` keeps `parent_attention_required:false` and all
+`wake_proven`, `retry_authorized`, `dispatch_authorized`, and
+`result_consumption_authorized` flags **false**. For a prelaunch refusal,
+`request_root_id` is only correlation: `RECONCILE_PRELAUNCH_REFUSAL` does not
+attest a ledger root or enable attention. `controller_return:UNCONFIRMED` always
+requires same-run reconciliation even if a leaf looks successful. A separate,
+authorized Executive/Agent OS consumer must bind the original source/root and
+actual RuntimeBinding and prove trusted delivery/ACK before any unattended
+parent wake may be claimed. Do not feed this staging view back into
+`fabric_request` or treat it as an automatic review-recovery policy.
+
+## Optional per-request turn ceiling
+
+`fabric_request.max_turns` is an integer from 1 through 400. It narrows one new
+commission through the incumbent native `request --max-turns` and Claude wrapper;
+it does not change fleet defaults, model tiers, admission, leases or acceptance.
+The effective limit is the smaller of this request ceiling and the existing
+model/complexity/operator profile. An omitted value preserves existing behavior.
+A turn is not a tool-call count, token allowance or dollar budget.
+
+Before creating a controller, the facade verifies that the native request help
+advertises `--max-turns`. An older adapter returns
+`ADAPTER_TURN_LIMIT_UNAVAILABLE` rather than silently discarding the constraint.
+The existing router considers only qualified `glm`/`minimax` modes for a capped
+request; another mode is refused before launch. This filter is not admission or
+permission to use a new provider. Unsupported modes remain available to requests
+without this option under their unchanged rules.
+
+The native owner retains the requested ceiling with the original request. Its
+existing foreground quota continuation preserves that same ceiling, root, parent
+and deadline, and still requires its original pre-task rejection proof. Reaching
+the turn limit is not a capacity rejection and does not authorize another attempt.
+A returned controller receipt reports the requested value, not proven worker START
+or acceptance. Inspect the actual terminal result and retain partial work.
+
+Roll out the complete protected native generation before the same-account facade
+release. Until both are qualified, the new opt-in must fail closed. Existing
+controllers remain on their original code and cannot be retroactively capped.
 
 ## Quota continuity
 
@@ -83,6 +276,39 @@ and the exact preview plan; apply requires the original service to be unloaded.
 It updates only `config.args[0]` and the corresponding three manifest fields,
 preserving the gateway bundle, private SDK, account, tunnel, port and selected
 protocol. The generic `upgrade` retains its same-backend-path requirement.
+For an independently authorized public-source release, the closed selector
+`--source-provenance github_public_protected_v1` reads only unauthenticated,
+certificate-verified GitHub metadata for the canonical
+`mastermindx-market-intelligence/Mastermind` `refs/heads/master`; it never reads or
+falls back to the legacy local-Git source. The observed protected commit must equal
+the requested release commit, and the fixed tree path must be a regular blob.
+The already staged backend is verified against that blob identity, SHA256, size,
+physical file and inode without downloading or executing it. Provenance and staged
+identity are included in the reviewed plan and revalidated before mutation. Metadata
+is strict JSON with duplicate-key rejection and a 1MiB ceiling. One fixed absolute
+ten-second deadline covers the whole connection/TLS/header/body sequence and all five
+fixed metadata documents; every document gets only the remaining time. The finite
+child executes captured qualified source bytes with a controlled module identity,
+never a pathname import or adjacent/tagged bytecode cache. Installed execution uses
+the existing sealed Control capture. A process timer gives the child its own
+absolute lifetime even if its parent exits. The remaining budget crosses processes
+using POSIX CLOCK_MONOTONIC, avoiding Python 3.9 macOS process-local clock origins;
+the child also clears an inherited blocked alarm signal. The parent's `subprocess.run(remaining)`
+also kills/waits on timeout. Checks after JSON parsing and final provenance validation
+refuse late results before intent/config/manifest writes. Process creation itself is
+not claimed separately interruptible. The child receives only the verified owner
+HOME; ambient proxy, CA override, keylog and Python environment settings are absent.
+Explicit `ProxyHandler({})` disables system proxy discovery while retaining standard
+TLS certificate and hostname verification. HTTPError-owned responses are explicitly
+closed before a constant refusal; there is no redirect, retry or persistent reader. Only
+`/git/ref/heads/master`, `/git/commits/<40 lowercase hex>` and
+`/git/trees/<40 lowercase hex>` under the canonical API root can reach transport;
+intermediate tree SHAs are checked before URL construction. Redirects, alternate
+authorities, dot/encoded separators, extra path components, query/fragment, and wrong
+SHA types are refused before transport construction. Apply's second observation still
+refuses changed protected refs or staged inode/bytes before any transaction mutation.
+The default `local_git_v1` remains available only for separately authorized local-Git
+contexts.
 The operator separately reconciles existing controllers, then stops and starts
 this original service through the same owner. See
 `ops/native_fabric/quota_continuity/README.md` for native evidence, retention and
@@ -105,8 +331,11 @@ sessionful legacy handler while sending malformed modern claims to the modern
 validator. Request-scoped views use the same backend owner and limiter, so completing
 an HTTP request detaches its view without closing retained Fabric controllers or
 results. Client metadata never supplies authentication; the existing private tunnel
-principal is checked on each request. Only the seven Fabric tools and the existing
-ping/output-page tools are available on this path. This does not supply individual
+principal is checked on each request. Only the seven original Fabric tools, the
+optional `fabric_result_page` when the installed backend advertises it, and the
+existing ping/output-page tools are available on this path. Adding the paging
+allowlist entry does not install a newer backend or synthesize a missing tool.
+This does not supply individual
 conversation authentication or the Executive v5 current-writer COMMIT fence.
 
 `/readyz` reports the selected modern protocol only after its handler is constructed.
@@ -123,12 +352,34 @@ The Fabric facade continues to use the existing pinned SDK v1. The opt-in HTTP e
 ```sh
 cd integrations/studio_direct_mcp
 npm ci --ignore-scripts --no-audit --no-fund
-node --test fabric-backend.test.mjs
+node --test fabric-backend.test.mjs fabric-backend-capacity.test.mjs fabric-result-paging.test.mjs fabric-turn-budget.test.mjs gateway-modern-fabric.test.mjs
 python3 -m unittest private_service_fabric_test private_service_test private_service_workspaces_test private_service_commission_test -q
 node fabric-preflight.mjs YOUR_UNUSED_CHECK_ID YOUR_VERIFIED_ROOT
 ```
 
-The tests use an isolated local CLI fixture, never real provider credentials or the production ledger. They cover strict inputs, literal packet transport, same-ID rejection, uncertain effects, root mismatch, byte capture, changed-result rejection, acceptance separation, original PID binding, and preservation of the restricted installation across restage/upgrade.
+The tests use an isolated local CLI fixture, never real provider credentials or the production ledger. They cover strict inputs, literal packet transport, same-ID rejection, uncertain effects, root mismatch, byte capture, changed-result rejection, complete paged delivery, exact-successor acceptance, isolation between successive leaves, acceptance separation, original PID binding, and preservation of the restricted installation across restage/upgrade.
+
+The optional `fabric-http-oversized-qualification.mjs` and
+`fabric-modern-oversized-qualification.mjs` exercise a 196,317-byte synthetic result
+through the real legacy or opt-in modern HTTP gateway/SDK and maintained Desktop
+Commander process engine. They reassemble and verify every page across client
+connections before deterministic acceptance. Run them only on the qualified host
+with `MMX_FABRIC_ENGINE_ENTRY` bound to the installed maintained engine. Their
+synthetic adapter uses no provider credentials, paid workers or production ledger;
+passing cloud source tests alone does not establish this installed-engine proof.
+
+The optional `fabric-http-manual-qualification.mjs` invokes a real authenticated
+HTTP gateway/SDK plus the maintained Desktop Commander process engine, but binds
+only the separately marked **synthetic** `fixtures/fabric-adapter-manual.py`.
+It verifies separate exact Z.AI GLM-5.3 and manual Experiential GLM-5.3 Uncensored
+model-pin previews, strictly constrained synthetic requests with original roots,
+Experiential retention opt-in, no cross-provider fallback, cross-session result
+retrieval and deterministic acceptance. All fixture host/model/return data
+are synthetic; no provider key, quota, actual worker or live Fabric ledger is
+accessed. A green fixture is not native provider installation or paid inference. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
+to its installed maintained engine; it is intentionally not a GitHub hosted test.
+The existing `fabric-http-qualification.mjs` retains the negative test for older
+native adapters that cannot enforce strict pins.
 
 `fabric-preflight.mjs` is a read-only real SDK/engine/adapter probe. `fabric-console.mjs` is an attended developer acceptance client: it issues one MCP call per input line, does not retry, and does not automatically accept a worker. Neither is an unattended orchestrator or proof of native ChatGPT installation.
 
@@ -145,3 +396,54 @@ In ChatGPT, the supported private connection flow is **Plugins -> Add custom MCP
 Publication, protected merge, host installation, tunnel readiness, plugin creation, individual account installation, tool snapshot exposure and native invocation are separate evidence. A passing local test or successful creation does not prove adoption across all six Web accounts. The final native acceptance requires this tool catalog, one admitted bounded worker, retained result consumption and explicit verified acceptance from the connected Web session. No Web turn is a daemon; unattended return requires its existing real owner and return path.
 
 Official connection references: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels and https://developers.openai.com/plugins/deploy/connect-chatgpt .
+# Fixed original collection on the existing modern C3 service
+
+The source supports an explicit, default-off `--original-collection` selection
+in the existing `private_service stage` / `upgrade` owner. It is limited to
+`fabric-c3-570f6f34` on `127.0.0.1:45280`, with `modernFabricProtocol`,
+`fabricOnly`, and the shared-account backend. It does not enroll the older C3
+service or any other Studio account. The gateway's actual private-tunnel
+principal authorizes these operations; arguments, headers, `_meta`, root labels
+and helper stdin are never identity assertions.
+
+The only source-qualified runs are
+`fabric-app-native-drivers-j-20261105-01` and
+`fabric-app-application-process-carrier-20261105-01`. The local tools accept
+`run_id` only, except that result reading also requires `receipt_sha256`:
+
+* `fabric_collect_original` retains one collection operation in the existing
+  `BackendOwner` and uses the native collector's exclusive destination fence.
+* `fabric_original_collection_status` reads that destination without transport.
+  Missing or partial evidence is not permission to repeat collection.
+* `fabric_original_collection_result` verifies a COMPLETE receipt and its files,
+  decodes UTF-8 without replacement, and uses the existing output pager.
+
+Native CLI callers still require genuine native caller context. The internal
+installed-control helper has only the two closed run selectors; it verifies the
+sealed control bundle, interpreter, native generation and collector dependencies
+before importing the collector. Its stdin supplies correlation, not authority.
+The trust boundary remains the enrolled machine owner, not isolation against a
+same-UID adversary. HTTP disconnects do not cancel or release collection work.
+An owned helper timeout preserves uncertainty and the original destination; it
+never cancels an original worker or settles a lease.
+
+The receipt retains `acceptance: NOT_RECORDED`, unknown controller/settlement
+state and the historical false producer-authentication flags. Current collection
+authorization does not manufacture historical producer or model authentication.
+Metabolism, the refused old A-core artifact, other existing rows and future runs
+are excluded from this gateway entry.
+
+## Publication and activation sequence
+
+This is source support, not an installed-capability claim. The release owner
+must build and install the full native collector generation and the current
+control bundle, then use the normal C3 stage/upgrade/config-seal path with the
+explicit opt-in. The verified same-owner opt-in is preserved by ordinary
+upgrades; `--no-original-collection` removes it. The prior 13-member gateway
+fileset and every older cohort retain their exact membership.
+
+After source and installed-closure proof, the root release owner performs the
+existing service start and same-app tool metadata publication/readback. A
+`fabric-backend-release` transaction updates only backend arguments and hashes;
+it cannot publish the new gateway module or collection configuration. C1's
+native pin and gateway compatibility paths remain their existing owners.

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -171,6 +171,8 @@ describe("status-only operation reopen", () => {
     history.replaceState(null, "", location);
     const made = fixture(); render(<App />); const user = userEvent.setup();
     await screen.findByText(original.operationKey);
+    // Today itself must expose recovery; a later route cannot substitute for it.
+    expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
     act(() => { history.pushState(null, "", location); window.dispatchEvent(new PopStateEvent("popstate")); });
     await navigateCompanyOperation(user, "Work");
     await user.type(screen.getByLabelText("Goal"), "Retain the original operation");
@@ -180,6 +182,14 @@ describe("status-only operation reopen", () => {
     expect(made.prepare).not.toHaveBeenCalled();
     expect(made.readOperation).not.toHaveBeenCalled();
     expect(made.data.get("owner-a")).toEqual(original);
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.getByRole("button", { name: "Check status" })).toBeTruthy();
+    expect(screen.getByText(original.operationKey)).toBeTruthy();
+    expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Retain the original operation");
+    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
+    expect(made.prepare).not.toHaveBeenCalled();
+    expect(made.readOperation).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();
   });
   it("a retained pointer blocks Launch while leaving the unsent draft editable and status usable", async () => {
     const made = fixture(); render(<App />);
@@ -296,5 +306,40 @@ describe("status-only operation reopen", () => {
     await act(async () => replacementResult.resolve({ ...replacementPointer, disposition: "accepted", missionSelection: { workRef: "WS:REPLACEMENT", rootJobId: "JOB-REPLACEMENT" } }));
     await waitFor(() => expect(window.location.search).toContain("JOB-REPLACEMENT"));
     expect(made.submit).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("stage-two current operation presentation", () => {
+  it("previews actual launch mapper scope without preparing, storing, submitting or reading an operation", async () => {
+    const made=fixture(null), reserve=vi.spyOn(made.store,"reserve");render(<App/>);
+    const user=userEvent.setup();await navigateCompanyOperation(user,"Work");
+    await user.type(screen.getByLabelText("Goal"),"Inspect only this requested scope");
+    await user.click(screen.getByRole("button",{name:"Preview requested scope"}));
+    expect(screen.getByRole("heading",{name:"Launch request preview"})).toBeTruthy();
+    expect(screen.getByText("Inspect only this requested scope",{selector:"p.launch-request-preview-goal"})).toBeTruthy();
+    expect(made.prepare).not.toHaveBeenCalled();expect(reserve).not.toHaveBeenCalled();
+    expect(made.submit).not.toHaveBeenCalled();expect(made.readOperation).not.toHaveBeenCalled();
+  });
+  it("presents the actual current unknown controller receipt and withdraws it on owner loss", async () => {
+    const made=fixture();made.readOperation.mockResolvedValue({...original,disposition:"unknown"});
+    render(<App/>);const user=userEvent.setup();
+    await user.click(await screen.findByRole("button",{name:"Check status"}));
+    await waitFor(()=>expect(made.readOperation).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByRole("button",{name:"Session Estate"}));
+    expect(screen.getByRole("heading",{name:"Request status"})).toBeTruthy();
+    const receipt = screen.getByRole("heading",{name:"Request status"}).closest("section")!;
+    expect(within(receipt).getByText("Request outcome unknown")).toBeTruthy();
+    expect(within(receipt).getByText(original.operationKey)).toBeTruthy();
+    expect(made.readOperation).toHaveBeenCalledTimes(1);
+    act(()=>{made.setCtx(null);made.notify(signedOut);});
+    expect(screen.queryByText(original.operationKey)).toBeNull();
+    // The private entry replaces the old Session Estate unavailable panel;
+    // it cannot expose the withdrawn owner's identity or erase its pointer.
+    expect(screen.getByRole("heading",{name:"Welcome back."})).toBeTruthy();
+    expect(screen.queryByRole("heading",{name:"Request status"})).toBeNull();
+    expect(made.data.get("owner-a")).toEqual(original);
+    expect(made.readOperation).toHaveBeenCalledTimes(1);
+    expect(made.prepare).not.toHaveBeenCalled();expect(made.submit).not.toHaveBeenCalled();
   });
 });

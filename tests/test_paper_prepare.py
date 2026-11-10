@@ -50,8 +50,12 @@ class PrepareTests(unittest.TestCase):
                 tools = {
                     "get_basic_info": {
                         "name": "get_basic_info",
-                        "inputSchema": {"type": "object"},
-                    }
+                        **copy.deepcopy(owner.b.REVIEWED_TOOL_CONTRACTS["get_basic_info"][0]),
+                    },
+                    "set_text_content": {
+                        "name": "set_text_content",
+                        **copy.deepcopy(owner.b.REVIEWED_TOOL_CONTRACTS["set_text_content"][0]),
+                    },
                 }
                 if not self.missing_open_tool:
                     tools["open_file"] = {
@@ -156,6 +160,13 @@ class PrepareTests(unittest.TestCase):
         self.assertIsNone(result["target_active"])
         self.assertEqual(result["after"]["identity"]["id"], TARGET)
         self.assertEqual(self.opens(), [])
+
+
+    def test_safe_getter_without_writer_remains_readonly_ready(self):
+        catalog = self.client.catalog()
+        catalog.pop("set_text_content")
+        self.client.catalog = lambda: catalog
+        self.assertEqual(self.prepare()["state"], "PAPER_READY_READ_ONLY")
 
     def test_vendor_open_tool_is_not_required(self):
         self.client.missing_open_tool = True

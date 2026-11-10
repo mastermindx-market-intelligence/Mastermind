@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "./plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 afterEach(() => cleanup());
@@ -12,8 +13,7 @@ function fixture() {
     schema: "mastermind.workspace_admitted_execution_plan.v1",
     selection: { ...selection },
     availability: "AVAILABLE", reason_codes: [],
-    source_observation: { schema: "mastermind.workspace_plan_observation.v1",
-      selection: { ...selection }, state: "SAME", control_room: {}, runtime: {} },
+    source_observation: planObservationFixture(selection),
     plan: {
       schema: "mastermind.admitted_execution_plan_view.v1",
       plan_schema_version: "mastermind.execution_plan/v3",
@@ -33,7 +33,7 @@ function fixture() {
 const unavailable = () => {
   const x = fixture();
   return { ...x, availability: "UNAVAILABLE", reason_codes: ["ADMISSION_NOT_ESTABLISHED"],
-    source_observation: { ...x.source_observation, state: "UNKNOWN" }, plan: null };
+    source_observation: { ...x.source_observation, state: "UNKNOWN", control_room: null, runtime: null }, plan: null };
 };
 
 describe("authenticated admitted-plan contract", () => {
@@ -74,6 +74,12 @@ describe("authenticated admitted-plan contract", () => {
     ["unadmitted plan", x => { x.plan.admission_state = "PENDING"; }],
     ["wrong policy digest", x => { x.plan.policy_sha = "not-a-digest"; }],
     ["wrong admission version", x => { x.plan.admission_schema_version = "mastermind.coo_plan_admission/v1"; }],
+    ["coerced plan version", x => {
+      x.plan.plan_schema_version = ["mastermind.execution_plan/v1"] as unknown as string;
+      x.plan.admission_schema_version = "mastermind.coo_plan_admission/v1";
+      x.plan.steps[1].prerequisite_step_ids = [];
+    }],
+    ["coerced business impact", x => { x.plan.steps[0].business_impact = ["routine"] as unknown as string; }],
     ["false completion", x => { (x.plan.steps[0] as object & { completed?: boolean }).completed = true; }],
     ["too many steps", x => { x.plan.steps = Array.from({ length: 9 }, (_, index) => ({ ...x.plan.steps[0], step_id: "n" + index, ordinal: index })); }],
   ] as Array<[string, (x: ReturnType<typeof fixture>) => void]>)("refuses %s", (_label, change) => {
@@ -86,6 +92,48 @@ describe("authenticated admitted-plan contract", () => {
     expect(() => decodeAdmittedPlan(x, selection)).toThrow("ADMITTED_PLAN_INVALID");
     x.source_observation.state = "CONFLICT";
     expect(decodeAdmittedPlan(x, selection).observation).toBe("CONFLICT");
+  });
+});
+
+describe("hierarchical admitted-plan compatibility", () => {
+  it.each([2, 9, 15])("preserves the exact v5/v3 root plan with %i steps", count => {
+    const x = fixture();
+    x.plan.plan_schema_version = "mastermind.execution_plan/v5";
+    x.plan.admission_schema_version = "mastermind.coo_plan_admission/v3";
+    x.plan.steps = Array.from({ length: count }, (_, ordinal) => ({
+      ordinal, step_id: "STEP-" + ordinal, objective: "Bounded root step " + ordinal,
+      business_impact: "routine", review_required: false,
+      prerequisite_step_ids: Array.from({ length: ordinal }, (_, previous) => "STEP-" + previous),
+    }));
+    const decoded = decodeAdmittedPlan(x, selection);
+    expect(decoded.availability).toBe("AVAILABLE");
+    if (decoded.availability !== "AVAILABLE") throw Error("expected original v5 plan");
+    expect(decoded.plan).toEqual(x.plan);
+    expect(decoded.plan.steps.at(-1)?.prerequisite_step_ids).toHaveLength(count - 1);
+  });
+  it.each([
+    ["mastermind.execution_plan/v5", "mastermind.coo_plan_admission/v1"],
+    ["mastermind.execution_plan/v5", "mastermind.coo_plan_admission/v2"],
+    ["mastermind.execution_plan/v5", "mastermind.coo_plan_admission/v4"],
+    ["mastermind.execution_plan/v4", "mastermind.coo_plan_admission/v3"],
+    ["mastermind.execution_plan/v1", "mastermind.coo_plan_admission/v3"],
+    ["mastermind.execution_plan/v6", "mastermind.coo_plan_admission/v3"],
+  ])("refuses crossed or unknown versions %s / %s", (planVersion, admissionVersion) => {
+    const x = fixture();
+    x.plan.plan_schema_version = planVersion;
+    x.plan.admission_schema_version = admissionVersion;
+    expect(() => decodeAdmittedPlan(x, selection)).toThrow("ADMITTED_PLAN_INVALID");
+  });
+  it("keeps the v5 wire bound without enlarging the legacy plan bound", () => {
+    for (const [version, admission, count] of [[5, 3, 17], [4, 2, 9]]) {
+      const x = fixture();
+      x.plan.plan_schema_version = "mastermind.execution_plan/v" + version;
+      x.plan.admission_schema_version = "mastermind.coo_plan_admission/v" + admission;
+      x.plan.steps = Array.from({ length: count }, (_, ordinal) => ({
+        ...x.plan.steps[0], ordinal, step_id: "STEP-" + ordinal, prerequisite_step_ids: [],
+      }));
+      expect(() => decodeAdmittedPlan(x, selection)).toThrow("ADMITTED_PLAN_INVALID");
+    }
   });
 });
 

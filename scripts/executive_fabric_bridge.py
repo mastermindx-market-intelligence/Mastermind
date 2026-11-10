@@ -34,7 +34,11 @@ async def serve(config: BridgeConfig,backend: Backend,*,stop_event=None,
     Stop closes only our server/FD. Runtime/Fabric owns unsettled operations;
     shutdown does not cancel, sweep, release leases or infer process absence.
     """
-    broker=FabricBridgeBroker(config,backend)
+    if config.adapter_id == 'canonical-paid-fabric':
+        from control_plane.paid_fabric_bridge_broker import PaidFabricBridgeBroker
+        broker=PaidFabricBridgeBroker(config,backend)
+    else:
+        broker=FabricBridgeBroker(config,backend)
     broker.require_service_identity()
     activated=None
     server=None

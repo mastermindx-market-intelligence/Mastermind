@@ -244,7 +244,7 @@ class CoreTests(unittest.TestCase):
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
                      "export_combined_pdf", "rename_pages", "list_files",
-                     "list_resources", "rename_resource", "arrange_pages", "update_pages"]:
+                     "delete_tokens"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
@@ -277,15 +277,18 @@ class CoreTests(unittest.TestCase):
                 mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
                 self.assertNotEqual(b.digest(mutated), b.SUPPORTED_CATALOG_SHA256)
                 client = ReviewedCatalogFake(mutated)
-                with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-                    self.call(
-                        client=client,
-                        expected_snapshot=b.digest(client.info),
-                        arguments={"fileId": "file-fixture"},
-                        _server_pin=b.SUPPORTED_SERVER,
-                        _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
-                    )
-                self.assertNotIn("create_artboard", client.calls)
+                schema = b.schema_receipt(client, mutated)
+                self.assertFalse(schema["full_catalog_known"])
+                self.assertIn("create_artboard", schema["compatible_write_tools"])
+                observed = self.call(
+                    client=client,
+                    expected_snapshot=b.digest(client.info),
+                    arguments={"fileId": "file-fixture"},
+                    _server_pin=b.SUPPORTED_SERVER,
+                    _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
+                )
+                self.assertEqual(observed["state"], "APPLIED_RESPONSE_OBSERVED")
+                self.assertEqual([name for name, _ in client.dispatched].count("create_artboard"), 1)
 
     def test_new_font_catalog_exact_delta_and_blocked_tools_preserved(self):
         fixture_dir = ROOT / "tests" / "fixtures" / "paper_desktop"
@@ -309,8 +312,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(
             after["description"], before["description"].replace("available to the user", "available in a file"),
         )
-        for name in ("create_file", "delete_nodes", "export", "export_combined_pdf",
-                     "list_resources", "open_file", "rename_pages", "rename_resource"):
+        for name in ("delete_nodes", "export", "export_combined_pdf",
+                     "open_file", "rename_pages"):
             with self.subTest(blocked_tool=name):
                 self.assertEqual(previous[name], current[name])
                 self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
@@ -331,13 +334,13 @@ class CoreTests(unittest.TestCase):
         changed = {name for name in shared if previous[name] != current[name]}
         self.assertEqual(changed, {"create_page", "get_basic_info", "get_jsx"})
         self.assertEqual(len(shared - changed), 32)
-        blocked_survivors = shared - b.READ_TOOLS - b.EDIT_TOOLS
-        self.assertEqual(len(blocked_survivors), 7)
+        blocked_survivors = shared - b.READ_TOOLS - b.EDIT_TOOLS - b.FILE_MANAGE_TOOLS
+        self.assertEqual(len(blocked_survivors), 4)
         for name in blocked_survivors:
             with self.subTest(blocked_tool=name):
                 self.assertEqual(previous[name], current[name])
-        self.assertEqual(set(current) - b.READ_TOOLS - b.EDIT_TOOLS,
-                         blocked_survivors | {"arrange_pages", "update_pages"})
+        self.assertEqual(set(current) - b.READ_TOOLS - b.EDIT_TOOLS - b.FILE_MANAGE_TOOLS,
+                         blocked_survivors)
 
         for name, added in (("create_page", {"icon"}),
                             ("get_jsx", {"includeNodeIds", "includeRootPositioning"})):
@@ -355,16 +358,21 @@ class CoreTests(unittest.TestCase):
                          previous["get_basic_info"]["inputSchema"])
         self.assertIn("divider", current["get_basic_info"]["description"])
 
-    def test_prior_v11_catalog_is_not_admitted_by_v12_write_pin(self):
+    def test_older_full_catalog_can_still_use_independently_compatible_tools(self):
         fixture = ROOT / "tests/fixtures/paper_desktop/48b258_full_catalog.json"
         client = ReviewedCatalogFake(json.loads(fixture.read_text(encoding="utf-8")))
-        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
-            b.execute(
-                "edit", tool="create_artboard", arguments={"fileId": "file-fixture"},
-                expected_snapshot=b.digest(client.info), operation_id="old-catalog-proof",
-                allow_write=True, client=client, lock_root=self.root,
-            )
-        self.assertEqual(client.dispatched, [])
+        # A historical global digest was not approved for wholesale writes,
+        # but the exact unchanged create_artboard input contract remains valid.
+        receipt = b.schema_receipt(client, client.catalog())
+        self.assertFalse(receipt["full_catalog_known"])
+        self.assertIn("create_artboard", receipt["compatible_write_tools"])
+        observed = b.execute(
+            "edit", tool="create_artboard", arguments={"fileId": "file-fixture"},
+            expected_snapshot=b.digest(client.info), operation_id="old-catalog-safe-tool",
+            allow_write=True, client=client, lock_root=self.root,
+        )
+        self.assertEqual(observed["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual([name for name, _ in client.dispatched].count("create_artboard"), 1)
 
     def test_divider_pages_preserve_exact_file_snapshot_and_explicit_page_target(self):
         client = ReviewedCatalogFake()
@@ -440,7 +448,7 @@ class CoreTests(unittest.TestCase):
 
     def test_new_page_management_tools_refuse_before_initialize_or_dispatch(self):
         for name in ("arrange_pages", "update_pages"):
-            for action in ("read", "edit"):
+            for action in ("read",):
                 with self.subTest(tool=name, action=action):
                     client = ReviewedCatalogFake()
                     with patch.object(client, "initialize") as initialize:
@@ -452,6 +460,54 @@ class CoreTests(unittest.TestCase):
                             )
                         initialize.assert_not_called()
                     self.assertEqual(client.dispatched, [])
+
+    def test_inspect_exposes_current_tool_scoped_write_readiness(self):
+        client = ReviewedCatalogFake()
+        result = b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertEqual(result["write_schema"], b.schema_receipt(client, client.value))
+        self.assertTrue(result["write_schema"]["accepted_for_write"])
+        self.assertEqual(result["write_schema"]["catalog_policy"], "TOOL_SCOPED_CONTRACT_V1")
+        self.assertEqual(client.calls, ["get_basic_info"])
+
+    def test_inspect_reports_one_incompatible_writer_without_blocking_other_tools(self):
+        client = ReviewedCatalogFake()
+        client.value["write_html"]["inputSchema"]["required"].append("unreviewed_constraint")
+        result = b.execute("status", client=client, lock_root=self.root)
+        schema = result["write_schema"]
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertTrue(schema["accepted_for_write"])
+        self.assertNotIn("write_html", schema["compatible_write_tools"])
+        self.assertIn("write_html", schema["incompatible_write_tools"])
+        self.assertIn("create_artboard", schema["compatible_write_tools"])
+        self.assertEqual(client.calls, ["get_basic_info"])
+
+    def test_inspect_can_be_connected_without_any_compatible_writer(self):
+        client = ReviewedCatalogFake()
+        for name in b.EDIT_TOOLS | b.FILE_MANAGE_TOOLS:
+            client.value.pop(name, None)
+        result = b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(result["state"], "CONNECTED")
+        self.assertFalse(result["write_schema"]["accepted_for_write"])
+        self.assertEqual(result["write_schema"]["compatible_write_tools"], [])
+        self.assertTrue(result["write_schema"]["snapshot_tool_compatible"])
+        self.assertEqual(client.calls, ["get_basic_info"])
+
+    def test_inspect_never_dispatches_an_unsafe_snapshot_getter_to_report_readiness(self):
+        client = ReviewedCatalogFake()
+        client.value["get_basic_info"]["annotations"]["readOnlyHint"] = False
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(client.calls, [])
+
+    def test_inspect_catalog_failure_is_not_converted_to_connected(self):
+        client = ReviewedCatalogFake()
+        def unavailable():
+            raise b.Refusal("CATALOG_UNAVAILABLE")
+        client.catalog = unavailable
+        with self.assertRaisesRegex(b.Refusal, "CATALOG_UNAVAILABLE"):
+            b.execute("status", client=client, lock_root=self.root)
+        self.assertEqual(client.calls, [])
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}

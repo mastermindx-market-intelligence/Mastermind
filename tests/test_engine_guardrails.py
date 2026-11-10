@@ -174,7 +174,7 @@ def test_theme_lens_fires_end_to_end():
 
 
 # ---------------------------------------------------------------------------
-# profit calc: cost-basis reset wipes unrealized P&L
+# profit calc: the cost-basis reset that wiped unrealized P&L is REMOVED (D-ACCT-1)
 # ---------------------------------------------------------------------------
 
 def test_position_log_idempotent_per_build_date(tmp_path, monkeypatch):
@@ -195,14 +195,10 @@ def test_position_log_idempotent_per_build_date(tmp_path, monkeypatch):
     assert len(hist) == 2 and hist[-1]["event"] == "trim"
 
 
-def test_reset_cost_basis_zeroes_unrealized(tmp_path, monkeypatch):
+def test_reset_cost_basis_to_market_is_removed():
+    """The avg_cost rewrite deleted unrealized P&L and has no non-test caller: gone, no stub."""
+    import inspect
+
     from portfolio import paper_account as pa
-    monkeypatch.setattr(pa, "_DATA", tmp_path, raising=False)
-    monkeypatch.setattr(pa, "_ACCOUNT_PATH", tmp_path / "account.json", raising=False)
-    pa._save_account({"inception_date": "2026-06-20", "starting_nav": 1_000_000.0,
-                      "cash": 500_000.0, "positions": {"AAA": {"shares": 100, "avg_cost": 50.0}},
-                      "spy_shares": None})
-    upd = pa.reset_cost_basis_to_market(prices={"AAA": 73.0})
-    assert upd["AAA"] == 73.0
-    pnl = pa.positions_pnl({"AAA": 73.0})
-    assert pnl["AAA"]["unrealized_pnl"] == 0.0
+    assert not hasattr(pa, "reset_cost_basis_to_market")
+    assert "reset_cost_basis_to_market" not in inspect.getsource(pa)

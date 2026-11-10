@@ -46,6 +46,7 @@ class RuntimeServices:
     action_ttl_ms: int = MAX_ACTION_TTL_MS
     resolve_recovery_binding: ActionBindingResolver | None = None
     run_recovery_io: Callable[[str, Callable[[], object]], Awaitable[object]] | None = None
+    resolve_browser_credential_use: Callable[..., object] | None = None
 
 
 def create_deployment(services: RuntimeServices):

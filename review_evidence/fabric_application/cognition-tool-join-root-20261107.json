@@ -1,0 +1,102 @@
+{
+  "base": "f523c3e26c346beb81b899f6092d6935102fefd8",
+  "behavior": [
+    "Exact25existingbot+7cognitionreadonlyobjects through one derived view",
+    "Original cognition namespace, lazy import and same catalogue/validator/dispatcher view",
+    "Wholebatch validation before any handler; no new tool/lifecycle/accounting authority",
+    "Real fixed andAUTO sharedfactory cognition rounds with original frozenroute/recovery/close behavior"
+  ],
+  "limits": [
+    "No live application selector, runtime service or provider call changed",
+    "HostedAUTOchat paired execution slot needs separate CI change",
+    "Translation/native-text/buffered pendingHermes contribution remains a separate composition step",
+    "Protected source, native/J/Metabolism qualification and actualVPS consumerproof remain owed"
+  ],
+  "paired_macro": "1636134041b05feb278f3fbb7f44f1847bafac22",
+  "postimages": {
+    "brain/bot_mcp.py": {
+      "blob": "ab26f2bcb0bf4ff126b80203a48aca9366d3c398",
+      "sha256": "eae9f82b4b1899973dba7c8e1f65f8f1bf8b5077863ceed51582583b675c66bc"
+    },
+    "tests/integration/test_fabric_chat_cross_pool_auto.py": {
+      "blob": "1d317f85d4353c5e5c33a776a61beb9d47cbd1ed",
+      "sha256": "7ddc63fa4551c9389e4c517bf89f15b291046575fc941ad8c9c84d45258a0902"
+    },
+    "tests/integration/test_fabric_chat_inference_composition.py": {
+      "blob": "af3908047917851fa552c425488ce8cc910f633f",
+      "sha256": "ab5ed1f7b87f63ba4b46735a6a1d3f9c9f22c8692d77e2338fbdd3cbfb43c3cb"
+    },
+    "tests/integration/test_fabric_text_cross_pool_auto.py": {
+      "blob": "b06c6adce404b81cc95758b4dbefd269aa259249",
+      "sha256": "7396358e778df9dbe17b411a645ba28a8fc3ecb5d79530db46acc5d3e8bf879c"
+    },
+    "tests/test_advisor_cognition_plane.py": {
+      "blob": "89614a3c0492aa71aa2a455851a1e219c0fc442d",
+      "sha256": "3ccbbee066a91afd649f0ae4c578a6918be06f1e9fe3bb06d65f1ffef052c054"
+    }
+  },
+  "schema": "mastermind.fabric_application.cognition_source_proof.v1",
+  "source_only": true,
+  "source_pin_refresh": {
+    "bindings": [
+      {
+        "new": "d8577c6ee5cc9bd3e7fc22905530f4755b860ae0",
+        "old": "3c1360866b6a4fcdc2f9d72732d0439361e3d0c7",
+        "path": "candidate/lease_broker.py"
+      },
+      {
+        "new": "e21b6d6a4e4230fce5f55d90820c6391d4b79324",
+        "old": "9a30985f744be11b8ce3f2514baef5b494b4471a",
+        "path": "candidate/go_lease_gateway.py"
+      },
+      {
+        "new": "066d87cd23275204fb6d30af45ac03db1d4dbb4f",
+        "old": "e2cadef511ae5ecd70b1c24ec35a21113bb873ea",
+        "path": "candidate/go_shim.py"
+      },
+      {
+        "new": "0d70a47906a23176d5eaed71a4575e925a500341",
+        "old": "a4844fa37548f31027b5041c35e540cd50e51ce3",
+        "path": "tests/test_application_cross_pool_auto.py"
+      }
+    ],
+    "evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706198574",
+    "post_blob": "b06c6adce404b81cc95758b4dbefd269aa259249",
+    "post_sha256": "7396358e778df9dbe17b411a645ba28a8fc3ecb5d79530db46acc5d3e8bf879c",
+    "pre_blob": "dc0ede5c139dd6a35003931aedcc61346fbe4f82",
+    "production_files_changed": false,
+    "source_head": "39bd39aaa8c5fa1f6112fc34c593815323428b2f",
+    "state": "EXACT_FOUR_PIN_COMPOSITION_REFRESH",
+    "test_execution_pending": true
+  },
+  "utc": "2026-11-07T11:30:44.536169+00:00",
+  "verification": {
+    "errors": 0,
+    "executed": 326,
+    "failed": 0,
+    "log_sha256": "3d0f9a61d3aade1fe00e26723820d6fc07bb681af0e29f7012e7a46d1d6818e3",
+    "modules": [
+      "tests/test_executive_fabric_release_identity_review.py",
+      "tests/test_advisor_chat.py",
+      "tests/test_advisor_cognition_plane.py",
+      "tests/test_cli_bridge.py",
+      "tests/integration/test_fabric_chat_inference_composition.py",
+      "tests/integration/test_fabric_chat_cross_pool_auto.py",
+      "tests/integration/test_fabric_chat_buffered_delivery.py",
+      "tests/integration/test_fabric_text_cross_pool_auto.py"
+    ],
+    "passed": 325,
+    "required_paired_composition": true,
+    "skipped": [
+      {
+        "class": "tests.test_cli_bridge",
+        "name": "test_live_round_trip",
+        "reason": "set BOT_TEST_LIVE_LLM=1 for a real round-trip"
+      }
+    ],
+    "xml_sha256": "829e6c2c5a065551ba55dbab158493dab59dfcebf6cd8adb2cfd1cbac51c0d3c"
+  },
+  "worker_patch_sha256": "04ca66d02859620efad769e3357342fa31717a27da8e3445f7c48cd4ab154481",
+  "worker_return": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6706198574",
+  "worker_source": "39bd39aaa8c5fa1f6112fc34c593815323428b2f"
+}

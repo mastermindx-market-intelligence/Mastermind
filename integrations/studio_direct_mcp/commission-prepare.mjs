@@ -8,7 +8,7 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const KEY = /^mmos-launch-[0-9a-f]{40}$/;
 const MAX_BYTES = 65536;
 const TEMPLATE_KEYS = new Set(['workstream', 'department', 'priority', 'execution_profile',
-  'allowed_write_paths', 'validation', 'attempt_limit']);
+  'allowed_write_paths', 'validation', 'attempt_limit', 'frontier_model_alias']);
 const REQUIRED_TEMPLATE = ['workstream', 'department', 'priority', 'execution_profile'];
 
 export function canonicalJson(value) {
@@ -50,6 +50,12 @@ export function createCommissionPreparer({ workspace, files, authenticate, baseS
     if (!exact(grant, ['principal_scope', 'template']) || !HEX64.test(grant.principal_scope) ||
         !object(grant.template) || REQUIRED_TEMPLATE.some((key) => !Object.hasOwn(grant.template, key)) ||
         Object.keys(grant.template).some((key) => !TEMPLATE_KEYS.has(key))) throw new TypeError('COMMISSION_GRANT_INVALID');
+    if (Object.hasOwn(grant.template, 'frontier_model_alias') &&
+        (typeof grant.template.frontier_model_alias !== 'string' ||
+         !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(grant.template.frontier_model_alias) ||
+         /[^a-z0-9._-]/.test(grant.template.frontier_model_alias))) {
+      throw new TypeError('COMMISSION_GRANT_INVALID');
+    }
     return Object.freeze({ scope: grant.principal_scope, template: canonicalJson(grant.template) });
   });
   // Active-call exclusion only. No durable operation/job state or retry queue.

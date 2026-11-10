@@ -1,0 +1,11 @@
+{
+  "schema": "mastermind.native_plan_terminal_diagnostic_component.v1",
+  "source_base": "43a75abaa83964e8ade64be5c5d1e2aaf35180f6",
+  "member": "ext/native_plan_worker.py",
+  "before": "ef27796c353e408aaaa8df89fa66c3332175007d6b1cfd6354a644a2d23bbef0",
+  "after": "2df8947c446e143d46bbf979e30dd11965080922839e2e37c3d8c0289ef2af7b",
+  "patch": "native_plan_worker.py.forward.patch",
+  "patch_sha256": "003be9b4f2121b51c443be9f72e66b653ff2ee0fd129f57e5e0e90dd8ba2fd7b",
+  "authority": "SOURCE_COMPONENT_ONLY; no profile/default/current selection, original run read, replay, reconciliation or terminal publication",
+  "integration": "Apply only to exact reviewed member parent; later existing composer must bind exact new member hash and preserve all other cohort bytes. No whole116/118/119 manifest emitted."
+}
