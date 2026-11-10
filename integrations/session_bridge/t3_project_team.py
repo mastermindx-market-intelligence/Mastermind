@@ -11,11 +11,12 @@ import hashlib
 import json
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping
 
 from .t3_mission_brief import MissionBrief, Phase
 from .t3_project_team_inventory import NativeInventory
+from .t3_project_team_results import NativeSettledResult
 from .t3_web_client import HandoffBrief, NativeUnavailable, T3CliClient, ThreadReceipt
 
 SCHEMA = "mastermind.t3_project_team.v1"
@@ -318,6 +319,11 @@ _TEAM_INSTRUCTIONS = (
     "directors own their slice and return evidence to their immediate parent. "
     "Do not replace child delegation with unrelated top-level launches. "
     "Use task_status and exact native thread/run results, not optimistic summaries. "
+    "Follow delegate_task's native next directive: when completion wakes the parent, "
+    "end the turn and consume the delivered result on that wake; do not poll. "
+    "Do not pass delegated task IDs to t3_background_wait: that tool tracks separate "
+    "background commands. An unmatched ID is not proof of a transport failure. "
+    "Use native parentThreadId for ancestry, not a model's self-description. "
     "Respect existing Executive/Capacity admission and conserved root budget. "
     "Requested graph ceilings are not grants. Preserve provider/model defaults. "
     "Use each role's requested native isolation, never a custom worktree allocator. "
@@ -495,10 +501,15 @@ def workspace_evidence(team: ProjectTeam, bindings: Mapping[str, RoleBinding],
 
 
 def inventory_coverage(team: ProjectTeam, bindings: Mapping[str, RoleBinding],
-                       observations: Mapping[str, Any], inventory: NativeInventory | None) -> dict[str, Any]:
+                       observations: Mapping[str, Any], inventory: NativeInventory | None, *,
+                       settled_results: Mapping[str, NativeSettledResult] | None = None) -> dict[str, Any]:
     result = {"qualified": False, "state": "not_observed", "unknown_native_thread_ids": [],
               "missing_native_thread_ids": [], "scope": "environment_local_project_threads",
               "atomic_snapshot": False}
+    settled_results = {} if settled_results is None else settled_results
+    if (type(settled_results) is not dict or not settled_results.keys() <= bindings.keys()
+            or any(type(value) is not NativeSettledResult for value in settled_results.values())):
+        return {**result, "state": "unqualified_settled_results"}
     if inventory is None or not bindings:
         return result
     if type(inventory) is not NativeInventory:
@@ -521,9 +532,12 @@ def inventory_coverage(team: ProjectTeam, bindings: Mapping[str, RoleBinding],
     for key, binding in bindings.items():
         item = native[binding.receipt.thread_id]
         observed = _observation(binding, observations.get(key))
+        settled = settled_results.get(key)
+        joined = settled_result_evidence(team, binding, observed, settled)
+        expected_run = settled.result_run_id if joined["qualified"] else binding.receipt.run_id
         if (item.parent_thread_id != binding.parent_thread_id
                 or item.relationship_to_parent != ("subagent" if binding.parent_thread_id else None)
-                or item.latest_run_id != binding.receipt.run_id or observed is None
+                or item.latest_run_id != expected_run or observed is None
                 or observed.get("latestRunId") != item.latest_run_id
                 or observed.get("status") != item.status):
             return {**result, "state": "inventory_observation_drift"}
@@ -661,14 +675,45 @@ def bind_delegation(team: ProjectTeam, offer: DelegationOffer, result: Any,
     return binding
 
 
+def settled_result_evidence(team: ProjectTeam, binding: RoleBinding | None,
+                            thread: dict[str, Any] | None,
+                            result: NativeSettledResult | None) -> dict[str, Any]:
+    """Join an explicit native settled return to the retained original receipt."""
+    if result is None:
+        return {"qualified": False, "state": "not_observed"}
+    if (binding is None or result.team_sha256 != team.fingerprint
+            or result.environment_id != binding.environment_id
+            or result.project_id != binding.receipt.project_id
+            or result.thread_id != binding.receipt.thread_id
+            or result.requested_run_id != binding.receipt.run_id):
+        return {"qualified": False, "state": "binding_mismatch"}
+    if not result.is_fresh():
+        return {"qualified": False, "state": "stale_settled_return"}
+    if thread is None:
+        return {"qualified": False, "state": "observation_unavailable"}
+    if thread.get("latestRunId") != result.result_run_id:
+        return {"qualified": False, "state": "result_run_not_current"}
+    if (thread.get("status") != "completed" or "activeRunId" not in thread
+            or thread["activeRunId"] is not None
+            or type(thread.get("pendingRequestCount")) is not int
+            or thread["pendingRequestCount"] != 0):
+        return {"qualified": False, "state": "thread_not_settled"}
+    return {"qualified": True, "state": "native_settled_return"}
+
+
 def project_graph(team: ProjectTeam, *, bindings: tuple[RoleBinding, ...] = (),
                   observations: Mapping[str, Any] | None = None,
                   uncertain_role_ids: tuple[str, ...] = (),
-                  native_inventory: NativeInventory | None = None) -> dict[str, Any]:
+                  native_inventory: NativeInventory | None = None,
+                  settled_results: Mapping[str, NativeSettledResult] | None = None) -> dict[str, Any]:
     """Portable native-evidence projection. It never marks work accepted."""
     by_binding = validate_bindings(team, bindings)
     observations = {} if observations is None else observations
+    settled_results = {} if settled_results is None else settled_results
     _require(type(observations) is dict, "TEAM_OBSERVATIONS_INVALID")
+    _require(type(settled_results) is dict and settled_results.keys() <= by_binding.keys()
+             and all(type(value) is NativeSettledResult for value in settled_results.values()),
+             "TEAM_SETTLED_RESULTS_INVALID")
     unknown = set(_tuple(uncertain_role_ids))
     _require(unknown <= team.by_id.keys(), "TEAM_UNCERTAIN_ROLE_UNKNOWN")
     workspace = workspace_evidence(team, by_binding, observations)
@@ -678,36 +723,56 @@ def project_graph(team: ProjectTeam, *, bindings: tuple[RoleBinding, ...] = (),
         binding = by_binding.get(role.role_id)
         observed = observations.get(role.role_id)
         thread = _observation(binding, observed) if binding else None
-        answer = T3CliClient.original_answer(binding.receipt, observed) if thread is not None else None
+        original = T3CliClient.original_answer(binding.receipt, observed) if thread is not None else None
+        settled = settled_results.get(role.role_id)
+        joined = settled_result_evidence(team, binding, thread, settled)
+        returned = None
+        if joined["qualified"]:
+            # This temporary lookup selects the native owner's result run. The
+            # persisted launch receipt and its original run are never replaced.
+            returned = T3CliClient.original_answer(
+                replace(binding.receipt, run_id=settled.result_run_id), observed)
+            if returned is None:
+                joined = {"qualified": False, "state": "result_text_unavailable"}
         state = "unbound" if binding is None else "observation_unavailable"
         if thread is not None:
             status = thread.get("status")
             if type(status) is str and status in _LIVE_STATES | _TERMINAL_STATES | {"idle"}:
                 state = status
             if binding.receipt.run_id != thread.get("latestRunId"):
-                state = "original_run_not_current"
-            elif status == "completed" and answer is None:
+                state = "completed" if returned is not None else "original_run_not_current"
+            elif status == "completed" and original is None:
                 state = "completion_unproven"
         if (requires_workspace_proof and binding is not None
                 and not workspace[role.role_id]["qualified"]):
-            answer = None
+            original = returned = None
         if role.role_id in unknown:
             state = "effect_unknown"
-            answer = None
+            original = returned = None
+        answer = original if original is not None else returned
+        provenance = "original_run" if original is not None else "native_settled_return" if returned is not None else None
         nodes[role.role_id] = {**role.document(), "native_state": state,
                                "binding": binding.document() if binding else None,
-                               "original_result_available": answer is not None,
+                               "original_result_available": original is not None,
+                               "result_available": answer is not None,
+                               "result_provenance": provenance,
+                               "result_run_id": (binding.receipt.run_id if original is not None
+                                                 else settled.result_run_id if returned is not None else None),
+                               "settled_return": settled.document() if settled else None,
+                               "settled_result_evidence": joined,
                                "result_sha256": hashlib.sha256(answer.encode()).hexdigest() if answer else None,
                                "subtree_results_available": False,
                                "workspace_group": team.workspace_group(role.role_id),
                                "workspace_evidence": workspace.get(role.role_id, {"qualified": False, "state": "unbound"}),
                                "acceptance": "not_evaluated"}
-    # Children precede parents; parent native completion alone is insufficient.
+    # Every defined descendant needs an original or explicitly joined result.
+    # A native settled return never replaces the complete child inventory check.
     for role in sorted(team.roles, key=lambda item: len(team.ancestors(item.role_id)), reverse=True):
         node = nodes[role.role_id]
-        node["subtree_results_available"] = node["original_result_available"] and all(
+        node["subtree_results_available"] = node["result_available"] and all(
             nodes[child.role_id]["subtree_results_available"] for child in team.children(role.role_id))
-    coverage = inventory_coverage(team, by_binding, observations, native_inventory)
+    coverage = inventory_coverage(team, by_binding, observations, native_inventory,
+                                  settled_results=settled_results)
     return {"schema": GRAPH_SCHEMA, "mission_id": team.mission.mission_id,
             "team_sha256": team.fingerprint, "source_ref": team.mission.source_ref,
             "objective": team.mission.objective, "done_when": list(team.mission.done_when),
@@ -739,7 +804,8 @@ class ProjectTeamClient:
 
     async def observe(self, team: ProjectTeam, bindings: tuple[RoleBinding, ...], *,
                       uncertain_role_ids: tuple[str, ...] = (),
-                      native_inventory: NativeInventory | None = None) -> dict[str, Any]:
+                      native_inventory: NativeInventory | None = None,
+                      settled_results: Mapping[str, NativeSettledResult] | None = None) -> dict[str, Any]:
         validate_bindings(team, bindings)
         _require(all(item.environment_id == self.environment_id for item in bindings),
                  "TEAM_CLIENT_ENVIRONMENT_DIFFERS")
@@ -751,7 +817,8 @@ class ProjectTeamClient:
                 # An unavailable child is never an empty successful result.
                 observations[binding.role_id] = None
         return project_graph(team, bindings=bindings, observations=observations,
-                             uncertain_role_ids=uncertain_role_ids, native_inventory=native_inventory)
+                             uncertain_role_ids=uncertain_role_ids, native_inventory=native_inventory,
+                             settled_results=settled_results)
 
 
 def _shape(value: Any, required: set[str], optional: set[str] = frozenset()) -> dict:

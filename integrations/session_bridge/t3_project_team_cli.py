@@ -23,6 +23,7 @@ from .t3_project_team import (
 )
 from .t3_web_client import NativeUnavailable, ThreadReceipt
 from .t3_project_team_inventory import inventory_from_document
+from .t3_project_team_results import settled_result_from_document
 
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 
@@ -43,7 +44,7 @@ def _read(path: str, limit: int) -> bytes:
 
 def _load_snapshot(path: str | None) -> dict[str, Any]:
     if path is None:
-        return {"bindings": (), "observations": {}, "evidence": (), "uncertain_role_ids": (), "native_inventory": None}
+        return {"bindings": (), "observations": {}, "evidence": (), "uncertain_role_ids": (), "native_inventory": None, "settled_results": {}}
 
     def unique(pairs):
         out = {}
@@ -56,7 +57,7 @@ def _load_snapshot(path: str | None) -> dict[str, Any]:
         raise TeamError("TEAM_NONFINITE_JSON")
 
     value = json.loads(_read(path, MAX_SNAPSHOT_BYTES), object_pairs_hook=unique, parse_constant=constant)
-    _shape(value, {"bindings", "observations", "dependency_evidence", "uncertain_role_ids"}, {"native_inventory"})
+    _shape(value, {"bindings", "observations", "dependency_evidence", "uncertain_role_ids"}, {"native_inventory", "settled_results"})
     _require(type(value["bindings"]) is list and type(value["dependency_evidence"]) is list
              and type(value["uncertain_role_ids"]) is list and type(value["observations"]) is dict,
              "TEAM_SNAPSHOT_SHAPE_INVALID")
@@ -71,7 +72,10 @@ def _load_snapshot(path: str | None) -> dict[str, Any]:
     for raw in value["dependency_evidence"]:
         _shape(raw, {"role_id", "accepted_by_role_id", "team_sha256", "source_ref"})
         evidence.append(DependencyEvidence(**raw))
-    return {"bindings": tuple(bindings), "observations": value["observations"],
+    settled = value.get("settled_results", {})
+    _require(type(settled) is dict and len(settled) <= len(bindings), "TEAM_SETTLED_RESULTS_INVALID")
+    return {"settled_results": {key: settled_result_from_document(item) for key, item in settled.items()},
+            "bindings": tuple(bindings), "observations": value["observations"],
             "evidence": tuple(evidence), "uncertain_role_ids": tuple(value["uncertain_role_ids"]),
             "native_inventory": inventory_from_document(value["native_inventory"])
             if value.get("native_inventory") is not None else None}
@@ -166,6 +170,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 snapshot.pop("evidence")
                 _emit(project_graph(team, **snapshot))
             else:
+                # Settled-result evidence is read-only; it cannot grant a new
+                # parent turn, a delegation, or a retry of an original effect.
+                snapshot.pop("settled_results")
                 offer = prepare_delegation(team, parent_role_id=args.parent_role,
                                            child_role_id=args.child_role, definition_ref=args.definition_ref, **snapshot)
                 _emit({"tool": "delegate_task", "arguments": offer.native_arguments(),

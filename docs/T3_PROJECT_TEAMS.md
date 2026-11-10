@@ -81,7 +81,8 @@ source evidence and the normalized native inventory:
   "observations": {},
   "dependency_evidence": [],
   "uncertain_role_ids": [],
-  "native_inventory": null
+  "native_inventory": null,
+  "settled_results": {}
 }
 ```
 
@@ -112,6 +113,48 @@ COO because a browser or CLI reply was lost. A stopped/restarted caller retains
 the original authenticated namespace: identical request IDs under different
 OAuth clients are not a safe replay strategy. Do not overwrite a binding with a
 newer run without reconciling the original effect through its native owner.
+
+## Automatic child-return continuations
+
+The real nested canary also exposed a tool-selection pitfall: delegated task IDs
+are not background-command IDs. Follow the native `delegate_task.next` directive;
+when it says completion wakes the parent, end the turn and consume that wake.
+Do not call `t3_background_wait` with delegated task IDs. An `unmatched` result is
+not a transport error. Derive ancestry from native `parentThreadId`, not an agent's
+self-description. The compiled role instructions include both corrections.
+
+
+A parent can finish its launch turn while its children keep working. T3 can then
+wake the same parent thread in a new run to integrate their returns. A final
+answer from that native continuation is not the original launch run's answer.
+Do not replace the launch receipt or guess that the latest run belongs to it.
+
+`read_native_settled_result` makes one bounded read through the existing injected
+native adapter: `t3_thread_wait`, the exact original thread/run,
+`untilDelegatedWorkSettled: true`. Only a successful native `resultRun` join can
+produce a `NativeSettledResult`; a timeout remains pending. The result retains
+the original requested run, qualified return run, exact team revision, observed
+environment/project, read timestamp and digest of the native wait return. The
+reader creates no dispatch, retry, queue, credential or independent wait loop.
+
+Pass these retained receipts as `settled_results`, keyed by role, alongside the
+ordinary observations and complete native child inventory. The standalone CLI
+accepts the same optional map in an existing-owner snapshot. Old snapshots remain
+valid; absent proof never relaxes their original-run checks.
+
+The graph keeps `binding.receipt.run_id` unchanged. `original_result_available`
+still means an answer from that original run. `result_available` can additionally
+mean an explicitly joined native settled return; `result_provenance` and
+`result_run_id` make the distinction visible. Freshness, source revision, thread
+lineage, current latest run, no active or pending work, workspace evidence and
+complete child coverage must still agree. An unseen child or an unknown effect
+still prevents completion. `acceptance` remains `not_evaluated`.
+
+This is read-only result attribution, not authorization to run another turn.
+It does not relax `prepare_delegation`'s exact-active-parent gate or grant a retry.
+Native automatic restarts that change the requested anchor run remain outside
+this join and require explicit reconciliation by the incumbent native owner.
+Caller-supplied snapshots and digests are not authentication or principal approval.
 
 ## Local commands
 

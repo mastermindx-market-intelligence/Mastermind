@@ -136,3 +136,52 @@ read consumer, not a full child inventory or model execution.
 No native threads, provider calls, application restarts, profile edits or new
 credentials have been created. No uncertain modifying effects. Continue G5 and
 G6 in this same operation; preserve remaining native/UI proof rather than invent it.
+
+
+## Live-native return follow-up (2026-11-10 UTC)
+
+Initial source PR #2394 is protected-merged as
+`edd451cd06e54bced7f7b44d151e541e30cb3fba`; the exact accepted package is installed
+on m2studio. Original canary `t3-team-canary-20261109-a1` was dispatched once,
+recovered an internal provider retry without caller relaunch, and created its
+native director. Native execution and receipts remain in that original thread.
+
+Source follow-up operation: `t3-project-native-returns-20261110`, based on the
+accepted merge, same pinned procedure `3673c03b1c8f583dec3e4c3d763b8267149c71a9`.
+No source writer was displaced; #2394 is already closed/merged. Direct work is
+LOWER_TOTAL_OVERHEAD for this bounded native-contract reconciliation.
+
+Native source 0770446's ThreadManagementService and OrchestratorMcpService return
+a separate `resultRun` when `untilDelegatedWorkSettled` joins child work. The
+initial graph correctly refuses arbitrary newer runs but cannot yet consume this
+explicit native return without replacing an original receipt. Correct that gap:
+retain original and final result identities separately, consume the native join
+once, preserve all inventory/workspace/uncertain-effect checks, and do not relax
+new-delegation admission or infer principal acceptance.
+
+Changed scope: owned team core/CLI, one new `t3_project_team_results.py`, focused
+result tests and package inclusion, this plan/user guide and actual pinned native
+wait-schema qualification evidence. No T3 source edit, runtime restart, provider
+configuration, additional model worker or competing continuity owner.
+
+DONE_WHEN for this follow-up: negative and regression tests pass, the real pinned
+native wait schema consumes the reader's exact request, the protected source is
+released normally, and the installed generation consumes real original canary
+receipts where native results are available. Never restart the canary to hide a
+missing or failed result. Preserve the original parent mission acceptance.
+
+Follow-up qualification: **176 focused/regression tests passed, 85 subtests
+passed**; **15/15 actual pinned native parser/schema checks passed**, including
+the helper's captured `t3_thread_wait` request and rejected non-boolean joins.
+AST self-check confirms `prepare_delegation`, `bind_delegation`,
+`validate_bindings` and `validate_dependency_evidence` are unchanged.
+
+The original native canary's worker executed the real `check` and `graph`
+commands at af6b724, with actual command items retained, and its director
+consumed the original completed return through `task_status`. The COO consumed
+the director's native return in ordinal 2; both parents preserve ordinal 1
+launch receipts. Full settled inventory and final root return remain separate
+proof requirements. The director mislabeled a background-command wait mismatch
+as a transport error and described its own ID as its parent; the compiled
+role instructions now follow native child-wake directives and native ancestry,
+not those model descriptions. No extra child or caller retry was launched.
