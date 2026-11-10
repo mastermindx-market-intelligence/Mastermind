@@ -34,6 +34,11 @@ def _cached_zh(text: str):
 
 router = APIRouter()
 
+# Additive, operator-authenticated scenario lab routes travel through the
+# incumbent web router; the security-reviewed app/main.py remains byte-pinned.
+from app import portfolio_scenarios as _portfolio_scenarios
+router.include_router(_portfolio_scenarios.router)
+
 _STATIC = Path(__file__).parent / "static"
 
 # The Mastermind project root is two levels up from app/web.py
