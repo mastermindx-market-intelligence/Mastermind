@@ -3305,9 +3305,11 @@ def test_primary_ci_checkout_retains_full_history_for_trusted_release_identity()
         step
         for step in steps
         if isinstance(step, dict)
+        and step.get("name") == "Checkout event source"
         and step.get("uses") == "actions/checkout@v4"
         and "repository" not in step.get("with", {})
     )
+    assert steps.index(primary) == 1
     assert primary.get("with", {}).get("fetch-depth") == 0
 
 

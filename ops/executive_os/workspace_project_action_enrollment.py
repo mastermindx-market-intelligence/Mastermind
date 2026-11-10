@@ -49,7 +49,7 @@ def _receipt_digest(receipt) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def compile_project_action_bindings(policy, existing_bindings, action_receipts) -> dict:
+def compile_project_action_bindings(policy, existing_bindings, action_receipts, *, schema=project_grant.SCHEMA) -> dict:
     """Compile an explicit project action selection without changing membership.
 
     The whole existing document — v1, v2, v3 or v4 — is validated first
@@ -67,6 +67,10 @@ def compile_project_action_bindings(policy, existing_bindings, action_receipts) 
     """
     if not isinstance(policy, ResourcePolicy):
         _refuse("policy_type")
+    try:
+        action_fields = project_grant.project_action_fields(schema)
+    except ValueError:
+        _refuse("action_selection")
     try:
         project_grant.validate_project_bindings(existing_bindings, policy)
     except _AUTH_ERRORS:
@@ -86,18 +90,29 @@ def compile_project_action_bindings(policy, existing_bindings, action_receipts) 
     profiles = {}
     for name, slot in base["profiles"].items():
         supplied = action_receipts[name]
-        if type(supplied) is not dict or set(supplied) != set(project_grant._ACTION_FIELDS):
+        if type(supplied) is not dict or set(supplied) != set(action_fields):
             _refuse("action_selection")
         grants = {}
-        for action in sorted(project_grant._ACTION_FIELDS):
-            field = project_grant._ACTION_FIELDS[action]
+        for action in sorted(action_fields):
+            field = action_fields[action]
             value = supplied[action]
             if value is None:
                 grants[field] = None
                 continue
             if not slot["enabled"] or slot["binding"] is None:
                 _refuse("disabled_action_profile")
-            if action in project_grant._SCOPED_ACTIONS:
+            if action in project_grant._INSTRUCTION_SCOPED_ACTIONS:
+                if type(value) is not dict or set(value) != {"work_ref", "instruction_ref", "receipt"}:
+                    _refuse("action_selection")
+                try:
+                    project_grant.validate_work({"work_ref": value["work_ref"]})
+                except (ValueError, TypeError):
+                    _refuse("work_ref")
+                if not project_grant.valid_instruction_ref(value["instruction_ref"]):
+                    _refuse("instruction_ref")
+                grants[field] = {"work_ref": value["work_ref"], "instruction_ref": value["instruction_ref"],
+                                 "permission_digest": _receipt_digest(value["receipt"])}
+            elif action in project_grant._SCOPED_ACTIONS:
                 if type(value) is not dict or set(value) != _SCOPED_RECEIPT_KEYS:
                     _refuse("action_selection")
                 try:
@@ -112,7 +127,7 @@ def compile_project_action_bindings(policy, existing_bindings, action_receipts) 
                 grants[field] = _receipt_digest(value)
         profiles[name] = dict(slot, **grants)
     document = {
-        "schema": project_grant.SCHEMA,
+        "schema": schema,
         "primary_profile": base["primary_profile"],
         "profiles": profiles,
     }

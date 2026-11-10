@@ -597,7 +597,9 @@ def diagnostic_retention_ready(lane_root, run_id, root_id):
 
 if __name__ == "__main__":
     if len(sys.argv) == 5 and sys.argv[1] == "retained-diagnostic-ready":
-        raise SystemExit(0 if diagnostic_retention_ready(*sys.argv[2:]) else 76)
+        # Predicate false is ordinary failure. Exit 76 belongs to the outer
+        # owned-process wrapper's unproved cleanup/capture result.
+        raise SystemExit(0 if diagnostic_retention_ready(*sys.argv[2:]) else 1)
     if len(sys.argv) == 7 and sys.argv[1] == "codex":
         raise SystemExit(codex_main(sys.argv[2:]))
     if len(sys.argv) == 8 and sys.argv[1] == "codex":

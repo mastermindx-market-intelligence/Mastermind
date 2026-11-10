@@ -127,6 +127,30 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
             decision.job_constraints()
 
 
+def test_sol61_project_executive_alias_is_exact_inert_and_not_worker_claimable():
+    router = ModelRouter.load()
+
+    candidate = router.model_aliases["project.executive.sol61"]
+    assert candidate.provider_alias == "codex"
+    assert candidate.adapter_id == "codex-cli"
+    assert candidate.execution_profile_id == "operator.appserver.readonly.v1"
+    assert candidate.model == "gpt-6.1-sol"
+    assert candidate.effort == "xhigh"
+    assert candidate.cost_class == "small"
+    assert candidate.capabilities == ("planning", "judgment", "escalation")
+    assert candidate.worker_eligible is False
+
+    for route in router.routes.values():
+        for risk in ("routine", "elevated"):
+            assert all(
+                "project.executive.sol61" not in tier.model_aliases
+                for tier in route[risk]
+            )
+
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("project.executive.sol61")
+
+
 def test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity():
     router = ModelRouter.load()
 
@@ -841,4 +865,129 @@ def test_byteplus_plan_remains_unroutable_without_private_realm():
         router.resolve_attended_model_alias(
             "byteplus.attended",
             "byteplus-coding-plan-personal.claude-code-anthropic",
+        )
+
+
+def test_minimax_attended_catalogue_remains_closed_and_unarmed():
+    router = ModelRouter.load()
+
+    assert router.providers["minimax"] == ProviderAlias(
+        "minimax", "attended-fabric", False, False
+    )
+    alias = router.model_aliases["minimax.attended"]
+    assert alias.provider_alias == "minimax"
+    assert alias.adapter_id == "attended-fabric"
+    assert alias.model == "MiniMax-M3"
+    assert alias.effort == "medium"
+    assert alias.capabilities == ("research",)
+    assert alias.worker_eligible is False
+    assert alias.execution_profile_id == "fabric.attended.claude.bounded.v1"
+    assert "coo.sealed.minimax" not in router.model_aliases
+
+    profile = router.capability_registry.resolve(alias.execution_profile_id)
+    assert profile.execution_surface == "claude-code"
+    assert profile.sandbox_policy == "read-only"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+
+
+def test_minimax_attended_alias_cannot_resolve_as_an_ordinary_worker():
+    router = ModelRouter.load()
+
+    assert router.resolve_model_alias("coo.sealed").worker_eligible is True
+    assert "minimax.attended" in router.model_aliases
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("minimax.attended")
+
+
+@pytest.mark.parametrize("risk", ["routine", "elevated"])
+def test_minimax_attended_alias_is_refused_in_capable_research_tiers(tmp_path, risk):
+    raw = _v2_policy()
+    router = _load_policy(tmp_path, raw)
+    assert "research" in router.model_aliases["minimax.attended"].capabilities
+    assert router.route(WorkRequest("research", risk=risk)).mode is RouteMode.WORKER
+
+    raw["routes"]["research"][risk][0]["model_aliases"].append("minimax.attended")
+    with pytest.raises(RoutingPolicyError, match="ineligible alias"):
+        _load_policy(tmp_path, raw)
+
+
+def test_minimax_attended_alias_is_absent_from_all_ordinary_route_projections():
+    router = ModelRouter.load()
+    raw = _v2_policy()
+
+    for task_kind, route in raw["routes"].items():
+        for risk in ("routine", "elevated"):
+            decision = router.route(WorkRequest(task_kind, risk=risk))
+            assert decision.mode is RouteMode.WORKER
+            for tier in decision.suitability_tiers:
+                assert "minimax.attended" not in tier.model_aliases
+            assert "minimax.attended" not in decision.preferred_model_aliases
+            assert "minimax.attended" not in (
+                decision.job_constraints()["preferred_model_aliases"]
+            )
+            assert all(
+                "minimax.attended" not in tier["model_aliases"]
+                for tier in route[risk]
+            )
+
+
+def _minimax_guard_binding_service(alias_name):
+    from types import SimpleNamespace
+
+    from control_plane.executive_service import ExecutiveControlService
+
+    service = object.__new__(ExecutiveControlService)
+    service.config = SimpleNamespace(
+        coo_model_alias=alias_name,
+        coo_operator_model_alias="coo.operator.readonly",
+        coo_quota_class="codex-coo",
+        coo_default_quota_class="codex-coo-default",
+        coo_operator_quota_class="codex-coo-operator",
+        proof_base_sha="a" * 40,
+        operator_harness_binary_digest="b" * 64,
+        operator_harness_version="fixture-v1",
+        coo_operator_harness_armed=False,
+        coo_attended_work_placements=(),
+        coo_paid_work_placements=(),
+    )
+    return service
+
+
+def test_minimax_attended_alias_cannot_source_the_coo_host_binding():
+    assert "minimax.attended" in ModelRouter.load().model_aliases
+    with pytest.raises(
+        ValueError,
+        match="configured COO alias must be a sealed, extension-free, write-capable worker",
+    ):
+        _minimax_guard_binding_service(
+            "minimax.attended"
+        )._load_coo_execution_binding()
+
+
+def test_minimax_binding_refusal_preserves_the_current_coo_binding_and_defaults():
+    from control_plane.executive_service import ServiceConfig
+
+    defaults = {field.name: field.default for field in dataclasses.fields(ServiceConfig)}
+    assert defaults["coo_model_alias"] == "coo.sealed"
+    assert defaults["coo_attended_work_placements"] == ()
+    assert defaults["coo_paid_work_placements"] == ()
+
+    binding = _minimax_guard_binding_service("coo.sealed")._load_coo_execution_binding()
+    assert binding["provider"] == "codex"
+    assert binding["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
+    assert binding["operator_provider"] == "codex"
+    assert binding["work_placement_union"] == [
+        {"provider_realm": "codex", "quota_class": "codex-coo"},
+        {"provider_realm": "codex", "quota_class": "codex-coo-default"},
+    ]
+
+
+def test_minimax_attended_resolution_refuses_the_unpromoted_provider():
+    router = ModelRouter.load()
+
+    assert "minimax.attended" in router.model_aliases
+    with pytest.raises(RoutingPolicyError, match="implemented nonautonomous provider"):
+        router.resolve_attended_model_alias(
+            "minimax.attended", "minimax-token-plan.claude-code-anthropic"
         )

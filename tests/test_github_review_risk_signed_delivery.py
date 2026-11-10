@@ -93,10 +93,9 @@ def test_signed_fast_webhook_skips_without_admitting_or_notifying():
 
 
 @pytest.mark.parametrize("path", [
-    "server/api/handler.py",
     ".github/workflows/ci.yml",
 ])
-def test_signed_standard_and_critical_use_original_one_job(path):
+def test_signed_critical_uses_original_one_job(path):
     app, source, ledger = host(path)
     status, body = asyncio.run(deliver(app))
     assert status == 202 and body["status"] == "ADMITTED", body
@@ -127,10 +126,18 @@ def test_manual_label_preserves_existing_authorized_route_with_one_pr_get():
     assert len(source.calls) == 1
 
 
-def test_duplicate_signed_standard_event_joins_original_command():
-    app, source, ledger = host("server/api/handler.py")
+def test_duplicate_signed_critical_event_joins_original_command():
+    app, source, ledger = host("security/handler.py")
     status1, body1 = asyncio.run(deliver(app))
     status2, body2 = asyncio.run(deliver(app))
     assert status1 == 202 and body1["job_id"] == "JOB-1"
     assert status2 == 200 and body2["status"] == "ALREADY_ADMITTED", body2
     assert ledger.calls == 2 and len(ledger.jobs) == 1
+
+
+def test_signed_standard_skips_before_job_admission():
+    app, source, ledger = host("server/api/handler.py")
+    status, body = asyncio.run(deliver(app))
+    assert status == 200 and body["status"] == "SKIPPED_NOT_REQUIRED"
+    assert ledger.jobs == {} and ledger.calls == 0
+    assert len(source.calls) == 4

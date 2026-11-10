@@ -66,7 +66,7 @@ class NetworkGuard:
 
         def check(address):
             host = address[0] if isinstance(address, tuple) else str(address)
-            if host not in {"127.0.0.1", "::1", "localhost"}:
+            if host not in {"127.0.0.1", "127.0.0.2", "127.0.0.3", "::1", "localhost"}:
                 self.blocked.append(host)
                 raise AssertionError(f"live network call to {host}")
 
@@ -177,7 +177,7 @@ class HarnessEndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             write_secrets(
-                home / ".config" / "hermes-runtime" / "mmsecretary.secrets.env",
+                home / ".config" / "hermes-runtime" / "mmrelay.secrets.env",
                 extra=(
                     "HERMES_SLACK_BOT_USER_ID=UHERMESSELF1\n"
                     "HERMES_SLACK_BOT_TOKEN=not-a-placeholder-token\n"
@@ -185,12 +185,24 @@ class HarnessEndToEnd(unittest.TestCase):
             )
             report = doctor(environ={}, home=home, systemd_user=False, upstream_attested=False)
         rendered = format_doctor(report)
-        self.assertNotIn("credential_file:mmsecretary.secrets.env", report["missing"])
-        self.assertNotIn("id:hermes-secretary:HERMES_SLACK_BOT_USER_ID", report["missing"])
-        self.assertNotIn("credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN", report["missing"])
-        self.assertIn("credential_file:mmmeta.secrets.env", report["missing"])
-        self.assertIn("id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID", report["missing"])
-        self.assertIn("credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN", report["missing"])
+        self.assertNotIn("credential_file:mmrelay.secrets.env", report["missing"])
+        self.assertNotIn("id:hermes-mmrelay:HERMES_SLACK_BOT_USER_ID", report["missing"])
+        self.assertNotIn("credential:hermes-mmrelay:HERMES_SLACK_BOT_TOKEN", report["missing"])
+        # A legacy two-unit transport file must never satisfy the collapsed
+        # single-identity roster row: fail closed against stale predecessors.
+        with tempfile.TemporaryDirectory() as raw:
+            home = Path(raw)
+            write_secrets(
+                home / ".config" / "hermes-runtime" / "mmsecretary.secrets.env",
+                extra=(
+                    "HERMES_SLACK_BOT_USER_ID=UHERMESSELF1\n"
+                    "HERMES_SLACK_BOT_TOKEN=not-a-placeholder-token\n"
+                ),
+            )
+            stale = doctor(environ={}, home=home, systemd_user=False, upstream_attested=False)
+        self.assertIn("credential_file:mmrelay.secrets.env", stale["missing"])
+        self.assertIn("id:hermes-mmrelay:HERMES_SLACK_BOT_USER_ID", stale["missing"])
+        self.assertIn("credential:hermes-mmrelay:HERMES_SLACK_BOT_TOKEN", stale["missing"])
         self.assertNotIn("not-a-placeholder-token", rendered)
         self.assertNotIn("UHERMESSELF1", rendered)
         self.assertNotIn(TOKEN, rendered)
@@ -199,7 +211,7 @@ class HarnessEndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             home = Path(raw)
             roster = home / "roster.json"
-            roster.write_text('{"hermes_agents": {"name": "hermes-secretary"}}\n', encoding="utf-8")
+            roster.write_text('{"hermes_agents": {"name": "hermes-mmrelay"}}\n', encoding="utf-8")
             report = doctor(
                 environ={},
                 home=home,
@@ -210,10 +222,8 @@ class HarnessEndToEnd(unittest.TestCase):
         self.assertEqual(report["status"], "MISSING")
         self.assertIn("config:hermes_agents:invalid", report["missing"])
         for row in (
-            "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
-            "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
-            "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
-            "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
+            "id:hermes-mmrelay:HERMES_SLACK_BOT_USER_ID",
+            "credential:hermes-mmrelay:HERMES_SLACK_BOT_TOKEN",
         ):
             self.assertNotIn(row, report["missing"])
         rendered = format_doctor(report)
@@ -320,8 +330,8 @@ class HarnessEndToEnd(unittest.TestCase):
 
     def _assert_boot(self, stack, secrets: Path) -> None:
         runtime = stack.runtime
-        self.assertEqual(runtime.gateway.host, "127.0.0.1")
-        code, body = http_get(f"http://127.0.0.1:{runtime.gateway.port}/api/health", TOKEN)
+        self.assertEqual(runtime.gateway.host, "127.0.0.2")
+        code, body = http_get(f"http://{runtime.gateway.host}:{runtime.gateway.port}/api/health", TOKEN)
         self.assertEqual(code, 200)
         payload = json.loads(body)
         self.assertEqual(payload["status"], "ok")
@@ -381,10 +391,8 @@ _CLEAN_MISSING = [
     "credential:MASTERMIND_STEWARD_ACCESS_TOKEN",
     "credential:MINIMAX_TOKEN_PLAN_KEY",
     "credential:ZAI_API_KEY",
-    "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
-    "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
-    "credential_file:mmmeta.secrets.env",
-    "credential_file:mmsecretary.secrets.env",
+    "credential:hermes-mmrelay:HERMES_SLACK_BOT_TOKEN",
+    "credential_file:mmrelay.secrets.env",
     "endpoint:HERMES_CURSOR_POOL_BASE_URL",
     "endpoint:MASTERMIND_STEWARD_MCP_URL",
     "grant:executive_admission",
@@ -394,8 +402,9 @@ _CLEAN_MISSING = [
     "grant:pinned_upstream_checkout",
     "grant:ubuntu1_systemd_user_manager",
     "id:DOT_BOT_USER_IDS",
-    "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
-    "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
+    "id:hermes-mmrelay:HERMES_SLACK_BOT_USER_ID",
+    "network_proxy:mmmeta",
+    "network_proxy:mmsecretary",
 ]
 
 

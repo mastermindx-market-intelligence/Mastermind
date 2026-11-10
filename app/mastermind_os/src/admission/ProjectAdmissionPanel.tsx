@@ -26,7 +26,7 @@ const COPY = {
     historical:"This request receipt is historical. Read project status to confirm the current gate.",
     refused:"Request declined", unknown:"The original request outcome is unresolved. Do not resend it, choose another destination, or create a replacement request.",
     localHold:"The pending request state could not be read. New requests are held until that state can be checked.",
-    check:"Check original request", details:"Source details", scope:"Project", current:"Current transition", noPermission:"This read does not supply current permission for this action.", refresh:"Check pause status to see the current setting.", noController:"Project controls are not connected here.",
+    check:"Check original project request", details:"Source details", scope:"Project", current:"Current transition", noPermission:"This read does not supply current permission for this action.", refresh:"Check pause status to see the current setting.", noController:"Project controls are not connected here.",
   },
   "zh-CN": {
     title:"新工作", note:"停止此项目的新工作；已在运行的工作可能继续。",
@@ -36,7 +36,7 @@ const COPY = {
     historical:"此请求回执属于历史记录。请读取项目状态以确认当前准入状态。",
     refused:"请求未获准", unknown:"原请求结果尚不明确。请勿重发、改用其他目标或创建替代请求。",
     localHold:"无法读取待处理请求状态。确认该状态之前，暂不接受新请求。",
-    check:"检查原请求", details:"来源详情", scope:"项目", current:"当前变更", noPermission:"此读取未提供执行此操作的当前许可。", refresh:"请检查暂停状态以查看当前设置。", noController:"此处尚未接入项目控制。",
+    check:"检查原始项目请求", details:"来源详情", scope:"项目", current:"当前变更", noPermission:"此读取未提供执行此操作的当前许可。", refresh:"请检查暂停状态以查看当前设置。", noController:"此处尚未接入项目控制。",
   },
 } as const;
 export function ProjectAdmissionPanel(props: ProjectAdmissionPanelProps) {

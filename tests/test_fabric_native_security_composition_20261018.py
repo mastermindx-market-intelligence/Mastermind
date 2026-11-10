@@ -19,6 +19,7 @@ import sys
 
 import pytest
 import test_fabric_clean_linked_donor_20261017 as donor_contract
+import test_fabric_grok47_qwen_release_composition_20261022 as current_source_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
@@ -33,7 +34,17 @@ GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c
 COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
 PRE_LONG_HORIZON_COMPOSED_SHA = "5880bad86fc4bc65a8460baf6156b46333a0ce33c24ef6742c905aa7db55ce2d"
 PRE_SLOT_HANDOFF_COMPOSED_SHA = "b670196db8f56018e91d73976b926a550318cb94cc566f86fa40f34a5d55de63"
-FINAL_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
+PRE_SPARSE_CONFIG_DATA_COMPOSED_SHA = "9a01a5b7d559e2f86b92f1da9c7f426d6a5b9c4f1e0ca98542ce8a0452bf87c1"
+SPARSE_CONFIG_DATA_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-config-data-forward.patch"
+SPARSE_CONFIG_DATA_FORWARD_PATCH_SHA = "fa1c45d7aedeb7f915b1f205900d78da259d74ba6d39a94bea68193d9235ccdb"
+PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
+FINAL_COMPOSED_SHA = "710115e08673467ce39a0322da2cf718a66e5b95d4a62a9eff94e160f79515db"
+APPLICATION_COMPOSED_SHA = "bb0369140835dacf1bd08aef6fe96878c5088a8109580fd006436e53d05801ea"
+CURRENT_COMPOSED_SHA = "d15238fa70942463de99ca4f7679ad9e27d6b91f9034ac792f903efd1c22cafc"
+SPARSE_PREFLIGHT_PATCH = ROOT / "tests/fixtures/fabric-native-sparse-commit-preflight-20261103.patch"
+SPARSE_PREFLIGHT_PATCH_SHA = "34d3cbbe2033bc8a1a68d6d711407ad57ee892a951f4ef68303c719f3585a9c9"
+APPLICATION_CARRIER_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-application-carrier-forward.patch"
+APPLICATION_CARRIER_FORWARD_PATCH_SHA = "d063403d193192706935d2f5b55abb589689cf73093a9a8718218ab7b794fc83"
 H1_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-h1-provider-entry-forward.patch"
 H1_FORWARD_PATCH_SHA = "4be46626757b8654babb5140ffc757d0fa74de879a37240965737a0c874b2918"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
@@ -54,7 +65,7 @@ def _current_native_count():
     owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(owner)
     return len(owner.BASE_FILES|owner.ADDITIONS)+1
 EXPECTED_NATIVE_FILES = _current_native_count()
-NATIVE_MANIFEST_SHA = "a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed"
+NATIVE_MANIFEST_SHA = "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
 
 
 def _sha(raw):
@@ -107,10 +118,48 @@ def _composition(directory):
     assert _sha(H1_FORWARD_PATCH.read_bytes()) == H1_FORWARD_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(H1_FORWARD_PATCH))
     donor_contract._git(directory, "apply", str(H1_FORWARD_PATCH))
-    composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    actual_current = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    assert _sha(actual_current) == CURRENT_COMPOSED_SHA
+    assert _sha(SPARSE_PREFLIGHT_PATCH.read_bytes()) == SPARSE_PREFLIGHT_PATCH_SHA
+    preflight_delta = directory / "sparse-commit-preflight"
+    preflight_delta.mkdir()
+    preflight_target = preflight_delta / "remote_sub_exec.py"
+    preflight_target.write_bytes(actual_current)
+    donor_contract._git(preflight_delta, "apply", "--reverse", "--check", str(SPARSE_PREFLIGHT_PATCH))
+    donor_contract._git(preflight_delta, "apply", "--reverse", str(SPARSE_PREFLIGHT_PATCH))
+    actual_composed = preflight_target.read_bytes()
+    assert _sha(actual_composed) == APPLICATION_COMPOSED_SHA
+    donor_contract._git(preflight_delta, "apply", "--check", str(SPARSE_PREFLIGHT_PATCH))
+    donor_contract._git(preflight_delta, "apply", str(SPARSE_PREFLIGHT_PATCH))
+    assert preflight_target.read_bytes() == actual_current
+    assert _sha(APPLICATION_CARRIER_FORWARD_PATCH.read_bytes()) == APPLICATION_CARRIER_FORWARD_PATCH_SHA
+    application_delta = directory / "application-carrier"
+    application_delta.mkdir()
+    application_target = application_delta / "remote_sub_exec.py"
+    application_target.write_bytes(actual_composed)
+    donor_contract._git(application_delta, "apply", "--unidiff-zero", "--reverse", "--check", str(APPLICATION_CARRIER_FORWARD_PATCH))
+    donor_contract._git(application_delta, "apply", "--unidiff-zero", "--reverse", str(APPLICATION_CARRIER_FORWARD_PATCH))
+    composed = application_target.read_bytes()
+    assert _sha(composed) == FINAL_COMPOSED_SHA
+    donor_contract._git(application_delta, "apply", "--unidiff-zero", "--check", str(APPLICATION_CARRIER_FORWARD_PATCH))
+    donor_contract._git(application_delta, "apply", "--unidiff-zero", str(APPLICATION_CARRIER_FORWARD_PATCH))
+    assert application_target.read_bytes() == actual_composed
+    # Prove this additive data-parser delta against the exact predecessor in
+    # both directions; retain every earlier transformation and historical pin.
+    assert _sha(SPARSE_CONFIG_DATA_FORWARD_PATCH.read_bytes()) == SPARSE_CONFIG_DATA_FORWARD_PATCH_SHA
+    sparse_delta = directory / "sparse-config-data"
+    sparse_delta.mkdir()
+    sparse_target = sparse_delta / "remote_sub_exec.py"
+    sparse_target.write_bytes(composed)
+    donor_contract._git(sparse_delta, "apply", "--reverse", "--check", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    donor_contract._git(sparse_delta, "apply", "--reverse", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    previous = sparse_target.read_bytes()
+    assert _sha(previous) == PRE_SPARSE_CONFIG_DATA_COMPOSED_SHA
+    donor_contract._git(sparse_delta, "apply", "--check", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    donor_contract._git(sparse_delta, "apply", str(SPARSE_CONFIG_DATA_FORWARD_PATCH))
+    assert sparse_target.read_bytes() == composed
     # Preserve the exact reviewed long-horizon executor as predecessor bytes.
     # The new handoff is removed only in a disposable inverse for source proof.
-    previous = composed
     first = previous.index(b'\n\ndef _slot_child_timeout_env(')
     last = previous.index(b'\ndef _fail(message:', first)
     previous = previous[:first] + previous[last:]
@@ -127,9 +176,9 @@ def _composition(directory):
     prior_long = prior_long.replace(b"not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)",
                                     b"not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)")
     assert _sha(prior_long) == PRE_LONG_HORIZON_COMPOSED_SHA
-    assert _sha(composed) == FINAL_COMPOSED_SHA
+    assert _sha(composed) == PRE_SPARSE_INDEX_ADVICE_COMPOSED_SHA
     assert target.read_bytes() == prior_long  # verified unchanged reviewed source cone
-    return composed
+    return actual_current
 
 
 @pytest.fixture(scope="session")
@@ -173,14 +222,14 @@ def native_stage(tmp_path_factory):
     assert result.returncode == 0, result.stderr
     expected = (NATIVE / "rollout/native-manifest.json").read_bytes()
     assert _sha(expected) == NATIVE_MANIFEST_SHA
-    assert (output / "native-manifest.json").read_bytes() == expected
-    assert (output / "native-source-inventory.json").read_bytes() == (
-        NATIVE / "rollout/native-source-inventory.json").read_bytes()
-    manifest = json.loads(expected)
+    builder = current_source_contract.read_builder()
+    manifest = current_source_contract.read_current_source_fixture().verify_current_stage(
+        output, NATIVE,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
     assert len(manifest) == EXPECTED_NATIVE_FILES
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
-    assert manifest["ext/remote_sub_exec.py"] == FINAL_COMPOSED_SHA
+    assert manifest["ext/remote_sub_exec.py"] == CURRENT_COMPOSED_SHA
     return output
 
 
@@ -206,7 +255,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == FINAL_COMPOSED_SHA
+    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == CURRENT_COMPOSED_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
@@ -247,7 +296,7 @@ def _seam(stage, base):
     for name in names:
         assert _sha((published / name).read_bytes()) == manifest[name]
         assert (published / name).stat().st_mode & 0o777 == 0o555
-    assert _sha((published / "remote_sub_exec.py").read_bytes()) == FINAL_COMPOSED_SHA
+    assert _sha((published / "remote_sub_exec.py").read_bytes()) == CURRENT_COMPOSED_SHA
     assert (published / "lanes").resolve() == remote_ext / "lanes"
     assert (published / "active").resolve() == remote_ext / "active"
     assert published.stat().st_mode & 0o777 == 0o555
@@ -373,7 +422,7 @@ print("benign fixture workspace ready")
         assert (fixture.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
         assert os.environ.get("HOME") == initial_home
     return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": len(files),
-            "support_files": 37, "executor_sha256": FINAL_COMPOSED_SHA,
+            "support_files": 37, "executor_sha256": CURRENT_COMPOSED_SHA,
             "fixture_native_digest": generation.name, "fixture_support_digest": support_digest,
             "mint_receipt_sha256": _sha(receipt.read_bytes()), "provider_started": False,
             "production_macro_helper_tested": False, "physical_lease_acquired": False}
@@ -386,7 +435,7 @@ def test_selected_native_support_executor_preserves_mint_and_outcome_binding(nat
     assert result.returncode == 0, result.stderr
     proof = json.loads(result.stdout)
     assert proof["status"] == "OFFLINE_COMPOSITION_SEAM_PASS"
-    assert proof["executor_sha256"] == FINAL_COMPOSED_SHA
+    assert proof["executor_sha256"] == CURRENT_COMPOSED_SHA
     assert proof["native_files"] == EXPECTED_NATIVE_FILES and proof["support_files"] == 37
     assert proof["provider_started"] is False
     assert proof["physical_lease_acquired"] is False

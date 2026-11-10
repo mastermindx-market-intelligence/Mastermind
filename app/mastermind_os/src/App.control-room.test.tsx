@@ -129,16 +129,9 @@ describe("authenticated incumbent Control Room read presentation", () => {
     );
     await act(async () => settle(decodeControlRoomRead(payload())));
     expect(screen.queryByText(/source-qualified Programs/)).toBeNull();
-    expect(
-      screen.getByText(/signed Control Room read is unavailable/i),
-    ).toBeTruthy();
-    expect(
-      (
-        screen.getByRole("button", {
-          name: "Refresh Control Room",
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh Control Room" })).toBeNull();
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });
 

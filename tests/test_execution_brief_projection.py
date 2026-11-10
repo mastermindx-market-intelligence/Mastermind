@@ -99,6 +99,35 @@ class ProjectionTests(unittest.TestCase):
                 mod.project('<!-- mastermind-active-owner-takeover-20261102 -->\nUnbalanced',
                             'Current brief.', profile)
 
+    def test_continuity_review_sentence_updated_without_removing_host_controls(self):
+        mod = self.module()
+        marker = 'mastermind-leadership-continuity-20261024'
+        obsolete = ('Independent REVIEW is still\n   required from any fresh '
+                    'non-authoring reviewer (never a specific named owner); never\n   '
+                    'self-merge or self-approve.')
+        old = (f'<!-- {marker} -->\nLeadership and EFFECT_UNKNOWN stay.\n'
+               f'{obsolete}\nNo purchases or paid credits.\n<!-- /{marker} -->\n'
+               f'Personal quotation: {obsolete}\n')
+        for profile in ('codex', 'claude'):
+            new = mod.project(old, 'Current brief.', profile)
+            managed = new.split(f'<!-- {marker} -->', 1)[1].split(
+                f'<!-- /{marker} -->', 1)[0]
+            self.assertNotIn(obsolete, managed)
+            self.assertIn('ordinary self-check and protected automation', managed)
+            self.assertIn('native/automatic CRITICAL requires one distinct technical review', managed)
+            self.assertIn('attended Web all-tier waiver remains', managed)
+            self.assertIn('no self-merge outside the protected controller', managed)
+            self.assertIn('Leadership and EFFECT_UNKNOWN stay.', managed)
+            self.assertIn('No purchases or paid credits.', managed)
+            self.assertIn(f'Personal quotation: {obsolete}', new)
+            self.assertEqual(mod.project(new, 'Current brief.', profile), new)
+
+    def test_unbalanced_continuity_block_fails_closed(self):
+        mod = self.module()
+        with self.assertRaises(ValueError):
+            mod.project('<!-- mastermind-leadership-continuity-20261024 -->',
+                        'Current brief.', 'codex')
+
     def test_memory_preserves_header_and_historical_effects(self):
         mod = self.module()
         old = 'v1\n\n## History\nEFFECT_UNKNOWN: operation-123 needs reconciliation.\n'

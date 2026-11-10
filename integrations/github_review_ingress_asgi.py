@@ -37,6 +37,7 @@ from control_plane.github_review_host_config import (
     ReviewHostSettings,
 )
 from integrations.github_review_risk_consumer import GitHubReviewRiskConsumer
+from integrations.github_pr_delivery_consumer import GitHubPRDeliveryConsumer
 
 
 MAX_HEADER_BYTES = 8192
@@ -177,6 +178,7 @@ class GitHubReviewReceiver:
         visibility: VisibilityPort | None = None,
         reconciliation_guard: Callable[[str], None] | None = None,
         risk_consumer: GitHubReviewRiskConsumer | None = None,
+        delivery_consumer: GitHubPRDeliveryConsumer | None = None,
     ) -> None:
         if not isinstance(settings, ReviewHostSettings):
             raise TypeError("expected enrolled review host settings")
@@ -189,6 +191,12 @@ class GitHubReviewReceiver:
         if risk_consumer is not None and type(risk_consumer) is not GitHubReviewRiskConsumer:
             raise TypeError("risk consumer must be bound to incumbent GitHub App")
         self._risk_consumer = risk_consumer
+        if delivery_consumer is not None and (
+            type(delivery_consumer) is not GitHubPRDeliveryConsumer
+            or frozenset({delivery_consumer.repository}) != settings.repositories
+        ):
+            raise TypeError("delivery consumer must match the enrolled GitHub repository")
+        self._delivery_consumer = delivery_consumer
         if reconciliation_guard is not None and not callable(reconciliation_guard):
             raise TypeError("reconciliation requires an incumbent owner guard")
         self._reconciliation_guard = reconciliation_guard
@@ -277,6 +285,31 @@ class GitHubReviewReceiver:
             task.result()
         except (Exception, asyncio.CancelledError):
             pass
+
+    def inspect_pull_request_delivery(
+        self, *, owner_execution_ref: str, pull_number: int,
+        expected_head_sha: str | None = None, max_pages: int = 3,
+        time_budget_seconds: float = 30.0,
+    ) -> dict:
+        """Internal, owner-authorized evidence read; no HTTP route or Job.
+
+        This uses the same enrolled owner guard as backlog reconciliation,
+        but never admits a reviewer, mutates a PR, or schedules a successor.
+        Source-owner qualification cannot be submitted through this interface.
+        """
+        if not self._settings.enabled:
+            raise ReviewIngressUnavailable("DELIVERY_INSPECTION_DISABLED")
+        if self._reconciliation_guard is None or self._delivery_consumer is None:
+            raise ReviewIngressUnavailable("DELIVERY_INSPECTION_OWNER_UNARMED")
+        if (type(owner_execution_ref) is not str or not owner_execution_ref.strip()
+                or len(owner_execution_ref) > 128):
+            raise ReviewIngressUnavailable("DELIVERY_EXECUTION_REFERENCE_INVALID")
+        if self._reconciliation_guard(owner_execution_ref) is not None:
+            raise ReviewIngressUnavailable("DELIVERY_OWNER_GUARD_INVALID_RETURN")
+        return self._delivery_consumer.inspect(
+            pull_number=pull_number, expected_head_sha=expected_head_sha,
+            max_pages=max_pages, time_budget_seconds=time_budget_seconds,
+        )
 
     def reconcile_open_pull_requests(
         self, *, owner_execution_ref: str, start_page: int = 1,

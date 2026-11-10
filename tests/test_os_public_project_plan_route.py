@@ -1,7 +1,7 @@
 """The new canonical record read is one exact GET, never an execution route."""
 from pathlib import Path
 
-from ops.executive_os.os_public_edge import GET_ROUTES, PRE_PROJECT_PLAN_GET_ROUTES, POST_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES, TRANSITION_ROUTE_PROFILES, _TEMPLATE
+from ops.executive_os.os_public_edge import GET_ROUTES, PRE_PROJECT_PLAN_GET_ROUTES, POST_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES, TRANSITION_ROUTE_PROFILES, PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, AUTHORIZATION_IDENTITY_GET_ROUTES, _TEMPLATE
 
 ROUTE = "/workspace/project-plan/current"
 
@@ -10,9 +10,10 @@ def test_new_read_is_fixed_get_and_old_publication_remains_an_exact_predecessor(
     assert GET_ROUTES.count(ROUTE) == 1
     assert ROUTE not in POST_ROUTES
     assert (PRE_PROJECT_PLAN_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES) in TRANSITION_ROUTE_PROFILES
-    assert set(GET_ROUTES) - set(PRE_PROJECT_PLAN_GET_ROUTES) == {
+    assert set(PRE_AUTHORIZATION_IDENTITY_GET_ROUTES) - set(PRE_PROJECT_PLAN_GET_ROUTES) == {
         ROUTE, "/workspace/project-journal/current", "/workspace/autonomy/current",
-        "/workspace/resources/capacity/current", "/workspace/project-direction/current", "/workspace/project-session/current", "/workspace/project-admission/current", "/workspace/project-admission/operation"}
+        "/workspace/resources/capacity/current", "/workspace/project-direction/current", "/workspace/project-session/current", "/workspace/project-admission/current", "/workspace/project-admission/operation", "/workspace/projects/archive/current", "/workspace/project-knowledge/current", "/workspace/project-memory/current", "/workspace/project-source/current", "/workspace/source-operation/context", "/workspace/source-operation/operation", '/workspace/project-instructions/current', '/workspace/instruction-admission/current', '/workspace/instruction-admission/operation', '/workspace/project-access/current', '/workspace/source-operation/options', '/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current', '/workspace/byok/roles/current'}
+    assert GET_ROUTES == PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + AUTHORIZATION_IDENTITY_GET_ROUTES
     template = _TEMPLATE.read_text()
     get_block = template.split("@get {", 1)[1].split("handle @get", 1)[0]
     post_block = template.split("@post {", 1)[1].split("handle @post", 1)[0]

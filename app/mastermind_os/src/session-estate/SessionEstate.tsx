@@ -8,7 +8,7 @@
  */
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
-import type { ControlRoomState } from "../control-room";
+import { decodeControlRoomActionPayload, type ControlRoomState } from "../control-room";
 import "./session-estate.css";
 
 export type SessionEstateLocale = "en" | "zh-CN";
@@ -63,6 +63,8 @@ const EN = {
     `Ambiguous group (${ids.length}): ${ids.join(", ")}`,
   missionHeading: "Work details",
   openMission: "Open work details",
+  openSession: "Open session",
+  sessionUnavailable: "Opening this session is unavailable. Refresh the source or check the session controls.",
   openNote: "Read navigation only; it does not open or activate any runtime surface.",
   suppressUnbound: "This binding is outside the current supplied project list, so no mission was guessed.",
   suppressConflict:
@@ -126,6 +128,8 @@ const ZH: Copy = {
   conflictGroup: (ids) => `歧义分组（${ids.length} 条）：${ids.join("、")}`,
   missionHeading: "工作详情",
   openMission: "打开工作详情",
+  openSession: "打开会话",
+  sessionUnavailable: "暂时无法打开此会话。请刷新来源或检查会话控制。",
   openNote: "仅作只读导航；不会打开或激活任何运行时界面。",
   suppressUnbound: "该绑定不在当前项目观察范围内，因此不会猜测任务。",
   suppressConflict: "该绑定属于冲突的工作/角色分组，因此不提供精确任务导航。",
@@ -212,18 +216,23 @@ function DetailBody({
   binding,
   copy,
   onOpenMission,
+  canOpenSurface,
+  onOpenSurface,
 }: {
   readonly read: AvailableRead;
   readonly navigation: AvailableNavigation;
   readonly binding: Binding;
   readonly copy: Copy;
   readonly onOpenMission: (workRef: string, rootJobId: string) => void;
+  readonly canOpenSurface: boolean;
+  readonly onOpenSurface?: (payload: Readonly<Record<string, unknown>>) => void;
 }) {
   const conflictGroups = navigation.conflicts.filter(
     (group) => group.work_ref === binding.work_ref && group.role === binding.role,
   );
   const unbound = navigation.unboundBindingIds.includes(binding.binding_id);
   const resolution = resolveMission(read, navigation, binding);
+  const canOpen = canOpenSurface && !!onOpenSurface && binding.provider !== "chatgpt";
   return (
     <div className="session-estate__detail-body">
       <p>{binding.provider} · {binding.role}</p>
@@ -289,6 +298,12 @@ function DetailBody({
       </dl>
       </details>
       <div className="session-estate__mission">
+        <button type="button" className="button session-estate__open" disabled={!canOpen}
+          onClick={() => {
+            if (!canOpen || !onOpenSurface) return;
+            onOpenSurface(decodeControlRoomActionPayload({ binding_id: binding.binding_id }, "open"));
+          }}>{copy.openSession}</button>
+        {!canOpen ? <p className="session-estate__note">{copy.sessionUnavailable}</p> : null}
         <h4 className="session-estate__mission-title">{copy.missionHeading}</h4>
         {resolution.kind === "resolved" ? (
           <>
@@ -317,6 +332,8 @@ export function SessionEstate({
   onOpenMission,
   children,
   controlsHeld = false,
+  canOpenSurface = false,
+  onOpenSurface,
 }: {
   readonly state: ControlRoomState;
   readonly locale?: SessionEstateLocale;
@@ -326,6 +343,10 @@ export function SessionEstate({
   readonly children?: ReactNode;
   /** Actual command-owner hold, independent of saved-connection observations. */
   readonly controlsHeld?: boolean;
+  /** Current incumbent action-owner eligibility, independent of read data. */
+  readonly canOpenSurface?: boolean;
+  /** Existing guarded owner; no URL, session identity or Runtime grant is derived here. */
+  readonly onOpenSurface?: (payload: Readonly<Record<string, unknown>>) => void;
 }) {
   const copy = locale === "zh-CN" ? ZH : EN;
   const titleId = useId();
@@ -507,6 +528,8 @@ export function SessionEstate({
                 binding={selected}
                 copy={copy}
                 onOpenMission={onOpenMission}
+                canOpenSurface={canOpenSurface && !controlsHeld && !state.refreshPending}
+                onOpenSurface={onOpenSurface}
               />
             )}
           </section>

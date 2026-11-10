@@ -25,7 +25,8 @@ from scripts.ohf.protocol import (
 
 REPO = Path(__file__).resolve().parent.parent
 PROFILE = "MASTERMIND_REAL_WORKFORCE_SKILLS_CATALOG_TEST"
-SKILLS = ("mastermind-craft", "mastermind-worker-bootstrap")
+SKILLS = ("mastermind-craft", "mastermind-worker-bootstrap",
+          "mastermind-fabric-orchestration")
 
 
 @pytest.mark.skipif(
@@ -39,7 +40,7 @@ def test_source_derived_workforce_skills_discovered_by_real_app_server(tmp_path,
         ["git", "rev-parse", "HEAD"], cwd=REPO, check=True,
         capture_output=True, text=True, timeout=5,
     ).stdout.strip()
-    files = source_files(REPO, source_sha)
+    files = source_files(REPO, source_sha, include_orchestration=True)
     artifact = assemble(files, source_sha, docs=False)
     assert ".mcp.json" not in artifact
     build = json.loads(artifact["BUILD.json"])

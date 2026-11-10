@@ -55,9 +55,9 @@ def test_auto_fast_skips_review_job_only_for_matching_current_source():
     assert (result.repository, result.pull_number, result.head_sha) == (REPO, PR, SHA)
 
 
-def test_auto_consequential_keeps_separate_machine_review():
+def test_auto_ordinary_schema_source_skips_machine_review():
     result = auto(risk(("server/schema/refresh.py",)))
-    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
     assert result.source_tier is ReviewTier.STANDARD
 
 
@@ -149,9 +149,9 @@ def test_caller_text_is_not_verified_origin(bad_origin):
         decide_risk_dispatch(origin=bad_origin, assessment=risk())
 
 
-def test_auto_bounded_app_source_keeps_signed_machine_review_when_host_enabled():
+def test_auto_bounded_app_source_skips_machine_review():
     result = auto(risk(("app/src/component.tsx",)))
-    assert result.action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert result.action is ReviewDispatch.SKIP_NO_REVIEW_NEEDED
     assert result.source_tier is ReviewTier.STANDARD
 
 
@@ -161,10 +161,19 @@ def test_forged_zero_assessment_counts_cannot_skip_signed_critical_machine_risk(
         minimum_independent_assessments=0,
         minimum_formal_non_author_approvals=0,
     )
-    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+    assert auto(assessment).action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE
 
 
-def test_signed_standard_machine_review_cannot_be_skipped_by_forged_zero_counts():
-    assessment = replace(risk(("server/api/refresh.py",)),
-        minimum_independent_assessments=0, minimum_formal_non_author_approvals=0)
-    assert auto(assessment).action is ReviewDispatch.AUTO_REVIEW_ELIGIBLE
+@pytest.mark.parametrize("paths", [("docs/user-guide.md",), ("server/api/refresh.py",),
+                                  ("control_plane/packet_gate.py",)])
+@pytest.mark.parametrize("counts", [(2, 1), (True, 0), (0, True), (-1, 0)])
+def test_forged_or_obsolete_count_objects_hold(paths, counts):
+    assessment = replace(risk(paths), minimum_independent_assessments=counts[0],
+                         minimum_formal_non_author_approvals=counts[1])
+    assert auto(assessment).action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE
+
+
+@pytest.mark.parametrize("paths", [("docs/user-guide.md",), ("server/api/refresh.py",)])
+def test_standard_skip_retains_exact_head_and_source_gates(paths):
+    assert auto(risk(paths), latest=current(head_sha="c" * 40)).action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE
+    assert auto(risk(paths, verified=False)).action is ReviewDispatch.HOLD_UNQUALIFIED_SOURCE

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .constants import CONFIG_EXIT, PINNED_UPSTREAM_SHA
 from .errors import RuntimeRefusal
+from .egress import ROLE_PROXY_HOST
 from .profile import RuntimeProfile
 
 _UNSAFE = set(" \n\r\t\"'`$")
@@ -49,6 +50,9 @@ def render_user_unit(
             raise RuntimeRefusal("UNSAFE_PATH")
         if label == "python" and not value:
             raise RuntimeRefusal("UNSAFE_PATH")
+    proxy_host = ROLE_PROXY_HOST.get(profile.role)
+    if proxy_host is None:
+        raise RuntimeRefusal("NATIVE_EGRESS_ROLE_REFUSED")
     state = str(profile.state_dir)
     secrets = str(profile.secrets_file)
     if any(ch in secrets for ch in _UNSAFE) or not secrets.startswith("/"):
@@ -67,6 +71,10 @@ StartLimitBurst={profile.start_limit_burst}
 Type=simple
 WorkingDirectory={state}
 ExecStart={python_executable} -m integrations.hermes_runtime supervise --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
+# Explicit operator-only canary. systemd executes ExecReload inside this unit's
+# existing cgroup and EnvironmentFile; no extra daemon or open network endpoint.
+# A PASS proves only a pinned native output observation, not remote auth/TLS.
+ExecReload={python_executable} -m integrations.hermes_runtime canary --profile {state}/current/profile.yaml --hermes-bin {state}/current/bin/hermes
 Environment=PYTHONPATH={repo_root}
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile={secrets}
@@ -83,8 +91,7 @@ ReadWritePaths={state}
 UMask=0077
 RestrictAddressFamilies=AF_UNIX AF_INET
 IPAddressDeny=any
-IPAddressAllow=localhost
-RestrictSUIDSGID=true
+# Backend gateway/health stay at 127.0.0.1; role-only proxy alias below.\n# No blanket 'localhost': that grants the sibling role's proxy IP.\nIPAddressAllow=127.0.0.1/32\nIPAddressAllow={proxy_host}/32\nRestrictSUIDSGID=true
 LockPersonality=true
 MemoryAccounting=true
 

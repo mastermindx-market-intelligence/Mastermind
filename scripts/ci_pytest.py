@@ -390,6 +390,11 @@ _MEASURED_SIX_JOB_PLACEMENT = {
     'tests/test_workspace_result_http.py': 0,  # 8.7s
     'tests/test_workspace_result_service.py': 3,  # 14.5s
     'tests/test_workspace_retained_root_selection.py': 1,  # 8.8s
+    # Later single-module forward pin; all historical pins above are unchanged.
+    # Actual closed run42540190617 measured this unpinned module on shard0;
+    # shard4 had the lightest repository step. Partial timings, no speedup claim.
+    # Evidence: ci/shard_timings/42540190617-hermes-forward.json.
+    'tests/test_hermes_primary_application_enrollment.py': 4,
 }
 
 
@@ -772,14 +777,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "either way, and any shard failing fails the gate."
         ),
     )
+    parser.add_argument(
+        "--progress", action="store_true",
+        help="stream the existing module timing records for the serial gate",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else repo_root()
     try:
         if args.jobs < 1:
             raise PolicyError("jobs must be at least 1")
         gate = resolve_gate(root)
-        # jobs=1 keeps the historical single-process argv exactly, so the
-        # default gate invocation is unchanged by this feature.
+        # jobs=1 keeps the historical module set/order and default argv.
+        # Progress is opt-in and changes observability only, never placement.
         shards = (
             partition_modules(gate["included"], jobs=args.jobs)
             if args.jobs > 1
@@ -794,7 +803,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if shards is not None:
         return run_shards(shards, root=root)
     completed = subprocess.run(
-        pytest_argv(gate["included"]),
+        pytest_argv(gate["included"], progress=args.progress),
         cwd=root,
         check=False,
     )

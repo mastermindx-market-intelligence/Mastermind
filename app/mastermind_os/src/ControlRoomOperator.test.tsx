@@ -208,13 +208,11 @@ describe("Control Room original operator intent in App", () => {
   it("discloses no binding or Discovery rows and dispatches nothing without acquisition", async () => {
     const { raw } = fixture({ signedIn: false });
     render(<App />);
-    const user = await enter();
+    expect(screen.getByText("Sign in to your workspace.")).toBeTruthy();
     expect(screen.queryByText(bindingId(1))).toBeNull();
     expect(screen.queryByText("fixture-candidate")).toBeNull();
     expect(screen.queryByLabelText("Work reference")).toBeNull();
-    const builds = screen.getByRole("button", { name: "Refresh builds" }) as HTMLButtonElement;
-    expect(builds.disabled).toBe(true);
-    await user.click(builds);
+    expect(screen.queryByRole("button", { name: "Refresh builds" })).toBeNull();
     expect(raw.readControlRoomState).not.toHaveBeenCalled();
     expect(raw.refreshControlRoomBuilds).not.toHaveBeenCalled();
   });

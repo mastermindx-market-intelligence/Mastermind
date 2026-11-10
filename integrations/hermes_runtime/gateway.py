@@ -1,23 +1,31 @@
-"""Authenticated loopback front door. The socket is created only for 127.0.0.1."""
+"""Authenticated loopback front door, bound to a qualified role-local address."""
 from __future__ import annotations
 
 from collections.abc import Callable
 import hmac
 import json
+import os
+import stat
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import socket
 import threading
 import urllib.parse
 
-from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST
+from .constants import DASHBOARD_PATH, HEALTH_PATH, LOOPBACK_HOST, SECRETARY_PATH, conversation_contract
+from .egress import ROLE_PROXY_HOST
+
+ALLOWED_LOOPBACK_HOSTS = frozenset((LOOPBACK_HOST, *ROLE_PROXY_HOST.values()))
 from .errors import RuntimeRefusal
 
 
-def reserve_loopback_port() -> int:
-    """Bind 127.0.0.1:0 and release it. Callers accept the small race."""
+def reserve_loopback_port(host: str = LOOPBACK_HOST) -> int:
+    """Bind one qualified loopback alias and release it; caller accepts race."""
+    if host not in ALLOWED_LOOPBACK_HOSTS:
+        raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        sock.bind((LOOPBACK_HOST, 0))
+        sock.bind((host, 0))
         return int(sock.getsockname()[1])
     finally:
         sock.close()
@@ -36,17 +44,28 @@ class _LoopbackServer(ThreadingHTTPServer):
 
 
 class Gateway:
-    def __init__(self, host: str, port: int, token: str, snapshot: Callable[[], tuple[int, dict]]):
-        if host != LOOPBACK_HOST:
+    def __init__(self, host: str, port: int, token: str, snapshot: Callable[[], tuple[int, dict]], *,
+                 conversation_token: str | None = None, conversation_handler: Callable | None = None,
+                 role: str = "mmsecretary"):
+        self._conversation_contract = conversation_contract(role)
+        if host not in ALLOWED_LOOPBACK_HOSTS:
             raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
         if not token:
             raise RuntimeRefusal("SECRETS_TOKEN_MISSING")
+        if ((conversation_token is None) != (conversation_handler is None)
+                or (conversation_token is not None and
+                    (type(conversation_token) is not str or not 16 <= len(conversation_token) <= 256
+                     or conversation_token == token or not callable(conversation_handler)))):
+            raise RuntimeRefusal("SECRETARY_GATEWAY_CAPABILITY_INVALID")
+        self._process_pid = os.getpid()
+        self._conversation_token = conversation_token
+        self._conversation_handler = conversation_handler
         self._token = token
         self._snapshot = snapshot
         handler = _handler_factory(self)
         self._httpd = _LoopbackServer((host, port), handler)
         bound_host, bound_port = self._httpd.socket.getsockname()[:2]
-        if bound_host != LOOPBACK_HOST:
+        if bound_host != host:
             self._httpd.server_close()
             raise RuntimeRefusal("NON_LOOPBACK_BIND_REFUSED")
         self.host = bound_host
@@ -57,6 +76,28 @@ class Gateway:
         if not self._started.wait(timeout=2):
             self.close()
             raise RuntimeRefusal("GATEWAY_START_FAILED")
+
+    def listener_custody(self) -> dict:
+        """Measure this main process's existing listening socket, never a config label."""
+        from common.hermes_role_status_contract import validate_gateway_listener
+        try:
+            channel = self._httpd.socket
+            identity = os.fstat(channel.fileno())
+            if (sys.platform != "linux" or os.getpid() != self._process_pid
+                    or self._conversation_handler is None
+                    or channel.family != socket.AF_INET or channel.type != socket.SOCK_STREAM
+                    or not stat.S_ISSOCK(identity.st_mode) or identity.st_uid != os.geteuid()
+                    or channel.getsockopt(socket.SOL_SOCKET, socket.SO_ACCEPTCONN) != 1
+                    or channel.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR) != 0
+                    or channel.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT) != 0
+                    or channel.get_inheritable()
+                    or channel.getsockname() != (self.host, self.port)):
+                raise ValueError()
+            return validate_gateway_listener({"host": self.host, "port": self.port,
+                                              "inode": str(identity.st_ino)},
+                                             role=self._conversation_contract.role)
+        except Exception:
+            raise RuntimeRefusal("SECRETARY_LISTENER_UNQUALIFIED") from None
 
     def close(self) -> None:
         self._httpd.shutdown()
@@ -71,6 +112,7 @@ class Gateway:
 def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
     token = gateway._token
     snapshot = gateway._snapshot
+    contract = gateway._conversation_contract
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "hermes-runtime"
@@ -103,7 +145,7 @@ def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
                     "hermes-runtime\n"
                     f"role={text.get('role', '')}\n"
                     f"sha={text.get('pinned_sha', '')}\n"
-                    "loopback=127.0.0.1\n"
+                    f"loopback={gateway.host}\n"
                     "auth=required\n"
                 ).encode("utf-8")
                 if token.encode("utf-8") in body:
@@ -114,12 +156,68 @@ def _handler_factory(gateway: Gateway) -> type[BaseHTTPRequestHandler]:
             self._send(404, b'{"status":"not_found"}', "application/json")
 
         def do_POST(self) -> None:  # noqa: N802
-            self._send(405, b'{"status":"method_refused"}', "application/json")
+            self.close_connection = True
+            parsed = urllib.parse.urlsplit(self.path)
+            if parsed.path != contract.path or gateway._conversation_handler is None:
+                self._send(405, b'{"status":"method_refused"}', "application/json")
+                return
+            if parsed.query or parsed.fragment or parsed.scheme or parsed.netloc:
+                self._send(400, b'{"status":"query_refused"}', "application/json")
+                return
+            headers = self.headers.get_all("Authorization", [])
+            expected = gateway._conversation_token
+            if (len(headers) != 1 or not headers[0].startswith("Bearer ")
+                    or not token_matches(headers[0][7:], expected)):
+                self._send(401, b'{"status":"unauthorized"}', "application/json")
+                return
+            lengths = self.headers.get_all("Content-Length", [])
+            if (self.headers.get("Transfer-Encoding") is not None or len(lengths) != 1
+                    or not 1 <= len(lengths[0]) <= 6
+                    or not lengths[0].isascii() or not lengths[0].isdigit()
+                    or not 0 < int(lengths[0]) <= 64 * 1024
+                    or self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json"):
+                self._send(400, b'{"status":"request_refused"}', "application/json")
+                return
+            def unique(items):
+                value = {}
+                for key, item in items:
+                    if key in value:
+                        raise ValueError("duplicate key")
+                    value[key] = item
+                return value
+            try:
+                self.connection.settimeout(5)
+                raw = self.rfile.read(int(lengths[0]))
+                if len(raw) != int(lengths[0]):
+                    raise ValueError("incomplete request")
+                request = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                                     parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+                if type(request) is not dict:
+                    raise ValueError("invalid request")
+            except (OSError, ValueError, UnicodeError, RecursionError):
+                self._send(400, b'{"status":"request_refused"}', "application/json")
+                return
+            try:
+                response = gateway._conversation_handler(request)
+                body = json.dumps(response, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=False, allow_nan=False).encode("utf-8")
+                if (type(response) is not dict or len(body) > 256 * 1024
+                        or any(json.dumps(secret, ensure_ascii=False)[1:-1].encode("utf-8") in body
+                               for secret in (token, expected))):
+                    raise ValueError("unqualified response")
+            except Exception:
+                # A callback may already have submitted native work. HTTP
+                # failure never proves nonexecution and never triggers retry.
+                self._send(503, b'{"status":"effect_unknown"}', "application/json")
+                return
+            self._send(200, body, "application/json")
 
         def _send(self, code: int, body: bytes, content_type: str) -> None:
             self.send_response(code)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()

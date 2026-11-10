@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -48,7 +49,11 @@ NOTICE_BYTES = {
 }
 
 
-def built_dist(app, *, noir_notices=False):
+PRIVATE_ENTRY = "assets/private-entry-a.jpg"
+PRIVATE_ENTRY_BYTES = b"\xff\xd8fixture private entry\xff\xd9"
+
+
+def built_dist(app, *, noir_notices=False, private_entry=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text('<script src="/os/assets/index-a.js"></script><link href="/os/assets/index-a.css">')
@@ -64,6 +69,8 @@ def built_dist(app, *, noir_notices=False):
             "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
             **NOTICE_BYTES,
         }
+        if private_entry:
+            extra[PRIVATE_ENTRY] = PRIVATE_ENTRY_BYTES
         for name, data in extra.items():
             path = dist / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +87,8 @@ def bundle(tmp_path, source, monkeypatch, request):
     monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(mod, "_require_root", lambda: None)
     monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(
-        app, noir_notices=getattr(request, "param", False)))
+        app, noir_notices=bool(getattr(request, "param", False)),
+        private_entry=getattr(request, "param", False) == "private_entry"))
     repo, sha, tree = source
     out = tmp_path / "bundle"
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
@@ -167,6 +175,28 @@ def launch_bundle(tmp_path, source, monkeypatch):
     return mod, out, sha, tree, calls
 
 
+@pytest.fixture
+def executive_bundle(tmp_path, source, monkeypatch):
+    mod = helper()
+    monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "_require_root", lambda: None)
+    calls = []
+
+    def build(app, **kwargs):
+        calls.append(kwargs)
+        return built_dist(app)
+    monkeypatch.setattr(mod, "_build", build)
+    # Even a valid ambient catalogue cannot turn this explicit resource-only
+    # preparation into legacy Launch configuration.
+    monkeypatch.setenv(mod.LAUNCH_CONFIG_ENV, canonical(launch_manifest()).decode("utf-8"))
+    repo, sha, tree = source
+    out = tmp_path / "executive-bundle"
+    mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
+                build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                executive_resource=mod.OS_EXECUTIVE_RESOURCE)
+    return mod, out, sha, tree, calls
+
+
 def rewrite_receipt(out, mod, mutate):
     path = out / "build-receipt.json"
     receipt = json.loads(path.read_bytes())
@@ -177,6 +207,25 @@ def rewrite_receipt(out, mod, mutate):
     return receipt
 
 
+def test_root_artifact_qualifies_under_restrictive_installer_umask(bundle, source, tmp_path):
+    # Production install.sh uses umask 077. The prepared root-owned package
+    # must still be mode 0755 and pass the exact incumbent artifact qualifier.
+    mod, _assets, sha, tree = bundle
+    output = tmp_path / "restricted-umask-root"
+    prior = os.umask(0o077)
+    try:
+        mod.prepare(source_repo=source[0], expected_sha=sha,
+                    web_client_id="test-public-client-id",
+                    output=output, build_user="test",
+                    node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"))
+    finally:
+        os.umask(prior)
+    assert output.stat().st_mode & 0o777 == 0o755
+    assert mod.qualify(output, expected_sha=sha, tree_sha=tree,
+                       source_repo=source[0]).digest
+
+
+@pytest.mark.parametrize("bundle", [False, "private_entry"], indirect=True)
 def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundle, tmp_path):
     mod, out, sha, tree = bundle
     receipt = json.loads((out / "build-receipt.json").read_bytes())
@@ -195,6 +244,9 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     assert (stage / "app/mastermind_os/dist/assets/index-a.js").read_text() == "committed app bytes"
     assert (stage / "app/mastermind_os/dist/assets/index-a.js").stat().st_mode & 0o777 == 0o444
     assert (stage / "app/mastermind_os/dist/assets").stat().st_mode & 0o777 == 0o755
+    for name, raw in checked.files.items():
+        assert (stage / mod.DIST / name).read_bytes() == raw
+        assert (stage / mod.DIST / name).stat().st_mode & 0o777 == 0o444
     (stage / ".executive-release-manifest.json").write_text("existing immutable seal")
     before = {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
     mod.compare_existing(checked, stage)
@@ -203,16 +255,22 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
-def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path):
+@pytest.mark.parametrize("bundle,expected_count", [(True, 11), ("private_entry", 12)], indirect=["bundle"])
+def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path, expected_count):
     mod, out, sha, tree = bundle
     manifest = json.loads((out / mod.DIST / "asset-manifest.json").read_bytes())
     rows = {item["path"]: item for item in manifest["files"]}
-    assert len(rows) == 11
+    assert len(rows) == expected_count
+    if expected_count == 12:
+        assert rows[PRIVATE_ENTRY] == {"path": PRIVATE_ENTRY, "byte_count": len(PRIVATE_ENTRY_BYTES),
+            "sha256": hashlib.sha256(PRIVATE_ENTRY_BYTES).hexdigest(), "mime": "image/jpeg"}
     checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
     stage = tmp_path / "notice-stage"
     stage.mkdir()
     mod.import_assets(checked, stage)
+    if expected_count == 12:
+        assert checked.files[PRIVATE_ENTRY] == PRIVATE_ENTRY_BYTES
+        assert (stage / mod.DIST / PRIVATE_ENTRY).read_bytes() == PRIVATE_ENTRY_BYTES
     for name, data in NOTICE_BYTES.items():
         assert rows[name] == {"path": name, "byte_count": len(data),
                               "sha256": hashlib.sha256(data).hexdigest(),
@@ -222,9 +280,9 @@ def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, 
     mod.compare_existing(checked, stage)
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
-def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
-    pytest.importorskip("mcp", reason="real HTTP loading belongs to the optional MCP network test environment")
+@pytest.mark.parametrize("bundle", [True, "private_entry"], indirect=True)
+def test_licensed_assets_load_and_serve_with_actual_mcp_sdk(bundle, monkeypatch):
+    import mcp  # Required real HTTP proof; missing dependency is not a passing skip.
     _, out, _, _ = bundle
     from ops.executive_os import executive_mcp_entry as entry
     # Only sealed host ownership is replaced for the temporary fixture. The
@@ -246,10 +304,16 @@ def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
         assert messages[0]["status"] == 200
         assert dict(messages[0]["headers"])[b"content-type"] == b"text/plain; charset=utf-8"
         assert messages[-1]["body"] == data
+    if (out / "app/mastermind_os/dist" / PRIVATE_ENTRY).exists():
+        messages = asyncio.run(request("/os/" + PRIVATE_ENTRY))
+        assert messages[0]["status"] == 200
+        assert dict(messages[0]["headers"])[b"content-type"] == b"image/jpeg"
+        assert dict(messages[0]["headers"])[b"x-content-type-options"] == b"nosniff"
+        assert messages[-1]["body"] == PRIVATE_ENTRY_BYTES
     assert asyncio.run(request("/os/third-party/unknown.txt"))[0]["status"] == 404
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
+@pytest.mark.parametrize("bundle", [True, "private_entry"], indirect=True)
 @pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "extra_directory"])
 def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage):
     mod, out, _, _ = bundle
@@ -267,6 +331,7 @@ def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage
         mod._capture_dist(out, sealed=False)
 
 
+@pytest.mark.parametrize("bundle", [False, "private_entry"], indirect=True)
 @pytest.mark.parametrize("damage", ["wrong_sha", "wrong_tree", "asset_changed", "manifest_changed", "missing_manifest", "extra", "symlink", "hardlink", "fifo", "traversal"])
 def test_bad_artifact_refused_without_destination_effect(bundle, tmp_path, damage):
     import os
@@ -592,7 +657,9 @@ def test_installer_optional_preflight_refuses_before_service_stop(bundle, tmp_pa
     variables = {"PYTHON_BINARY": str(wrapper), "SCRIPT_DIR": str(root / "ops/executive_os"),
                  "SOURCE_REPO": str(out.parent / "source"), "EXPECTED_SHA": "a" * 40 if choice == "wrong_source" else sha,
                  "TREE_SHA": tree, "OS_WEB_ASSETS": "" if choice == "absent" else str(out),
-                 "RELEASE_ROOT": str(release), "CONTROL_AEAD_BUNDLE": ""}
+                 "RELEASE_ROOT": str(release), "CONTROL_AEAD_BUNDLE": "",
+                 "HERMES_ATTENDED_SOURCE": "", "HERMES_ATTENDED_CONFIGURATION": "",
+                 "HERMES_ATTENDED_CONFIGURATION_SHA256": ""}
     script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in variables.items())
     script += "\n" + block + f"\nprintf stopped > {shlex.quote(str(effects))}\n"
     result = subprocess.run(["/bin/bash", "-c", script], capture_output=True, text=True)
@@ -760,7 +827,7 @@ def test_decoder_limit_parity_and_documented_byte_cap():
         mod.decode_launch_manifest("not bytes")
 
 
-@pytest.mark.parametrize("damage", ["partial_resource", "partial_manifest", "blank_resource", "wrong_resource",
+@pytest.mark.parametrize("damage", ["partial_manifest", "blank_resource", "wrong_resource",
                                     "duplicate_key", "noncanonical", "oversized", "surrogate",
                                     "research_with_paths", "unknown_field", "bool_priority"])
 def test_enabled_preparation_refuses_completely_before_any_build_effect(tmp_path, source, monkeypatch, damage):
@@ -772,12 +839,9 @@ def test_enabled_preparation_refuses_completely_before_any_build_effect(tmp_path
     repo, sha, _ = source
     target = tmp_path / "refused"
     resource = mod.OS_EXECUTIVE_RESOURCE
-    # A bare None pair is the disabled default; the API partial pair is one
-    # side present without the other. The CLI partial flag pair is covered in
-    # the command-line test.
-    if damage == "partial_resource":
-        raw = None
-    elif damage == "partial_manifest":
+    # Resource-only is separately qualified; a manifest without that explicit
+    # resource still refuses before any build work.
+    if damage == "partial_manifest":
         resource = None
         raw = canonical(launch_manifest())
     elif damage == "blank_resource":
@@ -799,7 +863,7 @@ def test_enabled_preparation_refuses_completely_before_any_build_effect(tmp_path
     assert list(tmp_path.glob(".os-web-build-*")) == []
 
 
-def test_build_env_carries_only_the_explicit_public_pair_ignoring_ambient_vite(source, tmp_path, monkeypatch):
+def test_build_env_carries_only_explicit_inputs_in_all_three_modes_ignoring_ambient_vite(source, tmp_path, monkeypatch):
     import os
     import pwd
     mod = helper()
@@ -819,6 +883,8 @@ def test_build_env_carries_only_the_explicit_public_pair_ignoring_ambient_vite(s
     monkeypatch.setenv("VITE_MM_LAUNCH_CONFIG", "foreign-config")
     monkeypatch.setenv("VITE_MM_EXECUTIVE_RESOURCE", "https://foreign.example/invalid")
     monkeypatch.setenv("VITE_MM_WEB_CLIENT_ID", "foreign-client-id")
+    monkeypatch.setenv("VITE_UNQUALIFIED_SETTING", "must-not-enter-build")
+    monkeypatch.setenv("NODE_OPTIONS", "must-not-enter-build")
     manifest = canonical(launch_manifest())
     user = pwd.getpwuid(os.getuid())
     mod._build(app, build_user=user.pw_name, node=node, npm_cli=npm,
@@ -838,27 +904,58 @@ def test_build_env_carries_only_the_explicit_public_pair_ignoring_ambient_vite(s
     disabled_app.mkdir(parents=True)
     mod._build(disabled_app, build_user=user.pw_name, node=node, npm_cli=npm,
                web_client_id="test-public-client-id", reserved_service_uids=reserved)
+    assert len(calls) == 4
     for kwargs in calls[2:]:
         assert mod.LAUNCH_CONFIG_ENV not in kwargs["env"]
         assert mod.LAUNCH_RESOURCE_ENV not in kwargs["env"]
         assert kwargs["env"]["VITE_MM_WEB_CLIENT_ID"] == "test-public-client-id"
+        assert [name for name in kwargs["env"] if name.startswith("VITE_")] == ["VITE_MM_WEB_CLIENT_ID"]
+        assert "NODE_OPTIONS" not in kwargs["env"]
+    executive_app = tmp_path / "work3/app/mastermind_os"
+    executive_app.mkdir(parents=True)
+    mod._build(executive_app, build_user=user.pw_name, node=node, npm_cli=npm,
+               web_client_id="test-public-client-id", reserved_service_uids=reserved,
+               executive_resource=mod.OS_EXECUTIVE_RESOURCE)
+    assert len(calls) == 6
+    for kwargs in calls[4:]:
+        env = kwargs["env"]
+        assert env["VITE_MM_WEB_CLIENT_ID"] == "test-public-client-id"
+        assert env[mod.LAUNCH_RESOURCE_ENV] == mod.OS_EXECUTIVE_RESOURCE
+        assert mod.LAUNCH_CONFIG_ENV not in env
+        assert sorted(name for name in env if name.startswith("VITE_")) == sorted(
+            ["VITE_MM_WEB_CLIENT_ID", mod.LAUNCH_RESOURCE_ENV])
+        assert "NODE_OPTIONS" not in env
 
 
-def test_partial_pair_refused_by_the_builder_itself(source, tmp_path, monkeypatch):
-    import os
-    import pwd
+@pytest.mark.parametrize("damage", ["partial_manifest", "blank_resource", "wrong_resource", "non_string_resource",
+                                    "duplicate_key", "noncanonical", "research_with_paths", "empty_manifest"])
+def test_unqualified_inputs_refuse_at_the_actual_builder_boundary(tmp_path, monkeypatch, damage):
     mod = helper()
-    repo, sha, _ = source
-    reserved = mod._reserved_service_uids(repo, sha)
+    resource = mod.OS_EXECUTIVE_RESOURCE
+    manifest = None
+    if damage == "partial_manifest":
+        resource, manifest = None, canonical(launch_manifest())
+    elif damage == "blank_resource":
+        resource = ""
+    elif damage == "wrong_resource":
+        resource = "https://mcp.mastermind-x.com/workspace/read"
+    elif damage == "non_string_resource":
+        resource = True
+    elif damage == "empty_manifest":
+        manifest = b""
+    else:
+        manifest = damaged_manifest(damage)
+    before = {str(path.relative_to(tmp_path)): path.is_dir() for path in tmp_path.rglob("*")}
+    monkeypatch.setattr(mod.pwd, "getpwnam", lambda *a: pytest.fail("operator preparation was reached"))
     monkeypatch.setattr(mod.subprocess, "run", lambda *a, **k: pytest.fail("build was invoked"))
-    with pytest.raises(ValueError, match="complete qualified input pair"):
-        mod._build(tmp_path, build_user=pwd.getpwuid(os.getuid()).pw_name,
-                   node=tmp_path / "absent-node", npm_cli=tmp_path / "absent-npm",
-                   web_client_id="test-public-client-id", reserved_service_uids=reserved,
-                   executive_resource=mod.OS_EXECUTIVE_RESOURCE)
+    with pytest.raises(ValueError):
+        mod._build(tmp_path, build_user="test", node=tmp_path / "absent-node", npm_cli=tmp_path / "absent-npm",
+                   web_client_id="test-public-client-id", reserved_service_uids=frozenset(),
+                   executive_resource=resource, launch_manifest=manifest)
+    assert before == {str(path.relative_to(tmp_path)): path.is_dir() for path in tmp_path.rglob("*")}
 
 
-def test_cli_prepare_reads_one_explicit_canonical_manifest_file_and_defaults_to_v1(bundle, tmp_path, monkeypatch, capsys):
+def test_cli_prepare_qualifies_three_explicit_modes_and_refuses_manifest_without_resource(bundle, tmp_path, monkeypatch, capsys):
     mod, out, sha, tree = bundle
     manifest_path = tmp_path / "launch.manifest.json"
     manifest_path.write_bytes(canonical(launch_manifest()))
@@ -882,11 +979,22 @@ def test_cli_prepare_reads_one_explicit_canonical_manifest_file_and_defaults_to_
                           source_repo=out.parent / "source")
     assert digest == mod._hash(checked.receipt)
     assert digest != checked.digest
-    monkeypatch.setattr(mod.sys, "argv", base + ["--output", str(tmp_path / "cli-partial"),
+    monkeypatch.setattr(mod.sys, "argv", base + ["--output", str(tmp_path / "cli-v3"),
                                                  "--executive-resource", mod.OS_EXECUTIVE_RESOURCE])
+    mod.main()
+    executive_digest = capsys.readouterr().out.strip().splitlines()[-1]
+    checked = mod.qualify(tmp_path / "cli-v3", expected_sha=sha, tree_sha=tree,
+                          source_repo=out.parent / "source")
+    v3_receipt = json.loads(checked.receipt)
+    assert v3_receipt["schema"] == mod.EXECUTIVE_SCHEMA and v3_receipt["mode"] == mod.EXECUTIVE_MODE
+    assert v3_receipt["executive_resource"] == mod.OS_EXECUTIVE_RESOURCE
+    assert "launch_config" not in v3_receipt and "launch_config_sha256" not in v3_receipt
+    assert executive_digest == mod._hash(checked.receipt)
+    monkeypatch.setattr(mod.sys, "argv", base + ["--output", str(tmp_path / "cli-manifest-only"),
+                                                 "--launch-manifest", str(manifest_path)])
     with pytest.raises(ValueError):
         mod.main()
-    assert not (tmp_path / "cli-partial").exists()
+    assert not (tmp_path / "cli-manifest-only").exists()
 
 
 @pytest.mark.parametrize("choices", [
@@ -943,3 +1051,112 @@ def test_malformed_frontier_choice_refuses_before_any_build(launch_bundle, tmp_p
                         {"ref": "frontier.one\n", "label": "One"}])))
     assert len(calls) == before
     assert not out.exists()
+
+
+# Resource-only Executive builds retain the same artifact, source and import owner.
+
+def test_resource_only_receipt_binds_exact_resource_without_legacy_catalogue(executive_bundle):
+    mod, out, sha, tree, calls = executive_bundle
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    receipt = json.loads(checked.receipt)
+    assert receipt["schema"] == mod.EXECUTIVE_SCHEMA and receipt["mode"] == mod.EXECUTIVE_MODE
+    assert set(receipt) == {"schema", "source_sha", "source_tree", "source_inputs", "mode", "recipe",
+                            "builder", "web_client_id", "asset_manifest_sha256", "executive_resource"}
+    assert receipt["executive_resource"] == mod.OS_EXECUTIVE_RESOURCE
+    assert set(receipt["source_inputs"]) == set(mod.LAUNCH_INPUTS)
+    assert mod._receipt_launch_inputs(receipt) == (mod.OS_EXECUTIVE_RESOURCE, None)
+    assert len(calls) == 1
+    assert calls[0]["executive_resource"] == mod.OS_EXECUTIVE_RESOURCE
+    assert calls[0]["launch_manifest"] is None
+    assert checked.receipt == (out / mod.RECEIPT).read_bytes()
+
+
+def test_resource_only_artifact_imports_through_existing_owner_but_is_not_legacy_launch_evidence(
+    executive_bundle, tmp_path, monkeypatch,
+):
+    from ops.executive_os import autonomy_control
+    mod, out, sha, tree, _ = executive_bundle
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    system = tmp_path / "disposable-system"
+    stage = system / "releases" / sha
+    stage.mkdir(parents=True)
+    mod.import_assets(checked, stage)
+    assert (stage / mod.DIST / "assets/index-a.js").read_bytes() == checked.files["assets/index-a.js"]
+    assert (stage / mod.INSTALLED_RECEIPT).read_bytes() == checked.receipt
+    (stage / ".executive-release-manifest.json").write_text("disposable immutable seal")
+    before = {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
+    mod.compare_existing(checked, stage)
+    with pytest.raises(ValueError):
+        mod.import_assets(checked, stage)
+    assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
+    # The installed legacy commission publication predicate deliberately remains
+    # v2-only. Reuse its real read method against this temporary imported tree;
+    # never read or publish any installed runtime configuration.
+    monkeypatch.setattr(autonomy_control, "SYSTEM_ROOT", system)
+    with pytest.raises(autonomy_control.GatewayPublicationError, match="gateway_launch_receipt_invalid"):
+        autonomy_control.ProductionGatewayPublicationHost().qualify_launch_publication(sha, tree)
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda r: r.pop("executive_resource"),
+    lambda r: r.update(executive_resource=""),
+    lambda r: r.update(executive_resource="https://mcp.mastermind-x.com/workspace/read"),
+    lambda r: r.update(executive_resource=True),
+    lambda r: r.update(mode="web"),
+    lambda r: r.update(mode="web+launch"),
+    lambda r: r.update(schema="mastermind.os_web_build.v1"),
+    lambda r: r.update(schema="mastermind.os_web_build.launch.v2"),
+    lambda r: r.update(launch_config=canonical(launch_manifest()).decode("utf-8"),
+                       launch_config_sha256=hashlib.sha256(canonical(launch_manifest())).hexdigest()),
+    lambda r: r.update(source_sha="a" * 40),
+    lambda r: r.update(source_tree="b" * 40),
+    lambda r: r["source_inputs"].update({"app/mastermind_os/src/launch-config.ts": "0" * 64}),
+])
+def test_resource_only_closed_receipt_rejects_catalogue_promotion_and_source_drift(executive_bundle, mutate):
+    mod, out, sha, tree, _ = executive_bundle
+    rewrite_receipt(out, mod, mutate)
+    with pytest.raises(ValueError):
+        mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+
+
+def test_resource_only_artifact_keeps_the_original_preflight_digest_fence(executive_bundle):
+    mod, out, sha, tree, _ = executive_bundle
+    first = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    rewrite_receipt(out, mod, lambda receipt: receipt.update(web_client_id="another-public-client-id"))
+    with pytest.raises(ValueError, match="build artifact changed after preflight"):
+        mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source", expected_digest=first.digest)
+
+
+@pytest.mark.parametrize("damage", ["wrong_sha", "dirty_source", "different_preparer", "source_changes_during_build"])
+def test_resource_only_preparation_retains_exact_source_checks(tmp_path, source, monkeypatch, damage):
+    mod = helper()
+    monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
+    monkeypatch.setattr(mod, "_require_root", lambda: None)
+    repo, sha, _ = source
+    calls = []
+
+    def build(app, **kwargs):
+        calls.append(kwargs)
+        if damage == "source_changes_during_build":
+            (repo / "app/mastermind_os/source.txt").write_text("changed during the build")
+        return built_dist(app)
+    monkeypatch.setattr(mod, "_build", build)
+    if damage == "wrong_sha":
+        sha = "a" * 40
+    elif damage == "dirty_source":
+        (repo / "app/mastermind_os/source.txt").write_text("uncommitted input")
+    elif damage == "different_preparer":
+        path = repo / "ops/executive_os/os_release_assets.py"
+        path.write_text(path.read_text() + "\n# different preparer generation\n")
+        git(repo, "add", str(path.relative_to(repo)))
+        git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "different generation")
+        sha = git(repo, "rev-parse", "HEAD")
+        git(repo, "update-ref", "refs/remotes/origin/master", sha)
+    out = tmp_path / "refused-executive-bundle"
+    with pytest.raises((ValueError, mod.InstallSourcePolicyError)):
+        mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
+                    build_user="test", node=Path("/test/node"), npm_cli=Path("/test/npm-cli.js"),
+                    executive_resource=mod.OS_EXECUTIVE_RESOURCE)
+    assert len(calls) == (1 if damage == "source_changes_during_build" else 0)
+    assert not out.exists()
+    assert list(tmp_path.glob(".os-web-build-*")) == []

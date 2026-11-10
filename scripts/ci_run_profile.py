@@ -14,8 +14,11 @@ Frozen interface:
   - Input reads are bounded to ``MAX_INPUT_BYTES`` (8 MiB).
 
 Fail-closed: mismatched run id / head SHA / run attempt evidence, duplicate job
-ids, naive or unparseable timestamps and inverted durations raise
-``ProfileError``. Missing identity fields, missing timestamps, pending jobs and
+ids, naive or unparseable execution timestamps and inverted execution durations
+raise ``ProfileError``. A completed skipped job with empty steps and no runner
+has no execution interval: retain its raw metadata and leave execution timings
+unknown. Unqualified synthetic completion metadata keeps completion unknown.
+Missing identity fields, missing timestamps, pending jobs and
 page-truncated job lists never become zeros or "complete" — they surface as
 ``evidence_gaps`` and the affected numbers stay ``null``.
 
@@ -164,7 +167,15 @@ def build_profile(snapshot):
         _url(repository.get("html_url"), web, "repository.html_url")
         _url(run.get("url"), f"{api}/actions/runs/{run_id}", "run.url")
         _url(run.get("html_url"), f"{web}/actions/runs/{run_id}", "run.html_url")
-        _url(run.get("jobs_url"), f"{api}/actions/runs/{run_id}/jobs", "run.jobs_url")
+        jobs_url = f"{api}/actions/runs/{run_id}/jobs"
+        # GitHub's attempt-specific run endpoint emits an attempt-qualified
+        # jobs_url. Accept only that SAME validated attempt, never a foreign
+        # attempt, a query-string variant, or rewritten captured evidence.
+        if run_attempt is not None:
+            attempt_jobs_url = f"{api}/actions/runs/{run_id}/attempts/{run_attempt}/jobs"
+            if run.get("jobs_url") == attempt_jobs_url:
+                jobs_url = attempt_jobs_url
+        _url(run.get("jobs_url"), jobs_url, "run.jobs_url")
     created_at = _parse_ts(run.get("created_at"), "run.created_at")
     observed_at = _parse_ts(snapshot.get("observed_at"), "observed_at")
     if created_at is not None and observed_at is not None and observed_at < created_at:
@@ -177,6 +188,7 @@ def build_profile(snapshot):
     job_attempts: set = set()
     missing_job_identity = False
     parsed_jobs = []
+    nonexecuted_ids = set()
     for index, job in enumerate(jobs):
         if not isinstance(job, dict):
             _fail(f"jobs[{index}] must be a job object")
@@ -205,8 +217,31 @@ def build_profile(snapshot):
             _url(job.get("run_url"), f"{api}/actions/runs/{run_id}", f"job {key}.run_url")
             _url(job.get("url"), f"{api}/actions/jobs/{job_id}", f"job {key}.url")
             _url(job.get("html_url"), f"{web}/actions/runs/{run_id}/job/{job_id}", f"job {key}.html_url")
-        started = _parse_ts(job.get("started_at"), f"job {key} ({_cut(job.get('name'))}) started_at")
-        completed = _parse_ts(job.get("completed_at"), f"job {key} ({_cut(job.get('name'))}) completed_at")
+        nonexecuted = (
+            job.get("status") == "completed" and job.get("conclusion") == "skipped"
+            and job.get("steps") == []
+            and all(job.get(field) is None for field in (
+                "runner_id", "runner_name", "runner_group_id", "runner_group_name"
+            ))
+        )
+        if nonexecuted:
+            nonexecuted_ids.add(key)
+            gaps.append(f"job {key} has only nonexecution evidence; raw synthetic timestamps retained, execution timings unknown")
+            started = None
+            try:
+                completed = _parse_ts(job.get("completed_at"), f"job {key} synthetic completed_at")
+            except ProfileError:
+                completed = None
+                gaps.append(f"job {key} synthetic completed_at is invalid; completion stays unknown")
+            if completed is not None and (
+                created_at is not None and completed < created_at
+                or observed_at is not None and completed > observed_at
+            ):
+                completed = None
+                gaps.append(f"job {key} synthetic completed_at is outside the observation window; completion stays unknown")
+        else:
+            started = _parse_ts(job.get("started_at"), f"job {key} ({_cut(job.get('name'))}) started_at")
+            completed = _parse_ts(job.get("completed_at"), f"job {key} ({_cut(job.get('name'))}) completed_at")
         if started is not None and completed is not None and completed < started:
             _fail(f"job {key} ({_cut(job.get('name'))}): completed_at precedes started_at (inverted duration)")
         if created_at is not None and started is not None and started < created_at:
@@ -280,7 +315,7 @@ def build_profile(snapshot):
             missing_completed.append({"job_id": job.get("id"), "name": name})
         else:
             completed_times.append((completed, job.get("id"), name, job.get("completed_at")))
-        if started is None:
+        if started is None and key not in nonexecuted_ids:
             missing_started.append({"job_id": job.get("id"), "name": name})
         age = (
             _round((observed_at - started).total_seconds())
@@ -296,6 +331,7 @@ def build_profile(snapshot):
                 "conclusion": job.get("conclusion"),
                 "started_at": job.get("started_at"),
                 "completed_at": job.get("completed_at"),
+                "execution_timing_eligible": key not in nonexecuted_ids,
                 "start_offset_seconds_from_created_at": start_offset,
                 "running_seconds": duration,
                 "age_at_observed_at_seconds": age,
@@ -444,6 +480,10 @@ def build_profile(snapshot):
             "unfinished_jobs": unfinished,
             "jobs_missing_started_at": missing_started,
             "jobs_missing_completed_at": missing_completed,
+            "nonexecuted_jobs": [
+                {"job_id": job.get("id"), "name": job.get("name")}
+                for key, job, _, _ in parsed_jobs if key in nonexecuted_ids
+            ],
         },
         "workflow_elapsed_seconds": workflow_elapsed,
         "workflow_elapsed_basis": elapsed_basis,
@@ -529,3 +569,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

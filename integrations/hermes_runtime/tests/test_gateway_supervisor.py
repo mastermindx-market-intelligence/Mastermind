@@ -98,6 +98,12 @@ class GatewaySupervisorTests(unittest.TestCase):
             payload = json.loads(body)
             self.assertEqual(payload["status"], "ok")
             self.assertTrue(payload["backend_ready"])
+            # Local pinned backend health is not a remote model inference
+            # or role Slack roundtrip, even while this endpoint returns 200.
+            self.assertFalse(payload["provider_authenticated"])
+            self.assertFalse(payload["native_model_turn_verified"])
+            self.assertFalse(payload["network_egress_policy_verified"])
+            self.assertFalse(payload["slack_roundtrip_verified"])
             self.assertEqual(payload["pinned_sha"], PINNED_UPSTREAM_SHA)
             self.assertEqual(payload["allowlist"], ["clarify"])
             self.assertTrue(payload["loopback"])
@@ -114,6 +120,25 @@ class GatewaySupervisorTests(unittest.TestCase):
             self.assertNotIn("--insecure", argv)
         finally:
             runtime.stop()
+
+    def test_two_role_loopback_aliases_preserve_gateway_auth_and_serve_binding(self) -> None:
+        for role, own, sibling in (
+            ("mmsecretary", "127.0.0.2", "127.0.0.3"),
+            ("mmmeta", "127.0.0.3", "127.0.0.2"),
+        ):
+            with self.subTest(role=role):
+                gateway = Gateway(own, 0, TOKEN, lambda: (200, {"status": "ok"}))
+                try:
+                    url = f"http://{own}:{gateway.port}/api/health"
+                    self.assertEqual(http_get(url)[0], 401)
+                    self.assertEqual(http_get(url, TOKEN)[0], 200)
+                    self.assertEqual(gateway.host, own)
+                    argv = build_serve_argv(STUB, role, 8766, own)
+                    self.assertEqual(argv[argv.index("--host") + 1], own)
+                    with self.assertRaises(RuntimeRefusal):
+                        build_serve_argv(STUB, role, 8766, sibling)
+                finally:
+                    gateway.close()
 
     def test_live_pid_without_responsive_backend_never_returns_healthy(self) -> None:
         for mode in ("silent", "unhealthy"):

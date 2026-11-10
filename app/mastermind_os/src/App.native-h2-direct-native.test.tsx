@@ -24,6 +24,7 @@ it.each([false, true])("actual native client composes one H2 launch, retained re
     profiles: [{ ref: "research_only", label: "Research" },
       { ref: "native_research_only", label: "Native research" }],
   }))!;
+  if ("bindings" in config) throw new Error("Expected the legacy v1 fixture");
   let consumed = false;
   const selection = { work_ref: config.workstream, job_id: "JOB-native-original", attempt_id: "ATT-native-original" };
   const result = () => ({

@@ -26,9 +26,10 @@ function fixture() {
     driftWithoutEvent() { generation++; }, listenerCount: () => listeners.size };
 }
 const disposals: Array<() => void> = [];
-const mount = (f: ReturnType<typeof fixture>) => {
+const mount = (f: ReturnType<typeof fixture>, now: () => number = () => 1_000_000,
+  legacyConfig: typeof config | null = config) => {
   // This unit exercises only the host boundary; the controller/store have their own suite.
-  const host = createOsExecutiveHost(config, f.transport, {} as PendingPointerStore, () => 1_000_000);
+  const host = createOsExecutiveHost(legacyConfig, f.transport, {} as PendingPointerStore, now);
   disposals.push(host.dispose); return host;
 };
 afterEach(() => { for (const dispose of disposals.splice(0)) dispose(); vi.useRealTimers(); });
@@ -63,6 +64,29 @@ describe("verified Executive host", () => {
     expect(h.binding.port.context()).toBeNull(); expect(f.transport.context).not.toHaveBeenCalled();
     f.change(true); await tick();
     expect(h.binding.port.context()?.principalScope).toBe(scopeA);
+  });
+  it("qualifies the same auth owner without a manifest and never restores withdrawn or silently replaced authority", async () => {
+    const f = fixture(); f.change(false);
+    const h = mount(f, () => 1_000_000, null); await h.ready;
+    expect(h.binding.getView()).toEqual({ projects: [], profiles: [], session: null });
+    expect(h.binding.port.context()).toBeNull();
+    expect(f.transport.context).not.toHaveBeenCalled();
+
+    const late = deferred<unknown>();
+    vi.mocked(f.transport.context).mockReturnValueOnce(late.promise);
+    f.change(true);
+    expect(f.transport.context).toHaveBeenCalledTimes(1);
+    f.change(false);
+    late.resolve(dto()); await tick();
+    expect(h.binding.port.context()).toBeNull();
+
+    f.change(true); await tick();
+    expect(h.binding.port.context()?.principalScope).toBe(scopeA);
+    expect(h.binding.makeLaunchIntent({ goal: "No legacy enrollment", projectRef: "executive-infrastructure", profileRef: "research_only" })).toBeNull();
+    f.driftWithoutEvent();
+    expect(h.binding.port.context()).toBeNull();
+    expect(f.transport.submit).not.toHaveBeenCalled();
+    expect(f.transport.status).not.toHaveBeenCalled();
   });
   it("invalidates immediately and withholds late context across A to B to A", async () => {
     const f = fixture(); const first = deferred<unknown>();
@@ -115,6 +139,77 @@ describe("verified Executive host", () => {
     expect(await result).toMatchObject({ operationKey: pointer.operationKey, disposition: "unknown" });
     expect(f.transport.status).toHaveBeenCalledTimes(1);
     expect(f.transport.submit).not.toHaveBeenCalled();
+  });
+  it("reports closed context diagnostics across pending, ready, invalid and transport outcomes", async () => {
+    const f = fixture();
+    const h = mount(f);
+    expect(h.diagnostics()).toEqual({ contextPhase: "pending" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(1);
+    await h.ready;
+    expect(h.diagnostics()).toEqual({ contextPhase: "ready" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(1);
+    for (let round = 0; round < 3; round++) expect(h.diagnostics().contextPhase).toBe("ready");
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(1);
+    vi.mocked(f.transport.context).mockResolvedValueOnce({ ...dto(), token: "secret" });
+    f.change(); await tick();
+    expect(h.diagnostics()).toEqual({ contextPhase: "invalid_response" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(2);
+    vi.mocked(f.transport.context).mockRejectedValueOnce(new Error("native missing"));
+    f.change(); await tick();
+    expect(h.diagnostics()).toEqual({ contextPhase: "unknown" });
+    vi.mocked(f.transport.context).mockRejectedValueOnce(new Error("EXECUTIVE_TRANSPORT_UNAVAILABLE"));
+    f.change(); await tick();
+    expect(h.diagnostics()).toEqual({ contextPhase: "transport_failure" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(4);
+  });
+  it("keeps a cancelled or stale attempt from downgrading diagnostics and stays unknown when blocked", async () => {
+    const cancellable = () => { let reject!: (reason?: unknown) => void;
+      const promise = new Promise<unknown>((_, r) => { reject = r; }); return { promise, reject }; };
+    const f = fixture(), late = cancellable();
+    vi.mocked(f.transport.context).mockReturnValueOnce(late.promise);
+    const h = mount(f);
+    expect(h.diagnostics()).toEqual({ contextPhase: "pending" });
+    f.change(false); // aborts the in-flight attempt through the existing boundary
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(1);
+    expect(h.diagnostics()).toEqual({ contextPhase: "unknown" });
+    late.reject(new Error("EXECUTIVE_AUTH_CHANGED")); await tick();
+    expect(h.diagnostics()).toEqual({ contextPhase: "unknown" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(1);
+    f.change(true); await tick();
+    expect(h.diagnostics()).toEqual({ contextPhase: "ready" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(2);
+  });
+  it("derives auth_unavailable on a blocked refresh only from an explicitly false native observation", async () => {
+    const f = fixture();
+    f.transport.diagnostics = () => ({ kind: "native", authAvailable: false, phase: "auth_unavailable" });
+    f.change(false); const h = mount(f); await h.ready;
+    expect(h.diagnostics()).toEqual({ contextPhase: "auth_unavailable" });
+    expect(vi.mocked(f.transport.context).mock.calls.length).toBe(0);
+    expect(h.binding.makeLaunchIntent({ goal: "Read fixture", projectRef: "executive-infrastructure", profileRef: "research_only" })).toBeNull();
+    expect(h.diagnostics()).toEqual({ contextPhase: "auth_unavailable" });
+  });
+  it("does not treat a ready or non-native diagnostic as an auth_unavailable observation", async () => {
+    const f = fixture();
+    f.transport.diagnostics = () => ({ kind: "native", authAvailable: true, phase: "ready" });
+    f.change(false); const nativeReady = mount(f); await nativeReady.ready;
+    expect(nativeReady.diagnostics()).toEqual({ contextPhase: "not_requested" });
+    const g = fixture();
+    g.transport.diagnostics = () => ({ kind: "web", authAvailable: false, phase: "auth_unavailable" });
+    g.change(false); const webOnly = mount(g); await webOnly.ready;
+    expect(webOnly.diagnostics()).toEqual({ contextPhase: "not_requested" });
+  });
+  it("reports expired only from the existing expiry timer and unknown after disposal", async () => {
+    vi.useFakeTimers(); const f = fixture();
+    vi.mocked(f.transport.context).mockResolvedValue(dto(scopeA, 1001));
+    let observedNow = 1_000_000;
+    const h = mount(f, () => observedNow); await h.ready;
+    expect(h.diagnostics()).toEqual({ contextPhase: "ready" });
+    observedNow += 1000;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.binding.port.context()).toBeNull();
+    expect(h.diagnostics()).toEqual({ contextPhase: "expired" });
+    h.dispose();
+    expect(h.diagnostics()).toEqual({ contextPhase: "unknown" });
   });
 
 });

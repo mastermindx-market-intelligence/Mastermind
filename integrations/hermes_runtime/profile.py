@@ -18,6 +18,7 @@ from .constants import (
     UPSTREAM_REPOSITORY,
 )
 from .errors import RuntimeRefusal, refusal
+from .egress import ROLE_PROXY_HOST
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _TOOL = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -60,6 +61,7 @@ class RuntimeProfile:
     source_path: Path
     service_name: str
     native_provider_id: str | None = None
+    gateway_backend: str = "standalone"
 
     @property
     def hermes_allowlist(self) -> frozenset[str]:
@@ -81,6 +83,27 @@ def load_profile(
     if path.is_symlink():
         raise RuntimeRefusal("PROFILE_SYMLINK_REFUSED")
     data = path.read_bytes()
+    return load_profile_bytes(
+        data, source_path=path, state_dir=state_dir,
+        secrets_file=secrets_file, hermes_home=hermes_home,
+    )
+
+
+def load_profile_bytes(
+    data: bytes,
+    *,
+    source_path: Path,
+    state_dir: Path | None = None,
+    secrets_file: Path | None = None,
+    hermes_home: Path | None = None,
+) -> RuntimeProfile:
+    """Parse exactly the supplied profile bytes with the incumbent validator.
+
+    ``source_path`` describes those bytes; it is never opened here. Existing
+    path qualification in the validator still applies to declared locations.
+    Descriptor-owning readers can therefore bind the selected configuration
+    to the same bytes they hash, without another profile-content read.
+    """
     if len(data) > 64 * 1024:
         raise RuntimeRefusal("PROFILE_TOO_LARGE")
     parsed = _load_unique_yaml(data)
@@ -90,7 +113,7 @@ def load_profile(
         parsed["state_dir"] = str(state_dir)
     if secrets_file is not None:
         parsed["secrets_file"] = str(secrets_file)
-    return _validate(parsed, source_path=path, hermes_home=hermes_home)
+    return _validate(parsed, source_path=Path(source_path), hermes_home=hermes_home)
 
 
 def dump_profile(profile: RuntimeProfile) -> str:
@@ -113,6 +136,8 @@ def dump_profile(profile: RuntimeProfile) -> str:
         f"  host: {profile.gateway_host}",
         f"  port: {profile.gateway_port}",
         f"  backend_port: {profile.backend_port}",
+        *([f"  backend: {profile.gateway_backend}"]
+          if profile.gateway_backend != "standalone" else []),
         "  auth: required",
         "service:",
         f"  restart: {profile.restart}",
@@ -186,7 +211,14 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
     else:
         provider = model.get("provider")
         default = model.get("default")
-        if provider != route["provider"] or default != route["default"]:
+        application = provider == "mastermind-fabric"
+        if application:
+            if (type(default) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", default) is None
+                    or "native_provider_id" in model
+                    or type(config.get("gateway")) is not dict
+                    or config["gateway"].get("backend") != "native-session-authority"):
+                issues.add("UNQUALIFIED_MODEL_ROUTE")
+        elif provider != route["provider"] or default != route["default"]:
             issues.add("UNQUALIFIED_MODEL_ROUTE")
         if not isinstance(provider, str):
             provider = ""
@@ -223,17 +255,28 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
     host = ""
     gateway_port = 0
     backend_port = 0
-    if not isinstance(gateway, dict) or set(gateway) - {"host", "port", "backend_port", "auth"}:
+    backend = "standalone"
+    if not isinstance(gateway, dict) or set(gateway) - {"host", "port", "backend_port", "auth", "backend"}:
         issues.add("GATEWAY_INVALID")
     else:
         host = gateway.get("host")
-        if host != LOOPBACK_HOST:
+        if host not in (LOOPBACK_HOST, ROLE_PROXY_HOST.get(role)):
             issues.add("NON_LOOPBACK_BIND_REFUSED")
             host = ""
         if gateway.get("auth") != "required":
             issues.add("AUTH_REQUIRED")
         gateway_port = _port(gateway.get("port"), issues, allow_zero=True)
         backend_port = _port(gateway.get("backend_port"), issues, allow_zero=True)
+        backend = gateway.get("backend", "standalone")
+        if backend not in ("standalone", "native-session-authority"):
+            issues.add("GATEWAY_BACKEND_UNQUALIFIED")
+        if backend == "native-session-authority":
+            if host != ROLE_PROXY_HOST.get(role):
+                issues.add("NATIVE_GATEWAY_ROLE_ADDRESS_REQUIRED")
+            if not gateway_port or not backend_port or gateway_port == backend_port:
+                issues.add("NATIVE_GATEWAY_FIXED_PORTS_REQUIRED")
+            if native_id is None and provider != "mastermind-fabric":
+                issues.add("NATIVE_GATEWAY_MODEL_SELECTION_REQUIRED")
 
     service = config.get("service")
     restart = "on-failure"
@@ -301,6 +344,7 @@ def _validate(config: dict[str, Any], *, source_path: Path, hermes_home: Path | 
         source_path=source_path,
         service_name=f"hermes-runtime-{role}",
         native_provider_id=native_id,
+        gateway_backend=backend,
     )
 
 
@@ -421,3 +465,4 @@ def _load_unique_yaml(data: bytes) -> Any:
     except (yaml.YAMLError, RecursionError) as exc:
         raise RuntimeRefusal("INVALID_UNIQUE_SAFE_YAML") from exc
     return parsed
+

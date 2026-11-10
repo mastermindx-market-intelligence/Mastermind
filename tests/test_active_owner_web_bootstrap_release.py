@@ -24,30 +24,34 @@ def test_project_block_fits_both_real_limits_and_has_exact_unique_rules():
         assert sum(line.startswith(number + " ") for line in block.splitlines()) == 1
 
 
+
 def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
-    # Protected #1999 added this real source-law rule on master after the
-    # original candidate. A passing standalone 8k check is insufficient:
-    # the integrated Project fence must still fit after the accepted rule.
+    # The accepted Macro opt-in remains governed by the release workflow;
+    # the compact Project must retain the pointer and never bulk-arm PRs.
     block = _project_block()
-    macro_rule = "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm."
-    assert macro_rule in block, "retain accepted #1999 Macro rule"
+    for guard in (
+        "9A. TASK FIRST:",
+        "docs/DELIVERY_WORKFLOW.md",
+        "Never bulk-arm/clear other holds",
+        "Native review != GitHub APPROVED",
+        "No denied-effect/EFFECT_UNKNOWN carrier swap",
+    ):
+        assert guard in block, f"accepted release guard missing: {guard}"
     assert len(block.encode("utf-8")) <= 8000
-    assert "Native read-only child may review here; child != GitHub APPROVED." in block
-    assert "No denied/EFFECT_UNKNOWN review reroute." in block
 
 
 def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
     block = _project_block()
     for phrase in (
-        "Archived",
-        "Current assigned receiver owns recovery",
-        "Archived chats/PR authors aren't live owners",
-        "Handoffs name an executable successor action",
-        "Independent non-author review",
-        "never native Sol labor",
-        "First explicit safety/permission denial",
+        "Assigned session owns recovery",
+        "not old chats/authors/roles",
+        "No dead-chat handback",
+        "HANDOFF_SOURCE_LINK_V1",
+        "Native CRITICAL keeps actual distinct review",
+        "no blanket independent technical/source review",
+        "Explicit safety/permission denial ends that action",
         "EFFECT_UNKNOWN",
-        "no self-approve/merge",
+        "never self-approve/self-merge/falsify/bypass",
     ):
         assert phrase in block
 
@@ -55,16 +59,15 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
 def test_formal_review_eligibility_and_handoff_remain_inside_fence():
     block = _project_block()
     for phrase in (
-        "6A. Named reviewer login is preferred",
-        "independent of PR authors/committers/coauthors",
-        "No impersonation, self-review, duplicate or denial evasion",
+        "6A. No named reviewer seat absent binding rule",
+        "Verify login, authors/coauthors, head and prior reviews",
+        "No impersonation/duplicate/uncertain review",
         "HANDOFF_SOURCE_LINK_V1",
-        "Delivery != PICKUP_ACK/START",
+        "Delivery != pickup/START",
         "<@U0BTCHX8HMF>",
         "Never DM.",
     ):
         assert phrase in block
-
 
 def test_project_installation_needs_editor_readback_and_behavioral_canary():
     instructions = ACCOUNT.read_text(encoding="utf-8")
@@ -84,7 +87,7 @@ def test_native_guidance_uses_one_genuine_non_author_review_owner():
         entry = (ROOT / name).read_text(encoding="utf-8")
         assert "reviewer login is a **placement preference, not an owner wait**" in entry
         assert "same reasoning session between two GitHub accounts" in entry
-        assert "No impersonation, author self-review" in entry
+        assert "No impersonation, false independent-review claim" in entry
     review = (ROOT / "docs/sol_skills/REVIEW_RETURN.md").read_text(encoding="utf-8")
     for phrase in (
         "not an exclusive owner/approver",
@@ -101,7 +104,8 @@ def test_native_guidance_uses_one_genuine_non_author_review_owner():
 def test_native_installer_retires_our_takeover_block_preserving_old_m2():
     installer = (ROOT / "scripts/project_execution_brief.py").read_text(encoding="utf-8")
     assert "'mastermind-active-owner-takeover-20261102'" in installer
-    assert "'mastermind-leadership-continuity-20261024'" not in installer
+    assert "'mastermind-leadership-continuity-20261024'" in installer
+    assert "retire this exact superseded blanket review/release sentence" in installer
     account = ACCOUNT.read_text(encoding="utf-8")
     for term in (
         "scripts/project_execution_brief.py",

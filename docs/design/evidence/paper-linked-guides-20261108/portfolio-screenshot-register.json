@@ -1,0 +1,236 @@
+[
+  {
+    "key": "directory",
+    "storeKey": "directoryCompleteScreenshot",
+    "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+    "pageId": "p-6-0",
+    "nodeId": "8L-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/directory.jpg"
+  },
+  {
+    "key": "directory-start",
+    "storeKey": "directoryStartFinalScreenshot",
+    "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+    "pageId": "p-1-0",
+    "nodeId": "1-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "aerlor-map",
+    "storeKey": "aerlorMapCompleteScreenshot",
+    "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+    "pageId": "p-A-0",
+    "nodeId": "6M0-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/aerlor-map.jpg"
+  },
+  {
+    "key": "aerlor-planner",
+    "storeKey": "aerlorPlannerAfterScreenshot",
+    "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+    "pageId": "p-9-1",
+    "nodeId": "5HT-1",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/aerlor-planner.jpg"
+  },
+  {
+    "key": "aerlor-salons",
+    "storeKey": "aerlorSalonsAfterScreenshot",
+    "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+    "pageId": "p-9-1",
+    "nodeId": "5HV-1",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "aerlor-mobile-header",
+    "storeKey": "aerlorHeaderAfterScreenshot",
+    "fileId": "01M6JNN71ZN4867VJZ83PPXQZ0",
+    "pageId": "p-9-1",
+    "nodeId": "5UU-1",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "os-guide",
+    "storeKey": "osSourceFinalScreenshot",
+    "fileId": "01M3NRCX55B452A12819WNE1RH",
+    "pageId": "p-E-0",
+    "nodeId": "YD2-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/os-guide.jpg"
+  },
+  {
+    "key": "os-index",
+    "storeKey": "os_index_source_screenshot",
+    "fileId": "01M3NRCX55B452A12819WNE1RH",
+    "pageId": "p-D-0",
+    "nodeId": "Q9I-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "news",
+    "storeKey": "newsSourceScreenshot",
+    "fileId": "01M5EXPMQTSBFBAM8KKG83FTZH",
+    "pageId": "p-3-0",
+    "nodeId": "2J5-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "hub",
+    "storeKey": "hubSourceScreenshot",
+    "fileId": "01M2VWK62FA5S4VVF6G7SBPE5J",
+    "pageId": "p-C-0",
+    "nodeId": "73A-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "gmi",
+    "storeKey": "gmiSourceScreenshot",
+    "fileId": "01M5H6EARN9YHQV17JC6ZG9BRY",
+    "pageId": "p-6-0",
+    "nodeId": "73O-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "sector",
+    "storeKey": "sectorSourceScreenshot",
+    "fileId": "01M6FAXA774QT1VRDMAG7DFQ2W",
+    "pageId": "p-5-0",
+    "nodeId": "GOI-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "breadth",
+    "storeKey": "breadthAfterScreenshot",
+    "fileId": "01M6Y3CRMC345RTB3ZDP3XSYRP",
+    "pageId": "p-1-0",
+    "nodeId": "8-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/breadth.jpg"
+  },
+  {
+    "key": "d06-desktop",
+    "storeKey": "d06DesktopRouteScreenshot",
+    "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+    "pageId": "p-1-0",
+    "nodeId": "WB-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/d06-desktop.jpg"
+  },
+  {
+    "key": "d06-phone",
+    "storeKey": "d06PhoneRouteScreenshot",
+    "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+    "pageId": "p-1-0",
+    "nodeId": "WG-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "terminal-build",
+    "storeKey": "terminalHeatmapBuildScreenshot",
+    "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+    "pageId": "p-O-1",
+    "nodeId": "28BB-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/terminal-build.jpg"
+  },
+  {
+    "key": "terminal-recovery",
+    "storeKey": "terminalRecoveryAfterScreenshot",
+    "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+    "pageId": "p-O-1",
+    "nodeId": "UIW-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/terminal-recovery.jpg"
+  },
+  {
+    "key": "terminal-portfolio",
+    "storeKey": "terminalPortfolioSourceScreenshot",
+    "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+    "pageId": "p-1F-0",
+    "nodeId": "26LF-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "prophet",
+    "storeKey": "prophetSourceScreenshot",
+    "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+    "pageId": "p-D-0",
+    "nodeId": "10QN-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "options",
+    "storeKey": "optionsSourceScreenshot",
+    "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+    "pageId": "p-3-0",
+    "nodeId": "16H-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "expectation",
+    "storeKey": "expectationSourceScreenshot",
+    "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+    "pageId": "p-2-0",
+    "nodeId": "4AR-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "memory",
+    "storeKey": "memorySourceScreenshot",
+    "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+    "pageId": "p-3-0",
+    "nodeId": "1EW-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "policy",
+    "storeKey": "policySourceScreenshot",
+    "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+    "pageId": "p-2-0",
+    "nodeId": "RE-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "options-desk",
+    "storeKey": "optionsDeskSourceScreenshot",
+    "fileId": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+    "pageId": "p-1-0",
+    "nodeId": "1ZN-0",
+    "persisted": false,
+    "path": null
+  },
+  {
+    "key": "biocatalyst",
+    "storeKey": "biocatalystRouteScreenshot",
+    "fileId": "01M6Y34XE4JKS3A40GMMZ954JE",
+    "pageId": "p-1-0",
+    "nodeId": "2B6-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/biocatalyst.jpg"
+  },
+  {
+    "key": "options-mobile",
+    "storeKey": "optionsMobileGuideScreenshot",
+    "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+    "pageId": "p-1-0",
+    "nodeId": "2V-0",
+    "persisted": true,
+    "path": "docs/design/evidence/paper-linked-guides-20261108/options-mobile.jpg"
+  }
+]

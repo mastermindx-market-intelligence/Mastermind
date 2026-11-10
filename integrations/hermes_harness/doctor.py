@@ -17,7 +17,9 @@ from integrations.hermes_models.contract import PROFILE_PRIMARY, PROVIDERS, prov
 from integrations.hermes_models.credentials import CredentialUnavailable, load_credential
 from integrations.hermes_runtime.constants import PINNED_UPSTREAM_SHA
 from integrations.hermes_runtime.errors import RuntimeRefusal
+from integrations.hermes_runtime.egress import native_egress_child_env
 from integrations.hermes_runtime.secrets import load_secrets
+from integrations.hermes_secretary.roster import load_roster_config
 
 SCHEMA = "mastermind.hermes_harness.doctor.v1"
 # Primary native model keys originate in the role-private secrets file.
@@ -37,9 +39,11 @@ _ENDPOINTS = (
     "HERMES_CURSOR_POOL_BASE_URL",
     "MASTERMIND_STEWARD_MCP_URL",
 )
+# Slack transport is the single-identity bridge: the roster's hermes-mmrelay
+# row owns mmrelay.secrets.env. The legacy two-unit transport files are no
+# longer gateway credential files (role-private plane still reads its own).
 _SECRET_FILES = (
-    "mmmeta.secrets.env",
-    "mmsecretary.secrets.env",
+    "mmrelay.secrets.env",
 )
 _ALWAYS_MISSING_GRANTS = (
     "grant:executive_admission",
@@ -75,6 +79,22 @@ def doctor(
         path = root / ".config" / "hermes-runtime" / name
         if not _gateway_file_ok(path):
             missing.append(f"credential_file:{name}")
+    role_private = {}
+    model_keys_by_role = {}
+    # Check the actual selected role-private systemd file, never ambient
+    # HTTP(S)_PROXY or an unrelated role/user secrets file.
+    for role in PROFILE_PRIMARY:
+        try:
+            _spec, secrets_path = _native_primary_source(root, role)
+            secrets = load_secrets(secrets_path)
+            role_private[role] = secrets
+            try:
+                model_keys_by_role[role] = load_credential(_spec, secrets.values)
+            except CredentialUnavailable:
+                pass  # The existing primary-key presence gate reports this.
+            native_egress_child_env(role, secrets.values)
+        except (RuntimeRefusal, OSError, ValueError, KeyError):
+            missing.append(f"network_proxy:{role}")
     for name in _ENDPOINTS:
         if not env.get(name, "").strip():
             missing.append(f"endpoint:{name}")
@@ -85,14 +105,68 @@ def doctor(
     manager = _systemd_user_manager() if systemd_user is None else systemd_user
     if not manager:
         missing.append("grant:ubuntu1_systemd_user_manager")
-    missing.extend(_agent_identity_gaps(root, roster_path=roster_path))
+    # One canonical snapshot qualifies both role rows and incumbent peers.
+    # Missing/malformed identity evidence is a core gap, never an empty roster.
+    try:
+        roster_config = load_roster_config(roster_path)
+    except (OSError, ValueError, UnicodeError):
+        missing.append("config:hermes_agents:invalid")
+        roster_config = None
+    incumbent_ids = frozenset()
+    if roster_config is not None:
+        missing.extend(_agent_identity_gaps(root, roster_config=roster_config))
+        incumbent_ids = _incumbent_peer_user_ids(roster_config)
+    for role, secrets in role_private.items():
+        if secrets.values.get("HERMES_SLACK_BOT_USER_ID", "") in incumbent_ids:
+            missing.append(f"isolation:incumbent_peer_user_id:{role}")
+    # Each role needs independently revocable credentials, separate Slack
+    # identity, and its own policy-enforced egress proxy. Never log values.
+    for role, secrets in role_private.items():
+        if secrets.dashboard_password == secrets.token:
+            missing.append(f"isolation:gateway_dashboard_alias:{role}")
+    if (len(model_keys_by_role) == len(PROFILE_PRIMARY)
+            and len(set(model_keys_by_role.values())) != len(model_keys_by_role)):
+        missing.append("isolation:shared_model_credential")
+    if len(role_private) == len(PROFILE_PRIMARY):
+        secretary = role_private["mmsecretary"]
+        meta = role_private["mmmeta"]
+        for key, left, right in (
+            ("gateway_token", secretary.token, meta.token),
+            ("dashboard_password", secretary.dashboard_password, meta.dashboard_password),
+            ("slack_bot_token", secretary.values.get("HERMES_SLACK_BOT_TOKEN", ""),
+             meta.values.get("HERMES_SLACK_BOT_TOKEN", "")),
+            ("slack_user_id", secretary.values.get("HERMES_SLACK_BOT_USER_ID", ""),
+             meta.values.get("HERMES_SLACK_BOT_USER_ID", "")),
+            ("egress_proxy", secretary.values.get("HERMES_NATIVE_HTTPS_PROXY", ""),
+             meta.values.get("HERMES_NATIVE_HTTPS_PROXY", "")),
+        ):
+            if left and right and left == right:
+                missing.append(f"isolation:shared_{key}")
     missing.append("id:DOT_BOT_USER_IDS")
     missing = sorted(set(missing))
+    # The core text/Slack role does not require Mac actuation, Cursor,
+    # vision or unarmed Steward/Fabric. Its configuration can qualify
+    # independently, but must never be reported as provider/Slack LIVE.
+    core_ids = {
+        "credential:BYTEPLUS_MODELARK_API_KEY", "credential:ZAI_API_KEY",
+        "grant:pinned_upstream_checkout", "grant:ubuntu1_systemd_user_manager",
+    }
+    core_prefixes = (
+        "credential_file:mm", "network_proxy:mm", "credential:hermes-",
+        "id:hermes-", "config:hermes_agents:", "isolation:",
+    )
+    core_missing = sorted(v for v in missing if v in core_ids or v.startswith(core_prefixes))
     return {
         "schema": SCHEMA,
         "status": "MISSING" if missing else "READY",
         "missing": missing,
         "missing_count": len(missing),
+        "core_text_status": "CONFIG_MISSING" if core_missing else "CONFIG_READY_NOT_LIVE_PROVEN",
+        "core_text_missing": core_missing,
+        "core_text_missing_count": len(core_missing),
+        "native_egress_host_policy_verified": False,
+        "provider_authenticated": False,
+        "slack_roundtrip_verified": False,
         "m2studio_machine_id": M2STUDIO_MACHINE,
         "pinned_sha": PINNED_UPSTREAM_SHA,
         "provider_env_names": sorted({spec.credential_env for spec in PROVIDERS.values()}),
@@ -107,11 +181,18 @@ def format_doctor(report: Mapping[str, object]) -> str:
         f"schema: {report.get('schema')}",
         f"status: {report.get('status')}",
         f"missing_count: {len(rows)}",
+        f"core_text_status: {report.get('core_text_status')}",
+        f"core_text_missing_count: {report.get('core_text_missing_count')}",
         "missing:",
     ]
     for item in rows:
         lines.append(f"- {item}")
     return "\n".join(lines) + "\n"
+
+
+def _incumbent_peer_user_ids(roster_config: Mapping[str, object]) -> frozenset[str]:
+    """Peer identities from the already validated canonical roster snapshot."""
+    return frozenset(peer["user_id"] for peer in roster_config["peers"])
 
 
 def _native_primary_present(home: Path, role: str) -> bool:
@@ -163,24 +244,11 @@ def _gateway_file_ok(path: Path) -> bool:
     return True
 
 
-def _agent_identity_gaps(home: Path, *, roster_path: Path | None = None) -> list[str]:
-    """Per-agent Slack bot id and token. Names only; file bodies stay out."""
+def _agent_identity_gaps(home: Path, *, roster_config: Mapping[str, object]) -> list[str]:
+    """Inspect per-agent private files after canonical roster validation."""
 
-    path = roster_path or (Path(__file__).resolve().parents[1] / "hermes_secretary" / "roster.json")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return [
-            "credential:hermes-metaceo:HERMES_SLACK_BOT_TOKEN",
-            "credential:hermes-secretary:HERMES_SLACK_BOT_TOKEN",
-            "id:hermes-metaceo:HERMES_SLACK_BOT_USER_ID",
-            "id:hermes-secretary:HERMES_SLACK_BOT_USER_ID",
-        ]
-    rows = data.get("hermes_agents") if isinstance(data, dict) else None
-    if not isinstance(rows, list):
-        return ["config:hermes_agents:invalid"]
     gaps: list[str] = []
-    for row in rows:
+    for row in roster_config["hermes_agents"]:
         if not isinstance(row, dict):
             continue
         name = row.get("name")

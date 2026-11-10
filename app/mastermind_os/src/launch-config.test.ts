@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { decodeLaunchBindingConfig } from "./launch-config";
+import { resolveLaunchBinding } from "./orchestration/executive-launch-command-port";
 const manifest = { v: 1, workstream: "WS:CONFIG-FIXTURE", priority: 5,
   projects: [{ ref: "executive-infrastructure", label: "Fixture department" }],
   profiles: [{ ref: "research_only", label: "Research" }] };
 describe("immutable operator launch configuration", () => {
   it("supplies exact choices and work identity without runtime defaults", () => {
-    const config = decodeLaunchBindingConfig(JSON.stringify(manifest))!;
+    const config = resolveLaunchBinding(decodeLaunchBindingConfig(JSON.stringify(manifest))!)!;
     expect(config.workstream).toBe(manifest.workstream);
     expect(config.projects).toEqual(manifest.projects);
     expect(Object.isFrozen(config.projects[0])).toBe(true);
@@ -32,10 +33,10 @@ describe("immutable operator launch configuration", () => {
 describe("operator-supplied requested CEO choices", () => {
   it("retains immutable explicit choices and their availability", () => {
     const frontierModels = [{ ref: "frontier.one", label: "One", unavailableReason: "Not qualified" }];
-    const config = decodeLaunchBindingConfig(JSON.stringify({ ...manifest, frontierModels }))!;
+    const config = resolveLaunchBinding(decodeLaunchBindingConfig(JSON.stringify({ ...manifest, frontierModels }))!)!;
     expect(config.frontierModels).toEqual(frontierModels);
     expect(Object.isFrozen(config.frontierModels?.[0])).toBe(true);
-    expect(decodeLaunchBindingConfig(JSON.stringify(manifest))?.frontierModels).toBeUndefined();
+    expect(resolveLaunchBinding(decodeLaunchBindingConfig(JSON.stringify(manifest))!)?.frontierModels).toBeUndefined();
   });
   it.each([[], [{ ref: "UPPER", label: "Bad" }], [{ ref: "a", label: "A", provider: "caller" }],
     [{ ref: "frontier.one\n", label: "One" }], [{ ref: "frontier.one\r\n", label: "One" }],

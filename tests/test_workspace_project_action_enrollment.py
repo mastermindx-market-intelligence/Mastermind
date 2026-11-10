@@ -28,6 +28,7 @@ PROJECT_ACTIONS = (
     "ACCEPT_DIRECTION",
     "add_project_file",
     "set_project_communication_preference",
+    "pause_instruction_admission",
 )
 FIELDS = project_grant._ACTION_FIELDS
 SCOPED_FIELDS = tuple(FIELDS[action] for action in PROJECT_ACTIONS[1:])
@@ -41,11 +42,13 @@ def _granted(profile, actions=PROJECT_ACTIONS):
 
 
 def project_receipts(profiles, selected=(), work_ref=WORK_REF):
-    """Complete explicit receipt maps: exactly the closed five-action keys."""
+    """Complete explicit receipt maps: exactly the closed eight-action keys."""
     chosen = set(selected)
     return {
         name: {action: (
-            {"work_ref": work_ref, "receipt": f"scoped:{name}:{action}".encode()}
+            {"work_ref": work_ref, "instruction_ref": "INS:WEEKLY-UPDATE", "receipt": f"scoped:{name}:{action}".encode()}
+            if action == "pause_instruction_admission" and (name, action) in chosen
+            else {"work_ref": work_ref, "receipt": f"scoped:{name}:{action}".encode()}
             if action != PUBLISH and (name, action) in chosen
             else (f"publish:{name}".encode()
                   if action == PUBLISH and (name, action) in chosen else None)
@@ -58,7 +61,7 @@ def expected_grant(receipt):
     """Expected stored grant for one supplied receipt input."""
     if isinstance(receipt, dict):
         return {"work_ref": receipt["work_ref"],
-                "permission_digest": hashlib.sha256(receipt["receipt"]).hexdigest()}
+                "permission_digest": hashlib.sha256(receipt["receipt"]).hexdigest()} | ({"instruction_ref": receipt["instruction_ref"]} if "instruction_ref" in receipt else {})
     return hashlib.sha256(receipt).hexdigest()
 
 

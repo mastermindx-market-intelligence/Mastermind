@@ -17,6 +17,7 @@ from unittest import mock
 _active = False
 _expected = False
 _unexpected = []
+_loopback_network = None
 _home = Path(pwd.getpwuid(os.getuid()).pw_dir)
 _private = tuple(str(_home / name) for name in
                  ('.glm', '.bailian', '.minimax', '.qwen', '.claude/projects',
@@ -27,11 +28,51 @@ class FixtureBoundaryError(AssertionError):
     pass
 
 
+def _allowed_loopback_event(event, args):
+    """Only the two registered, numeric-loopback HTTP fixture endpoints."""
+    scope = _loopback_network
+    if scope is None:
+        return False
+    if event == 'socket.__new__':
+        return (len(args) == 4 and args[1] == socket.AF_INET
+                and args[2] == socket.SOCK_STREAM and args[3] in (0, socket.IPPROTO_TCP))
+    if event in ('socket.bind', 'socket.connect'):
+        sock, address = args
+        return (sock.family == socket.AF_INET and sock.type == socket.SOCK_STREAM
+                and isinstance(address, tuple) and len(address) == 2
+                and address[0] == '127.0.0.1' and type(address[1]) is int
+                and (address[1] == 0 if event == 'socket.bind'
+                     else address[1] in scope['ports']))
+    if event == 'socket.getaddrinfo':
+        host, port, family, kind, protocol = args
+        return (host == '127.0.0.1' and type(port) is int and port in scope['ports']
+                and family in (0, socket.AF_INET) and kind in (0, socket.SOCK_STREAM)
+                and protocol in (0, socket.IPPROTO_TCP))
+    if event == 'urllib.Request':
+        return len(args) == 4 and args[0] in scope['post_urls'] and args[3] == 'POST'
+    return False
+
+
+@contextlib.contextmanager
+def numeric_loopback_network():
+    """Opt in after installation; process and private-owner guards stay active."""
+    global _loopback_network
+    assert _active and _loopback_network is None
+    scope = {'ports': set(), 'post_urls': set()}
+    _loopback_network = scope
+    try:
+        yield scope
+    finally:
+        _loopback_network = None
+
+
 def _audit(event, args):
     if not _active:
         return
     kind = None
     if event.startswith('socket.') or event == 'urllib.Request':
+        if _allowed_loopback_event(event, args):
+            return
         kind = 'network'
     elif event in ('subprocess.Popen', 'os.system', 'os.posix_spawn'):
         kind = 'process'
@@ -64,6 +105,39 @@ def _cleanup(temp):
     temp.cleanup()
 
 
+APPLICATION_PREIMAGES = {
+    # Retained f7 candidate bytes keep both historical95/102 transitions exact.
+    'ext/quota_circuit.py': ('rollout/preimages/quota_circuit_b119865.py', 28768,
+        '0962d638a0a5655a71ea7a6eeb83088ad60af30f4a26e9c5bc47a92c3ab77945'),
+    'ext/lease_broker.py': ('rollout/preimages/lease_broker_f1059fe.py', 73321,
+        'a2847a29abe590cb168c2cd8ae34e0b1c3222b6e92ab4c00f252a342d56e6406'),
+    'ext/go_lease_capability.py': ('source/go_lease_capability.py', 9456,
+        '9f350698ba94d64fedc3f64ebffce993840d7ee3376b46254756d58bdb78c66a'),
+    'ext/go_lease_gateway.py': ('source/go_lease_gateway.py', 4513,
+        '7b1e1d48933218135771c770a1d25c994aa0332bc6bc8461c5b9d625ef8a7658'),
+}
+
+
+def verify_current_stage(output):
+    """Qualify all current107 bytes before restoring historical fixtures."""
+    import test_native_current_source as current_source
+    native = Path(builder.__file__).parent.parent
+    if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
+        raise AssertionError("current application source binding differs")
+    return current_source.verify_current_stage(
+        output, native,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
+
+
+def restore_application_preimages(stage, manifest):
+    native = Path(builder.__file__).parent.parent
+    for name, (relative, size, expected) in APPLICATION_PREIMAGES.items():
+        raw = (native / relative).read_bytes()
+        if len(raw) != size or g.digest(raw) != expected or manifest[name] != expected:
+            raise AssertionError('historical application preimage differs: ' + name)
+        (stage / name).write_bytes(raw)
+
+
 class PairedLauncherUpgrade(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -76,9 +150,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()):
                 builder.main()
             current_manifest = (cls.built / 'native-manifest.json').read_bytes()
-            if current_manifest != (Path(builder.__file__).parent / 'native-manifest.json').read_bytes():
-                raise AssertionError('current builder differs from protected manifest')
-            cls.manifest = json.loads(current_manifest)
+            cls.manifest = verify_current_stage(cls.built)
             # Rebuild the original finite paired epoch, never relabel the
             # current H1/daemon generation as the historical95 target. The
             # snapshot contains only changed public code plus its whole95 map.
@@ -89,7 +161,10 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 raise AssertionError('historical95 fixture bytes changed')
             retained = json.loads(raw)
             old = retained['manifest']
-            removed = set(retained['removed_current_members'])
+            removed = set(retained['removed_current_members']) | {
+                'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
+                'ext/original_advertised_artifact.py'}
             if (retained['schema'] != 'mastermind.test_native_paired_historical95/v1'
                     or set(cls.manifest) - set(old) != removed or set(old) - set(cls.manifest)
                     or len(old) != 95 or retained['historical_manifest_sha256'] != installer.UPGRADE_MANIFEST):
@@ -120,6 +195,23 @@ class PairedLauncherUpgrade(unittest.TestCase):
             if g.digest(pool_preimage) != '85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e' or old['ext/pool_ledger.py'] != g.digest(pool_preimage):
                 raise AssertionError('historical pool ledger preimage differs')
             (cls.built / 'native-code-stage/ext/pool_ledger.py').write_bytes(pool_preimage)
+            # Ubuntu4 changes current first-worker policy. Restore its exact
+            # protected predecessor; never repin the immutable95 target.
+            qualification_raw = fixture.with_name('ubuntu4-grok-qualification-predecessor-f374289e.json').read_bytes()
+            if g.digest(qualification_raw) != '93f5285a758f1045be1f178f35d17e792459f167d2d631ff2914778253b64ebb':
+                raise AssertionError('qualification predecessor fixture changed')
+            qualification = json.loads(qualification_raw)
+            if (qualification['schema'] != 'fabric.ubuntu4-qualification-predecessor.v1'
+                    or qualification['commit'] != 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
+                    or qualification['blob'] != 'f72b12eac939143b1b2ed298139d55b06667a2c2'
+                    or qualification['path'] != 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'):
+                raise AssertionError('qualification predecessor scope differs')
+            qualification_payload = zlib.decompress(base64.b64decode(qualification['zlib_base64'], validate=True))
+            if (len(qualification_payload) != qualification['bytes']
+                    or g.digest(qualification_payload) != qualification['sha256']
+                    or qualification['sha256'] != old['ext/fabric_host_qualification.py']):
+                raise AssertionError('historical95 qualification predecessor differs')
+            (cls.built / 'native-code-stage/ext/fabric_host_qualification.py').write_bytes(qualification_payload)
             # S7 changed two members that the authentic historical95 inverse
             # previously left untouched. Restore their exact protected bytes;
             # never repin the immutable95 manifest or its paired-upgrade owner.
@@ -138,22 +230,66 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if len(payload)!=item['bytes'] or g.digest(payload)!=item['sha256'] or item['sha256']!=old[name]:
                     raise AssertionError('historical95 diagnostic preimage differs')
                 (cls.built/'native-code-stage'/name).write_bytes(payload)
+            # PR2097 changed precisely these two original95 members. Restore
+            # authentic protected candidate bytes only in the disposable owner;
+            # source/ preimages are a different generation and are not valid.
+            observer_raw = fixture.with_name('native-observer-historical95-48ca.json').read_bytes()
+            if g.digest(observer_raw) != '0dd81a279641b9c456ef94439d519d97f7670ec18831f5bd78f69bcdd710b3b2':
+                raise AssertionError('historical observer fixture changed')
+            observer = json.loads(observer_raw)
+            if (observer['schema'] != 'mastermind.test_native_observer_historical95/v1'
+                    or observer['source_commit'] != '48ca51f882338c58e377a0acf16931066c703384'
+                    or set(observer['files']) != {'ext/run_observation.py', 'ext/run_observation_delivery.py'}):
+                raise AssertionError('historical observer fixture scope differs')
+            for name,item in observer['files'].items():
+                payload = zlib.decompress(base64.b64decode(item['zlib_base64'],validate=True))
+                if len(payload) != item['bytes'] or g.digest(payload) != item['sha256'] or item['sha256'] != old[name]:
+                    raise AssertionError('historical95 observer preimage differs')
+                (cls.built/'native-code-stage'/name).write_bytes(payload)
             # Pinned finite long-horizon forward deltas are not historical95
             # bytes. Restore ONLY these named changed members inside this
             # disposable historical fixture; retain original SHA checks.
             native_root = Path(builder.__file__).parent.parent
             baseline_sources = {
+                'ext/artifact_delivery.py': native_root.parent / 'grok47/overlay/artifact_delivery.py',
                 'ext/fabric_operator_contract.py': native_root.parent / 'grok47/overlay/fabric_operator_contract.py',
                 'ext/native_remote.py': native_root.parent / 'grok47/overlay/native_remote.py',
                 'ext/sub.sh': native_root.parent / 'grok47/overlay/sub.sh',
                 'ext/oc_free_exec.sh': native_root / 'source/oc_free_exec.sh',
                 'ext/fabric_operator_owner.py': native_root / 'source/fabric_operator_owner.py',
+                # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
+                # Historical95 retains its pinned bytes; CURRENT fair-share stays unchanged.
+                'ext/lease_broker.py': fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+                # Protected49c2 predecessor, retained as data after the held
+                # process qualifier changed CURRENT. Never relabel old95.
+                'ext/linux_process_identity.py': (
+                    fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt'),
             }
             for name, predecessor in baseline_sources.items():
                 original = predecessor.read_bytes()
                 if g.digest(original) != old[name]:
                     raise AssertionError('long-horizon historical predecessor differs: '+name)
                 (cls.built/'native-code-stage'/name).write_bytes(original)
+            # A new polling helper delta cannot be inverted into historical95.
+            # Restore its already retained, independently hash-bound preimage.
+            long_raw = fixture.with_name('native-long-horizon-predecessors-20261103.json').read_bytes()
+            if g.digest(long_raw) != 'bb924475a501aa732ca0c5b1f05f9428c100c546bcbfb5d3e0c2ceaf268d6f19':
+                raise AssertionError('long-horizon predecessor fixture changed')
+            long_fixture = json.loads(long_raw)
+            if (long_fixture['schema'] != 'mastermind.test_native_long_horizon_predecessors102/v1'
+                    or long_fixture['source_commit'] != '9f65957e29eba92245d78609f032aaea523b7cb4'
+                    or set(long_fixture['files']) != {'ext/commission_deadline.py',
+                        'ext/fabric_continuation.py', 'ext/remote_sub_exec.py',
+                        'ext/remote_sub_helpers.py', 'ext/slot.py'}):
+                raise AssertionError('long-horizon predecessor scope differs')
+            helper_name = 'ext/remote_sub_helpers.py'
+            helper_item = long_fixture['files'][helper_name]
+            helper_payload = zlib.decompress(base64.b64decode(helper_item['zlib_base64'], validate=True))
+            if (len(helper_payload) != helper_item['bytes']
+                    or g.digest(helper_payload) != helper_item['sha256']
+                    or helper_item['sha256'] != old[helper_name]):
+                raise AssertionError('historical95 polling helper preimage differs')
+            (cls.built / 'native-code-stage' / helper_name).write_bytes(helper_payload)
             inverse = {
                 'ext/commission_deadline.py': [
                     ('not 0 <= result <= 14400', 'not 0 <= result <= 7200'),
@@ -165,12 +301,6 @@ class PairedLauncherUpgrade(unittest.TestCase):
                      '        3600 if kwargs.get("task_complexity") in (None, "") else 0))',
                      'floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
                      '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
-                ],
-                'ext/remote_sub_helpers.py': [
-                    ("    # Only broker acquisition reserves two seconds for local process cleanup.\n    # Other callers retain the old conservative whole-second deadline. Never\n    # allow a caller-supplied negative reserve or a new deadline authority.\n    selector = sys.argv[2] if len(sys.argv) == 3 else ''\n    if len(sys.argv) > 3 or selector not in ('', 'broker'):\n        raise ValueError('commission_duration_invalid')\n    reserve = 2.0 if selector == 'broker' else 0.0\n    remaining = require_remaining(deadline)\n    # Short admitted attempts retain the immediate-acquire path; with less\n    # than two seconds to spare, the broker may not queue or wait.\n    print(min(int(cap), max(0, int(remaining - reserve))))", '    # Whole seconds are conservative on the Bash/broker/worker wire. The\n    # process owner below retains fractional time for the actual local fuse.\n    print(min(int(cap), int(require_remaining(deadline))))'),
-                    ("r'[1-9][0-9]{0,4}'", "r'[1-9][0-9]{0,3}'"),
-                    ('raw) or int(raw) > 14400:', 'raw) or int(raw) > 7200:'),
-                    ('assert 1 <= timeout <= 14400', 'assert 1 <= timeout <= 7200'),
                 ],
                 'ext/slot.py': [
                     ('MAX_CHILD_TIMEOUT_S = 14400.0', 'MAX_CHILD_TIMEOUT_S = 7200.0'),
@@ -191,10 +321,31 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 if g.digest(raw) != old[name]:
                     raise AssertionError('long-horizon historical inverse unqualified: '+name)
                 target.write_bytes(raw)
+            restore_application_preimages(cls.built / 'native-code-stage', old)
+            # A new current-generation census implementation must never be
+            # relabeled as the immutable historical paired-upgrade payload.
+            # Restore the exact old lane runtime from a byte-pinned fixture.
+            historic_path = (Path(__file__).resolve().parents[4] /
+                'tests/fixtures/native-historical-lane-runtime-61350902.json')
+            historic_raw = historic_path.read_bytes()
+            if g.digest(historic_raw) != '1d658364949b3089ecb35b1ca6f3f8ac79970de1ab44dcc17dd6198a1f1eb3c0':
+                raise AssertionError('historical lane runtime fixture changed')
+            historic = json.loads(historic_raw)
+            original_runtime = zlib.decompress(
+                base64.b64decode(historic['zlib_base64'], validate=True)
+            )
+            if (historic['schema'] != 'mastermind.native_historical_lane_runtime.v1'
+                    or historic['original_sha256'] != old['ext/lane_runtime.py']
+                    or historic['original_bytes'] != len(original_runtime)
+                    or g.digest(original_runtime) != old['ext/lane_runtime.py']):
+                raise AssertionError('historical lane runtime preimage unqualified')
+            (cls.built / 'native-code-stage/ext/lane_runtime.py').write_bytes(
+                original_runtime
+            )
             cls.manifest = old
             for name,wanted in cls.manifest.items():
                 if g.digest((cls.built / 'native-code-stage' / name).read_bytes()) != wanted:
-                    raise AssertionError('historical95 full payload differs')
+                    raise AssertionError('historical95 full payload differs: '+name)
             historical_manifest = (json.dumps(cls.manifest,sort_keys=True,indent=2)+'\n').encode()
             if g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
@@ -223,7 +374,7 @@ class PairedLauncherUpgrade(unittest.TestCase):
         # remains exactly the historical 8bc -> d044 transition. Restore only
         # that closed three-line addition in a disposable module, not a pin.
         original_g = g
-        epoch_raw = Path(g.__file__).read_bytes()
+        epoch_raw = installer._HISTORICAL_LAUNCHER.read_bytes()
         added = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                  b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                  b'        return\n')

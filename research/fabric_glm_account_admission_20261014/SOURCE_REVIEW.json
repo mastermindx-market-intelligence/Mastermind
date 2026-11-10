@@ -1,0 +1,58 @@
+{
+  "at": "2026-10-14T17:29:14.118080+00:00",
+  "reviewer_root": "01a104e6-58f8-76d3-8d99-1302a1cca072",
+  "source_owner": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "state": "APPROVE_SCOPED_FUTURE_ACCOUNT_ADMISSION_SOURCE",
+  "findings": [],
+  "source_qualification": {
+    "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/pool-exhaustion-failover-20261014/glm-account-admission/SOURCE_QUALIFICATION.json",
+    "sha256": "e6c23d42a7424886528983c7cee57b4a9845a26216d80ecaaffd4c309977c59b"
+  },
+  "final_source_qualification_sha256": "94dbb82972fd634b32a012149c92ac3357fc07b881528b3eb352492cba06592c",
+  "accepted_postimages": {
+    "quota_remote.py": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+    "lease_broker.py": "d59fed1160403d93c2c46a34b39e0ff87d587f3bc207f74aec3749f658ba20ec"
+  },
+  "verified_current_installed_preimages": {
+    "quota_remote.py": "80ce4151a5d3f05528bc3c5e9af214d510ad9d9f17803c62f01a4c2d818ec5ff",
+    "lease_broker.py": "a72bc031ddb81e559e0cf48fcbf824a959edfcf445c1d3d2d89348c3c66c6f0c"
+  },
+  "proof": {
+    "BASELINE.xml": {
+      "sha256": "538923697693ccd4c5e836de20466cbe2f4d2ae1f0ca189da194a5b0d0d5b64a",
+      "distinct_cases": 24,
+      "failure": 3,
+      "error": 0,
+      "skipped": 0
+    },
+    "CANDIDATE.xml": {
+      "sha256": "e96e72cdaca54c22b72b2c875c2a51e864e9a0a8f308b67e46a580f9f3f7d430",
+      "distinct_cases": 24,
+      "failure": 0,
+      "error": 0,
+      "skipped": 0
+    },
+    "COMPATIBILITY.xml": {
+      "sha256": "554c6bd863f1095b7ce1021ff3512bd6b92cbe9d0d21083025f46f196eea832a",
+      "distinct_cases": 51,
+      "failure": 0,
+      "error": 0,
+      "skipped": 0
+    }
+  },
+  "independent_source_inspection": [
+    "Only cached_glm_account_parked added to quota_remote; all other executable AST exactly unchanged.",
+    "Only Broker.account_cap changed; all other executable AST exactly unchanged.",
+    "Exact configured account and glm authoritative 5h/weekly observation only; both container and observation freshness required; future timestamps and passed/invalid reset excluded. Existing 95 percent threshold reused.",
+    "No cache refresh, network, credential, policy, lease or result mutation. Unknown/stale/malformed quota preserves incumbent account decision.",
+    "Explicit exhausted-account request refuses without silently using another account; ordinary new-run intersection retains original root and existing lease/admission controls.",
+    "Retained tests exercise real broker candidate filter, acquisition, explicit account refusal and disabled-gates fixture; compatibility loader binds both candidate modules. No tests repeated."
+  ],
+  "limits": [
+    "Cached-only predicate does not prove current capacity or prevent every later quota failure.",
+    "Original fabric-ci-read-contract-tests-01a11e90-v1 and all other failed/unknown runs remain unaccepted and unreplayed. No live paid artifact success or midrun transfer established.",
+    "This is independent source review, not installed-byte, fresh-load, provider or Executive acceptance."
+  ],
+  "owner_next_action": "Existing Fabric owner may perform its ordinary exact-preimage checked local installation. Install quota helper before broker consumer; preserve backups and exact postimage/fresh-load evidence. No installed routing guard/state/settings change or refused log retry is included.",
+  "root_mutations": "Review receipt only; no installed source, configuration, lease, worker or provider changes."
+}

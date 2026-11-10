@@ -9,6 +9,11 @@ from pathlib import Path
 import sys
 
 from integrations.hermes_harness.doctor import doctor, format_doctor
+from integrations.hermes_harness.metadata import (
+    model_choices,
+    model_selection,
+    role_metadata,
+)
 from integrations.hermes_harness.overlays import overlay_chain, render_overlays
 from integrations.hermes_harness.stack import write_composed_profile
 from integrations.hermes_harness.tick import FIXTURE, routine_tick
@@ -37,7 +42,12 @@ def main(argv: list[str] | None = None) -> int:
     uninstall_p.add_argument("--state", type=Path, required=True)
     uninstall_p.add_argument("--systemd-user-dir", type=Path, required=True)
 
-    status_p = sub.add_parser("status")
+    status_p = sub.add_parser(
+        "status",
+        help="Summarise one installed role. This incumbent summary is deliberately "
+             "lenient about a damaged installation; a consumer that must not report a "
+             "damaged install as healthy reads 'role-metadata' instead",
+    )
     status_p.add_argument("--state", type=Path, required=True)
 
     shadow_p = sub.add_parser("shadow-run")
@@ -56,8 +66,19 @@ def main(argv: list[str] | None = None) -> int:
     models_p = sub.add_parser("models", help="List source-configurable BYOK role choices without loading credentials")
     models_p.add_argument("--role", choices=("mmsecretary", "mmmeta"), required=True)
 
+    role_p = sub.add_parser(
+        "role-metadata",
+        help="Read one role's installed configuration metadata without loading credentials",
+    )
+    role_p.add_argument("--state", type=Path, required=True)
+    role_p.add_argument("--role", choices=("mmsecretary", "mmmeta"), required=True)
+
     doctor_p = sub.add_parser("doctor")
     doctor_p.add_argument("--json", action="store_true")
+    doctor_p.add_argument(
+        "--core-text-config-only", action="store_true",
+        help="Exit 0 only when core BYOK role setup is source-configured; NOT a provider, egress or Slack live canary",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -86,12 +107,21 @@ def main(argv: list[str] | None = None) -> int:
             payload = _parity(args.decisions, args.posts, args.start, args.end)
         elif args.command == "models":
             payload = _models(args.role)
+        elif args.command == "role-metadata":
+            # A read of one explicitly selected role root. It never reads a
+            # credential, calls a provider, observes a service or attests a
+            # host; the projection carries the observation state itself.
+            payload = role_metadata(args.state, args.role)
         elif args.command == "doctor":
             report = doctor()
             if args.json:
                 print(json.dumps(report, sort_keys=True))
             else:
                 print(format_doctor(report), end="")
+            if args.core_text_config_only:
+                # Deliberately permits staged core-only install planning without
+                # requiring future Mac/Fabric grants; *not* serving authority.
+                return 0 if report["core_text_status"] == "CONFIG_READY_NOT_LIVE_PROVEN" else 2
             return 0 if report["status"] == "READY" else 2
         else:
             raise RuntimeRefusal("COMMAND_INVALID")
@@ -108,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _install(args: argparse.Namespace) -> dict:
     # Import on invocation: read-only shadow jobs must not depend on PyYAML.
-    from integrations.hermes_harness.native_byok import render_disarmed_native_byok
+    from integrations.hermes_harness.native_byok import expected_native_config
     selected_provider = _install_selection(args)
     profile_path = args.state.parent / f"{args.role}.hermes-profile.yaml"
     write_composed_profile(
@@ -127,7 +157,7 @@ def _install(args: argparse.Namespace) -> dict:
         hermes_bin=args.hermes_bin,
         upstream_source=args.upstream_source,
         fetch=bool(args.fetch),
-        hermes_config_renderer=render_disarmed_native_byok,
+        hermes_config_renderer=expected_native_config,
     )
     home = args.state / "current" / "hermes-home"
     overlays = render_overlays()
@@ -141,6 +171,10 @@ def _install(args: argparse.Namespace) -> dict:
     payload["unbound_extension_names"] = "NOT_INSTALLED"
     payload["native_steward_mcp"] = "CONFIGURED_DISABLED"
     payload["native_steward_connected"] = False
+    payload["native_executive_v3_mcp"] = "CONFIGURED_DISABLED"
+    payload["native_paper_mcp"] = "CONFIGURED_DISABLED"
+    payload["native_executive_v3_connected"] = False
+    payload["native_paper_connected"] = False
     payload["native_model_profile"] = "CONFIGURED_KEY_NAMES_ONLY"
     payload["provider_called"] = False
     payload["native_model_selection"] = _model_selection(load_profile(args.state / "current" / "profile.yaml"))
@@ -168,39 +202,11 @@ def _install_selection(args: argparse.Namespace) -> str | None:
 
 
 def _model_selection(profile) -> dict:
-    from integrations.hermes_models.contract import native_provider
-    try:
-        spec = native_provider(profile.role, profile.native_provider_id)
-    except (ValueError, KeyError):
-        raise RuntimeRefusal("NATIVE_MODEL_SELECTION_UNQUALIFIED") from None
-    return {
-        "provider_id": spec.provider_id,
-        "native_provider": spec.hermes_name,
-        "requested_model": spec.served_model,
-        "served_model_verified": False,
-        "credential_env": spec.credential_env,
-        "credential_file_env": spec.credential_file_env,
-        "automatic_fallback": False,
-        "provider_called": False,
-    }
+    return model_selection(profile)
 
 
 def _models(role: str) -> dict:
-    from integrations.hermes_models.contract import PROFILE_PRIMARY, native_provider_choices
-    return {
-        "role": role,
-        "default_provider_id": PROFILE_PRIMARY[role],
-        "choices": [{
-            "provider_id": spec.provider_id,
-            "native_provider": spec.hermes_name,
-            "requested_model": spec.served_model,
-            "credential_file_env": spec.credential_file_env,
-        } for spec in native_provider_choices(role)],
-        "selection_is_admission": False,
-        "automatic_fallback": False,
-        "provider_called": False,
-        "credentials_read": False,
-    }
+    return model_choices(role)
 
 
 def _uninstall(state: Path, unit_dir: Path) -> dict:

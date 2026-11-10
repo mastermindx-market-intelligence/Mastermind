@@ -60,6 +60,20 @@ class TerminalPollBudgetTests(unittest.TestCase):
                     self.assertGreater(child, 0)
                     self.assertLessEqual(child, fuse)
 
+    def test_fast_observer_caps_large_caller_poll_margin_at_30s(self):
+        # Candidate only: the older Grok overlay has its own original
+        # 120-second observation contract and is not silently republished.
+        file = ROOT / 'candidate/remote_sub.sh'
+        for max_secs, poll, expected_child in (
+                (14400, 120, 14340),
+                (3600, 120, 3540),
+                (7200, 45, 7140),
+                (210, 120, 150),
+        ):
+            with self.subTest(max_secs=max_secs, poll=poll):
+                self.assertEqual(budget(file, max_secs, poll),
+                                 (max_secs, expected_child))
+
     def test_edge_cases_do_not_make_negative_timeout(self):
         for file in PATHS:
             for maximum, poll, child_expected in ((45, 30, 15), (30, 30, 30), (2, 1, 1)):
@@ -116,10 +130,10 @@ class TerminalPollBudgetTests(unittest.TestCase):
         # The closed, hash-pinned forward candidate preserves both reviewed
         # Grok behavior and caller UTC narrowing. Both distinct launchers keep
         # their real runtime-margin checks above; this current pin additionally
-        # binds S7 same-operation private-diagnostic proof retention.
+        # binds the qualified APPLICATION carrier and private-diagnostic retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         'e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05')
+                         '1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),

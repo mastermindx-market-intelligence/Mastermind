@@ -115,10 +115,10 @@ def test_signed_ordinary_guide_skips_without_job_or_post():
 
 @pytest.mark.parametrize("path,expected", [
     (".github/workflows/ci.yml", ReviewDispatch.AUTO_REVIEW_ELIGIBLE),
-    ("server/api/handler.py", ReviewDispatch.AUTO_REVIEW_ELIGIBLE),
+    ("server/api/handler.py", ReviewDispatch.SKIP_NO_REVIEW_NEEDED),
     ("tests/conftest.py", ReviewDispatch.AUTO_REVIEW_ELIGIBLE),
     ("docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md", ReviewDispatch.AUTO_REVIEW_ELIGIBLE),
-    ("app/src/components/Button.tsx", ReviewDispatch.AUTO_REVIEW_ELIGIBLE),
+    ("app/src/components/Button.tsx", ReviewDispatch.SKIP_NO_REVIEW_NEEDED),
 ])
 def test_actual_source_path_controls_automatic_admission(path, expected):
     source = ExistingApp(path)

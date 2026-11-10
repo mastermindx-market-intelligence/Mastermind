@@ -1,6 +1,18 @@
+import {freshConversationArguments} from "./orchestration/fresh-conversation-transport";
+import {projectConversationArguments} from './conversations/project-conversation-transport';
+import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
-import { decodeSessionContext, type ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+} from "./orchestration/executive-session-command-port";
+import {sessionSendArguments} from "./orchestration/session-send-arguments";
+import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
+import { projectHistorySelection } from "./conversations/project-history-selection";
 import { normalizeDirectSelection, type DirectNativeTransport } from "./direct-native-result";
+import { closedReadFailureReason, type DiagnosticReadReason, type DiagnosticPhase, type ExecutiveDiagnosticSnapshot } from "./diagnostic-state";
+import { planningArguments } from "./planning/project-planning-transport";
+import { projectExecutionArguments } from "./planning/project-execution-transport";
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 type Listen = (event: string, listener: (event: { payload: unknown }) => void) => Promise<() => void>;
@@ -16,36 +28,35 @@ const WORK = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const ROOT = /^JOB-[A-Za-z0-9][A-Za-z0-9._:-]{0,250}$/;
 const OPERATION = /^session-continue-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
-/** Deprivilege the existing authenticated native context to READ-only; never
- * rewrite identity, selection or native source. Only a fully qualified backend
- * context can be projected, and its capability is reduced, not invented. */
-function nativeReadContextOnly(raw: unknown, selected: { workRef: string; rootJobId: string }): unknown {
-  if (!decodeSessionContext(raw, selected)) return raw;
-  const envelope = raw as Record<string, unknown>;
-  const data = envelope.data as Record<string, unknown>;
-  const capability = data.capabilities as Record<string, unknown>;
-  return {
-    ...envelope,
-    data: { ...data, capabilities: { ...capability, send: false } },
-  };
-}
-
 /** Private native auth epoch; no token/claims enter the webview, no arbitrary native command. */
 export async function createNativeExecutiveTransport(invoke: Invoke, listen: Listen) {
   let nativeGeneration = -1, epoch = 0, available = false;
+  let contextReadReason: DiagnosticReadReason = "UNKNOWN";
   let generationAbort = new AbortController();
   const listeners = new Set<() => void>();
   const invalidate = (nextAvailable = false) => {
     epoch++; available = nextAvailable;
+    contextReadReason = "UNKNOWN";
     const previous = generationAbort; generationAbort = new AbortController(); previous.abort();
     for (const listener of listeners) listener();
   };
   // A locally requested sign-in/out requires a later native auth generation.
   let minimumNativeGeneration = 0;
+  // Observer-only diagnostics over the *existing* auth_status/listen outcomes.
+  // No snapshot read invokes, subscribes, retries or notifies; unknown stays
+  // unknown and a stale reply never resurrects an older observation.
+  let observedAuth: boolean | null = null;
+  let phase: DiagnosticPhase = "not_requested";
+  const diagnostics = (): ExecutiveDiagnosticSnapshot =>
+    ({ kind: "native", authAvailable: observedAuth, phase, contextReadReason });
   const update = (raw: unknown) => {
     const next = status(raw);
-    if (!next) { invalidate(); minimumNativeGeneration = nativeGeneration + 1; return; }
+    if (!next) { phase = "invalid_response"; observedAuth = null; invalidate(); minimumNativeGeneration = nativeGeneration + 1; return; }
     if (next.generation < Math.max(nativeGeneration, minimumNativeGeneration)) return;
+    // A duplicate authoritative reply still settles the diagnostic attempt;
+    // it must not notify or change the original auth generation.
+    phase = next.available ? "ready" : "auth_unavailable";
+    observedAuth = next.available;
     if (next.generation === nativeGeneration && next.available === available) return;
     nativeGeneration = next.generation;
     invalidate(next.available);
@@ -54,22 +65,38 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   try {
     await listen("mastermind-executive-auth-state", (event) => update(event.payload));
     listening = true;
-  } catch { /* The read-only workspace remains usable without this optional capability. */ }
+  } catch {
+    /* The read-only workspace remains usable without this optional capability. */
+    phase = "transport_failure"; observedAuth = null;
+  }
   const ready = (async () => {
     if (!listening) return;
+    const started = epoch;
     try {
-      const started = epoch;
+      phase = "pending"; // observed only at the existing executive_auth_status invocation
       const initial = await invoke("executive_auth_status");
       if (started === epoch) update(initial);
-    } catch { /* Missing command remains unavailable. */ }
+    } catch {
+      /* Missing command remains unavailable. */
+      if (started === epoch) { phase = "transport_failure"; observedAuth = null; }
+    }
   })();
 
-  function call(command: "executive_context" | "executive_submit" | "executive_status" |
-    "executive_session_context" | "executive_session_reply" | "executive_session_references" |
-    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction",
+  function call(command: "read_company_priorities" | "executive_context" | "executive_submit" | "executive_status" |
+    "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
+    "executive_project_session_references" |
+    "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
+    "executive_direct_native_result" | "executive_direct_native_consume" | "executive_direct_correction" | "executive_project_planning" | "executive_project_execution",
     signal: AbortSignal, args?: Record<string, unknown>): Promise<unknown> {
     const started = epoch, boundary = generationAbort.signal;
     if (!available || signal.aborted) return Promise.reject(new Error("EXECUTIVE_UNAVAILABLE"));
+    if (command === "executive_context") contextReadReason = "UNKNOWN";
+    const observeContextFailure = (reason: unknown) => {
+      // Observe only this existing READ, never mutation/status outcomes. Its
+      // public rejection contract and authority checks stay unchanged.
+      if (command === "executive_context" && started === epoch && !signal.aborted && !boundary.aborted)
+        contextReadReason = closedReadFailureReason(reason);
+    };
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = (failed: boolean, value: unknown) => {
@@ -82,9 +109,12 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       if (signal.aborted || boundary.aborted) { abort(); return; }
       try {
         Promise.resolve(invoke(command, args)).then((value) => {
-          if (started !== epoch || !available || signal.aborted) abort(); else finish(false, value);
-        }, () => { finish(true, new Error("EXECUTIVE_TRANSPORT_UNAVAILABLE")); });
-      } catch { finish(true, new Error("EXECUTIVE_TRANSPORT_UNAVAILABLE")); }
+          if (started !== epoch || !available || signal.aborted) abort(); else {
+            if (command === "executive_context") contextReadReason = "NONE";
+            finish(false, value);
+          }
+        }, (reason: unknown) => { observeContextFailure(reason); finish(true, new Error("EXECUTIVE_TRANSPORT_UNAVAILABLE")); });
+      } catch (reason) { observeContextFailure(reason); finish(true, new Error("EXECUTIVE_TRANSPORT_UNAVAILABLE")); }
     });
   }
   const transport: OsExecutiveTransport & { directNative: DirectNativeTransport & {
@@ -92,9 +122,17 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
   } } = {
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    diagnostics,
     context: (signal) => call("executive_context", signal),
+    companyPriorities: (signal) => call("read_company_priorities", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
+    projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
+      {operation,arguments:planningArguments(operation,arguments_)})},
+    projectExecution: {request:(operation,arguments_,signal)=>call("executive_project_execution",signal,
+      {operation,arguments:projectExecutionArguments(operation,arguments_)})},
+    freshConversation: {request:(operation,arguments_,signal)=>call("executive_fresh_conversation",signal,
+      {operation,arguments:freshConversationArguments(operation,arguments_)})},
     directNative: {
       read: (selection, signal) => {
         const normalized = normalizeDirectSelection(selection);
@@ -138,23 +176,40 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       },
     },
   };
-  // Session history reuses the *same* native bearer owner/epoch. It exposes
-  // only the preexisting authenticated READ endpoints and cannot submit even
-  // if the backend reports an addressable target. The independent native
-  // executive_submit F2 review remains held; this does not modify that route.
-  const sessionTransport: ExecutiveSessionTransport = {
+  // History and qualified Fabric/Secretary continuations reuse the same
+  // native bearer owner, fixed SEND command and auth epoch.
+  // The independent executive_submit F2 review remains unchanged.
+  const sessionTransport: ProjectConversationHistoryTransport = {
+    projectConversations: {request: (operation,arguments_,signal) => {
+      const closed=projectConversationArguments(operation,arguments_);
+      return closed ? call('executive_project_conversations_read',signal,{operation,arguments:closed})
+        : Promise.reject(new Error('PROJECT_CONVERSATION_SELECTION_INVALID'));
+    }},
     authGeneration: () => epoch, available: () => available,
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    historyContext: (selection, signal) => {
+      const closed = projectHistorySelection(selection);
+      return closed ? call("executive_project_history_context", signal, {workRef: closed.workRef})
+        : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
+    },
     context: async (selection, signal) => {
-      if (!WORK.test(selection.workRef) || !ROOT.test(selection.rootJobId))
-        throw new Error("SESSION_SELECTION_INVALID");
-      return nativeReadContextOnly(await call("executive_session_context", signal, {
-        selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId },
-      }), selection);
+      const normalized = normalizeExecutiveSessionSelection(selection);
+      if (!normalized) throw new Error("SESSION_SELECTION_INVALID");
+      // The Session owner validates the returned target and capability.
+      return call("executive_session_context", signal, {
+        selection: sessionSelectionWire(normalized),
+      });
     },
     reply: (args, signal) => OPERATION.test(args.operation_key)
       ? call("executive_session_reply", signal, { operationKey: args.operation_key })
       : Promise.reject(new Error("SESSION_OPERATION_INVALID")),
+    projectReferences: (args, signal) => {
+      const closed = projectHistoryArguments(args);
+      if (!closed) return Promise.reject(new Error("SESSION_REFERENCES_INVALID"));
+      return call("executive_project_session_references", signal, {
+        workRef: closed.work_ref, ...(closed.cursor !== undefined ? { cursor: closed.cursor } : {}),
+      });
+    },
     references: (args, signal) => {
       if (!WORK.test(args.work_ref) || !ROOT.test(args.root_job_id) ||
           (args.page_size !== undefined && (!Number.isSafeInteger(args.page_size) ||
@@ -167,8 +222,18 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
         ...(args.cursor ? { cursor: args.cursor } : {}),
       });
     },
-    send: () => Promise.reject(new Error("NATIVE_SESSION_READ_ONLY")),
+    send: (arguments_,signal) => {
+      const closed=sessionSendArguments(arguments_);
+      return closed?call("executive_session_send",signal,{arguments:closed})
+        :Promise.reject(new Error("SESSION_SEND_INVALID"));
+    },
   };
   return { transport, sessionTransport, ready,
-    invalidate() { minimumNativeGeneration = nativeGeneration + 1; invalidate(); } };
+    invalidate() {
+      // A locally requested sign-in/out resets diagnostics to unknown without
+      // changing availability or epoch semantics.
+      minimumNativeGeneration = nativeGeneration + 1;
+      phase = "not_requested"; observedAuth = null;
+      invalidate();
+    } };
 }

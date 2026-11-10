@@ -62,3 +62,12 @@ for the existing Agent OS writer. This package does not write that store.
 python3 -m unittest discover -s integrations/hermes_delegate/tests -v
 python3 -m compileall -q integrations/hermes_delegate
 ```
+
+## Existing Executive child observation
+
+A trusted host can inject `ExecutiveChildQualification` and call
+`Bridge.inspect_executive_binding()` to observe one actual admitted plan's
+current work/repair child and current Attempt. This read-only diagnostic is
+outside the model tool surface and does not enable admission or a carrier.
+See [Executive binding](../../docs/hermes/EXECUTIVE_DELEGATION_BINDING.md) for
+exact scope, canonical owners, verification and remaining live integration.

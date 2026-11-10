@@ -429,7 +429,8 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
-def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request):
+@pytest.mark.parametrize('fixture_umask',[0o002,0o022])
+def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,fixture_umask):
     """Real FD/snapshot/Bash/getpath; trusted-platform metadata is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
@@ -445,7 +446,9 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    bootstrap=Path(sys.executable).with_name('python3')
+    # Canonicalize only the fixture directory. Keep python3's final selector
+    # symlink so the real owner still checks its image and alias identity.
+    bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
     monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
@@ -457,9 +460,19 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     protected=([str(bootstrap.resolve()),str(bootstrap.parent)] if system_launch else [str(real),str(logical.parent),*set(observed.values())])
     ancestry=(bootstrap.resolve(),bootstrap) if system_launch else (real,logical,*map(Path,observed.values()))
     ancestors={str(v) for p in ancestry for v in p.parents}
+    # RWE starts through a runner-owned virtual environment. Model only its
+    # exact existing regular startup configuration files, preserving real
+    # content, link, size, getpath and drift checks in the production pin.
+    import stat
+    startup_configs=set()
+    for directory in (logical.parent,logical.parent.parent):
+        candidate=directory/'pyvenv.cfg'
+        try:info=candidate.lstat()
+        except FileNotFoundError:continue
+        if stat.S_ISREG(info.st_mode):startup_configs.add(str(candidate))
     private=[];fault_acl=False
     def distribution(name):
-        return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
+        return str(name) in ancestors or str(name) in startup_configs or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
     def root_view(info):
         return _preserving_stat_view(info,uid=0,mode=info.st_mode&~0o022)
     def owned_fstat(fd):
@@ -487,7 +500,10 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         return rawxattr(name,key,*args,**kwargs)
     with tempfile.TemporaryDirectory(prefix='.mmx-inert-init-',dir=account.pw_dir) as scratch:
         private.extend([str(v) for v in Path(scratch).parents]+[scratch])
-        lane=Path(scratch)/'lanes';(lane/'ext/lanes').mkdir(parents=True,mode=0o700)
+        lane=Path(scratch)/'lanes';previous_umask=os.umask(fixture_umask)
+        try:
+            for directory in (lane,lane/'ext',lane/'ext/lanes'):directory.mkdir(mode=0o700)
+        finally:os.umask(previous_umask)
         hook=lane/'ext/HOST_ENV.sh';config=Path(scratch)/'not-read.json'
         hook.write_text('export GLM_CONFIG='+str(config)+'\n');hook.chmod(0o600)
         c=commitment();c.update(lane_root=str(lane),account=dict(uid=os.getuid(),gid=os.getgid(),user=account.pw_name,home=account.pw_dir),
@@ -502,7 +518,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors,root_files=[real])
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private)|startup_configs,prefixes=protected+[scratch],root_directories=ancestors,root_files=[real,*startup_configs])
         result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
@@ -573,20 +589,23 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed'
+    assert hashlib.sha256(current_raw).hexdigest()=='22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada'
     current=json.loads(current_raw)
-    assert len(before)==95 and len(current)==102
+    assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
     added={'ext/host_pull_daemon.sh','ext/host_pull_launchd.plist.template',
         'ext/paid_host_readiness.py','ext/paid_initializer.py',
         'ext/paid_initializer_token_data.py','ext/paid_initializer_nested_data.py',
-        'ext/paid_provider_entry.py'}
+        'ext/paid_provider_entry.py','ext/post_failure_observation.py',
+        'ext/post_failure_observation_delivery.py', 'ext/participant_binding.py',
+        'ext/fabric_participant_owner.py','ext/original_advertised_artifact.py'}
     # The accepted source union includes the protected review-routing picker,
     # provider/readiness composition and fixed-template launcher transition.
     # Preserve their finite changes without replacing the historical epoch.
-    changed={'ext/fabric_task.py','ext/glm_host_account_source.py',
+    changed={'ext/fabric_task.py','ext/glm_host_account_source.py','ext/lease_broker.py',
         'ext/host_pull.sh','ext/host_pull_backend.py','ext/paid_glm_model_client.py',
         'ext/paid_host_qualification.py','ext/paid_incumbent_state.py',
+        'ext/linux_process_identity.py',
         'ext/paid_model_owner.py','ext/pick.py','ext/pool_ledger.py','ext/remote_sub.sh',
         'ext/remote_sub_exec.py','ext/support_bundle.py','ext/paid_yaml_runtime.py','pool'}
     # P8.T1.S7's reviewed diagnostic boundary changes exactly these four
@@ -600,11 +619,34 @@ def test_native_initializer_extends_only_exact_preimage_members():
                           'ext/fabric_operator_contract.py','ext/native_remote.py',
                           'ext/oc_free_exec.sh','ext/remote_sub_helpers.py',
                           'ext/slot.py','ext/sub.sh'}
-    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed
-    assert sum(before[p]==current[p] for p in before)==69
-    for name in added|changed|diagnostic_changed|long_horizon_changed:
+    application_changed={'ext/lease_broker.py', 'ext/go_lease_capability.py', 'ext/go_lease_gateway.py', 'ext/quota_circuit.py'}
+    recovery_changed={'ext/artifact_delivery.py','ext/run_observation.py',
+                      'ext/run_observation_delivery.py'}
+    # Preserve protected Linux process custody, the Ubuntu4 qualifier
+    # and the application A members in the exact historical diff.
+    ubuntu4_changed={'ext/fabric_host_qualification.py'}
+    assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
+    # The procfs fallback and atomic load sampling change only the current lane runtime.
+    census_changed={'ext/lane_runtime.py'}
+    assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
+    assert current['ext/lane_runtime.py']=='b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b'
+    assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
+    # Census fallback advances exactly one additional historical member.
+    assert sum(before[p]==current[p] for p in before)==59
+    core_successors = {
+        "ext/go_lease_capability.py": ("d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940", "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
+        "ext/go_lease_gateway.py": ("adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949", "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
+        "ext/lease_broker.py": ("0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+    }
+    for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
-        assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
+        actual=hashlib.sha256(source.read_bytes()).hexdigest()
+        if name in core_successors:
+            predecessor,successor=core_successors[name]
+            assert current[name]==predecessor
+            assert actual==successor
+        else:
+            assert current[name]==actual
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
     source=(native/'rollout/native_install.py').read_text()
@@ -924,10 +966,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification adds two jobs, but full-mode H1 security checks and
-    # the required fan-in remain enforced by the canonical validator above.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards']
+    # PR qualification and early pin guards add three jobs; full-mode H1
+    # security checks and the required fan-in remain enforced by the validator.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
@@ -1058,3 +1100,4 @@ else:raise AssertionError('unmodeled writable file admitted')
     source='import sys\n'+_observer_metadata_fixture(definitions+'\n'+child_probe,exact=[*modeled.parents,modeled],prefixes=[],root_directories=[*modeled.parents,modeled,regular],root_files=[image])
     child=subprocess.run([sys.executable,'-I','-S','-B','-c',source,json.dumps(data)],capture_output=True,timeout=5)
     assert child.returncode==0 and not child.stdout and not child.stderr
+

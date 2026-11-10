@@ -9872,7 +9872,7 @@ def test_canary_envelope_binds_live_control_probe_and_inner_receipt(tmp_path: Pa
         )
 
 
-def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
+def test_awaiting_canary_quarantine_preserves_readiness_and_activation(
     tmp_path: Path, short_socket_root: Path
 ):
     async def exercise():
@@ -9937,6 +9937,225 @@ def test_awaiting_canary_quarantine_allows_only_readiness_and_activation(
             assert repeated["ok"] is False
             assert loader_calls == [True]
         finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_allows_provider_independent_backup_and_verify(
+    tmp_path: Path, short_socket_root: Path
+):
+    """DR backup/verify are local-only (real `control_plane.executive_backup`
+    helper, no fake) and must not depend on worker-provider canary
+    readiness: they run while AWAITING_CANARY, leave `service_state`
+    unchanged, and touch no canary/provider/worker surface."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            before = await _request(service, "status")
+            assert before["result"]["service_state"] == "AWAITING_CANARY"
+
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            receipt = created["result"]
+            database_path = Path(receipt["database_path"])
+            assert database_path.is_file()
+            assert database_path.parent == service.config.backup_root.resolve()
+            assert stat.S_IMODE(database_path.stat().st_mode) == 0o600
+            manifest_path = Path(receipt["manifest_path"])
+            assert manifest_path.is_file()
+
+            verified = await _request(
+                service, "verify-backup", {"name": database_path.name}
+            )
+            assert verified["ok"] is True, verified
+            assert (
+                verified["result"]["database_sha256"] == receipt["database_sha256"]
+            )
+
+            after = await _request(service, "status")
+            assert after["result"]["service_state"] == "AWAITING_CANARY"
+            # No canary verdict was ever loaded and the fake supervisor never
+            # observed a restart/requeue call from this path — backup/verify
+            # never reaches the supervisor, canary loader, or any worker.
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_refuses_lifecycle_and_worker_mutations(
+    tmp_path: Path, short_socket_root: Path
+):
+    """Worker and lifecycle mutations stay refused while AWAITING_CANARY,
+    and `service_state` never moves as a side effect of the attempt."""
+
+    async def exercise():
+        service, holder = _service(tmp_path, socket_root=short_socket_root)
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            for command, args in (
+                ("register-worker", {}),
+                ("create-proof-job", {}),
+                ("dispatch", {"job_id": "JOB-nonexistent"}),
+                ("run-coo-cycle", {"root_job_id": "JOB-nonexistent"}),
+                ("reconcile", {}),
+                ("requeue", {"job_id": "JOB-nonexistent"}),
+                ("cancel", {"job_id": "JOB-nonexistent"}),
+            ):
+                denied = await _request(service, command, args)
+                assert denied["ok"] is False, (command, denied)
+                assert "AWAITING_CANARY" in denied["error"]["message"], (
+                    command,
+                    denied,
+                )
+                assert service.service_state == "AWAITING_CANARY"
+            assert holder["supervisor"].requeue_values == []
+            assert holder["supervisor"].started_jobs == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_quarantined_state_refuses_backup_and_verify_backup(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The backup/verify decoupling preserves the QUARANTINED refusal;
+    only READY and AWAITING_CANARY admit the local backup routes."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            service._service_state = "QUARANTINED"
+            denied_backup = await _request(service, "backup")
+            assert denied_backup["ok"] is False
+            assert "QUARANTINED" in denied_backup["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_backup["error"]["message"]
+            denied_verify = await _request(
+                service, "verify-backup", {"name": "fixture.sqlite3"}
+            )
+            assert denied_verify["ok"] is False
+            assert "QUARANTINED" in denied_verify["error"]["message"]
+            assert "require service state READY or AWAITING_CANARY" in denied_verify["error"]["message"]
+            assert backend.created == []
+            assert backend.verified == []
+            assert service.service_state == "QUARANTINED"
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+def test_awaiting_canary_backup_stays_confined_to_the_configured_root(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY admission reuses the existing closed root and name
+    handling rather than a second backup surface: the configured root is
+    created owner-only, a name that is not a simple ``.sqlite3`` file name is
+    refused, and a backup with no canonical manifest is refused before the
+    backend is reached."""
+
+    async def exercise():
+        backend = _FakeBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            created = await _request(service, "backup")
+            assert created["ok"] is True, created
+            assert Path(created["result"]["database_path"]).parent == service.config.backup_root
+            assert stat.S_IMODE(service.config.backup_root.stat().st_mode) == 0o700
+            assert stat.S_IMODE(backend.created[0].stat().st_mode) == 0o600
+
+            escaped = await _request(
+                service, "verify-backup", {"name": "../executive.sqlite3"}
+            )
+            assert escaped["ok"] is False
+            assert "simple .sqlite3 file name" in escaped["error"]["message"]
+            assert backend.verified == []
+
+            unrestorable = await _request(
+                service, "verify-backup", {"name": "absent.sqlite3"}
+            )
+            assert unrestorable["ok"] is False
+            assert "no canonical manifest" in unrestorable["error"]["message"]
+            assert backend.verified == []
+        finally:
+            await service.close()
+
+    asyncio.run(exercise())
+
+
+class _BlockingBackup(_FakeBackup):
+    """Blocks inside the physical backup call so the owned-physical-worker
+    registration and the cancellation behaviour stay observable."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def create_online_backup(self, store, destination_dir: Path):
+        self.entered.set()
+        assert self.release.wait(timeout=30)
+        return super().create_online_backup(store, destination_dir)
+
+
+def test_awaiting_canary_backup_keeps_the_owned_physical_effect(
+    tmp_path: Path, short_socket_root: Path
+):
+    """The AWAITING_CANARY backup still runs through the service's owned
+    physical worker (`_run_physical` → `_run_owned_coroutine`): the effect is
+    registered as service-owned while it runs, a cancelled request does not
+    abandon it, and it completes rather than being dropped. A bare
+    `asyncio.to_thread` body would register no owned physical worker and its
+    effect would be abandoned on cancellation."""
+
+    async def exercise():
+        backend = _BlockingBackup()
+        service, _holder = _service(
+            tmp_path, socket_root=short_socket_root, backup=backend
+        )
+        service._service_state = "AWAITING_CANARY"
+        await service.start()
+        try:
+            request = {
+                "version": CONTROL_PROTOCOL_VERSION,
+                "command": "backup",
+                "args": {},
+            }
+            task = asyncio.create_task(service._dispatch_request(request))
+            for _ in range(500):
+                if backend.entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert backend.entered.is_set(), "the backup never reached the backend"
+            # The effect is owned by the service, not by a bare thread.
+            assert len(service._physical_workers) == 1
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # Cancellation of the request does not abandon the physical effect.
+            assert service._physical_workers
+            backend.release.set()
+            await asyncio.wait(tuple(service._physical_workers), timeout=30)
+            assert (service.config.backup_root / "fixture.sqlite3").is_file()
+        finally:
+            backend.release.set()
             await service.close()
 
     asyncio.run(exercise())
@@ -10849,7 +11068,9 @@ def test_cycle_supervisor_selection_uses_root_binding_not_global_arm(tmp_path, s
             plan=dataclasses.replace(root,job_id="JOB-plan",parent_job_id=root.job_id,
                                      depth=1,orchestration_role="plan")
             service.config=dataclasses.replace(service.config,coo_autonomy_armed=True,coo_operator_harness_armed=True)
-            monkeypatch.setattr(service.runtime.jobs,"get_job",lambda job_id:plan)
+            actual_get_job=service.runtime.jobs.get_job
+            monkeypatch.setattr(service.runtime.jobs,"get_job",
+                                lambda job_id:plan if job_id==plan.job_id else actual_get_job(job_id))
             monkeypatch.setattr(service,"_require_bound_coo_job",lambda job:root)
             monkeypatch.setattr(service,"_require_coo_workspace",lambda job:{})
             monkeypatch.setattr(service,"_coo_binding_for_root",lambda job:dict(operator_harness_armed=frozen))

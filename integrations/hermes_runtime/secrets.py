@@ -12,6 +12,8 @@ from .constants import (
     DASHBOARD_USERNAME_ENV,
     DEFAULT_CHILD_SECRET_ENV,
     GATEWAY_TOKEN_ENV,
+    SECRETARY_CONVERSATION_TOKEN_ENV,
+    conversation_contract,
 )
 from .errors import RuntimeRefusal
 
@@ -20,8 +22,14 @@ _PLACEHOLDERS = frozenset({
     "changeme", "password", "secret", "token", "hermes", "replace-me",
 })
 _CHILD_SECRET_ENV = set(DEFAULT_CHILD_SECRET_ENV)
+_CONVERSATION_TOKEN_ENVS = frozenset({
+    SECRETARY_CONVERSATION_TOKEN_ENV, conversation_contract("mmmeta").token_env,
+})
 _SLACK_BOT_USER_ID_ENV = "HERMES_SLACK_BOT_USER_ID"
 _SLACK_BOT_TOKEN_ENV = "HERMES_SLACK_BOT_TOKEN"
+_SUPERVISOR_NOTIFICATION_ENV = frozenset({
+    "NOTIFY_SOCKET", "INVOCATION_ID", "SYSTEMD_EXEC_PID", "MM_HERMES_IMPLEMENTATION_SHA",
+})
 
 
 def register_child_secret_env(names: set[str] | frozenset[str] | list[str]) -> None:
@@ -33,8 +41,10 @@ def register_child_secret_env(names: set[str] | frozenset[str] | list[str]) -> N
     for name in names:
         if not isinstance(name, str) or not _KEY.fullmatch(name):
             raise RuntimeRefusal("INVALID_SECRET_ENV_NAME")
-        if name == GATEWAY_TOKEN_ENV:
+        if name == GATEWAY_TOKEN_ENV or name in _CONVERSATION_TOKEN_ENVS:
             raise RuntimeRefusal("GATEWAY_TOKEN_STAYS_ON_THE_FRONT_DOOR")
+        if name in _SUPERVISOR_NOTIFICATION_ENV:
+            raise RuntimeRefusal("SUPERVISOR_NOTIFICATION_ENV_REFUSED")
         _CHILD_SECRET_ENV.add(name)
 
 
@@ -45,6 +55,12 @@ def clear_child_secret_env() -> None:
 
 def child_secret_env_names() -> frozenset[str]:
     return frozenset(_CHILD_SECRET_ENV)
+
+
+def assert_no_supervisor_notification_env(env: dict[str, str]) -> None:
+    """Refuse a late model/proxy merge that introduces main-process authority."""
+    if _SUPERVISOR_NOTIFICATION_ENV.intersection(env):
+        raise RuntimeRefusal("SUPERVISOR_NOTIFICATION_ENV_REFUSED")
 
 
 class Secrets:
@@ -58,6 +74,28 @@ class Secrets:
 
     def __repr__(self) -> str:
         return "Secrets(redacted)"
+
+
+def role_conversation_token(secrets: Secrets, *, role: str) -> str | None:
+    """One explicit role capability; a sibling credential is never ignored."""
+    contract = conversation_contract(role)
+    if (_CONVERSATION_TOKEN_ENVS - {contract.token_env}).intersection(secrets.values):
+        raise RuntimeRefusal("SECRETARY_CONVERSATION_ROLE_UNQUALIFIED")
+    value = secrets.values.get(contract.token_env)
+    if value is None:
+        return None
+    _validate_token(value)
+    if len(value) > 256 or value in {secrets.token, secrets.dashboard_password} or any(
+        other == value for key, other in secrets.values.items()
+        if key != contract.token_env
+    ):
+        raise RuntimeRefusal("SECRETARY_CONVERSATION_CREDENTIAL_ALIAS_REFUSED")
+    return value
+
+
+def secretary_conversation_token(secrets: Secrets) -> str | None:
+    """Retain the original Secretary capability accessor."""
+    return role_conversation_token(secrets, role="mmsecretary")
 
 
 def load_secrets(path: Path) -> Secrets:
@@ -149,7 +187,8 @@ def child_env(secrets: Secrets, *, home: Path, extra: dict[str, str] | None = No
         DASHBOARD_PASSWORD_ENV: secrets.dashboard_password,
     }
     for name in sorted(_CHILD_SECRET_ENV):
-        if name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV}:
+        if (name in env or name in {GATEWAY_TOKEN_ENV, _SLACK_BOT_TOKEN_ENV}
+                or name in _CONVERSATION_TOKEN_ENVS or name in _SUPERVISOR_NOTIFICATION_ENV):
             continue
         if name in secrets.values:
             env[name] = secrets.values[name]
@@ -164,4 +203,5 @@ def child_env(secrets: Secrets, *, home: Path, extra: dict[str, str] | None = No
         if "\n" in value or "\x00" in value:
             raise RuntimeRefusal("EXTRA_CHILD_ENV_REFUSED")
         env[key] = value
+    assert_no_supervisor_notification_env(env)
     return env

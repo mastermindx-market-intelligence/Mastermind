@@ -350,6 +350,88 @@ def test_inverted_job_duration_rejected():
         build_profile(snapshot)
 
 
+def _with_nonexecuted_job(**fields):
+    snapshot = _snapshot(observed_at=_t(1000))
+    # Same nonexecution shape as real push job128954238001: completion is
+    # six seconds before synthetic start, with no steps or assigned runner.
+    job = {
+        "id": 900108, "run_id": _RUN_ID, "head_sha": _SHA, "run_attempt": 3,
+        "name": "PR fast checks", "status": "completed", "conclusion": "skipped",
+        "started_at": _t(996), "completed_at": _t(990), "steps": [],
+        "runner_id": None, "runner_name": None,
+        "runner_group_id": None, "runner_group_name": None,
+    }
+    job.update(fields)
+    snapshot["jobs"]["jobs"].append(job)
+    snapshot["jobs"]["total_count"] += 1
+    return snapshot
+
+
+def test_nonexecuted_job_keeps_raw_anomaly_without_losing_other_timings():
+    profile = build_profile(_with_nonexecuted_job())
+    row = next(row for row in profile["jobs"] if row["job_id"] == 900108)
+    assert row["started_at"] == _t(996)
+    assert row["completed_at"] == _t(990)
+    assert row["execution_timing_eligible"] is False
+    assert row["running_seconds"] is None
+    assert row["start_offset_seconds_from_created_at"] is None
+    assert row["age_at_observed_at_seconds"] is None
+    assert profile["compute_time_seconds"] == 1748.0
+    assert profile["concurrent_wall_time_seconds"] == 965.0
+    assert profile["compute_time_complete"] is False
+    assert profile["complete_jobs"] is True
+    assert profile["workflow_elapsed_seconds"] == 990.0
+    assert profile["progress"]["nonexecuted_jobs"] == [{"job_id": 900108, "name": "PR fast checks"}]
+    assert any("nonexecution" in gap for gap in profile["evidence_gaps"])
+
+
+@pytest.mark.parametrize("started", [None, "not-a-timestamp", "2026-11-02T09:59:00Z", _t(1006)])
+def test_nonexecuted_start_metadata_is_preserved_but_never_timed(started):
+    profile = build_profile(_with_nonexecuted_job(started_at=started))
+    row = next(row for row in profile["jobs"] if row["job_id"] == 900108)
+    assert row["started_at"] == started
+    assert row["running_seconds"] is None
+    assert row["start_offset_seconds_from_created_at"] is None
+    assert profile["workflow_elapsed_seconds"] == 990.0
+
+
+@pytest.mark.parametrize("completed", [None, "not-a-timestamp", "2026-11-02T09:59:00Z", _t(1006)])
+def test_unqualified_nonexecuted_completion_keeps_report_incomplete(completed):
+    profile = build_profile(_with_nonexecuted_job(completed_at=completed))
+    row = next(row for row in profile["jobs"] if row["job_id"] == 900108)
+    assert row["completed_at"] == completed
+    assert row["running_seconds"] is None
+    assert profile["complete_jobs"] is False
+    assert profile["workflow_elapsed_seconds"] is None
+    assert profile["compute_time_seconds"] == 1748.0
+    assert profile["progress"]["jobs_missing_completed_at"] == [{"job_id": 900108, "name": "PR fast checks"}]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("status", "in_progress"), ("conclusion", "failure"),
+    ("conclusion", "cancelled"), ("steps", None),
+    ("steps", [_step(1, "Set up job", _t(996), _t(997))]),
+    ("runner_id", 1), ("runner_name", "runner"),
+    ("runner_group_id", 1), ("runner_group_name", "group"),
+])
+def test_execution_or_uncertain_evidence_keeps_strict_timestamp_validation(field, value):
+    with pytest.raises(ProfileError, match="inverted duration"):
+        build_profile(_with_nonexecuted_job(**{field: value}))
+
+
+def test_nonexecuted_job_still_requires_consistent_identity():
+    with pytest.raises(ProfileError, match="match workflow run run_id"):
+        build_profile(_with_nonexecuted_job(run_id=1))
+
+
+def test_nonexecuted_metadata_survives_the_actual_cli():
+    result = _run_cli(["-"], stdin=json.dumps(_with_nonexecuted_job()).encode())
+    assert result.returncode == 0, result.stderr.decode()
+    profile = json.loads(result.stdout)
+    assert profile["compute_time_seconds"] == 1748.0
+    assert profile["progress"]["nonexecuted_jobs"][0]["job_id"] == 900108
+
+
 def test_job_starting_before_created_at_rejected():
     with pytest.raises(ProfileError, match="inverted start offset"):
         build_profile(_snapshot(run={"created_at": _t(300)}))
@@ -630,3 +712,4 @@ def test_cli_malformed_identity_reports_bounded_error_without_traceback():
     assert b"Traceback" not in result.stderr
     assert len(result.stderr) < 600
     assert result.stdout == b""
+

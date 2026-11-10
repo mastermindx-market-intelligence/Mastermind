@@ -317,7 +317,7 @@ describe("stage-two current operation presentation", () => {
     await user.type(screen.getByLabelText("Goal"),"Inspect only this requested scope");
     await user.click(screen.getByRole("button",{name:"Preview requested scope"}));
     expect(screen.getByRole("heading",{name:"Launch request preview"})).toBeTruthy();
-    expect(screen.getByText("Inspect only this requested scope",{selector:"dd"})).toBeTruthy();
+    expect(screen.getByText("Inspect only this requested scope",{selector:"p.launch-request-preview-goal"})).toBeTruthy();
     expect(made.prepare).not.toHaveBeenCalled();expect(reserve).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();expect(made.readOperation).not.toHaveBeenCalled();
   });
@@ -334,7 +334,12 @@ describe("stage-two current operation presentation", () => {
     expect(made.readOperation).toHaveBeenCalledTimes(1);
     act(()=>{made.setCtx(null);made.notify(signedOut);});
     expect(screen.queryByText(original.operationKey)).toBeNull();
-    expect(screen.getByText("Request status unavailable")).toBeTruthy();
+    // The private entry replaces the old Session Estate unavailable panel;
+    // it cannot expose the withdrawn owner's identity or erase its pointer.
+    expect(screen.getByRole("heading",{name:"Welcome back."})).toBeTruthy();
+    expect(screen.queryByRole("heading",{name:"Request status"})).toBeNull();
+    expect(made.data.get("owner-a")).toEqual(original);
+    expect(made.readOperation).toHaveBeenCalledTimes(1);
     expect(made.prepare).not.toHaveBeenCalled();expect(made.submit).not.toHaveBeenCalled();
   });
 });

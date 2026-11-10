@@ -12,12 +12,13 @@ from pathlib import Path
 import shutil
 
 from tests.test_paid_release_archive_composition import _materialize
+from tests.test_glm_native_release_record_transition import expected_core_release_records
 
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = Path("ops/native_fabric/quota_continuity")
 PREIMAGE = "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e"
-CURRENT_MANIFEST = "a130be866589897c74a09ee5689ad9df751ce2207b8e5768cb5b58274292bbed"
+CURRENT_MANIFEST = "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
 
 
 def test_current_installer_materializes_the_exact_new_catalog_readers(tmp_path):
@@ -39,11 +40,14 @@ def test_current_installer_materializes_the_exact_new_catalog_readers(tmp_path):
     assert hashlib.sha256((release / NATIVE / "source/pool_ledger.py").read_bytes()).hexdigest() == PREIMAGE
     result = _materialize(release)
     assert result.returncode == 0, result.stderr
-    for name, raw in before.items():
+    expected = expected_core_release_records(release / NATIVE,
+        {name: raw for name, raw in before.items() if name != "native-preimages.json"})
+    expected["native-preimages.json"] = before["native-preimages.json"]
+    for name, raw in expected.items():
         assert (rollout / name).read_bytes() == raw
-    manifest = json.loads(before["native-manifest.json"])
-    inventory = json.loads(before["native-source-inventory.json"])
-    assert len(manifest) == len(inventory["files"]) == 102
+    manifest = json.loads(expected["native-manifest.json"])
+    inventory = json.loads(expected["native-source-inventory.json"])
+    assert len(manifest) == len(inventory["files"]) == 107
     for name, digest in manifest.items():
         path = rollout / "native-code-stage" / name
         assert hashlib.sha256(path.read_bytes()).hexdigest() == digest

@@ -1,0 +1,122 @@
+{
+  "archive_counterexamples": {
+    "added_archive_sha256": "b5a2d2490d87cb91cdcb73b7d1b2138bb850ad91f7de7609e4a462e4f8ae0bd8",
+    "added_directory": "ops/launchd",
+    "assertions_or_environment_precedence_changed": false,
+    "fixture": "/tmp/mmx-e3-ci-input-closure-d9dsnftn",
+    "live_effects": "NONE; source fixtures only",
+    "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+    "original_archive_sha256": "6b36b92f74833f739c7136e82ed5ae00623251e60bce9e03ecb47d47175982af",
+    "production_source_changes": 0,
+    "records": [
+      {
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "--noconftest",
+          "-c",
+          "/dev/null",
+          "--junitxml=/tmp/mmx-e3-ci-missing-plist.xml",
+          "tests/test_company_intelligence_event_compiler_e3a.py::test_qwen_resolves_worker_override_before_yaml"
+        ],
+        "exit": 1,
+        "junit_sha256": "4cddd24defabb35b061baf424a427300247924cb56b78a6860c7953ca38b2f7a",
+        "log_sha256": "16b2cb6670878c8bd5d874533619c1c5f5bd1577c2203ddec1a0378d1eba5993",
+        "name": "missing-plist",
+        "seconds": 5.773,
+        "totals": {
+          "errors": 0,
+          "failures": 1,
+          "skipped": 0,
+          "tests": 1
+        }
+      },
+      {
+        "command": [
+          "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "--noconftest",
+          "-c",
+          "/dev/null",
+          "--junitxml=/tmp/mmx-e3-ci-complete-closure.xml",
+          "tests/test_fabric_exact_scoped_model_composition.py",
+          "tests/test_company_intelligence_event_compiler_e3a.py"
+        ],
+        "exit": 1,
+        "junit_sha256": "cad251b7497c412a5478db9c1e637ff9929ad4f10c2eec6bc8897f176e789a42",
+        "log_sha256": "1690fe8be4a410acf716975dfd63c12f4f1a89b285632f81af60d30950aac723",
+        "name": "complete-closure",
+        "seconds": 17.247,
+        "totals": {
+          "errors": 0,
+          "failures": 1,
+          "skipped": 0,
+          "tests": 118
+        }
+      }
+    ],
+    "source": "5ca64e95cd2fbe03bb2258b62f6c1e402c1e6612",
+    "worker_plist_blob": "e8d8a3e35661f5ff62830b30868240f77c63f3b4"
+  },
+  "archive_followup_failure": "test_run_e3a_eval_hermetic_end_to_end requires nonempty git_head; source archive did not contain Git metadata",
+  "at": "2026-11-07T09:16:06.516607+00:00",
+  "classification": "SOURCE_CI_INPUT_CLOSURE_QUALIFIED",
+  "hosted_counterexample": {
+    "failed": 1,
+    "failure": "test_qwen_resolves_worker_override_before_yaml; sparse checkout omitted ops/launchd",
+    "job": 128354184252,
+    "passed": 117,
+    "run": 42356005158,
+    "tests": 118
+  },
+  "hosted_successor": "Required; not yet observed",
+  "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+  "registered_checkout_qualification": {
+    "command": [
+      "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+      "-m",
+      "pytest",
+      "-q",
+      "--noconftest",
+      "-c",
+      "/dev/null",
+      "-p",
+      "no:cacheprovider",
+      "--basetemp",
+      "/tmp/mmx-e3-registered-pytest-y2y4zq47",
+      "--junitxml=/tmp/mmx-e3-ci-registered-closure.xml",
+      "tests/test_fabric_exact_scoped_model_composition.py",
+      "tests/test_company_intelligence_event_compiler_e3a.py"
+    ],
+    "exit": 0,
+    "fixture_kind": "existing registered source checkout with real Git HEAD; synthetic providers",
+    "junit_sha256": "1e6849f503ca0ac60d4f24c8d23f98396d32a55052bb7db459a9bbcd66644411",
+    "log_sha256": "3591090995b75304842076f0b34cb227b2890e9f02ecc0fc8f31bf0fe09ab1cf",
+    "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+    "no_production_routing_or_test_assertion_change": true,
+    "paired_source": "5ca64e95cd2fbe03bb2258b62f6c1e402c1e6612",
+    "seconds": 13.526,
+    "status_after": "",
+    "totals": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 118
+    }
+  },
+  "repair": "Include ops/launchd in the pinned paired-owner sparse checkout and explicitly install its declared requests>=2.31 test dependency. No runtime code, provider precedence, fixture assertion, source pin or positive-proof gate changed.",
+  "requests_dependency_provenance": {
+    "candidate_source": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6704831450",
+    "decision": "Consume the same bounded workflow dependency declaration as the original retained candidate. Do not rely on an undeclared transitive test dependency.",
+    "macro_requirements_blob": "bdb554b5a46f8f717ab0e1db3c7ed9c27e57a67a",
+    "mastermind_pyproject_blob": "622259d33f04d40907075430c5228d6fbba2bae1",
+    "original_retained_candidate_workflow_blob": "946a9d23a356c20f4629e5c15420155d34ea1c43"
+  },
+  "runtime_effects": "NONE; synthetic provider tests only",
+  "source_parent": "5ca64e95cd2fbe03bb2258b62f6c1e402c1e6612",
+  "workflow_sha256": "d22458b162b2b2b815fe1f46d62c5448d018aa105e5f21cc2efd7639959d1398"
+}

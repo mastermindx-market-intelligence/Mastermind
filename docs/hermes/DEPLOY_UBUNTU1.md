@@ -64,6 +64,123 @@ empty, inaccessible or unsafe pointers fail closed rather than falling back
 to an inline key. Only the role's selected primary credential reaches its
 native model child; its sibling's provider credential is not forwarded.
 
+## Native HTTPS egress — mandatory, not automatically provisioned
+
+Native BYOK requires a role-private, canonical HTTPS CONNECT proxy.
+Only the **PID1-managed** root-owned system units are eligible to serve
+on Ubuntu1. They keep `IPAddressDeny=any` and
+`RestrictAddressFamilies=AF_UNIX AF_INET` and allow **only** the assigned
+role IP: 127.0.0.2/32 (Secretary) or 127.0.0.3/32 (Meta-CEO).
+The runtime gateway and pinned Hermes backend also bind that role IP.
+Never add shared 127.0.0.1/32, blanket localhost, public egress,
+arbitrary proxy hosts, inherited shell proxy or cross-role credentials.
+Legacy generated systemd --user units are inert staging artifacts and
+their startup is rejected by the production supervisor on Ubuntu1.
+
+The **existing private 0600 Secretary** file additionally needs these
+operator-provisioned settings (port shown as an example only):
+
+```text
+HERMES_NATIVE_EGRESS_ROLE=mmsecretary
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.2:18651
+```
+
+The **separate private 0600 Meta-CEO** file needs its own intended role and
+a different proxy endpoint (example port only):
+
+```text
+HERMES_NATIVE_EGRESS_ROLE=mmmeta
+HERMES_NATIVE_HTTPS_PROXY=http://127.0.0.3:18652
+```
+
+`integrations.hermes_runtime.egress.native_egress_child_env` validates these
+two fields from that role's private secrets, never the interactive shell, and
+passes only `HTTPS_PROXY` plus a fixed localhost `NO_PROXY` to the native
+model child. Empty, external, noncanonical, URL-credentialed, privileged-port,
+wrong-role and unqualified settings refuse before the child starts. ModelArk
+and Z.AI keys remain independently loaded from the previously reviewed
+credential pointers; neither key is forwarded to the proxy by this module.
+
+**Pinned donor source-level proxy contract:** at
+`NousResearch/hermes-agent@1c0cd667746d3395fe9e1b6c74f8f85952486f18`,
+`agent/process_bootstrap.py::_get_proxy_from_env` selects `HTTPS_PROXY`
+ahead of `HTTP_PROXY` and `ALL_PROXY`. `build_keepalive_http_client`
+passes the selected value to the OpenAI-wire `httpx.Client(proxy=...,
+verify=...)`, and `agent/agent_runtime_helpers.py` creates primary
+OpenAI-compatible model clients through that helper. This confirms the
+**intended source transport** honors the injected proxy, rather than relying
+on ambient shell proxy discovery; it still does not prove the installed
+binary, proxy listener, hostname allowlist, TLS peer or remote inference.
+
+**Critical cross-role isolation:** `IPAddressAllow=localhost` was
+originally broad (`127.0.0.0/8` and `::1/128`) and allowed either role
+to connect to a sibling proxy on a different localhost port. The updated
+root-managed unit now permits only **its own** 127.0.0.2/32 or
+127.0.0.3/32 IP for all local role services (gateway, backend, proxy).
+A 127.0.0.1/32 grant allows **every port** on that address, including
+unrelated host listeners, so it is forbidden for either root unit.
+The proxy must actually bind the selected role IP (not 0.0.0.0 or 127.0.0.1),
+and the host must prove that effective parent/system/user slice rules do
+not add a broader localhost allowance.
+
+systemd notes that cgroup eBPF-based `IPAddressAllow/Deny` can be silently
+ineffective on unsupported kernels, delegation layouts or container
+managers. `systemd --user` unit text, local `/api/health` 200 and
+`systemctl show` values are **not enforcement proof**. Before using either
+provider credential, separately test **from each actual running unit cgroup**:
+own proxy permitted, sibling proxy forbidden, unauthorized 127/8
+destination forbidden, direct public 443 forbidden, and only the intended
+host:443 CONNECT allowed by the operator-owned proxy. Test both
+directions, including negative results, and retain the host-bound receipts.
+Without proven enforcement, STOP production qualification; do not assume
+that different IP aliases by themselves provide isolation.
+
+**The proxy process is not created, installed or certified by this repository.**
+A currently authorized host network owner must separately provide and
+validate an existing compatible role-specific loopback HTTP CONNECT proxy
+that enforces the Secretary's exact commercial ModelArk destination
+`ark.ap-southeast.bytepluses.com:443` and the Meta-CEO's exact Z.AI
+destination `api.z.ai:443`, with TLS validation by the native model
+client. Deny all other destinations, including unrestricted tunneling; never
+use the proxy as a backdoor for Slack, general browsing, Fabric, or a second
+authority plane. It must not be accessible across role boundaries without
+the required host-side policy. Verify the installed Linux systemd cgroup
+actually enforces the network rules and the pinned native HTTP client honors
+the explicit HTTPS proxy. These are real-host canaries, not source-test claims.
+
+`hermesctl doctor` reports missing per-role proxy setup under
+`network_proxy:mmsecretary` / `network_proxy:mmmeta`, refuses shared
+bot/gateway/proxy identity and incumbent Grok Secretary bot-ID reuse as core
+readiness, and returns `core_text_status=CONFIG_READY_NOT_LIVE_PROVEN`
+only when its core configuration prerequisites are satisfied. It continues
+reporting optional Mac computer-use, future Fabric/Steward and Dot-account gaps
+independently; its overall status/exit behavior remains fail-closed.
+
+To qualify **only the two core text-bot configuration prerequisites** without
+requiring unrelated Mac/Fabric/vision features, use:
+
+```sh
+python3 integrations/hermes_harness/hermesctl doctor --core-text-config-only --json
+```
+
+This explicitly scoped command exits zero only for `CONFIG_READY_NOT_LIVE_PROVEN`.
+The JSON still says `status: MISSING` when future/optional capabilities are
+missing; it does not permit Slack send, model inference, Executive admission,
+host deployment, arbitrary traffic or proxy installation. Unscoped
+`hermesctl doctor` keeps the previous conservative full-readiness exit status.
+No doctor, local HTTP 200, proxy URL or selected model constitutes a live
+authenticated inference receipt.
+
+For actual acceptance, obtain authenticated pinned Hermes structured
+one-shot output through `chat -Q --query-file - --format stream-json` inside
+the approved service/network confinement, validate it using
+`integrations.hermes_harness.native_turn_evidence` from the companion
+stacked PR, prove remote TLS/provider usage and blocked destinations,
+then observe an authorized exact-parent thread reply from each distinct
+role bot through the existing Agent Dialogue owner. Keep the incumbent Grok
+Secretary operating until independent review, protected release and rollback
+proof are complete.
+
 MiniMax, Cursor pool and Steward MCP credentials and endpoints remain separate
 future qualification routes. Their optional pointer names include
 `MINIMAX_TOKEN_PLAN_KEY_FILE`, `CURSOR_API_KEY_FILE` and
@@ -72,10 +189,15 @@ automatic fallback, enabled Steward MCP or computer-use tool. The disabled
 Cursor endpoint defaults to `https://cursor-pool.invalid/v1`. Personal
 Coding Plan `/api/coding` provider URLs are refused.
 
-Each always-on Hermes agent has its own systemd user unit and its own 0600
-secrets file. The Slack bot identity is per unit, not shared with Grok Secretary.
+Each role has a separate **root-managed system unit running as a
+distinct non-root account/group**, named mmsecretary or mmmeta, with
+unequal numeric UIDs/GIDs, private 0700 state/secret directories, and its
+own mode-0600 secrets file. Shared longr/operator ownership is refused. The old user
+units are generated only into an inert staging directory; do not
+enable/start them. Slack bot identities are role-private and not
+shared with Grok Secretary.
 
-| Agent | User unit | Secrets file |
+| Agent | Root-managed system unit | Secrets file |
 | --- | --- | --- |
 | `hermes-secretary` | `hermes-runtime-mmsecretary.service` | `~/.config/hermes-runtime/mmsecretary.secrets.env` |
 | `hermes-metaceo` | `hermes-runtime-mmmeta.service` | `~/.config/hermes-runtime/mmmeta.secrets.env` |
@@ -91,10 +213,11 @@ HERMES_SLACK_BOT_TOKEN=<this-agents-bot-token>
 
 `self` is only that unit's `HERMES_SLACK_BOT_USER_ID`. Sibling Hermes ids live
 in `roster.json` under `sibling_hermes_agent_ids` and are not a self loop.
-Each user unit has `EnvironmentFile=` set to that unit's 0600 secrets file, so
-systemd loads `HERMES_SLACK_BOT_USER_ID` into the unit process. The unit text
-contains the path, not the secret bytes. The Hermes child receives that user
-id and does not receive `HERMES_SLACK_BOT_TOKEN` or `HERMES_GATEWAY_TOKEN`.
+Production root units have no `EnvironmentFile=`. After cgroup, OS-identity,
+private-path and Landlock checks, the CLI alone loads the existing private
+secret file. The native child receives its own Slack user id, never the
+Slack bot token or gateway token. Inert legacy user units are not launchable
+production services and must never be activated.
 
 The harness refuses to leave shadow mode when `HERMES_SLACK_BOT_USER_ID` is
 unset or malformed (`SHADOW_ID_REQUIRED`). Shadow mode remains the default
@@ -152,50 +275,121 @@ The doctor now checks the selected provider and actual private credential
 file referenced by an installed role profile, rather than treating an
 operator shell key or a different role's config as native readiness.
 
+## Role configuration metadata read
+
+Read one role's installed configuration without opening a credential, calling
+a provider, observing a running service or attesting the host:
+
+```sh
+python3 integrations/hermes_harness/hermesctl role-metadata \
+  --state "$HOME/.local/state/hermes-runtime-mmsecretary" --role mmsecretary
+python3 integrations/hermes_harness/hermesctl role-metadata \
+  --state "$HOME/.local/state/hermes-runtime-mmmeta" --role mmmeta
+```
+
+The projection is `mastermind.hermes.role_metadata.v1`. `state` is
+`CONFIGURATION_OBSERVED` when the installed manifest, current release
+receipt and role profile agree, `ABSENT` when the selected role root is
+readable and qualified, the incumbent install manifest is genuinely absent
+and no surviving install evidence is left in the root, and `UNAVAILABLE` with
+one fixed `reason` code otherwise. A root that still has a current-release
+link or a written release but no manifest is a damaged installation, not an
+absent role, and reports `MANIFEST_MISSING`. `ABSENT`
+never means the credential is absent, and it never says anything about a
+role on another host: a reader without a trusted binding to this host has no
+observation at all, and the `source_binding` field stays `NOT_ATTESTED`.
+
+`requested` carries the provider and model identifiers derived from the
+existing role catalog; `provenance` carries the upstream SHA, the release id
+and the manifest/profile/config digests. No credential name, credential
+digest, credential value, private path or raw error text is ever returned.
+The `proof` block always reports `credentials_read: false`,
+`provider_called: false`, `service_observed: false`,
+`served_model_verified: false` and `credential_enrollment: "UNVERIFIED"`.
+Run each command under the role's own login and point `--state` at that
+role's own state directory.
+
+`hermesctl status` is the incumbent operator summary and is deliberately
+lenient about a damaged installation: it keeps reporting `INSTALLED` for a
+root whose profile drifted or whose manifest was replaced by a symlink. A
+consumer that must not report a damaged install as healthy reads
+`role-metadata` instead, which returns `UNAVAILABLE` for those states. The
+two commands answer the same question differently on purpose; the difference
+is pinned by a test so neither can drift into the other unnoticed.
+
 ## Install
 
-From the repo root, as the operator user on ubuntu1:
+From the approved readable repo root on ubuntu1, run the Secretary block
+under the separately provisioned mmsecretary login and the Meta-CEO block
+under mmmeta. Each has its OWN HOME, private files and pinned executable.
+Never execute both blocks under one operator/shared account. Account
+provisioning is a separate authorized host-owner action, not this installer.
+See ROLE_ISOLATION_REPAIR.md; unsupported Landlock or failed numeric-ID
+isolation blocks service startup before keys are loaded.
+
+Secretary (mmsecretary account):
 
 ```sh
 umask 077
 mkdir -p "$HOME/.config/hermes-runtime/credentials" \
   "$HOME/.local/state" \
-  "$HOME/.config/systemd/user"
+  "$HOME/.local/share/hermes-stage/systemd/user"
+# This directory must be inert, unsymlinked, and outside active systemd user search.
+# Never use $HOME/.config/systemd/user for this staging-only installer.
 # Create the 0600 files above out of band. Do not echo tokens into the shell history.
 
-python3 integrations/hermes_harness/hermesctl doctor
+# Global doctor is not cross-UID credential proof. Inspect each installed
+# role with status --state under its own login; the actual CLI gates qualify it.
 
 # HERMES_BIN is the already-built hermes executable from the ubuntu1
 # pinned checkout. This procedure does not choose that path for you.
 python3 integrations/hermes_harness/hermesctl install \
   --role mmsecretary \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary" \
-  --systemd-user-dir "$HOME/.config/systemd/user" \
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user" \
   --secrets-file "$HOME/.config/hermes-runtime/mmsecretary.secrets.env" \
   --hermes-bin "$HERMES_BIN" \
   --fetch
+```
 
+Meta-CEO (mmmeta account, a DIFFERENT HOME and credential owner):
+
+```sh
+umask 077
+mkdir -p "$HOME/.config/hermes-runtime/credentials" \
+  "$HOME/.local/state" \
+  "$HOME/.local/share/hermes-stage/systemd/user"
+# Provision this account's separate 0600 files and HERMES_BIN out of band.
 python3 integrations/hermes_harness/hermesctl install \
   --role mmmeta \
   --state "$HOME/.local/state/hermes-runtime-mmmeta" \
-  --systemd-user-dir "$HOME/.config/systemd/user" \
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user" \
   --secrets-file "$HOME/.config/hermes-runtime/mmmeta.secrets.env" \
   --hermes-bin "$HERMES_BIN" \
-  --upstream-source "$HOME/.local/state/hermes-runtime-mmsecretary/current/upstream"
+  --fetch
 ```
 
 `--fetch` is the only network step. It refuses every revision except the pin.
-The second install copies that attested tree and does not fetch again.
-`--upstream-source` records `upstream_attested: false` unless the bytes came
-from `--fetch`.
+Each role independently fetches the exact pinned upstream source and must
+have its **own** `upstream_attested: true` install receipt before the operator
+canary is eligible. Reusing the first role's checkout through
+`--upstream-source` produces `upstream_attested: false` and therefore
+blocks the second role's canary; never paper over that attestation gate.
+All installs are operator-authorized postrelease actions, not CI steps.
 
 `install` writes:
 
-- `hermes-runtime-mmsecretary.service` and `hermes-runtime-mmmeta.service` in the user unit directory
-- a `default.target.wants` symlink for each
-- loopback ports `127.0.0.1:8765` (Secretary) and `127.0.0.1:8865` (Meta-CEO)
-- `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, `IPAddressAllow=localhost`
-- `EnvironmentFile=` pointing at that unit's 0600 secrets file, and no secret bytes in the unit
+- legacy **user** unit artifacts only in the inert, isolated staging directory
+- legacy `default.target.wants` symlinks **inside that inert directory**,
+  never in an active user-manager search path; do not enable/start those units
+- the root operator separately renders/reviews/installs the PID1-managed
+  system units from `ROOT_CONFINED_SYSTEM_UNIT.md` after acceptance gates
+- role-local gateway ports `127.0.0.2:8765` (Secretary) and `127.0.0.3:8865` (Meta-CEO); never activate staged user units
+- `RestrictAddressFamilies=AF_UNIX AF_INET`, `IPAddressDeny=any`, only\n  role-specific host-prefix `IPAddressAllow` rules (no blanket `localhost` 127/8)
+- legacy staged units may name an EnvironmentFile, but production root units
+  do NOT preload it; the CLI reads private credentials only after isolation
+- mandatory inherited Linux Landlock TCP bind/connect policy in production,
+  using fixed role gateway/backend ports and exact proxy port 18651 or 18652
 - provider overlay `provider-overlay.yaml` and `vision-overlay.yaml` under the role's `hermes-home`
 
 Model order in those overlays:
@@ -274,14 +468,18 @@ receiving-owner evidence and independent review exist. Do not remove the
 `enabled: false` fence to make a model start or call a tool. No
 `hermesctl install` receipt or local health response can prove those grants.
 
-Enable each user unit on its own. One unit does not start the other.
-This still does not post to Slack:
+**Only after** the normal protected release, independent review, root
+operator approval, installed one-Squid proxy and a proven fail-closed
+PID1 cgroup firewall, enable each **system** unit separately. Never
+enable a user-manager Hermes unit; this still does not post to Slack:
 
 ```sh
-systemctl --user daemon-reload
-systemctl --user enable --now hermes-runtime-mmsecretary.service
-systemctl --user enable --now hermes-runtime-mmmeta.service
-systemctl --user status hermes-runtime-mmsecretary.service hermes-runtime-mmmeta.service
+sudo systemctl daemon-reload
+# Requires independently approved root-owned unit files and host network tests.
+sudo systemctl enable --now hermes-runtime-mmsecretary.service
+# Only after Secretary isolation passes; a separate controlled cutover.
+sudo systemctl enable --now hermes-runtime-mmmeta.service
+sudo systemctl status hermes-runtime-mmsecretary.service hermes-runtime-mmmeta.service
 python3 integrations/hermes_harness/hermesctl status \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary"
 python3 - <<'PY'
@@ -293,7 +491,7 @@ token = next(
     for line in text.splitlines()
     if line.startswith("HERMES_GATEWAY_TOKEN=")
 )
-request = urllib.request.Request("http://127.0.0.1:8765/api/health")
+request = urllib.request.Request("http://127.0.0.2:8765/api/health")
 request.add_header("Authorization", f"Bearer {token}")
 with urllib.request.urlopen(request, timeout=5) as response:
     print(response.status)
@@ -301,7 +499,7 @@ PY
 ```
 
 Expect `200` from health **only after** the pinned child process is
-running and its separate `127.0.0.1` backend responds to `GET /api/health`
+running and its separate `127.0.0.2` backend responds to `GET /api/health`
 with HTTP `200`, a JSON object containing `"ok": true`, and a `commit`
 exactly equal to the protected Hermes donor pin
 `1c0cd667746d3395fe9e1b6c74f8f85952486f18`. This is the pinned
@@ -389,21 +587,26 @@ A passing shadow is not a cutover. Grok Secretary keeps the live seat.
 
 ## Rollback
 
-Stop the user services first. Uninstall removes the state directory and the
-user unit. It leaves the 0600 secrets files in place.
+Stop approved root-owned **system** services first. Uninstall affects
+legacy staged user-unit artifacts and installed runtime state, not the
+root-owned service files: the root operator must separately remove those
+after verifying their original identities. Keep 0600 secrets private.
 
 ```sh
+sudo systemctl disable --now hermes-runtime-mmsecretary.service || true
+sudo systemctl disable --now hermes-runtime-mmmeta.service || true
+# Legacy user-manager units, only if installed; never restart them.
 systemctl --user disable --now hermes-runtime-mmsecretary.service || true
 systemctl --user disable --now hermes-runtime-mmmeta.service || true
 systemctl --user daemon-reload
 
 python3 integrations/hermes_harness/hermesctl uninstall \
   --state "$HOME/.local/state/hermes-runtime-mmsecretary" \
-  --systemd-user-dir "$HOME/.config/systemd/user"
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user"
 
 python3 integrations/hermes_harness/hermesctl uninstall \
   --state "$HOME/.local/state/hermes-runtime-mmmeta" \
-  --systemd-user-dir "$HOME/.config/systemd/user"
+  --systemd-user-dir "$HOME/.local/share/hermes-stage/systemd/user"
 ```
 
 A second uninstall prints `ABSENT`. To keep the tree and undo one bad
@@ -417,3 +620,187 @@ python3 -m integrations.hermes_runtime rollback \
 Rollback only exists after a second install. It points `current` at the
 previous release and does not delete secrets. Grok Secretary is not stopped
 by any of these commands.
+
+## Own-alias TCP and numeric-identity release checks
+
+ROLE_ISOLATION_REPAIR.md supersedes all prior shared-UID examples. Require
+distinct actual mmsecretary/mmmeta UIDs/GIDs, private directories, no extra
+shared supplementary group, no preloaded EnvironmentFile, and actual
+Landlock ABI >= 4 attachment before runtime secret loading. Network guards
+reject ephemeral/colliding ports or a proxy port other than 18651/18652.
+From each final service prove an unrelated wildcard TCP listener is denied
+through the role's OWN alias, and synthetic sibling-file reads are denied.
+A skipped Linux test or source-only mock is not host proof. TCP restrictions
+do not claim UDP/Unix IPC containment, TLS, billing, or Slack acceptance.
+
+
+## Isolated runtime source entry
+
+The root-managed unit selects
+`/opt/mastermind-executive/releases/<40-character-commit>/ops/executive_os/release_manifest.py`
+with CPython 3.12 and `-I -S -B`. The fixed `hermes-runtime` entry admits the
+existing `supervise` and separately authorized `canary` commands. The renderer
+refuses other release-root shapes and a supplied implementation label that
+differs from the selected release directory.
+
+Before importing Hermes, the existing release owner holds the physical source
+ancestry, manifest and imported files. It refuses writable or non-root-owned
+objects, links, ACLs, changed descriptors, unlisted imports and changed source
+bytes. It compiles manifest-matched source snapshots and uses the existing
+pinned pure PyYAML closure. It adds no repository or site-package import path.
+The held context stays with the existing CLI process; there is no second
+supervisor, lifecycle owner or retry service.
+
+Linux enrollment includes exactly `paid_yaml_runtime.py`,
+`paid_pyyaml_6_0_3.zip` and `paid_pyyaml_provenance.json` from the current native
+Fabric source owner, plus the shared runtime-custody factory
+`paid_initializer.py` and the incumbent `linux_process_identity.py`. Neither
+helper is copied into the release. It does not install packages or enable a role.
+
+## Frozen Hermes runtime installation input
+
+The release manifest may carry one optional fifth member, `hermes_runtime`,
+with the closed schema `mastermind.hermes_runtime_installation/v1`. The outer
+schema stays `mastermind.executive_release_manifest/v1` and the persisted
+document is either the historic four keys or those four plus `hermes_runtime`.
+An omitted member is the legacy release. A persisted `null` is invalid and is
+never accepted as "absent".
+
+The member records only the operator-approved recipe:
+
+- `bootstrap_python` and `launch_python`, each exactly
+  `{path, real_path, sha256}`; for Hermes the two documents must be equal.
+- `startup`, exactly `{profile, prefix, exec_prefix, base_prefix,
+  base_exec_prefix}`; the only admitted profile is
+  `cpython-3.12-linux-root-prefix-nosite.v1`, and the base prefixes must equal
+  their prefixes because a root-prefix interpreter is not a virtual
+  environment.
+- `roles`, exactly two ordered rows, `mmmeta` then `mmsecretary`, each
+  exactly `{role, uid, gid, state_dir, restart_sec, start_limit_burst,
+  start_limit_interval_sec}`. The UIDs are positive and distinct, the GIDs are
+  positive and distinct, and a UID need not equal its GID. Paths are
+  normalized absolute paths with no traversal, control character, systemd
+  unit name or unit directory. The service bounds are `restart_sec` 0..60,
+  `start_limit_burst` 1..10 and `start_limit_interval_sec` 1..3600; an
+  integral restart bound normalizes to one value.
+
+No credential, provider, model, environment variable, arbitrary command, unit
+path, implementation label or release root is accepted. The canonical member
+is bounded to 16 KiB.
+
+This member is DATA the operator supplies. It is not this repository's
+self-attestation of the host, the interpreter, the accounts or a running unit.
+The authority for the accepted Ubuntu1 vendor proof and for the created role
+receipts stays with those existing owners.
+
+`ops/executive_os/release_manifest.py` exposes
+`validate_hermes_runtime_installation(value)`, which returns the detached
+canonical document. `_document`, `create` and `verify` take the member
+explicitly, and `verify(..., expected_hermes_runtime=...)` distinguishes three
+modes: omitted is ordinary inspection, an explicit `None` requires absence and
+an explicit document requires exact validated equality. The persisted member is
+never discarded to hide a mismatch.
+
+The installer takes the same input with `--hermes-runtime-json`, decodes it
+with a bounded closed decoder before the first mutation and always passes the
+explicit expectation — including its absence — to the manifest tool, which is
+still invoked from the accepted source copy. An already installed release
+whose frozen member differs conflicts before any mutation; the immutable
+manifest is never retrofitted. When a Hermes member is supplied, execute the
+enroller from that same accepted checkout; a different source repository is
+refused before rendering so the unit hashes and sealed release use one source.
+
+The shared unit recipe now has one pure formatter. `render_host_unit` keeps
+every profile-facing validation and produces the same bytes as before, and
+`render_role_units_from_installation` supplies the closed recipe directly,
+without constructing a synthetic runtime profile. The role account, the unit
+name, the role-only loopback address and the final release path are derived
+from the role and the enclosing manifest; the ExecStart always names
+`/opt/mastermind-executive/releases/<commitSHA>`, never a staging or archive
+path. Linux enrollment renders those expected units and reports their digest;
+it does not write them and does not start a role.
+
+The fixed PID1 observer joins that approved source to the live host. For
+each role it holds the immutable release, the manifest-approved member and the
+root-owned unit fragment through the existing descriptor/ancestor/ACL owner.
+It queries only the two fixed units with an explicit property list and requires
+a loaded, non-transient unit at the exact fragment, no drop-in and no pending
+daemon reload. The effective ExecStart must be the qualified Python
+`-I -S -B` recipe, without an ignored-error prefix, running the fixed release
+entry and role profile. These checks do not claim independent observation of
+every effective sandbox property or kernel enforcement.
+
+The shared `held_runtime_custody` context now remains open for the complete
+role entry. Its no-site sentinels are installed before ordinary imports;
+programmatic late dispatch refuses without backfilling that early policy.
+Before importing the CLI or reading a role credential, the entry compares its
+actual executable, four Python prefixes, role principal, kernel self-image and
+process birth to the held approved inputs. The image's digest and complete
+identity must match the retained interpreter descriptor. Source/runtime checks
+bracket every subsequent main-process custody sample.
+
+The existing main-only STATUS publisher emits the closed v2 custody witness
+through PID1. The gateway requires v2 for a positive role pair and independently
+checks MainPID, live process birth and real/effective UID/GID with the incumbent
+non-image process reader. It joins the witness to the held root manifest's
+original-byte digest and approved launch-image digest. It does not open another
+role's executable or acquire tracing privileges. Standalone v1 codecs remain
+available for legacy diagnostics, but v1 cannot satisfy the positive host read.
+
+Both snapshots must agree, preserve the publisher's original timestamps and
+pass the existing dual-clock freshness checks. The same four-second deadline is
+checked between acquisition stages and before returning; bounded synchronous
+filesystem reads are not a hard preemption mechanism. Missing facts, refused
+reads and changed custody yield no positive observation.
+
+The public role projection and its proof, including `service_observed: false`
+and credential enrollment `UNVERIFIED`, remain unchanged. A completed metadata
+join establishes neither provider authentication nor a served model/turn.
+Protected installation, actual kernel isolation, credential enrollment and the
+real browser/serving path still require their corresponding host evidence.
+
+### Credential-free qualification entry
+
+The fixed isolated release entry also accepts `hermes-runtime isolation-probe`.
+Use the same CPython 3.12 `-I -S -B` recipe, protected release path and held
+source/YAML context as the role service. This is a closed entry to the existing
+finite probe, not an arbitrary module launcher. `--list-cases` is inert.
+Follow [FINAL_ROLE_QUALIFICATION.md](FINAL_ROLE_QUALIFICATION.md) for the
+qualification-only unit override, source identity, external witnesses and
+restoration. This source capability does not clear the serving/deployment hold.
+
+### Mastermind OS role observations through the existing host gateway
+
+The authenticated Office role cards read the fixed pair through the existing
+Workspace HTTP route, Control socket and MH1 mTLS host-observation family.
+Control does not run Linux PID1 queries on the Mac. The Linux gateway owns its
+local Hermes metadata observer.
+
+Control's existing root-pinned Fabric v2 binding document may include one
+optional `hermes_role_metadata_read` object with exactly these fields:
+
+- `host_ref` and `worker_id`: one exact pair already present in
+  `remote_transports` and its physical binding.
+- `expected_host_binding_sha256`: the Linux owner's
+  `remote_worker_gateway_config_digest(config)`, including its Hermes
+  capability. This is not the physical Fabric binding digest.
+- `expected_implementation_sha`: the protected Linux release commit expected
+  by that gateway's Hermes observer.
+
+The binding document remains selected through the existing
+`fabric_bindings_path` and `fabric_bindings_sha256` Control inputs. There is
+no second configuration file, endpoint or credential owner. An absent selection
+preserves SOURCE_UNBOUND and performs no remote read. A malformed selection or
+missing exact transport refuses configuration. The reader rechecks the original
+source and TLS-file identities before and after one bounded request; changed
+custody discards the observation as SOURCE_CHANGED. It neither retries nor falls
+back to the Mac, another host or an Attempt client. Existing paid/attended
+composition exclusions remain unchanged.
+
+The selection enables only the authenticated metadata read; it does not arm
+worker execution, install a role or enroll a key. The Linux installed-source
+qualifier must still establish the actual release/runtime binding. Until then
+the UI remains honestly unavailable even when the transport is connected.
+Office refresh updates this observation without changing the direction draft,
+frozen preview or existing launch owner. Configuration observed is not proof of
+credential enrollment, service health, served model, useful turn or usage.

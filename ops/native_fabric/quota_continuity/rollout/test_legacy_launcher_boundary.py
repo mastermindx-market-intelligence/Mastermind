@@ -8,13 +8,18 @@ import unittest
 from unittest import mock
 
 import native_generation as generation
+import native_install as installer
 
 
 class LegacyLauncherBoundary(unittest.TestCase):
     def test_late_old_launcher_refuses_before_business_exec(self):
-        current_source = Path(generation.__file__).read_bytes()
+        current_source = installer._HISTORICAL_LAUNCHER.read_bytes()
+        self.assertEqual(hashlib.sha256(current_source).hexdigest(),
+                         "43e814339a16582e2205f12117e1f17c40dce2e42a9c52d815a37c043e772e1b")
         # The host-pull plist admission is later than the paired-upgrade launcher.
-        # The historical 8bc verifier is this file with that one block removed.
+        # The historical 8bc verifier is this retained predecessor with only
+        # the named later admissions removed. Current launcher growth cannot
+        # change the old boundary being proved.
         admission = (
             b"    # One vetted flat plist. Not a suffix rule and not a directory walk.\n"
             b"    if relative == \"ext/host_pull_launchd.plist.template\":\n"

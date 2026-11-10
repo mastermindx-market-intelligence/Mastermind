@@ -1,0 +1,295 @@
+{
+  "boundaries": {
+    "capture_transport": "existing authenticated gh CLI GETs; source projection run on exact retained responses",
+    "captured_pr_mutations_performed": false,
+    "installed_app_consumer_proven": false,
+    "production_delivery_proven": false,
+    "raw_capture_published": false,
+    "runtime_dispatch_performed": false
+  },
+  "fixed_regression": {
+    "after": "Separate semantic source_evidence_digest permits unchanged qualification through CI progress; new heads/body/holds remain invalidators; full evidence_digest retained for audit.",
+    "before": {
+      "actual": null,
+      "expected": "READY_CANDIDATE",
+      "kind": "regression_reproducer",
+      "only_change": "CI in_progress -> success; source and holds identical",
+      "reason": [
+        "QUALIFICATION_OBSERVATION_UNBOUND"
+      ],
+      "reproduced": true,
+      "source_head": "8f745daf9693183a43baf584b9ead62157776789"
+    }
+  },
+  "joint_source_composition": {
+    "active_programme_qualified_candidate": {
+      "issues": [
+        "SOURCE_QUALIFIED"
+      ],
+      "verdict": "READY_CANDIDATE"
+    },
+    "closure_keeps_active": true,
+    "consumer_previous_head": "8f745daf9693183a43baf584b9ead62157776789",
+    "consumer_source_sha256": {
+      "control_plane/github_pr_delivery_evidence.py": "21898132f39dc9f31448d03d3421180bc07e90179c4eb9dd6cc59e56fee9e899",
+      "integrations/github_pr_delivery_consumer.py": "d0eb585fe652d0044d362b2415f8ce30440a981a767f81e33d2d9b8ea0ec9048"
+    },
+    "elapsed_seconds": 2.891,
+    "failures": 0,
+    "five_negative_cases_passed": true,
+    "formal_approval": false,
+    "in_memory_module_overlay": true,
+    "incumbent_source_files_changed": false,
+    "kind": "read_only_exact_source_composition",
+    "lifecycle_head": "7e47f3667e8b25c3d9e9206f4e0f861d72390299",
+    "lifecycle_pr": 2078,
+    "lifecycle_sha256": "3106a3e68515305a99c6615273fb92220b8493da03276b610d8bb688fc40040b",
+    "pytest_exit_code": 0,
+    "release_authorized": false,
+    "testcase_count": 131
+  },
+  "kind": "source_consumer_verification",
+  "live_source_reports": [
+    {
+      "auto_merge_observed": false,
+      "base_sha": "cb390bfc5a4b85a59a1005bfd3824305a5a4bfee",
+      "check_run_counts": {
+        "skipped": 1,
+        "success": 8
+      },
+      "ci_observation_coverage_complete": true,
+      "commit_status_counts": {},
+      "content_footprint": {
+        "documentation": 1,
+        "executable_or_style_source": 1,
+        "tests": 1
+      },
+      "coverage": {
+        "checks": true,
+        "files": true,
+        "issue_comments": true,
+        "review_comments": true,
+        "reviews": true,
+        "statuses": true
+      },
+      "current_head_review_counts": {
+        "APPROVED": 1
+      },
+      "draft": false,
+      "evidence_digest": "928fe34f4a26529a04916993f6e98595e9c94268f594f83a183625a8700a4bc6",
+      "failed_check_refs": [],
+      "formal_approval_satisfied": null,
+      "head_sha": "33f1c201fe0a27a5b5d7bfb681a0f52525b7b219",
+      "mergeable_state_observed": "unknown",
+      "merged": true,
+      "metadata_coverage_complete": true,
+      "next_action": "VERIFY_DELIVERED_CONSUMER",
+      "observed_at": "2026-11-05T08:10:09.081130+00:00",
+      "possible_restriction_refs": [
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2074",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2074#issuecomment-6651483587",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2074#issuecomment-6652446286",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2074#issuecomment-6652744688",
+        "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2074#pullrequestreview-5780843858"
+      ],
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2074",
+      "pull_number": 2074,
+      "qualification_advice": null,
+      "reasons": [
+        "POSSIBLE_RESTRICTION_REQUIRES_ADJUDICATION"
+      ],
+      "release_authorized": false,
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "required_checks_satisfied": null,
+      "schema": "mastermind.github_pr_delivery_evidence.v1",
+      "source_evidence_digest": "b438572b2022e2d0c11912b305b386ad02f2d19af3f7a7198fed08ee21ac2988",
+      "source_maturity": "NOT_INFERRED",
+      "source_owner_qualification_bound": false,
+      "source_record_coverage_complete": true,
+      "source_review_coverage": "NOT_INFERRED",
+      "source_stable": true,
+      "state": "closed"
+    },
+    {
+      "auto_merge_observed": false,
+      "base_sha": "79668e1e8f1d6589fff7ee2eca523aa0022fbf27",
+      "check_run_counts": {
+        "failure": 3,
+        "skipped": 3,
+        "success": 9
+      },
+      "ci_observation_coverage_complete": true,
+      "commit_status_counts": {},
+      "content_footprint": {
+        "documentation": 1,
+        "tests": 1
+      },
+      "coverage": {
+        "checks": true,
+        "files": true,
+        "issue_comments": true,
+        "review_comments": true,
+        "reviews": true,
+        "statuses": true
+      },
+      "current_head_review_counts": {},
+      "draft": true,
+      "evidence_digest": "0ed0fc50dbcb9f372ba948e1bce09fbb80bdf0facf55544679da62baf345d5d9",
+      "failed_check_refs": [
+        {
+          "app_id": 15368,
+          "id": 97987374165
+        },
+        {
+          "app_id": 15368,
+          "id": 97985409962
+        },
+        {
+          "app_id": 15368,
+          "id": 97984060046
+        }
+      ],
+      "formal_approval_satisfied": null,
+      "head_sha": "95e77dcc2e2960eb2ba7aa51ccaa911aebcf7da1",
+      "mergeable_state_observed": "unstable",
+      "merged": false,
+      "metadata_coverage_complete": true,
+      "next_action": "ADJUDICATE_RECORDED_RESTRICTIONS",
+      "observed_at": "2026-11-05T08:10:13.205245+00:00",
+      "possible_restriction_refs": [
+        "https://github.com/mastermindx-market-intelligence/macro/pull/6423"
+      ],
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/6423",
+      "pull_number": 6423,
+      "qualification_advice": null,
+      "reasons": [
+        "POSSIBLE_RESTRICTION_REQUIRES_ADJUDICATION",
+        "FAILED_CHECK_OBSERVED_NOT_REQUIRED_GATE_PROOF"
+      ],
+      "release_authorized": false,
+      "repository": "mastermindx-market-intelligence/macro",
+      "required_checks_satisfied": null,
+      "schema": "mastermind.github_pr_delivery_evidence.v1",
+      "source_evidence_digest": "99b99ee17732046580798cdb4cc77dfc8cfb6a412eae0ef66da4b3705ee3ea8e",
+      "source_maturity": "NOT_INFERRED",
+      "source_owner_qualification_bound": false,
+      "source_record_coverage_complete": true,
+      "source_review_coverage": "NOT_INFERRED",
+      "source_stable": true,
+      "state": "open"
+    },
+    {
+      "auto_merge_observed": false,
+      "base_sha": "0f03615e86ed63f00ad9b294c7a5c909bad7b70a",
+      "check_run_counts": {
+        "success": 21
+      },
+      "ci_observation_coverage_complete": true,
+      "commit_status_counts": {},
+      "content_footprint": {
+        "executable_or_style_source": 2,
+        "tests": 2
+      },
+      "coverage": {
+        "checks": true,
+        "files": true,
+        "issue_comments": true,
+        "review_comments": true,
+        "reviews": true,
+        "statuses": true
+      },
+      "current_head_review_counts": {},
+      "draft": true,
+      "evidence_digest": "ef9049f309350d7a55baec62cfd9fe601049cabcaaf7cbda0a320dcce18d9b15",
+      "failed_check_refs": [],
+      "formal_approval_satisfied": null,
+      "head_sha": "0988218218c79a411efb12ea022dcf1d536049f9",
+      "mergeable_state_observed": "behind",
+      "merged": false,
+      "metadata_coverage_complete": true,
+      "next_action": "ADJUDICATE_RECORDED_RESTRICTIONS",
+      "observed_at": "2026-11-05T08:12:13.463739+00:00",
+      "possible_restriction_refs": [
+        "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1294",
+        "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1294#issuecomment-6641965720",
+        "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1294#issuecomment-6643504229"
+      ],
+      "pr_url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/pull/1294",
+      "pull_number": 1294,
+      "qualification_advice": null,
+      "reasons": [
+        "POSSIBLE_RESTRICTION_REQUIRES_ADJUDICATION",
+        "INTEGRATION_OR_RELEASE_GATE_OBSERVED"
+      ],
+      "release_authorized": false,
+      "repository": "mastermindx-market-intelligence/mastermind-terminal",
+      "required_checks_satisfied": null,
+      "schema": "mastermind.github_pr_delivery_evidence.v1",
+      "source_evidence_digest": "cd58fc31e908faa7ec8a6845e4bf7eb6911a248cfd1d9cca018cafbac5da2e3e",
+      "source_maturity": "NOT_INFERRED",
+      "source_owner_qualification_bound": false,
+      "source_record_coverage_complete": true,
+      "source_review_coverage": "NOT_INFERRED",
+      "source_stable": true,
+      "state": "open"
+    }
+  ],
+  "operation": "pr-delivery-evidence-consumer-20261105-pro",
+  "parent_operation": "pr-delivery-recovery-20261105-sol-001",
+  "recorded_at": "2026-11-05T08:46:40.150334+00:00",
+  "remaining": [
+    "protected release of #2081 and applicable #2078 readiness repair",
+    "existing-host installation and permission/config readback",
+    "authorized live owner invocation",
+    "existing orchestration/action consumption and actual protected delivery"
+  ],
+  "source_base": "0efd0744ac705ddc24880acde1cb4ac6e8c55d05",
+  "source_sha256": {
+    "control_plane/github_pr_delivery_evidence.py": "21898132f39dc9f31448d03d3421180bc07e90179c4eb9dd6cc59e56fee9e899",
+    "integrations/github_pr_delivery_consumer.py": "d0eb585fe652d0044d362b2415f8ce30440a981a767f81e33d2d9b8ea0ec9048",
+    "integrations/github_review_host_composition.py": "7b6ea0d38f6d29f6ccbdbb8c8f3fcb06c28106a50b536ebd444bf53686240c71",
+    "integrations/github_review_ingress_asgi.py": "e7a12177203f2ba14afa297196f9b684a1342d613da1a28b87985471eaba9c2c",
+    "tests/test_github_pr_delivery_consumer.py": "144c499a2f5df321084be0498380f1f60d094893ae5a831ca9101934c5ea440c",
+    "tests/test_github_pr_delivery_evidence.py": "de26d6652561f209d35607559559ddccb42d8413f889c5695f9d9c0a55bf404b"
+  },
+  "test_result": {
+    "command": [
+      ".venv-delivery/bin/python",
+      "-m",
+      "pytest",
+      "-o",
+      "addopts=",
+      "-q",
+      "tests/test_github_pr_delivery_evidence.py",
+      "tests/test_github_pr_delivery_consumer.py",
+      "tests/test_github_pr_lifecycle.py",
+      "tests/test_github_pr_draft_readiness.py",
+      "tests/test_github_review_host_composition.py",
+      "tests/test_github_review_ingress_asgi.py",
+      "tests/test_github_review_asgi_mount.py",
+      "tests/test_github_review_api.py",
+      "tests/test_github_review_app_token.py",
+      "tests/test_github_review_receiver_capacity.py",
+      "tests/test_github_review_host_config.py",
+      "--tb=short"
+    ],
+    "duration_seconds": 5.6,
+    "environment": "isolated venv with system packages and repository-pinned PyJWT[crypto]==2.14.0",
+    "failed": 0,
+    "passed": 256,
+    "python": "3.14.7",
+    "targets": [
+      "tests/test_github_pr_delivery_evidence.py",
+      "tests/test_github_pr_delivery_consumer.py",
+      "tests/test_github_pr_lifecycle.py",
+      "tests/test_github_pr_draft_readiness.py",
+      "tests/test_github_review_host_composition.py",
+      "tests/test_github_review_ingress_asgi.py",
+      "tests/test_github_review_asgi_mount.py",
+      "tests/test_github_review_api.py",
+      "tests/test_github_review_app_token.py",
+      "tests/test_github_review_receiver_capacity.py",
+      "tests/test_github_review_host_config.py"
+    ]
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schema": "hermes-primary-final-owner-source-join.v1",
+  "source_head": "02549b9165830f1a4ba88332244d620d37e317db",
+  "incoming": "5a136966c3285e49010d449072b3f60e37389c4b",
+  "retained_pair_source": "1a301a0a8e8ce9096d1e371505833e2d3a1bf12b",
+  "qualification_change": "Use the composed candidate for adapter and native owner, retain exact Macro9eb and Hermes1c0cd source pins and clean-HEAD checks.",
+  "preserved": [
+    "current Session Bridge return reader and regression tests",
+    "both token-not-on-disk assertions and security sink annotations",
+    "current APPLICATION translation fixture da17699",
+    "qualified distinct chat transport fixture",
+    "actual sparse executor and v9 native package"
+  ],
+  "paired_paths": {
+    ".github/workflows/hermes-application-inference.yml": "d2586044d04e0a9357bf57af15a0fa2473ac6503",
+    "integrations/hermes_application_fabric/qualification/qualify_application_owner.py": "07378aec892dd80ac5781f0741cfda19ad00d497"
+  },
+  "proof_required": [
+    "positive zero-failure/zero-error/zero-skip enrollment gate",
+    "137 host/Session Bridge cases (report actual resulting count)",
+    "nine actual native-owner conversations at one clean composed HEAD",
+    "paired production consumer tests and required CI"
+  ],
+  "runtime_activated": false,
+  "diff_review": {
+    "inherited_eof_blank_line_warnings": [
+      ".github/workflows/hermes-application-inference.yml",
+      "integrations/hermes_application_fabric/HOST_INTEGRATION.md",
+      "integrations/hermes_application_fabric/QUALIFICATION.md",
+      "integrations/hermes_application_fabric/README.md",
+      "integrations/hermes_runtime/cli.py",
+      "integrations/hermes_runtime/install.py",
+      "integrations/hermes_runtime/native_gateway_entry.py",
+      "integrations/hermes_runtime/profile.py",
+      "integrations/hermes_runtime/supervisor.py",
+      "integrations/hermes_runtime/tcp_sandbox.py",
+      "integrations/hermes_runtime/tests/test_operator_native_enrollment.py",
+      "ops/executive_os/application_tunnel_control.py",
+      "ops/executive_os/os_tunnel_entry.py",
+      "ops/executive_os/release_manifest.py",
+      "tests/application_tunnel_ci/require_proof.py",
+      "tests/executive_fabric_release_identity_review.py"
+    ],
+    "other_whitespace_findings": 0,
+    "decision": "Retain accepted source bytes; inherited EOF-only style diagnostics do not justify changing the pinned runtime package."
+  }
+}

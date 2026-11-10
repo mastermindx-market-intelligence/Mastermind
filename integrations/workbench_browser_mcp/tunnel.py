@@ -23,7 +23,7 @@ from mcp.server.lowlevel import Server
 from mcp.types import CallToolResult, ServerResult, TextContent
 
 from common.bounded_sync_executor import SyncExecutionTimeout
-from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS
+from control_plane.browser_resource_contract import READ_ONLY_BROWSER_TOOLS, WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
 from control_plane.executive_agent_capabilities import (
     McpServerGrant,
     observed_mcp_tool_schema_digest,
@@ -146,6 +146,8 @@ def _host_config(value: BrowserServiceConfig) -> BrowserHostConfig:
         home_dir=value.home_dir,
         tmp_dir=value.tmp_dir,
         startup_timeout_seconds=value.startup_timeout_seconds,
+        app_control_origin=value.app_control_origin,
+        expected_tool_schema_digest=value.app_control_tool_schema_digest or WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
     )
 
 
@@ -229,7 +231,7 @@ def create_browser_tunnel_server(
         browser_config.tool_catalog_file,
         maximum=MAX_BROWSER_CATALOG_BYTES,
     )
-    surface = build_browser_tool_surface(catalog)
+    surface = build_browser_tool_surface(catalog, expected_tool_schema_digest=browser_config.app_control_tool_schema_digest or WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST)
     allowed_names = frozenset(surface.validators)
     if mcp_grant is not None:
         if (
@@ -438,7 +440,7 @@ def create_browser_tunnel_server(
                         caller, request["start_ref"]
                     ),
                 )
-            elif name in READ_ONLY_BROWSER_TOOLS:
+            elif name in surface.read_tools:
                 native_args = dict(request)
                 browser_ref = native_args.pop("browser_ref")
                 direct_native = await _run_existing(

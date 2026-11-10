@@ -53,7 +53,7 @@ import {
 
 // ── Frozen UI-local contract types ────────────────────────────────────────────
 
-export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept";
+export type OperationKind = "launch" | "message" | "stop" | "consume" | "project_pause" | "project_resume" | "project_create" | "project_adopt" | "direction_accept" | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn";
 
 export interface CommandIntent {
   readonly kind: OperationKind;
@@ -73,6 +73,15 @@ export interface OperationPointer {
   readonly operationKey: string;
   readonly kind: OperationKind;
   readonly targetKey: string | null;
+}
+
+/** Read-only provenance of this controller's actual original operation.
+ * Request acceptance is not lifecycle START, return or product acceptance. */
+export interface OriginalOperationObservation {
+  readonly pointer: Readonly<OperationPointer>;
+  readonly owner: Readonly<OwnerContext>;
+  readonly status: Exclude<OperationState["status"], "idle">;
+  readonly missionSelection: Readonly<MissionSelection> | null;
 }
 
 export interface EffectReceipt {
@@ -104,6 +113,21 @@ export interface FiniteCommandPort {
   ): Promise<EffectReceipt>;
   advanceOperation?(pointer: OperationPointer, phaseReceiptDigest: string, signal: AbortSignal): Promise<EffectReceipt>;
   readOperation(
+    pointer: OperationPointer,
+    signal: AbortSignal,
+  ): Promise<EffectReceipt>;
+  /**
+   * Optional observational POST for a stored source operation. When present,
+   * ONLY an explicit `recover({ reconcileSource: true })` may call it, and
+   * only for the closed source kind set (`project_create`, `project_adopt`,
+   * `direction_accept`, `project_source_write`); every other kind, and any
+   * default recovery, still uses {@link FiniteCommandPort.readOperation}. It
+   * always receives the same stored original pointer — never a new key, and
+   * nothing is prepared, reserved, submitted or advanced through it. Its
+   * refusal is a hold, not a settlement: see the controller's recovery
+   * distinction.
+   */
+  reconcileOperation?(
     pointer: OperationPointer,
     signal: AbortSignal,
   ): Promise<EffectReceipt>;
@@ -247,7 +271,20 @@ export interface UnknownState {
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 
-const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept"]);
+const VALID_KINDS: ReadonlySet<string> = new Set(["launch", "message", "stop", "consume", "project_pause", "project_resume", "project_create", "project_adopt", "direction_accept", "project_source_write", "instruction_pause", "conversation_create", "conversation_consume", "conversation_turn"]);
+
+/**
+ * Closed set of source kinds for which an explicit
+ * `recover({ reconcileSource: true })` MAY use the optional observational
+ * `reconcileOperation`. Every other kind — and any default recovery — stays
+ * on `readOperation` only.
+ */
+const RECONCILABLE_SOURCE_KINDS: ReadonlySet<string> = new Set([
+  "project_create",
+  "project_adopt",
+  "direction_accept",
+  "project_source_write",
+]);
 
 const POINTER_KEYS: ReadonlySet<string> = new Set([
   "operationKey",
@@ -389,6 +426,8 @@ export class OperationController {
   private _epoch = 0;
 
   private _tracked: TrackedOperation | null = null;
+  private _receiptBasis: Readonly<{pointer: Readonly<OperationPointer>; scope: string;
+    generation: string; epoch: number}> | null = null;
 
   constructor(
     private readonly _port: FiniteCommandPort,
@@ -397,6 +436,24 @@ export class OperationController {
 
   getState(): OperationState {
     return this._state;
+  }
+
+  /** No effect, store access or lifecycle transition. A withdrawn context
+   * withholds even terminal provenance; the durable original hint is untouched. */
+  observeOriginalOperation(): OriginalOperationObservation | null {
+    const basis = this._receiptBasis;
+    if (!basis || basis.epoch !== this._epoch) return null;
+    try {
+      const context = this._port.context(), state = this._state;
+      if (!context || context.principalScope !== basis.scope || context.generation !== basis.generation
+          || this._receiptBasis !== basis || this._epoch !== basis.epoch || state.status === "idle") return null;
+      if (state.pointer && (state.pointer.operationKey !== basis.pointer.operationKey
+          || state.pointer.kind !== basis.pointer.kind || state.pointer.targetKey !== basis.pointer.targetKey)) return null;
+      return Object.freeze({pointer: basis.pointer,
+        owner: Object.freeze({principalScope: basis.scope, generation: basis.generation}),
+        status: state.status, missionSelection: state.status === "accepted" && state.missionSelection
+          ? Object.freeze({...state.missionSelection}) : null});
+    } catch {return null;}
   }
 
   /**
@@ -518,15 +575,35 @@ export class OperationController {
   }
 
   /**
-   * Resolve the pending hint through `readOperation` only. Never submits.
+   * Resolve the pending hint; default recovery uses readOperation only.
+   * Recovery never submits the original source action or advances a phase.
    *
    * Recover is observation only. It may join an in-flight promise only when
    * the live principal and generation match the captured tracked context.
    * A foreign or changed context is refused locally (`OPERATION_BUSY`)
    * without leaking the original pointer or selection, without publishing,
    * and without clearing the original-scope hint.
+   *
+   * RECOVERY DISTINCTION. Without options this call is read-only: it uses
+   * {@link FiniteCommandPort.readOperation} and a refused receipt stays
+   * terminal exactly as before. Only an explicit
+   * `recover({ reconcileSource: true })` MAY call the optional
+   * {@link FiniteCommandPort.reconcileOperation} instead, and only for the
+   * closed set of source kinds (`project_create`, `project_adopt`,
+   * `direction_accept`, `project_source_write`); every other kind, and a port
+   * without the optional method, stays read-only. The reconcile still reads
+   * the same stored original pointer under the same scope and epoch fences,
+   * with no prepare, reserve, submit, new key, payload or advance. Because
+   * the reconcile is itself an observational POST, its refusal, an unknown
+   * receipt, a throw or a partial READY_FOR_ADVANCE witness is NOT evidence
+   * that the original source action had no effect: the exact original pointer
+   * is retained as `unknown` (never cleared) so a later recover can resolve
+   * it. Only a verified overall terminal accepted receipt may clear, and only
+   * through the existing exact compare-clear.
    */
-  async recover(): Promise<OperationState> {
+  async recover(
+    options?: { readonly reconcileSource?: boolean },
+  ): Promise<OperationState> {
     const ctx = this._port.context();
     if (!ctx) return this._idle("OWNER_ABSENT");
 
@@ -554,18 +631,42 @@ export class OperationController {
       if (!read.pointer) return this._idle("RECOVER_NO_POINTER");
 
       const pointer = read.pointer;
+      // Recovery is read-only unless the caller explicitly asked for a source
+      // reconcile, the stored kind is in the closed source set, and the port
+      // actually exposes the optional observer. Everything else — a default
+      // recovery, any other kind, an absent method — stays on `readOperation`.
+      let reconcile:
+        | ((pointer: OperationPointer, signal: AbortSignal) => Promise<EffectReceipt>)
+        | null = null;
+      if (options?.reconcileSource === true && RECONCILABLE_SOURCE_KINDS.has(pointer.kind)) {
+        try {
+          const candidate = this._port.reconcileOperation;
+          if (typeof candidate === "function") reconcile = candidate;
+        } catch {
+          reconcile = null;
+        }
+      }
+      // Optional property resolution can re-enter a host auth/selection edge.
+      // Recheck before tracking or invoking the original scoped observer.
+      if (options !== undefined && this._stale(epoch, scope, generation)) return this._state;
       this._state = { status: "checking", pointer, reason: "CHECKING" };
       const op = this._track(pointer, scope, generation, epoch, abort);
 
       let receipt: unknown;
       try {
-        receipt = await this._port.readOperation(pointer, abort.signal);
+        receipt = reconcile
+          ? await reconcile.call(this._port, pointer, abort.signal)
+          : await this._port.readOperation(pointer, abort.signal);
       } catch {
         if (this._stale(epoch, scope, generation)) return this._state;
         return await this._applyFailure(op, "RECOVER_FAILED");
       }
       if (this._stale(epoch, scope, generation)) return this._state;
-      return await this._applyReceipt(receipt, op);
+      return await this._applyReceipt(
+        receipt,
+        op,
+        reconcile ? { retainRefusal: true } : undefined,
+      );
     }, abort);
   }
 
@@ -634,6 +735,7 @@ export class OperationController {
    * its original scope.
    */
   invalidate(): void {
+    this._receiptBasis = null;
     const tracked = this._tracked;
     const hadVisibleOperation = this._state.status !== "idle" || tracked !== null || this._inflight !== null;
 
@@ -688,6 +790,8 @@ export class OperationController {
     abort: AbortController | null,
   ): TrackedOperation {
     const op: TrackedOperation = { pointer, scope, generation, epoch, abort };
+    this._receiptBasis = Object.freeze({pointer: Object.freeze({operationKey: pointer.operationKey,
+      kind: pointer.kind, targetKey: pointer.targetKey}), scope, generation, epoch});
     this._tracked = op;
     return op;
   }
@@ -754,10 +858,17 @@ export class OperationController {
    * A receipt arrived for `op`. Decide first whether it may be published.
    * Returns a promise so the caller can await the atomic `clearIfEqual`
    * before publishing a terminal state.
+   *
+   * `reconcile` is set only for an explicit `recover({ reconcileSource: true })`
+   * call that used the optional observer. After the existing full receipt
+   * validation and identity matching, a refused reconcile is held as
+   * `unknown`: the reconcile is itself observational and does not prove the
+   * original source action had no effect.
    */
   private _applyReceipt(
     receipt: unknown,
     op: TrackedOperation,
+    reconcile?: { readonly retainRefusal?: boolean },
   ): Promise<OperationState> {
     if (this._stale(op.epoch, op.scope, op.generation)) return Promise.resolve(this._state);
     if (!isValidReceipt(receipt)) {
@@ -773,6 +884,13 @@ export class OperationController {
     }
     if (receipt.targetKey !== op.pointer.targetKey) {
       return Promise.resolve(this._retain(op, "TARGET_MISMATCH"));
+    }
+
+    // An observational source reconcile refusal is not evidence that the
+    // original source action had no effect, so the exact original pointer is
+    // retained (never cleared) for a later recovery.
+    if (reconcile?.retainRefusal === true && receipt.disposition === "refused") {
+      return Promise.resolve(this._retain(op, "UNKNOWN_RECEIPT"));
     }
 
     // Only an accepted launch receipt may carry a selection. A message or a
@@ -922,6 +1040,7 @@ export class OperationController {
   }
 
   private _idle(reason: SafeReason): OperationState {
+    this._receiptBasis = null;
     const state: IdleState = { status: "idle", pointer: null, reason };
     this._state = state;
     return state;

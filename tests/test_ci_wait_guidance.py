@@ -52,6 +52,39 @@ class GuardTests(unittest.TestCase):
         self.read(1000)
         self.assertIsNone(self.read(1001, 'gh run view 42 --json status'))
 
+    def test_pr_numbers_in_distinct_repositories_do_not_collide(self):
+        self.assertIsNone(self.read(1000, 'gh pr view 42 -R example/one --json state'))
+        self.assertIsNone(self.read(1001, 'gh pr view 42 -R example/two --json state'))
+        self.assertIsNotNone(self.read(1002, 'gh pr view 42 --repo EXAMPLE/ONE --json isDraft'))
+
+    def test_new_source_facts_do_not_wait_for_previous_status_read(self):
+        self.assertIsNone(self.read(1000, 'gh pr view 42 -R example/repo --json state'))
+        source = 'gh pr view 42 -R example/repo --json state,isDraft,body,files,headRefOid'
+        self.assertIsNone(self.read(1001, source))
+        self.assertIsNotNone(self.read(1002, source))
+        reordered = 'gh pr view 42 -R example/repo --json headRefOid,files,body,isDraft,state'
+        self.assertIsNotNone(self.read(1003, reordered))
+
+    def test_rotating_status_fields_does_not_bypass_cooldown(self):
+        self.assertIsNone(self.read(1000, 'gh pr view 42 -R example/repo --json state'))
+        self.assertIsNotNone(self.read(1001, 'gh pr view 42 -R example/repo --json statusCheckRollup'))
+
+    def test_material_pr_mutation_invalidates_only_its_repository(self):
+        one = 'gh pr view 42 -R example/one --json state,body'
+        two = 'gh pr view 42 -R example/two --json state,body'
+        self.read(1000, one)
+        self.read(1000, two)
+        self.guard['_clear_poll_state_for_mutation'](
+            self.payload, 'gh pr edit 42 -R example/one --title changed'
+        )
+        self.assertIsNone(self.read(1001, one))
+        self.assertIsNotNone(self.read(1001, two))
+
+    def test_jq_text_does_not_turn_unrelated_metadata_into_ci_state(self):
+        command = "gh pr view 42 -R example/repo --json url --jq '.state'"
+        self.assertIsNone(self.read(1000, command))
+        self.assertIsNone(self.read(1001, command))
+
     def test_message_explains_finite_scope_and_no_bypass(self):
         self.read(1000)
         reason = self.read(1001)
@@ -83,13 +116,24 @@ class GuardTests(unittest.TestCase):
         result = self.invoke('sleep 300; gh run view 42')
         self.assertEqual(result['permissionDecision'], 'deny')
 
-    def test_guard_ast_changes_only_guidance_and_native_surface_classification(self):
+    def test_guard_ast_changes_only_guidance_native_surface_and_pr_identity(self):
         # Joined-string text has different segmentation; normalize entire returned
         # guidance expressions only, then require all other AST nodes unchanged.
         old = ast.parse(FIXTURE.read_text())
-        new = ast.parse(installer.render('guard', FIXTURE.read_text()))
+        rendered = installer.render('guard', FIXTURE.read_text())
+        helper_start = rendered.index(installer.POLL_IDENTITY_START)
+        helper_end = rendered.index(installer.POLL_IDENTITY_END) + len(installer.POLL_IDENTITY_END)
+        rendered = rendered[:helper_start] + rendered[helper_end:]
+        self.assertEqual(rendered.count(installer.PR_MUTATION_UPDATE), 1)
+        rendered = rendered.replace(installer.PR_MUTATION_UPDATE, '', 1)
+        new = ast.parse(rendered)
         for tree in (old, new):
+            identity = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_poll_key')
+            identity.args = ast.arguments(posonlyargs=[], args=[], kwonlyargs=[],
+                                          kw_defaults=[], defaults=[])
+            identity.body = [ast.Expr(value=ast.Constant(value='<PR poll identity>'))]
             fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_repeat_poll_reason')
+            fn.body[1].value = ast.Constant(value='<PR poll identity call>')
             conditional = next(n for n in fn.body if isinstance(n, ast.If) and isinstance(n.test, ast.BoolOp))
             conditional.body[-1].value = ast.Constant(value='<cooldown guidance>')
             bash = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'guard_bash')
@@ -145,6 +189,19 @@ class InstallerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             installer.prepare(self.home)
         self.assertEqual((self.home / installer.TARGETS['guard']).read_bytes(), before)
+
+    def test_guard_only_preview_preserves_foreign_instruction_rollout(self):
+        target = self.home / installer.TARGETS['codex']
+        target.write_text('newer instruction owner')
+        plan = installer.prepare(self.home, ['guard', 'guard'])
+        self.assertEqual([item['kind'] for item in plan], ['guard'])
+        self.assertEqual(target.read_text(), 'newer instruction owner')
+        with self.assertRaises(ValueError):
+            installer.prepare(self.home)
+
+    def test_unknown_target_is_refused(self):
+        with self.assertRaises(ValueError):
+            installer.prepare(self.home, ['unowned-path'])
 
     def test_concurrent_edit_after_plan_is_preserved(self):
         plan = installer.prepare(self.home)

@@ -56,7 +56,7 @@ def component_namespace(source: str, here: Path) -> dict:
     """Execute exact materialized functions; omit import-time native side effects."""
     names = {
         "FabricTaskError", "validate_run_id", "_bounded_regular",
-        "_acceptance_unknown", "inspect_run", "_parse_route",
+        "_acceptance_unknown", "inspect_run", "_inspect_run", "_parse_route",
         "_safe_request_refusal_code",
     }
     nodes = []
@@ -215,13 +215,9 @@ def test_symlinked_refusal_cannot_supply_diagnostics(ns):
 def test_proposal_remains_inert_and_preserves_its_original_admission_ast(material):
     assert digest((PROPOSAL / "fabric_task.py.base").read_bytes()) == MANIFEST["preimage_sha256"]
     assert MANIFEST["active_candidate_unchanged"] is True
-    # The later browser catalog adds read-only owner-namespace binding to the
-    # active adapter. It does not activate this proposal's diagnostic behavior.
-    active = ast.parse((ROOT / MANIFEST["target_path"]).read_text())
-    assert not any(isinstance(node, ast.FunctionDef) and node.name == "_safe_request_refusal_code"
-                   for node in ast.walk(active))
-    assert not any(isinstance(node, ast.Constant) and node.value == "request_refusal_code"
-                   for node in ast.walk(active))
+    # This immutable proposal records its historical preimage. The current
+    # native candidate may separately implement the diagnosed live defect;
+    # the tests below verify that current behavior without rewriting archives.
     old, new = map(ast.parse, material[:2])
     ignored = {"inspect_run", "_parse_route", "_safe_request_refusal_code"}
     def clean(module):
@@ -243,3 +239,61 @@ def test_proposal_remains_inert_and_preserves_its_original_admission_ast(materia
             kept.append(node)
         return ast.dump(ast.Module(body=kept, type_ignores=[]), include_attributes=False)
     assert clean(old) == clean(new)
+
+
+@pytest.fixture
+def current_native_ns(tmp_path, monkeypatch):
+    # Operates on the real current candidate, never on an installed generation.
+    provider = types.ModuleType("provider_outcome")
+    provider.digest = digest
+    monkeypatch.setitem(sys.modules, "provider_outcome", provider)
+    return component_namespace((ROOT / MANIFEST["target_path"]).read_text(), tmp_path)
+
+
+@pytest.mark.parametrize("message,expected", [
+    ("NONE reason=no_operator_available", "NO_OPERATOR_AVAILABLE"),
+    ("NONE reason=no_pool_available", "NO_POOL_AVAILABLE"),
+    ("ROUTE_INCOMPLETE", "ROUTE_INCOMPLETE"),
+    ("ECONOMIC_POLICY_REFUSED: redacted private detail", "ECONOMIC_POLICY_REFUSED"),
+    ("NONE reason=private-host-token", UNKNOWN),
+    ("NONE reason=no_operator_available private=secret", UNKNOWN),
+    ("NO_OPERATOR_AVAILABLE private=secret", UNKNOWN),
+])
+def test_current_candidate_classifies_only_exact_closed_refusals(current_native_ns, message, expected):
+    classify = current_native_ns["_safe_request_refusal_code"]
+    assert classify(current_native_ns["FabricTaskError"](message)) == expected
+    assert "secret" not in classify(current_native_ns["FabricTaskError"](message))
+    assert classify(ValueError(message)) == UNKNOWN
+
+
+def test_deadline_picker_no_operator_refusal_can_be_diagnosed_without_retry(current_native_ns):
+    with pytest.raises(current_native_ns["FabricTaskError"]) as exc:
+        current_native_ns["_parse_route"]("NONE reason=no_operator_available")
+    code = current_native_ns["_safe_request_refusal_code"](exc.value)
+    assert code == "NO_OPERATOR_AVAILABLE"
+
+    rid, _ = retained_receipts(current_native_ns, code=code)
+    status = current_native_ns["inspect_run"](rid)
+    assert status["state"] == "REQUEST_REFUSED_BEFORE_LAUNCH"
+    assert status["request_refusal_code"] == code
+    assert status["execution_absence_proven"] is True
+    assert status["accepted"] is None and status["result_available"] is False
+    assert status["same_run_replay_allowed"] is False
+    assert status.get("root_id") is None
+
+
+@pytest.mark.parametrize("legacy,code,launch", [
+    (True, "NO_OPERATOR_AVAILABLE", False),
+    (False, "private-provider-text", False),
+    (False, "NO_OPERATOR_AVAILABLE", True),
+])
+def test_current_candidate_never_invents_legacy_or_launch_reason(current_native_ns, legacy, code, launch):
+    rid, _ = retained_receipts(current_native_ns, code=code, legacy=legacy, launch=launch)
+    status = current_native_ns["inspect_run"](rid)
+    if launch:
+        assert status["state"] == "REQUEST_RETAINED_NO_START_EVIDENCE"
+        assert "request_refusal_code" not in status
+    else:
+        assert status["state"] == "REQUEST_REFUSED_BEFORE_LAUNCH"
+        assert status["request_refusal_code"] == UNKNOWN
+        assert status["same_run_replay_allowed"] is False

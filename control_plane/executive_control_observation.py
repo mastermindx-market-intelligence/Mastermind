@@ -9,6 +9,8 @@ import stat
 from ops.executive_os.capacity_broker_topology import CONTROL_UID
 
 SCHEMA = 'mastermind.control_observation/v1'
+CONFIGURATION_SCHEMA = 'mastermind.control_observation/v2'
+CONFIGURATION_FIELD = 'hermes_attended_configuration_sha256'
 MAX_BYTES = 8192
 CONFIG_MAX_BYTES = 4194304
 CONTROL_PATH = '/Library/Application Support/MastermindExecutive/config/control.json'
@@ -73,7 +75,11 @@ def validate_identity(value):
 
 def parse_observation(raw):
     value = _json(raw, MAX_BYTES, ascii_only=True)
-    if (set(value) != FIELDS or value['schema'] != SCHEMA
+    extended = value.get('schema') == CONFIGURATION_SCHEMA
+    expected_fields = FIELDS | {CONFIGURATION_FIELD} if extended else FIELDS
+    if (set(value) != expected_fields
+            or value['schema'] != (CONFIGURATION_SCHEMA if extended else SCHEMA)
+            or extended and not _hex(value[CONFIGURATION_FIELD], 64)
             or type(value['control_uid']) is not int or value['control_uid'] != CONTROL_UID
             or value['control_acl_absent'] is not True
             or not _hex(value['source_release_sha'], 40)
@@ -98,6 +104,9 @@ def encode_observation(control_bytes, identity, expected_sha):
                  control_identity=list(identity), control_uid=CONTROL_UID,
                  python_runtime_provenance_digest=document.get('python_runtime_provenance_digest'),
                  control_acl_absent=True)
+    if CONFIGURATION_FIELD in document:
+        value['schema'] = CONFIGURATION_SCHEMA
+        value[CONFIGURATION_FIELD] = document[CONFIGURATION_FIELD]
     raw = (json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True)+'\n').encode('ascii')
     parse_observation(raw)
     return raw

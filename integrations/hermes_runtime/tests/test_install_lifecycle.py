@@ -339,7 +339,9 @@ class InstallLifecycleTests(unittest.TestCase):
         unit = self.unit_dir / "hermes-runtime-mmsecretary.service"
         text = unit.read_text(encoding="utf-8")
         self.assertIn("Restart=on-failure", text)
-        self.assertIn("IPAddressAllow=localhost", text)
+        self.assertIn("IPAddressAllow=127.0.0.1/32", text)
+        self.assertIn("IPAddressAllow=127.0.0.2/32", text)
+        self.assertNotIn("IPAddressAllow=localhost", text)
         self.assertIn("IPAddressDeny=any", text)
         self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET\n", text)
         self.assertNotIn("AF_INET6", text)

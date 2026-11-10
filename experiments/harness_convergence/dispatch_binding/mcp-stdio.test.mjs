@@ -153,6 +153,50 @@ it('in-flight cancellation reaches the real server and settles without a second 
   expect(f.events().filter(e => e.event === 'read')).toHaveLength(1)
   await f.close()
 })
+it('an already-aborted granted dispatch never sends a real MCP request', async () => {
+  const f = await setup(); await f.ready()
+  const controller = new AbortController()
+  controller.abort()
+  let accepted = false
+  try {
+    const outcome = await f.call('read_file', { file: 'memo.txt' }, controller.signal)
+    accepted = outcome.isError !== true
+  } catch {
+    // A rejected cancellation is still fail-closed; an outbound read is not.
+  }
+  expect(accepted).toBe(false)
+  expect(f.events().filter(event => event.event === 'read')).toHaveLength(0)
+  expect(f.ctx.tools.schemas().map(tool => tool.name).sort())
+    .toEqual(['mcp__disk__read_file', 'mcp__disk__search_files'])
+  await f.close()
+})
+
+it('revocation racing with an in-flight abort never replays its original MCP read', async () => {
+  const f = await setup({ mode: 'wait-cancel' }); await f.ready()
+  const controller = new AbortController()
+  const pending = f.call('read_file', { file: 'memo.txt' }, controller.signal)
+  await vi.waitFor(() => expect(f.events().filter(event => event.event === 'read')).toHaveLength(1),
+    { timeout: 2000, interval: 10 })
+  // A request already dispatched is a real effect. Revocation forbids later
+  // dispatch; it cannot retroactively assert that the first read never happened.
+  f.state.allowed = false
+  controller.abort()
+  let firstSucceeded = false
+  try {
+    const settled = await pending
+    firstSucceeded = settled.isError !== true
+  } catch {
+    // Existing cancellation may settle by rejection or an error envelope.
+  }
+  expect(firstSucceeded).toBe(false)
+  await vi.waitFor(() => expect(f.events().filter(event => event.event === 'cancelled')).toHaveLength(1),
+    { timeout: 2000, interval: 10 })
+  expect((await f.call('read_file', { file: 'memo.txt' })).isError).toBe(true)
+  expect(f.events().filter(event => event.event === 'read')).toHaveLength(1)
+  expect(f.events().filter(event => event.event === 'search')).toHaveLength(0)
+  await f.close()
+})
+
 it('the synthetic fixture never reads a caller-selected outside path', async () => {
   const f = await setup(); await f.ready()
   expect((await f.call('read_file', { file: '../outside.txt' })).isError).toBe(true)

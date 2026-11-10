@@ -1,0 +1,214 @@
+{
+  "schema": "mastermind.source_qualification.v1",
+  "mission": "Persistent Sector Leadership / Mastermind #1202",
+  "operation_id": "persistent-sector-publisher-inventory-20261107-c4",
+  "source_base": "c4b8a13fbad9a9e5676ea8f24f8114e869e06aaa",
+  "source_law_pin": "5f8c13da926011fb5fdc8cea21287b532ac968db",
+  "scope": {
+    "source_only": true,
+    "installed": false,
+    "original_macro_recovery_applied": false,
+    "product_acceptance": false
+  },
+  "observed_failure": {
+    "action_ref": "d9f96f37087b2d3e00c9b6e9a1985c40b2ea98657b7f597c56d34174dfd1f6af",
+    "code": "INDEX_RECOVERY_STATE_UNAVAILABLE",
+    "effect": "NOT_APPLIED",
+    "cause": "Both ls-files --stage -z and ls-files -v -z exceed the ordinary 1 MiB execFile output buffer. Exact HEAD/tree/index and other observations succeeded.",
+    "diagnostic_pid": 22866,
+    "index_bytes": 17915202,
+    "index_sha256": "370a13762ce3f851565dbd861612a6d84123ea0139e4ed61aaf12bc6e656f564"
+  },
+  "implemented": {
+    "inventory_stdout_bytes": 67108864,
+    "stderr_bytes": 1048576,
+    "work_deadline": "existing commandTimeoutMs",
+    "abort_cleanup_ms": 1000,
+    "binary_full_stream_sha256": true,
+    "unchanged_fingerprints": true,
+    "partial_digest_admitted": false,
+    "unconfirmed_cleanup": "bounded refusal; does not claim child exit",
+    "ordinary_output_limit_unchanged": true
+  },
+  "successor": {
+    "owner": "native-pool-pin-enrollment",
+    "generation": "c4-publisher-inventory-20261107-v1",
+    "transaction": "native-pool-pin-enrollment-publisher-inventory",
+    "parent_plan_sha256": "7d0112d29668a3bb4ef26790387d1010fedd638895088cd08a34d9d893a12301",
+    "parent_manifest_sha256": "8af46ae3e2ffea1ed0af23c78f9ed11dedb3411f05118937679fb535c5048d76",
+    "before_publisher_sha256": "a8ce5f25f4fc606e294f58de5748a73a36de5178d8e30b27132c3660e161d58e",
+    "after_publisher_sha256": "6b50521c6d94c83a2f68a700f6f658c4d52ec91cd7fc29bedb00a9d4f6647f05",
+    "unchanged_adapter_sha256": "290cf5e961db2fa30e37c32da473595518df0ded80fc850a84cf5bdae1a1ec3c",
+    "unchanged_config_sha256": "f06dc822015fc11f34d7e1142bdf1b016cb985af701ba929f33b313ff3a570df",
+    "write_order": [
+      "publisher",
+      "manifest",
+      "result"
+    ],
+    "v4_parent_preserved": true,
+    "incomplete_child_blocks_start": true
+  },
+  "source_hashes": {
+    "integrations/studio_direct_mcp/git-publish.mjs": "6b50521c6d94c83a2f68a700f6f658c4d52ec91cd7fc29bedb00a9d4f6647f05",
+    "integrations/studio_direct_mcp/git-publish.test.mjs": "7c35a8cc81f5ccaf63a1243156ddfb13ee0cedb3d2f0ce4be2bb52f8e2c52a0d",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "c520edb091932152bd94b77bda65722a16294dd0a84c484ca03c362962cf3670",
+    "integrations/studio_direct_mcp/private_service_status_successor_test.py": "c7ada1ce2ed36fd3fa66569b0d729f56b7dd5c2b45ea677aeeeb02a1bfc7b42c",
+    "integrations/studio_direct_mcp/private_service_c4_parent_proof_test.py": "7ebe6711510cc8388650bbf8dddcfc7332646df38cc9f654f7764de9a61ce7b0",
+    "docs/runbooks/c4-macro-publisher-enrollment.md": "cab1d608777dce7eb9f7830efe5ae3794cdad4a796f3fdd2471b1ab07a51a322",
+    "integrations/studio_direct_mcp/private_service_pin_enrollment_test.py": "4d72dc65c52b0c4bdb175f184031fc8f0e99c58c1169738f59b2b1ea7afc6a5f"
+  },
+  "qualification": {
+    "publisher_final": {
+      "name": "publisher",
+      "command": [
+        "node",
+        "--test",
+        "git-publish.test.mjs"
+      ],
+      "rc": 0,
+      "seconds": 129.814,
+      "summary": [
+        "\u2139 tests 142",
+        "\u2139 suites 0",
+        "\u2139 pass 142",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 129716.097666"
+      ],
+      "log_sha256": "2fcdf31bad4b280be69ae0513a2ec1901afb5d64ebebf847d38f8bc7d1a1eaf8",
+      "files": {
+        "integrations/studio_direct_mcp/git-publish.mjs": "6b50521c6d94c83a2f68a700f6f658c4d52ec91cd7fc29bedb00a9d4f6647f05",
+        "integrations/studio_direct_mcp/git-publish.test.mjs": "7c35a8cc81f5ccaf63a1243156ddfb13ee0cedb3d2f0ce4be2bb52f8e2c52a0d",
+        "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "c520edb091932152bd94b77bda65722a16294dd0a84c484ca03c362962cf3670",
+        "docs/runbooks/c4-macro-publisher-enrollment.md": "0dfc1a75fd72fe704797391a1ca2a897e36c187bc269026d16b6ffa79cfa98da"
+      }
+    },
+    "enrollment_final": {
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "private_service_status_successor_test",
+        "private_service_c4_parent_proof_test"
+      ],
+      "rc": 0,
+      "seconds": 36.33,
+      "summary": [
+        "Ran 110 tests in 36.114s",
+        "OK"
+      ],
+      "log_sha256": "3da1745084d6fd3e3d93488d40066b51e3265d17b4fe479fb13a2a2ed8188414",
+      "files": {
+        "integrations/studio_direct_mcp/private_service_c4_parent_proof_test.py": "7ebe6711510cc8388650bbf8dddcfc7332646df38cc9f654f7764de9a61ce7b0",
+        "integrations/studio_direct_mcp/private_service_status_successor_test.py": "477dcd0d3c233678de5d7f78abffb89adccf4cb477e74dcaf8eb4796d20ffcec"
+      }
+    },
+    "control_and_identity": {
+      "name": "control",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "control_bundle_test",
+        "control_bundle_closure_test",
+        "studio_direct_control_test",
+        "private_service_status_successor_test.C4InventorySourceIdentityTests"
+      ],
+      "rc": 0,
+      "seconds": 12.925,
+      "summary": [
+        "Ran 63 tests in 12.680s",
+        "OK"
+      ],
+      "log_sha256": "bcc4ad7c0d3934399b270502dee7e6ea0e108bd74c80dd0d4f1e5710a87627cf",
+      "status_test_sha256": "c7ada1ce2ed36fd3fa66569b0d729f56b7dd5c2b45ea677aeeeb02a1bfc7b42c"
+    },
+    "retained_native": {
+      "name": "retained-native",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "ops/native_fabric/quota_continuity/rollout",
+        "-p",
+        "native_install_retained_successor_test.py"
+      ],
+      "rc": 0,
+      "seconds": 0.521,
+      "summary": [
+        "Ran 12 tests in 0.293s",
+        "OK"
+      ],
+      "log_sha256": "695b1829a73cc873577d9722b9a0b8dd4b1af50e64ae07dcbceee9e864060bcd",
+      "status_test_sha256": "c7ada1ce2ed36fd3fa66569b0d729f56b7dd5c2b45ea677aeeeb02a1bfc7b42c"
+    },
+    "final_source_identity": {
+      "name": "identity",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "private_service_status_successor_test.C4InventorySourceIdentityTests"
+      ],
+      "rc": 0,
+      "seconds": 0.204,
+      "summary": [
+        "Ran 1 test in 0.000s",
+        "OK"
+      ],
+      "log_sha256": "fb184ea57734512b1f088f9181209901b9cd46df3eb7eaa2500ea9e48dde20b5",
+      "files": {
+        "integrations/studio_direct_mcp/git-publish.mjs": "6b50521c6d94c83a2f68a700f6f658c4d52ec91cd7fc29bedb00a9d4f6647f05",
+        "integrations/studio_direct_mcp/git-publish.test.mjs": "7c35a8cc81f5ccaf63a1243156ddfb13ee0cedb3d2f0ce4be2bb52f8e2c52a0d",
+        "integrations/studio_direct_mcp/private_service_pin_enrollment.py": "c520edb091932152bd94b77bda65722a16294dd0a84c484ca03c362962cf3670",
+        "docs/runbooks/c4-macro-publisher-enrollment.md": "0dfc1a75fd72fe704797391a1ca2a897e36c187bc269026d16b6ffa79cfa98da"
+      }
+    },
+    "qualification_scope_note": "Enrollment logic was qualified at f3eedfb10afa2d6496d673ead90e39d181d74acd9016c413cd684c42e17f828d. Its only subsequent change is the fixed publisher target hash for the bounded-cleanup correction; the final exact source identity test passed. All earlier tests and their overlaps remain recorded.",
+    "initial_enrollment": {
+      "rc": 1,
+      "tests": 110,
+      "failures": 2,
+      "errors": 1,
+      "log_sha256": "1f9bf8e3a37141c0afd11c7afea84f9aa16f43de022116daf1e38f995daf0617",
+      "cause": "Fixture restoration attempted to write after changing a file to 0400; two inherited absence assertions ignored the retained lock file from completed v4. Restored mode before write and asserted initial lock inode/bytes unchanged. No installed action or permission denial occurred."
+    },
+    "hosted_compatibility_followup": {
+      "failed_run": 42383094654,
+      "failed_job": 128434821767,
+      "failed_head": "2a121aa9b938982a7adcc9e0be8013c538d6a469",
+      "hosted_tests": 626,
+      "hosted_failures": 1,
+      "cause": "The existing current-protected-payload assertion compared current inventory child bytes against the immutable historical v4 C4_PUBLISHER_AFTER. Corrected only this assertion and test name to C4_INVENTORY_AFTER; retained historical v4 literals and unchanged adapter assertion.",
+      "command": [
+        "python3",
+        "-B",
+        "-m",
+        "unittest",
+        "private_service_pin_enrollment_test"
+      ],
+      "rc": 0,
+      "tests": 59,
+      "seconds": 6.093,
+      "log_sha256": "3c076cd927bc778e43801871c8dd5b12d89e0bce5ad054b6964d2a1b4d8104a5",
+      "test_file_sha256": "4d72dc65c52b0c4bdb175f184031fc8f0e99c58c1169738f59b2b1ea7afc6a5f",
+      "runtime_source_unchanged": true
+    }
+  },
+  "review": {
+    "classification": "SELF_REVIEWED",
+    "c3_judgment": "Read-only architecture judgment found no concrete successor-history/phase/start defect. Its bounded-cleanup finding was repaired and covered by two no-close/kill-failure regressions. Native child result is not formal GitHub APPROVED."
+  },
+  "retained_evidence": "/Volumes/Mastermind/evidence/persistent-sector-leadership-20261106-c4/returned-source-leaves/c4-inventory-correction",
+  "remaining": [
+    "normal protected source release",
+    "complete control-bundle adoption through existing CAS owner",
+    "exact child preview/quiescent apply/readback/start",
+    "fresh original Macro index recovery and source publication",
+    "production consumer/resource/provider/browser acceptance"
+  ]
+}

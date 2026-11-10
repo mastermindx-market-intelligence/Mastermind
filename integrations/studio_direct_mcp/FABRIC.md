@@ -25,7 +25,7 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 Omitting `pool` and `model` retains the existing economical `AUTO` route, including the
 incumbent eligible pre-task capacity continuation. For a **new** run only, the Web
 `fabric_request` may set a closed `pool` from `grok`, `glm`, `minimax`, `bailian`,
-`cursor`, `ocfree`, or `go`; `model` requires `pool` and selects an exact *already
+`cursor`, `ocfree`, `go`, `byteplus`, or `experiential`; `model` requires `pool` and selects an exact *already
 qualified* model within that pool. `model: "auto"` means only the provider is pinned.
 This is a strict constraint, not a suggestion, and it does not expose a host or account.
 
@@ -57,39 +57,71 @@ stdout. Unsupported native help or a malformed/mismatched preview still yields
 `retry_allowed=false`; any future genuinely separate review needs a new,
 properly admitted run after the actual policy/capacity issue is resolved.
 
-Optional `max_turns` is limited by native
-policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
-read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
-independence filter.
+Optional `max_turns` follows native wrapper compatibility: GLM and MiniMax use
+their existing limits; BytePlus permits at most 64. Other manual pools refuse it.
+`subject_pool` remains the separate author independence filter.
 
-`pool: "experiential"` is an additional strictly manual pin for the Experiential Labs
-uncensored route and accepts exactly `model: "glm-5.3-uncensored"` — no omitted model, no
-`auto`, and no other slug (including `glm-5.3-flash-uncensored` or any case variant);
-every deviation is refused before reservation or dispatch. The current native
-source contract admits only the plugin's `mechanical` and `fix_build` labor
-classes; `review`, `audit`, and `census` are refused before any native call.
-**That provider retains prompts and responses.** Every experiential request must carry all
-three explicit acknowledgments: `retention_opt_in: true`, `sensitive_data_opt_in: true`,
-and `code_exposure_opt_in: true`. This conservative code consent is required even for
-public-looking packets because a worker may later access repository source.
-The fields are refused for other pools; they are never sent to the provider.
-For experiential, the incumbent native `request --help` must advertise the four
-exact independent gates `--experiential-retention-acknowledged`,
-`--experiential-sensitive-data-opt-in`, `--experiential-proprietary-code`,
-`--experiential-code-exposure-opt-in` before any native status/preview/launch.
-The facade passes all four to the **native worker authority** (not HTTP inference);
-older native adapters fail closed as `MANUAL_ROUTE_UNAVAILABLE`.
-This is a mechanism for carrying explicit caller acknowledgments, not proof that
-a ChatGPT identity authenticated the consent or that any provider is qualified. `max_turns` is refused for this pool until the native adapter proves compatibility.
-The same native `preview`, `--strict-manual-pin` recheck, exact run/pool/model witnesses and
-no-fallback rules apply, with the experiential slug compared exactly; if the native adapter
-has no qualified Experiential route the request fails closed with `MANUAL_ROUTE_UNAVAILABLE`
-before any worker dispatch. Source presence alone activates nothing in connected ChatGPT.
-Existing model quality, budget, entitlement, host and policy
-gates always win; a model string is never proof that a model is served or permitted.
+### ModelArk and Experiential plan selectors
+
+The facade carries these closed selectors to the existing native owner. It does
+not read provider credentials, select an account, infer an entitlement, or own a
+budget counter.
+
+| Pool | Request model | Native behavior |
+| --- | --- | --- |
+| `byteplus` | `deepseek-v4.1-flash`, `glm-5.3-flash` | Exact Coding Plan model |
+| `byteplus` | omitted or `auto` | Native default; preview result becomes an exact request pin |
+| `experiential` | omitted or `free` | Native included-plan preference, subject to verified funding |
+| `experiential` | `uncensored` | Explicit paid Flash lane; native preference is DeepSeek, then GLM at new selection only |
+| `experiential` | Seven plain included IDs or the two Flash Uncensored IDs | Exact enrolled model, protocol and funding admission |
+| `experiential` | `glm-5.3-uncensored` | Historical explicit route, only if native policy admits it |
+
+The seven included IDs are `deepseek-v4.1-flash`,
+`deepseek-v4.1-flash-1017`, `gpt-6-luna`, `clef`, `clef-flash`,
+`jev-latest`, and `gpt-6-luna-decisions`. The two paid IDs are
+`deepseek-v4.1-flash-uncensored` and `glm-5.3-flash-uncensored`.
+Promotional `:free` IDs are not Max-plan selectors. The facade never converts
+included selection into paid selection. A selector's preview must resolve within
+its requested lane, and the exact model is forwarded to native strict request;
+neither another model nor another pool can be silently substituted.
+
+Both plan pools accept only the facade's bounded `mechanical` and `fix_build`
+classes. All Experiential manual requests require explicit
+`retention_opt_in: true`, `sensitive_data_opt_in: true`, and
+`code_exposure_opt_in: true`, even for public-looking packets. Experiential
+retains prompts and responses. The facade forwards the existing four native
+consent flags, including conservative proprietary-code treatment. Native help
+must advertise every flag before status, preview or launch, and native admission
+independently rechecks consent, funding and account identity.
+
+For unpinned `C0_MECHANICAL` / `C1_ROUTINE_BOUNDED` `mechanical` or
+`fix_build` work, `provider_plan_auto: true` selects one native AUTO attempt.
+It bypasses the incumbent pre-task continuation wrapper because that wrapper's
+deadline/preflight contract excludes these local plan consumers. Native may still
+choose another admitted incumbent pool; the field grants no provider, account,
+consent or paid-lane authority. It is not forwarded as a new native argument.
+Manual pools are incompatible with it. Other AUTO requests preserve the existing
+continuation behavior. Responses identify the single-attempt limit explicitly.
+
+For the same bounded unpinned AUTO classes, all three consents may be supplied together with
+`response_only: true`. This explicitly declares a task completed entirely from its submitted packet,
+with no worker tool actions or artifact requirements; it is never inferred from packet
+text. This form also selects one native attempt. The facade forwards `--experiential-response-only` and all four consent
+flags without adding a pool or model pin. Native AUTO may consider included
+chat models only. Paid Uncensored and native System One/Decisions protocols stay
+explicit selections. Without these fields, existing AUTO behavior is unchanged.
+Consent fields are refused on other explicit pools, and incomplete or nonboolean
+consents refuse before native access.
+
+Native funding gates remain controlling. Catalog presence is not Max funding
+proof, and a merged facade cannot make an unverified included lane eligible.
+No request, failed attempt or effect-unknown run is replayed by this change.
 
 `fabric_capabilities.manual_routing.available` is true only when the installed native
-adapter advertises both `preview` and `--strict-manual-pin`. A source-merged Web
+adapter advertises both `preview` and `--strict-manual-pin`. The capability
+also reports the facade's closed pool list and consent requirements, with
+`tool_snapshot_verified: false`: it cannot attest ChatGPT's exposed schema.
+A source-merged Web
 facade or passing tests alone do not activate the feature in connected ChatGPT.
 Reconcile the pinned native generation, immutable service release, tool snapshot and
 actual originating parent; verify one new pinned-model START, useful result, parent
@@ -175,6 +207,22 @@ The effective limit is the smaller of this request ceiling and the existing
 model/complexity/operator profile. An omitted value preserves existing behavior.
 A turn is not a tool-call count, token allowance or dollar budget.
 
+For complex implementation or audits, **omit `max_turns` unless a deliberately
+tighter ceiling is required**. Do not copy a small smoke-test ceiling into a
+multi-step C2/C3 assignment. Incident #2090 retained explicit 64-turn requests;
+the workers performed real edits and then exhausted that caller ceiling. The
+installed wrapper's qualified defaults remain its own authority. Explicit caps
+are never silently raised, and a larger requested value cannot raise a tighter
+operator limit.
+
+For C2/C3 requests with an explicit ceiling, the MCP controller receipt exposes
+`EXPLICIT_COMPLEX_TASK_TURN_CEILING`. This is an advisory, not another
+admission/refusal gate. `effective_max_turns=null` means the facade has not
+observed the actual wrapper limit; it must not invent one. The equivalent
+native launch diagnostic ships only with the next sealed native generation
+(its source composition is identity-bound); this release carries the advisory
+at the MCP boundary alone.
+
 Before creating a controller, the facade verifies that the native request help
 advertises `--max-turns`. An older adapter returns
 `ADAPTER_TURN_LIMIT_UNAVAILABLE` rather than silently discarding the constraint.
@@ -189,6 +237,16 @@ and deadline, and still requires its original pre-task rejection proof. Reaching
 the turn limit is not a capacity rejection and does not authorize another attempt.
 A returned controller receipt reports the requested value, not proven worker START
 or acceptance. Inspect the actual terminal result and retain partial work.
+
+A corroborated `turn_limit/error_max_turns/max_turns` result leads with that
+verified cause, not the SDK's nonfatal `unrecognized_model` catalog notice.
+The failure explicitly reports `workspace_changes=NOT_INSPECTED`: no accepted
+result is **not** evidence that no source files were written. The original
+owner must reconcile its existing workspace and effects before recovery.
+Never reset/recreate the workspace, accept unfinished changes, or replay a
+failed run merely because its final report lacks a patch. The closed-field
+status diagnostic follows the original owner namespace and withholds itself
+on unsafe, mismatched or changed provider/process receipts.
 
 Roll out the complete protected native generation before the same-account facade
 release. Until both are qualified, the new opt-in must fail closed. Existing
@@ -244,6 +302,39 @@ and the exact preview plan; apply requires the original service to be unloaded.
 It updates only `config.args[0]` and the corresponding three manifest fields,
 preserving the gateway bundle, private SDK, account, tunnel, port and selected
 protocol. The generic `upgrade` retains its same-backend-path requirement.
+For an independently authorized public-source release, the closed selector
+`--source-provenance github_public_protected_v1` reads only unauthenticated,
+certificate-verified GitHub metadata for the canonical
+`mastermindx-market-intelligence/Mastermind` `refs/heads/master`; it never reads or
+falls back to the legacy local-Git source. The observed protected commit must equal
+the requested release commit, and the fixed tree path must be a regular blob.
+The already staged backend is verified against that blob identity, SHA256, size,
+physical file and inode without downloading or executing it. Provenance and staged
+identity are included in the reviewed plan and revalidated before mutation. Metadata
+is strict JSON with duplicate-key rejection and a 1MiB ceiling. One fixed absolute
+ten-second deadline covers the whole connection/TLS/header/body sequence and all five
+fixed metadata documents; every document gets only the remaining time. The finite
+child executes captured qualified source bytes with a controlled module identity,
+never a pathname import or adjacent/tagged bytecode cache. Installed execution uses
+the existing sealed Control capture. A process timer gives the child its own
+absolute lifetime even if its parent exits. The remaining budget crosses processes
+using POSIX CLOCK_MONOTONIC, avoiding Python 3.9 macOS process-local clock origins;
+the child also clears an inherited blocked alarm signal. The parent's `subprocess.run(remaining)`
+also kills/waits on timeout. Checks after JSON parsing and final provenance validation
+refuse late results before intent/config/manifest writes. Process creation itself is
+not claimed separately interruptible. The child receives only the verified owner
+HOME; ambient proxy, CA override, keylog and Python environment settings are absent.
+Explicit `ProxyHandler({})` disables system proxy discovery while retaining standard
+TLS certificate and hostname verification. HTTPError-owned responses are explicitly
+closed before a constant refusal; there is no redirect, retry or persistent reader. Only
+`/git/ref/heads/master`, `/git/commits/<40 lowercase hex>` and
+`/git/trees/<40 lowercase hex>` under the canonical API root can reach transport;
+intermediate tree SHAs are checked before URL construction. Redirects, alternate
+authorities, dot/encoded separators, extra path components, query/fragment, and wrong
+SHA types are refused before transport construction. Apply's second observation still
+refuses changed protected refs or staged inode/bytes before any transaction mutation.
+The default `local_git_v1` remains available only for separately authorized local-Git
+contexts.
 The operator separately reconciles existing controllers, then stops and starts
 this original service through the same owner. See
 `ops/native_fabric/quota_continuity/README.md` for native evidence, retention and
@@ -331,3 +422,54 @@ In ChatGPT, the supported private connection flow is **Plugins -> Add custom MCP
 Publication, protected merge, host installation, tunnel readiness, plugin creation, individual account installation, tool snapshot exposure and native invocation are separate evidence. A passing local test or successful creation does not prove adoption across all six Web accounts. The final native acceptance requires this tool catalog, one admitted bounded worker, retained result consumption and explicit verified acceptance from the connected Web session. No Web turn is a daemon; unattended return requires its existing real owner and return path.
 
 Official connection references: https://developers.openai.com/api/docs/guides/secure-mcp-tunnels and https://developers.openai.com/plugins/deploy/connect-chatgpt .
+# Fixed original collection on the existing modern C3 service
+
+The source supports an explicit, default-off `--original-collection` selection
+in the existing `private_service stage` / `upgrade` owner. It is limited to
+`fabric-c3-570f6f34` on `127.0.0.1:45280`, with `modernFabricProtocol`,
+`fabricOnly`, and the shared-account backend. It does not enroll the older C3
+service or any other Studio account. The gateway's actual private-tunnel
+principal authorizes these operations; arguments, headers, `_meta`, root labels
+and helper stdin are never identity assertions.
+
+The only source-qualified runs are
+`fabric-app-native-drivers-j-20261105-01` and
+`fabric-app-application-process-carrier-20261105-01`. The local tools accept
+`run_id` only, except that result reading also requires `receipt_sha256`:
+
+* `fabric_collect_original` retains one collection operation in the existing
+  `BackendOwner` and uses the native collector's exclusive destination fence.
+* `fabric_original_collection_status` reads that destination without transport.
+  Missing or partial evidence is not permission to repeat collection.
+* `fabric_original_collection_result` verifies a COMPLETE receipt and its files,
+  decodes UTF-8 without replacement, and uses the existing output pager.
+
+Native CLI callers still require genuine native caller context. The internal
+installed-control helper has only the two closed run selectors; it verifies the
+sealed control bundle, interpreter, native generation and collector dependencies
+before importing the collector. Its stdin supplies correlation, not authority.
+The trust boundary remains the enrolled machine owner, not isolation against a
+same-UID adversary. HTTP disconnects do not cancel or release collection work.
+An owned helper timeout preserves uncertainty and the original destination; it
+never cancels an original worker or settles a lease.
+
+The receipt retains `acceptance: NOT_RECORDED`, unknown controller/settlement
+state and the historical false producer-authentication flags. Current collection
+authorization does not manufacture historical producer or model authentication.
+Metabolism, the refused old A-core artifact, other existing rows and future runs
+are excluded from this gateway entry.
+
+## Publication and activation sequence
+
+This is source support, not an installed-capability claim. The release owner
+must build and install the full native collector generation and the current
+control bundle, then use the normal C3 stage/upgrade/config-seal path with the
+explicit opt-in. The verified same-owner opt-in is preserved by ordinary
+upgrades; `--no-original-collection` removes it. The prior 13-member gateway
+fileset and every older cohort retain their exact membership.
+
+After source and installed-closure proof, the root release owner performs the
+existing service start and same-app tool metadata publication/readback. A
+`fabric-backend-release` transaction updates only backend arguments and hashes;
+it cannot publish the new gateway module or collection configuration. C1's
+native pin and gateway compatibility paths remain their existing owners.

@@ -6,13 +6,13 @@ This runbook is the procedure. It is not permission to execute it. WP5 is shadow
 
 - Decisions are JSONL on disk. `would_post` is false. The Slack client is rejected if it exposes a write method.
 - `routines/jobs.json` is `installed: false`. Every job is paused, `deliver: local`. `install_into_hermes_home()` raises.
-- `mmsecretary` / `mmmeta` are not modified.
+- `mmsecretary` / `mmmeta` are not modified. Slack transport is the single-identity Executive Relay bridge: one roster unit (`hermes-mmrelay` → `hermes-runtime-mmrelay.service`, `mmrelay.secrets.env`) holds the one bot token, and `relay_mux.py` plans routing and attribution without writing anything.
 - No Slack token belongs in this tree, in a prompt, or in a Hermes profile env checked into git.
 
 ## Before any cutover
 
 1. Independent non-author review of the exact head that would be enrolled.
-2. Put each agent's `HERMES_SLACK_BOT_USER_ID` and `HERMES_SLACK_BOT_TOKEN` in that unit's 0600 secrets file. Chairman Chris is already `U0BRET6191C`. Grok Secretary `U0BTCHX8HMF` stays a peer. Dot bot user ids are still unset. The two post rooms are already `#dotsandgroksecretary` and `#metaceo`. Thread replies there of receipt, PICKUP, or RESULT are the only pre-authorized sends, and a reply may address Grok Secretary. Shadow mode still posts nothing.
+2. Put `HERMES_SLACK_BOT_USER_ID` and `HERMES_SLACK_BOT_TOKEN` in the single unit's 0600 secrets file, `mmrelay.secrets.env` (Executive Relay bot `U0BT71H4FQE`). Chairman Chris is already `U0BRET6191C`. Grok Secretary `U0BTCHX8HMF` stays a peer. The two post rooms are already `#dotsandgroksecretary` and `#metaceo`. Thread replies there of receipt, PICKUP, or RESULT are the only pre-authorized sends, and a reply may address Grok Secretary. Shadow mode still posts nothing.
 3. Run shadow mode against a read-only Slack export for a Chairman-chosen window. Compare with `parity.compare`. A refusal must show up as `withheld`, not as a post. Mismatches are investigated. They are not patched by posting.
 4. Keep the shadow JSONL. Dedup keys are `channel:ts`. A second pass must not grow the file for the same messages.
 5. Do not point Hermes cron at a live home. The catalog clock is already `America/Cancun` (UTC-5, no DST), with the original wall clock noted on each job. `install_into_hermes_home()` still refuses.
@@ -21,7 +21,7 @@ This runbook is the procedure. It is not permission to execute it. WP5 is shadow
 ## Cutover, only after a separate Chairman grant
 
 1. Leave Grok Secretary running. Shadow and live may overlap. Dedup by Slack ts so the same commission is not handed off twice. An ACK from this agent's own bot user id keeps the detector quiet on that thread. A Grok Secretary ACK is a peer receipt and does not suppress the commission.
-2. A later change may flip delivery from local JSONL to a thread reply. That change is not this package. It still may not approve or merge, may not use Always allow, and may not retry a Fabric run id.
+2. A later change may flip delivery from local JSONL to a thread reply. That change is not this package. It still may not approve or merge, may not use Always allow, and may not retry a Fabric run id. All outbound sends go through `relay_mux.plan` and always carry the single bot id, never a human, commissioner, or peer identity — per-role persona comes from `chat:write.customize` attribution (username/icon), with a bold `*Secretary ·*` / `*Meta-CEO ·*` header as fallback.
 3. Enrolling skills into `mmsecretary` is a profile change on the qualification lane, which has its own writer. Do not push that branch from this work. The skills toolset there is disabled on purpose.
 4. Wake delivery still belongs to `control_plane.wake_events`. Mint only when the dialogue resolver has already produced `agent_dialogue_attention:<64 hex>`. Do not add a secretary source kind in order to make the timer "more native".
 5. Post the receipt and the RESULT on the existing Slack thread and on the PR only after the grant in step 2. Reviewers comment with a `VERDICT:` line. They do not approve.

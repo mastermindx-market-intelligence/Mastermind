@@ -30,7 +30,7 @@ builder = historical.builder
 @pytest.fixture(scope='module')
 def source_owners(tmp_path_factory):
     root = tmp_path_factory.mktemp('successor-source').resolve()
-    raw = Path(g.__file__).read_bytes()
+    raw = installer._HISTORICAL_LAUNCHER.read_bytes()
     addition = (b'    # One vetted flat plist. Not a suffix rule and not a directory walk.\n'
                 b'    if relative == "ext/host_pull_launchd.plist.template":\n'
                 b'        return\n')
@@ -49,8 +49,7 @@ def source_owners(tmp_path_factory):
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
     current_raw = (target / 'native-manifest.json').read_bytes()
-    assert current_raw == (ROLLOUT / 'native-manifest.json').read_bytes()
-    manifest = json.loads(current_raw)
+    manifest = historical.verify_current_stage(target)
     import base64, zlib
     fixture = ROLLOUT.parents[3] / 'tests/fixtures/native-catalog-predecessor102-0be933.json'
     retained_raw = fixture.read_bytes()
@@ -59,7 +58,17 @@ def source_owners(tmp_path_factory):
     assert retained['schema'] == 'mastermind.test_native_catalog_predecessor102/v1'
     assert retained['source_commit'] == '58083bf128fdac2d8eab374641c78bb403e7d18c'
     historical_manifest = retained['manifest']
-    assert set(manifest) == set(historical_manifest)
+    added = {'ext/post_failure_observation.py', 'ext/post_failure_observation_delivery.py',
+                'ext/participant_binding.py', 'ext/fabric_participant_owner.py',
+                'ext/original_advertised_artifact.py'}
+    assert set(manifest) == set(historical_manifest) | added
+    # Remove only the two reviewed S14, two participant and one recovery additions inside this disposable102
+    # inverse, after proving each is the actual current staged payload.
+    for name in added:
+        path = target / 'native-code-stage' / name
+        assert g.digest(path.read_bytes()) == manifest[name]
+        path.unlink()
+    manifest = {name: digest for name, digest in manifest.items() if name not in added}
     # S7 changed three additional members of the CURRENT closure. Restore
     # their exact protected predecessor bytes in this historical B11 fixture;
     # the immutable original fixture and paired-upgrade target stay unchanged.
@@ -88,6 +97,12 @@ def source_owners(tmp_path_factory):
     assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert set(long_retained['files']) == long_names
     base_paths = {
+        # Only historical102 lacks this retained APPLICATION carrier predecessor.
+        # Historical95 already carries its distinct support bytes in its fixture.
+        'ext/support_bundle.py':
+            ROLLOUT / 'preimages/support_bundle_e5e6153.py',
+        'ext/artifact_delivery.py':
+            ROLLOUT.parents[1] / 'grok47/overlay/artifact_delivery.py',
         'ext/fabric_operator_contract.py':
             ROLLOUT.parents[1] / 'grok47/overlay/fabric_operator_contract.py',
         'ext/fabric_operator_owner.py':
@@ -98,6 +113,18 @@ def source_owners(tmp_path_factory):
             ROLLOUT.parent / 'source/oc_free_exec.sh',
         'ext/sub.sh':
             ROLLOUT.parents[1] / 'grok47/overlay/sub.sh',
+        # Protected899ac broker blob b39e1fbcebe88513ee9c1dd756c56a9c68ff72b1.
+        # Restore only this disposable historical102 payload, not CURRENT.
+        'ext/lease_broker.py':
+            fixture.with_name('native-lease-broker-pre-fair-share-899ac3a9.py.txt'),
+        # Protected49c2 custody predecessors are immutable fixture data.
+        # The existing loop joins each complete payload to the frozen102 map.
+        'ext/linux_process_identity.py':
+            fixture.parent / 'native_historical_payloads/linux_process_identity.py.txt',
+        'ext/paid_host_qualification.py':
+            fixture.parent / 'native_historical_payloads/paid_host_qualification.py.txt',
+        'ext/paid_initializer.py':
+            fixture.parent / 'native_historical_payloads/paid_initializer.py.txt',
     }
     new_names = long_names | set(base_paths)
     # S9 also changes the CURRENT picker. Bind its authentic protected
@@ -109,9 +136,49 @@ def source_owners(tmp_path_factory):
     assert selection['commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert selection['blob'] == 'dd542dbc5bb746c0ad1428b177b25a98b7a02536'
     assert selection['path'] == 'ops/native_fabric/quota_continuity/candidate/pick.py'
-    predecessor_files = {**retained['files'], **diagnostic['files'], 'ext/pick.py': selection}
+    # Reuse the exact protected observer bytes already checked against the
+    # immutable95 and102 maps; source/ preimages belong to another epoch.
+    observer_raw = (ROLLOUT.parents[3] / 'tests/fixtures/native-observer-historical95-48ca.json').read_bytes()
+    assert g.digest(observer_raw) == '0dd81a279641b9c456ef94439d519d97f7670ec18831f5bd78f69bcdd710b3b2'
+    observer = json.loads(observer_raw)
+    assert observer['schema'] == 'mastermind.test_native_observer_historical95/v1'
+    assert observer['source_commit'] == '48ca51f882338c58e377a0acf16931066c703384'
+    assert set(observer['files']) == {'ext/run_observation.py', 'ext/run_observation_delivery.py'}
+    # Ubuntu4 Grok qualification changes CURRENT policy only. Keep the exact
+    # historical B11 policy bytes bound to their protected source and digest.
+    qualification_raw = (ROLLOUT.parents[3] / 'tests/fixtures/ubuntu4-grok-qualification-predecessor-f374289e.json').read_bytes()
+    assert g.digest(qualification_raw) == '93f5285a758f1045be1f178f35d17e792459f167d2d631ff2914778253b64ebb'
+    qualification = json.loads(qualification_raw)
+    assert qualification['schema'] == 'fabric.ubuntu4-qualification-predecessor.v1'
+    assert qualification['commit'] == 'f374289eb74587eaa755f5bc8e5a3252d00850e0'
+    assert qualification['blob'] == 'f72b12eac939143b1b2ed298139d55b06667a2c2'
+    assert qualification['path'] == 'ops/native_fabric/quota_continuity/candidate/fabric_host_qualification.py'
+    # Restore the byte-pinned old runtime only in this historical102 fixture.
+    # The current procfs fallback must not relabel the accepted transition.
+    runtime_raw = fixture.with_name('native-historical-lane-runtime-61350902.json').read_bytes()
+    assert g.digest(runtime_raw) == '1d658364949b3089ecb35b1ca6f3f8ac79970de1ab44dcc17dd6198a1f1eb3c0'
+    runtime = json.loads(runtime_raw)
+    assert runtime['schema'] == 'mastermind.native_historical_lane_runtime.v1'
+    assert runtime['original_sha256'] == historical_manifest['ext/lane_runtime.py']
+    runtime_predecessor = {
+        'bytes': runtime['original_bytes'], 'sha256': runtime['original_sha256'],
+        'zlib_base64': runtime['zlib_base64'],
+    }
+    # Restore the exact protected host-pull predecessors only in this
+    # historical102 fixture. CURRENT retains the repaired source payloads.
+    host_raw = fixture.with_name('native-host-pull-predecessors-9141013f.json').read_bytes()
+    assert g.digest(host_raw) == 'f73799e6bb662c7a807ed4865723f770a759d73ae226768709b9bca3d6df3383'
+    host = json.loads(host_raw)
+    assert host['schema'] == 'mastermind.test_native_host_pull_predecessors/v1'
+    assert host['source_commit'] == '9141013f5a969d59f508784b9f4f76794983caa5'
+    assert set(host['files']) == {'ext/host_pull.sh', 'ext/host_pull_backend.py',
+                                 'ext/host_pull_daemon.sh'}
+    predecessor_files = {**retained['files'], **diagnostic['files'], **host['files'],
+                         **observer['files'], 'ext/pick.py': selection,
+                         'ext/fabric_host_qualification.py': qualification,
+                         'ext/lane_runtime.py': runtime_predecessor}
     assert {name for name in manifest if manifest[name] != historical_manifest[name]} == (
-        set(predecessor_files) | new_names
+        set(predecessor_files) | new_names | set(historical.APPLICATION_PREIMAGES)
     )
     for name, digest in manifest.items():
         assert g.digest((target / 'native-code-stage' / name).read_bytes()) == digest
@@ -129,6 +196,7 @@ def source_owners(tmp_path_factory):
         payload = predecessor.read_bytes()
         assert g.digest(payload) == historical_manifest[name]
         (target / 'native-code-stage' / name).write_bytes(payload)
+    historical.restore_application_preimages(target / 'native-code-stage', historical_manifest)
     manifest = historical_manifest
     historical_raw = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
     assert g.digest(historical_raw) == retained['manifest_sha256'] == installer.SUCCESSOR_MANIFEST
@@ -252,8 +320,8 @@ def test_wrong_target_cannot_be_admitted(owner):
 
 def test_source_owner_hash_is_not_a_caller_hint(owner):
     path = owner.root / 'wrong_generation.py'
-    path.write_bytes(Path(g.__file__).read_bytes() + b'\n# extra source\n')
-    with mock.patch.object(g, '__file__', str(path)):
+    path.write_bytes(installer._HISTORICAL_LAUNCHER.read_bytes() + b'\n# extra source\n')
+    with mock.patch.object(installer, '_HISTORICAL_LAUNCHER', path):
         with pytest.raises(ValueError, match='source differs'):
             prepare(owner)
     assert not owner.successor.exists()
@@ -468,3 +536,73 @@ def test_published_successor_owner_drift_refuses_before_next_authority_edge(owne
         assert (owner.ext / 'fabric_task.py').read_bytes() == task
     assert g.current(owner.store) == before
     assert (owner.store / 'bootstrap/.launcher-successor-v1.json').exists()
+
+
+def test_installed_control_resolves_actual_completed_successor(owner, tmp_path):
+    """Construct under the installer guard, then prove the sealed read context."""
+    import importlib.util
+    import os
+    import subprocess
+    repository = ROLLOUT.parents[3]
+    control_source = repository / "integrations/studio_direct_mcp"
+    spec = importlib.util.spec_from_file_location(
+        "successor_installed_control_bundle", control_source / "control_bundle.py")
+    bundle = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bundle)
+    import hashlib
+    import stat
+    def owner_bytes():
+        result = {}
+        for path in sorted(owner.root.rglob("*")):
+            info = path.lstat()
+            value = (os.readlink(path) if path.is_symlink() else
+                     hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else
+                     "directory")
+            result[str(path.relative_to(owner.root))] = (stat.S_IMODE(info.st_mode), value)
+        return result
+    plan = prepare(owner)
+    receipt = installer.apply_successor(owner.successor)
+    before = owner_bytes()
+    pointer = g.current(owner.store)
+    # Close the real installer's audited phase through its normal teardown.
+    # Its existing registered cleanup retains this disposable tree until the
+    # installed-control read phase completes; no audit exception is added.
+    owner.tearDown()
+    home = tmp_path / "installed-home"
+    home.mkdir(mode=0o700)
+    control = home / ".local/share/studio-direct-mcp/control"
+    control.mkdir(parents=True, mode=0o700)
+    launcher = home / ".local/bin/studio-direct"
+    launcher.parent.mkdir(parents=True, mode=0o700)
+    launcher.write_text("#!/bin/sh\nexit 0\n")
+    launcher.chmod(0o700)
+    with mock.patch.object(bundle.Path, "home", return_value=home):
+        installed = bundle.install(source=control_source, control_root=control,
+                                   launcher=launcher)
+    assert len(installed["files"]) == 74
+    code = r"""
+import importlib.util,json,sys
+from pathlib import Path
+from types import SimpleNamespace
+root=Path(sys.argv[1])
+spec=importlib.util.spec_from_file_location("installed_successor_proof",root/"private_service.py")
+svc=importlib.util.module_from_spec(spec);sys.modules[spec.name]=svc
+spec.loader.exec_module(svc)
+args=SimpleNamespace(successor_bundle=Path(sys.argv[2]),
+    successor_plan_sha256=sys.argv[3],account="chatgpt1",operation="status")
+with svc._pin_native_context(args) as observed:
+    assert observed["phase"]=="SELECTED"
+    print(json.dumps(observed,sort_keys=True))
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", code, str(control),
+         str(owner.successor), plan["digest"]],
+        cwd=home, env={"HOME": str(home), "PATH": "/usr/bin:/bin", "LANG": "C"},
+        capture_output=True, text=True, timeout=40)
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["successor_digest"] == plan["digest"]
+    assert observed["selection"] == receipt["selection"] == pointer
+    assert observed["pool_bridge"] == plan["entries"]["pool"]["bridge"]
+    assert owner_bytes() == before
+    assert g.current(owner.store) == pointer

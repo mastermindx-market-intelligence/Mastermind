@@ -17,13 +17,17 @@ def _approved_project_block(text: str) -> str:
     )[1].split("\n```", 1)[0]
 
 
+
 def _contains_macro_release_instruction(text: str) -> bool:
+    # Accepted Macro opt-in still lives in DELIVERY_WORKFLOW; the compact
+    # one-pass rule routes there and must never bulk-arm other PRs.
     return all(
         snippet in _approved_project_block(text)
         for snippet in (
-            "9A. Macro `merge-on-green`:",
+            "9A. TASK FIRST:",
             "docs/DELIVERY_WORKFLOW.md",
-            "Never bulk-arm.",
+            "actual repo controls/opt-ins govern",
+            "Never bulk-arm/clear other holds",
         )
     )
 
@@ -36,27 +40,25 @@ def test_actual_web_project_block_exposes_release_pointer_within_budget():
     assert len(block) <= 8000
     assert len(block.encode("utf-8")) <= 8000
     for anchor in (
-        "6A. Named reviewer login",
-        "33. MORE_WORK_EXISTS means the mission is incomplete",
-        "39. Persist results/rulings/continuations",
+        "6A. No named reviewer seat absent binding rule",
+        "33. MORE_WORK_EXISTS is incomplete",
+        "39. Persist rulings/results to canonical owners",
         "40. Grok Secretary",
-        "Review: load docs/SESSION_INDEPENDENT_REVIEW_ROUTING.md at pin.",
+        "5A. CHATGPT WEB REVIEW WAIVER",
     ):
-        assert anchor in block, f"incumbent #1987 instruction lost: {anchor}"
+        assert anchor in block, f"incumbent release safety lost: {anchor}"
     assert DELIVERY.is_file()
 
 
 def test_outside_fence_release_note_does_not_count_as_installed_instruction():
     kernel = KERNEL.read_text(encoding="utf-8")
     assert _contains_macro_release_instruction(kernel)
-    moved = kernel.replace(
-        "9A. Macro `merge-on-green`: docs/DELIVERY_WORKFLOW.md. Never bulk-arm.",
-        "",
-    )
-    assert moved != kernel, "the exact projected rule must exist in the source"
+    marker = "9A. TASK FIRST:"
+    moved = kernel.replace(marker, "", 1) + "\n" + marker
+    assert moved != kernel, "actual projected release pointer must exist"
     assert not _contains_macro_release_instruction(moved)
+    assert marker in moved
     assert "Cross-session PR release and auto-merge discoverability" in moved
-
 
 def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
     delivery = DELIVERY.read_text(encoding="utf-8")
@@ -70,7 +72,7 @@ def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
         "HOLD-RELEASED",
         "APPROVED",
         "Fabric",
-        "Only when release is **actually authorized**",
+        "Once the required checks, applicable review and holds are satisfied",
         "gh pr edit <number> --repo mastermindx-market-intelligence/macro --add-label merge-on-green",
         "failure-marker pass",
         "global CI workload cap",
@@ -78,9 +80,9 @@ def test_release_procedure_requires_review_holds_ci_and_real_sweeper_readback():
         "PROVEN_LIVE",
     ):
         assert token in section, f"Macro release gate lost: {token}"
-    assert section.index("Verify **one genuinely independent formal GitHub APPROVED review**") < section.index(
-        "Only when release is **actually authorized**"
-    ), "release opt-in must come after non-author and hold checks"
+    assert section.index("Apply only the review actually required") < section.index(
+        "Once the required checks, applicable review and holds are satisfied"
+    ), "release opt-in must follow applicable qualification and hold checks"
 
 
 def test_account_entrypoint_routes_macros_and_other_repos_differently():
@@ -94,7 +96,7 @@ def test_account_entrypoint_routes_macros_and_other_repos_differently():
         "docs/DELIVERY_WORKFLOW.md",
         "merge-on-green",
         "binding CI",
-        "independent non-author arming/release decision",
+        "assigned session",
         "recorded holds",
         "main",
         "master",
@@ -155,56 +157,42 @@ def test_cross_repository_macro_gh_commands_are_explicitly_bound():
 
 
 
-def _assert_review_once_automatic_release_transition(delivery: str, account: str) -> None:
-    section = delivery.split(
-        "### Review once, release automatically — only after machine enforcement", 1
-    )[1].split("`merge-blocked` is a refusal/diagnostic", 1)[0]
+def _assert_proportionate_automatic_release(delivery: str) -> None:
+    ordinary = delivery.split("## One qualification, normal protected release", 1)[1]
     for token in (
-        "one independent source review",
-        "not yet live authority",
-        "absent, stale, revoked, self-authored and unreadable reviews",
-        "CHANGES_REQUESTED",
-        "installed, independently qualified and read back",
-        "without an additional non-author release operator",
-        "admin bypass",
+        "Ordinary reversible FAST/STANDARD",
+        "No independent technical review, formal approval, separate release operator",
+        "**one** distinct native/Fabric technical review",
+        "CEO-Web all-tier self-review waiver remains",
+        "only when an actual repository rule or specific binding hold requires it",
+        "No additional non-author arming ceremony",
+        "Until a prospective controller",
+        "preserve its actual enforced behavior",
+        "Missing or unreadable enforcement data must fail closed",
+        "Never use REST/admin bypass",
     ):
-        assert token in section, f"automatic release safety contract lost: {token}"
-    interim = delivery.split(
-        "3. Verify **one genuinely independent formal GitHub APPROVED review**", 1
-    )[1].split("5. Reconcile the **existing controller**", 1)[0]
-    assert "**current interim non-author release fence**" in interim
-    assert "Macro's sweeper does not yet read native PR" in interim
-    assert "eligible independent release/arming actor must verify" in interim
-    assert "Macro\'s existing sweeper does not check formal" in section
-    assert "retain the current" in account
-    assert "independent non-author arming/release decision" in account
-    assert "review once and let existing automation perform" in account
+        assert token in ordinary, token
+    for obsolete in (
+        "current interim non-author release fence",
+        "eligible independent release/arming actor must verify",
+        "Verify **one genuinely independent formal GitHub APPROVED review**",
+    ):
+        assert obsolete not in delivery
 
 
-def test_review_once_auto_release_preserves_interim_and_machine_enforcement():
-    delivery = DELIVERY.read_text(encoding="utf-8")
-    account = (ROOT / "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md").read_text(
-        encoding="utf-8"
-    )
-    _assert_review_once_automatic_release_transition(delivery, account)
-
+def test_ordinary_release_removes_internal_arming_gate_preserves_real_controls():
     import pytest
 
+    delivery = DELIVERY.read_text(encoding="utf-8")
+    _assert_proportionate_automatic_release(delivery)
+    # Losing a real enforcement fence is a regression even when routine review
+    # counts remain zero. Reject that mutation, not merely a renamed heading.
     for removed in (
-        "**current interim non-author release fence**",
-        "Macro's sweeper does not yet read native PR",
-        "eligible independent release/arming actor must verify",
-        "installed, independently qualified and read back",
-        "absent, stale, revoked, self-authored and unreadable reviews",
+        "preserve its actual enforced behavior",
+        "Missing or unreadable enforcement data must fail closed",
+        "Never use REST/admin bypass",
     ):
-        damaged = delivery.replace(removed, "UNVERIFIED", 1)
+        damaged = delivery.replace(removed, "", 1)
         assert damaged != delivery
         with pytest.raises(AssertionError):
-            _assert_review_once_automatic_release_transition(damaged, account)
-    damaged_account = account.replace(
-        "independent non-author arming/release decision",
-        "self-release approved", 1
-    )
-    assert damaged_account != account
-    with pytest.raises(AssertionError):
-        _assert_review_once_automatic_release_transition(delivery, damaged_account)
+            _assert_proportionate_automatic_release(damaged)

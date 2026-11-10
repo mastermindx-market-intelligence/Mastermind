@@ -12,7 +12,7 @@ model:
   default: glm-5.3
 secrets_file: ~/.config/hermes-runtime/mmmeta.secrets.env
 gateway:
-  host: 127.0.0.1
+  host: 127.0.0.3
   port: 8865
   backend_port: 8866
   auth: required

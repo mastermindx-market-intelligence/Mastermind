@@ -87,8 +87,8 @@ Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 
 inclusive.
 
 Duration is a planning estimate, not a minimum run time. Short substantive work is eligible
-under the same task-class and justification gates. Do not inflate an estimate or keep a session
-generating to fill it. Complete the useful authorized work batch, then checkpoint or yield.
+under the same task-class and justification gates. Do not inflate estimates or generate to fill
+time; existing completion/continuity gates still apply.
 Current model/account allowances and remaining capacity remain facts supplied by existing Capacity
 owners; this receipt neither reserves quota nor proves model availability. No quota constants,
 new capacity store, or provider entitlement are introduced here.

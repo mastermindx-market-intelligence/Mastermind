@@ -78,12 +78,14 @@ class Bridge:
         policy: Mapping[str, Any] | None = None,
         review_verifier: Any | None = None,
         parent_verifier: Any | None = None,
+        executive_qualification: Any | None = None,
     ) -> None:
         self.admission = admission if admission is not None else InertExecutiveAdmission()
         # Existing Executive/original-parent and independent review owners
         # supply verification-only ports. Unbound default permits no finish.
         self.review_verifier = review_verifier
         self.parent_verifier = parent_verifier
+        self.executive_qualification = executive_qualification
         self.carriers = dict(carriers or {})
         self.carriers.setdefault("fabric", UnboundCarrier())
         self.carriers.setdefault("cursor_cloud", UnboundCarrier())
@@ -91,6 +93,23 @@ class Bridge:
         self._by_key: dict[str, _Record] = {}
         self._by_fingerprint: dict[str, _Record] = {}
         self._lock = threading.Lock()
+
+    def inspect_executive_binding(self) -> dict[str, Any]:
+        """Trusted-host diagnostic; never an admission or model tool action."""
+        if self.executive_qualification is None:
+            return _bare(state="REFUSED", reason="EXECUTIVE_QUALIFICATION_NOT_BOUND")
+        try:
+            observation = self.executive_qualification.qualify()
+        except Exception:
+            return _bare(state="UNAVAILABLE", reason="EXECUTIVE_QUALIFICATION_UNAVAILABLE")
+        if (
+            not isinstance(observation, Mapping)
+            or observation.get("authority") != "OBSERVATION_ONLY"
+            or observation.get("live_submit") is not False
+            or observation.get("state") not in {"QUALIFIED", "REFUSED", "UNAVAILABLE"}
+        ):
+            return _bare(state="REFUSED", reason="EXECUTIVE_QUALIFICATION_UNVERIFIED")
+        return dict(observation)
 
     def submit(self, raw: Mapping[str, Any]) -> dict[str, Any]:
         blocked = refusal_for_policy(self.policy)

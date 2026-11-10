@@ -3,6 +3,49 @@
 # Packet content is transported by scp and read remotely; it is never argv.
 set -u
 
+# bash >=5.1 writes a heredoc/here-string below its pipe size (64 KiB) into a
+# pipe before the reader starts; on 2026-10-13 a 777-byte heredoc blocked there
+# forever on M2 (TERM then misreported ENOSPC). Level 50 restores temp-file
+# heredocs and is exported to local child bash; bash 3.2 ignores it.
+export BASH_COMPAT=50
+
+# Read-only heredoc transport proof: no reservation, lease, trap or worker launch.
+if [ "${1:-}" = "--selftest-heredoc" ]; then
+  selftest_out=$(mktemp "${TMPDIR:-/tmp}/remote_sub_heredoc.XXXXXX") || exit 70
+  selftest_doc=$(printf '%04096d' 0)
+  (
+    if [ -p /dev/stdin ]; then selftest_kind=pipe
+    elif [ -f /dev/stdin ]; then selftest_kind=file
+    else selftest_kind=other
+    fi
+    printf '%s %s\n' "$selftest_kind" "$(wc -c | tr -d ' ')" > "$selftest_out"
+  ) <<HEREDOC_SELFTEST &
+$selftest_doc
+HEREDOC_SELFTEST
+  selftest_pid=$!
+  selftest_ticks=0
+  while kill -0 "$selftest_pid" 2>/dev/null; do
+    if [ "$selftest_ticks" -ge 100 ]; then
+      kill -TERM "$selftest_pid" 2>/dev/null
+      wait "$selftest_pid" 2>/dev/null
+      rm -f "$selftest_out"
+      echo "HEREDOC_SELFTEST_FAIL reason=timeout bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+      exit 124
+    fi
+    sleep 0.1
+    selftest_ticks=$((selftest_ticks + 1))
+  done
+  wait "$selftest_pid" 2>/dev/null
+  selftest_result=$(cat "$selftest_out" 2>/dev/null)
+  rm -f "$selftest_out"
+  if [ "$selftest_result" = "file 4097" ]; then
+    echo "HEREDOC_SELFTEST_OK transport=file bytes=4097 bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}"
+    exit 0
+  fi
+  echo "HEREDOC_SELFTEST_FAIL reason=transport result=${selftest_result:-none} bash=$BASH_VERSION compat=${BASH_COMPAT:-unset}" >&2
+  exit 1
+fi
+
 # Read/export only: enter before any reservation, lease, trap or worker launch.
 if [ "${1:-}" = "--collect-existing" ]; then
   shift
@@ -73,7 +116,7 @@ while [ "$#" -gt 0 ]; do
 done
 [ -n "$HOST_ARG" ] && [ -n "$MODE" ] && [ -n "$PACKET" ] && [ -n "$REMOTE_CWD" ] || usage
 case "$MODE" in
-  glm|glm-codex|minimax|minimax-codex|grok|cursor|qwen|go-codex|codex-native|claude-native|oc-free) ;;
+  glm|glm-codex|minimax|minimax-codex|grok|cursor|qwen|go-codex|codex-native|claude-native|oc-free|application) ;;
   *) echo "unsupported mode: $MODE" >&2; exit 2 ;;
 esac
 case "$MODE" in
@@ -217,6 +260,12 @@ declare -a SCRATCH_PATHS=()
 declare -a TEMP_FILES=()
 SCRATCH_PATHS+=()
 TEMP_FILES+=()
+# The APPLICATION purpose is a closed, purpose-isolated branch of this same
+# controller: no worker provider acquire/renew/adopt/settle, no worker ledger,
+# no fabricated Job/Attempt.
+APPLICATION_ACTIVE=0
+APPLICATION_DISPATCH_MODEL=""
+APPLICATION_DISPATCH_DIGEST=""
 
 log() {
   local line
@@ -226,6 +275,30 @@ log() {
     printf '%s\n' "$line" >> "$LOG_FILE" 2>/dev/null || true
   fi
 }
+
+# Route one already-prepared APPLICATION dispatch. The closed data contract is
+# validated here for routing only; the receiving executor authenticates the
+# dispatch against the trusted owner.
+if [ "$MODE" = application ]; then
+  if [ "$REMOTE_CWD" != "~" ]; then
+    echo "APPLICATION_CWD_REFUSED before_lease=1" >&2
+    exit 2
+  fi
+  APPLICATION_DISPATCH_SUMMARY=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
+    application-dispatch-summary "$PACKET") || {
+      RC=78; log "APPLICATION_DISPATCH_REFUSED before_lease=1"; exit "$RC";
+    }
+  read -r APPLICATION_DISPATCH_MODEL APPLICATION_DISPATCH_DIGEST \
+    APPLICATION_PACKET_SHA256 APPLICATION_DISPATCH_HOST APPLICATION_DISPATCH_ID \
+    <<< "$APPLICATION_DISPATCH_SUMMARY"
+  if [ "$HOST_ARG" != "$APPLICATION_DISPATCH_HOST" ] ||
+     [ "$ID" != "$APPLICATION_DISPATCH_ID" ]; then
+    RC=78; log "APPLICATION_ROUTE_SCOPE_REFUSED before_lease=1"; exit "$RC";
+  fi
+  APPLICATION_ACTIVE=1
+  MODEL="$APPLICATION_DISPATCH_MODEL"
+  log "APPLICATION_DISPATCH_ROUTED invocation=$APPLICATION_DISPATCH_DIGEST"
+fi
 
 if [ -n "${FABRIC_OPERATOR_POST_SUPPORT_CONTINUATION:-}" ]; then
   [ "$ID" = fabric-paid-operator-return-proof-01a11e90-v1 ] &&
@@ -263,6 +336,9 @@ fi
 release_lease() {
   # Command substitutions run in a subshell. Retain an unproven local process
   # cleanup in the original log so EXIT cannot lose that custody decision.
+  if [ "${APPLICATION_ACTIVE:-0}" = "1" ]; then
+    return 0  # A owns the provider lease; this controller never releases it.
+  fi
   if [ "${COMMISSION_ACTIVE:-0}" = 1 ] && [ -n "${REMOTE_SUB_LOG_READY:-}" ] &&
      LC_ALL=C awk -v run="$ID" -v host="$HOST_ARG" '
        $2 == "[remote_sub" && $3 == "id=" run && $4 == "host=" host "]" &&
@@ -383,8 +459,13 @@ commission_run() {
 }
 
 commission_refresh_runtime() {
-  local stage seconds
+  local stage seconds actual_observation_poll
   stage="$1"
+  # The adaptive same-run observer never sleeps more than 30s, even when
+  # configured POLL_SECS is higher. Reserve two *actual* observation periods,
+  # not a needlessly large value that truncates a healthy long-horizon worker.
+  actual_observation_poll="$POLL_SECS"
+  [ "$actual_observation_poll" -le 30 ] || actual_observation_poll=30
   if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
     seconds=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || {
       RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC";
@@ -409,10 +490,10 @@ commission_refresh_runtime() {
   # cleanup/RC publication and a final in-deadline controller observation.
   # This narrows the worker only; it never extends the MAX_SECS fuse, broker
   # lease, provider budget, or commission deadline.
-  if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - 2 * POLL_SECS))
-  elif [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
-    CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
+  if [ "$MAX_SECS" -gt $((2 * actual_observation_poll)) ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - 2 * actual_observation_poll))
+  elif [ "$MAX_SECS" -gt "$actual_observation_poll" ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - actual_observation_poll))
   else
     CHILD_TIMEOUT=$MAX_SECS
   fi
@@ -717,7 +798,7 @@ PY_RETAIN_PLAIN_PACKET
   fi
 fi
 
-if [ "$HOST_ARG" = m2 ]; then
+if [ "$HOST_ARG" = m2 ] && [ "$APPLICATION_ACTIVE" -eq 0 ]; then
   "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" lane-root-local-scope \
     "$HOSTS_SOURCE" "$HOST_ARG" >/dev/null 2>&1 || {
       RC=78; log "REMOTE_LANE_ROOT_LOCAL_SCOPE_REFUSED before_worker=1"; exit "$RC";
@@ -831,9 +912,9 @@ print(alias, cores, max_active, load_gate, min_free_mem, thermal_limit,
 }
 load_host_registry || exit "$RC"
 if [ -n "$NEW_MACRO_COMMIT" ]; then
-  # This initial implementation covers the four Linux fleet hosts only.
+  # Registered Linux fleet hosts; enrollment and donor custody remain separate.
   case "$HOST_ARG" in
-    ubuntu0|ubuntu1|ubuntu2|ubuntu3) ;;
+    ubuntu0|ubuntu1|ubuntu2|ubuntu3|ubuntu4) ;;
     *) log "FABRIC_NEW_MACRO_LINUX_HOST_REFUSED before_lease=1"; exit 78 ;;
   esac
 fi
@@ -934,6 +1015,62 @@ else
 fi
 case "$POLL_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_POLL_SECS" >&2; RC=2; exit "$RC";; esac
 case "$MAX_SECS" in ''|*[!0-9]*|0) echo "invalid REMOTE_SUB_MAX_SECS" >&2; RC=2; exit "$RC";; esac
+# Validate before numeric arithmetic: 00 is also zero, and unbounded
+# decimal input can overflow Bash/test and silently bypass a guard.
+# This changes no valid 1..14400 second configured observation/runtime.
+if [ "${#POLL_SECS}" -gt 5 ] || [ "$POLL_SECS" -eq 0 ] ||
+   [ "$POLL_SECS" -gt 14400 ] ||
+   [ "${POLL_SECS#0}" != "$POLL_SECS" ]; then
+  echo "invalid REMOTE_SUB_POLL_SECS" >&2
+  RC=2; exit "$RC"
+fi
+if [ "${#MAX_SECS}" -gt 5 ] || [ "$MAX_SECS" -eq 0 ] ||
+   [ "${MAX_SECS#0}" != "$MAX_SECS" ]; then
+  echo "invalid REMOTE_SUB_MAX_SECS" >&2
+  RC=2; exit "$RC"
+fi
+# Completion visibility is fastest just after launch, with a hard bounded
+# number of additional SSH observations per job. A transport/protocol failure
+# uses backoff; it never triggers a second launch, provider switch or lease loss.
+# The caller's validated POLL_SECS remains the maximum and the original fuse
+# still owns expiration, heartbeat, collection and EFFECT_UNKNOWN handling.
+fabric_poll_delay() {
+  local observed_elapsed="$1" remaining_seconds="$2" failed_reads="$3"
+  local proposed="$POLL_SECS"
+  if [ "$observed_elapsed" -lt 30 ]; then
+    proposed=2
+  elif [ "$observed_elapsed" -lt 120 ]; then
+    proposed=5
+  elif [ "$observed_elapsed" -lt 600 ]; then
+    proposed=10
+  fi
+  # Outages can only slow observations, never accelerate them.
+  if [ "$failed_reads" -ge 3 ]; then
+    proposed="$POLL_SECS"
+  elif [ "$failed_reads" -eq 2 ] && [ "$proposed" -lt 10 ]; then
+    proposed=10
+  elif [ "$failed_reads" -eq 1 ] && [ "$proposed" -lt 5 ]; then
+    proposed=5
+  fi
+  # A caller's large observation interval must not leave the lease owner
+  # asleep beyond the 30-second heartbeat duty. The configured value is a
+  # maximum, not permission to delay live-liveness observations for hours.
+  [ "$proposed" -le "$POLL_SECS" ] || proposed="$POLL_SECS"
+  [ "$proposed" -le 30 ] || proposed=30
+  [ "$proposed" -le "$remaining_seconds" ] || proposed="$remaining_seconds"
+  FABRIC_POLL_DELAY_S="$proposed"
+}
+
+# The faster first-minute completion observations must not multiply provider
+# broker-heartbeat writes. Keep at least the old caller-selected heartbeat
+# cadence, bounded to 30s even when a caller selects a longer result interval.
+# The original lease and its separate slot-heartbeat remain authoritative.
+fabric_poll_heartbeat_due() {
+  local heartbeat_age="$1" heartbeat_interval="$POLL_SECS"
+  [ "$heartbeat_interval" -le 30 ] || heartbeat_interval=30
+  [ "$heartbeat_age" -ge "$heartbeat_interval" ]
+}
+
 if [ "$MAX_SECS" -gt 14400 ]; then
   echo "REMOTE_SUB_MAX_SECS must not exceed 14400" >&2
   RC=2
@@ -1279,6 +1416,13 @@ SUPPORT_FILES=(
 # The v2 executor imports this explicit sealed dependency only for bound roots.
 [ "$REMOTE_PHYSICAL_ROOT" = "-" ] || SUPPORT_FILES+=(artifact_delivery.py)
 [ "$CANONICAL_PAID_ACTIVE" -eq 0 ] || SUPPORT_FILES+=(paid_glm_model_client.py paid_model_owner.py linux_process_identity.py paid_provider_entry.py paid_initializer.py paid_initializer_token_data.py paid_initializer_nested_data.py)
+# APPLICATION has one explicit closure; ordinary worker membership is unchanged.
+if [ "$APPLICATION_ACTIVE" -eq 1 ]; then
+  [ -f "$HERE/application_native_owner.py" ] || {
+    RC=78; log "APPLICATION_OWNER_ABSENT before_launch=1"; exit "$RC";
+  }
+  SUPPORT_FILES+=(application_native_owner.py)
+fi
 SUPPORT_MANIFEST="$LOG_DIR/${ID}.support.json"
 REMOTE_SUPPORT_SOURCE="$REMOTE_LANE_TRANSFER/tmp/$ID.support-src"
  # Retain the exact per-run manifest as the pre-task control-flow identity.
@@ -1802,14 +1946,18 @@ while true; do
   WAIT_STARTED_SECONDS=$SECONDS
   RC=""
   poll_count=0
+  POLL_FAILURE_STREAK=0
+  LAST_POLL_BROKER_HEARTBEAT=$((SECONDS - POLL_SECS))
   CANONICAL_LAUNCH_RELAYED=0
   while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do
     if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
       commission_poll_remaining=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || break
       [ "$commission_poll_remaining" -gt 0 ] || break
     fi
-    if [ -n "$LEASE_ID" ]; then
+    if [ "${APPLICATION_ACTIVE:-0}" -eq 0 ] && [ -n "$LEASE_ID" ] &&
+       fabric_poll_heartbeat_due "$((SECONDS - LAST_POLL_BROKER_HEARTBEAT))"; then
       broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true
+      LAST_POLL_BROKER_HEARTBEAT=$SECONDS
     fi
     poll_count=$((poll_count + 1))
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
@@ -1835,19 +1983,21 @@ while true; do
         log "RC value=$RC poll=$poll_count"
         break
       elif [ "$POLL_VALUE" = "__REMOTE_SUB_PENDING__" ]; then
+        POLL_FAILURE_STREAK=0
         log "POLL_PENDING poll=$poll_count"
       else
+        [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
         log "POLL_PROTOCOL_INVALID poll=$poll_count bytes=$(wc -c < "$POLL_FILE" 2>/dev/null || echo 0)"
       fi
     else
+      [ "$POLL_FAILURE_STREAK" -ge 3 ] || POLL_FAILURE_STREAK=$((POLL_FAILURE_STREAK + 1))
       log "POLL_TRANSPORT_FAILED rc=$poll_rc poll=$poll_count"
     fi
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
     remaining=$((MAX_SECS - elapsed))
     [ "$remaining" -gt 0 ] || break
-    sleep_for="$POLL_SECS"
-    [ "$sleep_for" -le "$remaining" ] || sleep_for="$remaining"
-    commission_run poll-sleep sleep "$sleep_for" || break
+    fabric_poll_delay "$elapsed" "$remaining" "$POLL_FAILURE_STREAK"
+    commission_run poll-sleep sleep "$FABRIC_POLL_DELAY_S" || break
   done
 
   if [ -z "$RC" ]; then
@@ -1941,6 +2091,27 @@ if [ "$NATIVE_MODE" -eq 1 ]; then
   then PRESERVE_LEASE=0; log "NATIVE_SETTLED receipt=$(basename "$NATIVE_TERMINAL")"
   else PRESERVE_LEASE=1; log "NATIVE_EFFECT_UNKNOWN same_carrier_reconciliation_required=1"
   fi
+fi
+
+# The APPLICATION branch collects its own typed terminal receipt and exits. A
+# remains the sole durable dispatch/terminal/close owner: no worker ledger row
+# and no provider settlement happens here.
+if [ "${APPLICATION_ACTIVE:-0}" -eq 1 ]; then
+  APPLICATION_TERMINAL="$LOG_DIR/${ID}.application-terminal.json"
+  if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq \
+      "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.application-terminal.json" \
+      "$APPLICATION_TERMINAL" &&
+     APPLICATION_RESULT_RC=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" application-result-valid \
+       "$APPLICATION_TERMINAL" "$PACKET" "$LOCAL_OUT"); then
+    RC="$APPLICATION_RESULT_RC"
+    log "APPLICATION_RESULT_SAVED file=$(basename "$APPLICATION_TERMINAL")"
+  else
+    RC=76
+    log "APPLICATION_RESULT_UNAVAILABLE rc=76 effect_unknown=1 same_carrier_reconciliation_required=1"
+  fi
+  require_bound_lane_layout_after_launch after_collection
+  log "APPLICATION_DONE rc=$RC worker_ledger=0 provider_settlement=owner_a"
+  exit "$RC"
 fi
 
 # Ordinary profiles have no separate native terminal receipt. Their remote RC

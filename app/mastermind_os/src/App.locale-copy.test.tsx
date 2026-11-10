@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import {cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
+import {act, cleanup, fireEvent, render, screen, waitFor} from "@testing-library/react";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {App} from "./App";
+import type {AuthState} from "./host";
 import {createFixtureCommandBinding} from "./browser-proof-command-fixture";
 import type {PendingPointerStore} from "./orchestration/operation-controller";
 const readiness = vi.hoisted(() => ({version:"test-version",source_revision:"raw-source-revision",build_identity:"raw-build-identity",transport:"raw-transport",state:"raw-state",native_client_ref:"raw-client"}));
@@ -11,9 +12,12 @@ afterEach(()=>{cleanup();localStorage.clear();delete window.MastermindMissionHos
 it("shows plain Chinese unavailable work, selection and footer without changing raw diagnostics",()=>{
  render(<App locale="zh-CN" theme="light"/>);
  expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
- expect(screen.getByText("此处暂时无法开始工作。")).toBeTruthy();
- expect(screen.getByText("尚未选择工作项")).toBeTruthy();
- expect(screen.getByRole("navigation",{name:"工作导航"})).toBeTruthy();
+ expect(screen.getByRole("navigation",{name:"公司导航"})).toBeTruthy();
+ expect(screen.getByRole("link",{name:"跳至工作区"})).toBeTruthy();
+ expect(screen.getByText("暂时无法开始工作。")).toBeTruthy();
+ expect(screen.queryByText("尚未选择工作项")).toBeNull();
+ expect(document.querySelector("details.nav-advanced nav")?.getAttribute("aria-label")).toBe("工作导航");
+ expect(document.querySelector<HTMLDetailsElement>("details.nav-advanced")?.open).toBe(false);
  expect(screen.getByText("状态与来源")).toBeTruthy();
  const summary=screen.getByText("技术详情");
  expect(summary.closest("details")?.open).toBe(false);
@@ -51,5 +55,33 @@ it("changes language in the real ready composer without remounting or sending it
  expect(screen.getByRole("heading",{name:"开始工作"})).toBeTruthy();
  expect(screen.getByLabelText("目标")).toBe(goal);
  expect(goal.value).toBe("Keep this exact unsent goal");
+ expect(submit).not.toHaveBeenCalled();
+});
+
+it.each(["en", "zh-CN"] as const)("shows an explicit signed-out cue with the original sign-in action (%s)", locale => {
+ const signIn=vi.fn(async()=>{});
+ window.MastermindMissionHost={auth:{getState:()=>({status:"signed_out",reason:null,acquisition:false,content:false}),subscribe:()=>()=>{},signIn,signOut:vi.fn(async()=>{})}};
+ render(<App locale={locale}/>);
+ expect(screen.getByRole("heading",{name:locale==="zh-CN"?"欢迎回来。":"Welcome back."})).toBeTruthy();
+ expect(screen.queryByText(locale==="zh-CN"?"暂时无法获取待决策事项。":"Decision information is unavailable right now.")).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:locale==="zh-CN"?"登录":"Sign in"}));
+ expect(signIn).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the unsent Today goal protected before the explicit expired-auth cue",async()=>{
+ let signedIn=true;
+ let notify: (state: AuthState)=>void=()=>{};
+ const store:PendingPointerStore={read:()=>null,reserve:()=>({reserved:true}),clearIfEqual:()=>true};
+ const binding=createFixtureCommandBinding(store);
+ const submit=vi.spyOn(binding.port,"submit");
+ const signIn=vi.fn(async()=>{});
+ window.MastermindMissionHost={commandBinding:binding,auth:{getState:()=>({status:signedIn?"signed_in":"signed_out",reason:signedIn?null:"TOKEN_EXPIRED",acquisition:signedIn,content:false}),subscribe:listener=>{notify=listener;return()=>{};},signIn,signOut:vi.fn(async()=>{})}};
+ render(<App locale="en"/>);
+ fireEvent.change(screen.getByLabelText("Goal"),{target:{value:"Literal unsent Today goal"}});
+ await act(async()=>{signedIn=false;notify(window.MastermindMissionHost!.auth!.getState());});
+ expect(screen.getByRole("heading",{name:"Welcome back."})).toBeTruthy();
+ expect((screen.getByLabelText("Goal") as HTMLTextAreaElement).value).toBe("Literal unsent Today goal");
+ expect(screen.getByLabelText("Goal").closest("section")?.textContent).toContain("expired");
+ expect(screen.queryByText("Decision information is unavailable right now.")).toBeNull();
  expect(submit).not.toHaveBeenCalled();
 });

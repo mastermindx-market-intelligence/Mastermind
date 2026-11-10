@@ -834,3 +834,32 @@ context, checking each stage before the next. A command launched through the C4 
 itself is not a qualified self-cutover mechanism. The subsequent Paper prepare/edit and
 visual readback remain on Studio Direct C4.
 
+## Source readiness and named-seat diagnostics (v22; not installed)
+
+The reconciled #1409 source adds early write-readiness reporting to
+`paper_inspect` while retaining the current `TOOL_SCOPED_CONTRACT_V1` policy.
+Its `write_schema` reports compatible and incompatible write tools separately.
+An incompatible unrelated writer does not disable qualified operations; a
+connected document can also report no compatible writers. The live critical
+`get_basic_info` contract is still checked before its implicit call. Catalog
+failure remains a typed refusal and is never converted into `CONNECTED`.
+
+Named v3/v4 direct-service receipts additionally expose only
+`schema`, `seat_id`, `source_revision` and `bridge_sha256` under
+`transport_diagnostic`. The stdio projection validates the exact key set and
+value formats. Legacy unnamed bundles omit this field. These verified-install
+diagnostics identify source provenance, confer no authority and do not enter
+snapshot hashes, execution bindings, write permission or retry decisions.
+Refusals and unknown-effect receipts retain their original state and operation.
+
+The additive source generation is **v22**, bridge SHA-256
+`af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b`. Every existing generation remains immutable,
+including v12 `82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb`
+and v21 `dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa`.
+The old #1409 proposal to replace the v12 binding or restore whole-catalog-only
+write admission is superseded by the accepted protected implementation.
+
+This is source integration only. It changes no installed selector, service,
+tunnel or design. The historical #1409 staging denial remains unreplayed;
+another generation name is not permission to repeat that action. An authorized
+runtime release and same-carrier real-app acceptance remain separate.
