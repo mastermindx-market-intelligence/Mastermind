@@ -10,6 +10,9 @@ from __future__ import annotations
 import glob
 import json
 import os
+import re
+import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import pytest
@@ -116,3 +119,82 @@ def test_endpoint_returns_pdf():
     assert r.content[:4] == b"%PDF"
     # unknown id -> clean 404, not a 500
     assert c.get("/research_paper.pdf", params={"id": "nope-xyz"}).status_code == 404
+
+
+# Real ReportLab pagination; synthetic content, no store or network reads.
+class ResearchPdfPaginationTests(unittest.TestCase):
+    def render(self, markdown):
+        drawn = []
+        draw_text = R.NumberedCanvas.drawText
+
+        def record(canvas, text_object):
+            drawn.append(text_object.getCode())
+            return draw_text(canvas, text_object)
+
+        paper = {
+            "ticker": "SYNTH",
+            "company": "Synthetic Pagination Fixture",
+            "generated_at": "2026-11-10T05:00:00Z",
+            "combined": 50,
+            "engine_score": 40,
+            "research_score": 60,
+            "report_md": markdown,
+        }
+        with patch.object(R.NumberedCanvas, "drawText", record):
+            pdf = R.build(paper, {})
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertTrue(pdf.rstrip().endswith(b"%%EOF"))
+        pages = len(re.findall(rb"/Type\s*/Page\b", pdf))
+        self.assertGreaterEqual(pages, 1)
+        text = "\n".join(drawn)
+        for page in range(1, pages + 1):
+            self.assertEqual(text.count(f"Page {page} of {pages}"), 1)
+        return pages, text
+
+    def test_tall_body_cell_splits_without_losing_or_repeating_text(self):
+        values = [f"fact{i:04d}" for i in range(700)]
+        pages, text = self.render(
+            "| EvidenceHeader | DetailHeader |\n|---|---|\n| Synthetic | "
+            + " ".join(values) + " |\n\nAfterTableMarker"
+        )
+        self.assertGreaterEqual(pages, 3)
+        self.assertEqual(re.findall(r"fact\d{4}", text), values)
+        self.assertGreaterEqual(text.count("DetailHeader"), 3)
+        self.assertEqual(text.count("AfterTableMarker"), 1)
+
+    def test_tall_cells_in_both_columns_preserve_following_rows(self):
+        left = [f"left{i:04d}" for i in range(500)]
+        right = [f"right{i:04d}" for i in range(650)]
+        pages, text = self.render(
+            "| LeftHeader | RightHeader |\n|---|---|\n| "
+            + " ".join(left) + " | " + " ".join(right)
+            + " |\n| FinalLeftMarker | FinalRightMarker |"
+        )
+        self.assertGreaterEqual(pages, 3)
+        self.assertEqual(re.findall(r"left\d{4}", text), left)
+        self.assertEqual(re.findall(r"right\d{4}", text), right)
+        self.assertGreaterEqual(text.count("RightHeader"), 3)
+        self.assertEqual(text.count("FinalLeftMarker"), 1)
+        self.assertEqual(text.count("FinalRightMarker"), 1)
+
+    def test_regular_table_stays_on_one_page(self):
+        pages, text = self.render(
+            "| KeyHeader | ValueHeader |\n|---|---|\n| OrdinaryMarker | 0 |"
+        )
+        self.assertEqual(pages, 1)
+        self.assertEqual(text.count("KeyHeader"), 1)
+        self.assertEqual(text.count("OrdinaryMarker"), 1)
+
+    def test_ragged_table_preserves_present_cells(self):
+        _, text = self.render(
+            "| KeyHeader | ValueHeader | ExtraHeader |\n|---|---|---|\n"
+            "| RaggedMarker |\n| SecondMarker | ThirdMarker | FourthMarker |"
+        )
+        for marker in ("RaggedMarker", "SecondMarker", "ThirdMarker", "FourthMarker"):
+            self.assertEqual(text.count(marker), 1)
+
+    def test_long_plain_paragraph_still_paginates(self):
+        values = [f"plain{i:04d}" for i in range(1000)]
+        pages, text = self.render(" ".join(values))
+        self.assertGreaterEqual(pages, 2)
+        self.assertEqual(re.findall(r"plain\d{4}", text), values)
