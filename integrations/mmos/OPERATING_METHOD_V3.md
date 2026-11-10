@@ -59,6 +59,30 @@ loses detail and a verification hop that costs the parent.
   hold #1893, `~/.hermes` profiles and the gateway, the VPS.
 - Ceiling, not target: 12 concurrent children per lead, 8 per sub-lead.
 
+## Provider failures and dispatch discipline (added 2026-11-10, after the router outage)
+
+What happened: every lead and most children ran on `glm-5.3`. Its keys ran out of quota, the
+fallback route refused the model, and the router restarted about forty times. Five leads and
+about thirty children died together. Leads that stayed alive re-sent dispatches they could not
+see had landed and stacked up to five writers on one output. Four to five hours of work sat
+uncommitted in dead checkouts.
+
+- Lanes are spread across at least two models. No model carries more than about half of the
+  running drivers.
+- A provider or transport failure is not a task failure. On `ECONNRESET`, `ECONNREFUSED`,
+  HTTP 429 or 503, `FABRIC_ALL_ROUTES_COOLING`, or "tool result missing": stop dispatching.
+  Do not re-send. List threads by title (`t3_thread_list`, `includeSubagents`) to see what
+  actually started. Commit and push what exists. Return to the parent with the state.
+- Every `delegate_task` carries a unique `clientRequestId`. One writer per output: before any
+  dispatch that follows an errored turn, list same-title children first.
+- Work is pushed to the lane branch on origin after every slice that passes its check, and at
+  least every 30 minutes of work. An outage should cost minutes.
+- This wave runs as drivers with a side crew: the driver does the stateful chain itself and
+  holds at most 3 children at a time. The machine sits at a load of 45 on 24 cores; width is
+  not free.
+- The principal checks the router before a wide launch: one small request per model to
+  `127.0.0.1:8313`, and the refusal classes in the router's `logs/stderr.log`.
+
 ## Model routing by output type
 
 | The output is | Check | Models |
@@ -66,7 +90,7 @@ loses detail and a verification hop that costs the parent.
 | A diff with a test that passes | Run the test | `deepseek-v4.1-flash` first, `glm-5.3`, `grok-4.7` |
 | An attack on a diff | The reproducing command | `grok-4.7`, `glm-5.3` (a different model from the writer) |
 | A statement: census, diagnosis, "I observed X" | Raw output files the parent opens; two independent models when it gates a decision | `glm-5.3`; `grok-4.7` only as the second investigator |
-| A design or a decision memo | The principal or lead reads it; options carry exact commands | `glm-5.3` at effort high; `deepseek-v4-pro` as the second read |
+| A design or a decision memo | The principal or lead reads it; options carry exact commands | `glm-5.3` at effort high; `grok-4.7` as the second read (`deepseek-v4-pro` had no live route on 2026-11-10) |
 | Desktop or app driving, visual comparison | Window-scoped capture plus accessibility text on disk | `grok-4.7`, `minimax-m3` |
 | Lane leadership (long reading, briefing, joining) | The lane's joined suite and its ledger | `glm-5.3` |
 | CI steward | Run conclusion | `deepseek-v4.1-flash`, `glm-5.3-flash` |
