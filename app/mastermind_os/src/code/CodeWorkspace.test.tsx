@@ -94,4 +94,10 @@ describe("CodeWorkspace (TD04)", () => {
     expect(screen.getAllByText("运行中").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("拉取请求")).toBeTruthy();
   });
+
+  it("attemptId defaults to null — the projected thread list stays the surface until App passes one", () => {
+    render(<CodeWorkspace projection={available([thread()])} />);
+    expect(screen.getByRole("list", { name: "T3 coding threads" })).toBeTruthy();
+    expect(screen.queryByTestId("mm-code-workbench")).toBeNull();
+  });
 });

@@ -2323,6 +2323,72 @@ pub async fn read_fabric_status(app: AppHandle, selection: FabricStatusSelection
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct T3AttemptFleetSelection {
+    attempt_id: String,
+}
+const T3_ATTEMPT_FLEET_PATH: &str = "/workspace/resources/t3/attempts/current";
+const T3_ATTEMPT_FLEET_SCHEMA: &str = "mastermind.t3_attempt_fleet/v1";
+const T3_ATTEMPT_FLEET_CAP: usize = 16_384;
+/// Attempt ids are company run ids (`runs/...`): they CONTAIN `/` and so are
+/// never valid under the ordinary identifier grammars. This mirrors the shared
+/// wire contract (`validT3AttemptId`), including its secret-token refusal.
+fn t3_attempt_id_valid(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let first = match bytes.next() { Some(byte) => byte, None => return false };
+    if !first.is_ascii_alphanumeric()
+        || value.len() > 160
+        || !bytes.all(|byte| byte.is_ascii_alphanumeric() || b"_./:%=-".contains(&byte)) {
+        return false;
+    }
+    let lowered = value.to_ascii_lowercase();
+    if ["xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-", "xapp-", "github_pat_",
+        "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "bearer"]
+        .iter().any(|token| lowered.contains(token)) {
+        return false;
+    }
+    // The wire `sk-…` rule: `sk-` followed by at least sixteen identifier bytes.
+    !lowered.match_indices("sk-").any(|(index, _)| {
+        lowered[index + 3..].bytes()
+            .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_' || *byte == b'-')
+            .count() >= 16
+    })
+}
+impl T3AttemptFleetSelection {
+    fn validate(&self) -> Result<()> {
+        if !t3_attempt_id_valid(&self.attempt_id) {
+            return Err("REQUEST_INVALID".into());
+        }
+        Ok(())
+    }
+}
+/// Fixed read-only T3 attempt fleet projection through the existing Workspace
+/// identity: one signed GET, no caller URL, retry, second transport or write path.
+#[tauri::command]
+pub async fn read_t3_attempt_fleet(app: AppHandle, selection: T3AttemptFleetSelection) -> Result<Value> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{T3_ATTEMPT_FLEET_PATH}")).map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut().append_pair("attempt_id", &selection.attempt_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = ensure_native_token(&app, Resource::Acquisition).await?;
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json").header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    // Typed refusals arrive as ordinary schema-bearing bodies, never as transport errors.
+    let result = bounded_json(response, T3_ATTEMPT_FLEET_CAP).await;
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(T3_ATTEMPT_FLEET_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The shared frontend contract decoder retains the closed refusal and
+    // attempt vocabulary before display; this command grants no thread authority.
+    Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RetainedActivitySelection {
     work_ref: String,
     root_job_id: String,
@@ -4932,6 +4998,40 @@ mod fabric_read_selection_tests {
         let mut mistyped = valid;
         mistyped["run_id"] = serde_json::json!(3);
         assert!(serde_json::from_value::<FabricStatusSelection>(mistyped).is_err());
+    }
+}
+
+#[cfg(test)]
+mod t3_attempt_fleet_read_tests {
+    use super::*;
+
+    #[test]
+    fn attempt_ids_admit_run_slashes_but_neither_paths_nor_secrets() {
+        for id in ["runs/att-1", "runs/2026-11-09/worker-7:seat%3D3", "a"] {
+            assert!(T3AttemptFleetSelection { attempt_id: id.into() }.validate().is_ok(), "{id}");
+        }
+        assert!(T3AttemptFleetSelection { attempt_id: "a".repeat(160) }.validate().is_ok());
+        // `sk-` plus only fifteen identifier bytes is below the wire secret threshold.
+        assert!(T3AttemptFleetSelection { attempt_id: format!("runs/sk-{}", "c".repeat(15)) }.validate().is_ok());
+        let refused: Vec<String> = vec!["".into(), "a".repeat(161), "../runs/1".into(), "runs/1 x".into(),
+            "runs/1?extra=2".into(), "runs/xoxb-0123456789abcdef".into(), format!("runs/GHP_{}", "a".repeat(30)),
+            format!("runs/github_pat_{}", "b".repeat(20)), "runs/bearer/1".into(),
+            format!("runs/sk-{}", "c".repeat(16)), "runs/xapp-secret".into()];
+        for id in refused {
+            assert!(T3AttemptFleetSelection { attempt_id: id }.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn selection_accepts_only_the_one_typed_field() {
+        let valid = serde_json::json!({"attempt_id": "runs/att-1"});
+        assert!(serde_json::from_value::<T3AttemptFleetSelection>(valid.clone()).unwrap().validate().is_ok());
+        let mut extra = valid.clone();
+        extra["owner_path"] = serde_json::json!("/private/foreign");
+        assert!(serde_json::from_value::<T3AttemptFleetSelection>(extra).is_err());
+        let mut mistyped = valid;
+        mistyped["attempt_id"] = serde_json::json!(7);
+        assert!(serde_json::from_value::<T3AttemptFleetSelection>(mistyped).is_err());
     }
 }
 
