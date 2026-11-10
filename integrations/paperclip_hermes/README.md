@@ -200,6 +200,11 @@ captured preimages: four production files and four existing test files. It makes
 the existing encoding and POSIX guards explicit to the checker, fixes BOM-prefixed
 tick-lock parsing with a fresh-live-holder regression, and corrects the reported
 annotation/import/unused-variable formatting. No checker rule is weakened.
+The repository patch represents empty context lines as bare newlines accepted by
+native Git. This retains full context while passing the repository whitespace
+check. Ordinary `git apply --check` and `git apply` reproduce all eight qualified
+postimages from their exact preimages; no special apply option is needed. The
+qualification records both the original artifact and normalized repository hashes.
 
 All 14 native checks pass on qualified tree
 `08ffdd48f5e0ed105fb628b137485073e8939b05`, including zero blocking or advisory

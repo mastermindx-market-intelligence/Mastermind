@@ -354,8 +354,12 @@ reimplementing or repeating its accepted tests. The preparation, test and check
 receipts are terminal; the recorded preparation process is absent. Fresh source
 CAS binds this adoption to the existing Paperclip publication operation.
 
-The eight-file patch is SHA256
-`fe2f3f9d5a5dc8c6360b5c2facdc622f39c6cf61aaca880bf50fdaa29d5145d3`.
+The eight-file repository patch is SHA256
+`2610c739ad692ba774d3b7ff83716e5f58d1f3d8ae86a70b1e3dac5002a0c663`. Its 16 empty context lines use native Git's bare-newline
+representation so the repository whitespace gate passes. All context and hunk
+positions remain intact; ordinary `git apply --check` and `git apply` on eight
+exact disposable preimages reproduce all eight qualified postimages. The
+original qualification artifact remains `fe2f3f9d5a5dc8c6360b5c2facdc622f39c6cf61aaca880bf50fdaa29d5145d3`.
 Qualified tree `08ffdd48f5e0ed105fb628b137485073e8939b05` has all 14 native
 checks passing and 91 affected tests passing. Those 91 include 62 credential
 cases already counted in the original 128; they are not an additional distinct total.

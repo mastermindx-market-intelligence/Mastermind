@@ -18,7 +18,7 @@
   "source_publication_commit": false,
   "hygiene_patch": {
     "repository_path": "integrations/paperclip_hermes/native-baseline-hygiene.patch",
-    "sha256": "fe2f3f9d5a5dc8c6360b5c2facdc622f39c6cf61aaca880bf50fdaa29d5145d3",
+    "sha256": "2610c739ad692ba774d3b7ff83716e5f58d1f3d8ae86a70b1e3dac5002a0c663",
     "files": 8,
     "before_sha256": {
       "cron/scheduler.py": "2ab6b65f8eb07a121d00d6913db339efbf65c4e25a57f225b2ac87fa28cd0767",
@@ -39,6 +39,18 @@
       "tests/gateway/test_drain_marker_status.py": "0efe2028022b32b714fc9649a495d1a109767ff38569659a135deb0df26d7e20",
       "tests/test_fallback_family_first.py": "292922fea637ac254358a88779921d848b90891eb9c726dd456e7bf76f992d8a",
       "tests/tools/test_browser_real_profile.py": "de08c9f275ed2c95898609eedc3e1b7bb957314ad49abcda962c84a208b9577e"
+    },
+    "repository_representation": {
+      "original_sha256": "fe2f3f9d5a5dc8c6360b5c2facdc622f39c6cf61aaca880bf50fdaa29d5145d3",
+      "normalized_empty_context_lines": 16,
+      "format": "Full-context unified diff; native Git accepts bare empty context lines",
+      "application_options": [],
+      "roundtrip_receipt_sha256": "bfe4db779d2aeb59fe655efd4e25ccf160f72d251ff13b8b4acdbd94ee1952e0",
+      "verified_preimages": 8,
+      "verified_qualified_postimages": 8,
+      "apply_check_exit": 0,
+      "apply_exit": 0,
+      "installed_source_changed": false
     }
   },
   "composition": {

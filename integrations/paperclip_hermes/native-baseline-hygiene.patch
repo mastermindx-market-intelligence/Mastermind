@@ -5,26 +5,26 @@ index e348f11026..0f9d5171c3 100644
 @@ -43,12 +43,12 @@ class SteerText(str):
      #: Absolute paths of the images the user attached to this steer, in the order they staged them.
      images: tuple[str, ...] = ()
- 
+
 -    def __new__(cls, text: str = "", images: Sequence[str] | Iterable[str] | None = None) -> "SteerText":
 +    def __new__(cls, text: str = "", images: Sequence[str] | Iterable[str] | None = None) -> SteerText:
          instance = super().__new__(cls, text)
          instance.images = _clean_images(images)
          return instance
- 
+
 -    def with_images(self, images: Sequence[str] | Iterable[str] | None) -> "SteerText":
 +    def with_images(self, images: Sequence[str] | Iterable[str] | None) -> SteerText:
          """This text with ``images`` added to the ones it already carries."""
          return SteerText(str(self), _clean_images(tuple(self.images) + _clean_images(images)))
- 
+
 @@ -58,7 +58,7 @@ def steer_images(text: object) -> tuple[str, ...]:
      return getattr(text, "images", ()) if isinstance(text, str) else ()
- 
- 
+
+
 -def join_steer_text(texts: Iterable[str]) -> "SteerText | str":
 +def join_steer_text(texts: Iterable[str]) -> SteerText | str:
      """Newline-join buffered steers without losing their attachments.
- 
+
      Returns the plain ``str`` join when nothing carries an image, so a text-only buffer stays
 diff --git a/cron/scheduler.py b/cron/scheduler.py
 index 277cd592ca..3a83cca46f 100644
@@ -73,7 +73,7 @@ index 1ffdc95099..6e12b8f7d2 100644
      # admission observation must not substitute ambient values for that failure.
 -    from agent.secret_scope import current_secret_scope, get_secret  # noqa: F401
 +    from agent.secret_scope import current_secret_scope, get_secret
- 
+
      with observational_file_backend() as backend:
          config_path = get_config_path()
 diff --git a/tests/cron/test_tick_lock_staleness.py b/tests/cron/test_tick_lock_staleness.py
@@ -90,7 +90,7 @@ index fd4dbe7003..a3ce6149f4 100644
          try:
              dead_pid = st._read_tick_lock_stamp(lock_file)[0]
 @@ -85,7 +85,7 @@ class TestDeadHolderCannotBlock:
- 
+
  class TestStalenessDetection:
      def test_dead_pid_stamp_is_stale_even_when_fresh(self, tick_paths):
 -        lock_dir, lock_file = tick_paths
@@ -101,7 +101,7 @@ index fd4dbe7003..a3ce6149f4 100644
 @@ -96,6 +96,13 @@ class TestStalenessDetection:
          lock_file.write_text(f"{os.getpid()} {time.time():.6f}", encoding="utf-8")
          assert st._stale_tick_lock(lock_file) == (False, "live holder")
- 
+
 +    def test_bom_stamp_preserves_fresh_live_holder_identity(self, tick_paths):
 +        _, lock_file = tick_paths
 +        acquired_at = int(time.time())
@@ -123,7 +123,7 @@ index fd4dbe7003..a3ce6149f4 100644
          try:
 @@ -149,7 +156,7 @@ class TestReclaim:
                  holder.wait()
- 
+
      def test_fresh_live_holder_is_never_reclaimed(self, tick_paths, caplog):
 -        lock_dir, lock_file = tick_paths
 +        _, lock_file = tick_paths
@@ -140,7 +140,7 @@ index fd4dbe7003..a3ce6149f4 100644
          threads_fds, errors = [], []
          try:
 @@ -218,7 +225,7 @@ class TestReclaim:
- 
+
  class TestConcurrentTickersExactlyOneRuns:
      def test_exactly_one_holder_among_concurrent_tickers(self, tick_paths):
 -        lock_dir, lock_file = tick_paths
@@ -153,9 +153,9 @@ index 2cf4bfa379..229e1fcf3d 100644
 --- a/tests/gateway/test_drain_marker_status.py
 +++ b/tests/gateway/test_drain_marker_status.py
 @@ -17,7 +17,7 @@ from pathlib import Path
- 
+
  import pytest
- 
+
 -import gateway.drain_control as drain_control
 +from gateway import drain_control
  from gateway.drain_control import (
@@ -166,14 +166,14 @@ index 1d3d7d6742..e10fc6a942 100644
 --- a/tests/test_fallback_family_first.py
 +++ b/tests/test_fallback_family_first.py
 @@ -106,7 +106,7 @@ def test_integration_glm_request_fails_over_to_glm_rail():
- 
- 
+
+
  def test_integration_deepseek_request_fails_over_to_deepseek_rail():
 -    (provider, model), agent = _run_first_activation("deepseek-v4-1-flash-261017")
 +    (provider, model), _agent = _run_first_activation("deepseek-v4-1-flash-261017")
      assert _model_family_token(model) == "deepseek", (provider, model)
      assert (provider, model) == ("byteplus-coding", "deepseek-v4-1-flash-261017")
- 
+
 diff --git a/tests/tools/test_browser_real_profile.py b/tests/tools/test_browser_real_profile.py
 index 9ec9621dcd..7acbb4c1ee 100644
 --- a/tests/tools/test_browser_real_profile.py
