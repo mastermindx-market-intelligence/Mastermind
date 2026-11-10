@@ -1,0 +1,138 @@
+{
+  "schema": "PAPER_BOUNDED_REVIEW_V1",
+  "mission_date": "2026-11-08",
+  "law_pin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "finding_basis": "Bounded native/source inspection. No new repair justified; existing qualification gates remain.",
+  "domains": [
+    {
+      "domain": "D16",
+      "name": "Forex",
+      "outcome": "No new native repair established in bounded review",
+      "targets": [
+        {
+          "file": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+          "page": "p-1-0",
+          "boards": [
+            "8BD-0",
+            "9UA-0",
+            "AV5-0"
+          ]
+        }
+      ],
+      "verified": [
+        "Assessed JPY is distinct from literal USD/JPY orientation.",
+        "164 bp rate-gap level and -6 bp change are labeled separately.",
+        "1.64 pp carry is a rate difference; matched forward/funding/basis requirements are explicit.",
+        "Implementation index labels watch lifecycle as future behavior, not runtime acceptance."
+      ],
+      "limits": "Page reports 101 boards but lists 100. Omitted final lifecycle board was not retrieved or certified. Source/deployment history and prior denial remain intact.",
+      "source_pin": "5eb1603edb4486f06c74df7c43a1082427a59b6e",
+      "source_paths": [
+        "templates/forex_r26_workspace.html.j2",
+        "templates/forex_r26.js",
+        "scripts/build_forex.py"
+      ],
+      "mutations": 0
+    },
+    {
+      "domain": "D17",
+      "name": "Commodities",
+      "outcome": "No new native repair established in bounded review",
+      "targets": [
+        {
+          "file": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+          "page": "p-2-0",
+          "boards": [
+            "4OS-0",
+            "4VP-0",
+            "4LS-0",
+            "158-0",
+            "36B-0",
+            "473-0"
+          ]
+        },
+        {
+          "file": "01M3P1X4FR6BRTB13KA736Y1HT",
+          "page": "p-1-0",
+          "boards": [
+            "44L-0"
+          ]
+        }
+      ],
+      "verified": [
+        "Research snapshot is distinct from live quotes and opportunity ranking.",
+        "Price coverage is broader than physical coverage.",
+        "WTI physical-source and cause limitations are explicit.",
+        "Exact curve remains held pending qualified contract receipts; independent clocks, AS_SAVED and revision handling are already required."
+      ],
+      "limits": "A carry_vm object without a returned clock does not alone establish a new native defect or actual consumer contradiction. Held curve and existing evidence requirements were not reopened.",
+      "source_pin": "5eb1603edb4486f06c74df7c43a1082427a59b6e",
+      "source_paths": [
+        "templates/commodities.html.j2",
+        "scripts/build_commodities.py"
+      ],
+      "mutations": 0
+    },
+    {
+      "domain": "D19",
+      "name": "China",
+      "outcome": "No new native repair established in bounded review",
+      "targets": [
+        {
+          "file": "01M38EVF74SJWG1GANN5VP380Z",
+          "page": "p-3-0",
+          "boards": [
+            "1EQ-0",
+            "1IM-0",
+            "70Q-0",
+            "8FR-0"
+          ]
+        },
+        {
+          "file": "01M2VWK62FA5S4VVF6G7SBPE5J",
+          "page": "p-3-0",
+          "boards": [
+            "KE-0"
+          ]
+        }
+      ],
+      "verified": [
+        "Hong Kong listing venue, HKD return basis and synthetic price returns are explicit.",
+        "Three illustrative listings are distinct from the full sector basket.",
+        "178-name source universe is distinct from nine excerpts.",
+        "Holdings changes, experimental leads, model checks and unavailable onshore/offshore result remain qualified."
+      ],
+      "limits": "Not a certification of all 48 R2 boards or all China routes. Native builder references still require current-head reconciliation and actual incumbent bindings; no current source implementation claim.",
+      "source_pin": null,
+      "source_paths": [],
+      "mutations": 0
+    },
+    {
+      "domain": "D20",
+      "name": "Hong Kong and Canada",
+      "outcome": "No new native repair established in bounded review",
+      "targets": [
+        {
+          "file": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+          "page": "p-2-1",
+          "boards": [
+            "DC-0",
+            "P9-0",
+            "1WY-0",
+            "255-0"
+          ]
+        }
+      ],
+      "verified": [
+        "Hong Kong is a dated design-sample roster, with HKD values and missing quote time disclosed.",
+        "Hong Kong missing change history does not invent exits or exit time.",
+        "Canada screen membership does not establish entry permission; current quotes are unavailable.",
+        "320px ZH boards preserve these semantic boundaries and wrap readable content."
+      ],
+      "limits": "Root viewed two desktop captures and read all four selected JSX. Bounded reasoning reviewer viewed the two 320px ZH captures. Native text/layout consistency is not interactive, focus, live freshness or production accessibility proof.",
+      "source_pin": null,
+      "source_paths": [],
+      "mutations": 0
+    }
+  ]
+}

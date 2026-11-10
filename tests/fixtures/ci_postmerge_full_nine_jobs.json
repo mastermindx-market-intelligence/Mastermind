@@ -91,7 +91,7 @@
     ]
   },
   "jobs": {
-    "total_count": 9,
+    "total_count": 10,
     "jobs": [
       {
         "id": 128937727632,
@@ -149,6 +149,81 @@
             "number": 7,
             "started_at": "2026-11-09T01:57:56Z",
             "completed_at": "2026-11-09T01:57:56Z"
+          }
+        ]
+      },
+      {
+        "id": 128937727700,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "Pin and identity guards",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T01:57:46Z",
+        "completed_at": "2026-11-09T02:04:12Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937727700",
+        "runner_id": 1000542739,
+        "runner_name": "GitHub Actions 1000542739",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T01:57:46Z",
+            "completed_at": "2026-11-09T01:57:47Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T01:57:47Z",
+            "completed_at": "2026-11-09T01:57:54Z"
+          },
+          {
+            "name": "Set up actions/setup-python",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T01:57:54Z",
+            "completed_at": "2026-11-09T01:58:03Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T01:58:03Z",
+            "completed_at": "2026-11-09T01:59:20Z"
+          },
+          {
+            "name": "Run pinned source-identity guard suite",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T01:59:20Z",
+            "completed_at": "2026-11-09T02:04:11Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:04:11Z",
+            "completed_at": "2026-11-09T02:04:12Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:04:12Z",
+            "completed_at": "2026-11-09T02:04:12Z"
           }
         ]
       },
@@ -1939,5 +2014,6 @@
     "head_repository": {
       "full_name": "mastermindx-market-intelligence/Mastermind"
     }
-  }
+  },
+  "capture_note": "Guard job entry projected for the F2 ten-job schema contract; every other value captured from the real run."
 }
