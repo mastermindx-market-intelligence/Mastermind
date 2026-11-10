@@ -16,35 +16,57 @@ No DONE_WHEN row is installed-proven. Product lanes idled while one CRITICAL row
 serially through Opus author plus Opus reviewer. CI was dispatched on about ten intermediate
 heads and the principal watched it. Those three habits end here.
 
-## Graph
+## Graph (revised 2026-11-10, Chairman directive: leads fan out, they do not type)
 
 ```
 Fable meta-orchestrator   decisions, briefs, acceptance of lead reports, continuity. No merges,
   |                       no test runs, no CI reads, no fix commits.
-  +- Lane leads integrate their own lane into the trunk (see CI and release rule 2)
-  +- Lane leads (GLM 5.3 by default; Opus only for the single hardest lane)
-       +- Workers (GLM 5.3) and leaves (deepseek-v4.1-flash, glm-5.3-flash, minimax-m3.1-flash)
+  +- Lane lead            plans, splits, briefs, verifies returns, integrates, lands on the trunk.
+       |                  Writes no implementation and runs no long investigation itself.
+       +- Sub-lead        owns one slice of the lane end to end (GLM 5.3 or Gemini 4 Argon)
+       |    +- Workers    Grok 4.7, GLM 5.3, DeepSeek V4.1 Flash
+       +- Workers         direct leaves for slices too small to need a sub-lead
 ```
 
-- Leads delegate. A lead that types more than a few hundred lines itself is doing it wrong:
-  split into disjoint-file leaves, verify their diffs, integrate inside the lane branch.
-- Max 4 concurrent children per lead, depth stops at the leaf. Never inherit a model: every
-  `delegate_task` names `target: {providerInstanceId: "capacity_fabric", model: <id>}`.
+- Delegation is the default, lead labour is the exception. Before a lead opens an editor or
+  starts a multi-step investigation it asks: can a worker do this from a written brief? If yes,
+  it spawns. A lead may itself do only: reading enough to split the work, writing briefs,
+  checking returned evidence, merge and conflict resolution, the trunk push, and a fix of at
+  most about 30 lines when briefing would cost more than the fix. Anything larger done by the
+  lead is reported in its return under `LEAD LABOUR` with the reason.
+- Fan-out: up to 12 concurrent children per lead and 8 per sub-lead, three levels below Fable
+  (lead, sub-lead, worker). Launch independent children in one batch, not one at a time. If the
+  runtime refuses a nested `delegate_task`, the parent keeps those workers as its own direct
+  children; nobody falls back to doing the work alone.
+- First act of every lead: a split plan of at least four parallel slices (or a one-line reason
+  the lane cannot be split), launched before any other work.
+- Cross-model pairs are the standard unit: one model writes, a different model checks. GLM 5.3
+  writes and Grok 4.7 attacks, or the reverse. Two cheap models that disagree are worth more
+  than one expensive model that is alone.
+- Never inherit a model: every `delegate_task` names
+  `target: {providerInstanceId: "capacity_fabric", model: <id>}`. One writer per checkout:
+  writing children use `isolation: "worktree"` or disjoint files in the parent's lane.
 - Children get only their brief. Give goal, exact paths, the test command, and the return format.
+- Evidence rule, every model, every level: a child's claim counts only when the parent has
+  opened the artifact itself (commit SHA on the branch, test output file, capture on disk,
+  command transcript). Grok 4.7 returned invented statistics once and reported captures that
+  did not exist once in this program, so prose-only returns are rejected, not trusted.
 
 ## Model tiers (cheapest tier that can do the job)
 
 | Work | Model |
 |---|---|
-| Lane lead, integrator, implementation, routine review | `glm-5.3` |
-| Bounded leaf: one file, one test row, one board, census, extraction | `deepseek-v4.1-flash`, `glm-5.3-flash`, `minimax-m3.1-flash` |
-| Vision / Paper parity check | `minimax-m3`, `gemini-4-argon` |
-| Cheap adversarial second opinion on a diff | `grok-4.7`, `gemini-4-argon` |
-| CI steward (dispatch, wait, classify, rerun infra-only) | `glm-5.3-flash` or `deepseek-v4.1-flash` |
-| Hardest lane lead, one final CRITICAL review bundle | `claude-opus-5-5` (effort high, not xhigh) |
+| Core fleet: lane lead, sub-lead, implementation, integration, routine review | `glm-5.3` |
+| Core fleet: implementation worker, adversarial check of a diff, vision, computer use (app click-through, captures) | `grok-4.7` |
+| Bounded worker: one file, one test row, one board, census, extraction, log reading | `deepseek-v4.1-flash` (first choice), `glm-5.3-flash`, `minimax-m3.1-flash` |
+| Opus-grade judgment at lower cost: hard diagnosis, design of a risky change, CRITICAL-row pre-review, lead of a hard lane | `gemini-4-argon` |
+| Vision / Paper parity check | `grok-4.7`, `gemini-4-argon`, `minimax-m3` |
+| CI steward (dispatch, wait, classify, rerun infra-only) | `deepseek-v4.1-flash` or `glm-5.3-flash` |
+| Lead of the single hardest lane, one final CRITICAL review bundle | `claude-opus-5-5` (effort high, not xhigh), and it still fans out as above |
 | Fable-grade escalation when Opus is unavailable or fails | `kimi-k3.1-pro` |
 
-Escalate one tier only after the cheaper tier failed twice on the same bounded problem, and say so.
+Opus and Kimi are not needed for anything GLM, Grok, Gemini or DeepSeek can do. Escalate one
+tier only after the cheaper tier failed twice on the same bounded problem, and say so.
 
 ## CI and release rule
 
@@ -77,7 +99,7 @@ Escalate one tier only after the cheaper tier failed twice on the same bounded p
 
 `STATUS` DONE / PARTIAL / BLOCKED, `BRANCH@SHA` pushed to origin, `PROVEN` by test or live with
 the command and counts, `FILES` touched, `PIN MOVES`, `OPEN` items, `OWNER ASKS` with the exact
-act and owner. Long evidence goes in the lane ledger under `integrations/mmos/`, not in the reply.
+act and owner, `FLEET` (children launched per model, accepted, rejected) and `LEAD LABOUR`. Long evidence goes in the lane ledger under `integrations/mmos/`, not in the reply.
 
 ## Safety that does not change
 
