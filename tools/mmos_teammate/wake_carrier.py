@@ -67,7 +67,11 @@ def parse_coding_job_block(reply):
     -> {"key"} or None. The block names WHICH job of this task it is (the
     task's title+description is the brief); a block without a key means the
     default. Malformed -> None (plain answer; a trigger can never fail the
-    run). A key quoted back as an example (`<...>`) is not a trigger."""
+    run). Blocks count only in the teammate's OWN reply AND only as its LAST
+    word (attack review F9): a block the teammate QUOTED back — from the
+    task description or anywhere else — is followed by the teammate's own
+    prose and is not a trigger. Example `<...>` keys die at the identifier
+    regex, never as a trigger."""
     lines = (reply or "").splitlines()
     start = None
     for idx, line in enumerate(lines):
@@ -76,22 +80,25 @@ def parse_coding_job_block(reply):
             start = idx
     if start is None:
         return None
-    key, closed = None, False
-    for line in lines[start + 1:]:
-        if line.strip().startswith("```"):
+    key, closed, close_idx = None, False, None
+    for idx in range(start + 1, len(lines)):
+        if lines[idx].strip().startswith("```"):
             closed = True
+            close_idx = idx
             break
-        if key is None and line.strip().startswith("key:"):
-            key = line.split(":", 1)[1].strip()
+        if key is None and lines[idx].strip().startswith("key:"):
+            key = lines[idx].split(":", 1)[1].strip()
             continue
         return None  # any other content makes it malformed, not a trigger
     if not closed:
         return None
+    # F9: anything but whitespace after the closing fence means the block
+    # was quoted or documented, not emitted as the reply's own last word
+    if any(line.strip() for line in lines[close_idx + 1:]):
+        return None
     key = key or CODING_JOB_DEFAULT_KEY
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", key):
-        return None  # job keys stay safe identifiers
-    if key.startswith("<") and key.endswith(">"):
-        return None  # the how-to example quoted back, not a real trigger
+        return None  # job keys stay safe identifiers (and `<...>` examples)
     return {"key": key}
 
 
@@ -153,9 +160,11 @@ def handle_coding_job(pc, issue, reply, block, opts):
     the door socket, and maps the answer honestly onto the task: an honest
     admission/replay comment (the job id is the identity the result will
     carry home), or ONE blocker comment with the exact reason (WAIT detail,
-    refusal code, unreachable door). Idempotent across runs by comment
-    marker; the door itself is idempotent by command. Never raises — a
-    blocked job must not fail the delivered answer."""
+    refusal code, unreachable door). Terminal outcomes carry the idempotency
+    marker; TRANSIENT ones (WAIT, unreachable door) deliberately do not, so
+    a later wake retries the one call — the door itself is idempotent by
+    command. Never raises — a blocked job must not fail the delivered
+    answer."""
     socket_path = (opts.get("coding_job_door") or "").strip()
     if not socket_path:
         log("coding-job block present but no coding_job_door in config; "
@@ -178,10 +187,15 @@ def handle_coding_job(pc, issue, reply, block, opts):
         status, body = door._request(
             "POST", "/paperclip/coding-job/admit", {"command": command})
     except OSError as exc:
+        # F4 (attack review): DOOR_UNREACHABLE is TRANSIENT — the door may
+        # just be restarting.  The comment deliberately carries NO marker so
+        # the next wake retries the one admit call (the door is idempotent
+        # by command).
         pc.add_comment(issue["id"], (
             f"[t2-carrier] coding job blocked — DOOR_UNREACHABLE\n\n"
             f"The Executive door socket is not answering ({exc}); the task's "
-            f"governed coding job could not be requested.\n\n{marker}"))
+            f"governed coding job could not be requested and will be "
+            f"retried on the next wake."))
         log(f"coding-job door unreachable for {issue.get('identifier')}")
         return
     result = body.get("result") if isinstance(body, dict) else None
@@ -197,13 +211,15 @@ def handle_coding_job(pc, issue, reply, block, opts):
         log(f"coding job for {issue.get('identifier')} {state} as {job_id}")
         return
     if status == 200 and state == "WAIT":
+        # F4: WAIT is TRANSIENT capacity — no marker, so the next wake
+        # retries when the queue drains; only terminal outcomes suppress.
         reason = (result or {}).get("wait_reason") or "queue full"
         detail = (result or {}).get("wait_detail") or {}
         pc.add_comment(issue["id"], (
             f"[t2-carrier] coding job blocked — WAIT ({reason})\n\n"
             f"The Executive ready queue has no capacity for this task's "
-            f"coding job right now{': ' + json.dumps(detail) if detail else ''}."
-            f"\n\n{marker}"))
+            f"coding job right now{': ' + json.dumps(detail) if detail else ''}"
+            f"; it will be retried on the next wake."))
         log(f"coding job for {issue.get('identifier')} WAIT: {reason}")
         return
     error = (body.get("error") or {}) if isinstance(body, dict) else {}

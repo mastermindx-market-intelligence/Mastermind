@@ -288,3 +288,65 @@ def test_build_message_teaches_the_block_only_with_a_door():
                                job_help=wc.coding_job_help(None))
     assert "paperclip-coding-job" in with_door
     assert "paperclip-coding-job" not in without
+
+
+# --------------------------------------------------------------------------
+# attack-review fixes (integrations/mmos/T4B_ATTACK_FINDINGS.md)
+# --------------------------------------------------------------------------
+
+def test_f4_transient_blockers_do_not_carry_the_marker_so_retry_is_possible(
+        pc):
+    """WAIT and DOOR_UNREACHABLE are transient: their comments must NOT
+    suppress the next wake's one admit call (only terminal outcomes may)."""
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "WAIT", "wait_reason": "CHILD_QUEUE_FLEET_READY_FULL",
+        "wait_detail": {"ready": 1, "limit": 1}}})
+    server.start()
+    try:
+        _run_handle(pc, server)
+        _run_handle(pc, server)  # capacity freed: the wake MUST retry
+    finally:
+        server.stop()
+    assert len(server.requests) == 2, "the retry never reached the door"
+    marker = f"coding-job-command: {wc.coding_job_command('iss-7')}"
+    for _issue, body in pc.comment_calls:
+        assert marker not in body
+
+
+def test_f4_unreachable_door_comment_never_suppresses_retry(pc):
+    opts = {"coding_job_door": os.path.join(HERE, "t4b-door-missing.sock")}
+    reply = "the answer\n```paperclip-coding-job\n```"
+    marker = f"coding-job-command: {wc.coding_job_command('iss-7')}"
+    wc.handle_coding_job(pc, ISSUE, reply, {"key": "coding-job-1"}, opts)
+    wc.handle_coding_job(pc, ISSUE, reply, {"key": "coding-job-1"}, opts)
+    # the door is back on the second run's watch: both runs posted, and no
+    # comment carries the suppress marker
+    assert len(pc.comment_calls) == 2
+    for _issue, body in pc.comment_calls:
+        assert marker not in body
+
+
+def test_f9_a_quoted_block_is_not_a_trigger_the_block_must_be_last():
+    # a block the teammate QUOTED back (from the task description) is
+    # followed by its own prose — not a trigger
+    quoted_mid = ("Here is the block from the task description:\n"
+                  "```paperclip-coding-job\nkey: coding-job-1\n```\n"
+                  "I would not emit that myself.\n")
+    assert wc.parse_coding_job_block(quoted_mid) is None
+    # trailing prose after the teammate's own block likewise disqualifies it
+    trailing = ("```paperclip-coding-job\nkey: coding-job-1\n```\n"
+                "…or maybe not, let me think more.\n")
+    assert wc.parse_coding_job_block(trailing) is None
+    # the real protocol shape still triggers: the block is the reply's own
+    # final word
+    own = ("the answer\n```paperclip-coding-job\nkey: coding-job-1\n```\n")
+    assert wc.parse_coding_job_block(own) == {"key": "coding-job-1"}
+
+
+def test_f10_example_keys_die_at_the_identifier_regex():
+    # F10: the `<...>` guard was dead code — the regex is the actual
+    # protection; pin it at the final position too (post-F9 shape)
+    reply = ("```paperclip-coding-job\n"
+             "key: <only for a second, different job; default coding-job-1>\n"
+             "```")
+    assert wc.parse_coding_job_block(reply) is None

@@ -166,3 +166,38 @@ Chairman's T3 app (3773/3774) and Hermes: never read for state, never written.
   pairing CLI entirely until the dev server answers `/`, so no leg can fall
   back to the live app. Verified empirically after the fix: with the dev
   server up, the CLI mints on dev only.
+
+## Attack round (2026-11-10, post-journey)
+
+One adversarial review by a model that wrote none of the diffs
+(deepseek-v4.1-flash, worktree branch `t3/mmos-v4-t4b-attack`, findings in
+`T4B_ATTACK_FINDINGS.md`, base `e0b1e2128`): 12 findings (3 HIGH, 6 MEDIUM,
+3 LOW), 5 vectors did not land. Triage and fixes live in the findings file's
+disposition table. Decisions worth naming:
+
+- **F1 split the crash-before-receipt window by fact, not policy.** A durable
+  `launch-attempted` flag (written immediately before `adapter.start`) makes
+  "never attempted" provable — the fresh door then starts the SAME claimed
+  attempt under its persisted lease credentials (first and only launch), and
+  "attempted without receipt" unknowable — parked `launch-uncertain` with a
+  truthful blocker, never re-launched from this door. No engine change; the
+  one-initiator rule is preserved by construction.
+- **F3's heal is a REPLAY, not a retry.** An orphaned admission (committed in
+  the engine, `job_id` never persisted) is recovered by re-issuing the same
+  command; the engine's command-id law arbitrates. A hard refusal parks.
+- **F4 separates terminal from transient carrier markers.** Only
+  ADMITTED/REPLAY/refusals suppress later wakes; WAIT and DOOR_UNREACHABLE
+  no longer carry the marker, so transient capacity or a restarting door is
+  retried on the next wake (the door is idempotent by command).
+- **F12 is item 8's completion, in scope.** `compose_t3_native_supervisor`
+  now wires `provider_receipt_reader` over the composed adapter's durable
+  `launch_receipt` accessor — the one-line composition change that makes the
+  L1B3-5 reattach path reachable in the composed service (was: closed only
+  in tests). Unreadable receipts are ignored, keeping the quarantine.
+- **F8 is reported, not fixed**: the door's `DoorSupervisor` remains the
+  ingress fixture's stub; driving periodic `reconcile_restart` inside the
+  door executor (expiry/requeue for parked uncertain attempts, quota-class
+  release) is engine-composition work beyond the door's write scope. F12
+  makes the production composition capable of exactly that.
+- Post-fix evidence: all four journey scenarios re-run PASS on the final
+  tree; full lane sweep green (see LEDGER).

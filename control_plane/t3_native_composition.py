@@ -1024,6 +1024,29 @@ class SupervisorBoundaryT3Adapter:
         return getattr(self._inner, name)
 
 
+def _t3_provider_receipt_reader(composition: T3NativeComposition):
+    """L1B3-5 (item 8): the adapter's durable launch receipt is the provider
+    identity a fresh supervisor needs to adopt an identity-less claim.
+
+    The reader reads through the composed adapter's own durable accessor
+    (``launch_receipt``) — the same store the adapter wrote before its ACK —
+    and hands the supervisor the mapping it validates: a non-empty
+    ``provider_session_id`` or None.  A receipt that cannot be read is
+    IGNORED, never guessed: the supervisor then keeps the pre-existing
+    identity-ambiguous quarantine."""
+    adapter = composition.adapter
+
+    def reader(attempt_id: str):
+        try:
+            receipt = adapter.launch_receipt(str(attempt_id))
+        except Exception:  # noqa: BLE001 - an unreadable receipt is no receipt
+            return None
+        session = (getattr(receipt, "thread_id", "") or "").strip()
+        return {"provider_session_id": session} if session else None
+
+    return reader
+
+
 def compose_t3_native_supervisor(
     primary: Any,
     composition: T3NativeComposition,
@@ -1043,6 +1066,12 @@ def compose_t3_native_supervisor(
     attests through its durable receipts, not a local binary attestation),
     and the process controller is the remote-native one unless a caller with
     its own controller injects it.
+
+    The supervisor is wired with a ``provider_receipt_reader`` over that
+    same durable receipt store (L1B3-5): a crash between the persisted
+    launch receipt and ``record_process`` leaves an identity-less claim the
+    composed supervisor can adopt under its receipt — never requeue into a
+    second launch.
     """
     if not composition.composed:
         raise T3NativeCompositionError(
@@ -1067,6 +1096,7 @@ def compose_t3_native_supervisor(
         ),
         instance_id=primary.instance_id,
         project_input_owner=primary,
+        provider_receipt_reader=_t3_provider_receipt_reader(composition),
     )
 
 

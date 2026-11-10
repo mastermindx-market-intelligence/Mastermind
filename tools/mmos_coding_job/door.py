@@ -390,9 +390,14 @@ class CodingJobDoor:
         return {}
 
     def _save_frozen(self) -> None:
-        self.frozen_path.write_text(
+        # F5 (attack review): write-temp-then-rename — a crash mid-write must
+        # never leave a truncated frozen.json, or the next door cannot start
+        # and every frozen job is lost with it.
+        tmp = self.frozen_path.with_name("frozen.json.tmp")
+        tmp.write_text(
             json.dumps(self.frozen, indent=2, sort_keys=True),
             encoding="utf-8")
+        os.replace(tmp, self.frozen_path)
 
     def _reserve_thread(self, role: str) -> bool:
         budget = (json.loads(self._budget.read_text())
@@ -405,6 +410,17 @@ class CodingJobDoor:
         budget["reserved"].append(role)
         self._budget.write_text(json.dumps(budget), encoding="utf-8")
         return True
+
+    def _release_thread(self, role: str) -> None:
+        """F7 (attack review): the budget bounds CONCURRENT jobs; a job that
+        reached a terminal phase gives its slot back (idempotent)."""
+        if not self._budget.exists():
+            return
+        budget = json.loads(self._budget.read_text())
+        reserved = budget.get("reserved") or []
+        if role in reserved:
+            budget["reserved"] = [r for r in reserved if r != role]
+            self._budget.write_text(json.dumps(budget), encoding="utf-8")
 
     # ------------------------------------------------------- service setup
 
@@ -476,6 +492,8 @@ class CodingJobDoor:
             self.root / "run" / "executive.sock", command, args or {})
 
     def _refreeze_binding(self) -> None:
+        if self.service is None:
+            return  # not yet started (intake before serve; tests)
         self.service._ceo_ingress_app_binding = dataclasses.replace(
             self.service._ceo_ingress_app_binding,
             child_request_material={
@@ -558,6 +576,14 @@ class CodingJobDoor:
             return {"ok": False, "error": {
                 "kind": "refused", "code": "invalid_input",
                 "message": "coding-job command is not frozen for any task"}}
+        entry = self.frozen[command]
+        # F3 (attack review): the request (the carrier's ONE call) is durable
+        # BEFORE the engine is asked, so a crash mid-call is recoverable.
+        # Freezing at intake is REGISTRATION, never a request — the door
+        # must not admit a task nobody asked for (the live default-journey
+        # re-run caught exactly that inversion).
+        entry["admit_requested_at"] = _now()
+        self._save_frozen()
         context = self._frame_context()
         frame = {
             "schema": SELECTED_CHILD_FRAME_SCHEMA,
@@ -576,12 +602,17 @@ class CodingJobDoor:
         finally:
             writer.close()
             await writer.wait_closed()
+        # the outcome is durable even when it is a WAIT or a refusal, so the
+        # executor never re-asks a question the engine already answered
+        entry["admit_outcome"] = (
+            (reply.get("result") or {}).get("state")
+            or (reply.get("error") or {}).get("code") or "UNKNOWN")
         if reply.get("ok") and reply.get("result", {}).get("state") in (
                 "ADMITTED", "REPLAY"):
-            entry = self.frozen[command]
             entry["job_id"] = reply["result"].get("job_id")
             entry["admitted_at"] = _now()
-            self._save_frozen()
+        self._save_frozen()
+        if entry.get("job_id"):
             self._wake.set()
         return reply
 
@@ -603,6 +634,35 @@ class CodingJobDoor:
         rows = self.launch_census.read_text(encoding="utf-8").splitlines()
         return sum(1 for line in rows if line.strip()
                    and json.loads(line).get("tool") == "t3_thread_launch")
+
+    def _ensure_admitted(self, command: str, entry: dict) -> None:
+        """F3 (attack review): a crash between the admission commit and the
+        frozen save leaves the engine holding an admitted job this door
+        cannot see — an admit was REQUESTED (durable) but its outcome is
+        unknown.  Re-issuing the SAME command is an idempotent REPLAY — the
+        engine's command_id unique law arbitrates — so the orphan is
+        recovered, never doubled.  The reply's outcome is then durable; a
+        WAIT or refusal was answered and stays with the carrier."""
+        try:
+            asyncio.run(self.admit(command))
+        except Exception as exc:  # noqa: BLE001 - the service is in-process
+            _log(f"re-admission of {command[:24]}… failed: "
+                 f"{type(exc).__name__}: {exc}")
+            return  # the outcome is still unknown; the next wake retries
+        if entry.get("job_id"):
+            self._save_frozen()  # idempotent with admit()'s own persist
+            self._wake.set()
+            return  # healed: the orphaned admission is visible to the door
+        outcome = entry.get("admit_outcome") or "UNKNOWN"
+        if outcome == "WAIT":
+            return  # answered; the carrier retries on its next wake
+        code = outcome if outcome != "UNKNOWN" else "ADMISSION_REFUSED"
+        reason = (f"the Executive refused re-admission of the frozen job "
+                  f"({outcome})")
+        entry["phase"] = "admission-refused"
+        entry["blocker"] = {"code": code, "reason": reason[:200]}
+        self._save_frozen()
+        self._surface_blocker(entry, code, reason[:200])
 
     def _record_census(self, tool: str, arguments: dict) -> None:
         with self.launch_census.open("a", encoding="utf-8") as fh:
@@ -677,13 +737,33 @@ class CodingJobDoor:
             self._wake.wait(timeout=2.0)
             self._wake.clear()
             for command, entry in list(self.frozen.items()):
-                if entry.get("phase") in ("delivered", "surfaced"):
+                action = self._entry_action(entry)
+                if action == "skip":
                     continue
-                # a surfaced blocker is the job's recorded result — re-running
-                # a hard-failed execute would route around a reported refusal
-                if entry.get("blocker_surfaced"):
+                job_role = (f"job:{entry.get('job_id')}"
+                            if entry.get("job_id") else None)
+                if action == "admit":
+                    # F3 (attack review): the engine may hold an admitted job
+                    # whose job_id never reached frozen.json — re-admit the
+                    # SAME command (idempotent REPLAY), never a second job.
+                    self._ensure_admitted(command, entry)
                     continue
-                if not entry.get("job_id"):
+                if action == "finish-sealed":
+                    # F6: the seam already fired inside complete_attempt; a
+                    # crash before the bookkeeping read only owes this read.
+                    self._finish_sealed(runtime, entry)
+                    if job_role:
+                        self._release_thread(job_role)
+                    continue
+                if action == "blocker":
+                    # F6: execution is over (refused/failed/parked); only the
+                    # blocker post may still be owed — never a re-execution.
+                    blocker = entry.get("blocker") or {}
+                    self._surface_blocker(
+                        entry, blocker.get("code") or "EXECUTOR_FAILED",
+                        blocker.get("reason") or entry.get("error") or "")
+                    if job_role:
+                        self._release_thread(job_role)
                     continue
                 try:
                     self._execute(runtime, command, entry)
@@ -692,9 +772,44 @@ class CodingJobDoor:
                          f"{type(exc).__name__}: {exc}")
                     entry["phase"] = "execute-failed"
                     entry["error"] = f"{type(exc).__name__}: {exc}"[:300]
+                    entry["blocker"] = {
+                        "code": "EXECUTOR_FAILED",
+                        "reason": f"{type(exc).__name__}: {exc}"[:200]}
                     self._save_frozen()
                     self._surface_blocker(entry, "EXECUTOR_FAILED",
                                           f"{type(exc).__name__}: {exc}"[:200])
+                    if job_role:
+                        self._release_thread(job_role)
+
+    # execution phases after which _execute must never run again: the
+    # refusal/failure is the job's recorded result (F6, attack review)
+    PARKED_PHASES = ("delivery-refused", "execute-failed", "launch-uncertain",
+                     "admission-refused")
+
+    def _entry_action(self, entry: dict) -> str:
+        """One bounded routing decision per frozen entry per wake (F6).
+
+        Registration is not a request: a frozen entry nobody's carrier call
+        named stays parked until its admit call arrives (and a WAIT or a
+        refusal was already answered — the carrier retries, not the door)."""
+        phase = entry.get("phase")
+        if phase == "delivered":
+            return "skip"
+        if entry.get("blocker_surfaced"):
+            # the blocker is the job's recorded result on the task; a
+            # surfaced blocker is terminal for this executor
+            return "skip"
+        if not entry.get("job_id"):
+            if not entry.get("admit_requested_at"):
+                return "skip"   # registered only; nobody asked for a job
+            if entry.get("admit_outcome"):
+                return "skip"   # answered (WAIT/refusal); the carrier owns retry
+            return "admit"      # the crash window: outcome unknown
+        if phase == "sealed":
+            return "finish-sealed"
+        if phase in self.PARKED_PHASES:
+            return "blocker"
+        return "execute"
 
     def _dev_server_ready(self) -> bool:
         """The configured dev T3 server answers on the configured base."""
@@ -827,25 +942,73 @@ class CodingJobDoor:
                 "run_dir": str(spec.run_dir),
                 "prompt": spec.prompt, "model": spec.model}
             self._save_frozen()
+            # F1 (attack review): durable proof of WHETHER adapter.start was
+            # ever called for this attempt.  A crash before this flag and
+            # without a receipt means the launch NEVER HAPPENED (the fresh
+            # door may lawfully start it — still one launch); a crash AFTER
+            # the flag without a receipt leaves the launch UNCERTAIN and the
+            # attempt must be parked, never re-launched from this door.
+            launch_flag = (self.root / "run" / "jobs" / attempt_id
+                           / "launch-attempted")
+            launch_flag.write_text(_now(), encoding="utf-8")
             ref = asyncio.run(adapter.start(spec))
             entry["provider_session_id"] = ref.provider_session_id
             entry["phase"] = "launched"
             self._save_frozen()
             _log(f"launched ONE native thread {ref.provider_session_id}")
         else:
-            # Recovery continuation (the L1B3-5 crash window): the persisted
-            # adapter receipt proves the launch took effect.  Reattach with
-            # the retained ref — ZERO native calls — then record the
-            # provider-managed process and adopt the lease under a new fence
-            # (the canary's MAIN-P2 path, verbatim).
+            # Recovery continuation.  The persisted adapter receipt proves
+            # the launch took effect: reattach with the retained ref — ZERO
+            # native calls — then record the provider-managed process (only
+            # if the identity is not already durable, F2) and adopt the
+            # lease under a new fence (the canary's MAIN-P2 path).
             from control_plane.worker_execution_contract import WorkerRecoveryBinding
             from control_plane.t3_execution_adapter import (
                 SQLiteT3AdapterStateStore,
             )
             store = SQLiteT3AdapterStateStore(self._adapter_store_path())
             run = store.load_run(attempt_id)
+            launch_flag = (self.root / "run" / "jobs" / attempt_id
+                           / "launch-attempted")
             if run is None or run.spec is None or run.original_ref is None:
-                raise RuntimeError("no persisted adapter run to recover")
+                if launch_flag.exists():
+                    # the launch was ATTEMPTED but left no durable receipt:
+                    # whether the native thread started is unknowable here.
+                    # Park the attempt honestly; never guess, never re-launch.
+                    entry["phase"] = "launch-uncertain"
+                    entry["blocker"] = {
+                        "code": "LAUNCH_UNCERTAIN",
+                        "reason": "the previous door died attempting the "
+                                  "launch before its receipt was durable; "
+                                  "whether the native thread started is "
+                                  "unknown — the attempt is left to "
+                                  "lease-expiry reconciliation, never "
+                                  "re-launched from this door"}
+                    self._save_frozen()
+                    self._release_thread(f"job:{job_id}")
+                    self._surface_blocker(entry, "LAUNCH_UNCERTAIN",
+                                          entry["blocker"]["reason"])
+                    return
+                # F1: no receipt AND no launch was ever attempted — the
+                # claim's lease is still held by this door's persisted
+                # credentials, so START the claimed attempt now.  This is
+                # the attempt's first and only launch.
+                adapter, _box = self._compose_adapter(request, branch,
+                                                      fresh=False)
+                spec = self._launch_spec(
+                    run_id=attempt_id, job_id=job_id,
+                    prompt=self._worker_prompt(attempt_id, branch))
+                launch_flag.write_text(_now(), encoding="utf-8")
+                _log(f"launch of {attempt_id} was never attempted; starting "
+                     "the claimed attempt now (its first launch)")
+                ref = asyncio.run(adapter.start(spec))
+                entry["provider_session_id"] = ref.provider_session_id
+                entry["phase"] = "launched"
+                self._save_frozen()
+                _log(f"launched ONE native thread {ref.provider_session_id}")
+                self._seal_and_deliver(runtime, entry, attempt_id, adapter,
+                                       ref, branch)
+                return
             adapter, _box = self._compose_adapter(request, branch, fresh=False)
             ref = asyncio.run(adapter.reattach(
                 run.spec, WorkerRecoveryBinding.bind(
@@ -854,12 +1017,25 @@ class CodingJobDoor:
                     prompt_path=run.spec.run_dir / "input" / "prompt.txt")))
             _log(f"reattached {attempt_id} -> {ref.provider_session_id} "
                  "(zero native calls)")
-            runtime.attempts.record_process(
-                attempt_id,
-                fence_generation=entry["fence_generation"],
-                lease_token=entry["lease_token"],
-                provider_session_id=ref.provider_session_id,
-                launch_metadata={})
+            # F2 (attack review): a crash AFTER record_process left the
+            # identity durable on the row; recording again is a hard
+            # StateConflict that would misreport a succeeded job.  Only the
+            # adoption is owed when the identity is already there.
+            row = runtime.attempts.get_attempt(attempt_id)
+            recorded_session = getattr(row, "provider_session_id", None)
+            if not recorded_session and not getattr(row, "pid", None):
+                runtime.attempts.record_process(
+                    attempt_id,
+                    fence_generation=entry["fence_generation"],
+                    lease_token=entry["lease_token"],
+                    provider_session_id=ref.provider_session_id,
+                    launch_metadata={})
+            elif (recorded_session is not None
+                    and recorded_session != ref.provider_session_id):
+                raise RuntimeError(
+                    f"attempt {attempt_id} holds provider identity "
+                    f"{recorded_session!r}, reattach read "
+                    f"{ref.provider_session_id!r}; refusing to rewrite")
             adopted = runtime.attempts.adopt_attempt(
                 attempt_id,
                 expected_fence_generation=entry["fence_generation"],
@@ -871,6 +1047,13 @@ class CodingJobDoor:
             _log(f"adopted {attempt_id} under fence "
                  f"{adopted.attempt.fence_generation}")
 
+        self._seal_and_deliver(runtime, entry, attempt_id, adapter, ref,
+                               branch)
+
+    def _seal_and_deliver(self, runtime, entry, attempt_id, adapter, ref,
+                          branch) -> None:
+        """The shared tail: wait terminal, collect, seal through the
+        execution-return seam, then read the delivery receipt honestly."""
         statuses, final = self._wait_terminal(adapter, ref)
         _log(f"attempt {attempt_id} terminal: {final.value} "
              f"({statuses})")
@@ -907,8 +1090,15 @@ class CodingJobDoor:
         entry["final_status"] = getattr(sealed.status, "value",
                                         str(sealed.status))
         self._save_frozen()
+        self._finish_sealed(runtime, entry)
 
-        # The seam fired inside complete_attempt; read its receipt honestly.
+    def _finish_sealed(self, runtime, entry) -> None:
+        """Read the seam's delivery receipt and finish the entry (F6): the
+        seam fired inside complete_attempt, so this is bookkeeping only —
+        callable again after a crash between the seal and this read."""
+        attempt_id = entry.get("attempt_id")
+        job_role = (f"job:{entry.get('job_id')}"
+                    if entry.get("job_id") else None)
         events = [
             e for e in runtime.store.list_events(
                 command_id_prefix=execution_return_receipt_command_id(
@@ -925,11 +1115,15 @@ class CodingJobDoor:
             entry["phase"] = "delivered"
         else:
             entry["phase"] = "delivery-refused"
-            self._surface_blocker(
-                entry, delivery.get("refusal_code") or "DELIVERY_REFUSED",
-                f"return could not be delivered "
-                f"({delivery.get('refusal_code') or delivery.get('state')})")
+            entry["blocker"] = {
+                "code": delivery.get("refusal_code") or "DELIVERY_REFUSED",
+                "reason": f"return could not be delivered "
+                          f"({delivery.get('refusal_code') or delivery.get('state')})"}
+            self._surface_blocker(entry, entry["blocker"]["code"],
+                                  entry["blocker"]["reason"])
         self._save_frozen()
+        if job_role:
+            self._release_thread(job_role)
         _log(f"sealed {attempt_id}: delivery "
              f"{entry['delivery'].get('state')}")
 
@@ -1009,11 +1203,13 @@ class CodingJobDoor:
     # ------------------------------------------------------ blocker surface
 
     def _surface_blocker(self, entry: dict, code: str, reason: str) -> None:
-        """ONE blocker comment per code on the task (an Executive-side act,
-        no retry loop). If Paperclip is unreachable the frozen record is the
-        honest residue and the phase stays delivery-refused/execute-failed."""
+        """ONE blocker comment per code on the task (an Executive-side act).
+        The payload is persisted before the post so a later wake can retry
+        the POST alone (F6) — never a re-execution; if Paperclip stays
+        unreachable the frozen record is the honest residue."""
         issue = entry.get("issue") or {}
         issue_id = issue.get("id")
+        entry["blocker"] = {"code": code, "reason": str(reason)[:200]}
         if not issue_id:
             return
         if entry.get("blocker_surfaced") == code:
@@ -1107,7 +1303,10 @@ class CodingJobDoorApp:
                     "message": "a frozen coding-job command is required"}})
                 return
             reply = await self._door.admit(command.strip())
-            await self._json(send, 200 if reply.get("ok") else 200, reply)
+            # F11 (attack review): the JSON body is this socket's contract
+            # (ok/result/error); a refusal is a 200 with ok=false so the
+            # carrier always gets the exact reason, never a bare status.
+            await self._json(send, 200, reply)
             return
         if (path.startswith("/paperclip/coding-job/state/")
                 and method == "GET" and len(path.rsplit("/", 1)) == 2):

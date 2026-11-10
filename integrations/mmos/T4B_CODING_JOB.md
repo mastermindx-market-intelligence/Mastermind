@@ -56,5 +56,13 @@ canary's GitHub-evidence shape: a branch on the existing repo, no PR against
 ```bash
 TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
   -p no:cacheprovider tests/test_mmos_teammate_coding_job.py \
-  tests/test_mmos_coding_job_door.py tests/test_paperclip_result_delivery.py
+  tests/test_mmos_coding_job_door.py tests/test_paperclip_result_delivery.py \
+  tests/test_t3_native_composition.py \
+  tests/test_t3_native_supervisor_receipt_wiring.py \
+  tests/test_mmos_teammate_carrier.py tests/test_mmos_teammate_cutover.py \
+  tests/test_executive_supervisor_provider_reattach.py
 ```
+
+(163 passed on the final tree.) The carrier/door files carry the
+attack-round fixes — one test per finding; see `T4B_ATTACK_FINDINGS.md`
+for the disposition table.
