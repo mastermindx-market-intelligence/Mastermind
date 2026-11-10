@@ -37,6 +37,14 @@ jobs:
           # The existing deploy_from_git.sh fetches and verifies current master
           # before archiving the immutable accepted SHA.
           fetch-depth: 1
+          # Pin the checkout to the real master ref: merge-queue branch pushes
+          # (gh-readonly-queue/master/*) can fire this workflow with a queue
+          # speculative head as the checkout default, which lacks repo files the
+          # deploy guards require (observed 2026-11-09: run 42721199417 checked
+          # out 5f59fcde8 and failed 'VPS host pin missing' while the pin was
+          # present at the event's master SHA). The job-level ref guard passed
+          # for that event, so the checkout itself must be pinned.
+          ref: refs/heads/master
       - name: Deploy exact accepted master using incumbent rollback owner
         shell: bash
         env:
