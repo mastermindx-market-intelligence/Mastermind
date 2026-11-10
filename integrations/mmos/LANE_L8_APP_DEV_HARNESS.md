@@ -29,8 +29,8 @@ contract landed on trunk with the same refresh.
 
 | Slice | What | Model / shape | State |
 |---|---|---|---|
-| R1 | Reuse scan: Rust→JS return path **without IPC**, WKWebView snapshot, socket listener choice | glm-5.3 + gemini-4-argon, two investigators | in flight |
-| A | `tools/mmos_dev.py` up/down/status, dev root, npm-dep handling | deepseek-v4.1-flash, diff+test | in flight (old brief incl. `--fixture`; on return keep the generic core — A2 replaces `--fixture` with `--url` shell-mode launch of the dev bundle) |
+| R1 | Reuse scan: Rust→JS return path **without IPC**, WKWebView snapshot, socket listener choice | glm-5.3 + gemini-4-argon, two investigators | R1a (glm-5.3) **accepted** — hash verified, 92 lines, all claims sourced; R1b (argon) failed twice on a provider transport bug (missing thought_signature), rerouted to deepseek-v4-pro (R1c) with the sharpened no-IPC question |
+| A | `tools/mmos_dev.py` up/down/status, dev root, npm-dep handling | deepseek-v4.1-flash, diff+test | **landed** `2902c33f6` → lane `9eb0f4368`; lead re-ran pytest: 30 passed, 0 failed; py_compile clean. A2 will add `up --url` (dev bundle in shell mode) once S1 lands |
 | D0 | `dev_log.rs` JSONL logger + redaction | deepseek-v4.1-flash, diff+test | **landed** `0319f54b5` → lane; lead re-ran `cargo test dev_log`: 3 passed, 0 failed |
 | C | Page verbs via `install.ts`/`proof.tsx` + fixture failure injection | deepseek-v4.1-flash | **cancelled** (re-scope: surface dropped; verbs move to a native-injected bootstrap that works on any page) |
 | S1 | Shell mode: `parse_shell_url` + env-gated startup branch + refusal logging + no-remote-IPC guarantee + `tauri.conf.dev.json` overlay + minimal injected page bootstrap | deepseek-v4.1-flash, diff+test; then grok-4.7 attack pass on the diff | launching |
@@ -67,9 +67,12 @@ contract landed on trunk with the same refresh.
 
 | Model | Launched | Accepted | Rejected | Cancelled |
 |---|---|---|---|---|
-| deepseek-v4.1-flash | 3 (A, D0, C) | 1 (D0) | 0 | 1 (C, re-scope) |
-| glm-5.3 | 1 (R1a) | 0 | 0 | 0 |
-| gemini-4-argon | 1 (R1b) | 0 | 0 | 0 |
+| deepseek-v4.1-flash | 3 (A, D0, C) | 2 (A: 30/0, D0: 3/0) | 0 | 1 (C, re-scope) |
+| glm-5.3 | 1 (R1a) | 1 (R1a) | 0 | 0 |
+| gemini-4-argon | 2 (R1b ×2) | 0 | 0 (provider transport bug both times, not a finding) | 0 |
+| deepseek-v4-pro | 1 (R1c) | pending | 0 | 0 |
+
+R1a load-bearing facts (verified): tauri lock **2.11.6**; `eval_with_callback` added **2.12.0** (crates.io max stable 2.12.5 — refresh reachable); WKWebView snapshot donor = mcp-server-tauri `macos.rs` (MIT; `with_webview` → objc2-web-kit 0.3.2 takeSnapshot → block2 RcBlock → mpsc; all crates already in our lock via wry); screen-capture donors (tauri-pilot cgwindow, connector xcap, Victauri) **rejected by law**; UDS listener = std-thread `std::os::unix::net`, no tokio feature churn; tauri-plugin-log 2.10.1 viable but D0's serde_json appender already landed — adopt only if rotation/file-target needs emerge. R1a's invoke-reply return path serves the app's own page only; the shell page needs zero IPC → R1c's question.
 
 ## Notes
 
