@@ -1,0 +1,63 @@
+{
+  "scope": "observed_tool_descriptor",
+  "catalogSha256": "f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb",
+  "paperVersion": "0.5.18",
+  "observedAt": "2026-11-08",
+  "note": "Exact native update_styles descriptor from the allowlisted catalog projection; adapter bridge_access removed. This is not the full f200 catalog.",
+  "tool": {
+    "name": "update_styles",
+    "description": "Update styles on one or more nodes. Use this for targeted style changes. Supports design tokens as CSS variables. Supports batch updates in a single call.\n- Setting the top / left styles of an artboard changes its position on the canvas.\n- Anywhere urls are accepted, paper-gen:// URLs can be used to generate images with AI. ONLY use when the user explicitly asked for image generation. Read \"image-generation\" guide first via get_guide.\n- Styles you set that are inert in the node's context are dropped rather than applied; their keys are returned under the ignoredStyles property.\n- On Text nodes, text styles apply to all text, including styled spans. To style only parts of text, read the Text node's content with get_jsx then use set_text_content to replace it.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "updates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "nodeIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The IDs of the nodes to update."
+              },
+              "styles": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                "description": "Styles as a JSON object with camelCase property names (e.g. {\"backgroundColor\": \"#fff\", \"padding\": \"20px\"}), like React.CSSProperties."
+              }
+            },
+            "required": [
+              "nodeIds",
+              "styles"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Array of style updates to apply. Each item specifies node IDs and styles to apply to all of them."
+        },
+        "fileId": {
+          "type": "string",
+          "description": "The file ID that the tool should operate on."
+        }
+      },
+      "required": [
+        "updates",
+        "fileId"
+      ],
+      "additionalProperties": false
+    },
+    "annotations": {
+      "destructiveHint": true
+    }
+  }
+}

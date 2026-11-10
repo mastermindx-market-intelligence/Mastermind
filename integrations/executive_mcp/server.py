@@ -596,8 +596,10 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
+    "/workspace/native-authorization-identity/acquisition/current",
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
+    "/workspace/resources/models/current",
 )
 _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
     "/workspace/project-admission/pause",
@@ -690,6 +692,9 @@ class _ExecutivePathFence:
             self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
+            from integrations.mastermind_steward_app.live_window import supports_native_content_identity
+            if supports_native_content_identity(content_app):
+                self._workspace_routes.add("/workspace/native-authorization-identity/content/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
         self._public_routes.update(self._workspace_routes)
         if workspace_app is not None:
@@ -1680,6 +1685,9 @@ def _build_profile_mcp_app(
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
+        from integrations.mastermind_steward_app.live_window import supports_native_content_identity
+        if supports_native_content_identity(content_app):
+            outer_routes.append(Route("/workspace/native-authorization-identity/content/current", content_app, methods=["GET"]))
     if os_app is not None:
         if type(os_app) is not OsStaticApp:
             raise ValueError("fixed OS static owner required")
@@ -2607,7 +2615,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
 
     app = Starlette(routes=[Route(COO_MCP_PATH, authenticated, methods=["POST"])], lifespan=lifespan)
     app.router.redirect_slashes = False
-    coo = _LiteralCooRoute(app)
+    coo = _LiteralCooRoute(app, evaluation_core=core)
     if principal_ruling_target is None:
         return coo
     return _CooWithPrincipalRuling(coo,
@@ -2727,11 +2735,22 @@ def build_principal_ruling_mcp_app(core: Any, *, target: Any) -> Any:
 
 
 class _LiteralCooRoute:
-    def __init__(self, app):
+    def __init__(self, app, *, evaluation_core=None):
         self._app = app
         self._guard = _DuplicateAuthorizationGuard(app, mcp_path="/mcp/coo")
+        self._evaluation_core = evaluation_core
 
     async def __call__(self, scope, receive, send):
+        # One exact prospective purpose facet, using the SAME signed COO
+        # authenticator/core and installed App peer. No extra MCP tool, generic
+        # operation route, profile grant or default mission authority.
+        if (scope.get('type') == 'http' and self._evaluation_core is not None
+                and scope.get('path') == '/mcp/coo/evaluation-assessment'
+                and scope.get('raw_path') == b'/mcp/coo/evaluation-assessment'
+                and scope.get('method') == 'POST' and not scope.get('query_string')):
+            mapped = dict(scope, path='/v1/memory/evaluation-assessment', raw_path=b'/v1/memory/evaluation-assessment')
+            await self._evaluation_core(mapped, receive, send)
+            return
         if scope.get("type") == "http" and (
                 scope.get("path") != "/mcp/coo" or scope.get("raw_path") != b"/mcp/coo"
                 or scope.get("method") != "POST" or scope.get("query_string")):

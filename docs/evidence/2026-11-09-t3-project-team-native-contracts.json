@@ -1,0 +1,74 @@
+{
+  "schema": "mastermind.t3_project_team_native_qualification.v1",
+  "native_source_pin": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+  "native_consumer_sha256": {
+    "packages/shared/src/t3ProjectFile.ts": "6a4cf049f3e6d58a81ce0b93cbe9b9d3a1970694ef16679b13ab756e6de58f69",
+    "packages/contracts/src/t3ProjectFile.ts": "efabd7fb41fb38d401169eb661cea698acb679f899ead6b490f02cb57f083fea",
+    "packages/contracts/src/orchestratorMcp.ts": "a1a1f5ffc84c5cc151947db666069a440f1f4f15c96cdd6dabfbc0b9bae826d1",
+    "packages/contracts/src/orchestrationV2.ts": "55479fd5af733e0af6afad7f60d3d8de9f4e6916822e404e28f11deccd3d5ee0"
+  },
+  "node_version": "v26.5.0",
+  "checks": [
+    {
+      "name": "native_project_actions_parse",
+      "passed": true
+    },
+    {
+      "name": "native_project_actions_reject_bad_icon",
+      "passed": true
+    },
+    {
+      "name": "native_delegate_shared_schema",
+      "passed": true
+    },
+    {
+      "name": "native_delegate_worktree_schema",
+      "passed": true
+    },
+    {
+      "name": "native_delegate_rejects_unknown_isolation",
+      "passed": true
+    },
+    {
+      "name": "native_delegate_rejects_unknown_role",
+      "passed": true
+    },
+    {
+      "name": "native_launch_workspace_schema",
+      "passed": true
+    },
+    {
+      "name": "native_launch_rejects_shadow_workspace",
+      "passed": true
+    },
+    {
+      "name": "native_child_inventory_request_schema",
+      "passed": true
+    },
+    {
+      "name": "native_child_inventory_rejects_bad_cursor",
+      "passed": true
+    },
+    {
+      "name": "native_child_inventory_rejects_oversize_page",
+      "passed": true
+    },
+    {
+      "name": "native_launch_request_id_schema",
+      "passed": true
+    },
+    {
+      "name": "native_message_fits_prompt_contract",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "effects": {
+    "native_threads": 0,
+    "model_calls": 0,
+    "credentials": 0,
+    "profile_edits": 0
+  },
+  "proves": "Actual pinned native project-file parser and delegation/workspace/prompt contracts consume the compiler output.",
+  "does_not_prove": "Live native agent execution, active-project import, installed app source identity, routing admission, model quality or project acceptance."
+}

@@ -282,7 +282,16 @@ class TailnetFutureSelectorTests(TailnetFixtureBase):
 
     def test_selector_pins_exactly_the_two_supplied_tailnet_accounts(self):
         self.future_api()
-        supplied = {a: frozenset(pair) for a, pair in TAILNET_PIN_SUPPLIED_CANONICAL.items()}
+        forward = {
+            "fabric-design": "a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c",
+            "fabric-read": "6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c",
+        }
+        application = {
+            "fabric-design": "070cebf2c4b4bbd41eb7fd687347292e40e13519a98a303bafca13202e971e8c",
+            "fabric-read": "32f76d5282f1187a3c355835bd5b34bb73f4e00fe05b9de9a84c958780ef9836",
+        }
+        supplied = {a: frozenset((*pair, forward[a], application[a]))
+                    for a, pair in TAILNET_PIN_SUPPLIED_CANONICAL.items()}
         self.assertEqual({a: frozenset(v) for a, v in svc._NATIVE_POOL_PIN_TAILNET_CANONICAL.items()}, supplied)
         for account, (old, post) in TAILNET_PIN_SUPPLIED_CANONICAL.items():
             with self.subTest(account=account):

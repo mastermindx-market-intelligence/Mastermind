@@ -65,6 +65,8 @@ def test_authenticated_native_and_control_room_routes_are_exact_and_method_scope
         "/workspace/resources/host-observation/current",
         "/workspace/mission-result/current",
         "/workspace/native-draft-identity/current",
+        "/workspace/native-authorization-identity/acquisition/current",
+        "/workspace/native-authorization-identity/content/current",
         "/workspace/byok/roles/current",
         "/workspace/instruction-admission/current",
         "/workspace/instruction-admission/operation",
@@ -251,8 +253,10 @@ def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
              ("handle @get {", "handle @post {", "handle @sourcepost {", "handle @mcpmeta {", "handle @mcp {", "\n    abort\n")]
     assert order == sorted(order)
     # Caddy performs no authentication or token handling on any branch.
+    # Literal path names may contain authorization; directives/headers may not.
+    non_path_lines = "\n".join(line for line in config.splitlines() if not line.strip().startswith("path "))
     for forbidden in ("basicauth", "forward_auth", "jwt", "authorization", "Authorization"):
-        assert forbidden not in config
+        assert forbidden not in non_path_lines
     # Untrusted forwarding and CDN client-identity headers are stripped on every
     # branch and forwarding identity is rewritten to loopback/https.
     for header in ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",

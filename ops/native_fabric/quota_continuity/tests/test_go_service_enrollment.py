@@ -6,20 +6,68 @@ import os
 from pathlib import Path
 import sqlite3
 import time
+import sys
 from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
 from test_go_native_stage import builds, native_stage, ROOT, g, installer, loaded_entry
-from test_go_native_install import go_owner, assert_history
+from test_go_native_install import go_owner, assert_history, retained_go_owner, assert_retained_history
 from test_native_launcher_successor_transition import source_owners, owner
+
+
+@pytest.fixture(scope="module", autouse=True)
+def reseal_modified_entry_for_disposable_fixtures():
+    """Reseal the entry in disposable fixtures without replacing source verification."""
+    import native_generation as generation
+    import sys as fixture_sys
+    from test_go_native_stage import builder, ROOT
+    import test_native_launcher_upgrade as fixture_upgrade
+    fixture_path = str(ROOT / "tests")
+    if fixture_path in sys.path:
+        sys.path.remove(fixture_path)
+    import test_native_launcher_upgrade as fixture_upgrade
+    import test_native_launcher_successor_transition as package_transition
+    package_transition.historical = fixture_upgrade
+    fixture_sys.modules["test_native_launcher_successor_transition"] = package_transition
+    if "test_go_native_install" in fixture_sys.modules:
+        fixture_sys.modules["test_go_native_install"].history = package_transition
+
+    original = builder.stage_external_go_component
+    def reseal(root, output, ext, staged_manifest=None):
+        result = original(root, output, ext, staged_manifest=staged_manifest)
+        if staged_manifest is None or not (output / "native-source-inventory.json").exists():
+            return result
+        path = output / "native-code-stage" / generation.GO_ENTRY
+        raw = (ROOT / "candidate/native_go_entry.py").read_bytes()
+        path.write_bytes(raw)
+        digest = generation.digest(raw)
+        output.joinpath("native-manifest.json").write_text(json.dumps(
+            dict(staged_manifest, **{generation.GO_ENTRY: digest}), sort_keys=True, indent=2) + "\n")
+        if staged_manifest is not None:
+            staged_manifest[generation.GO_ENTRY] = digest
+        inventory_path = output / "native-source-inventory.json"
+        if not inventory_path.exists():
+            return result
+        inventory = json.loads(inventory_path.read_bytes())
+        inventory["files"][generation.GO_ENTRY].update(sha256=digest, bytes=len(raw))
+        inventory_path.write_text(json.dumps(inventory, sort_keys=True, indent=2) + "\n")
+        return result
+    with mock.patch.object(builder, "stage_external_go_component", side_effect=reseal):
+        yield
+
 
 
 @pytest.fixture
 def service_owner(go_owner):
     case = go_owner
     installer.apply_go(case.go_bundle)
+    return service_owner_from_completed_go(case)
+
+
+def service_owner_from_completed_go(case):
+    """Configure the same physical service owner after an actual Go transition."""
     go = case.ext / "go_shim"
     go.chmod(0o700)
     for relative in ("glm_shim", "state", "broker"):
@@ -71,6 +119,47 @@ def service_owner(go_owner):
     case.current_before = (case.store / "CURRENT.json").read_bytes()
     case.bridge_before = {name: Path(row["target"]).read_bytes() for name, row in case.go_plan["entries"].items()}
     return case
+
+
+def set_specification(case, *, successor=False):
+    admin = copy.deepcopy(case.specification)
+    text = copy.deepcopy(case.specification)
+    admin["schema"] = installer.SERVICE_ADMIN_SPEC_SCHEMA
+    admin["scope"]["admin_pool_view"] = True
+    admin["scope"]["selection_purpose"] = {
+        "purpose_id": "fixture-admin-text", "source_ref": "fixture:qualified-purpose",
+        "task": {"task_class": "mechanical", "route_key": "fixture-admin-text",
+                 "task_complexity": "C1_ROUTINE_BOUNDED", "needs": []}}
+    admin["scope"].update(principal_id="macro-admin", caller_host="fixture-vps",
+        workload="admin-site-interactive", capability_lane="admin-orchestrator",
+        workload_profile="site_interactive", credential_ref="MACRO_FABRIC_APPLICATION_TOKEN")
+    admin["grant"].update(grant_id="fixture-admin", principal_id="macro-admin",
+        credential_ref="MACRO_FABRIC_APPLICATION_TOKEN", caller_hosts=["fixture-vps"],
+        workloads=["admin-site-interactive"], models=["fixture-model"])
+    purpose = {"purpose_id": "fixture-text-batch", "source_ref": "fixture:qualified-text",
+        "task": {"task_class": "mechanical", "route_key": "fixture-text-batch",
+                 "task_complexity": "C1_ROUTINE_BOUNDED", "needs": []}}
+    text["schema"] = installer.SERVICE_SELECTED_SPEC_SCHEMA
+    text["scope"].update(principal_id="mastermind-text", caller_host="m2studio",
+        workload="mastermind-site-batch", capability_lane="mastermind-text",
+        workload_profile="site_batch", credential_ref="MASTERMIND_FABRIC_APPLICATION_TOKEN",
+        selection_purpose=purpose)
+    text["grant"].update(grant_id="fixture-text", principal_id="mastermind-text",
+        credential_ref="MASTERMIND_FABRIC_APPLICATION_TOKEN", caller_hosts=["m2studio"],
+        workloads=["mastermind-site-batch"], models=["fixture-model"])
+    case.service_set = {"schema": installer.SERVICE_SET_SPEC_SCHEMA,
+        "operation_id": "fixture-service-set", "admin": admin, "text": text}
+    case.admin_credential = None
+    case.admin_grant = copy.deepcopy(admin["grant"])
+    return case.service_set
+
+
+def prepare_set(case):
+    plan = installer.prepare_go_service_enrollment(case.go_bundle, case.service_set, case.service_bundle)
+    private = case.service_bundle / installer._SERVICE_PRIVATE
+    case.admin_credential = (json.loads(private.read_bytes())["credentials"][0]
+                             if private.exists() else None)
+    return plan
 
 
 def prepare(case):
@@ -187,7 +276,10 @@ def test_selected_purpose_is_closed_and_never_inserted_into_legacy_scope(service
 
 
 def unchanged_ingress(case):
-    assert_history(case)
+    if case.go_plan["schema"] == installer.GO_RETAINED_SCHEMA:
+        assert_retained_history(case)
+    else:
+        assert_history(case)
     assert (case.store / "CURRENT.json").read_bytes() == case.current_before
     assert {name: Path(row["target"]).read_bytes() for name, row in case.go_plan["entries"].items()} == case.bridge_before
 
@@ -493,3 +585,23 @@ def test_recovered_rename_is_durable_and_revalidated_before_receipt(service_owne
         action(case.service_bundle)
     assert "progress" in events and case.service_receipt.exists()
     assert (path.read_bytes(), path.stat().st_ino) == before
+
+
+@pytest.fixture
+def retained_service_owner(retained_go_owner):
+    # Reuse the actual existing service fixture, choosing the genuine retained
+    # transition instead of the intact transition at its installer call.
+    case = retained_go_owner
+    case.go_bundle = case.retained_bundle
+    case.go_plan = case.retained_plan
+    with mock.patch.object(installer, "apply_go", side_effect=installer.apply_retained_go) as applied:
+        result = service_owner.__wrapped__(case)
+        assert applied.call_count == 1
+    return result
+
+
+def test_retained_go_enrolls_and_reconciles_through_actual_service_owner(retained_service_owner, capsys):
+    case = retained_service_owner
+    assert installer._completed_go_for_service(case.go_bundle)[0]["schema"] == installer.GO_RETAINED_SCHEMA
+    test_enrollment_commits_one_private_binding_and_one_scoped_grant(case, capsys)
+    assert_retained_history(case)

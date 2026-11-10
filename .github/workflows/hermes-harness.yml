@@ -31,6 +31,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 1c0cd667746d3395fe9e1b6c74f8f85952486f18
+          path: .ci-hermes-native
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -49,10 +55,25 @@ jobs:
       - name: Compile the harness and the five packages
         run: python -m compileall -q integrations/hermes_harness integrations/hermes_runtime integrations/hermes_models integrations/hermes_steward integrations/hermes_delegate integrations/hermes_secretary
       - name: Run the offline harness and all five dependency contracts
+        env:
+          MASTERMIND_HERMES_VENDOR_ROOT: ${{ github.workspace }}/.ci-hermes-native
+          HERMES_HOME: ${{ runner.temp }}/hermes-harness-native-fixture
         run: |
           set -eu
           for package in hermes_models hermes_harness hermes_runtime hermes_steward hermes_delegate hermes_secretary; do
-            if [ "$package" = hermes_runtime ] || [ "$package" = hermes_harness ]; then
+            if [ "$package" = hermes_harness ]; then
+              python -m pytest -q "integrations/$package/tests" --junitxml="$RUNNER_TEMP/hermes-harness.xml"
+              python - "$RUNNER_TEMP/hermes-harness.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          cases = [case for case in ET.parse(sys.argv[1]).iter('testcase')
+                   if case.get('classname', '').endswith('.NativePluginLoaderTests')]
+          if not cases or any(case.find(tag) is not None for case in cases
+                              for tag in ('failure', 'error', 'skipped')):
+              raise SystemExit('Pinned Hermes loader cases must execute without failures, errors or skips')
+          print(f'Qualified {len(cases)} real pinned Hermes loader cases')
+          PY
+            elif [ "$package" = hermes_runtime ]; then
               python -m pytest -q "integrations/$package/tests"
             else
               python -m unittest discover -v -s "integrations/$package/tests" -p 'test_*.py'

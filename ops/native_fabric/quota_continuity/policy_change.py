@@ -1,9 +1,10 @@
-"""Inspect and author candidates for the incumbent native Fabric policy owner.
+"""Operate the incumbent native Fabric policy owner without a parallel registry.
 
-Inspect/preview are read-only. Stage may create one new private candidate file,
-never change live policy. No operation opens accounts, resolves credentials,
-acquires a lease, changes a generation or makes a provider request. The existing
-native owner alone defines critical-policy compatibility and activation.
+Inspect/preview/status are read-only; stage authors one private candidate.
+Compatible publication delegates to the selected verified native publisher,
+with original revision, retained rollback and admission-lock checks. Nothing
+opens accounts, resolves credentials, acquires a lease, selects a generation or
+makes a provider request. Critical model/pool changes remain generation-owned.
 """
 from __future__ import annotations
 
@@ -242,7 +243,21 @@ def main(argv: list[str] | None = None) -> int:
     verify = actions.add_parser("verify-candidate", help="Read back an original candidate after uncertain publication")
     verify.add_argument("--candidate", required=True, type=Path)
     verify.add_argument("--expected-candidate-sha256", required=True)
+    for name in ("publish-compatible", "publication-status"):
+        command = actions.add_parser(name, help=(
+            "Delegate compatible policy publication to the selected native owner" if name == "publish-compatible"
+            else "Observe original target bytes without replaying a publication"))
+        command.add_argument("--stable-ext", required=True, type=Path)
+        command.add_argument("--expected-native-generation", required=True)
+        command.add_argument("--expected-current-sha256", required=True)
+        command.add_argument("--expected-candidate-sha256", required=True)
+        if name == "publish-compatible":
+            command.add_argument("--candidate", required=True, type=Path)
+            command.add_argument("--rollback-source", required=True, type=Path)
     args = parser.parse_args(argv)
+    if args.command in {"publish-compatible", "publication-status"}:
+        from ops.native_fabric.quota_continuity import policy_publication
+        return policy_publication.run_cli(args)
     if args.command in {"stage", "verify-candidate"}:
         from ops.native_fabric.quota_continuity import policy_edit
         return policy_edit.run_cli(args)

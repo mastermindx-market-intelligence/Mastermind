@@ -829,6 +829,11 @@ def _build_runtime_roots(account: str) -> dict:
 
 # Exact existing cohort: pin compatibility preserves installed capabilities.
 NATIVE_POOL_PIN_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
+# The already enrolled public seats that may move from their preserved original
+# successor pins to a qualified retained-Go application ingress. This is the
+# same cohort the incumbent native forward-selection proof already admits; it
+# is not a new roster, seat set or enrollment.
+NATIVE_POOL_PIN_FORWARD_ACCOUNTS = frozenset(('admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal', 'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4', 'fabric-design', 'fabric-read'))
 NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537e5ade635f5c9fa3a89ab99ae9ea57f549d2856832d01f90c1e61c1533',
                     'fleet-status.mjs': 'a7ba88b02d7099d99d0e6d1e702b2faee6b7a05e7e6e6a49c86c567184e5c780',
                     'gateway.mjs': '92e7f38f9eb53a5b140d0f3809b3381a4d35cea86bbb2e20229f108792ec30c8',
@@ -889,11 +894,15 @@ NATIVE_POOL_PIN_PREDECESSORS = {'admin-business': {'fleet-routing.mjs': 'dc98537
 _NATIVE_POOL_PIN_TAILNET_CANONICAL = {
     "fabric-design": frozenset((
         "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
+        "a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c",
         "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
+        "070cebf2c4b4bbd41eb7fd687347292e40e13519a98a303bafca13202e971e8c",
     )),
     "fabric-read": frozenset((
-        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
         "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
+        "6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c",
+        "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
+        "32f76d5282f1187a3c355835bd5b34bb73f4e00fe05b9de9a84c958780ef9836",
     )),
 }
 
@@ -910,14 +919,64 @@ CONTROL_BUNDLE_FILES = (
     "studio_direct_control.py",
     "private_service_status_successor.py",
     "private_service_pin.py",
-    "fleet_git_failure_compat.py",
     "private_service_pin_enrollment.py",
     "paper_v20_fleet_cohorts.py",
     "ops/native_fabric/quota_continuity/rollout/native_install.py",
-    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
-    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
     "ops/native_fabric/quota_continuity/rollout/native_generation.py",
     "ops/fabric_launch/install.py",
+    "fleet_git_failure_compat.py",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
+    "control_plane/provider_protocols.py",
+    "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py",
+    "ops/native_fabric/provider_plans/maintenance_guard/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/maintenance_guard/remote_sub_exec.py.patch",
+    "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
+    "ops/native_fabric/provider_plans/memory118/lease_broker.after-maintenance.py.patch",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_contract.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_owner.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/run_observation_delivery.py",
+    "ops/native_fabric/provider_plans/memory118_support_status/after_terminal_diagnostics/profile.json",
+    "ops/native_fabric/provider_plans/memory118_support_status/artifact_delivery.py.patch",
+    "ops/native_fabric/provider_plans/memory118_support_status/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    "ops/native_fabric/provider_plans/profile.json",
+    "ops/native_fabric/provider_plans/remote_placement/profile.json",
+    "ops/native_fabric/provider_plans/router_admission.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/component.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/current40/profile.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/candidate/application_http_transports.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/candidate/go_shim.py",
+    "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+    "ops/native_fabric/quota_continuity/rollout/application_http_realm_projection.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_bridge.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_host_context.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_plan_policy.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_transport.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native_plan_worker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/remote-placement.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/source/application_http_transports.py.preimage",
+    "ops/native_fabric/quota_continuity/source/codex_provider_realm.py.preimage",
+    "ops/native_fabric/quota_continuity/source/glm_keys.py",
+    "ops/native_fabric/quota_continuity/source/go_shim.py",
+    "ops/native_fabric/support_policy_status/reader.py",
 )
 # Exact inert pre-control-bundle snapshots observed on the original M2 host.
 # These are NOT executable/source dependencies and confer no runtime authority.
@@ -1170,6 +1229,27 @@ def cmd_native_pool_pin(args):
     return 0
 
 
+def cmd_native_pool_pin_forward(args):
+    """Dispatch the one closed forward Go bridge pin transaction.
+
+    The incumbent original pin owner keeps its own command, plan, receipt and
+    artifact set. This companion adds no second transaction to that record and
+    no new lifecycle, registry or credential path.
+    """
+    pin = _pin_owner_module()
+    try:
+        value = pin.run_forward(sys.modules[__name__], args)
+    except SystemExit as error:
+        allowed = {"NATIVE_POOL_PIN_FORWARD_" + code for code in pin.FORWARD_REFUSAL_CODES}
+        if type(error.code) is str and error.code in allowed:
+            raise
+        raise SystemExit("NATIVE_POOL_PIN_FORWARD_OWNER_REFUSED") from None
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        raise SystemExit("NATIVE_POOL_PIN_FORWARD_OWNER_REFUSED") from None
+    print(json.dumps(value, sort_keys=True))
+    return 0
+
+
 @contextmanager
 def _native_selected_publication_lock_for_publisher(account):
     """Hold the existing selected native-generation lock throughout a publisher CAS.
@@ -1335,6 +1415,139 @@ print(json.dumps({'successor_digest':p['digest'],'target_generation':p['target_g
         yield checked
 
 
+@contextmanager
+def _pin_forward_native_context(args):
+    """Bind the forward transition to the authentic retained-Go artifact.
+
+    This is the same isolated proof shape as the incumbent successor proof: it
+    imports the actual native owners, authenticates the retained Go artifact
+    with the strict reader and observes the committed phase. It never applies,
+    repairs, retries or relabels a native transition, and it never trusts a
+    caller supplied digest, path or pointer.
+    """
+    import importlib.util
+    context = _INSTALLED_CONTROL_CONTEXT
+    code_root = context["root"] if context is not None else Path(__file__).resolve().parents[2]
+    rollout = code_root / "ops/native_fabric/quota_continuity/rollout"
+    python_flags = ["-I", "-S", "-B"] if context is not None else ["-I", "-B"]
+    for name in ("native_install.py", "native_generation.py"):
+        source = rollout / name
+        if source.is_symlink() or not source.is_file():
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+    code = r"""
+import json,os,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import native_install as i
+import native_generation as g
+bundle=Path(sys.argv[2])
+# The strict reader authenticates the artifact identity exactly once. It is
+# never used as an inspection channel and never falls back to another chain.
+envelope=i._successor_json(bundle/'PLAN.json')
+schema=envelope.get('schema') if type(envelope) is dict else None
+if schema==i.GO_SCHEMA:
+    plan,payloads=i.read_go(bundle)
+    prior_bundle,prior,_,_,_=i._completed_successor(plan['prior_successor_bundle'])
+elif schema==i.GO_RETAINED_SCHEMA:
+    plan,payloads=i.read_retained_go(bundle)
+    historical=i._retained_successor_evidence(plan['prior_successor_bundle'],
+        original_absent=True,current_bridges=False)
+    prior_bundle,prior=historical['bundle'],historical['plan']
+else:
+    raise ValueError('unsupported Go ingress schema')
+if (prior['digest']!=plan['prior_successor_digest'] or
+    Path(prior_bundle).resolve()!=Path(plan['prior_successor_bundle']).resolve()):
+    raise ValueError('Go predecessor differs')
+prior_entry=prior['entries']['pool']
+original_successor={
+ 'successor_bundle':str(prior_bundle),'successor_digest':prior['digest'],
+ 'target_generation':prior['target_generation'],
+ 'expected_selection':prior['expected_selection'],
+ 'pool_target':prior_entry['target'],'pool_previous':prior_entry['previous'],
+ 'pool_bridge':prior_entry['bridge'],
+}
+store=Path(plan['store'])
+entry=plan['entries']['pool']
+previous=plan['expected_selection']
+selected={'schema':g.POINTER_SCHEMA,'generation':plan['target_generation'],
+          'previous':previous['generation'],'sequence':previous['sequence']+1}
+# The completed Go ingress proof is authoritative for the committed phase.
+completed=False
+try:
+    i._completed_go_for_service(bundle)
+    completed=True
+except (ValueError,OSError,KeyError,TypeError):
+    completed=False
+if completed:
+    phase='SELECTED'
+    if g.current(store)!=selected:
+        raise ValueError('selection differs from the completed Go ingress')
+else:
+    # An unresolved or unacknowledged Go transaction is not absence and can
+    # never authorize a new forward preparation.
+    receipts=store/'bootstrap'
+    if os.path.lexists(receipts/'.go-application-ingress-v1.json'):
+        raise ValueError('unresolved Go transaction')
+    if os.path.lexists(receipts/(plan['digest']+'.go.json')):
+        raise ValueError('unacknowledged Go transaction')
+    if g.current(store)!=previous:
+        raise ValueError('selection compare-and-swap refused')
+    # The old Go ingress bytes must still be the exact preimages.
+    i._upgrade_entries(plan)
+    phase='PREVIOUS'
+print(json.dumps({
+ 'original_successor':original_successor,
+ 'go_digest':plan['digest'],'go_schema':plan['schema'],
+ 'go_generation':plan['target_generation'],
+ 'go_expected_selection':plan['expected_selection'],
+ 'go_bootstrap_digest':plan['bootstrap_digest'],
+ 'go_prior_successor_digest':plan['prior_successor_digest'],
+ 'go_component_sha256':plan['component_sha256'],
+ 'go_manifest_sha256':plan['manifest_sha256'],
+ 'pool_target':entry['target'],'pool_previous':entry['previous'],
+ 'pool_bridge':entry['bridge'],'store':plan['store'],'phase':phase,
+},sort_keys=True))
+"""
+    def proof():
+        try:
+            r = subprocess.run([sys.executable, *python_flags, "-c", code, str(rollout),
+                str(args.forward_go_bundle)], capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED") from None
+        if r.returncode != 0 or len(r.stdout) > 16384:
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+        value = _pin_owner_module().decode(r.stdout)
+        if set(value) != {
+            "original_successor",
+            "go_digest", "go_schema", "go_generation", "go_expected_selection",
+            "go_bootstrap_digest", "go_prior_successor_digest",
+            "go_component_sha256", "go_manifest_sha256", "pool_target",
+            "pool_previous", "pool_bridge", "store", "phase",
+        }:
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+        if value["phase"] not in ("PREVIOUS", "SELECTED"):
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_REFUSED")
+        return value
+    first = proof()
+    if context is not None:
+        generation = _installed_control_module(
+            "_studio_pin_forward_native_generation",
+            "ops/native_fabric/quota_continuity/rollout/native_generation.py")
+    else:
+        spec = importlib.util.spec_from_file_location(
+            "_studio_pin_forward_native_generation", rollout / "native_generation.py")
+        generation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generation)
+    from contextlib import nullcontext
+    lock = (generation.publication_lock(Path(first["store"]))
+            if args.operation in ("apply", "reconcile") else nullcontext())
+    with lock:
+        checked = proof()
+        if checked != first:
+            raise SystemExit("NATIVE_POOL_PIN_FORWARD_GO_CHANGED")
+        yield checked
+
+
 def _pin_reject_generic_restage(account):
     # The newly recognized cohort receives only preserving lifecycle/pin support.
     # It does not silently acquire the generic capability-rebuilding upgrade path.
@@ -1356,6 +1569,11 @@ def _pin_reject_generic_restage(account):
 
 def _pin_require_start(account, roots):
     if account not in NATIVE_POOL_PIN_ACCOUNTS:
+        return
+    if os.path.lexists(roots["state"] / "native-pool-pin-forward"):
+        # The forward owner authenticates every incumbent predecessor against
+        # its retained before bytes, then the exact live after pair and Go.
+        _pin_owner_module().require_start(sys.modules[__name__], account, roots)
         return
     if os.path.lexists(roots["state"] / "fleet-status-module-successor"):
         owner = _fleet_status_successor_owner_module()
@@ -1515,17 +1733,24 @@ def _typed_git_config(user_root: Path, *, closed_repositories: bool = False) -> 
     }
 
 
+PAPER_RUNTIME_V22_REL = Path(".local/share/mastermind-paper/runtime/v22")
+PAPER_RUNTIME_V22_BRIDGE_SHA256 = "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b"
+
+
 def _verify_paper_runtime(
     user_root: Path, *, expected_sha: str | None = None,
     runtime_rel: Path | None = None, rel: Path | None = None,
 ) -> dict:
     # One owner, two reviewed callers: M1 uses runtime_rel; C2 uses rel.
+    if runtime_rel == PAPER_RUNTIME_V22_REL or rel == PAPER_RUNTIME_V22_REL:
+        if (runtime_rel != PAPER_RUNTIME_V22_REL or rel != PAPER_RUNTIME_V22_REL
+                or expected_sha != PAPER_RUNTIME_V22_BRIDGE_SHA256):
+            raise SystemExit("Paper v22 requires the exact reviewed runtime and bridge")
+
     if runtime_rel is not None and rel is not None and runtime_rel != rel:
         raise SystemExit("Paper runtime conflicting generation selectors")
     runtime_rel = runtime_rel or rel or PAPER_RUNTIME_REL
-    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL,
-                           M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL,
-                           PAPER_RUNTIME_V10_REL):
+    if runtime_rel not in (PAPER_RUNTIME_REL, M1_PAPER_V5_RUNTIME_REL, M1_PAPER_V20_RUNTIME_REL, PAPER_RUNTIME_V20_REL, PAPER_RUNTIME_V10_REL, PAPER_RUNTIME_V22_REL):
         raise SystemExit("paper runtime generation is not an admitted target")
     if runtime_rel == M1_PAPER_V5_RUNTIME_REL:
         fixed_sha = M1_PAPER_V5_BRIDGE_SHA256
@@ -1607,6 +1832,29 @@ def _paper_design_config(
     }
 
 
+def _publication_upgrade_paper_config(
+    account: str, previous_config: dict, user_root: Path,
+) -> dict | None:
+    """Retain the fixed publication seat's qualified, already selected v20."""
+    if account != "mastermind-os-publication" or "paperDesign" not in previous_config:
+        return None
+    paper = previous_config["paperDesign"]
+    if (type(paper) is not dict or paper.get("enabled") is not True
+            or type(paper.get("commandTimeoutMs")) is not int):
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    if paper == _paper_design_config(user_root):
+        return None
+    expected = _paper_design_config(
+        user_root, rel=PAPER_RUNTIME_V20_REL, bridge_sha256=PAPER_V20_BRIDGE_SHA256,
+    )
+    if paper != expected:
+        raise SystemExit("publication Paper predecessor is not an admitted profile")
+    _verify_paper_runtime(
+        user_root, runtime_rel=PAPER_RUNTIME_V20_REL, expected_sha=PAPER_V20_BRIDGE_SHA256,
+    )
+    return expected
+
+
 def _fleet_status_config(user_root: Path) -> dict | None:
     launcher = user_root / FLEET_STATUS_LAUNCHER_REL
     if not launcher.exists():
@@ -1622,7 +1870,9 @@ def _fleet_status_config(user_root: Path) -> dict | None:
 
 
 ORIGINAL_COLLECTION_ACCOUNT = "fabric-c3-570f6f34"
-ORIGINAL_COLLECTION_SCHEMA = "mastermind.fabric_original_collection.v1"
+ORIGINAL_COLLECTION_PRINCIPAL = "p:tunnel:" + ORIGINAL_COLLECTION_ACCOUNT
+ORIGINAL_COLLECTION_SCHEMA = "mastermind.fabric_original_collection.v2"
+ORIGINAL_COLLECTION_LEGACY_SCHEMA = "mastermind.fabric_original_collection.v1"
 ORIGINAL_COLLECTION_RUNS = frozenset((
     "fabric-app-native-drivers-j-20261105-01",
     "fabric-app-application-process-carrier-20261105-01",
@@ -1630,13 +1880,337 @@ ORIGINAL_COLLECTION_RUNS = frozenset((
 ORIGINAL_COLLECTION_FIELDS = frozenset((
     "enabled", "schema", "pythonPath", "pythonSha256", "controlPath",
     "controlSha256", "controlBundleDigest", "nativeStore", "nativeGeneration",
+    "predecessor",
 ))
+ORIGINAL_COLLECTION_LEGACY_FIELDS = frozenset(ORIGINAL_COLLECTION_FIELDS - {"predecessor"})
+
+# The sealed predecessor import. The machine owner builds and seals it; the
+# gateway owner only consumes the sealed result. A caller-selected object,
+# matching labels or a digest the caller computed over its own bytes are not
+# authentication.
+ORIGINAL_PREDECESSOR_SCHEMA = "mastermind.fabric_original_predecessor.v1"
+ORIGINAL_PREDECESSOR_KEYS = frozenset(("prior", "receipt_sha256", "runs", "schema", "seal"))
+ORIGINAL_PREDECESSOR_PRIOR_KEYS = frozenset((
+    "account", "bundleDigest", "configHash", "controlSha256", "host",
+    "nativeGeneration", "parent", "principal", "root",
+))
+ORIGINAL_PREDECESSOR_RUN_KEYS = frozenset(("destination", "observation"))
+ORIGINAL_PREDECESSOR_ROOT = "fabric-application-integration-20261104-sol"
+ORIGINAL_PREDECESSOR_MAX_RECEIPT = 1024 * 1024
+# Exactly one reconciliation selection exists, for the preserved J identity.
+ORIGINAL_RECONCILE_RUN = "fabric-app-native-drivers-j-20261105-01"
+
+# The original status contract emitted by the incumbent collector. The retry
+# flag is accepted under either spelling; exactly one must be present.
+ORIGINAL_OBSERVATION_STATUS_KEYS = frozenset((
+    "acceptance", "controller_state", "destination_reserved", "effect_state",
+    "lease_settlement", "original_operation_mutated", "reason", "run_id", "state",
+))
+ORIGINAL_OBSERVATION_RECEIPT_KEYS = frozenset((
+    "acceptance", "controller_state", "delivery_verified", "destination_reserved",
+    "lease_settlement", "original_operation_mutated", "receipt_sha256", "run_id", "state",
+))
+ORIGINAL_OBSERVATION_RETRY_KEYS = ("retry_authorized", "retry_allowed")
+
+# Durable one-use subordinate ownership for the single reconciliation.
+ORIGINAL_RECONCILIATION_SCHEMA = "mastermind.fabric_original_reconciliation.v1"
+ORIGINAL_RECONCILIATION_PREFIX = "original-reconciliation-"
+ORIGINAL_RECONCILIATION_SUFFIX = ".json"
+# Evidence that an original helper was still in flight during the transition.
+ORIGINAL_HELPER_PENDING_PREFIX = "original-helper-"
+ORIGINAL_HELPER_PENDING_SUFFIX = ".pending"
 
 
 def _original_collection_profile(account, host, port, fabric_only, modern_fabric):
     if (account != ORIGINAL_COLLECTION_ACCOUNT or host != "127.0.0.1" or port != 45280
             or fabric_only is not True or modern_fabric is not True):
         raise ValueError("original collection requires its existing private C3 service")
+
+
+def _canonical_json(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _original_predecessor_body(document: dict) -> str:
+    """Flat canonical body: sorted ``path=value`` lines.
+
+    The machine owner and the gateway owner must agree byte for byte without
+    sharing a JSON canonicaliser, so the body is deliberately flat ASCII.
+    """
+    pairs = [("schema", document["schema"]),
+             ("receipt_sha256", document["receipt_sha256"])]
+    for key in sorted(document["prior"]):
+        pairs.append(("prior." + key, str(document["prior"][key])))
+    for run_id in sorted(document["runs"]):
+        entry = document["runs"][run_id]
+        pairs.append(("runs." + run_id + ".destination", entry["destination"]))
+        pairs.append(("runs." + run_id + ".observation",
+                      "null" if entry["observation"] is None else entry["observation"]))
+    lines = []
+    for path, value in sorted(pairs, key=lambda item: item[0]):
+        if "\n" in value or "=" in path or not path:
+            raise ValueError("original predecessor body refused")
+        lines.append(path + "=" + value)
+    return "\n".join(lines)
+
+
+def _original_predecessor_seal(document: dict) -> str:
+    return hashlib.sha256(_original_predecessor_body(document).encode("utf-8")).hexdigest()
+
+
+def _original_observation_shape(value) -> str | None:
+    """Return the contract shape of one original status observation, or None."""
+    if type(value) is not dict:
+        return None
+    keys = set(value)
+    retry = keys & set(ORIGINAL_OBSERVATION_RETRY_KEYS)
+    if len(retry) != 1:
+        return None
+    rest = keys - set(ORIGINAL_OBSERVATION_RETRY_KEYS)
+    if rest == set(ORIGINAL_OBSERVATION_STATUS_KEYS):
+        return "status"
+    if rest == set(ORIGINAL_OBSERVATION_RECEIPT_KEYS):
+        return "receipt"
+    # The incumbent's unqualified-evidence response did not always include
+    # reservation/effect fields. Retain that exact observation as held; never
+    # manufacture the missing facts or make it eligible for reconciliation.
+    optional = {"destination_reserved", "effect_state"}
+    if (value.get("state") == "UNKNOWN"
+            and set(ORIGINAL_OBSERVATION_STATUS_KEYS) - optional <= rest
+            and rest < set(ORIGINAL_OBSERVATION_STATUS_KEYS)):
+        return "held_status"
+    return None
+
+
+def _original_json(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate original observation field")
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=unique,
+        parse_constant=lambda value: (_ for _ in ()).throw(
+            ValueError("nonfinite original observation field")))
+
+
+def _original_observation_find(document):
+    """Find the unique original status observation in a retained receipt.
+
+    Decode the retained JSON/MCP text envelopes without treating prose as an
+    observation. Every branch must fit the bounds before uniqueness is known.
+    """
+    found = []
+    stack = [(document, 0, True)]
+    visited = 0
+    decoded_bytes = 0
+    while stack:
+        value, depth, encoded = stack.pop()
+        visited += 1
+        if visited > 4096 or depth > 16:
+            raise ValueError("original observation envelope exceeds its bound")
+        if _original_observation_shape(value) is not None:
+            found.append(value)
+            if len(found) > 1:
+                raise ValueError("original observation envelope is ambiguous")
+            continue
+        if type(value) is dict:
+            stack.extend((item, depth + 1, key in
+                {"text", "response", "result", "output", "content"})
+                for key, item in value.items())
+        elif type(value) is list:
+            stack.extend((item, depth + 1, encoded) for item in value)
+        elif encoded and type(value) is str and value.lstrip().startswith(("{", "[")):
+            decoded_bytes += len(value.encode("utf-8"))
+            if decoded_bytes > 4 * ORIGINAL_PREDECESSOR_MAX_RECEIPT:
+                raise ValueError("original observation text exceeds its bound")
+            stack.append((_original_json(value), depth + 1, True))
+    if len(found) != 1:
+        return None
+    return found[0]
+
+
+def _original_observation_qualify(observation, run_id) -> str:
+    """Qualify one retained observation against the original source contract."""
+    shape = _original_observation_shape(observation)
+    if shape is None:
+        raise ValueError("original predecessor observation is not the original contract")
+    if observation.get("run_id") != run_id:
+        raise ValueError("original predecessor observation names another run")
+    retry = next(key for key in ORIGINAL_OBSERVATION_RETRY_KEYS if key in observation)
+    if observation[retry] is not False:
+        raise ValueError("original predecessor observation authorizes a retry")
+    if observation.get("acceptance") != "NOT_RECORDED":
+        raise ValueError("original predecessor observation recorded acceptance")
+    if observation.get("original_operation_mutated") is not False:
+        raise ValueError("original predecessor observation mutated the original operation")
+    if (observation.get("lease_settlement") != "UNKNOWN"
+            or observation.get("controller_state") != "UNKNOWN"):
+        raise ValueError("original predecessor observation settled a lease or controller")
+    state = observation.get("state")
+    if shape in ("status", "held_status"):
+        if state not in ("ABSENT", "UNKNOWN"):
+            raise ValueError("original predecessor observation is not absent or unknown")
+        if ("effect_state" in observation and observation["effect_state"] != "UNKNOWN"):
+            raise ValueError("original predecessor observation effect is not unknown")
+        if ("destination_reserved" in observation
+                and type(observation["destination_reserved"]) is not bool):
+            raise ValueError("original predecessor observation reservation is not a fact")
+        if state == "ABSENT" and observation.get("destination_reserved") is not False:
+            raise ValueError("original predecessor observation claims a reservation it never made")
+    else:
+        if state not in ("PENDING", "COMPLETE"):
+            raise ValueError("original predecessor observation is not a retained return")
+        if observation.get("destination_reserved") is not True:
+            raise ValueError("original predecessor observation lost its reservation")
+        if type(observation.get("delivery_verified")) is not bool:
+            raise ValueError("original predecessor observation verification is not a fact")
+        if observation["delivery_verified"] != (state == "COMPLETE"):
+            raise ValueError("original predecessor observation verification differs from state")
+        if not _sha256_hex(observation.get("receipt_sha256")):
+            raise ValueError("original predecessor observation receipt digest is not qualified")
+    return shape
+
+
+def _original_predecessor_verify(document) -> dict:
+    """Machine-owner verification of an installed predecessor binding."""
+    if type(document) is not dict or set(document) != set(ORIGINAL_PREDECESSOR_KEYS):
+        raise ValueError("original predecessor binding is not installed")
+    if document["schema"] != ORIGINAL_PREDECESSOR_SCHEMA:
+        raise ValueError("original predecessor schema refused")
+    if not _sha256_hex(document["receipt_sha256"]):
+        raise ValueError("original predecessor digest refused")
+    prior = document["prior"]
+    if type(prior) is not dict or set(prior) != set(ORIGINAL_PREDECESSOR_PRIOR_KEYS):
+        raise ValueError("original predecessor prior commitments refused")
+    if (prior["account"] != ORIGINAL_COLLECTION_ACCOUNT
+            or prior["principal"] != ORIGINAL_COLLECTION_PRINCIPAL):
+        raise ValueError("original predecessor owner refused")
+    if (prior["root"] != ORIGINAL_PREDECESSOR_ROOT or prior["parent"] != ORIGINAL_PREDECESSOR_ROOT
+            or prior["host"] != "ubuntu1"):
+        raise ValueError("original predecessor root refused")
+    for key in ("bundleDigest", "configHash", "controlSha256", "nativeGeneration"):
+        if not _sha256_hex(prior[key]):
+            raise ValueError("original predecessor commitment refused")
+    runs = document["runs"]
+    if type(runs) is not dict or set(runs) != set(ORIGINAL_COLLECTION_RUNS):
+        raise ValueError("original predecessor runs refused")
+    for run_id, entry in runs.items():
+        if run_id not in ORIGINAL_COLLECTION_RUNS:
+            raise ValueError("original predecessor run refused")
+        if type(entry) is not dict or set(entry) != set(ORIGINAL_PREDECESSOR_RUN_KEYS):
+            raise ValueError("original predecessor entry refused")
+        if (type(entry["destination"]) is not str or not entry["destination"].startswith("/")
+                or "\n" in entry["destination"]):
+            raise ValueError("original predecessor destination refused")
+        destination = Path(entry["destination"])
+        if (str(destination) != entry["destination"] or ".." in destination.parts or "\x00" in entry["destination"]
+                or ORIGINAL_PREDECESSOR_ROOT not in destination.parts
+                or destination.name != run_id + "-collection-v1"):
+            raise ValueError("original predecessor destination refused")
+        if entry["observation"] is None:
+            continue  # Explicit held slot, not an unattempted operation.
+        if type(entry["observation"]) is not str or not entry["observation"]:
+            raise ValueError("original predecessor observation refused")
+        try:
+            observation = _original_json(entry["observation"])
+        except ValueError:
+            raise ValueError("original predecessor observation is not decodable")
+        _original_observation_qualify(observation, run_id)
+    if _original_predecessor_seal(document) != document["seal"]:
+        raise ValueError("original predecessor seal refused")
+    return document
+
+
+def _original_collection_scope(collector) -> dict:
+    """The installed machine-owned scope for the two fixed original runs."""
+    scope = {}
+    for run_id in sorted(ORIGINAL_COLLECTION_RUNS):
+        plain = collector.PLAIN_SCOPES.get(run_id)
+        if type(plain) is not dict:
+            raise ValueError("original collection scope is missing")
+        scope[run_id] = {key: plain[key]
+            for key in ("root", "parent", "host", "destination")}
+    return scope
+
+
+def _original_predecessor_build(receipt_path, expected_digest, prior_descriptor,
+                                prior_config_hash, scope, retained_observations=None) -> dict:
+    """Qualify the retained original receipt and seal the machine-owner import."""
+    path = Path(receipt_path)
+    if not path.is_absolute():
+        raise SystemExit("original predecessor receipt path must be absolute")
+    try:
+        # Retained caller evidence can live on the existing evidence volume,
+        # outside HOME. Capture one bounded, stable regular file; the complete
+        # caller-supplied digest remains the authority for these exact bytes.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                    or before.st_size > ORIGINAL_PREDECESSOR_MAX_RECEIPT):
+                raise ValueError("original receipt is not a bounded regular file")
+            raw = stream.read(ORIGINAL_PREDECESSOR_MAX_RECEIPT + 1)
+            identity = lambda info: (info.st_dev, info.st_ino, info.st_mode,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            if (len(raw) != before.st_size
+                    or identity(before) != identity(os.fstat(stream.fileno()))
+                    or identity(before) != identity(path.lstat())):
+                raise ValueError("original receipt changed during capture")
+    except (OSError, ValueError, SystemExit) as error:
+        raise SystemExit("original predecessor receipt unavailable or unstable") from error
+    # The whole-file digest is the only accepted expectation. An inner
+    # response digest is never a substitute for it.
+    digest = hashlib.sha256(raw).hexdigest()
+    if digest != expected_digest:
+        raise SystemExit("original predecessor receipt digest mismatch")
+    try:
+        document = _original_json(raw.decode("utf-8"))
+        observation = _original_observation_find(document)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise SystemExit("original predecessor receipt is not decodable JSON")
+    if observation is None:
+        raise SystemExit(
+            "original predecessor receipt carries no unique original status observation; "
+            "supply the retained first call receipt in the original status contract")
+    run_id = observation.get("run_id")
+    if run_id not in ORIGINAL_COLLECTION_RUNS:
+        raise SystemExit("original predecessor receipt names an unenrolled run")
+    try:
+        _original_observation_qualify(observation, run_id)
+    except ValueError as error:
+        raise SystemExit("original predecessor receipt refused: " + str(error))
+    run_scope = scope.get(run_id)
+    if run_scope is None:
+        raise SystemExit("original predecessor receipt names an unscoped run")
+    canonical = _canonical_json(observation)
+    predecessor = {
+        "schema": ORIGINAL_PREDECESSOR_SCHEMA,
+        "receipt_sha256": digest,
+        "prior": {
+            "account": ORIGINAL_COLLECTION_ACCOUNT,
+            "principal": ORIGINAL_COLLECTION_PRINCIPAL,
+            "root": run_scope["root"],
+            "parent": run_scope["parent"],
+            "host": run_scope["host"],
+            "controlSha256": prior_descriptor["controlSha256"],
+            "nativeGeneration": prior_descriptor["nativeGeneration"],
+            "configHash": prior_config_hash,
+            "bundleDigest": prior_descriptor["controlBundleDigest"],
+        },
+        "runs": {run: {"destination": scope[run]["destination"], "observation": None}
+                 for run in sorted(ORIGINAL_COLLECTION_RUNS)},
+    }
+    predecessor["runs"][run_id]["observation"] = canonical
+    for retained_run, retained in (retained_observations or {}).items():
+        if retained_run not in ORIGINAL_COLLECTION_RUNS or retained_run == run_id:
+            raise ValueError("original predecessor retained slot conflicts")
+        _original_observation_qualify(retained, retained_run)
+        predecessor["runs"][retained_run]["observation"] = _canonical_json(retained)
+    predecessor["seal"] = _original_predecessor_seal(predecessor)
+    return predecessor
+
 
 
 def _original_collection_native(configuration=None, *, require_current=True):
@@ -1667,9 +2241,106 @@ def _original_collection_native(configuration=None, *, require_current=True):
         "controlPath": str(control), "controlSha256": hashlib.sha256(context["files"]["private_service.py"]).hexdigest(),
         "controlBundleDigest": manifest["bundleDigest"],
         "nativeStore": str(store), "nativeGeneration": digest}
-    if configuration is not None and configuration != expected:
-        raise ValueError("original collection installed descriptor changed")
+    # The predecessor binding is machine-owner sealed and carried beside the
+    # installed descriptor. It is verified here and never chosen by a caller.
+    predecessor = None
+    if configuration is not None:
+        provided = dict(configuration)
+        if "predecessor" in provided:
+            predecessor = provided.pop("predecessor")
+        if provided != expected:
+            raise ValueError("original collection installed descriptor changed")
+        if predecessor is not None:
+            _original_predecessor_verify(predecessor)
+    expected["predecessor"] = predecessor
     return expected, native, root, metadata
+
+
+def _original_collection_descriptor_validate(descriptor) -> None:
+    """Validate one retained original collection descriptor.
+
+    The v1 descriptor predates the predecessor binding and is still accepted
+    as the incumbent's own commitment; the v2 descriptor carries it.
+    """
+    if type(descriptor) is not dict:
+        raise SystemExit("invalid retained original collection selection")
+    fields = set(descriptor)
+    if fields == set(ORIGINAL_COLLECTION_LEGACY_FIELDS):
+        schema = ORIGINAL_COLLECTION_LEGACY_SCHEMA
+    elif fields == set(ORIGINAL_COLLECTION_FIELDS):
+        schema = ORIGINAL_COLLECTION_SCHEMA
+    else:
+        raise SystemExit("invalid retained original collection selection")
+    if (descriptor.get("enabled") is not True
+            or descriptor.get("schema") != schema
+            or any(not _sha256_hex(descriptor.get(key)) for key in
+                   ("pythonSha256", "controlSha256", "controlBundleDigest", "nativeGeneration"))
+            or any(type(descriptor.get(key)) is not str or not Path(descriptor[key]).is_absolute()
+                   or str(Path(descriptor[key])) != descriptor[key] or ".." in Path(descriptor[key]).parts
+                   for key in ("pythonPath", "controlPath", "nativeStore"))):
+        raise SystemExit("invalid retained original collection selection")
+    predecessor = descriptor.get("predecessor")
+    if predecessor is not None:
+        try:
+            _original_predecessor_verify(predecessor)
+        except ValueError as error:
+            raise SystemExit(str(error))
+
+
+def _original_predecessor_setting(args, roots, prior, previous, previous_predecessor,
+                                  descriptor) -> dict | None:
+    """Carry the sealed predecessor forward or seal a new one.
+
+    One sealed import per installation. A clean empty owner is never
+    constructed over an already sealed predecessor.
+    """
+    receipt = getattr(args, "original_predecessor_receipt", None)
+    expected = getattr(args, "original_predecessor_sha256", None)
+    # Legacy call sites carry mock objects with no new CLI attributes. Only
+    # actual explicit option values are read.
+    if type(receipt) is not str:
+        receipt = None
+    if type(expected) is not str:
+        expected = None
+    if (receipt is None) != (expected is None):
+        raise SystemExit("original predecessor receipt and sha256 must be supplied together")
+    if expected is not None and not _sha256_hex(expected):
+        raise SystemExit("original predecessor sha256 must be a sha256 digest")
+    if receipt is None:
+        if previous_predecessor is None:
+            if previous is not None:
+                raise SystemExit("refusing upgrade: retained original receipt is required before replacing an unsealed owner")
+            return None
+        try:
+            _original_predecessor_verify(previous_predecessor)
+        except ValueError as error:
+            raise SystemExit(str(error))
+        return previous_predecessor
+    if previous_predecessor is not None:
+        # A repeated identical request is idempotent; a different receipt is
+        # refused. One sealed import per installation.
+        if previous_predecessor.get("receipt_sha256") == expected:
+            return previous_predecessor
+        raise SystemExit(
+            "refusing upgrade: the installed original predecessor binding is already sealed")
+    if previous is None:
+        raise SystemExit(
+            "refusing upgrade: an original predecessor import requires an existing "
+            "original collection installation")
+    collector = _original_collection_collector(descriptor, require_current=True)
+    scope = _original_collection_scope(collector)
+    # Read the companion's existing local receipt; this is not a collection or
+    # remote observation. An unreadable companion remains explicitly held.
+    retained = {}
+    for run in ORIGINAL_COLLECTION_RUNS - {ORIGINAL_RECONCILE_RUN}:
+        observed = collector._gateway_collection_status(run)
+        if observed.get("state") in ("COMPLETE", "PENDING"):
+            _original_observation_qualify(observed, run)
+            retained[run] = observed
+    predecessor = _original_predecessor_build(
+        receipt, expected, previous, prior.get("configHash"), scope, retained)
+    _original_predecessor_verify(predecessor)
+    return predecessor
 
 
 def _original_collection_setting(args, roots, prior, fabric_only, modern_fabric):
@@ -1683,18 +2354,11 @@ def _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
         config = json.loads(roots["config"].read_text(encoding="utf-8"))
         previous = config.get("originalCollection")
         if previous is not None:
-            if (type(previous) is not dict or set(previous) != ORIGINAL_COLLECTION_FIELDS
-                    or previous.get("enabled") is not True
-                    or previous.get("schema") != ORIGINAL_COLLECTION_SCHEMA
-                    or any(not _sha256_hex(previous.get(key)) for key in
-                           ("pythonSha256", "controlSha256", "controlBundleDigest", "nativeGeneration"))
-                    or any(type(previous.get(key)) is not str or not Path(previous[key]).is_absolute()
-                           or str(Path(previous[key])) != previous[key] or ".." in Path(previous[key]).parts
-                           for key in ("pythonPath", "controlPath", "nativeStore"))
-                    or config.get("backendMode") != "shared-account"
+            if (config.get("backendMode") != "shared-account"
                     or config.get("gitPublish") is not False or config.get("paperDesign") is not False
                     or any(key in config for key in ("repositoryWorkspaces", "commissionPublication", "fleetStatus", "publicUrl"))):
                 raise SystemExit("invalid retained original collection selection")
+            _original_collection_descriptor_validate(previous)
             _original_collection_profile(config.get("accountLabel"), config.get("host"),
                 config.get("port"), config.get("fabricOnly"), config.get("modernFabricProtocol"))
     enabled = previous is not None if requested is None else requested
@@ -1704,7 +2368,632 @@ def _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
     # Explicit opt-in is needed initially. Upgrades rebuild a fully verified
     # descriptor under the same enrolled service; no client chooses a path.
     descriptor, _, _, _ = _original_collection_native()
-    return descriptor
+    previous_predecessor = previous.get("predecessor") if previous is not None else None
+    predecessor = _original_predecessor_setting(
+        args, roots, prior, previous, previous_predecessor, descriptor)
+    return dict(descriptor, predecessor=predecessor)
+
+
+
+def _original_collection_collector(configuration=None, *, require_current=True):
+    """Load the sealed installed collector module.
+
+    The installed native generation owns these bytes. Nothing outside the
+    sealed closure is imported, and the collector is never written to disk.
+    """
+    _, native, root, metadata = _original_collection_native(
+        configuration, require_current=require_current)
+    import importlib.util
+    ext = root / "ext"
+    target = ext / "original_delivery_collector.py"
+    source = native.regular_bytes(target)
+    if native.digest(source) != metadata["files"]["ext/original_delivery_collector.py"]:
+        raise ValueError("original collector changed")
+    sys.path.insert(0, str(ext))
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("original_delivery_collector", target)
+    collector = importlib.util.module_from_spec(spec)
+    if "original_delivery_collector" in sys.modules:
+        raise ValueError("original collector module conflict")
+    sys.modules["original_delivery_collector"] = collector
+    exec(compile(source, str(target), "exec"), collector.__dict__)
+    return collector
+
+
+def _original_state_root(account: str) -> Path:
+    return _build_runtime_roots(account)["state"]
+
+
+# The existing private-service installer owns these immutable recovery records.
+# They authorize only completion of one frozen installation, never a new run.
+_ORIGINAL_INSTALL_SCHEMA = "mastermind.studio_original_preserving_install.v1"
+_ORIGINAL_INSTALL_PREFIX = "original-preserving-upgrade-"
+_ORIGINAL_INSTALL_LIMIT = 16 * 1024 * 1024
+
+
+def _original_install_encode(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+
+
+def _original_install_paths(roots):
+    return {**{name: roots["base"] / name for name in STAGE_FILES},
+            "@config": roots["config"], "@plist": roots["plist"], "@manifest": roots["manifest"]}
+
+
+def _original_install_executor():
+    context = _INSTALLED_CONTROL_CONTEXT
+    interpreter = Path(sys.executable).resolve(strict=True)
+    control = Path(__file__).resolve(strict=True)
+    closure = None
+    if context is not None:
+        closure = {}
+        for name, expected in context["files"].items():
+            current = _fabric_release_bytes(context["root"] / name)
+            if current != expected:
+                raise SystemExit("original preserving upgrade control closure changed")
+            closure[name] = hashlib.sha256(current).hexdigest()
+    return {"python": str(interpreter),
+            "pythonHash": _stable_regular_file_hash(interpreter, label="original upgrade interpreter"),
+            "control": str(control),
+            "controlHash": _stable_regular_file_hash(control, label="original upgrade control"),
+            "installedRoot": str(context["root"]) if context is not None else None,
+            "installedClosure": closure}
+
+
+def _original_install_fsync_parent(directory):
+    # Custody evidence requires a positive directory durability fence.
+    _assert_dest_safe(directory)
+    before = directory.lstat()
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        held = os.fstat(fd)
+        identity = lambda value: (value.st_dev, value.st_ino, value.st_uid, value.st_mode)
+        if (not stat.S_ISDIR(held.st_mode) or held.st_uid != os.getuid()
+                or held.st_mode & 0o022 or identity(before) != identity(held)):
+            raise SystemExit("original preserving upgrade parent changed or unsafe")
+        os.fsync(fd)
+        if identity(directory.lstat()) != identity(held):
+            raise SystemExit("original preserving upgrade parent changed during sync")
+    finally:
+        os.close(fd)
+
+
+def _original_install_sync(path, expected):
+    # A visible file is not an acknowledged fsync. Re-establish durability of
+    # this exact inode and its parent before using it as an installation proof.
+    limit = max(2 * 1024 * 1024, len(expected))
+    if _fabric_release_bytes(path, limit=limit) != expected:
+        raise SystemExit("original preserving upgrade durable bytes changed")
+    before = path.lstat()
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            raise SystemExit("original preserving upgrade durable inode changed")
+        os.fsync(fd)
+        named = path.lstat()
+        if (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino):
+            raise SystemExit("original preserving upgrade durable inode changed")
+    finally:
+        os.close(fd)
+    _original_install_fsync_parent(path.parent)
+    if _fabric_release_bytes(path, limit=limit) != expected:
+        raise SystemExit("original preserving upgrade durable readback changed")
+
+
+def _original_install_decode(plan, roots):
+    import base64
+    fields = {"schema", "uid", "account", "label", "source", "node", "backend",
+              "host", "port", "executor", "request", "entries"}
+    if (type(plan) is not dict or set(plan) != fields
+            or plan["schema"] != _ORIGINAL_INSTALL_SCHEMA
+            or type(plan["uid"]) is not int or plan["uid"] != os.getuid()
+            or plan["account"] != ORIGINAL_COLLECTION_ACCOUNT
+            or plan["label"] != "com.mastermind.studio-direct-private." + ORIGINAL_COLLECTION_ACCOUNT
+            or plan["host"] != "127.0.0.1" or type(plan["port"]) is not int or plan["port"] != 45280
+            or any(type(plan[k]) is not str or not Path(plan[k]).is_absolute()
+                   for k in ("source", "node", "backend"))
+            or type(plan["executor"]) is not dict or type(plan["request"]) is not dict
+            or type(plan["entries"]) is not list):
+        raise SystemExit("original preserving upgrade plan identity refused")
+    targets = _original_install_paths(roots)
+    if [row.get("key") for row in plan["entries"] if type(row) is dict] != list(targets):
+        raise SystemExit("original preserving upgrade plan members refused")
+    decoded = {}
+    for row in plan["entries"]:
+        if type(row) is not dict or set(row) != {"key", "before", "beforeMode", "after"}:
+            raise SystemExit("original preserving upgrade plan row refused")
+        values = {}
+        for phase in ("before", "after"):
+            value = row[phase]
+            if phase == "before" and value is None:
+                values[phase] = None
+                continue
+            if type(value) is not str:
+                raise SystemExit("original preserving upgrade plan payload refused")
+            try:
+                raw = base64.b64decode(value, validate=True)
+            except (ValueError, TypeError):
+                raise SystemExit("original preserving upgrade plan payload refused") from None
+            if len(raw) > 2 * 1024 * 1024 or base64.b64encode(raw).decode("ascii") != value:
+                raise SystemExit("original preserving upgrade plan payload refused")
+            values[phase] = raw
+        mode = row["beforeMode"]
+        if ((values["before"] is None and mode is not None)
+                or (values["before"] is not None
+                    and (type(mode) is not int or mode & 0o022 or not 0 <= mode <= 0o777))):
+            raise SystemExit("original preserving upgrade plan mode refused")
+        decoded[row["key"]] = (values["before"], values["after"], mode)
+    try:
+        old = _original_json(decoded["@manifest"][0].decode("utf-8"))
+        new = _original_json(decoded["@manifest"][1].decode("utf-8"))
+        before = _original_json(decoded["@config"][0].decode("utf-8"))
+        after = _original_json(decoded["@config"][1].decode("utf-8"))
+        prior = before["originalCollection"]
+        selected = after["originalCollection"]
+        _original_collection_descriptor_validate(prior)
+        _original_collection_descriptor_validate(selected)
+        _original_collection_profile(before.get("accountLabel"), before.get("host"),
+            before.get("port"), before.get("fabricOnly"), before.get("modernFabricProtocol"))
+        _original_collection_profile(after.get("accountLabel"), after.get("host"),
+            after.get("port"), after.get("fabricOnly"), after.get("modernFabricProtocol"))
+        predecessor = selected["predecessor"]
+        _original_predecessor_verify(predecessor)
+        if {k: v for k, v in before.items() if k != "originalCollection"} != {
+                k: v for k, v in after.items() if k != "originalCollection"}:
+            raise ValueError("configuration changed outside original selection")
+        if prior.get("predecessor") is not None:
+            if predecessor != prior["predecessor"]:
+                raise ValueError("sealed predecessor changed")
+        else:
+            commitments = {"controlSha256": prior["controlSha256"],
+                "nativeGeneration": prior["nativeGeneration"],
+                "configHash": hashlib.sha256(decoded["@config"][0]).hexdigest(),
+                "bundleDigest": prior["controlBundleDigest"]}
+            if any(predecessor["prior"].get(k) != v for k, v in commitments.items()):
+                raise ValueError("predecessor does not bind original install")
+        expected = {"version": MANIFEST_VERSION, "account": plan["account"],
+            "label": plan["label"], "files": {
+                name: hashlib.sha256(decoded[name][1]).hexdigest() for name in STAGE_FILES},
+            "source": plan["source"], "node": plan["node"], "backend": plan["backend"],
+            "nodeHash": old["nodeHash"], "backendHash": old["backendHash"],
+            "dependencyTreeHash": old["dependencyTreeHash"], "host": plan["host"],
+            "port": plan["port"], "configHash": hashlib.sha256(decoded["@config"][1]).hexdigest(),
+            "plistHash": hashlib.sha256(decoded["@plist"][1]).hexdigest()}
+        if new != expected:
+            raise ValueError("target manifest differs")
+        for key in ("account", "label", "node", "backend", "host", "port"):
+            if old[key] != expected[key]:
+                raise ValueError("original install identity differs")
+        if (old["configHash"] != hashlib.sha256(decoded["@config"][0]).hexdigest()
+                or old["plistHash"] != hashlib.sha256(decoded["@plist"][0]).hexdigest()
+                or not set(old["files"]).issubset(set(STAGE_FILES))):
+            raise ValueError("original manifest closure differs")
+        for name in STAGE_FILES:
+            previous = decoded[name][0]
+            if name in old["files"]:
+                if previous is None or hashlib.sha256(previous).hexdigest() != old["files"][name]:
+                    raise ValueError("original source preimage differs")
+            elif previous is not None:
+                raise ValueError("unowned source preimage")
+        expected_plist = plistlib.dumps(_build_plist(Path(plan["node"]), roots["gateway"],
+            roots["config"], _user_root(), plan["label"]), fmt=plistlib.FMT_XML)
+        if decoded["@plist"][1] != expected_plist:
+            raise ValueError("target plist differs")
+    except (KeyError, ValueError, TypeError, AttributeError, UnicodeError) as error:
+        raise SystemExit("original preserving upgrade plan closure refused") from error
+    return decoded, old, new, selected
+
+
+def _original_install_records(roots):
+    state = roots["state"]
+    _assert_dest_safe(state)
+    info = state.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != DIR_MODE):
+        raise SystemExit("original preserving upgrade state refused")
+    names = sorted(p.name for p in state.iterdir() if p.name.startswith(_ORIGINAL_INSTALL_PREFIX))
+    if len(names) > 128:
+        raise SystemExit("original preserving upgrade history exceeds bound")
+    plans, completions = {}, {}
+    for name in names:
+        suffix = name[len(_ORIGINAL_INSTALL_PREFIX):]
+        complete = suffix.endswith(".complete.json")
+        digest = suffix[:-14] if complete else suffix[:-5] if suffix.endswith(".json") else ""
+        if not _sha256_hex(digest):
+            raise SystemExit("original preserving upgrade record name refused")
+        path = state / name
+        raw = _fabric_release_bytes(path, limit=_ORIGINAL_INSTALL_LIMIT)
+        if stat.S_IMODE(path.lstat().st_mode) != FILE_MODE:
+            raise SystemExit("original preserving upgrade record mode refused")
+        try:
+            value = _original_json(raw.decode("utf-8"))
+        except (ValueError, UnicodeError) as error:
+            raise SystemExit("original preserving upgrade record malformed") from error
+        if raw != _original_install_encode(value):
+            raise SystemExit("original preserving upgrade record is not canonical")
+        if complete:
+            completions[digest] = (path, raw, value)
+        else:
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise SystemExit("original preserving upgrade record digest differs")
+            decoded = _original_install_decode(value, roots)
+            plans[digest] = (path, raw, value, decoded)
+    if set(completions) - set(plans):
+        raise SystemExit("original preserving upgrade orphan completion")
+    records = []
+    for digest, (path, raw, plan, decoded) in plans.items():
+        complete = completions.get(digest)
+        if complete is not None:
+            expected = {"schema": _ORIGINAL_INSTALL_SCHEMA, "planSha256": digest,
+                        "targetManifestSha256": hashlib.sha256(decoded[0]["@manifest"][1]).hexdigest(),
+                        "state": "COMPLETE"}
+            if complete[2] != expected:
+                raise SystemExit("original preserving upgrade completion differs")
+            _original_install_sync(path, raw)
+            _original_install_sync(complete[0], complete[1])
+        records.append((digest, path, raw, plan, decoded, complete))
+    if sum(record[5] is None for record in records) > 1:
+        raise SystemExit("original preserving upgrade has multiple unresolved plans")
+    return records
+
+
+def _original_install_pending(roots):
+    return any(record[5] is None for record in _original_install_records(roots))
+
+
+def _original_install_request(args):
+    # Capture the existing upgrade parser's explicit/default CLI fields, not
+    # incidental attributes on legacy call-site objects.
+    defaults = build_parser().parse_args(["upgrade", "--account", args.account,
+        "--source", str(args.source), "--node", str(args.node),
+        "--backend", str(args.backend), "--port", str(args.port)])
+    provided = vars(args)
+    result = {}
+    for name, default in vars(defaults).items():
+        if name == "func":
+            continue
+        value = provided.get(name, default)
+        if isinstance(value, Path):
+            value = str(value)
+        if type(value) not in (str, int, float, bool, type(None)):
+            raise SystemExit("original preserving upgrade request field refused")
+        result[name] = value
+    _original_install_encode(result)
+    return result
+
+
+def _original_install_matches(plan, args, source, node, backend, port):
+    return (plan["source"] == str(source) and plan["node"] == str(node)
+        and plan["backend"] == str(backend) and plan["port"] == port
+        and plan["account"] == args.account
+        and _original_install_encode(plan["request"]) == _original_install_encode(_original_install_request(args)))
+
+
+def _original_install_observe(roots, decoded):
+    states = {}
+    for key, path in _original_install_paths(roots).items():
+        before, after, mode = decoded[key]
+        if not os.path.lexists(path):
+            if before is not None:
+                raise SystemExit("original preserving upgrade target missing")
+            states[key] = "OLD"
+            continue
+        actual = _fabric_release_bytes(path)
+        actual_mode = stat.S_IMODE(path.lstat().st_mode)
+        if actual == after and actual_mode == FILE_MODE:
+            states[key] = "TARGET"
+        elif before is not None and actual == before and actual_mode == mode:
+            states[key] = "OLD"
+        else:
+            raise SystemExit("original preserving upgrade foreign target bytes")
+    return states
+
+
+def _original_install_output(plan, roots, old):
+    print(json.dumps({"upgraded": True, "account": plan["account"], "label": plan["label"],
+        "runtime": str(roots["base"]), "plist": str(roots["plist"]), "manifest": str(roots["manifest"]),
+        "gateway": str(roots["gateway"]), "port": plan["port"], "source": plan["source"],
+        "previousSource": str(old.get("source") or "")}))
+    return 0
+
+
+def _original_install_finish(record, roots, *, completed=False):
+    digest, path, raw, plan, decoded_owner, receipt = record
+    decoded, old, new, selected = decoded_owner
+    if _original_install_executor() != plan["executor"]:
+        raise SystemExit("original preserving upgrade executing closure changed")
+    incoming = {src.name: _sha256_file(src) for src in _check_source_files(Path(plan["source"]))}
+    if incoming != new["files"]:
+        raise SystemExit("original preserving upgrade incoming source changed")
+    if (_stable_regular_file_hash(Path(plan["node"]), label="original upgrade node") != new["nodeHash"]
+            or _stable_regular_file_hash(Path(plan["backend"]), label="original upgrade backend") != new["backendHash"]
+            or (new["dependencyTreeHash"] is not None
+                and _dependency_tree_hash(roots["node_modules"]) != new["dependencyTreeHash"])):
+        raise SystemExit("original preserving upgrade runtime closure changed")
+    # Validate the frozen descriptor, never construct a replacement from CURRENT
+    # or collect/rebuild either original predecessor slot.
+    _original_collection_native(selected, require_current=not completed)
+    observed = _original_install_observe(roots, decoded)
+    if completed and any(value != "TARGET" for value in observed.values()):
+        raise SystemExit("original preserving upgrade completed install changed")
+    _original_install_sync(path, raw)
+    targets = _original_install_paths(roots)
+    for key, target in targets.items():
+        before, after, mode = decoded[key]
+        # Recheck the whole old/target relation before every replacement.
+        observed = _original_install_observe(roots, decoded)
+        if observed[key] == "OLD":
+            if completed:
+                raise SystemExit("original preserving upgrade cannot roll back completion")
+            _atomic_write_bytes(target, after, FILE_MODE)
+        _original_install_sync(target, after)
+    _verify_staged_install(plan["account"], plan["label"], roots,
+                           require_runtime_seal=new["dependencyTreeHash"] is not None)
+    if any(value != "TARGET" for value in _original_install_observe(roots, decoded).values()):
+        raise SystemExit("original preserving upgrade final closure changed")
+    result = {"schema": _ORIGINAL_INSTALL_SCHEMA, "planSha256": digest,
+              "targetManifestSha256": hashlib.sha256(decoded["@manifest"][1]).hexdigest(),
+              "state": "COMPLETE"}
+    completion = roots["state"] / (_ORIGINAL_INSTALL_PREFIX + digest + ".complete.json")
+    expected = _original_install_encode(result)
+    if not os.path.lexists(completion):
+        _fabric_release_new(completion, expected)
+    _original_install_sync(completion, expected)
+    return _original_install_output(plan, roots, old)
+
+
+def _original_install_resume(args, source, node, backend, port, roots):
+    if args.account != ORIGINAL_COLLECTION_ACCOUNT:
+        return None
+    records = _original_install_records(roots)
+    pending = [record for record in records if record[5] is None]
+    if pending:
+        record = pending[0]
+        if not _original_install_matches(record[3], args, source, node, backend, port):
+            raise SystemExit("original preserving upgrade requires its original request")
+        return _original_install_finish(record, roots)
+    # Historical completion is never permission to restore an old installation.
+    for record in reversed(records):
+        if not _original_install_matches(record[3], args, source, node, backend, port):
+            continue
+        if _original_install_executor() != record[3]["executor"]:
+            continue
+        try:
+            observed = _original_install_observe(roots, record[4][0])
+        except SystemExit:
+            continue
+        incoming = {src.name: _sha256_file(src) for src in _check_source_files(source)}
+        if all(value == "TARGET" for value in observed.values()) and incoming == record[4][2]["files"]:
+            return _original_install_finish(record, roots, completed=True)
+    return None
+
+
+def _original_install_begin(source, node, backend, account, label, host, port, roots,
+                            original_collection, retained_config, dependency_tree_hash, original_request):
+    import base64
+    if _original_install_pending(roots):
+        raise SystemExit("original preserving upgrade requires reconciliation")
+    source_payloads = {src.name: src.read_bytes() for src in _check_source_files(source)}
+    if retained_config is None:
+        raise SystemExit("original preserving upgrade requires retained configuration")
+    config = json.dumps(retained_config, indent=2, sort_keys=True).encode("utf-8")
+    plist = plistlib.dumps(_build_plist(node, roots["gateway"], roots["config"], _user_root(), label),
+                          fmt=plistlib.FMT_XML)
+    manifest = {"version": MANIFEST_VERSION, "account": account, "label": label,
+        "files": {name: hashlib.sha256(raw).hexdigest() for name, raw in source_payloads.items()},
+        "source": str(source), "node": str(node), "backend": str(backend),
+        "nodeHash": _stable_regular_file_hash(node, label="node"),
+        "backendHash": _stable_regular_file_hash(backend, label="backend"),
+        "dependencyTreeHash": dependency_tree_hash, "host": host, "port": port,
+        "configHash": hashlib.sha256(config).hexdigest(), "plistHash": hashlib.sha256(plist).hexdigest()}
+    payloads = {**source_payloads, "@config": config, "@plist": plist,
+                "@manifest": json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")}
+    entries = []
+    for key, target in _original_install_paths(roots).items():
+        exists = os.path.lexists(target)
+        before = _fabric_release_bytes(target) if exists else None
+        entries.append({"key": key,
+            "before": base64.b64encode(before).decode("ascii") if before is not None else None,
+            "beforeMode": stat.S_IMODE(target.lstat().st_mode) if exists else None,
+            "after": base64.b64encode(payloads[key]).decode("ascii")})
+    plan = {"schema": _ORIGINAL_INSTALL_SCHEMA, "uid": os.getuid(), "account": account,
+        "label": label, "source": str(source), "node": str(node), "backend": str(backend),
+        "host": host, "port": port, "executor": _original_install_executor(),
+        "request": original_request, "entries": entries}
+    decoded = _original_install_decode(plan, roots)
+    raw = _original_install_encode(plan)
+    if len(raw) > _ORIGINAL_INSTALL_LIMIT:
+        raise SystemExit("original preserving upgrade plan exceeds bound")
+    digest = hashlib.sha256(raw).hexdigest()
+    path = roots["state"] / (_ORIGINAL_INSTALL_PREFIX + digest + ".json")
+    # No target is changed until this complete original plan is durable.
+    _fabric_release_new(path, raw)
+    return _original_install_finish((digest, path, raw, plan, decoded, None), roots)
+
+
+def _original_installed_descriptor(configuration=None):
+    """Bind the whole descriptor, including its predecessor, to the live seal."""
+    account = ORIGINAL_COLLECTION_ACCOUNT
+    roots = _build_runtime_roots(account)
+    if _original_install_pending(roots):
+        raise ValueError("original preserving upgrade requires reconciliation")
+    manifest = _verify_staged_install(account,
+        f"com.mastermind.studio-direct-private.{account}", roots)
+    raw = _fabric_release_bytes(roots["config"])
+    if hashlib.sha256(raw).hexdigest() != manifest["configHash"]:
+        raise ValueError("original collection installed configuration changed")
+    config = _original_json(raw.decode("utf-8"))
+    _original_collection_profile(config.get("accountLabel"), config.get("host"),
+        config.get("port"), config.get("fabricOnly"), config.get("modernFabricProtocol"))
+    descriptor = config.get("originalCollection")
+    _original_collection_descriptor_validate(descriptor)
+    if configuration is not None and configuration != descriptor:
+        raise ValueError("original collection descriptor is not the installed selection")
+    return descriptor, manifest
+
+
+@contextmanager
+def _original_control_quiescence():
+    """Use the incumbent control lock, including for helpers predating markers."""
+    context = _INSTALLED_CONTROL_CONTEXT
+    lock = _user_root() / ".local/share/studio-direct-mcp/control/.control-bundle.lock"
+    _assert_dest_safe(lock)
+    owned = context is None
+    fd = (os.open(lock, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+          if owned else context["lock_fd"])
+    try:
+        held, named = os.fstat(fd), lock.lstat()
+        if (not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
+                or held.st_nlink != 1 or stat.S_IMODE(held.st_mode) != FILE_MODE
+                or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)):
+            raise SystemExit("original helper control lock is unqualified")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise SystemExit("original helper quiescence is not proven") from error
+        yield
+    finally:
+        if owned:
+            os.close(fd)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+
+
+def _original_upgrade_serialized(function):
+    @wraps(function)
+    def guarded(args):
+        if args.account != ORIGINAL_COLLECTION_ACCOUNT:
+            return function(args)
+        roots = _build_runtime_roots(args.account)
+        if _original_install_pending(roots):
+            with _original_control_quiescence():
+                return function(args)
+        raw = _fabric_release_bytes(roots["config"])
+        if _original_json(raw.decode("utf-8")).get("originalCollection") is None:
+            return function(args)
+        with _original_control_quiescence():
+            return function(args)
+    return guarded
+
+
+def _original_fsync_dir(directory):
+    """A failed durability fence prevents transport; it is never best effort."""
+    _assert_dest_safe(directory)
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        held = os.fstat(fd)
+        if (held.st_uid != os.getuid() or stat.S_IMODE(held.st_mode) != DIR_MODE):
+            raise OSError("original state directory is unsafe")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _original_helper_pending(account: str) -> list[str]:
+    """Names of original helper markers still present in the owner state."""
+    state = _original_state_root(account)
+    if account != ORIGINAL_COLLECTION_ACCOUNT:
+        return []
+    _assert_dest_safe(state)
+    if not state.is_dir():
+        raise SystemExit("original helper state is unavailable; quiescence is unproven")
+    try:
+        names = sorted(path.name for path in state.iterdir()
+            if path.name.startswith(ORIGINAL_HELPER_PENDING_PREFIX)
+            and path.name.endswith(ORIGINAL_HELPER_PENDING_SUFFIX))
+    except OSError as error:
+        raise SystemExit("original helper markers are unreadable; quiescence is unproven") from error
+    return names
+
+
+def _original_helper_marker(account: str) -> Path:
+    return _original_state_root(account) / (
+        ORIGINAL_HELPER_PENDING_PREFIX + str(os.getpid()) + ORIGINAL_HELPER_PENDING_SUFFIX)
+
+
+def _original_helper_marker_take():
+    """Record that this helper is in flight. The marker is evidence only."""
+    marker = _original_helper_marker(ORIGINAL_COLLECTION_ACCOUNT)
+    _ensure_secure_dir(marker.parent)
+    handle = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(handle, "wb") as stream:
+        payload = str(os.getpid()).encode("ascii")
+        if stream.write(payload) != len(payload):
+            raise OSError("short original helper marker write")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _original_fsync_dir(marker.parent)
+    return marker
+
+
+def _original_helper_marker_drop(marker) -> None:
+    if marker is None:
+        return
+    try:
+        marker.unlink()
+        _original_fsync_dir(marker.parent)
+    except OSError:
+        pass
+
+
+def _original_reconciliation_record(account: str, run_id: str) -> Path:
+    return _original_state_root(account) / (
+        ORIGINAL_RECONCILIATION_PREFIX + run_id + ORIGINAL_RECONCILIATION_SUFFIX)
+
+
+def _original_reconcile_claim(configuration, run_id, predecessor_sha256, collector):
+    """Take the durable one-use subordinate ownership before any transport.
+
+    The record's existence is the fence. A crash, a lost helper outcome or an
+    absent leaf never makes the observation eligible again.
+    """
+    document = _original_predecessor_verify(configuration.get("predecessor"))
+    entry = document["runs"].get(run_id)
+    if entry is None or run_id != ORIGINAL_RECONCILE_RUN:
+        raise ValueError("original reconciliation is not enrolled for this run")
+    if document["receipt_sha256"] != predecessor_sha256:
+        raise ValueError("original predecessor digest refused")
+    scope = _original_collection_scope(collector)
+    if run_id not in scope or scope[run_id]["destination"] != entry["destination"]:
+        raise ValueError("original reconciliation destination changed")
+    observation = _original_json(entry["observation"]) if entry["observation"] is not None else None
+    if (_original_observation_shape(observation) != "status"
+            or observation.get("state") not in ("ABSENT", "UNKNOWN")):
+        raise ValueError("original reconciliation is not eligible")
+    path = _original_reconciliation_record(ORIGINAL_COLLECTION_ACCOUNT, run_id)
+    _ensure_secure_dir(path.parent)
+    payload = _canonical_json({
+        "schema": ORIGINAL_RECONCILIATION_SCHEMA,
+        "run_id": run_id,
+        "predecessor_sha256": predecessor_sha256,
+        "destination": entry["destination"],
+        "state": "INTENT",
+    }).encode("utf-8")
+    handle = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(handle, "wb") as stream:
+        if stream.write(payload) != len(payload):
+            raise OSError("short_local_write")
+        stream.flush()
+        os.fsync(stream.fileno())
+    _original_fsync_dir(path.parent)
+    return path, entry["destination"]
+
+
+def _original_reconcile_settle(path: Path, result, run_id, predecessor_sha256,
+                               destination) -> None:
+    """Record the settled outcome without ever releasing the one-use fence."""
+    state = "COMPLETE" if result.get("state") == "COMPLETE" else "UNKNOWN"
+    payload = _canonical_json({
+        "schema": ORIGINAL_RECONCILIATION_SCHEMA,
+        "run_id": run_id,
+        "predecessor_sha256": predecessor_sha256,
+        "destination": destination,
+        "state": state,
+        "receipt_sha256": result.get("receipt_sha256"),
+    }).encode("utf-8")
+    _atomic_write_bytes(path, payload, 0o600)
+    _original_fsync_dir(path.parent)
 
 
 def cmd_original_collection_helper(args):
@@ -1731,49 +3020,107 @@ def cmd_original_collection_helper(args):
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
         required = {"configuration", "operation", "run_id"}
         if (type(value) is not dict or not required.issubset(value)
-                or set(value) - required - {"receipt_sha256"}
-                or value["operation"] not in ("collect", "status", "result")
+                or set(value) - required - {"receipt_sha256", "predecessor_sha256"}
+                or value["operation"] not in ("collect", "status", "result", "reconcile")
                 or type(value["run_id"]) is not str or value["run_id"] not in ORIGINAL_COLLECTION_RUNS
                 or (value["operation"] == "result" and not _sha256_hex(value.get("receipt_sha256")))
                 or (value["operation"] != "result" and "receipt_sha256" in value)
+                or (value["operation"] == "reconcile" and not _sha256_hex(value.get("predecessor_sha256")))
+                or (value["operation"] != "reconcile" and "predecessor_sha256" in value)
                 or type(value["configuration"]) is not dict
                 or set(value["configuration"]) != ORIGINAL_COLLECTION_FIELDS):
             raise ValueError("original collection selector refused")
         selected_run = value["run_id"]
         operation = value["operation"]
-        _, native, root, metadata = _original_collection_native(value["configuration"],
-            require_current=value["operation"] == "collect")
-        import importlib.util
-        ext = root / "ext"
-        target = ext / "original_delivery_collector.py"
-        source = native.regular_bytes(target)
-        if native.digest(source) != metadata["files"]["ext/original_delivery_collector.py"]:
-            raise ValueError("original collector changed")
-        sys.path.insert(0, str(ext))
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("original_delivery_collector", target)
-        collector = importlib.util.module_from_spec(spec)
-        if "original_delivery_collector" in sys.modules:
-            raise ValueError("original collector module conflict")
-        sys.modules["original_delivery_collector"] = collector
-        exec(compile(source, str(target), "exec"), collector.__dict__)
-        if collector.GATEWAY_ORIGINAL_RUNS != ORIGINAL_COLLECTION_RUNS:
-            raise ValueError("original collector scope differs")
-        started = True
-        result = collector._gateway_original_delivery(value["operation"], value["run_id"],
-            value.get("receipt_sha256"))
-        encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-        if len(encoded) > 16 * 1024 * 1024:
-            raise ValueError("original collection output bound")
-        sys.stdout.buffer.write(encoded + b"\n")
-        return 0
-    except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError):
-        effect_possible = started and operation == "collect"
+        # Evidence that this helper was in flight. A stale marker is preserved
+        # as evidence of an interrupted dispatch and is never deleted blindly.
+        with _c2_lifecycle_mutex(ORIGINAL_COLLECTION_ACCOUNT):
+            _original_installed_descriptor(value["configuration"])
+            if operation == "collect":
+                raise ValueError("original collect must consume its retained owner slot")
+            return _original_collection_dispatch(value)
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError,SystemExit):
+        print(json.dumps({"run_id": selected_run, "state": "REFUSED",
+            "effect_state": "NOT_APPLIED", "reason": "original_collection_unconfirmed",
+            "retry_authorized": False}))
+        return 75
+
+
+def _original_collection_dispatch(value):
+    """Invoked only while the installed descriptor and lifecycle lock are held."""
+    operation, selected_run = value["operation"], value["run_id"]
+    started = completed = False
+    marker = None
+    try:
+        marker = _original_helper_marker_take()
+        try:
+            collector = _original_collection_collector(
+                value["configuration"], require_current=operation in ("collect", "reconcile"))
+            if collector.GATEWAY_ORIGINAL_RUNS != ORIGINAL_COLLECTION_RUNS:
+                raise ValueError("original collector scope differs")
+            record = None
+            if operation == "reconcile":
+                # Machine-owner verification of the sealed predecessor and the
+                # durable one-use fence both precede any remote transport.
+                record, destination = _original_reconcile_claim(value["configuration"],
+                    value["run_id"], value["predecessor_sha256"], collector)
+            started = True
+            result = collector._gateway_original_delivery(value["operation"], value["run_id"],
+                value.get("receipt_sha256"))
+            if record is not None:
+                _original_reconcile_settle(record, result, selected_run,
+                    value["predecessor_sha256"], destination)
+            encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+            if len(encoded) > 16 * 1024 * 1024:
+                raise ValueError("original collection output bound")
+            sys.stdout.buffer.write(encoded + b"\n")
+            completed = True
+            return 0
+        finally:
+            if completed or not started:
+                _original_helper_marker_drop(marker)
+    except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError,SystemExit):
+        effect_possible = started and operation in ("collect", "reconcile")
         print(json.dumps({"run_id": selected_run,
             "state": "UNKNOWN" if effect_possible else "REFUSED",
             "effect_state": "EFFECT_UNKNOWN" if effect_possible else "NOT_APPLIED",
             "reason": "original_collection_unconfirmed", "retry_authorized": False}))
         return 75
+
+
+def cmd_original_predecessor_readback(args) -> int:
+    """Read back the installed predecessor import and the one-use fence.
+
+    This is a read-only owner readback. It performs no collection, no
+    transport and no install, and it never rewrites the sealed binding.
+    """
+    account = args.account
+    if account != ORIGINAL_COLLECTION_ACCOUNT:
+        raise SystemExit("original predecessor readback account refused")
+    roots = _build_runtime_roots(account)
+    descriptor, installed = _original_installed_descriptor()
+    predecessor = descriptor.get("predecessor") if isinstance(descriptor, dict) else None
+    if predecessor is None:
+        print(json.dumps({"account": account, "predecessor": None, "sealed": False,
+            "reason": "no_sealed_predecessor_binding",
+            "reconciliation": {}, "pending_helpers": _original_helper_pending(account),
+            "configHash": installed["configHash"]}, sort_keys=True, indent=2))
+        return 0
+    try:
+        _original_predecessor_verify(predecessor)
+        sealed, reason = True, "sealed_predecessor_verified"
+    except ValueError as error:
+        sealed, reason = False, str(error)
+    records = {}
+    for run_id in sorted(predecessor.get("runs") or {}):
+        path = _original_reconciliation_record(account, run_id)
+        records[run_id] = (json.loads(path.read_text(encoding="utf-8"))
+            if path.is_file() and not path.is_symlink() else None)
+    print(json.dumps({"account": account, "predecessor": predecessor,
+        "sealed": sealed, "reason": reason, "reconciliation": records,
+        "pending_helpers": _original_helper_pending(account),
+        "configHash": installed["configHash"]}, sort_keys=True, indent=2))
+    return 0
 
 
 def _build_config(
@@ -2303,7 +3650,13 @@ def _write_install(
     fabric_only: bool = False,
     modern_fabric: bool = False,
     original_collection: dict | None = None,
+    retained_config: dict | None = None,
+    original_request: dict | None = None,
 ) -> int:
+    if (account == ORIGINAL_COLLECTION_ACCOUNT and previous_source is not None
+            and original_collection is not None and original_collection.get("predecessor") is not None):
+        return _original_install_begin(source, node_abs, backend_abs, account, label, host, port,
+            roots, original_collection, retained_config, dependency_tree_hash, original_request)
     user_root = _user_root()
     _ensure_secure_dir(roots["base"])
     _ensure_secure_dir(roots["state"])
@@ -2318,7 +3671,7 @@ def _write_install(
     _atomic_write_text(
         roots["config"],
         json.dumps(
-            _build_config(
+            retained_config if retained_config is not None else _build_config(
                 account,
                 host,
                 port,
@@ -3781,6 +5134,7 @@ def _upgrade_c2_personal_git_timeout_only(
 
 
 @_fabric_lifecycle_serialized()
+@_original_upgrade_serialized
 def cmd_upgrade(args) -> int:
     account = args.account
     # The closed C1 gateway-only route is dispatched before the generic restage
@@ -3856,8 +5210,21 @@ def cmd_upgrade(args) -> int:
         raise SystemExit(
             "publisher preflight and CAS options require --publisher-only-fleet-v10 "
             "or --c1-fleet-git-failure-compat")
-    if _launchd_inspect(label) is not None:
+    observed = (_lifecycle_inspect(account, label, roots)
+                if account == ORIGINAL_COLLECTION_ACCOUNT else _launchd_inspect(label))
+    if observed is not None:
         raise SystemExit("refusing upgrade while service is running; stop first")
+    # No original helper may still be in flight across the transition. A stale
+    # marker is evidence of an interrupted dispatch and is never deleted
+    # blindly; the owner resolves it explicitly.
+    pending_helpers = _original_helper_pending(account)
+    if pending_helpers:
+        raise SystemExit(
+            "refusing upgrade: an original collection helper is still pending: "
+            + ", ".join(pending_helpers))
+    resumed = _original_install_resume(args, source, node_abs, backend_abs, port, roots)
+    if resumed is not None:
+        return resumed
     prior = _verify_staged_install(
         account, label, roots, require_runtime_seal=False
     )
@@ -3897,19 +5264,51 @@ def cmd_upgrade(args) -> int:
         )
         _verify_upgrade_preserves_installed_fleet_capabilities(
             prior, roots, projected)
-    # Preserve the existing restricted profile; do not silently restore tools.
+    retained_raw = _fabric_release_bytes(roots["config"])
+    if hashlib.sha256(retained_raw).hexdigest() != prior["configHash"]:
+        raise SystemExit("original upgrade configuration changed")
+    previous_config = _original_json(retained_raw.decode("utf-8"))
+    # Keep the existing restricted profile and the fixed publication seat's
+    # already selected Paper generation. Runtime qualification precedes writes.
+    retained_paper = None
     if not fabric_only:
-        _verify_paper_runtime(_user_root())
+        retained_paper = _publication_upgrade_paper_config(account, previous_config, _user_root())
+        if retained_paper is None:
+            _verify_paper_runtime(_user_root())
 
+    modern_fabric = _modern_fabric_setting(args, roots, prior, fabric_only)
+    original_collection = _original_collection_setting(args, roots, prior, fabric_only, modern_fabric)
+    retained_config = None
+    if previous_config.get("originalCollection") is not None:
+        retained_config = dict(previous_config)
+        if original_collection is None:
+            retained_config.pop("originalCollection")
+        else:
+            retained_config["originalCollection"] = original_collection
+    if retained_paper is not None:
+        # Rebuild through the normal owner so an explicitly refreshed commission
+        # digest still takes effect; retain only the exact qualified Paper member.
+        if retained_config is None:
+            retained_config = _build_config(
+                account, host, port, node_abs, backend_abs, roots["state"], _user_root(),
+                repository_workspaces=repository_workspaces, commission_digest=commission_digest,
+                fabric_only=fabric_only, modern_fabric=modern_fabric,
+                original_collection=original_collection,
+            )
+        retained_config["paperDesign"] = retained_paper
     return _write_install(
         source, node_abs, backend_abs, account, label, host, port, roots,
         result_key="upgraded", previous_source=str(prior.get("source") or ""),
         repository_workspaces=repository_workspaces,
         commission_digest=commission_digest,
         fabric_only=fabric_only,
-        modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
-        original_collection=_original_collection_setting(args, roots, prior, fabric_only,
-            _modern_fabric_setting(args, roots, prior, fabric_only)),
+        modern_fabric=modern_fabric,
+        original_collection=original_collection,
+        retained_config=retained_config,
+        original_request=(_original_install_request(args)
+            if account == ORIGINAL_COLLECTION_ACCOUNT and original_collection is not None
+            and original_collection.get("predecessor") is not None else None),
+        dependency_tree_hash=prior.get("dependencyTreeHash"),
     )
 
 
@@ -5070,6 +6469,8 @@ def cmd_seal_runtime(args) -> int:
 @_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_start(args) -> int:
+    if args.account == ORIGINAL_COLLECTION_ACCOUNT and _original_install_pending(_build_runtime_roots(args.account)):
+        raise SystemExit("original preserving upgrade requires reconciliation before start")
     account = args.account
     _validate_account_label(account)
     label = f"com.mastermind.studio-direct-private.{account}"
@@ -5190,6 +6591,11 @@ def build_parser() -> argparse.ArgumentParser:
     original = sub.add_parser("_original-collection-helper", help=argparse.SUPPRESS)
     original.set_defaults(func=cmd_original_collection_helper)
 
+    readback = sub.add_parser("original-predecessor-readback",
+        help="read back the installed sealed original predecessor import")
+    readback.add_argument("--account", required=True)
+    readback.set_defaults(func=cmd_original_predecessor_readback)
+
     status = sub.add_parser("fleet-status-module-upgrade")
     status.add_argument("--account", choices=(
         "admin-business", "chatgpt1", "chatgpt2-business", "chatgpt2-personal",
@@ -5215,6 +6621,14 @@ def build_parser() -> argparse.ArgumentParser:
     pin.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
     pin.set_defaults(func=cmd_native_pool_pin)
 
+    forward = sub.add_parser("native-pool-pin-forward")
+    forward.add_argument("--account", required=True)
+    forward.add_argument("--forward-go-bundle", required=True,
+                         help="exact qualified retained Go ingress bundle for this transition")
+    forward.add_argument("--expected-plan-sha256",
+                         help="exact owner preview plan SHA256; required for apply, status and reconcile")
+    forward.add_argument("--operation", choices=("preview", "apply", "status", "reconcile"), required=True)
+    forward.set_defaults(func=cmd_native_pool_pin_forward)
     publisher = sub.add_parser("native-pool-pin-publisher")
     publisher.add_argument("--account", choices=("chatgpt2-personal",), required=True)
     publisher.add_argument("--operation",
@@ -5269,6 +6683,10 @@ def build_parser() -> argparse.ArgumentParser:
                        help="opt into stateless MCP for the private Fabric-only shared backend; otherwise preserve verified selection")
         s.add_argument("--original-collection", action=argparse.BooleanOptionalAction, default=None,
                        help="explicit fixed J/carrier collection capability for the existing modern C3 service")
+        s.add_argument("--original-predecessor-receipt",
+                       help="retained original first-call receipt file for the preserving migration")
+        s.add_argument("--original-predecessor-sha256",
+                       help="expected whole-file sha256 of --original-predecessor-receipt")
         s.add_argument("--fabric-only", action="store_true", help="new Fabric-only installation; no Git, Paper or repository tools")
         s.add_argument("--os-commission-config-sha256", help="opt into the exact root-sealed OS publication grant")
         s.add_argument("--enable-repository-workspaces", action="store_true",

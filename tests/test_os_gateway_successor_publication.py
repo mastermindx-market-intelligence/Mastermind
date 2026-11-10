@@ -25,6 +25,143 @@ OLD_SHA = incumbent.SHA
 NEW_SHA = "d" * 40
 
 
+def set_studio_commission(s, value):
+    """Retain the existing Studio seal while modeling its enrolled profile."""
+    config_path = s.studio["base"] / "config.json"
+    config = json.loads(config_path.read_bytes())
+    config["commissionPublication"] = value
+    config_bytes = control._encoded_json(config)
+    replace_fixture(config_path, config_bytes)
+    manifest_path = s.studio["base"] / "manifest.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    manifest["configHash"] = incumbent.digest(config_bytes)
+    replace_fixture(manifest_path, control._encoded_json(manifest))
+
+
+def test_successor_preserves_enrolled_studio_and_original_grant_binding(successor):
+    s, request, prior = successor
+    set_studio_commission(s, {
+        "enabled": True,
+        "configurationDigest": request.prior_grant_sha256,
+    })
+    studio_paths = [s.studio["base"] / name for name in ("config.json", "manifest.json")]
+    original_studio = {p: p.read_bytes() for p in studio_paths}
+    result = publish(s, request)
+    assert result.state == "PUBLISHED"
+    assert all(p.read_bytes() == raw for p, raw in original_studio.items())
+    assert history(request).read_bytes() == prior
+    assert incumbent.digest(control.OS_GATEWAY_COMMISSION_GRANT.read_bytes()) != request.prior_grant_sha256
+    assert not control.AUTONOMY_TRANSACTION.exists()
+
+
+
+@pytest.mark.parametrize("profile", [
+    None,
+    True,
+    "enabled",
+    {"enabled": False, "configurationDigest": "matching"},
+    {"enabled": 1, "configurationDigest": "matching"},
+    {"enabled": True},
+    {"enabled": True, "configurationDigest": True},
+    {"enabled": True, "configurationDigest": "not-a-digest"},
+    {"enabled": True, "configurationDigest": "0" * 64},
+    {"enabled": True, "configurationDigest": "matching", "extra": False},
+])
+def test_successor_rejects_unbound_or_malformed_studio_enrollment_before_intent(
+    successor, profile,
+):
+    s, request, _prior = successor
+    if isinstance(profile, dict):
+        profile = dict(profile)
+        if profile.get("configurationDigest") == "matching":
+            profile["configurationDigest"] = request.prior_grant_sha256
+    set_studio_commission(s, profile)
+    before = target_bytes(s)
+    with pytest.raises(control.GatewayPublicationError) as excinfo:
+        publish(s, request)
+    assert excinfo.value.code == "gateway_studio_invalid"
+    assert_unchanged(s, before)
+    assert not history(request).exists()
+
+
+@pytest.mark.parametrize("existing_grant", [False, True])
+def test_first_publication_cannot_admit_enrollment_from_a_supplied_grant_hash(
+    gateway, existing_grant,
+):
+    s = gateway
+    overrides = {}
+    grant_digest = "f" * 64
+    if existing_grant:
+        s.publish()
+        control.OS_GATEWAY_RECEIPT.unlink()
+        grant_digest = incumbent.digest(control.OS_GATEWAY_COMMISSION_GRANT.read_bytes())
+        s.mcp_bytes = control.OS_GATEWAY_MCP_CONFIG.read_bytes()
+        s.plist_bytes = control.OS_GATEWAY_MCP_PLIST.read_bytes()
+        overrides = {"prior_grant_absent": False, "prior_grant_sha256": grant_digest}
+    set_studio_commission(s, {
+        "enabled": True, "configurationDigest": grant_digest,
+    })
+    before = {p: p.read_bytes() if p.exists() else None for p in s.target_paths()}
+    with pytest.raises(control.GatewayPublicationError) as excinfo:
+        s.publish(**overrides)
+    assert excinfo.value.code == "gateway_studio_invalid"
+    assert {p: p.read_bytes() if p.exists() else None for p in s.target_paths()} == before
+    assert not control.OS_GATEWAY_RECEIPT.exists()
+    assert not control.AUTONOMY_TRANSACTION.exists()
+
+
+def test_enrolled_successor_lost_ack_reconciles_against_retained_prior_grant(
+    successor, monkeypatch,
+):
+    s, request, prior = successor
+    set_studio_commission(s, {
+        "enabled": True, "configurationDigest": request.prior_grant_sha256,
+    })
+    studio_config = (s.studio["base"] / "config.json").read_bytes()
+    manifest = lose_terminal_ack(s, request, monkeypatch)
+    assert incumbent.digest(control.OS_GATEWAY_COMMISSION_GRANT.read_bytes()) != request.prior_grant_sha256
+    receipt = control.OS_GATEWAY_RECEIPT.read_bytes()
+    receipt_inode = control.OS_GATEWAY_RECEIPT.stat().st_ino
+    fresh = s.fresh_host(monkeypatch)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("enrolled successor reconciliation attempted publication")
+
+    monkeypatch.setattr(fresh, "write_gateway_receipt", forbidden)
+    monkeypatch.setattr(fresh, "_retain_gateway_predecessor", forbidden)
+    assert s.reconcile(host=fresh, transaction_id=manifest["transaction_id"]) == manifest["transaction_id"]
+    assert (s.studio["base"] / "config.json").read_bytes() == studio_config
+    assert control.OS_GATEWAY_RECEIPT.read_bytes() == receipt
+    assert control.OS_GATEWAY_RECEIPT.stat().st_ino == receipt_inode
+    assert history(request).read_bytes() == prior
+    assert not control.AUTONOMY_TRANSACTION.exists()
+
+
+def test_premature_studio_grant_refresh_keeps_original_publication_unknown(
+    successor, monkeypatch,
+):
+    s, request, prior = successor
+    set_studio_commission(s, {
+        "enabled": True, "configurationDigest": request.prior_grant_sha256,
+    })
+    manifest = lose_terminal_ack(s, request, monkeypatch)
+    current_grant_digest = incumbent.digest(control.OS_GATEWAY_COMMISSION_GRANT.read_bytes())
+    set_studio_commission(s, {
+        "enabled": True, "configurationDigest": current_grant_digest,
+    })
+    receipt = control.OS_GATEWAY_RECEIPT.read_bytes()
+    fresh = s.fresh_host(monkeypatch)
+    try:
+        with pytest.raises((control.TransactionEffectUnknown, control.GatewayPublicationError)):
+            s.reconcile(host=fresh, transaction_id=manifest["transaction_id"])
+        assert control.AUTONOMY_TRANSACTION.exists()
+        assert control.OS_GATEWAY_RECEIPT.read_bytes() == receipt
+        assert history(request).read_bytes() == prior
+    finally:
+        if fresh._transaction_owner_fd is not None:
+            fresh._release_transaction_owner()
+
+
 def move_and_replace(path):
     raw = path.read_bytes()
     mode = stat.S_IMODE(path.stat().st_mode)

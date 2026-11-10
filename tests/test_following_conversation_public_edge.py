@@ -21,8 +21,9 @@ def test_fixed_consumer_routes_reach_renderer_without_widening_incumbent_caps():
         "/os/executive/direct-native/correction",
     )
     assert edge.POST_ROUTES == edge.PRE_COMPANY_PRIORITIES_POST_ROUTES + ("/os/executive/company-priorities",)
-    assert (edge.GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
-    assert edge.GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
+    assert (edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, edge.PRE_COMPANY_PRIORITIES_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
+    assert edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES == edge.PRE_CONVERSATION_READ_GET_ROUTES + ('/workspace/resources/host-observation/current', '/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
+    assert edge.GET_ROUTES == edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + edge.AUTHORIZATION_IDENTITY_GET_ROUTES
     text = edge.render(manifest(), 49152)
     assert 'path ' + ' '.join(edge.POST_ROUTES) + '\n' in text
     assert 'path ' + ' '.join(edge.GET_ROUTES) + ' ' in text
@@ -86,5 +87,6 @@ def test_mission_result_firstcut_and_following_profiles_are_exact():
     assert (edge.PRE_NATIVE_DRAFT_GET_ROUTES, edge.PRE_NATIVE_DRAFT_POST_ROUTES) in edge.TRANSITION_ROUTE_PROFILES
     assert edge.PRE_NATIVE_DRAFT_GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current',)
     assert edge.PRE_NATIVE_DRAFT_POST_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES
-    assert edge.GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
+    assert edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_GET_ROUTES + ('/workspace/mission-result/current', '/workspace/native-draft-identity/current') + edge.BYOK_READ_ROUTES
+    assert edge.GET_ROUTES == edge.PRE_AUTHORIZATION_IDENTITY_GET_ROUTES + edge.AUTHORIZATION_IDENTITY_GET_ROUTES
     assert edge.PRE_NATIVE_SESSION_SEND_POST_ROUTES == edge.PRE_FOLLOWING_MISSION_RESULT_POST_ROUTES

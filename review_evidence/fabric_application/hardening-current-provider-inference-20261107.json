@@ -1,0 +1,72 @@
+{
+  "at": "2026-11-07T08:36:55.529832+00:00",
+  "scope": "changed Macro provider factory with actual Mastermind inference consumers",
+  "source": "5ca64e95cd2fbe03bb2258b62f6c1e402c1e6612",
+  "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+  "fixture": "/tmp/mmx-41e-brain-composition-ycu98u6z",
+  "archives": [
+    {
+      "source": "5ca64e95cd2fbe03bb2258b62f6c1e402c1e6612",
+      "paths": [
+        "brain",
+        "bot",
+        "bridge",
+        "common",
+        "app",
+        "control_plane",
+        "data_layer",
+        "portfolio",
+        "scripts/translate_all.py",
+        "tests/integration/test_production_inference_composition.py",
+        "tests/integration/test_fabric_inference_composition.py",
+        "tests/integration/test_fabric_translation_composition.py",
+        "tests/integration/test_fabric_chat_inference_composition.py",
+        "tests/integration/test_fabric_chat_buffered_delivery.py",
+        "tests/integration/test_fabric_text_native_application.py",
+        "tests/integration/test_fabric_text_cross_pool_auto.py",
+        "tests/integration/test_technician_fabric_composition.py",
+        "tests/integration/test_fabric_portfolio_composition.py",
+        "tests/integration/test_fabric_regional_portfolio_composition.py",
+        "tests/integration/test_fabric_chat_browser.py",
+        "ops/native_fabric/quota_continuity",
+        "ops/native_fabric/experiential_proxy/gateway.py"
+      ],
+      "archive_sha256": "ba0d1ef82716f84f8a2bc224aebeabc41a2dfe7558cef8056913b0945cec1e84",
+      "regular_files": 1863
+    },
+    {
+      "source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+      "paths": [
+        "engine",
+        "lib",
+        "config"
+      ],
+      "archive_sha256": "3d11791620c625bd9cf17b2c801a73163f3aebe23cab609143dd2dcf45063d22",
+      "regular_files": 2531
+    }
+  ],
+  "command": [
+    "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "tests/integration",
+    "-p",
+    "test_*inference_composition.py",
+    "-v"
+  ],
+  "required_fixture_flags": {
+    "MM_REQUIRE_PRODUCTION_MODE_COMPOSITION": "1",
+    "MM_REQUIRE_FABRIC_COMPOSITION": "1"
+  },
+  "exit": 0,
+  "seconds": 10.372,
+  "summary": [
+    "Ran 47 tests in 7.659s",
+    "OK"
+  ],
+  "log_sha256": "d5f3160abe22ac3b2497bab2e42ff2033c91355c1df3e119bd286a466685f6bb",
+  "live_effects": "NONE; synthetic provider fixtures only",
+  "source_edits": 0
+}

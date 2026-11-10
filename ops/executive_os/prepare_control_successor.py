@@ -133,6 +133,7 @@ def _validate_document(document: dict[str, Any]) -> None:
         control._absolute_path(value["proof_source_repository"])
         control._absolute_path(value["ceo_ingress_app_macro_root"])
         control._validate_fabric_bridge_config(value)
+        control._validate_memory_control_config(value)
         control.company_consultation_launchd_entry(value)
         validate_control_coo(value)
         control._validate_subscription_canary_realm_config(value)

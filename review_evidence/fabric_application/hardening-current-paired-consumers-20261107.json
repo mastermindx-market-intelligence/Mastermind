@@ -1,0 +1,105 @@
+{
+  "schema": "fabric-paired-current-source-proof.v1",
+  "at": "2026-11-07T11:22:06.535011+00:00",
+  "source": "659578237735ba7c83d05f2ee1f5c79df025f084",
+  "macro_source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+  "fixture": "/tmp/mmx-659-paired-consumer-tg62zvo3",
+  "python": "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+  "state": "PASSED",
+  "live_effects": "NONE; disposable source and synthetic provider fixtures only",
+  "archives": [
+    {
+      "source": "659578237735ba7c83d05f2ee1f5c79df025f084",
+      "paths": [
+        "brain",
+        "bot",
+        "bridge",
+        "common",
+        "app",
+        "control_plane",
+        "data_layer",
+        "portfolio",
+        "scripts/translate_all.py",
+        "tests/integration/test_production_inference_composition.py",
+        "tests/integration/test_fabric_inference_composition.py",
+        "tests/integration/test_fabric_chat_inference_composition.py",
+        "tests/integration/test_fabric_translation_composition.py",
+        "ops/native_fabric/quota_continuity",
+        "ops/native_fabric/experiential_proxy/gateway.py"
+      ],
+      "archive_sha256": "c9cf0ae8621497767f6bcd21778a14525247f0a60249551dcc0bedb1e0dedf05",
+      "regular_files": 1859
+    },
+    {
+      "source": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+      "paths": [
+        "engine",
+        "lib",
+        "config"
+      ],
+      "archive_sha256": "3d11791620c625bd9cf17b2c801a73163f3aebe23cab609143dd2dcf45063d22",
+      "regular_files": 2531
+    }
+  ],
+  "runs": [
+    {
+      "label": "inference",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/integration",
+        "-p",
+        "test_*inference_composition.py",
+        "-v"
+      ],
+      "exit": 0,
+      "seconds": 4.281,
+      "summary": [
+        "Ran 47 tests in 2.824s",
+        "OK"
+      ],
+      "log": "/tmp/mmx-659-paired-inference.log",
+      "log_sha256": "dc0b894807582e0f3dbeeb23d9397a7d5a88a4c7620408b41a7d90ee318ba547"
+    },
+    {
+      "label": "translation",
+      "command": [
+        "/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/bin/python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests/integration",
+        "-p",
+        "test_fabric_translation_composition.py",
+        "-v"
+      ],
+      "exit": 0,
+      "seconds": 5.302,
+      "summary": [
+        "Ran 23 tests in 4.999s",
+        "OK"
+      ],
+      "log": "/tmp/mmx-659-paired-translation.log",
+      "log_sha256": "734d61de5f20af5b4d9647a253855bbf64959ebcbc98bce459b016a6cc419fdc"
+    }
+  ],
+  "required_fixture_flags": {
+    "MM_REQUIRE_PRODUCTION_MODE_COMPOSITION": "1",
+    "MM_REQUIRE_FABRIC_COMPOSITION": "1"
+  },
+  "source_unchanged": true,
+  "dependency_versions": {
+    "mcp": "2.3.0",
+    "claude-agent-sdk": "0.2.179",
+    "PyYAML": "6.0.3",
+    "fastapi": "0.141.1",
+    "httpx": "0.28.1",
+    "jsonschema": "4.26.0",
+    "anthropic": null
+  },
+  "limits": "These paired fixtures use the recorded equipped Python environment, not the production macOS hash lock; no live provider or installed conversation."
+}

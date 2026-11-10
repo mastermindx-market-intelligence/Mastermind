@@ -145,6 +145,8 @@ class BrowserServiceConfig:
     startup_timeout_seconds: float
     mount_path: str = "/browser"
     credential_runtime: object | None = None
+    app_control_origin: str | None = None
+    app_control_tool_schema_digest: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -260,8 +262,20 @@ def _incoming_authority(value: object) -> str:
 
 
 def parse_browser_service_config(value: object) -> BrowserServiceConfig:
-    if not isinstance(value, dict) or set(value) != _BROWSER_KEYS:
+    if not isinstance(value, dict) or set(value) not in (_BROWSER_KEYS, _BROWSER_KEYS | {"app_control"}):
         _refuse()
+    origin = digest = None
+    if "app_control" in value:
+        from control_plane.browser_resource_contract import APP_CONTROL_TOOL_SCHEMA_DIGEST, validate_app_control_origin
+        selected = value["app_control"]
+        if (type(selected) is not dict or set(selected) != {"origin", "tool_schema_digest"}
+                or selected["tool_schema_digest"] != APP_CONTROL_TOOL_SCHEMA_DIGEST):
+            _refuse()
+        try:
+            origin = validate_app_control_origin(selected["origin"])
+        except ValueError:
+            _refuse()
+        digest = APP_CONTROL_TOOL_SCHEMA_DIGEST
     return BrowserServiceConfig(
         source_root=_absolute_path(value.get("source_root")),
         python_executable=_absolute_path(value.get("python_executable")),
@@ -274,6 +288,8 @@ def parse_browser_service_config(value: object) -> BrowserServiceConfig:
         tmp_dir=_absolute_path(value.get("tmp_dir")),
         tool_catalog_file=_absolute_path(value.get("tool_catalog_file")),
         startup_timeout_seconds=_bounded_timeout(value.get("startup_timeout_seconds")),
+        app_control_origin=origin,
+        app_control_tool_schema_digest=digest,
     )
 
 
@@ -345,6 +361,8 @@ def parse_service_config(value: object) -> ServiceConfig:
             credential_grant = parse_credential_grant(value["credential_grant"])
             browser = dataclasses.replace(parse_browser_service_config(value["browser"]),
                 credential_runtime=parse_credential_runtime(value["credential_runtime"]))
+            if browser.app_control_origin is not None:
+                _refuse()
         except CredentialUseRefused:
             _refuse()
     else:
@@ -817,6 +835,7 @@ def create_browser_sibling(
                 _refuse()
         from integrations.workbench_browser_mcp.deployment import create_browser_deployment
         from integrations.workbench_browser_mcp.resource_port import BrowserHostConfig
+        from control_plane.browser_resource_contract import WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
 
         catalog = _secure_json(
             selected.tool_catalog_file,
@@ -834,6 +853,8 @@ def create_browser_sibling(
             tmp_dir=selected.tmp_dir,
             startup_timeout_seconds=selected.startup_timeout_seconds,
             credential_runtime=selected.credential_runtime,
+            app_control_origin=selected.app_control_origin,
+            expected_tool_schema_digest=selected.app_control_tool_schema_digest or WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
         )
         return create_browser_deployment(
             services=runtime.services,

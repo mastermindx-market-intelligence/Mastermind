@@ -1,0 +1,348 @@
+{
+  "core_postimages": {
+    "gateway/run.py": "86fb8733e839f66442fc8219ce236ec5123151a855cc88265a7e3c7f1093cd8c",
+    "gateway/run_turn_prepare.py": "804d9c2ab6438594f7f996ab4d2bdc24bbf6b24cdf5441a84bbbb24151eee2ad",
+    "gateway/run_turn_runner.py": "4d775d0cf16e11838710ff87b62153c010f9c67f30932b0d2695acacb1c7103a",
+    "gateway/session_authority.py": "e4b1dcb9e61a94f39ca620c2349d35d4713b1b4d56943186296ce352cb9816be",
+    "gateway/session_provider_context.py": "6b6f20519b940e473cd72827c9ffe6534d8c8bc297f9d84cf4a9b44959b7c833",
+    "hermes_cli/cli_agent_setup_mixin.py": "2aef5fda6f5bd6687bd675027d12ed0a7c867d17c642569fa5f7496d8d133d66",
+    "hermes_cli/config.py": "04b0ec7de32e1176ad3b5d6cefc64045e6b6287664d8a84487d75801745d8b68",
+    "hermes_cli/config_backend.py": "cfd705a149f035608be3fce39b3a2ad76476996869ed6c50e99898d54571a392",
+    "hermes_cli/env_loader.py": "120920ee41470c9b0e4fd9d086861e0909de136256298eee8f88056f165bc416",
+    "hermes_cli/inventory.py": "c3482f95bec4262f89d45b3bf24ac31964a89065c84fac496bc011465fdd5b8d",
+    "hermes_cli/managed_scope.py": "8f1ac561bb24853432c6e546888aa83cf0fa793de5d75e401ce7a5260660b4ec",
+    "hermes_cli/plugins.py": "56503d6897b570b3c8ff8d568f8c1a5952c5207131319b883ea910744b3436f5",
+    "hermes_cli/runtime_provider.py": "b85334ca6ef45a24c7c37a311b66b4ec5f700ed2a3b9b55d097f01dd19fae515",
+    "hermes_cli/runtime_provider_host.py": "39caeb4b4653b3db25b8a237912f6fcc2b3f0529f8f9f3899a41a4fb7fa8f6cc",
+    "pm/workspace.py": "2a92aed9e291860e6bb8a782b34e76f54a0a9f735533f5c1c05c3311e74bdbe5",
+    "providers/base.py": "018fb53d9213b4e3a5fe79522bca60e920569a7ddbbadecf79c55e64328d13fe",
+    "tests/hermes_cli/test_config_observational.py": "d1b7f5e79a94beae4bf85b67510c241bbb34afad980c2c830d81205baded28b1",
+    "tests/pm/test_buildable_multi_home.py": "f5a45eefd277ffaa7f25e483edfa50501d70e87cc98ec0a74dcc61f1561abcd8",
+    "ui-tui/src/__tests__/modelPickerHostBound.test.tsx": "bcaf428f6757f0b9b3a69d48f2dc6815b2337d2dda06c34d969dcbb23a94209c",
+    "ui-tui/src/components/modelPicker.tsx": "e102fcbb23997fc94eb4d984f2cf0f0ed357577b004502c34a3e6244c8fdacce"
+  },
+  "exact_postimages": true,
+  "installed": false,
+  "live_acceptance": false,
+  "live_source_unchanged": true,
+  "manifest_sha256": "b3601ed493a6ffa9eaabd8e58e451768a69d1544df337ca646e0ca452ac89f7e",
+  "native_files": {
+    "agent/agent_init_fallback.py": {
+      "identity": {
+        "st_ctime_ns": 1794059584869713362,
+        "st_dev": 16777232,
+        "st_ino": 2001120715,
+        "st_mode": 33152,
+        "st_mtime_ns": 1794059584869713362,
+        "st_nlink": 1,
+        "st_size": 3024,
+        "st_uid": 501
+      },
+      "sha256": "d711241adccb370b64a70e440b16175aa33e3f5bb9425ff2d377efe73ef14668"
+    },
+    "agent/chat_completion_helpers.py": {
+      "identity": {
+        "st_ctime_ns": 1794059571211421857,
+        "st_dev": 16777232,
+        "st_ino": 2017375826,
+        "st_mode": 33152,
+        "st_mtime_ns": 1794059571210549900,
+        "st_nlink": 1,
+        "st_size": 226212,
+        "st_uid": 501
+      },
+      "sha256": "dc6a16b6e34f7397f7b42e7fdc6ba9d542d8f488b43ee91a58b903e1f341ac8c"
+    },
+    "gateway/run.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974711736641,
+        "st_dev": 16777232,
+        "st_ino": 2001129281,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974711736641,
+        "st_nlink": 1,
+        "st_size": 274609,
+        "st_uid": 501
+      },
+      "sha256": "f2eabc2972822df232375a4e32b22e79daafcec9bc2f66a6cfb305c255cf11d3"
+    },
+    "gateway/run_turn_prepare.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974726865526,
+        "st_dev": 16777232,
+        "st_ino": 2001129330,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974726865526,
+        "st_nlink": 1,
+        "st_size": 44721,
+        "st_uid": 501
+      },
+      "sha256": "71512a46ac5f361eb75ff3c455ada7f8486e2f28a12fec30fe8e8f7f90f44461"
+    },
+    "gateway/run_turn_runner.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974727589736,
+        "st_dev": 16777232,
+        "st_ino": 2001129332,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974727589736,
+        "st_nlink": 1,
+        "st_size": 93911,
+        "st_uid": 501
+      },
+      "sha256": "c20474c99ae171882f5524646b60cf5d877e596b6f753051134ce1b8840edbb6"
+    },
+    "gateway/session_authority.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974732894921,
+        "st_dev": 16777232,
+        "st_ino": 2001129354,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974732894921,
+        "st_nlink": 1,
+        "st_size": 90979,
+        "st_uid": 501
+      },
+      "sha256": "7902f0cdca329c229a41328bec2c84103d3c5adc01bea7020b7bc76e4b26404d"
+    },
+    "gateway/session_provider_context.py": {
+      "identity": null,
+      "sha256": null
+    },
+    "hermes_cli/cli_agent_setup_mixin.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974786992436,
+        "st_dev": 16777232,
+        "st_ino": 2001129594,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974786992436,
+        "st_nlink": 1,
+        "st_size": 52433,
+        "st_uid": 501
+      },
+      "sha256": "7d3db020acfa411909c4cfac240795950919545be7a302598b72a595db3c7231"
+    },
+    "hermes_cli/config.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974801404776,
+        "st_dev": 16777232,
+        "st_ino": 2001129655,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974801404776,
+        "st_nlink": 1,
+        "st_size": 191256,
+        "st_uid": 501
+      },
+      "sha256": "53063c14fb03540ceb73f296e72ba2e1f71c0b0ce98e88f435fcfedf79d3355f"
+    },
+    "hermes_cli/config_backend.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974801736486,
+        "st_dev": 16777232,
+        "st_ino": 2001129656,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974801736486,
+        "st_nlink": 1,
+        "st_size": 25119,
+        "st_uid": 501
+      },
+      "sha256": "35e1c4a2cd8c1c9d6b90139a3df8a4a7c20eeb7409f12df7f54a34915d1972b7"
+    },
+    "hermes_cli/env_loader.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974820584008,
+        "st_dev": 16777232,
+        "st_ino": 2001129739,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974820584008,
+        "st_nlink": 1,
+        "st_size": 60254,
+        "st_uid": 501
+      },
+      "sha256": "b4ba716b5e9d73ccbbc16f507b366ffad0c02bbf12d164568ca32461bf858e11"
+    },
+    "hermes_cli/inventory.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974837562273,
+        "st_dev": 16777232,
+        "st_ino": 2001129816,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974837562273,
+        "st_nlink": 1,
+        "st_size": 56716,
+        "st_uid": 501
+      },
+      "sha256": "e752a4a0f0f292878ab39c9791d12705dac5d6d7b6b08dd1bc5d47886b3b4235"
+    },
+    "hermes_cli/managed_scope.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974856171294,
+        "st_dev": 16777232,
+        "st_ino": 2001129896,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974856171294,
+        "st_nlink": 1,
+        "st_size": 7632,
+        "st_uid": 501
+      },
+      "sha256": "1c5d16b92952a0101cb8ee8f0f70cf7cd2d19faffe224f9ca1b52dd29e794ed2"
+    },
+    "hermes_cli/plugins.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974890345284,
+        "st_dev": 16777232,
+        "st_ino": 2001130025,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974890345284,
+        "st_nlink": 1,
+        "st_size": 122660,
+        "st_uid": 501
+      },
+      "sha256": "0da0ebe88da76f4a73d77fcc6942ef549154abbc573d52d74c1608bcb61efce4"
+    },
+    "hermes_cli/runtime_provider.py": {
+      "identity": {
+        "st_ctime_ns": 1793961974913255611,
+        "st_dev": 16777232,
+        "st_ino": 2001130114,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961974913255611,
+        "st_nlink": 1,
+        "st_size": 75397,
+        "st_uid": 501
+      },
+      "sha256": "7a742d2c3cd759ebfb5a3321b48bec80d1faa2d15c6fd09e595e0ed1a6fc9376"
+    },
+    "hermes_cli/runtime_provider_host.py": {
+      "identity": null,
+      "sha256": null
+    },
+    "pm/workspace.py": {
+      "identity": {
+        "st_ctime_ns": 1793961975705178236,
+        "st_dev": 16777232,
+        "st_ino": 2001133908,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961975705178236,
+        "st_nlink": 1,
+        "st_size": 36338,
+        "st_uid": 501
+      },
+      "sha256": "111f0bade0820c4ab9d52cf87999f048aeddb1258026dc1b93699f52e27522d4"
+    },
+    "providers/base.py": {
+      "identity": {
+        "st_ctime_ns": 1793961975705818363,
+        "st_dev": 16777232,
+        "st_ino": 2001133912,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961975705818363,
+        "st_nlink": 1,
+        "st_size": 39687,
+        "st_uid": 501
+      },
+      "sha256": "d0a8c867ae0e870ad617b4da2ab49b3302cc7f107508ebf9828c96a5aeb000dc"
+    },
+    "tests/hermes_cli/test_config_observational.py": {
+      "identity": null,
+      "sha256": null
+    },
+    "tests/pm/test_buildable_multi_home.py": {
+      "identity": null,
+      "sha256": null
+    },
+    "tests/tui_gateway/test_kanban_resume_guard.py": {
+      "identity": {
+        "st_ctime_ns": 1794043237258768765,
+        "st_dev": 16777232,
+        "st_ino": 2012485035,
+        "st_mode": 33152,
+        "st_mtime_ns": 1794043237251205007,
+        "st_nlink": 1,
+        "st_size": 4201,
+        "st_uid": 501
+      },
+      "sha256": "e25a4ea47ade78982a4fb0a9c0f4e962a83170b4bfea838538b3c6bbf8c799cc"
+    },
+    "tests/tui_gateway/test_protocol.py": {
+      "identity": {
+        "st_ctime_ns": 1794043248549358639,
+        "st_dev": 16777232,
+        "st_ino": 2012486337,
+        "st_mode": 33152,
+        "st_mtime_ns": 1794043248543458924,
+        "st_nlink": 1,
+        "st_size": 86807,
+        "st_uid": 501
+      },
+      "sha256": "4aa138c12cc41be298059be8e8a9b77471dce9f443c5108c464c8d8096106e03"
+    },
+    "tests/tui_gateway/test_tui_gateway_server.py": {
+      "identity": {
+        "st_ctime_ns": 1794042839658681775,
+        "st_dev": 16777232,
+        "st_ino": 2012334185,
+        "st_mode": 33152,
+        "st_mtime_ns": 1794042839652170108,
+        "st_nlink": 1,
+        "st_size": 841174,
+        "st_uid": 501
+      },
+      "sha256": "77f67dd2c7b0fba928fcecd00daa1366822849ffa67a3acb75a4fb494c2ff535"
+    },
+    "tui_gateway/methods_session.py": {
+      "identity": {
+        "st_ctime_ns": 1794042516276631449,
+        "st_dev": 16777232,
+        "st_ino": 2012051304,
+        "st_mode": 33188,
+        "st_mtime_ns": 1794042516276631449,
+        "st_nlink": 1,
+        "st_size": 130731,
+        "st_uid": 501
+      },
+      "sha256": "69b00256bd55956c53fb6ab86ab3af9be0fc637cc4f52b34a66143d86247e0a9"
+    },
+    "ui-tui/src/__tests__/modelPickerHostBound.test.tsx": {
+      "identity": null,
+      "sha256": null
+    },
+    "ui-tui/src/components/modelPicker.tsx": {
+      "identity": {
+        "st_ctime_ns": 1793961977937412669,
+        "st_dev": 16777232,
+        "st_ino": 2001146568,
+        "st_mode": 33152,
+        "st_mtime_ns": 1793961977937412669,
+        "st_nlink": 1,
+        "st_size": 29069,
+        "st_uid": 501
+      },
+      "sha256": "ad4024551a25e9e9405feb3cdb264762ad2b7e89dea024a58ef2c2bb30017901"
+    }
+  },
+  "native_head": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "non_python_postimages_verified": [
+    "ui-tui/src/__tests__/modelPickerHostBound.test.tsx",
+    "ui-tui/src/components/modelPicker.tsx"
+  ],
+  "observed_at": "2026-11-07T19:05:47.592871+00:00",
+  "patch_apply_check": true,
+  "patch_sha256": "631d202a736dc511b359b518dc74ab9b9b84566b05d74bafb2bab7763ed94541",
+  "preserved_tracked_edits": [
+    "agent/agent_init_fallback.py",
+    "agent/chat_completion_helpers.py",
+    "tests/tui_gateway/test_kanban_resume_guard.py",
+    "tests/tui_gateway/test_protocol.py",
+    "tests/tui_gateway/test_tui_gateway_server.py",
+    "tui_gateway/methods_session.py"
+  ],
+  "provider_request": false,
+  "qualifier_source_sha256": "5bd236096ea87a2b31796a127836c98d0896017f734a13fdd9cad516c22cd75a",
+  "reverse_patch_restores_preimages": true,
+  "runtime_reload": false,
+  "schema": "mastermind.hermes_h4_live_preimage_qualification.v1",
+  "source_commit": "389352e73546d0d59aeb3f7bdb5509d2ef4c5194",
+  "syntax_checked_files": 18,
+  "worker_dispatch": false
+}

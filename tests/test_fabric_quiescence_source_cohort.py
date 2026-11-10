@@ -4,6 +4,12 @@ import importlib.util
 import json
 from pathlib import Path
 import unittest
+import tempfile
+import io
+import sys
+from contextlib import redirect_stdout
+from unittest import mock
+from tests.native107_source_fixtures import historical_manifest_and_inventory
 
 ROOT=Path(__file__).resolve().parents[1]
 ROLLOUT=ROOT/'ops/native_fabric/quota_continuity/rollout'
@@ -12,9 +18,20 @@ builder=importlib.util.module_from_spec(spec);spec.loader.exec_module(builder)
 
 
 class Cohort(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.stage_temp = tempfile.TemporaryDirectory(prefix="current-quiescence-source-")
+        cls.addClassCleanup(cls.stage_temp.cleanup)
+        output = Path(cls.stage_temp.name) / "reviewed-stage"
+        with mock.patch.object(sys, "argv", ["builder", "--output", str(output)]), redirect_stdout(io.StringIO()):
+            builder.main()
+        cls.current_manifest = json.loads((output / "native-manifest.json").read_bytes())
+        cls.current_inventory = json.loads((output / "native-source-inventory.json").read_bytes())
+
     def setUp(self):
-        self.actual_manifest=json.loads((ROLLOUT/'native-manifest.json').read_bytes())
-        self.manifest=builder.before_sparse_index_advice(self.actual_manifest)
+        self.actual_manifest=dict(self.current_manifest)
+        historical, _ = historical_manifest_and_inventory()
+        self.manifest=builder.before_sparse_index_advice(historical)
 
     def test_exact_one_member_forward_normalization_retains_emitted_source(self):
         original=dict(self.manifest)
@@ -37,7 +54,8 @@ class Cohort(unittest.TestCase):
     def test_broker_byte_drift_cannot_reuse_review(self):
         path=ROOT/'ops/native_fabric/quota_continuity/candidate/lease_broker.py'
         raw=path.read_bytes()
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),builder.QUALIFICATION_QUIESCENCE_BROKER_SHA256)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),self.actual_manifest['ext/lease_broker.py'])
+        self.assertEqual(self.manifest['ext/lease_broker.py'],builder.QUALIFICATION_QUIESCENCE_BROKER_SHA256)
         changed=dict(self.manifest);changed['ext/lease_broker.py']=hashlib.sha256(raw+b'\n# unrelated byte drift\n').hexdigest()
         with self.assertRaises(ValueError):builder.before_admission_integrity(changed)
 
@@ -130,5 +148,25 @@ class Cohort(unittest.TestCase):
         with self.assertRaises(ValueError): builder.before_host_pull_integrity(broken)
         with self.assertRaises(ValueError): builder.before_admission_integrity(broken)
 
+
+
+    def test_current_application_capture_is_qualified_from_actual_inventory(self):
+        inventory = self.current_inventory
+        current = self.actual_manifest
+        self.assertEqual(set(current), set(inventory['files']))
+        self.assertEqual(len(current), 107)
+        for name, digest in current.items():
+            self.assertEqual(inventory['files'][name]['sha256'], digest)
+        captured = {}
+        for name in builder.GO_APPLICATION_DEPENDENCIES:
+            row = inventory['files']['ext/' + name]
+            raw = (ROLLOUT.parent / row['source']).read_bytes()
+            self.assertEqual(len(raw), row['bytes'])
+            captured[name] = hashlib.sha256(raw).hexdigest()
+            self.assertEqual(captured[name], current['ext/' + name])
+        original = dict(current)
+        builder.validate_go_base_manifest(current, captured)
+        self.assertEqual(current, original)
+        self.assertNotEqual(current, self.manifest)
 
 if __name__=='__main__':unittest.main()

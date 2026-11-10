@@ -25,7 +25,16 @@ COMPLEXITIES = frozenset({
 KEY = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 IDENTITY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 OPERATIONS = frozenset({"preview", "submit", "status", "result"})
-MANUAL_POOLS = frozenset({"grok", "glm", "minimax", "bailian", "cursor", "ocfree", "go"})
+# xai / anthropic-oauth / openai-codex joined 2026-11-09 following the xai
+# registration precedent (orch/fabric pools.yaml + accounts.yaml catalog form,
+# executed by the Hermes native providers xai-oauth / the m2 anthropic gateway
+# 127.0.0.1:8312 / openai-codex on m2). They remain absent from routing
+# execute_order/judgment_order until a fleet executor is qualified; manual
+# selection here is request-only and Fabric admission stays authoritative.
+MANUAL_POOLS = frozenset({
+    "grok", "glm", "minimax", "bailian", "cursor", "ocfree", "go",
+    "xai", "anthropic-oauth", "openai-codex",
+})
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$")
 # The model never receives a root/parent/caller authority field.
 TOOL_SCHEMA = {
@@ -72,11 +81,18 @@ class SessionGrant:
     generation: str
     manual_pools: tuple[str, ...] = ()
     manual_models: tuple[tuple[str, str], ...] = ()
+    # Native canonical conversation identity across compression segments.
+    # Only the host sets this; session_id remains the actual current caller.
+    origin_session_id: str | None = None
 
     def __post_init__(self) -> None:
         for value in (self.root_id, self.parent_id):
             if type(value) is not str or IDENTITY.fullmatch(value) is None:
                 raise FabricNativeRefusal("GRANT_IDENTITY_INVALID")
+        if self.origin_session_id is not None and (
+                type(self.origin_session_id) is not str
+                or not 0 < len(self.origin_session_id) <= 256):
+            raise FabricNativeRefusal("GRANT_ORIGIN_INVALID")
         for value in (self.profile_id, self.session_id, self.generation):
             if type(value) is not str or not 0 < len(value) <= 256:
                 raise FabricNativeRefusal("GRANT_LINEAGE_INVALID")
@@ -119,8 +135,11 @@ def run_id_for(grant: SessionGrant, task_key: str) -> str:
     """
     if type(task_key) is not str or KEY.fullmatch(task_key) is None:
         raise FabricNativeRefusal("TASK_KEY_INVALID")
-    data = json.dumps([grant.profile_id, grant.session_id,
-                       task_key], separators=(",", ":")).encode("utf-8")
+    identity = ([grant.profile_id, grant.session_id, task_key]
+                if grant.origin_session_id is None else
+                ["native-origin-v1", grant.root_id, grant.profile_id,
+                 grant.origin_session_id, task_key])
+    data = json.dumps(identity, separators=(",", ":")).encode("utf-8")
     return "hermes-native-" + hashlib.sha256(data).hexdigest()[:40]
 
 
@@ -155,6 +174,17 @@ def _attest_reply(raw: Any, grant: SessionGrant, run_id: str) -> dict[str, Any]:
                  "reason": str(raw.get("reason"))[:120] if raw.get("reason") else None,
                  "result_digest": digest,
                  "worker_started": raw.get("worker_started") is True}
+    if "effective_run_id" in raw:
+        effective = raw["effective_run_id"]
+        if type(effective) is not str or IDENTITY.fullmatch(effective) is None:
+            raise FabricNativeRefusal("FABRIC_OWNER_EFFECTIVE_ID_INVALID")
+        # This is an observed continuation leaf, never a new input, retry or
+        # acceptance authority. Preserve the original logical run separately.
+        if (state not in {"NOT_FOUND", "UNVERIFIED", "PREVIEW_ONLY",
+                          "CONTROLLER_CREATED", "REFUSED", "UNAVAILABLE"}
+                and raw.get("response_withheld") is not True
+                and raw.get("request_correlation_only") is not True):
+            projected["effective_run_id"] = effective
     body = raw.get("result_text")
     if body is not None:
         if (state != "TERMINAL" or type(body) is not str or digest is None

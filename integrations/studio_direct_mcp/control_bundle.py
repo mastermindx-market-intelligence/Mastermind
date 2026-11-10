@@ -37,12 +37,66 @@ CAPTURED_CONTROL_FILES = (
     "ops/fabric_launch/install.py",
 )
 # Preserve the exact ten-member captured generation for locked migration.
-CONTROL_FILES = (
+REVIEW_CONTROL_FILES = (
     *CAPTURED_CONTROL_FILES,
     "fleet_git_failure_compat.py",
     "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
     "ops/native_fabric/quota_continuity/rollout/preimages/native_generation_75330d.py",
 )
+# Exact Go verification inputs for the installed owner; never a source-path fallback.
+GO_REVIEW_SOURCE_FILES = (
+    "control_plane/provider_protocols.py",
+    "ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py",
+    "ops/native_fabric/provider_plans/maintenance_guard/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/maintenance_guard/remote_sub_exec.py.patch",
+    "ops/native_fabric/provider_plans/memory118/fabric_memory_view.py",
+    "ops/native_fabric/provider_plans/memory118/lease_broker.after-maintenance.py.patch",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_contract.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/fabric_operator_owner.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/protected_memory_economic.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/provider_outcome.py",
+    "ops/native_fabric/provider_plans/memory118/native_owner/run_observation_delivery.py",
+    "ops/native_fabric/provider_plans/memory118_support_status/after_terminal_diagnostics/profile.json",
+    "ops/native_fabric/provider_plans/memory118_support_status/artifact_delivery.py.patch",
+    "ops/native_fabric/provider_plans/memory118_support_status/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/patches/pick_remote_plan_modes.forward.patch",
+    "ops/native_fabric/provider_plans/profile.json",
+    "ops/native_fabric/provider_plans/remote_placement/profile.json",
+    "ops/native_fabric/provider_plans/router_admission.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/component.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/current40/profile.json",
+    "ops/native_fabric/provider_plans/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/candidate/application_http_transports.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/candidate/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/candidate/go_shim.py",
+    "ops/native_fabric/quota_continuity/candidate/lease_broker.py",
+    "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+    "ops/native_fabric/quota_continuity/rollout/application_http_realm_projection.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_capability.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/go_lease_gateway.py",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_bridge.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_host_context.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_plan_policy.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/experiential_transport.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native_plan_worker.py",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/memory_support/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/remote-placement.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/source/application_http_transports.py.preimage",
+    "ops/native_fabric/quota_continuity/source/codex_provider_realm.py.preimage",
+    "ops/native_fabric/quota_continuity/source/glm_keys.py",
+    "ops/native_fabric/quota_continuity/source/go_shim.py",
+    "ops/native_fabric/support_policy_status/reader.py",
+)
+CONTROL_FILES = (*REVIEW_CONTROL_FILES, *GO_REVIEW_SOURCE_FILES)
 # Exact inert pre-control-bundle snapshots observed on the original M2 host.
 # These are NOT executable/source dependencies and confer no runtime authority.
 # Preserve them without admission of arbitrary pre-* names or changed content.
@@ -245,13 +299,13 @@ def _read_manifest(path: Path) -> dict:
     if not isinstance(value, dict) or set(value) != expected_keys or value.get("schema") != SCHEMA:
         raise Refusal("CONTROL_MANIFEST_INVALID")
     files = value.get("files")
-    # Legacy three/four and captured ten-member identities remain observable
-    # for migration. New runtime admission requires the full thirteen members.
+    # Legacy three/four and captured ten/thirteen-member identities remain observable
+    # for migration. New runtime admission requires the full reviewed source closure.
     if (not isinstance(files, dict)
             or frozenset(files) not in (frozenset(LEGACY_CONTROL_FILES),
                                        frozenset(STATUS_CONTROL_FILES),
                                        frozenset(CAPTURED_CONTROL_FILES),
-                                       frozenset(CONTROL_FILES))):
+                                       frozenset(REVIEW_CONTROL_FILES), frozenset(CONTROL_FILES))):
         raise Refusal("CONTROL_MANIFEST_INVALID")
     if any(not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) for digest in files.values()):
         raise Refusal("CONTROL_MANIFEST_INVALID")
@@ -280,7 +334,7 @@ def _verify_locked(*, control_root: Path, launcher: Path) -> dict:
     _require_code_layout(
         root, manifest["files"], complete=True,
         allow_cache=frozenset(manifest["files"]) not in (
-            frozenset(CAPTURED_CONTROL_FILES), frozenset(CONTROL_FILES)),
+            frozenset(CAPTURED_CONTROL_FILES), frozenset(REVIEW_CONTROL_FILES), frozenset(CONTROL_FILES)),
     )
     observed = {}
     for name in manifest["files"]:
@@ -303,10 +357,10 @@ def verify(*, control_root: Path, launcher: Path) -> dict:
     root = _require_private_dir(control_root)
     if not os.path.lexists(root / ".control-bundle.lock"):
         # Legacy identity observation is read-only and does not claim a locked
-        # generation. Both captured generations require their existing lock.
+        # generation. Every captured cohort requires its existing lock.
         manifest = _read_manifest(root / "manifest.json")
         if frozenset(manifest["files"]) in (
-                frozenset(CAPTURED_CONTROL_FILES), frozenset(CONTROL_FILES)):
+                frozenset(CAPTURED_CONTROL_FILES), frozenset(REVIEW_CONTROL_FILES), frozenset(CONTROL_FILES)):
             raise Refusal("CONTROL_BUNDLE_LOCK_REQUIRED")
         observed = _verify_locked(control_root=root, launcher=launcher)
         identity = ("schema", "files", "launcherHash", "bundleDigest", "source")
