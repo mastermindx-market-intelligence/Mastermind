@@ -51,6 +51,20 @@ aborts.
    at one click with no tree change → stop and report.
 4. GUI child time-box: 20 minutes.
 
+## Evidence log (lead-verified artifacts only)
+
+- **s1 ACCEPTED** (glm-5.3; artifact opened by lead). Projects read =
+  `GET https://mcp.mastermind-x.com/workspace/programs/current` (Bearer,
+  `read_programs` → `Resource::Acquisition`), identical at 5420bb17+trunk.
+  No on-disk logs/persisted state exist (no logging framework; log dirs and
+  WebKit storage empty — OBSERVED absence). Status→code: 401→`AUTHENTICATION_REQUIRED`,
+  403→`ACCESS_REFUSED`; all codes render the same UI string
+  (`ArchiveProjectsView.tsx:250`). Live incident status only in memory:
+  Technical details → "Refresh local native diagnostics" → "Last Projects
+  HTTP status" (`executive_auth_status(diagnostics:true)`, local read).
+  Decisive A-vs-B evidence = that diagnostics reading; C unlikely for this
+  read (path is edge-proxied per principal's 401-without-token).
+
 ## Fix / land / install (to be filled)
 
 - Writer: glm-5.3 (worktree branch); attacker: grok-4.7 (diff review, different model).
