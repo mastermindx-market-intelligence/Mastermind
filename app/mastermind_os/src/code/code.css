@@ -664,3 +664,15 @@
     text-align: left;
   }
 }
+/* ≤480 mobile (390px boards): the workbench tablist wraps instead of
+   overflowing once a count-carrying tab label grows past the column.
+   Desktop ≥1200px is untouched. */
+@media (max-width: 480px) {
+  .mm-code-tabs {
+    flex-wrap: wrap;
+  }
+}
+
+/* HC11 settings entry/back affordance (lead wiring) */
+.mm-code-settings-entry { margin: 0 0 12px; }
+.mm-code-settings-entry button { font: inherit; background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }

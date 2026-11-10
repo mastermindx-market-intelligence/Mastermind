@@ -1,9 +1,11 @@
+import { useState } from "react";
 import {
   readT3ThreadProjection,
   t3ThreadUrl,
   type T3ProjectionRead,
   type T3ThreadProjection,
 } from "./t3-thread-projection";
+import { CodeSettingsPanel } from "./CodeSettingsPanel";
 import type { ActivitySelection } from "../planning/retained-activity";
 import type {
   ExecutionReturnDeliveryReceipt,
@@ -23,6 +25,8 @@ const STRINGS = {
     heading: "T3 Code",
     headingSummary:
       "Company coding threads on T3 Code. This surface opens the exact native thread; it never embeds an editor or terminal.",
+    settingsLabel: "Code settings",
+    settingsBack: "← Back to Code",
     threadsLabel: "T3 coding threads",
     threadLabel: (threadId: string) => `T3 thread ${threadId}`,
     openThread: "Open in T3 Code ↗",
@@ -53,6 +57,8 @@ const STRINGS = {
     heading: "T3 Code",
     headingSummary:
       "T3 Code 上的公司编码线程。此界面打开确切的原生线程；绝不内嵌编辑器或终端。",
+    settingsLabel: "Code 设置",
+    settingsBack: "← 返回 Code",
     threadsLabel: "T3 编码线程",
     threadLabel: (threadId: string) => `T3 线程 ${threadId}`,
     openThread: "在 T3 Code 中打开 ↗",
@@ -126,6 +132,32 @@ export function CodeWorkspace({
           : undefined),
     );
 
+  // HC11 — Code settings replaces the workspace content while open. No
+  // provider/environment configuration source is projected in this build, so
+  // both lists are honestly null (the panel names the missing sources).
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  if (settingsOpen) {
+    return (
+      <section className="mm-code" aria-labelledby="mm-code-heading">
+        <h1 id="mm-code-heading" tabIndex={-1}>
+          {t.heading}
+        </h1>
+        <p className="mm-code-settings-entry">
+          <button type="button" onClick={() => setSettingsOpen(false)}>
+            {t.settingsBack}
+          </button>
+        </p>
+        <CodeSettingsPanel
+          locale={locale}
+          providers={null}
+          environments={null}
+          activeEnvironmentId={null}
+          onClose={() => setSettingsOpen(false)}
+        />
+      </section>
+    );
+  }
+
   if (attemptId != null) {
     return (
       <CodeWorkbench
@@ -146,6 +178,11 @@ export function CodeWorkspace({
         <h1 id="mm-code-heading" tabIndex={-1}>
           {t.heading}
         </h1>
+        <p className="mm-code-settings-entry">
+          <button type="button" onClick={() => setSettingsOpen(true)}>
+            {t.settingsLabel}
+          </button>
+        </p>
         <div className="card mm-code-unavailable">
           <p className="mm-eyebrow">{t.unavailableTitle}</p>
           <p>{t.unavailableBody}</p>
@@ -174,6 +211,11 @@ export function CodeWorkspace({
         {t.heading}
       </h1>
       <p className="muted">{t.headingSummary}</p>
+      <p className="mm-code-settings-entry">
+        <button type="button" onClick={() => setSettingsOpen(true)}>
+          {t.settingsLabel}
+        </button>
+      </p>
       <ul className="mm-code-threads" aria-label={t.threadsLabel}>
         {threads.map((thread) => {
           const url = t3ThreadUrl(thread.environment, thread.threadId);

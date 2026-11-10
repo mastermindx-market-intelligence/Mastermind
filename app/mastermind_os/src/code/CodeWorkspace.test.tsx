@@ -100,4 +100,16 @@ describe("CodeWorkspace (TD04)", () => {
     expect(screen.getByRole("list", { name: "T3 coding threads" })).toBeTruthy();
     expect(screen.queryByTestId("mm-code-workbench")).toBeNull();
   });
+
+  it("mounts HC11 Code settings in place of the thread list, honestly null-fed, and returns on close", async () => {
+    const { fireEvent } = await import("@testing-library/react");
+    render(<CodeWorkspace projection={available([thread()])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Code settings" }));
+    // Honest null states: the panel names the missing sources, never sample providers.
+    expect(screen.getByText("Code settings / Providers")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("DeepSeek Harness");
+    expect(document.body.textContent).not.toContain("Ubuntu 2");
+    fireEvent.click(screen.getByRole("button", { name: /Back to Code|×/ }));
+    expect(screen.getByRole("list", { name: "T3 coding threads" })).toBeTruthy();
+  });
 });

@@ -279,6 +279,9 @@
   height: 36px;
   border-radius: 10px;
   font-size: 12px;
+  /* Keeps the avatar's fixed slot when the head row wraps at 390px — the
+     name block (min-width: 0) absorbs the squeeze, never the avatar. */
+  flex-shrink: 0;
 }
 .mm-cv-detail-id {
   display: grid;
