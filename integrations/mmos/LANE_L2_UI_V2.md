@@ -137,12 +137,19 @@ disabled with a visible reason.
 
 ## OPEN
 
-- One adversarial pass on the final lane delta (`e844a5e7b..` lane HEAD).
-- Trunk land: fetch `feat/mmos-v1-integration-t3`, plain-merge if moved, gates
-  on the merged result, non-force push; recompute identity pins if moved.
+- None for this lane. Adversarial pass (grok-4.7, READ_ONLY) on
+  `e844a5e7b..deced831c`: honest-state clean, CSS clean, tests clean; one
+  claimed MAJOR (toolbar `setSearchSelection(null)` blocking mode entry) was
+  independently verified false and rejected — separate state vars, committed
+  board-mode tests cover entry, and clearing a stale selection on mode
+  switch is the intended behavior.
+- LANDED: trunk `feat/mmos-v1-integration-t3` fast-forwarded
+  `b2cb6385b..deced831c` (non-force; trunk contained in lane, no merge, no
+  identity-pin moves). Lane branch `t3/mmos-v2-l2` @ `deced831c` throughout.
 
 Done this wave: B7 merge `ccf3fe154` (responsive+keyboard, 43 files/514 tests
 on the merged result); release-candidate gates green — typecheck ✓, full
 `npx vitest run` 7400 passed/12 skipped (1 load flake re-verified in
 isolation), `cargo check` exit 0 (14 pre-existing warnings); parity pass
-above; HC10 rail collapse fix `cb155c6a3`.
+above; HC10 rail collapse fix `cb155c6a3`; post-fix affected gate
+typecheck ✓ + `src/team src/code` 21 files/240 tests on the landed HEAD.
