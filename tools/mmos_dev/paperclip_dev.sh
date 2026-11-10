@@ -192,14 +192,20 @@ http_get() { # $1=url — echoes body; rc 0 on curl success (check identity sepa
   curl -sS -m "$CURL_TIMEOUT" "$1" 2>/dev/null
 }
 
-# http_post_json <url> <json> — echoes "HTTPCODE\nbody"
+# http_post_json <url> <json> — echoes "HTTPCODE\nbody", from ONE request.
+# The body is captured to a temp file so code and body come from the same
+# call: install/enable/delete are NOT idempotent, and a two-curl helper
+# double-fires them (observed: second install answered "already installed"
+# while the first had succeeded — the script then mis-read the error body as
+# the install row).
 http_post_json() {
-  local url="$1" json="$2" out code
-  out="$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X POST \
-        -H 'Content-Type: application/json' -d "$json" "$url" 2>/dev/null)" || { echo "000"; return 0; }
-  code="$out"
-  body="$(curl -sS -m 60 -X POST -H 'Content-Type: application/json' -d "$json" "$url" 2>/dev/null || true)"
-  printf '%s\n%s' "$code" "$body"
+  local url="$1" json="$2" tmp code body
+  tmp="$(mktemp)"
+  code="$(curl -sS -m 60 -X POST -H 'Content-Type: application/json' \
+        -d "$json" -o "$tmp" -w '%{http_code}' "$url" 2>/dev/null)" || code="000"
+  body="$(cat "$tmp" 2>/dev/null || true)"
+  rm -f "$tmp"
+  printf '%s\n%s' "${code:-000}" "$body"
 }
 
 usage() {
@@ -617,16 +623,21 @@ PYEOF
 # Print the installed plugin record whose packagePath matches $1, as JSON.
 installed_plugin_by_path() { # $1=base $2=module_dir
   local base="$1" dir="$2" out
-  out="$(http_get "$base/api/plugins?status=ready")" || return 1
-  printf '%s' "$out" | "$PY" - "$(resolve_dir "$dir")" <<'PYEOF'
-import json, sys
+  # No status filter: a plugin in error status is exactly when a reload is
+  # needed, and /api/plugins?status=ready would hide it.
+  out="$(http_get "$base/api/plugins")" || return 1
+  # Data goes in as an argument, NOT stdin: this python reads its script from
+  # a heredoc on stdin, and a pipe into the same stdin is overridden by the
+  # heredoc (json.load would read EOF).
+  "$PY" - "$(resolve_dir "$dir")" "$out" <<'PYEOF'
+import json, sys, os
 target = sys.argv[1]
 try:
-    rows = json.load(sys.stdin)
+    rows = json.loads(sys.argv[2])
 except Exception:
     sys.exit(1)
 for row in rows:
-    if row.get("packagePath") and __import__("os").path.realpath(row["packagePath"]) == target:
+    if row.get("packagePath") and os.path.realpath(row["packagePath"]) == target:
         print(json.dumps(row))
         sys.exit(0)
 sys.exit(1)
@@ -809,10 +820,10 @@ cmd_status() {
     local rows
     rows="$(http_get "$base/api/plugins")" || rows=""
     if [ -n "$rows" ] && [ "$rows" != "[]" ]; then
-      printf '%s\n' "$rows" | "$PY" - <<'PYEOF'
+      "$PY" - "$rows" <<'PYEOF'
 import json, sys
 try:
-    rows = json.load(sys.stdin)
+    rows = json.loads(sys.argv[1])
 except Exception:
     sys.exit(0)
 for r in rows:
@@ -854,12 +865,14 @@ cmd_logs() {
     base="$(api_base 2>/dev/null)" || die 1 "no config yet at $CONFIG_PATH — run 'up' first."
     local identity; identity="$(dynamic_identity_check "$base")"
     [ "$identity" = "dev" ] || die 1 "dev instance not healthy (identity: $identity)."
-    http_get "$base/api/plugins/$plugin_id/logs?limit=$limit" | "$PY" - <<'PYEOF'
+    local rows
+    rows="$(http_get "$base/api/plugins/$plugin_id/logs?limit=$limit")" || rows=""
+    "$PY" - "$rows" <<'PYEOF'
 import json, sys
 try:
-    rows = json.load(sys.stdin)
+    rows = json.loads(sys.argv[1])
 except Exception:
-    print(sys.stdin.read() if False else "(no parseable log rows)")
+    print("(no parseable log rows)")
     sys.exit(0)
 for r in rows:
     print("%s [%s] %s %s" % (r.get("createdAt"), r.get("level"), r.get("message"), r.get("dataJson") or ""))
@@ -891,18 +904,47 @@ cmd_install_module() {
   resp="$(http_post_json "$base/api/plugins/install" "{\"packageName\":\"$module_dir\",\"isLocalPath\":true}")"
   code="${resp%%$'\n'*}"
   body="${resp#*$'\n'}"
-  [ "$code" = "200" ] || { err "install failed (HTTP $code):"; printf '%s\n' "$body" >&2; die 1 "install-module failed."; }
-  printf '%s\n' "$body" | "$PY" - "$module_dir" <<'PYEOF'
+  local already=0
+  if [ "$code" != "200" ]; then
+    case "$body" in
+      *"already installed"*)
+        already=1
+        log "module already installed — waiting for it to become ready (use reload-module after a source edit)."
+        ;;
+      *)
+        err "install failed (HTTP $code):"; printf '%s\n' "$body" >&2; die 1 "install-module failed." ;;
+    esac
+  fi
+  if [ "$already" = "0" ]; then
+    "$PY" - "$body" <<'PYEOF'
 import json, sys
-row = json.load(sys.stdin)
+try:
+    row = json.loads(sys.argv[1])
+except Exception:
+    sys.exit(0)
+if row.get("error"):
+    print("[paperclip-dev] install error : %s" % row["error"])
+    sys.exit(0)
 print("[paperclip-dev] installed   : %s (id %s, version %s, status %s)" % (
     row.get("pluginKey"), row.get("id"), row.get("version"), row.get("status")))
 print("[paperclip-dev] packagePath : %s" % row.get("packagePath"))
 PYEOF
+  fi
 
-  # Wait until the plugin is ready and its worker is up.
+  # Resolve the plugin id from the install body; if the body is not a row
+  # (e.g. "already installed" — the module is still installed), fall back to
+  # the registry lookup by package path.
   local deadline=$(( SECONDS + INSTALL_TIMEOUT )) plugin_id
-  plugin_id="$(printf '%s' "$body" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+  plugin_id="$(printf '%s' "$body" | "$PY" -c 'import json,sys
+try: print(json.load(sys.stdin).get("id") or "")
+except Exception: print("")')"
+  if [ -z "$plugin_id" ]; then
+    plugin_id="$(installed_plugin_by_path "$base" "$module_dir" 2>/dev/null \
+      | "$PY" -c 'import json,sys
+try: print(json.load(sys.stdin).get("id") or "")
+except Exception: print("")' 2>/dev/null || true)"
+  fi
+  [ -n "$plugin_id" ] || die 1 "could not resolve plugin id for $module_dir."
   while :; do
     body="$(http_get "$base/api/plugins/$plugin_id")" || body=""
     if [ "$(printf '%s' "$body" | "$PY" -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)" = "ready" ]; then
@@ -940,11 +982,11 @@ cmd_reload_module() {
   # Report worker diagnostics via the plugin dashboard route (read-only).
   local diag
   diag="$(http_get "$base/api/plugins/$plugin_id/dashboard")" || diag=""
-  printf '%s\n' "$diag" | "$PY" - "$plugin_key" <<'PYEOF'
+  "$PY" - "$plugin_key" "$diag" <<'PYEOF'
 import json, sys
 key = sys.argv[1]
 try:
-    d = json.load(sys.stdin)
+    d = json.loads(sys.argv[2])
 except Exception:
     print("[paperclip-dev] reload     : dashboard unreadable; check 'logs plugin %s'" % key)
     sys.exit(0)
