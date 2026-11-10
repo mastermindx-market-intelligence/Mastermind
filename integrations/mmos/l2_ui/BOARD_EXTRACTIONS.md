@@ -131,6 +131,36 @@ section with task rows + counts) + selected task dialogue 920 (header,
 facts row, task timeline, scoped task composer, footer). Maps to the
 delegated-task binding vocabulary (DelegatedTaskCard) at conversation level.
 
+## HC10 Routines · Schedule, run and delivery (15GA-0)
+Hosted in the HC01 Team workspace (same toolbar + conversation list). Center
+"Routine editor" 744: "← Engineering" back, "Routines" heading, "Engineering
+check-in" + chip "Scheduled"; "What should happen?" textarea; Schedule card
+(Repeat + Timezone); "Deliver the result to" select + note "The run and its
+delivery are tracked separately."; Run behavior (Execution "Engineering ·
+Team default"; "If a run is still active" — "Gateway policy · View");
+footer "Pause routine" + actions. Right rail 344 "SCHEDULE & HISTORY": Next
+occurrence ("Next at 20:30" · "America / Vancouver" · "Runs on the Team
+gateway"), Latest run (Execution/Finished, Room delivery/Confirmed, "Open
+result in room →"), Recent runs list ("19:30 Finished · Delivered", …,
+"View run history →"), note "Pausing the schedule — Stops future scheduled
+starts. Any active run keeps its own …". Sample times/zones/counts are
+Paper data: real reads or honest unavailable.
+
+## HC11 Code settings · Provider, environment and capabilities (15QF-0)
+Location bar "Code settings / Providers" + ×. Settings nav 248: INTERFACE
+(General, Appearance, Chat, Keyboard shortcuts), AGENTS (Providers, Threads,
+Browser, Devices, Scheduled tasks), CODE (Projects, Diffs & pull requests,
+Source control, Worktrees), CONNECTIONS (Environments, Sharing & access) —
+only Providers has full content; other tabs honest placeholders. Content
+1120: "Providers" + "Configure coding agents for this environment." +
+"＋ Add provider"; "Showing configuration for" env select + "Existing
+threads stay on their original environment."; provider connection card
+(identity + "Ready" chip; Executable / Arguments / Default model /
+Connection auth; "Credentials stay on the execution environment.");
+"Capabilities from this connection" rows (Runs/streaming — Available;
+Models and session options — Discovered from agent; Native subagent
+dialogues — Not provided by ACP; linked-tasks note); "More providers →".
+
 ## Journey map (HB01 17GG-0)
 Four steps: Gather the team → Delegate useful work → Work in Code → Return
 the result. Coverage lists: Team & conversation / Code & results / Controls
