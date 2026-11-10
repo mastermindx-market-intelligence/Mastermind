@@ -5,6 +5,11 @@ import { DelegatedTaskCard } from "./DelegatedTaskCard";
 import { NewBotPanel } from "./NewBotPanel";
 import { NewGroupPanel } from "./NewGroupPanel";
 import { BotSettingsPanel } from "./BotSettingsPanel";
+import { RoutinesPanel } from "./RoutinesPanel";
+import { InboxNeedsYouPanel } from "./InboxNeedsYouPanel";
+import { SplitConversationsWorkspace } from "./SplitConversationsWorkspace";
+import { SearchContextView } from "./SearchContextView";
+import { WorkHierarchyView } from "./WorkHierarchyView";
 import type { DelegatedTask } from "./delegated-task";
 import "./team.css";
 
@@ -133,6 +138,11 @@ const STRINGS = {
     newGroup: "New group",
     newBot: "＋ New bot",
     botSettings: "Bot settings",
+    routines: "Routines",
+    needsYou: "Needs you",
+    splitView: "Split view",
+    searchMode: "/ Search",
+    workMode: "/ Work",
     conversationHeading: "Conversation",
     conversationSectionNote:
       "The existing persistent conversation surface. This view never creates a second transport.",
@@ -202,6 +212,11 @@ const STRINGS = {
     newGroup: "新群组",
     newBot: "＋ 新机器人",
     botSettings: "机器人设置",
+    routines: "例行事务",
+    needsYou: "待你处理",
+    splitView: "分屏对话",
+    searchMode: "/ 搜索",
+    workMode: "/ 工作",
     conversationHeading: "对话",
     conversationSectionNote:
       "既有的持久对话界面。此视图绝不创建第二个传输通道。",
@@ -286,8 +301,27 @@ export function TeamWorkspace({
   const t = STRINGS[locale];
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [surface, setSurface] = useState<
-    "new-bot" | "new-group" | "bot-settings" | null
+    | "new-bot"
+    | "new-group"
+    | "bot-settings"
+    | "routines"
+    | "needs-you"
+    | "split"
+    | "search"
+    | "work"
+    | null
   >(null);
+  /** Search-mode selection is owned here so the panel stays controlled and
+   *  Escape/toolbar switches reset it — never a stale highlighted result. */
+  const [searchSelection, setSearchSelection] = useState<string | null>(null);
+  /** A Paper board mode (HC10/HC18/HC19/HC20/HC21) replaces the roster table;
+   *  the create panels (HC02/HC03) stay overlays above whatever is shown. */
+  const modeSurface =
+    surface === "routines" ||
+    surface === "needs-you" ||
+    surface === "split" ||
+    surface === "search" ||
+    surface === "work";
   const rosterButtons = useRef<(HTMLButtonElement | null)[]>([]);
   const resolvedHost =
     host ??
@@ -561,6 +595,28 @@ export function TeamWorkspace({
       </h1>
       <p className="muted">{t.headingSummary}</p>
       <div className="mm-team-toolbar" role="toolbar" aria-label={t.toolbarLabel}>
+        {(
+          [
+            ["routines", t.routines],
+            ["needs-you", t.needsYou],
+            ["split", t.splitView],
+            ["search", t.searchMode],
+            ["work", t.workMode],
+          ] as const
+        ).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            className="mm-toolbar-button"
+            aria-pressed={surface === mode}
+            onClick={() => {
+              setSearchSelection(null);
+              setSurface(surface === mode ? null : mode);
+            }}
+          >
+            {label}
+          </button>
+        ))}
         <button
           type="button"
           className="mm-toolbar-button"
@@ -576,6 +632,7 @@ export function TeamWorkspace({
           {t.newBot}
         </button>
       </div>
+      {modeSurface ? null : (
       <table className="mm-roster" aria-label={t.rosterLabel}>
         <thead>
           <tr>
@@ -646,6 +703,39 @@ export function TeamWorkspace({
           ))}
         </tbody>
       </table>
+      )}
+      {surface === "routines" ? (
+        <RoutinesPanel
+          locale={locale}
+          roster={roster.roster}
+          routine={null}
+          onBack={() => setSurface(null)}
+        />
+      ) : null}
+      {surface === "needs-you" ? (
+        <InboxNeedsYouPanel locale={locale} roster={roster} requests={null} />
+      ) : null}
+      {surface === "split" ? (
+        <SplitConversationsWorkspace locale={locale} panes={[]} />
+      ) : null}
+      {surface === "search" ? (
+        <SearchContextView
+          locale={locale}
+          query=""
+          results={null}
+          selectedId={searchSelection}
+          onSelectResult={setSearchSelection}
+          onCloseSelection={() => setSearchSelection(null)}
+        />
+      ) : null}
+      {surface === "work" ? (
+        <WorkHierarchyView
+          locale={locale}
+          parentWork={null}
+          delegated={null}
+          selectedTask={null}
+        />
+      ) : null}
       {surface === "new-bot" ? (
         <NewBotPanel
           locale={locale}

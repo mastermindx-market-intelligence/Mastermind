@@ -99,3 +99,43 @@ describe("TeamWorkspace — hosting the HC02/HC03/HC09 conversation surfaces", (
     expect(container.textContent).not.toMatch(/12 teammates/i);
   });
 });
+
+describe("TeamWorkspace — hosting the HC10/HC18/HC19/HC20/HC21 board modes", () => {
+  it("toggles a board mode in place of the roster and back, with aria-pressed", () => {
+    render(<TeamWorkspace roster={roster} />);
+    const needsYou = screen.getByRole("button", { name: "Needs you" });
+    expect(needsYou.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(needsYou);
+    expect(needsYou.getAttribute("aria-pressed")).toBe("true");
+    // HC18 replaces the roster table with the inbox, honestly null-fed.
+    expect(screen.queryByRole("table", { name: "Team roster" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Needs you" })).toBeTruthy();
+    expect(screen.getByText("No request projection is wired")).toBeTruthy();
+    fireEvent.click(needsYou);
+    expect(needsYou.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("table", { name: "Team roster" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Needs you" })).toBeNull();
+  });
+
+  it("hosts HC10 Routines on the real roster with its honest not-projected card and back", () => {
+    render(<TeamWorkspace roster={roster} />);
+    fireEvent.click(screen.getByRole("button", { name: "Routines" }));
+    expect(screen.getByRole("heading", { name: "Routines" })).toBeTruthy();
+    expect(screen.getByText("Routines are not projected in this build")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "← Team" }));
+    expect(screen.getByRole("table", { name: "Team roster" })).toBeTruthy();
+  });
+
+  it("hosts HC19 split, HC20 search and HC21 work modes with honest empty states", () => {
+    render(<TeamWorkspace roster={roster} />);
+    fireEvent.click(screen.getByRole("button", { name: "Split view" }));
+    expect(screen.getByRole("heading", { name: "Two conversations" })).toBeTruthy();
+    expect(screen.getByText("This workspace needs two conversations.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "/ Search" }));
+    expect(screen.getByRole("heading", { name: "Search" })).toBeTruthy();
+    expect(screen.getByText("Search source not projected in this build")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "/ Work" }));
+    expect(screen.getByRole("heading", { name: "Work" })).toBeTruthy();
+    expect(screen.getByText("Parent work not projected in this build")).toBeTruthy();
+  });
+});
