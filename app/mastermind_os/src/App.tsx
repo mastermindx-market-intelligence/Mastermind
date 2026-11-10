@@ -13,7 +13,7 @@ import type {
   WindowDocument,
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { readFreshConversationLocation } from "./conversations/fresh-conversation-location";
 import { useFreshConversationDraftState } from "./conversations/new-conversation/useFreshConversationDraftState";
 import { useFreshConversationJourney } from "./conversations/new-conversation/useFreshConversationJourney";
@@ -37,6 +37,7 @@ import { readLaunchBindingConfig } from "./launch-config";
 import { resolveLaunchBinding } from "./orchestration/executive-launch-command-port";
 import { Today } from "./today/Today";
 import { TeamRoute } from "./team/TeamRoute";
+import { TeamShell } from "./team/TeamShell";
 import { HermesNativePanel } from "./hermes-native/HermesNativePanel";
 import { CodeWorkspace } from "./code/CodeWorkspace";
 import { ProjectDeliveryPanel, type DeliveryTrailStep } from "./projects/ProjectDeliveryPanel";
@@ -190,6 +191,8 @@ import {
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
 import { nativeAuthFeedback, nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
+const CompanyWorkspace = lazy(() => import("./company/CompanyWorkspace").then(module => ({ default: module.CompanyWorkspace })));
+
 export const navigation = [
   "Today",
   "Team",
@@ -5354,6 +5357,26 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <p>{locale === "zh-CN" ? "当前来源未提供项目操作接口。" : "The current source has not supplied the project operation interface."}</p></section>}
       {retainedProjectGoal}
     </>;
+  else if (active === "Team")
+    content = <TeamShell key={`team:${authRevision}`} locale={locale}
+      company={<Suspense fallback={<p role="status">{locale === "zh-CN" ? "正在加载团队工作区…" : "Loading the team workspace…"}</p>}><CompanyWorkspace key={authRevision} transport={window.MastermindMissionHost?.company}
+      authGeneration={authRevision} canRead={Boolean(authState?.status === "signed_in" && authState.acquisition)} locale={locale}
+      onNavigate={destination => { setProjectTab(null); setActive(destination); }}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return false;
+        const matches = index.programs.filter(card => card.workRef === workRef);
+        if (matches.length !== 1) return false;
+        const card = matches[0];
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return true;
+        }
+        setCatalogueProject({ workRef, authRevision, epoch: programIndexEpoch });
+        setProjectTab("More"); setActive("Projects"); return true;
+      }}/></Suspense>}
+      runtime={<TeamRoute locale={locale} runtimeOnly delegatedTask={null}
+        onOpenConversations={() => { setProjectTab(null); setActive("Conversations"); }}
+        onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}/>}
+      nativeConversations={<HermesNativePanel locale={locale}/>}/>;
   else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
       currentCatalogue={{value: index, current: currentTodayCatalogue}}
@@ -5910,21 +5933,6 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       </details>
       </>
     );
-  else if (active === "Team")
-    // Team roster (TD01/TS01) + bot entry (TD02/HC04). The conversation
-    // surface below is the EXISTING hermes-native panel; never a second
-    // transport. The roster is read once through the existing native port's
-    // read-only team_roster operation (Director B's authoritative contract).
-    content = (
-      <TeamRoute
-        key={`team:${authRevision}`}
-        locale={locale}
-        conversationPanel={<HermesNativePanel key={`team-hermes:${authRevision}`} locale={locale}/>}
-        delegatedTask={null}
-        onOpenConversations={() => { setProjectTab(null); setActive("Conversations"); }}
-        onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}
-      />
-    );
   else if (active === "Code")
     // TD04 workbench surface: typed T3 thread projections with documented
     // deep links only. No embedded editor/terminal; no launch authority.
@@ -6180,7 +6188,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Team" || active === "Code" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && active !== "Team" && active !== "Code" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Team" || active === "Code" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
+            {active === "Team" ? null : active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Code" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && active !== "Code" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Code" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
           </div>
         </header>
         {nativeGoalNotice}

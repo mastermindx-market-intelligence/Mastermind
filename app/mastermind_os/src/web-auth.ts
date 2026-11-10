@@ -1,3 +1,4 @@
+import { COMPANY_CAP, COMPANY_SCHEMA, companyQuery, validateBacklogRequest } from "./company/contract";
 import {hostObservationWebMethods} from "./resources/host-observation-web";
 import {freshConversationArguments,FRESH_CONVERSATION_PATHS} from "./orchestration/fresh-conversation-transport";
 import { BYOK_ROLES_RESPONSE_CAP } from "./meta-ceo/byok-roles-read";
@@ -1455,6 +1456,12 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
         signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
+    readCompany: ({ signal, ...selection }) => read("acquisition", `${ORIGIN}/workspace/company/current?${companyQuery(selection)}`, signal,
+      { cap: COMPANY_CAP, typedUnavailableSchema: COMPANY_SCHEMA }),
+    createCompanyBacklog: ({ payload, signal }) => {
+      validateBacklogRequest(payload);
+      return sourcePost("/workspace/company/command", { ...payload }, signal);
     },
     readModelConfiguration: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/models/current`,
       signal, { cap: 278_528, typedUnavailableSchema: "mastermind.workspace_model_configuration.v1" }),

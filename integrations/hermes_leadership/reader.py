@@ -41,7 +41,8 @@ class LeadershipReader:
     def __init__(self, *, charter_key: str, session_id: str,
                  access: SecretaryAccessClient, currentness_guard: Callable[[], bool],
                  adviser_budget_reader: Callable[[], Awaitable[dict]] | None = None,
-                 include_project_continuity: bool = False):
+                 include_project_continuity: bool = False,
+                 include_company_context: bool = False):
         charter_for(charter_key)
         if type(session_id) is not str or _ID.fullmatch(session_id) is None:
             raise ValueError('invalid_native_session')
@@ -55,6 +56,9 @@ class LeadershipReader:
         if type(include_project_continuity) is not bool:
             raise ValueError("invalid_project_continuity_binding")
         self._include_project_continuity = include_project_continuity
+        if type(include_company_context) is not bool:
+            raise ValueError("invalid_company_context_binding")
+        self._include_company_context = include_company_context
         self._budget_reader = adviser_budget_reader
         self._key = charter_key
         self._session_id = session_id
@@ -160,6 +164,27 @@ class LeadershipReader:
                                                read_completed_at=after)
                 value['continuity']['project_plan'] = context
                 value['continuity']['missing_fields'] = missing_plan_fields(context)
+            if self._include_company_context:
+                from integrations.paperclip_control.agent_context import unavailable_company
+                if not self.is_current():
+                    return outcome('REFUSED','binding_not_current')
+                try:
+                    company = await self._access.read_company_context()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    company = unavailable_company('source_unavailable')
+                if not self.is_current():
+                    return outcome('REFUSED','binding_not_current')
+                if type(company) is dict and company.get('state') == 'REFUSED':
+                    return outcome('REFUSED','source_refused')
+                company_after = self._clock()
+                if (type(company_after) not in (int,float) or not math.isfinite(company_after)
+                        or company_after < after
+                        or company_after-stamp.timestamp() > summary['freshness']['local']['guard_seconds']):
+                    return outcome('UNAVAILABLE','source_not_fresh')
+                after = company_after
+                value['company_context'] = company if type(company) is dict else unavailable_company('source_unavailable')
             if self._key == 'grok_adviser':
                 budget = budget_result('meter_unbound')
                 if self._budget_reader is not None:
@@ -183,6 +208,10 @@ class LeadershipReader:
                     return outcome('UNAVAILABLE','source_not_fresh')
                 value['adviser_budget'] = budget
             encoded = json.dumps(value,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode('utf-8')
+            if len(encoded) > MAX_BYTES and self._include_company_context:
+                from integrations.paperclip_control.agent_context import unavailable_company
+                value['company_context'] = unavailable_company('brief_capacity_exceeded')
+                encoded = json.dumps(value,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode('utf-8')
             if len(encoded) > MAX_BYTES and self._include_project_continuity:
                 context = unavailable_plan('brief_capacity_exceeded')
                 value['continuity']['project_plan'] = context

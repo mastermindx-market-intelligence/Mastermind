@@ -145,7 +145,7 @@ const STRINGS = {
     workMode: "/ Work",
     conversationHeading: "Conversation",
     conversationSectionNote:
-      "The existing persistent conversation surface. This view never creates a second transport.",
+      "No conversation is bound to this runtime profile in this view.",
     gatewayLive: "Live",
     gatewayDisconnected: "Viewer disconnected",
     gatewayBusy: "Gateway busy",
@@ -219,7 +219,7 @@ const STRINGS = {
     workMode: "/ 工作",
     conversationHeading: "对话",
     conversationSectionNote:
-      "既有的持久对话界面。此视图绝不创建第二个传输通道。",
+      "此视图未为该运行配置绑定对话。",
     gatewayLive: "在线",
     gatewayDisconnected: "查看端已断开",
     gatewayBusy: "网关繁忙",
@@ -281,6 +281,7 @@ export function TeamWorkspace({
   onOpenCode,
   onCheckConnection,
   previewAuthority = true,
+  runtimeOnly = false,
 }: {
   locale?: "en" | "zh-CN";
   roster: TeamRosterRead;
@@ -297,8 +298,18 @@ export function TeamWorkspace({
   onCheckConnection?: () => void;
   /** True while this surface can only observe (PREVIEW chips stay honest). */
   previewAuthority?: boolean;
+  /** Company actions remain with the company consumer in the shared shell. */
+  runtimeOnly?: boolean;
 }) {
-  const t = STRINGS[locale];
+  const t = runtimeOnly ? { ...STRINGS[locale],
+    heading: locale === "zh-CN" ? "运行配置" : "Runtime profiles",
+    headingSummary: locale === "zh-CN" ? "本地已登记的 Hermes 运行配置与观测到的运行状态。" : "Locally enrolled Hermes profiles and their observed runtime state.",
+    rosterLabel: locale === "zh-CN" ? "运行配置" : "Runtime profiles",
+    backToRoster: locale === "zh-CN" ? "← 运行配置" : "← Runtime profiles",
+    rosterUnavailableTitle: locale === "zh-CN" ? "运行配置来源不可用" : "Runtime profiles could not be read",
+    rosterUnavailableBody: locale === "zh-CN" ? "当前无法核验本地运行配置。" : "The local profile source could not be verified.",
+    rosterUnavailableNote: locale === "zh-CN" ? "运行配置的当前可用性尚未核验。" : "Current profile availability is not verified.",
+  } : STRINGS[locale];
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
   const [surface, setSurface] = useState<
     | "new-bot"
@@ -535,6 +546,7 @@ export function TeamWorkspace({
                 </div>
               ) : null}
             </dl>
+            {runtimeOnly ? <p className="muted">{t.conversationSectionNote}</p> : <>
             <h3>{t.conversationHeading}</h3>
             <p
               className={`mm-gateway mm-gateway-${gatewayState}`}
@@ -574,6 +586,7 @@ export function TeamWorkspace({
             ) : (
               <p className="muted">{t.noTask}</p>
             )}
+            </>}
           </div>
         </div>
         {surface === "bot-settings" && selected ? (
@@ -594,7 +607,7 @@ export function TeamWorkspace({
         {t.heading}
       </h1>
       <p className="muted">{t.headingSummary}</p>
-      <div className="mm-team-toolbar" role="toolbar" aria-label={t.toolbarLabel}>
+      {!runtimeOnly && <div className="mm-team-toolbar" role="toolbar" aria-label={t.toolbarLabel}>
         {(
           [
             ["routines", t.routines],
@@ -631,8 +644,8 @@ export function TeamWorkspace({
         >
           {t.newBot}
         </button>
-      </div>
-      {modeSurface ? null : (
+      </div>}
+      {!runtimeOnly && modeSurface ? null : (
       <table className="mm-roster" aria-label={t.rosterLabel}>
         <thead>
           <tr>
@@ -704,7 +717,7 @@ export function TeamWorkspace({
         </tbody>
       </table>
       )}
-      {surface === "routines" ? (
+      {!runtimeOnly && surface === "routines" ? (
         <RoutinesPanel
           locale={locale}
           roster={roster.roster}
@@ -712,13 +725,13 @@ export function TeamWorkspace({
           onBack={() => setSurface(null)}
         />
       ) : null}
-      {surface === "needs-you" ? (
+      {!runtimeOnly && surface === "needs-you" ? (
         <InboxNeedsYouPanel locale={locale} roster={roster} requests={null} />
       ) : null}
-      {surface === "split" ? (
+      {!runtimeOnly && surface === "split" ? (
         <SplitConversationsWorkspace locale={locale} panes={[]} />
       ) : null}
-      {surface === "search" ? (
+      {!runtimeOnly && surface === "search" ? (
         <SearchContextView
           locale={locale}
           query=""
@@ -728,7 +741,7 @@ export function TeamWorkspace({
           onCloseSelection={() => setSearchSelection(null)}
         />
       ) : null}
-      {surface === "work" ? (
+      {!runtimeOnly && surface === "work" ? (
         <WorkHierarchyView
           locale={locale}
           parentWork={null}
@@ -736,7 +749,7 @@ export function TeamWorkspace({
           selectedTask={null}
         />
       ) : null}
-      {surface === "new-bot" ? (
+      {!runtimeOnly && surface === "new-bot" ? (
         <NewBotPanel
           locale={locale}
           roster={roster}
@@ -744,7 +757,7 @@ export function TeamWorkspace({
           onClose={() => setSurface(null)}
         />
       ) : null}
-      {surface === "new-group" ? (
+      {!runtimeOnly && surface === "new-group" ? (
         <NewGroupPanel
           locale={locale}
           roster={roster}

@@ -94,8 +94,11 @@ describe("Team and Code company routes", () => {
     render(<App />);
     fireEvent.click(within(companyNav()).getByRole("button", { name: "Team" }));
     expect(activeRoute()).toBe("Team");
-    expect(screen.getByRole("heading", { name: "Team roster" })).toBeTruthy();
-    expect(screen.getByText("Team needs a connection")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Company" }).getAttribute("aria-selected")).toBe("true");
+    expect(nativeTransport.invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Runtime profiles" }));
+    expect(screen.getByRole("heading", { name: "Runtime profiles" })).toBeTruthy();
+    expect(screen.getByText("Runtime profiles could not be read")).toBeTruthy();
     expect(screen.getByText("Roster not verified")).toBeTruthy();
     expect(screen.getByText("Current team size")).toBeTruthy();
     expect(screen.getByText("Not verified")).toBeTruthy();
@@ -106,7 +109,7 @@ describe("Team and Code company routes", () => {
     expect(nativeTransport.invoke).not.toHaveBeenCalled();
     expect(
       screen.getByText(
-        /An unavailable source is never shown as an empty company/i,
+        /Current profile availability is not verified/i,
       ),
     ).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
@@ -129,7 +132,9 @@ describe("Team and Code company routes", () => {
     );
     render(<App />);
     fireEvent.click(within(companyNav()).getByRole("button", { name: "Team" }));
-    const table = await screen.findByRole("table", { name: "Team roster" });
+    expect(nativeTransport.invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Runtime profiles" }));
+    const table = await screen.findByRole("table", { name: "Runtime profiles" });
     expect(table).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Open Engineering" }),
@@ -151,6 +156,19 @@ describe("Team and Code company routes", () => {
       request: { operation: "team_roster" },
       expectedAuthGeneration: 7,
     });
+    fireEvent.click(screen.getByRole("button", { name: "Open Engineering" }));
+    const runtime = screen.getByRole("region", { name: "Runtime profiles" });
+    expect(within(runtime).getByRole("heading", { name: "Engineering" })).toBeTruthy();
+    expect(within(runtime).getByText("No conversation is bound to this runtime profile in this view.")).toBeTruthy();
+    expect(within(runtime).queryByRole("combobox")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Native conversations" }));
+    expect(screen.getByRole("tabpanel", { name: "Native conversations" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Engineering" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Runtime profiles" }));
+    expect(screen.getByRole("heading", { name: "Engineering" })).toBeTruthy();
+    const operations = nativeTransport.invoke.mock.calls.map(([, args]) => args.request.operation);
+    expect(operations.filter(operation => operation === "team_roster")).toHaveLength(1);
+    expect(operations.every(operation => ["status", "team_roster"].includes(operation))).toBe(true);
   });
 
   it("shows the honest not-projected T3 threads while no projection source is connected (TD04)", () => {
@@ -174,10 +192,11 @@ describe("Team and Code company routes", () => {
     const company = companyNav("zh-CN");
     fireEvent.click(within(company).getByRole("button", { name: "团队" }));
     expect(activeRoute()).toBe("Team");
-    expect(screen.getByRole("heading", { name: "团队名册" })).toBeTruthy();
-    expect(screen.getByText("团队需要连接")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "运行配置" }));
+    expect(screen.getByRole("heading", { name: "运行配置" })).toBeTruthy();
+    expect(screen.getByText("运行配置来源不可用")).toBeTruthy();
     expect(screen.getByText("名册未验证")).toBeTruthy();
-    expect(screen.getByText(/来源不可用时，绝不显示为空公司。/)).toBeTruthy();
+    expect(screen.getByText(/运行配置的当前可用性尚未核验。/)).toBeTruthy();
     expect(screen.getByText("NATIVE_PLATFORM_UNAVAILABLE")).toBeTruthy();
     fireEvent.click(within(company).getByRole("button", { name: "代码" }));
     expect(activeRoute()).toBe("Code");
