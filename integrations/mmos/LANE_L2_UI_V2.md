@@ -79,6 +79,35 @@ components as their primary boards.
 - Paper parity: structure+copy extracted via `get_tree_summary` (committed in
   `BOARD_EXTRACTIONS.md`); visual parity pass pending at wave close.
 
+## Visual parity pass (wave close)
+
+Local untracked harness (dev server + `parity-preview.html?board=` filter,
+real components, preview-only fixtures — never committed) compared against
+Paper refs (`get_screenshot`) and `BOARD_EXTRACTIONS.md`:
+
+- **HC10 Routines**: structure/typography match. Found + fixed a real defect
+  — the shell's global `dl` 110px template collapsed every fact row into the
+  label column (rail note rendered 13px wide); fixed in `cb155c6a3` and pinned
+  by the css contract audit (grid reset + dd wrap, 22/22).
+- **HC18 Needs you**: strong parity (fixture count delta only).
+- **HC19 Split**: strong parity — "Two conversations", side-by-side panes,
+  independent composers + per-pane draft notes.
+- **HC20 Search**: good — layout/results/context pane match; filter chips not
+  rendered (no search source; fabricated facets forbidden by law).
+- **HC21 Work**: strong parity.
+- **HC12 Thread**: matches the extraction end-to-end (Thread/origin/task
+  link/attachment/composer/@ mention/note) via the harness; unmounted in the
+  shipped UI by honest-state law (no origin-message source).
+- **HC01/HC02/HC09/HC11**: accepted on component tests + 22-test css audit +
+  B7 hardening (light touch by decision).
+
+Accepted deltas (honest, recorded): HC10 back label "← Team" vs Paper's
+"← <teammate name>" (no name source in routines mode) and honest
+not-projected schedule fields vs Paper's sampled "Next at 20:30 · America /
+Vancouver"; HC19 omits Paper's workspace-tabs strip ("Workspace saved on this
+device" — no workspace persistence exists in this build); composers without a
+backend render disabled-with-reason vs Paper's live ones.
+
 ## Honest-state law (binding on every surface)
 
 Real projection or honest unavailable/unknown-with-reason — never Paper sample
@@ -108,8 +137,12 @@ disabled with a visible reason.
 
 ## OPEN
 
-- B7 (responsive hardening) merge, then a team.css/conversation css check on
-  the merged result (TD08–TD13, HC13–HC16, HC22–24).
-- One adversarial pass on the final lane delta (in flight on the merged base).
-- Visual parity pass vs Paper (minimax-m3/gemini-4-argon) at wave close.
-- Full `npx vitest run` + `cargo check` at release candidate, then trunk land.
+- One adversarial pass on the final lane delta (`e844a5e7b..` lane HEAD).
+- Trunk land: fetch `feat/mmos-v1-integration-t3`, plain-merge if moved, gates
+  on the merged result, non-force push; recompute identity pins if moved.
+
+Done this wave: B7 merge `ccf3fe154` (responsive+keyboard, 43 files/514 tests
+on the merged result); release-candidate gates green — typecheck ✓, full
+`npx vitest run` 7400 passed/12 skipped (1 load flake re-verified in
+isolation), `cargo check` exit 0 (14 pre-existing warnings); parity pass
+above; HC10 rail collapse fix `cb155c6a3`.
