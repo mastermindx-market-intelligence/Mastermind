@@ -1,4 +1,4 @@
-"""A strict 12-file release profile; no wildcard/optional asset admission.
+"""Strict private-entry and Team profiles; no wildcard/optional asset admission.
 
 The legacy 3/9/11/13 profiles stay intact. This exercises the incumbent
 manifest builder, not a mock release permission or simulated installation.
@@ -47,6 +47,11 @@ PROFILE9 = BASE + NOIR + LICENSES
 PROFILE11 = PROFILE9 + NOTICES
 PROFILE12 = PROFILE11 + (PRIVATE_ENTRY,)
 PROFILE13 = PROFILE11 + RICH_CLIENT
+TEAM = (
+    "assets/CompanyWorkspace-team_js.js",
+    "assets/CompanyWorkspace-team_css.css",
+)
+PROFILE14 = PROFILE12 + TEAM
 
 
 def _fixture_source(tmp_path: Path, names: tuple[str, ...]) -> Path:
@@ -65,9 +70,9 @@ def _fixture_source(tmp_path: Path, names: tuple[str, ...]) -> Path:
     return tmp_path
 
 
-@pytest.mark.parametrize("names", [PROFILE3, PROFILE9, PROFILE11, PROFILE12, PROFILE13])
+@pytest.mark.parametrize("names", [PROFILE3, PROFILE9, PROFILE11, PROFILE12, PROFILE13, PROFILE14])
 def test_existing_closed_asset_layouts_remain_qualified(names):
-    assert OS_ASSET_PROFILE_FILE_COUNTS == (3, 9, 11, 12, 13)
+    assert OS_ASSET_PROFILE_FILE_COUNTS == (3, 9, 11, 12, 13, 14)
     mimes = os_asset_mimes(names)
     assert len(mimes) == len(names)
     assert set(mimes) == set(names)
@@ -76,13 +81,14 @@ def test_existing_closed_asset_layouts_remain_qualified(names):
     assert mimes["assets/index-ABC_1.css"] == "text/css; charset=utf-8"
 
 
-def test_exact_current_private_entry_release_has_sealed_manifest(tmp_path):
-    root = _fixture_source(tmp_path, PROFILE12)
+@pytest.mark.parametrize("names", [PROFILE12, PROFILE14])
+def test_exact_current_private_entry_release_has_sealed_manifest(tmp_path, names):
+    root = _fixture_source(tmp_path, names)
     manifest = build_os_asset_manifest(root)
     assert manifest["schema"]
-    assert len(manifest["files"]) == 12
+    assert len(manifest["files"]) == len(names)
     rows = {row["path"]: row for row in manifest["files"]}
-    assert set(rows) == set(PROFILE12)
+    assert set(rows) == set(names)
     private = (root / "app/mastermind_os/dist" / PRIVATE_ENTRY).read_bytes()
     assert rows[PRIVATE_ENTRY] == {
         "path": PRIVATE_ENTRY,
@@ -91,6 +97,14 @@ def test_exact_current_private_entry_release_has_sealed_manifest(tmp_path):
         "mime": "image/jpeg",
     }
     assert not any("SourceMarkdown" in name for name in rows)
+    for name in TEAM if names == PROFILE14 else ():
+        data = (root / "app/mastermind_os/dist" / name).read_bytes()
+        assert rows[name] == {
+            "path": name,
+            "byte_count": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "mime": "text/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8",
+        }
 
 
 @pytest.mark.parametrize(

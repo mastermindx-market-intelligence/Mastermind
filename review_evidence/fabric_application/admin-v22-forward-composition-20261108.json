@@ -1,0 +1,77 @@
+{
+  "schema": "mastermind.h4_admin_v22_forward_qualification.v1",
+  "mission": "H4 native Hermes activation and live proof",
+  "source_base": "7a3c0b78710ffa66140228b6e2af53036c78d63e",
+  "operation_id": "hermes-admin-paper-forward-composition-20261108",
+  "scope": "Preserve admin enrollment/status history while composing its exact reviewed Paper v22 predecessor into the original native forward owner.",
+  "authority": "Current Chairman H4 completion instruction; compatible protected procedure pin ee9a15ddd7d65e6faabad07968323988ea0eddfb.",
+  "source_links": {
+    "h4": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2166#issuecomment-6706269059",
+    "root_merge": "https://github.com/mastermindx-market-intelligence/Mastermind/commit/7a3c0b78710ffa66140228b6e2af53036c78d63e",
+    "paper_reviewed_source": "https://github.com/mastermindx-market-intelligence/Mastermind/commit/faff1935489cc6847b4f9677f97baae0015c5ed7"
+  },
+  "original_history": {
+    "native_pin_plan": "25870fe238760b16ccc41b005c3a4289b8327dbe5a4d8b10015c00faaac15bac",
+    "enrollment_plan": "a77998c7c695fb2b72928260489f8f3b4a5525cf19517b4d3b10693db83111b2",
+    "status_plan": "5a37768deb1fae7d08e0c06794ef9778b5edac9499ff2b945d6fdeafaa8529fd",
+    "config": "76e093610040209dd788297c99b9d82da557edce13f83bcb2fcc5a2b8a9c4ba1",
+    "status_manifest": "df82f28cf650cba351d7226c6d6f2075b30cb202b437bcc1acdcdf3d598e92be",
+    "rewritten": false
+  },
+  "paper_projection": {
+    "generation": "v22",
+    "reviewed_bridge": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
+    "current_config": "8c3b9206cc1c2a3a935f08a1e7683fbc48e9b05001e9f092212a6b2c1ed1d6e7",
+    "current_manifest": "d6e054e828ca606cd1c98b20f26bd91a397fbca2fb4505fa953ed1eaaffc2027",
+    "deterministic_projection_byte_exact": true,
+    "allowed_config_delta": [
+      "paperDesign.bridgePath",
+      "paperDesign.bridgeSha256",
+      "paperDesign.pythonPath"
+    ],
+    "allowed_manifest_delta": [
+      "configHash"
+    ],
+    "historical_selection_receipt_claimed": false
+  },
+  "qualification": {
+    "new_regression_before": {
+      "tests": 7,
+      "errors": 5,
+      "refusals": [
+        "NATIVE_POOL_PIN_FORWARD_OWNER_REFUSED",
+        "paper runtime generation is not an admitted target"
+      ]
+    },
+    "new_regression_after": {
+      "tests": 7,
+      "passed": 7
+    },
+    "owner_regressions": {
+      "tests": 327,
+      "passed": 327,
+      "log_sha256": "248162c0bf8cfb4660f376eb21c8b96384adb6fce6b8e409d8e6f3e8863a895c"
+    },
+    "legacy_runtime_regressions": {
+      "tests": 60,
+      "passed": 60,
+      "log_sha256": "36b77f2a0c4409b5cc1a93e6d949c24138c59393863051f76b757ce25c3ef475"
+    },
+    "diff_check": "PASS"
+  },
+  "candidate_preview": {
+    "source_protected": false,
+    "returncode": 0,
+    "phase": "PREVIEW",
+    "effect": "NOT_APPLIED",
+    "plan_sha256": "6b0dfa35e171d75464c5d99c0363a562c98a10395355e5e25b111c74d969c28a",
+    "go_plan_sha256": "f13a4ada7571c3e1f5aeb025dff0f8967efb6d9b671fb3d623d2afdb074c46b9",
+    "published_native_generation": "b5765f4130e3cfcfeb1a01932003c4bf3a35b49024caf960f0771b7a869a9268",
+    "receipt_sha256": "62031aeb320f282c31eceea199f4877e8cbf92e45537aaa3a4f6b680208b5f50",
+    "installed_pair_unchanged": true,
+    "service_stopped": false,
+    "forward_applied": false,
+    "native_selected": false
+  },
+  "remaining": "Protected merge, protected preview/readback, actual per-seat custody and original lifecycle/native transition, then H4 installed live acceptance."
+}

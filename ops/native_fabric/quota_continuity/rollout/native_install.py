@@ -828,13 +828,15 @@ def _go_component(bundle, stable_ext, target_files):
         raise ValueError("Go original installed source differs")
     manifest_raw = _go_file(bundle.parent / "native-manifest.json")
     manifest = generation.unique_json(manifest_raw)
+    if stage_builder.before_glm_application_core(manifest) == manifest:
+        raise ValueError("current Go handler requires the complete application core cohort")
     if manifest != target_files:
         raise ValueError("Go target differs from captured native manifest")
-    http_members = stage_builder.HTTP_GENERATION_MEMBERS & set(manifest)
+    http_members = set(manifest) & (stage_builder.HTTP_GENERATION_MEMBERS | stage_builder.GLM_HTTP_GENERATION_MEMBERS)
     if http_members:
-        if http_members != stage_builder.HTTP_GENERATION_MEMBERS:
+        if http_members not in (stage_builder.HTTP_GENERATION_MEMBERS, stage_builder.HTTP_GENERATION_MEMBERS | stage_builder.GLM_HTTP_GENERATION_MEMBERS):
             raise ValueError("Go target application HTTP closure incomplete")
-        http_sources = stage_builder.application_http_sources(root)
+        http_sources = stage_builder.application_http_sources(root, include_glm=bool(http_members & stage_builder.GLM_HTTP_GENERATION_MEMBERS), captured_projection=(_go_file(bundle.parent / "native-code-stage" / "ext/application_http_realms.v2.json") if bool(http_members & stage_builder.GLM_HTTP_GENERATION_MEMBERS) else None), captured_projection_sha256=(manifest["ext/application_http_realms.v2.json"] if bool(http_members & stage_builder.GLM_HTTP_GENERATION_MEMBERS) else None))
         if any(manifest[relative] != generation.digest(data[0]) for relative, data in http_sources.items()):
             raise ValueError("Go target application HTTP differs from exact reviewed source")
     base = {key: value for key, value in manifest.items()
@@ -1317,19 +1319,22 @@ def _service_snapshot(entry, path, *, read=True, mode=None):
     return raw, before
 
 
-def _service_owner_identities(entry, startup, profile, *, application_http=False):
+def _service_owner_identities(entry, startup, profile, *, application_http=False, glm_provider_profile=None):
     paths = entry.application_enrollment_paths(startup)
     directory_paths = {"go": startup.paths["go"], "broker": startup.paths["db_path"].parent,
         "accounts": startup.paths["accounts_path"].parent, "profile": profile.parent,
         "bootstrap": paths["intent"].parent, "store": paths["intent"].parent.parent}
     provider_profile = entry.application_http_profile(startup) if application_http else None
+    if glm_provider_profile is not None:
+        glm_provider_profile = Path(glm_provider_profile)
+        directory_paths["glm_provider_profile"] = glm_provider_profile.parent
     if provider_profile is not None:
         directory_paths["provider_profile"] = provider_profile.parent
     identities = {}
     for name, path in directory_paths.items():
         entry._directory(path)
         info = path.lstat()
-        if name in {"go", "profile", "provider_profile", "bootstrap", "store"} and stat.S_IMODE(info.st_mode) != 0o700:
+        if name in {'go', 'profile', 'provider_profile', 'bootstrap', 'store', 'glm_provider_profile'} and stat.S_IMODE(info.st_mode) != 0o700:
             raise ValueError("service private parent custody refused")
         identities["directory:" + name] = {"dev": info.st_dev, "ino": info.st_ino,
             "uid": info.st_uid, "gid": info.st_gid, "mode": stat.S_IMODE(info.st_mode)}
@@ -1339,7 +1344,107 @@ def _service_owner_identities(entry, startup, profile, *, application_http=False
     _, identities["account_profile"] = _service_snapshot(entry, profile, read=False, mode=0o600)
     if provider_profile is not None:
         _, identities["provider_profile"] = _service_snapshot(entry, provider_profile, read=False, mode=0o600)
+    if glm_provider_profile is not None:
+        _, identities["glm_provider_profile"] = _service_snapshot(entry, glm_provider_profile, read=False, mode=0o600)
     return identities
+
+
+
+_GLM_SERVICE_SEMANTIC_FIELDS = frozenset({
+    "pool", "source_projection_sha256", "recipes", "accounts"})
+_GLM_SERVICE_CUSTODY_FIELDS = frozenset({
+    "provider_profile", "provider_profile_identity", "provider_profile_sha256"})
+
+
+def _glm_plan_semantic(record):
+    """Read retained custody commitments without accessing the provider file."""
+    if type(record) is not dict or set(record) != _GLM_SERVICE_SEMANTIC_FIELDS | _GLM_SERVICE_CUSTODY_FIELDS:
+        raise ValueError("GLM service plan projection shape invalid")
+    identity, profile = record["provider_profile_identity"], record["provider_profile"]
+    if (type(profile) is not str or not Path(profile).is_absolute() or ".." in Path(profile).parts or
+            type(identity) is not dict or set(identity) != {
+                "dev", "ino", "uid", "gid", "mode", "nlink", "size", "mtime_ns", "ctime_ns"} or
+            any(type(value) is not int or value < 0 for value in identity.values()) or
+            identity["mode"] != 0o600 or identity["nlink"] != 1 or
+            type(record["provider_profile_sha256"]) is not str or
+            re.fullmatch("[0-9a-f]{64}", record["provider_profile_sha256"]) is None):
+        raise ValueError("GLM service plan custody shape invalid")
+    return {key: record[key] for key in _GLM_SERVICE_SEMANTIC_FIELDS}
+
+
+def _validate_glm_service_specification(entry, startup, specification):
+    if (startup is None or specification["schema"] != SERVICE_ROLE_SPEC_SCHEMA or
+            "route_scope" not in specification["scope"]):
+        raise ValueError("GLM HTTP projection requires routed v9 role enrollment")
+    record = specification["glm_application_http"]
+    entry.validate_glm_application_http_projection(startup, record, normalized=False)
+    if record["source_projection_sha256"] != startup.glm_projection_sha256:
+        raise ValueError("GLM HTTP source projection differs from selected generation")
+    recipes = {}
+    for recipe in record["recipes"]:
+        model = recipe["model"]
+        if recipe != entry.application_http_recipe(startup, model, pool="glm"):
+            raise ValueError("GLM HTTP recipe differs from selected generation")
+        _, recipes[model] = startup.broker_module._application_http_recipe(
+            recipe, pool="glm", model=model)
+    accounts, models = set(), set()
+    grants = [grant for grant in specification["grants"] if grant.get("pool") == "glm"]
+    if not grants:
+        raise ValueError("GLM HTTP projection has no corresponding grant")
+    for grant in grants:
+        names = grant.get("accounts")
+        if (type(grant.get("models")) is not list or len(grant["models"]) != 1 or
+                grant["models"][0] not in recipes or
+                grant.get("recipe_digest") != recipes[grant["models"][0]] or
+                type(names) is not list or not names or
+                any(type(name) is not str or entry.IDENTITY.fullmatch(name) is None for name in names) or
+                len(set(names)) != len(names) or "transport_kind" in grant):
+            raise ValueError("GLM HTTP requires one concrete recipe-bound model per grant")
+        accounts.update(names)
+        models.add(grant["models"][0])
+    if accounts != set(record["accounts"]) or models != set(recipes):
+        raise ValueError("GLM HTTP grants differ from the projected accounts or models")
+
+
+def _capture_glm_service_projection(entry, startup, specification):
+    if "glm_application_http" not in specification:
+        return None
+    profile = entry.application_glm_http_profile(startup)
+    raw, identity = _service_snapshot(entry, profile, mode=0o600)
+    record = dict(specification["glm_application_http"],
+                  provider_profile=str(profile), provider_profile_identity=identity,
+                  provider_profile_sha256=generation.digest(raw))
+    entry.validate_glm_application_http_projection(startup, record, normalized=True)
+    return record
+
+
+def _completed_glm_service_receipt(entry, startup, bundle, plan, specification):
+    """Return the original completed operation without fresh provider reads."""
+    if "glm_application_http" not in plan:
+        return None
+    paths = entry.application_enrollment_paths(startup, specification["scope"]["service_profile"])
+    if not os.path.lexists(paths["receipt"]):
+        return None
+    raw, binding_identity = _service_snapshot(entry, paths["binding"], mode=0o600)
+    intent_raw, intent_identity = _service_snapshot(entry, paths["intent"], mode=0o600)
+    receipt_raw, receipt_identity = _service_snapshot(entry, paths["receipt"], mode=0o600)
+    entry.validate_completed_application_records(
+        startup, raw, binding_identity, intent_raw, receipt_raw)
+    document, intent, receipt = map(entry._service_json, (raw, intent_raw, receipt_raw))
+    if (document["schema"] != entry.SERVICE_ROLE_SCHEMA or
+            document["scope"] != plan["scope"] or document["owners"] != plan["owners"] or
+            document["glm_application_http"] != plan["glm_application_http"] or
+            document["operation_id"] != plan["operation_id"] or
+            document["plan_digest"] != plan["digest"] or
+            document["source_generation"] != plan["source_generation"] or
+            document["ingress_digest"] != plan["ingress_digest"] or
+            intent["bundle"] != str(bundle) or
+            generation.digest(generation.canonical(_service_grant_value(specification))) != plan["grant_sha256"] or
+            entry.application_file_identity(paths["binding"]) != binding_identity or
+            entry.application_file_identity(paths["intent"]) != intent_identity or
+            entry.application_file_identity(paths["receipt"]) != receipt_identity):
+        raise ValueError("GLM completed service enrollment differs from original plan")
+    return receipt
 
 
 def _service_specification(entry, specification, startup=None, *, allow_inactive_grant=False):
@@ -1374,6 +1479,8 @@ def _service_specification(entry, specification, startup=None, *, allow_inactive
     routed_role = role and type(specification.get("scope")) is dict and "route_scope" in specification["scope"]
     if routed_role:
         fields = fields - {"grant"} | {"grants"}
+    if routed_role and "glm_application_http" in specification:
+        fields = fields | {"glm_application_http"}
     selected = type(specification) is dict and specification.get("schema") in (SERVICE_SELECTED_SPEC_SCHEMA, SERVICE_ADMIN_SPEC_SCHEMA, SERVICE_ROLE_SPEC_SCHEMA)
     if http:
         fields.add("application_recipe")
@@ -1440,6 +1547,8 @@ def _service_specification(entry, specification, startup=None, *, allow_inactive
         _, digest = startup.broker_module._application_http_recipe(recipe, pool="bailian", model=grant["models"][0])
         if grant.get("recipe_digest") != digest:
             raise ValueError("service enrollment HTTP grant commitment differs")
+    if "glm_application_http" in specification:
+        _validate_glm_service_specification(entry, startup, specification)
     return specification
 
 
@@ -2041,6 +2150,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
     with generation.publication_lock(store), _service_source(go_ingress_bundle) as context:
         ingress, selection, metadata, entry, startup = context
         specification = _service_specification(entry, specification, startup)
+        glm_projection = _capture_glm_service_projection(entry, startup, specification)
         fresh_family = specification["schema"] == SERVICE_FRESH_FAMILY_SPEC_SCHEMA
         workloads = specification["schema"] == SERVICE_WORKLOAD_SPEC_SCHEMA
         routed = specification["schema"] == SERVICE_ROUTED_SPEC_SCHEMA
@@ -2064,7 +2174,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
             if any(os.path.lexists(path) for path in paths.values()):
                 raise ValueError("service enrollment already has an original artifact")
             profile = Path(specification["scope"]["account_profile"])
-        owners = _service_owner_identities(entry, startup, profile, application_http=http)
+        owners = _service_owner_identities(entry, startup, profile, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None)
         before, identity = _service_snapshot(entry, startup.paths["accounts_path"])
         with startup.yaml_runtime.held_yaml(startup.yaml_archive, startup.yaml_provenance, startup.yaml_check):
             if fresh_family:
@@ -2095,7 +2205,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         if expires is not None and expires <= time.time():
             raise ValueError("service grant is already expired")
         if (_service_snapshot(entry, startup.paths["accounts_path"]) != (before, identity)
-                or _service_owner_identities(entry, startup, profile, application_http=http) != owners):
+                or _service_owner_identities(entry, startup, profile, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None) != owners):
             raise ValueError("service owners changed during preparation")
         plan = {"schema": entry.SERVICE_FRESH_FAMILY_ENROLLMENT_SCHEMA if fresh_family else entry.SERVICE_ROLE_ENROLLMENT_SCHEMA if role else entry.SERVICE_WORKLOAD_ENROLLMENT_SCHEMA if workloads else entry.SERVICE_ROUTED_ENROLLMENT_SCHEMA if routed else entry.SERVICE_FAMILY_ENROLLMENT_SCHEMA if family else entry.SERVICE_SET_ENROLLMENT_SCHEMA if service_set else
                 entry.SERVICE_HTTP_ENROLLMENT_SCHEMA if http else entry.SERVICE_ADMIN_ENROLLMENT_SCHEMA if admin else
@@ -2105,7 +2215,7 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
             "store": str(store), "selection": selection,
             "installer_sha256": generation.digest(generation.regular_bytes(__file__)),
             "entry_sha256": metadata["files"][generation.GO_ENTRY],
-            "owners": entry.application_service_owners(startup, application_http=http), "owner_identities": owners,
+            "owners": entry.application_service_owners(startup, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None), "owner_identities": owners,
             "accounts_before": {"sha256": generation.digest(before), "identity": identity},
             "accounts_after_sha256": generation.digest(after)}
         if service_set:
@@ -2144,6 +2254,10 @@ def prepare_go_service_enrollment(go_ingress_bundle, specification, output):
         if http:
             plan.update(application_recipe=specification["application_recipe"],
                 application_accounts=specification["grant"]["accounts"])
+        if glm_projection is not None:
+            if plan["owner_identities"]["glm_provider_profile"] != glm_projection["provider_profile_identity"]:
+                raise ValueError("GLM provider custody changed during enrollment preparation")
+            plan["glm_application_http"] = glm_projection
         plan["digest"] = generation.digest(generation.canonical(plan))
         generation.atomic_bytes(output / "specification.json", generation.canonical(specification) + b"\n", 0o600)
         generation.atomic_bytes(output / "PLAN.json", generation.canonical(plan) + b"\n", 0o600)
@@ -2170,6 +2284,9 @@ def _read_service_plan(bundle):
                       int(bool(plan.get("predecessor"))) if service_set else 0)
     fields = (_SERVICE_PLAN_FIELDS - {"scope"} | {"scopes", "predecessor_schema" if family else "predecessor"}) if service_set else _SERVICE_PLAN_FIELDS
     fields = fields | {"application_recipe", "application_accounts"} if http else fields
+    glm = type(plan) is dict and plan.get("schema") == "native-go-service-enrollment.v9" and "glm_application_http" in plan
+    if glm:
+        fields = fields | {"glm_application_http"}
     if retained_count:
         fields |= {"predecessor_credential_sha256s" if family else "predecessor_credential_sha256",
                    "predecessor_custody", "predecessor_private"}
@@ -2187,6 +2304,13 @@ def _read_service_plan(bundle):
         if info.st_nlink != 1:
             raise ValueError("service enrollment artifact has another link")
     specification = _successor_json(bundle / "specification.json")
+    if glm:
+        if (specification.get("schema") != SERVICE_ROLE_SPEC_SCHEMA or
+                type(specification.get("scope")) is not dict or "route_scope" not in specification["scope"] or
+                _glm_plan_semantic(plan["glm_application_http"]) != specification.get("glm_application_http")):
+            raise ValueError("GLM service plan differs from saved specification")
+    elif "glm_application_http" in specification:
+        raise ValueError("GLM service plan projection missing")
     before = generation.regular_bytes(bundle / "accounts.before.yaml", 2 * 1024 * 1024)
     after = generation.regular_bytes(bundle / "accounts.after.yaml", 2 * 1024 * 1024)
     if (generation.digest(before) != plan["accounts_before"]["sha256"]
@@ -2577,7 +2701,15 @@ def _service_transaction(bundle, *, reconcile_only=False):
         raise ValueError("service publication owner differs from original ingress")
     with generation.publication_lock(store), _service_source(plan["go_ingress_bundle"]) as context:
         ingress, selection, metadata, entry, startup = context
+        if "glm_application_http" in plan:
+            if (ingress["digest"] != plan["ingress_digest"] or startup.generation != plan["source_generation"] or
+                    selection != plan["selection"] or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]):
+                raise ValueError("GLM completed enrollment source differs")
+            completed_glm = _completed_glm_service_receipt(entry, startup, bundle, plan, specification)
+            if completed_glm is not None:
+                return completed_glm
         specification = _service_specification(entry, specification, startup)
+        glm_projection = _capture_glm_service_projection(entry, startup, specification)
         http = specification["schema"] == SERVICE_HTTP_SPEC_SCHEMA
         admin = specification["schema"] == SERVICE_ADMIN_SPEC_SCHEMA
         role = specification["schema"] == SERVICE_ROLE_SPEC_SCHEMA
@@ -2593,6 +2725,8 @@ def _service_transaction(bundle, *, reconcile_only=False):
             entry.SERVICE_SELECTED_RECEIPT_SCHEMA if selected else entry.SERVICE_RECEIPT_SCHEMA)
         projection = ({"application_recipe": specification["application_recipe"],
             "application_accounts": specification["grant"]["accounts"]} if http else {})
+        if glm_projection is not None:
+            projection["glm_application_http"] = glm_projection
         paths = entry.application_enrollment_paths(startup,
             specification["scope"]["service_profile"] if role else None)
         profile = Path(specification["scope"]["account_profile"])
@@ -2602,8 +2736,8 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 or metadata["files"][generation.GO_ENTRY] != plan["entry_sha256"]
                 or specification["operation_id"] != plan["operation_id"]
                 or specification["scope"] != plan["scope"]
-                or entry.application_service_owners(startup, application_http=http) != plan["owners"]
-                or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+                or entry.application_service_owners(startup, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None) != plan["owners"]
+                or _service_owner_identities(entry, startup, profile, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None) != plan["owner_identities"]
                 or any(plan[key] != value for key, value in projection.items())
                 or generation.digest(generation.canonical(_service_grant_value(specification))) != plan["grant_sha256"]):
             raise ValueError("service enrollment plan no longer binds its original owners")
@@ -2624,7 +2758,7 @@ def _service_transaction(bundle, *, reconcile_only=False):
         public = {"schema": enrollment_schema, "operation_id": plan["operation_id"],
                   "plan_digest": plan["digest"]}
         with _service_broker_lock(entry, startup, plan["owner_identities"]["lock_path"]):
-            if _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]:
+            if _service_owner_identities(entry, startup, profile, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None) != plan["owner_identities"]:
                 raise ValueError("service owners changed before publication")
             original = os.path.lexists(paths["intent"])
             if original:
@@ -2688,7 +2822,7 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 if _read_service_plan(bundle) != (bundle, plan, specification, before, after):
                     raise ValueError("service bundle changed before target publication")
                 if (_completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
-                        or _service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+                        or _service_owner_identities(entry, startup, profile, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None) != plan["owner_identities"]
                         or _successor_json(paths["intent"]) != intent
                         or _service_snapshot(entry, private, mode=0o600) != (raw, private_identity)
                         or _successor_json(private_receipt) != {"sha256": generation.digest(raw), "identity": private_identity}):
@@ -2710,7 +2844,7 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 _record_once(progress[name], {"sha256": generation.digest(data), "identity": identity})
             final = {name: _service_target(entry, path, data, old, progress[name], prepared[name], plan["digest"])[1]
                      for name, path, data, old, _ in targets}
-            if (_service_owner_identities(entry, startup, profile, application_http=http) != plan["owner_identities"]
+            if (_service_owner_identities(entry, startup, profile, application_http=http, glm_provider_profile=glm_projection["provider_profile"] if glm_projection is not None else None) != plan["owner_identities"]
                     or _completed_go_for_service(plan["go_ingress_bundle"])[1] != selection
                     or _successor_json(paths["intent"]) != intent):
                 raise ValueError("service original custody changed before completion")
@@ -2719,6 +2853,8 @@ def _service_transaction(bundle, *, reconcile_only=False):
                 "ingress_digest": plan["ingress_digest"], "scope": plan["scope"],
                 "binding_sha256": generation.digest(raw), "binding_identity": final["binding"],
                 "accounts_sha256": generation.digest(after), "accounts_identity": final["accounts"]}
+            if glm_projection is not None:
+                receipt["glm_application_http"] = glm_projection
             if http:
                 receipt.update(application_recipe_digest=specification["grant"]["recipe_digest"],
                     source_projection_sha256=specification["application_recipe"]["source_projection_sha256"],

@@ -60,10 +60,10 @@ EDIT_TOOLS = frozenset({
 })
 FILE_MANAGE_TOOLS = frozenset({"create_file", "rename_resource"})
 
-# Version-independent tool capability contract. Every reviewed reference below
-# is derived from existing accepted full-catalog fixtures, but admission tests
-# each current tool *independently*. Presentation strings and unrelated vendor
-# tools never disable a usable tool. The actual shapes and safety annotations
+# Version-independent tool capability contract. Reviewed references come from
+# accepted full catalogs or exact observed tool descriptors retained in fixtures.
+# Admission tests each current tool *independently*. Presentation strings and
+# unrelated vendor tools never disable a usable tool. The shapes and safety annotations
 # remain source-reviewed. Do not turn this into a trust-all version fallback.
 REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint': True},
                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -498,6 +498,8 @@ REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint':
                                                               'type': 'array'}},
                                    'required': ['fileId', 'updates'],
                                    'type': 'object'}}],
+ # The second style profile is the exact f200 tool-only descriptor fixture;
+ # primitive-union equivalence is not generalized to other tools or schemas.
  'update_styles': [{'annotations': {'destructiveHint': True},
                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
                                     'additionalProperties': False,
@@ -507,6 +509,21 @@ REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint':
                                                                                                     'type': 'array'},
                                                                                         'styles': {'additionalProperties': {'anyOf': [{'type': 'string'},
                                                                                                                                       {'type': 'number'}]},
+                                                                                                   'propertyNames': {'type': 'string'},
+                                                                                                   'type': 'object'}},
+                                                                         'required': ['nodeIds', 'styles'],
+                                                                         'type': 'object'},
+                                                               'type': 'array'}},
+                                    'required': ['fileId', 'updates'],
+                                    'type': 'object'}},
+                   {'annotations': {'destructiveHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'updates': {'items': {'additionalProperties': False,
+                                                                         'properties': {'nodeIds': {'items': {'type': 'string'},
+                                                                                                    'type': 'array'},
+                                                                                        'styles': {'additionalProperties': {'type': ['string', 'number']},
                                                                                                    'propertyNames': {'type': 'string'},
                                                                                                    'type': 'object'}},
                                                                          'required': ['nodeIds', 'styles'],

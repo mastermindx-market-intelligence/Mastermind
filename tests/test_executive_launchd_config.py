@@ -328,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|prepare-mcp-selected-child|plan-control-component|apply-control-component|reconcile-control-component|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|plan-mcp-component|apply-mcp-component|reconcile-mcp-component|prepare-mcp-selected-child|plan-control-component|apply-control-component|reconcile-control-component|resume-control-component|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -809,6 +809,11 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         # Retirement provenance is installed only after finite cleanup; an
         # unconfigured template must never imply an accepted predecessor.
         "retired_finite_composition",
+        # Explicit sealed Memory groups remain absent in the default template.
+        "protected_memory_execution",
+        "memory_native_issuer",
+        "memory_original_result_access",
+        "memory_evaluation",
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)

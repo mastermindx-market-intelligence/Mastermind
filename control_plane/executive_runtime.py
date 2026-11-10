@@ -918,6 +918,23 @@ def _normalise_constraints(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
     result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
+    if "native_memory" in raw:
+        # Public correlation on the existing Job, never source/dispatch authority.
+        # The protected Memory owner independently requires current Runtime,
+        # genuine Control peer and Linux recipient/source admission.
+        from common.native_memory_intent_contract import normalize_memory_runtime_intent
+        try:
+            result["native_memory"] = normalize_memory_runtime_intent(raw["native_memory"])
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            raise StateConflict("native Memory intent constraint is invalid") from None
+    if "native_memory_evaluation" in raw:
+        from common.memory_evaluation_contract import evaluation_intent
+        try:
+            if "native_memory" not in result:
+                raise ValueError()
+            result["native_memory_evaluation"] = evaluation_intent(raw["native_memory_evaluation"])
+        except (ValueError, TypeError):
+            raise StateConflict("native Memory evaluation constraint is invalid") from None
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
@@ -18356,12 +18373,13 @@ def _recheck_placement_lineage(connection, job_row, spec, authority) -> None:
 
 def _placement_binding_for_attempt(connection, attempt_id: str) -> dict[str, Any] | None:
     """The Attempt's CURRENT ExecutionBinding: the one issued at claim, or the
-    latest re-issue by ``adopt_attempt`` (which rotates the fence on the same
-    Attempt — REVIEW_2314 M-1)."""
+    latest re-issue by adoption or expired OHF takeover, both of which rotate
+    the fence on the same Attempt."""
     rows = connection.execute(
         "SELECT event_type,payload_json FROM events WHERE attempt_id=? AND ("
         "(event_type='JOB_CLAIMED' AND aggregate_type='job') OR "
-        "(event_type='ATTEMPT_ADOPTED' AND aggregate_type='attempt')) ORDER BY event_id",
+        "(event_type IN ('ATTEMPT_ADOPTED','OHF_EXPIRED_LEASE_TAKEN_OVER') "
+        "AND aggregate_type='attempt')) ORDER BY event_id",
         (attempt_id,),
     ).fetchall()
     issued = [
@@ -18380,7 +18398,7 @@ def _placement_binding_for_attempt(connection, attempt_id: str) -> dict[str, Any
 def _reissue_placement_binding(
     connection, row: sqlite3.Row, *, fence_counter: int, lease_expires_at_ms: int
 ) -> dict[str, Any] | None:
-    """Adoption rotated the fence: re-issue the binding in the SAME transaction."""
+    """Re-issue the binding in the SAME transaction as its fence rotation."""
     from control_plane.child_execution_contracts import ExecutionBinding
     from control_plane.executive_placement_authority import reissue_execution_binding
     placed = connection.execute(
@@ -18388,7 +18406,7 @@ def _reissue_placement_binding(
         (row["job_id"],),
     ).fetchone()
     if placed is None or placed[0] is None:
-        return None  # legacy (non-placement) Job: adoption unchanged
+        return None  # legacy (non-placement) Job: no binding to re-issue
     raw = _placement_binding_for_attempt(connection, str(row["attempt_id"]))
     if raw is None:
         raise StateConflict("adoption refused: placement Job Attempt has no ExecutionBinding")
@@ -20066,6 +20084,12 @@ class AttemptRegistry:
             )
             if quota.rowcount != 1 or attempt.rowcount != 1:
                 raise StateConflict("expired OHF takeover lost its CAS race")
+            binding = _reissue_placement_binding(
+                connection,
+                row,
+                fence_counter=next_fence,
+                lease_expires_at_ms=expiry,
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",
@@ -20081,6 +20105,7 @@ class AttemptRegistry:
                     "fence_generation": next_fence,
                     "lease_owner": owner,
                     "lease_expires_at_ms": expiry,
+                    **({"execution_binding": binding} if binding is not None else {}),
                 },
                 timestamp_ms=timestamp,
             )

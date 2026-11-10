@@ -1,0 +1,198 @@
+{
+  "schema": "mastermind.t3_project_team.v1",
+  "mission": {
+    "schema": "mastermind.t3_mission_brief.v1",
+    "mission_id": "example-mastermind-os",
+    "objective": "TEMPLATE ONLY: a COO owns the complete Mastermind OS outcome across experience, runtime and acceptance directors.",
+    "source_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/9b04756b814e4c8c3a3fd1d40ea54c493aab90f6/docs/plans/2026-11-09-t3-coo-project-graph.md",
+    "base_sha": "3673c03b1c8f583dec3e4c3d763b8267149c71a9",
+    "phases": [
+      {
+        "phase_id": "experience",
+        "objective": "Deliver the real project and team experience",
+        "checks": [
+          "A user can open a project, delegate a slice and inspect its original result"
+        ]
+      },
+      {
+        "phase_id": "runtime",
+        "objective": "Compose existing orchestration and fleet owners",
+        "checks": [
+          "Original root, immediate parent and native receipts survive interruption"
+        ]
+      },
+      {
+        "phase_id": "acceptance",
+        "objective": "Integrate and prove the whole journey",
+        "checks": [
+          "Accepted changes are present in the tested parent commit and the real consumer succeeds"
+        ]
+      }
+    ],
+    "done_when": [
+      "The original whole-project journey works, not only individual slices",
+      "Every native result is linked and reviewed; missing and uncertain work remains explicit"
+    ],
+    "allowed_write_paths": [
+      "src/experience",
+      "src/runtime",
+      "tests"
+    ],
+    "non_goals": [
+      "Illustrative paths and roles are not a second MMOS program or permission to replace active owners",
+      "No new runtime, queue, router, credentials or memory store"
+    ],
+    "stop_conditions": [
+      "Do not dispatch this template: first bind the original accepted project plan, paths, owner and budget",
+      "Preserve original effects; pause on explicit denial, exhausted budget or uncertain writes"
+    ],
+    "notes_ref": "agentos:WS:ORCHESTRATOR-PROJECT-CONTINUITY",
+    "execution_envelope_ref": "runtime:existing-owner-must-bind"
+  },
+  "roles": [
+    {
+      "role_id": "coo",
+      "kind": "coo",
+      "parent_id": null,
+      "objective": "Own integration and original acceptance",
+      "phase_ids": [
+        "experience",
+        "runtime",
+        "acceptance"
+      ],
+      "allowed_write_paths": [
+        "src/experience",
+        "src/runtime",
+        "tests"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "shared"
+    },
+    {
+      "role_id": "experience",
+      "kind": "director",
+      "parent_id": "coo",
+      "objective": "Own product experience",
+      "phase_ids": [
+        "experience"
+      ],
+      "allowed_write_paths": [
+        "src/experience"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "worktree"
+    },
+    {
+      "role_id": "projects",
+      "kind": "worker",
+      "parent_id": "experience",
+      "objective": "Implement project launch and progress",
+      "phase_ids": [
+        "experience"
+      ],
+      "allowed_write_paths": [
+        "src/experience/projects"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "shared"
+    },
+    {
+      "role_id": "teams",
+      "kind": "worker",
+      "parent_id": "experience",
+      "objective": "Implement team hierarchy and returned results",
+      "phase_ids": [
+        "experience"
+      ],
+      "allowed_write_paths": [
+        "src/experience/teams"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "shared"
+    },
+    {
+      "role_id": "runtime",
+      "kind": "director",
+      "parent_id": "coo",
+      "objective": "Own runtime composition",
+      "phase_ids": [
+        "runtime"
+      ],
+      "allowed_write_paths": [
+        "src/runtime"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "worktree"
+    },
+    {
+      "role_id": "delegation",
+      "kind": "worker",
+      "parent_id": "runtime",
+      "objective": "Reuse native delegation and exact-parent return",
+      "phase_ids": [
+        "runtime"
+      ],
+      "allowed_write_paths": [
+        "src/runtime/delegation"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "shared"
+    },
+    {
+      "role_id": "recovery",
+      "kind": "worker",
+      "parent_id": "runtime",
+      "objective": "Reuse native recovery and incumbent continuity",
+      "phase_ids": [
+        "runtime"
+      ],
+      "allowed_write_paths": [
+        "src/runtime/recovery"
+      ],
+      "depends_on": [],
+      "native_role": "implementation",
+      "isolation": "shared"
+    },
+    {
+      "role_id": "acceptance",
+      "kind": "director",
+      "parent_id": "coo",
+      "objective": "Verify the integrated outcome after both directors",
+      "phase_ids": [
+        "acceptance"
+      ],
+      "allowed_write_paths": [
+        "tests"
+      ],
+      "depends_on": [
+        "experience",
+        "runtime"
+      ],
+      "native_role": "implementation",
+      "isolation": "worktree"
+    },
+    {
+      "role_id": "consumer-proof",
+      "kind": "worker",
+      "parent_id": "acceptance",
+      "objective": "Run the real integrated consumer and negative cases",
+      "phase_ids": [
+        "acceptance"
+      ],
+      "allowed_write_paths": [
+        "tests"
+      ],
+      "depends_on": [],
+      "native_role": "test",
+      "isolation": "shared"
+    }
+  ],
+  "requested_max_live_agents": 8,
+  "requested_max_depth": 3
+}

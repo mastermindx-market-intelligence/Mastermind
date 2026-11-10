@@ -185,7 +185,21 @@ Verify the exact website origin, intended account, and relation to the current t
 supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
 passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
 or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
-unrelated personal accounts. A saved secret is not independent authority for account/security
+unrelated personal accounts.
+
+**Chairman fleet-sync ruling (issued 2026-11-08 by Chris, recorded verbatim authority under
+this section).** Enrolled Mastermind fleet hosts owned by the same principal (`chriswong`)
+constitute one trust domain for credential availability. When the Chairman explicitly directs
+it in the session record, an assigned session may synchronize saved credentials (keychain
+items, browser profiles/cookies, API keys) from the seat host to an enrolled fleet host
+under ALL of: (a) transport is an authenticated encrypted fleet channel (SSH/Tailscale) or
+an encrypted archive whose passphrase travels on that same channel; (b) secrets land only
+in the destination host's own protected stores (login keyring, Chrome profile directory,
+owner-only-mode credential files) — never as plaintext dumps, transcripts, prompts, logs, or
+world-readable files; (c) the destination host remains under fleet enrollment controls;
+(d) nothing is copied to third parties, unenrolled machines, or public surfaces. This ruling
+does not authorize vault export to external media, personal accounts, or non-fleet machines,
+and the Chairman may revoke it in writing at any time. A saved secret is not independent authority for account/security
 changes, spending, money movement, trading, production deployment, or other reserved actions.
 
 This instruction does not override OS/tool permissions, site controls, explicit access refusals,
@@ -236,7 +250,7 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
 - A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
 - If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
-- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge.
+- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge. Self-approve means an author-cast `APPROVED` review; self-merge means a direct or admin-bypassed merge of protected `master`. Enrolling one's own qualified Ready PR in native auto-merge or the merge queue is the permitted normal release path, not self-merging.
 - A disabled Executive Control service with an unreconciled protected result is a real action-scoped admission hold, not evidence that an archived original chat owns the project. Do not restart or replay the denied result; advance disjoint permitted work.
 - Apply ACTIVE_EXECUTION's "Prove an owner gate before using it to stop" before naming another owner as the only next action. Give the exact target, original-carrier effects, live writer/lease, denied or permitted action and addressable next step.
 - `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
