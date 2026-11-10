@@ -13,10 +13,12 @@ import sys
 import zipfile
 
 FILES = (
+    "integrations/session_bridge/t3_native_client.py",
     "integrations/session_bridge/t3_mission_brief.py",
     "integrations/session_bridge/t3_web_client.py",
     "integrations/session_bridge/t3_project_team.py",
     "integrations/session_bridge/t3_project_team_inventory.py",
+    "integrations/session_bridge/t3_project_team_results.py",
     "integrations/session_bridge/t3_project_team_cli.py",
 )
 

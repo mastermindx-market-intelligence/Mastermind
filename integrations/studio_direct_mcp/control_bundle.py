@@ -96,7 +96,23 @@ GO_REVIEW_SOURCE_FILES = (
     "ops/native_fabric/quota_continuity/source/go_shim.py",
     "ops/native_fabric/support_policy_status/reader.py",
 )
-CONTROL_FILES = (*REVIEW_CONTROL_FILES, *GO_REVIEW_SOURCE_FILES)
+# Preserve the exact 63-member captured Go closure for locked migration only.
+GO_REVIEW_CONTROL_FILES = (*REVIEW_CONTROL_FILES, *GO_REVIEW_SOURCE_FILES)
+# Retain the released native43 profile and each authenticated composition operand.
+FLEET_REVIEW_SOURCE_FILES = (
+    "ops/native_fabric/provider_plans/fleet_launch_repair/profile.json",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/remote_sub.sh.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/support_bundle.py.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/remote_sub.sh.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker_provider_memory.py",
+)
+CONTROL_FILES = (*GO_REVIEW_CONTROL_FILES, *FLEET_REVIEW_SOURCE_FILES)
 # Exact inert pre-control-bundle snapshots observed on the original M2 host.
 # These are NOT executable/source dependencies and confer no runtime authority.
 # Preserve them without admission of arbitrary pre-* names or changed content.
@@ -299,13 +315,14 @@ def _read_manifest(path: Path) -> dict:
     if not isinstance(value, dict) or set(value) != expected_keys or value.get("schema") != SCHEMA:
         raise Refusal("CONTROL_MANIFEST_INVALID")
     files = value.get("files")
-    # Legacy three/four and captured ten/thirteen-member identities remain observable
+    # Legacy three/four and captured ten/thirteen/63-member identities remain observable
     # for migration. New runtime admission requires the full reviewed source closure.
     if (not isinstance(files, dict)
             or frozenset(files) not in (frozenset(LEGACY_CONTROL_FILES),
                                        frozenset(STATUS_CONTROL_FILES),
                                        frozenset(CAPTURED_CONTROL_FILES),
-                                       frozenset(REVIEW_CONTROL_FILES), frozenset(CONTROL_FILES))):
+                                       frozenset(REVIEW_CONTROL_FILES), frozenset(GO_REVIEW_CONTROL_FILES),
+                                       frozenset(CONTROL_FILES))):
         raise Refusal("CONTROL_MANIFEST_INVALID")
     if any(not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest) for digest in files.values()):
         raise Refusal("CONTROL_MANIFEST_INVALID")
@@ -334,7 +351,8 @@ def _verify_locked(*, control_root: Path, launcher: Path) -> dict:
     _require_code_layout(
         root, manifest["files"], complete=True,
         allow_cache=frozenset(manifest["files"]) not in (
-            frozenset(CAPTURED_CONTROL_FILES), frozenset(REVIEW_CONTROL_FILES), frozenset(CONTROL_FILES)),
+            frozenset(CAPTURED_CONTROL_FILES), frozenset(REVIEW_CONTROL_FILES), frozenset(GO_REVIEW_CONTROL_FILES),
+                                       frozenset(CONTROL_FILES)),
     )
     observed = {}
     for name in manifest["files"]:
@@ -360,7 +378,8 @@ def verify(*, control_root: Path, launcher: Path) -> dict:
         # generation. Every captured cohort requires its existing lock.
         manifest = _read_manifest(root / "manifest.json")
         if frozenset(manifest["files"]) in (
-                frozenset(CAPTURED_CONTROL_FILES), frozenset(REVIEW_CONTROL_FILES), frozenset(CONTROL_FILES)):
+                frozenset(CAPTURED_CONTROL_FILES), frozenset(REVIEW_CONTROL_FILES), frozenset(GO_REVIEW_CONTROL_FILES),
+                                       frozenset(CONTROL_FILES)):
             raise Refusal("CONTROL_BUNDLE_LOCK_REQUIRED")
         observed = _verify_locked(control_root=root, launcher=launcher)
         identity = ("schema", "files", "launcherHash", "bundleDigest", "source")

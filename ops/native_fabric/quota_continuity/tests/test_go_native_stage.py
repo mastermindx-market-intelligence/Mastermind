@@ -148,6 +148,13 @@ def before_extended_host_pull_epoch(manifest):
             "c830ad60c191394c5aec80d6678801a1939a85dd08665fda20d16b096e95f818",
         "e917b89cf49a9bcc3a4d14e4fb264bb9459dd95d2d86dfbcece70b8e6a644467":
             "cacfba749a6ef6f5a8f905243aa7ef4f5423f7b1ebb1beb0e61c22f1b6d05e48",
+        # The qualified native_go_entry helper successor changes only that
+        # member of the two complete Go/HTTP images above. Retain both entry
+        # generations and bind the full before/after host-pull closures.
+        "873bd5ec7ec1d46a1850202f12b76dd5dd09b4e43c9e01bdae5e689794ac0f1b":
+            "3a85e0746bd228d6ebf4c0e57fea4e8e9c757449f2f6eb995cbb6694bc052d60",
+        "21abea132c329c159dfcb46069879ee90b8ca59bc450bd0ab0af9a227ac3d17d":
+            "87b59355de02f14f90261608179f3f520722f01a43ca77376cf8b750f01a32d7",
     }
     actual = g.digest((json.dumps(manifest, sort_keys=True, indent=2) + "\n").encode())
     assert actual in historical_by_current
@@ -155,6 +162,57 @@ def before_extended_host_pull_epoch(manifest):
     previous.update(builder.HOST_PULL_INTEGRITY_PREIMAGES)
     assert g.digest((json.dumps(previous, sort_keys=True, indent=2) + "\n").encode()) == historical_by_current[actual]
     return previous
+
+
+
+@pytest.mark.parametrize(
+    "extended,current_historical,legacy_historical",
+    [
+        ("application",
+         "3a85e0746bd228d6ebf4c0e57fea4e8e9c757449f2f6eb995cbb6694bc052d60",
+         "05cae94005dea8f568f79337520747d7b99c372bb880a5425fb13a888b75a273"),
+        ("http",
+         "87b59355de02f14f90261608179f3f520722f01a43ca77376cf8b750f01a32d7",
+         "fe17a36022001450c0ca2dba1bb98b7a3a7247f1cc8fbb0eea7079b6103ff06e"),
+    ],
+)
+def test_extended_historical_fixture_preserves_exact_entry_generations(
+    builds, extended, current_historical, legacy_historical,
+):
+    manifest = json.loads(
+        (getattr(builds, extended) / "native-manifest.json").read_bytes()
+    )
+    original = dict(manifest)
+
+    def manifest_digest(value):
+        return g.digest((json.dumps(value, sort_keys=True, indent=2) + "\n").encode())
+
+    assert manifest_digest(before_extended_host_pull_epoch(manifest)) == current_historical
+    assert manifest == original
+
+    legacy = dict(manifest)
+    legacy["ext/native_go_entry.py"] = (
+        "5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878"
+    )
+    legacy_before = dict(legacy)
+    assert manifest_digest(before_extended_host_pull_epoch(legacy)) == legacy_historical
+    assert legacy == legacy_before
+
+    foreign = dict(manifest)
+    foreign["ext/native_go_entry.py"] = "f" * 64
+    foreign_before = dict(foreign)
+    with pytest.raises(AssertionError):
+        before_extended_host_pull_epoch(foreign)
+    assert foreign == foreign_before
+
+    partial = builder.before_glm_application_core(manifest)
+    key, prior = next(iter(builder.HOST_PULL_INTEGRITY_PREIMAGES.items()))
+    assert partial[key] != prior
+    partial[key] = prior
+    partial_before = dict(partial)
+    with pytest.raises(AssertionError):
+        before_extended_host_pull_epoch(partial)
+    assert partial == partial_before
 
 
 @pytest.mark.parametrize("extended", ["application", "http"])
