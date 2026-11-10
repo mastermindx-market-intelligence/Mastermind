@@ -189,8 +189,13 @@ def ask_help(roster, my_agent_id):
 
 
 def build_message(identifier: str, title: str, body: str, op: str,
-                  link: str = None, asking: str = None) -> str:
+                  link: str = None, asking: str = None,
+                  notes: list = None) -> str:
     body = (body or "").strip()
+    if notes:
+        body += ("\n\nNotes the board wrote on the issue before you were "
+                 "woken (oldest first):\n\n"
+                 + "\n\n".join(f"- {note}" for note in notes))
     where = (f"Issue page (the board accepts or declines the answer there): "
              f"{link}\n\n") if link else ""
     how_to_ask = f"\n\n{asking}" if asking else ""
@@ -658,6 +663,22 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     return True
 
 
+def comment_rows(pc, issue):
+    """An issue's comments, oldest first. Paperclip lists them newest first,
+    so they are ordered here by their own timestamps; rows without one keep
+    the order they came in."""
+    try:
+        rows = pc.comments(issue["id"])
+    except CarrierError:
+        return []
+    if isinstance(rows, dict):
+        rows = rows.get("comments") or rows.get("rows") or []
+    rows = list(rows)
+    if rows and all(row.get("createdAt") for row in rows):
+        rows.sort(key=lambda row: row["createdAt"])
+    return rows
+
+
 def board_feedback(pc, issue):
     """Unaddressed board feedback on an in_review issue: (reason, comment).
 
@@ -666,8 +687,15 @@ def board_feedback(pc, issue):
     so pending present means the current round already answered the board.
     reason: the newest rejected request_confirmation's decline reason.
     comment: the newest USER comment posted after the last agent comment
-    (the board's note on the answer). None when nothing new awaits."""
+    (the board's note on the answer). None when nothing new awaits.
+
+    Feedback needs a declined answer: with no rejected confirmation nothing
+    was ever sent back, so a board comment on a task that has no answer yet
+    (a note left while assigning it, say) is not a revision round — the task
+    itself still has to reach the teammate; board_notes() carries the note.
+    A system notice is not the board speaking."""
     reason = None
+    rejected = False
     try:
         rows = pc.interactions(issue["id"])
     except CarrierError:
@@ -681,29 +709,38 @@ def board_feedback(pc, issue):
         if row.get("status") == "pending":
             pending = True
         elif row.get("status") == "rejected":
+            rejected = True
             text = ((row.get("result") or {}).get("reason") or "").strip()
             reason = text or reason
     if pending:
         return None  # the current round's delivery already answered the board
+    if not rejected:
+        return None  # no answer was declined: there is nothing to revise
     comment = None
-    try:
-        rows = pc.comments(issue["id"])
-    except CarrierError:
-        rows = []
-    if isinstance(rows, dict):
-        rows = rows.get("comments") or rows.get("rows") or []
     last_agent = -1
     newest_user = None
-    for idx, row in enumerate(rows):
-        if row.get("authorType", "agent") == "agent":
+    for idx, row in enumerate(comment_rows(pc, issue)):
+        kind = row.get("authorType", "agent")
+        if kind == "agent":
             last_agent = idx
-        elif idx > last_agent:
+            newest_user = None  # words from before this answer are not about it
+        elif kind == "user" and idx > last_agent:
             newest_user = row
     if newest_user is not None:
         comment = (newest_user.get("body") or "").strip() or None
     if reason or comment:
         return reason, comment
     return None
+
+
+def board_notes(pc, issue, limit=5, max_chars=2000):
+    """What the board wrote on an issue that has no answer yet: the bodies of
+    its user comments, oldest first, newest `limit` kept. They go into the
+    first task message so a note left while assigning is not lost."""
+    mine = [row for row in comment_rows(pc, issue)
+            if row.get("authorType") == "user"
+            and (row.get("body") or "").strip()]
+    return [row["body"].strip()[:max_chars] for row in mine[-limit:]]
 
 
 def handle_feedback(pc, t3, issue, opts):
@@ -747,6 +784,12 @@ def handle_feedback(pc, t3, issue, opts):
             message += f"\nDecline reason: \"{reason}\"\n"
         if comment:
             message += f"\nThe board wrote on the issue:\n\n{comment}\n"
+        if scan_marker(messages, op)[0] is None:
+            # The task itself is not in the thread the teammate can see (it
+            # was never sent here, or it has scrolled out of what the server
+            # returns): a revision without the task cannot be answered.
+            message += (f"\nThe task, in full:\n\n{issue.get('title') or ''}"
+                        f"\n\n{(issue.get('description') or '').strip()}\n")
         message += ("\nSend a corrected final answer. Your reply to this "
                     "message is posted as the issue comment and re-enters "
                     "review.")
@@ -882,7 +925,8 @@ def run_carrier(pc, t3_factory, opts):
                 # An asked teammate answers; it does not pass the ask on.
                 asking=None if ask_child_op(issue.get("description") or "")
                 else ask_help(opts.get("roster"),
-                              os.environ.get("PAPERCLIP_AGENT_ID")))
+                              os.environ.get("PAPERCLIP_AGENT_ID")),
+                notes=board_notes(pc, issue))
             log(f"sending {op} to thread {thread_id}")
             result = t3.send(message)
             reply = result.get("reply") or ""

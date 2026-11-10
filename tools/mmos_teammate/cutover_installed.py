@@ -8,6 +8,10 @@ The agent's earlier run command is saved first and `rollback` puts it back.
     cutover_installed.py check    <spec.json>   read only: is it safe to move?
     cutover_installed.py apply    <spec.json>   save the old setup, then move
     cutover_installed.py rollback <spec.json>   put the saved setup back
+    cutover_installed.py refresh-carrier <spec.json>
+                                  install this checkout's carrier file for an
+                                  agent that is already moved (the file is
+                                  shared, so this updates every moved agent)
 
 One agent per spec, on purpose: agents are moved one at a time. Nothing here
 creates an agent, a company, an issue or a wake. The principal runs this; a
@@ -247,12 +251,48 @@ def cmd_rollback(spec):
     return 0
 
 
+def cmd_refresh_carrier(spec):
+    """Replace the installed carrier file with this checkout's copy.
+
+    `apply` refuses while the agent has open work, which is right for a move
+    and wrong for a carrier fix: a task waiting on the board would block the
+    fix forever. The file is read once when a run starts, and it is swapped in
+    one rename, so a run sees the old file or the new one, never half of each.
+    It still refuses while any run of the company is live, so no task is
+    started by one version and finished by another."""
+    http = Http(spec["paperclip_base"])
+    agent, _, live = read_state(http, spec)
+    carrier_path, _ = carrier_paths(spec)
+    if not is_ours(agent, carrier_path):
+        die(f"{agent.get('name')} does not run the carrier at {carrier_path}; "
+            "use `apply` to move it")
+    if live:
+        die(f"{len(live)} run(s) are live in this company; wait for them to end")
+    source = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "wake_carrier.py")
+    before = sha256_file(carrier_path) if os.path.exists(carrier_path) else None
+    after = sha256_file(source)
+    if before != after:
+        staged = f"{carrier_path}.new-{os.getpid()}"
+        shutil.copyfile(source, staged)
+        os.replace(staged, carrier_path)
+    print(json.dumps({
+        "carrierPath": carrier_path, "sha256Before": before,
+        "sha256After": sha256_file(carrier_path), "changed": before != after,
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=2))
+    return 0
+
+
+COMMANDS = {"check": cmd_check, "apply": cmd_apply, "rollback": cmd_rollback,
+            "refresh-carrier": cmd_refresh_carrier}
+
+
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in ("check", "apply", "rollback"):
-        die("usage: cutover_installed.py check|apply|rollback <spec.json>")
+    if len(sys.argv) != 3 or sys.argv[1] not in COMMANDS:
+        die("usage: cutover_installed.py check|apply|rollback|refresh-carrier "
+            "<spec.json>")
     spec = json.load(open(sys.argv[2]))
-    return {"check": cmd_check, "apply": cmd_apply,
-            "rollback": cmd_rollback}[sys.argv[1]](spec)
+    return COMMANDS[sys.argv[1]](spec)
 
 
 if __name__ == "__main__":

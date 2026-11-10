@@ -979,3 +979,94 @@ def test_reject_reaches_the_inbox_path_as_feedback():
     keys = [c[2] for c in pc.calls if c[0] == "interaction"]
     assert keys == [f"{op}-rev1-confirm"]
     assert pc.issues["is-1"]["status"] == "in_review"
+
+
+# --- a board note on a task with no answer yet is not a revision round ------
+# (found on the installed app, MAS-9, 2026-11-10: a task moved to a teammate
+# with a board comment reached it as "the board declined the current answer",
+# without the task text)
+
+def test_board_comment_before_any_answer_is_not_feedback():
+    issues = feedback_issue()
+    issues["is-1"]["status"] = "todo"
+    pc = FakePaperclip(issues=issues)
+    pc.comment_rows["is-1"] = [
+        {"body": "moved here from another teammate", "authorType": "user"}]
+    pc.interaction_rows = []
+    assert wc.board_feedback(pc, pc.issue("is-1")) is None
+    t3 = FakeT3(replies=["three lines"])
+    assert run(pc, t3) == 0
+    op = fb_op()
+    assert len(t3.sends) == 1 and f"[{op}]\n" in t3.sends[0]
+    assert "-rev1" not in t3.sends[0]
+    assert "Write a three-line summary." in t3.sends[0]   # the task itself
+    assert "moved here from another teammate" in t3.sends[0]  # and the note
+    assert "declined" not in t3.sends[0]
+
+
+def test_system_notice_is_not_board_feedback():
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "Automatic recovery blocked", "authorType": "system"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": ""}}]
+    assert wc.board_feedback(pc, pc.issue("is-1")) is None
+    assert wc.board_notes(pc, pc.issue("is-1")) == []
+
+
+def test_board_notes_keep_order_and_cap():
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "second", "authorType": "user", "createdAt": "2026-11-10T02"},
+        {"body": "first", "authorType": "user", "createdAt": "2026-11-10T01"},
+        {"body": "agent words", "authorType": "agent",
+         "createdAt": "2026-11-10T03"},
+        {"body": "x" * 5000, "authorType": "user", "createdAt": "2026-11-10T04"}]
+    notes = wc.board_notes(pc, pc.issue("is-1"))
+    assert notes[:2] == ["first", "second"] and len(notes[2]) == 2000
+    assert wc.board_notes(pc, pc.issue("is-1"), limit=1) == ["x" * 2000]
+
+
+def test_feedback_reads_comments_newest_first_as_paperclip_lists_them():
+    # the installed app returns comments newest first; the board's words on
+    # the declined answer are the ones AFTER the agent's answer in time
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "use lines, not words", "authorType": "user",
+         "createdAt": "2026-11-10T22:09:00Z"},
+        {"body": "answer v1", "authorType": "agent",
+         "createdAt": "2026-11-10T22:07:00Z"},
+        {"body": "note from before the answer", "authorType": "user",
+         "createdAt": "2026-11-10T22:05:00Z"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "wrong unit"}}]
+    assert wc.board_feedback(pc, pc.issue("is-1")) == (
+        "wrong unit", "use lines, not words")
+    # with no comment after the answer, the old note is not quoted as feedback
+    pc.comment_rows["is-1"] = pc.comment_rows["is-1"][1:]
+    assert wc.board_feedback(pc, pc.issue("is-1")) == ("wrong unit", None)
+
+
+def test_revision_carries_the_task_when_the_thread_never_had_it():
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "you never got the task"}}]
+    t3 = FakeT3(replies=["three lines"])        # empty thread: no [op] marker
+    assert run_bound(pc, t3) == 0
+    assert "Write a three-line summary." in t3.sends[0]
+    assert t3.sends[0].count("[pc-") == 1       # still one marker, the rev one
+    # when the task is in the thread it is not repeated
+    pc2 = FakePaperclip(issues=feedback_issue())
+    pc2.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
+    pc2.interaction_rows = [dict(pc.interaction_rows[0])]
+    t3b = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+                           ("assistant", "r1", "answer v1")],
+                 replies=["answer v2"])
+    assert run_bound(pc2, t3b) == 0
+    assert "Write a three-line summary." not in t3b.sends[0]
