@@ -1,4 +1,4 @@
-"""One measured placement delta; the canonical resolver/coverage owner stays."""
+"""One measured placement table; the canonical resolver/coverage owner stays."""
 import hashlib
 import json
 from pathlib import Path
@@ -9,41 +9,58 @@ from scripts import ci_pytest as cip
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'tests/test_hermes_primary_application_enrollment.py'
-HISTORICAL = 'eb8af32eaaab6403554719ca32fe7e0fa495fd92ba081badcc2f5e688474c2c2'
+# CI Lightning F3 re-derivation, measured on exact merge-group run 42708053350:
+# the 150 slowest measured included modules are pinned longest-processing-time-
+# first over overhead-aware starting loads, and TARGET keeps its hermes-forward
+# pin on shard 4. Any table change requires new evidence and this hash to move.
+F3_EVIDENCE = 'ci/shard_timings/42708053350.json'
+F3_SOURCE_RUN = 42708053350
+F3_TABLE_SHA256 = '7b298530d545a62576288712ecdef21b57108b918fc0d37d5d690cfb0b4f1521'
+LEGACY_HERMES_FORWARD_SHA256 = 'eb8af32eaaab6403554719ca32fe7e0fa495fd92ba081badcc2f5e688474c2c2'
 
 
 def positions(shards):
     return {path: index for index, shard in enumerate(shards) for path in shard}
 
 
-def historical_pins():
-    pins = {path: shard for path, shard in cip._MEASURED_SIX_JOB_PLACEMENT.items() if path != TARGET}
+def pinned_table():
+    pins = dict(cip._MEASURED_SIX_JOB_PLACEMENT)
     canonical = json.dumps(pins, sort_keys=True, separators=(',', ':')).encode()
-    assert len(pins) == 150 and hashlib.sha256(canonical).hexdigest() == HISTORICAL
+    assert len(pins) == 151 and hashlib.sha256(canonical).hexdigest() == F3_TABLE_SHA256
     return pins
+
+
+def check_f3_contract(included):
+    pins = pinned_table()
+    evidence = json.loads((ROOT / F3_EVIDENCE).read_text())
+    assert evidence['source_run'] == F3_SOURCE_RUN
+    assert evidence['pinned_modules'] == len(pins)
+    # The LPT pins are exactly the 150 slowest measured included modules
+    # (deterministic tie-break); TARGET is not among them and keeps shard 4.
+    included_set = set(included)
+    measured = {
+        path: seconds for path, seconds in evidence['modules'].items()
+        if path in included_set and path != TARGET
+    }
+    slowest = sorted(measured.items(), key=lambda item: (-item[1], item[0]))[:150]
+    assert {path for path in pins if path != TARGET} == {path for path, _ in slowest}
+    assert pins[TARGET] == 4
+    shards = cip.partition_modules(included, jobs=6)
+    cip.verify_partition(included, shards)
+    placed = positions(shards)
+    assert sorted(placed) == sorted(included)
+    assert all(placed[path] == shard for path, shard in pins.items())
+    return placed
 
 
 def hashed(path, jobs):
     return int.from_bytes(hashlib.sha256(path.encode()).digest()[:8], 'big') % jobs
 
 
-def check_forward_contract(included):
-    prior = historical_pins()
-    before = {path: prior.get(path, hashed(path, 6)) for path in included}
-    shards = cip.partition_modules(included, jobs=6)
-    cip.verify_partition(included, shards)
-    after = positions(shards)
-    assert sorted(path for path in included if before[path] != after[path]) == [TARGET]
-    assert before[TARGET] == 0 and after[TARGET] == 4
-    assert sorted(path for shard in shards for path in shard) == sorted(included)
-    assert len(after) == len(included)
-    return after
-
-
-def test_canonical_plan_moves_only_measured_hermes_module_and_covers_every_module_once():
+def test_canonical_plan_pins_measured_slowest_and_covers_every_module_once():
     included = cip.resolve_gate(ROOT)['included']
     assert TARGET in included
-    check_forward_contract(included)
+    check_f3_contract(included)
 
 
 @pytest.mark.parametrize('jobs', [1, 2, 3, 4, 5, 8])
@@ -58,22 +75,22 @@ def test_forward_pin_cannot_change_other_job_counts(jobs):
 
 def test_new_module_does_not_reshuffle_existing_assignments():
     included = cip.resolve_gate(ROOT)['included']
-    before = check_forward_contract(included)
+    before = check_f3_contract(included)
     extended = tuple(sorted((*included, 'tests/test_future_forward_pin_fixture.py')))
     after = positions(cip.partition_modules(extended, jobs=6))
     assert all(after[path] == index for path, index in before.items())
 
 
-@pytest.mark.parametrize('mutation', ['historical-value', 'unrelated-pin'])
+@pytest.mark.parametrize('mutation', ['table-value', 'unrelated-pin'])
 def test_unapproved_additional_placement_changes_are_detected(monkeypatch, mutation):
     pins = dict(cip._MEASURED_SIX_JOB_PLACEMENT)
-    if mutation == 'historical-value':
+    if mutation == 'table-value':
         path = next(iter(pins)); pins[path] = (pins[path]+1) % 6
     else:
         pins['tests/test_unrelated_future_module.py'] = 1
     monkeypatch.setattr(cip, '_MEASURED_SIX_JOB_PLACEMENT', pins)
     with pytest.raises(AssertionError):
-        historical_pins()
+        pinned_table()
 
 
 def test_retained_evidence_is_partial_and_does_not_claim_measured_speedup():
@@ -83,4 +100,4 @@ def test_retained_evidence_is_partial_and_does_not_claim_measured_speedup():
     assert value['observation']['module'] == TARGET and value['observation']['cases_finished'] == 44
     assert value['retention']['truncated'] is True and value['retention']['summary_rows'] == 256
     assert value['whole_run_speedup_measured'] is False
-    assert value['historical_map_sha256'] == HISTORICAL
+    assert value['historical_map_sha256'] == LEGACY_HERMES_FORWARD_SHA256
