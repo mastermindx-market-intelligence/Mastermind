@@ -37,6 +37,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Classify integrated source diff using protected base code
         id: scope
         env:
@@ -89,6 +92,10 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
       - name: Verify exact changed source without executing untrusted PR text
         env:
           PR_BASE_SHA: ${{ needs.pr_scope.outputs.source_base }}
@@ -97,11 +104,6 @@ jobs:
           set -euo pipefail
           git diff --check "$PR_BASE_SHA...$PR_HEAD_SHA"
           python -m compileall -q scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py
-      - uses: actions/setup-python@v5
-        if: ${{ needs.pr_scope.outputs.mode == 'smoke' }}
-        with:
-          python-version: "3.12"
-          cache: pip
       # Source-proximate web tests import app.deps through the real application.
       # Supply the same immutable engine/lib source as the full-shard job;
       # no runtime data, new credential policy or alternate dependency owner.
