@@ -576,7 +576,10 @@ def test_ask_replay_creates_no_second_child():
                                          "title": "Summarize file X",
                                          "description": "Write a three-line summary."}})
     pc2.child_rows = pc.child_rows
-    t3.messages_store = [("user", "r1", "task"), ("assistant", "r1", ASK_REPLY)]
+    pc2.comment_rows = {"is-1": [{"body": ASK_REPLY}]}  # first run posted it
+    real_op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    t3.messages_store = [("user", "r1", f"[{real_op}] task"),
+                         ("assistant", "r1", ASK_REPLY)]
     assert run_with_roster(pc2, t3, roster) == 0
     assert [c for c in pc2.calls if c[0] == "create_issue"] == []
     assert [c for c in pc2.calls if c[0] == "block"] == []
@@ -702,3 +705,35 @@ def test_ask_child_delivers_done_without_board_confirmation():
     # done so the asker's issue_blockers_resolved wake can fire
     assert "comment" in kinds and "interaction" not in kinds
     assert pc.issues["is-1"]["status"] == "done"
+
+
+def test_resumed_parent_after_children_completed_runs_return():
+    # Paperclip's issue_children_completed wake may move the parent out of
+    # blocked before the asker's run starts; the done child is the signal
+    issues, ask_op, child = blocked_parent_with_done_child()
+    issues["is-1"]["status"] = "in_progress"
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["ch-1"] = [{"body": "t45_beta.txt has 30 lines"}]
+    t3 = FakeT3(replies=["FINAL: 30 lines"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1 and f"[{ask_op}-ret]" in t3.sends[0]
+    assert "30 lines" in t3.sends[0]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_blocked_parent_with_pending_child_reconciles_ask_not_return():
+    issues, _, child = blocked_parent_with_done_child()
+    real_op = wc.op_id("is-1", "Report the line count\nAsk an engineer for the count.")
+    ask_op = f"{real_op}-ask"  # the marker handle_ask actually matches
+    child["status"] = "todo"  # the teammate has not finished yet
+    child["description"] = f"Run wc -l.\n\nAsked by Mira on MMO-1 [{ask_op}]"
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    # the ask reply is already in the thread (marker rule reconciles it)
+    real_op = wc.op_id("is-1", "Report the line count\nAsk an engineer for the count.")
+    t3 = FakeT3(messages=[("user", "r1", f"[{real_op}] task"),
+                          ("assistant", "r1", ASK_REPLY)])
+    assert run_with_roster(pc, t3, {"Atlas-TEST": "ag-atlas"}) == 0
+    assert t3.sends == []  # no return send while the child is not done
+    assert [c for c in pc.calls if c[0] == "create_issue"] == []

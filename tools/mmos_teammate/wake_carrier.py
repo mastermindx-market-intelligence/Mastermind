@@ -639,19 +639,22 @@ def run_carrier(pc, t3_factory, opts):
         f"activeRun={active_run_id(row) or 'none'}")
 
     try:
-        if issue.get("status") == "blocked":
-            # The issue_blockers_resolved wake: every blocker reached done.
-            ask_op = None
-            for row in pc.children(issue["id"]):
-                marker = ask_child_op(row.get("description") or "")
-                if marker:
-                    ask_op = marker
-                    break
-            if ask_op:
-                return handle_return(pc, t3, issue, ask_op, opts)
+        ask_children = [row for row in pc.children(issue["id"])
+                        if ask_child_op(row.get("description") or "")]
+        if issue.get("status") == "blocked" and not ask_children:
             log(f"blocked issue {issue.get('identifier')} has no ask child; "
                 "leaving it for a person")
             return 0
+        if ask_children and all(row.get("status") == "done"
+                                for row in ask_children):
+            # The return edge: every ask child reached done, so this build
+            # woke the asker (issue_blockers_resolved / issue_children_
+            # completed — the latter may have resumed the parent out of
+            # blocked already; the children, not the status, are the signal).
+            return handle_return(pc, t3, issue,
+                                 ask_child_op(ask_children[0]
+                                              .get("description") or ""),
+                                 opts)
         content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
         op = op_id(issue["id"], content)
         state, existing = scan_marker(t3.messages()[1], op)
