@@ -183,3 +183,22 @@ def test_malformed_private_values_always_have_fixed_errors(spec, env, kind):
     with pytest.raises(binding.LaunchCredentialError) as caught:
         binding.validate(spec, payload)
     assert 'secret-é' not in str(caught.value)
+
+
+@pytest.mark.parametrize('scheme,default_port', [('http', 80), ('https', 443)])
+def test_same_origin_accepts_only_omitted_default_port_equivalence(spec, env, scheme, default_port):
+    env['ORCH_URL'] = f'{scheme}://orchestrator.invalid'
+    env['ORCH_TOOLS_URL'] = f'{scheme}://orchestrator.invalid:{default_port}/mcp'
+    values, context, _public = binding.validate(spec, binding.collect(spec, env))
+    assert values['ORCH_API_KEY'] == env['ORCH_API_KEY']
+    assert context['ORCH_TOOLS_URL'] == env['ORCH_TOOLS_URL']
+
+
+@pytest.mark.parametrize('scheme,default_port', [('http', 80), ('https', 443)])
+@pytest.mark.parametrize('zero_side', ['ORCH_URL', 'ORCH_TOOLS_URL'])
+def test_same_origin_does_not_treat_explicit_zero_as_default(spec, env, scheme, default_port, zero_side):
+    env['ORCH_URL'] = f'{scheme}://orchestrator.invalid:{default_port}'
+    env['ORCH_TOOLS_URL'] = f'{scheme}://orchestrator.invalid:{default_port}/mcp'
+    env[zero_side] = f'{scheme}://orchestrator.invalid:0'
+    with pytest.raises(binding.LaunchCredentialError, match='launch_credentials_endpoint_mismatch'):
+        binding.collect(spec, env)

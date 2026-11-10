@@ -112,19 +112,29 @@ contracts were regenerated from their canonical owner during qualification.
 
 | Verification | Result |
 | --- | --- |
-| Generic credential/lease behavior | 15 passed |
+| Generic credential/lease behavior | 21 passed |
 | Native creation, plugin registration, finite execution, startup privacy | 34 passed |
 | Real dispatch, terminal/snapshot, nested scope and logging privacy | 7 passed |
 | Existing manifest and plugin-host/provider-auth compatibility | 48 passed |
 | Existing gateway CLI compatibility | 14 passed |
 | Generated gateway contract and profile-history checks | 4 passed |
-| Total native qualification on the composed source | 122 passed |
+| Total native qualification on the composed source | 128 passed |
 | Mastermind manifest/edge contract and readiness fixtures | 16 passed |
+| Exact HTTPS-token review and guard regressions | 15 passed |
 
-The final 122 distinct cases use 88 unchanged passing cases from the main
-qualification plus the affected gateway file's focused rerun (34 passes).
-That rerun corrected a fixture's assumption about native metadata traversal
-count; the privacy refusal already worked. No duplicate cases are added.
+The final 128 distinct native cases use 66 unchanged compatibility checks plus
+62 credential, gateway and tool cases rerun after the exact-origin repair.
+Six new cases establish omitted/default-port equivalence and refusal when either
+endpoint specifies port zero against a default-port peer. All four zero-port
+cases failed on the old expression before the repair; only an omitted port now
+receives the scheme default. Earlier duplicate passes are not counted.
+
+Hosted CI exposed the standard HTTPS literal to D8's identity/topology guard.
+The existing test-owned review table now pins this one token to the exact path,
+complete source hash and typed token position. Fifteen regression cases preserve
+missing/different postimage refusal, numeric/context/byte drift, added identities,
+diff/postimage mismatch and restoration of the finding when the entry is removed.
+The generic scanner and protected template assertions are unchanged.
 
 The earlier broader compatibility run recorded 144 passes and six platform
 skips. Its three `test_session_client_env.py` failures reproduced on the untouched
@@ -163,10 +173,11 @@ acceptance.
 Publish through the existing source controls. Compose against the actual installed
 source in an owned artifact; preserve existing dirty changes. Before application,
 verify all before-hashes and the current native gateway identity, writer custody
-and active work. The recorded 04:34:02 UTC observation has eight active units
-(four chats, one in-process cron job, three managed units), including an unsafe
-cron marked wedged; this is not quiescence proof. Use the incumbent lifecycle owner only after its work is safe to
-drain. Do not use a whole-source auto-stash/update as a file installer, hot-patch
+and active work. The recorded 04:58:56 UTC observation has nineteen active units
+(nine chats, four in-process cron jobs, six managed units). All four crons are
+restart-unsafe and none is marked wedged. The earlier long-running CEO execution
+completed and delivered at 04:58:19 UTC and must not be replayed. Use the incumbent
+lifecycle owner only after current work is safe to drain. Do not use a whole-source auto-stash/update as a file installer, hot-patch
 running imports, or start a second gateway.
 
 After the core capability is installed and read back, install/enable the plugin

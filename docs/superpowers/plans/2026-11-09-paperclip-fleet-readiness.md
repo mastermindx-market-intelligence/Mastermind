@@ -117,8 +117,9 @@ seconds. No duplicate restart was issued.
 
 All 13 configurations were audited after restart at
 `2026-11-10T02:24:09.049628Z`. Browser roster also confirms the same profiles
-and models. Cold power-loss/login recovery, backup restore and restart during
-active work were not exercised. Host AC sleep/automatic-power-restart settings
+and models. The exact database archive was later restored in an isolated native
+rehearsal; see the recovery evidence below. Cold power-loss/login recovery and
+restart during active work were not exercised. Host AC sleep/automatic-power-restart settings
 were inspected and already suitable; they were not changed.
 
 ## Original task and reconciled effects
@@ -193,7 +194,7 @@ First support is local/in-process only; managed/remote/background/delegated
 credential execution refuses. No credential extension is installed yet.
 
 The actual installed-source composition preserves 85 changed/new source files.
-Qualification passes 122 native tests (56 focused credential tests plus
+Qualification passes 128 native tests (62 focused credential tests plus
 66 existing plugin, CLI and contract checks). Both generated contract preimages
 were reproduced exactly from their unmodified canonical inputs, then regenerated
 with the extension. Six Paperclip edge-contract checks and ten readiness fixtures
@@ -208,13 +209,38 @@ same-origin MCP URL, and separate persistent identity key withheld from private
 payload and child environments. Managed identity signing is not provided by this
 extension. The plugin does not replace provider, memory or lifecycle custody.
 
-Fresh native lifecycle evidence at 04:34:02 UTC observed PID 22139, instance
-`0b628416e12b45ca93ac7dcd7a299844`, epoch 7, source ba4ddf, with eight active work
-units: four chats, one in-process cron job and three managed units. One unsafe
-cron is marked wedged; native restart waiting may exclude it and cannot be used
-as evidence that all work has settled. This supersedes the old
-Hermes PID/boot observation. Native active work and installed-source custody are
+Native lifecycle evidence at 04:58:56 UTC observed PID 22139, instance
+`0b628416e12b45ca93ac7dcd7a299844`, epoch 7, source ba4ddf, with nineteen active
+units: nine chats, four in-process cron jobs and six managed units. All four crons
+are restart-unsafe and not wedged. The earlier CEO execution completed and
+delivered at 04:58:19 UTC; preserve that terminal result. This supersedes the
+old eight-unit snapshot and Hermes PID/boot observation. Native active work and installed-source custody are
 real release boundaries; no restart or live core overwrite has been performed.
+
+## Recovery and boot evidence — 2026-11-10
+
+The original SQL archive passed an isolated native restore at 04:47:42 UTC:
+301 public tables, 373 applied/journal migrations, no pending migrations,
+invalid indexes or unvalidated constraints, and all thirteen current identities.
+The temporary cluster was reclaimed and production health/listeners were
+preserved. This is database-only recovery proof, not a file/key restoration.
+
+The configured Time Machine destination volume is absent; its exact UUID lookup
+reports no disk. Automatic backup is disabled. Inclusion of Paperclip's master
+key and local-storage directory is configured, but no usable completed backup
+was found. Recover the existing destination or resolve its replacement before
+claiming recoverability of those filesystem dependencies. The Paperclip service
+runs in gui/501; FileVault is on and no automatic-login user is configured.
+Cold boot requires the existing unlock/login path and remains untested.
+
+CI on the first credential head exposed one HTTPS default-port literal to the
+existing identity/topology guard. The repair uses the existing complete-source
+hash and exact-token review mechanism with fifteen adversarial guard tests;
+scanner policy and protected templates are unchanged. The same review found and
+fixed explicit port zero being collapsed to the scheme default. Four native
+negative cases failed before the repair and all six new origin cases now pass.
+The regenerated twenty-five-file patch passed `git apply --check` at 05:10:05
+UTC with no target or captured-source drift; it remains unapplied.
 
 ## Source qualification and DO_NOT_REDO
 

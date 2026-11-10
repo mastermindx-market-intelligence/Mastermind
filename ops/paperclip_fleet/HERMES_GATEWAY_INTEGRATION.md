@@ -73,8 +73,12 @@ required Capacity Fabric receipt or memory marker.
 Hermes qualification starts at
 `ba4ddf9945a213ede9dda016602a86591ed634f9` and carries the actual installed
 source's 85 changed/new files. The native PM and `scripts/run_tests.sh` produced
-122 passes: 56 credential tests plus 66 existing plugin, CLI and contract
-checks. All 16 Mastermind Paperclip contract/readiness fixtures pass separately.
+128 passes: 62 credential tests plus 66 existing plugin, CLI and contract
+checks. The origin repair preserves explicit port zero instead of treating it as
+an omitted default; all four negative regressions failed on the old code.
+All 16 Mastermind Paperclip contract/readiness fixtures and 15 exact-token guard
+regressions pass separately. The existing hash/token-bound D8 review mechanism
+classifies only the reviewed HTTPS default literal; scanner policy is unchanged.
 
 Native `scripts/check` remains failed on 3 footgun and 13 Ruff findings that
 reproduce identically on the installed baseline. The other 12 checks pass;
@@ -92,9 +96,10 @@ those changes into qualification. The builder is not an installer. Do not
 overwrite, reset, stash or silently release unrelated changes.
 
 Fresh native active-work evidence supersedes stale PID observations. At
-04:34:02 UTC the gateway had eight active work units: four chats, one in-process
-cron job and three managed units. One unsafe cron is marked wedged. Native
-restart waiting may exclude wedged work and is not quiescence proof. There is no unconditional non-interrupting deferred
+04:58:56 UTC the gateway had nineteen active work units: nine chats, four
+in-process cron jobs and six managed units. All four crons were restart-unsafe
+and none was wedged. The earlier CEO execution completed/delivered at 04:58:19
+UTC. Native restart waiting is not quiescence proof. There is no unconditional non-interrupting deferred
 patch/restart owner. Preserve current work and use the existing source custody,
 drain and guarded restart owners only when the finite cutover is ready.
 

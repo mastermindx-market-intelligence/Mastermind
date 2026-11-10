@@ -145,7 +145,10 @@ def _url_origin(value):
         if (url.scheme not in {'http', 'https'} or not url.hostname
                 or url.username is not None or url.password is not None or url.fragment or url.query):
             _fail('invalid_launch_credentials_context')
-        return url.scheme, url.hostname.lower(), url.port or (443 if url.scheme == 'https' else 80)
+        port = url.port
+        if port is None:
+            port = 443 if url.scheme == 'https' else 80
+        return url.scheme, url.hostname.lower(), port
     except ValueError:
         _fail('invalid_launch_credentials_context')
 

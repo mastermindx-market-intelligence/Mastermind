@@ -123,13 +123,32 @@ the restart report and actual health before any retry.
 
 The fresh pre-cutover database backup was
 `paperclip-20261109-181411.sql.gz` (365,501 bytes) under the instance backup
-directory. Existing hourly/30-day policy was preserved. Restore into a separate
-test instance was not exercised; do not claim disaster-recovery proof.
+directory. Existing hourly/30-day policy was preserved. At 04:47:42 UTC the exact
+archive passed complete gzip reading and native restoration into a newly created
+empty sibling database on an isolated temporary cluster: 301 public tables,
+373 applied/journal migrations, zero pending migrations, zero invalid indexes
+and zero unvalidated constraints. All thirteen current agent identities and the
+existing company matched. One retained terminated agent is excluded by native
+list semantics. Temporary process, listener and directory were reclaimed;
+production health/listeners and the original archive hash were unchanged.
+
+This is database-only recovery proof. The local encrypted-secrets provider also
+requires the same `secrets/master.key`, and local objects live in `data/storage`.
+Both paths are included by the existing Time Machine configuration, but no
+completed backup covering them is available. The configured volume UUID
+`F9E6A707-17C6-40E6-A83D-42519F1D1A1D` is absent from connected disk inventory;
+its exact native lookup reports `Could not find disk`. Automatic Time Machine
+backups are disabled. Existing Hermes/Executive backup owners do not establish
+Paperclip file/key coverage. Recover the existing destination, or resolve a
+replacement through the existing backup owner, before claiming file/key restore.
+No key contents were read or copied during this diagnosis.
 
 Host AC sleep was already disabled and automatic restart after power loss was
 already enabled. Those power settings were inspected, not changed. The service
-is a user LaunchAgent; cold boot/login and physical-power-loss recovery have not
-been tested.
+is a user LaunchAgent in `gui/501`. FileVault is on and no automatic-login user
+is configured; availability therefore follows the existing unlock/login path.
+Cold boot/login and physical-power-loss recovery have not been tested. No login,
+encryption or service-scope settings were changed.
 
 Useful existing surfaces:
 
@@ -174,7 +193,7 @@ backend or lifecycle queue.
 
 The first release supports local/in-process finite execution and refuses
 unsupported managed/remote/background/delegated credential scope. Base-source
-qualification is superseded by 122 passing native tests on the exact installed
+qualification is superseded by 128 passing native tests on the exact installed
 source composition, preserving 85 existing changed/new source files and generated
 contract inputs. Six edge-contract and ten readiness fixtures pass separately.
 The full native source check still fails on the same 3 footgun and 13 Ruff
@@ -186,9 +205,11 @@ one-hour runtime-tools token. It excludes the persistent agent-identity private
 key from launch payload and child environments; identity signing is not provided.
 
 The current gateway identity and work inventory must be read from native
-lifecycle control. The 04:34:02 UTC observation found eight active work units,
-including one in-process cron job marked unsafe and wedged. Native
-restart waiting must not be mistaken for proof that this work has settled. No source overwrite, drain or
+lifecycle control. The 04:58:56 UTC observation found nineteen active work units:
+nine chats, four in-process crons and six managed units. All four crons were
+restart-unsafe and not wedged. The earlier CEO execution completed/delivered at
+04:58:19 UTC; do not replay it. Native restart waiting is not proof that current
+work has settled. No source overwrite, drain or
 Hermes restart has been performed by this operation. Preserve that work and use
 the incumbent guarded lifecycle when the concrete finite cutover is ready.
 
