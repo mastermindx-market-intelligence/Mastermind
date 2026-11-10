@@ -7,6 +7,13 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Immutable native startup addon: this context operand bounds diagnostic
+    # detail, not an account or routing identity. Review exactly one token;
+    # every other byte remains visible and any source drift restores the guard.
+    'integrations/paperclip_hermes/native-startup-recovery.patch': {
+        'sha256': '3ecbaed255c705132f350735934b6d6b7935408a1e02e1f2b4a36b1a99c87910',
+        'sites': ((163, 41, 44, 'int', '500'),),
+    },
     # Exact captured GLM-helper fixture: HTTPError(code=...) response statuses.
     # No account/principal identity is masked; any byte drift exposes all sites.
     'ops/native_fabric/quota_continuity/tests/fixtures/glm_helper_531198.py': {
