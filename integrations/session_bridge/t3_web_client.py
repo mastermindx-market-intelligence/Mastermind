@@ -191,7 +191,11 @@ class T3CliClient:
                     modifying: bool = False, request_id: str = "read",
                     thread_id: str | None = None) -> Any:
         try:
-            result = self.runner(CliInvocation((self.executable, "thread", *args), stdin))
+            # Native startup warnings can otherwise be written before --json
+            # output. Ask the actual CLI for error-only logging; never strip or
+            # guess a JSON object from a possibly ambiguous modifying reply.
+            result = self.runner(CliInvocation(
+                (self.executable, "thread", *args, "--log-level", "error"), stdin))
             if inspect.isawaitable(result):
                 result = await result
             if (type(result) is not CliResult or type(result.returncode) is not int
@@ -208,6 +212,7 @@ class T3CliClient:
             raise NativeUnavailable("native observation unavailable") from None
 
     async def list_threads(self, project_id: str) -> tuple[Mapping[str, Any], ...]:
+        """Native CLI root inventory; its current implementation excludes subagents."""
         project = _identity(project_id, "project_id")
         value = await self._call(("list", "--project", project, "--json"))
         if (type(value) is not list or len(value) > 1000
