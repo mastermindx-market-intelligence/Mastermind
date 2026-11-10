@@ -457,3 +457,7 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 
 The full operator procedure and recovery rules are in
 `docs/DELIVERY_WORKFLOW.md`.
+
+## Graph engineering and suborchestrator delivery
+
+For substantial multi-domain or long-horizon work, load [mastermind-graph-engineering](skills/mastermind-graph-engineering/SKILL.md). Delegate complete outcomes through useful levels of admitted leads and workers; each lead integrates its descendants and returns compact evidence. Preserve the original mission, true runtime ancestry, shared root allowances, source custody and actual release controls. This is a working method over existing Executive/Fabric/Agent OS owners, not a new dispatcher or permission grant.
