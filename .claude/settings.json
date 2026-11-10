@@ -5,6 +5,7 @@
   },
   "defaultMode": "default",
   "env": {
-    "BOT_REASONING_LAYER": "1"
+    "BOT_REASONING_LAYER": "1",
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"
   }
 }

@@ -652,7 +652,10 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # the per-attempt route adds one further route-constant line above the
 # handler; the same eight reviewed action-refusal operands are byte-identical
 # and shift by one more line.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'f7e4e50df2b8945be5dfdb8e5092f4d68dcfe738c75cf39efaa89a1ffb463e95', 'sites': ((928, 71, 74, 'int', '400'), (939, 71, 74, 'int', '403'), (947, 71, 74, 'int', '400'), (953, 79, 82, 'int', '400'), (962, 71, 74, 'int', '400'), (972, 71, 74, 'int', '403'), (977, 76, 79, 'int', '503'), (983, 71, 74, 'int', '403'))}
+# Company route composition moves the existing control_room_action function
+# by five lines. Whole-function AST equality against 7ff2a1ac proves all eight
+# refusal operands unchanged; retain exactly those tokens and the new full hash.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5aefe400aa824d768b746b3a4b8575da1f67216faf3cc9ed5e3b30b1977f2a42', 'sites': ((933, 71, 74, 'int', '400'), (944, 71, 74, 'int', '403'), (952, 71, 74, 'int', '400'), (958, 79, 82, 'int', '400'), (967, 71, 74, 'int', '400'), (977, 71, 74, 'int', '403'), (982, 76, 79, 'int', '503'), (988, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -913,14 +916,10 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
-# Pin-move history converged at this merge (origin/master into
-# feat/mmos-v1-integration-t3, 2026-11-10). Master #2365 (commit 6696153d3,
-# accepted manual-pool enumeration xai, anthropic-oauth, openai-codex) moved
-# the same two reason-length tokens by nine lines (48->57, 271->280) with
-# unchanged enclosing validation expressions. The trunk moved this pin in its
-# 2026-11-09 merge (MERGE_MASTER_20261109); master independently re-pinned in
-# #2377/#2386. Both sides carried byte-identical pin value and sites here;
-# recomputed against the merged source at this merge — no side was picked.
+# Both integration and long-horizon branches independently qualified the same
+# accepted #2365 source: three manual-pool options move the unchanged two
+# 500-character limits by nine lines. The exact digest and AST sites agree.
+# This composition reconciles history comments only; no exemption is widened.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),
