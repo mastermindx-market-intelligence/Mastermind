@@ -167,7 +167,10 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
         changed = False
         for server_name, desired in expected.items():
             old = servers.get(server_name)
-            if old is not None and old != desired:
+            comparable = dict(old) if isinstance(old, dict) else old
+            if isinstance(comparable, dict) and comparable.get("env") == {}:
+                comparable.pop("env")  # existing Claude configs commonly persist an empty env
+            if old is not None and comparable != desired:
                 raise SetupError(f"Conflicting {server_name} server in {name}; preserved")
             if old is None:
                 servers[server_name] = desired

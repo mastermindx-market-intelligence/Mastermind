@@ -109,6 +109,17 @@ class SetupTests(unittest.TestCase):
             self.plan()
         self.assertIn("someone-elses-owner", p.read_text())
 
+    def test_existing_empty_env_browser_entry_is_preserved(self):
+        p = self.homes[0] / ".claude.json"
+        config = json.loads(p.read_text())
+        existing = {"type": "stdio", "command": str(self.home / ".local/share/mastermind-runtime/node/bin/node"),
+                    "args": [str(self.t3 / "mcp/mmx-browser/server.js")], "env": {}}
+        config["mcpServers"]["mmx-browser"] = existing
+        self.write_json(p, config)
+        plan = self.plan()
+        setup.apply_plan(plan, plan["plan_sha256"])
+        self.assertEqual(json.loads(p.read_text())["mcpServers"]["mmx-browser"], existing)
+
     def test_rollback_restores_exact_originals(self):
         plan = self.plan()
         result = setup.apply_plan(plan, plan["plan_sha256"])
