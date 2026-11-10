@@ -345,9 +345,11 @@ class CrashAfterReceiptStore:
         self._inner = inner
         self._side = side_path
 
-    def put_launch_receipt(self, run_id: str, *, receipt, original_ref):
-        out = self._inner.put_launch_receipt(
-            run_id, receipt=receipt, original_ref=original_ref)
+    def put_launch_receipt(self, run_id: str, *args, **kwargs):
+        # *args/**kwargs: the engine's receipt-store signature has grown
+        # (cursor=) since this hook was written; forward everything so the
+        # crash lands in the intended window, never as a TypeError
+        self._inner.put_launch_receipt(run_id, *args, **kwargs)
         self._side.write_text(json.dumps({"crashed": _now(),
                                           "run_id": run_id}), encoding="utf-8")
         os._exit(90)  # noqa: PLW0160 - the deterministic crash point

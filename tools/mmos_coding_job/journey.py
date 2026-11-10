@@ -181,17 +181,28 @@ def start_door(config: Path, scratch: Path) -> subprocess.Popen:
         [PY, str(DOOR), "--config", str(config), "serve"],
         stdout=log_file, stderr=subprocess.STDOUT, cwd=str(REPO_ROOT))
     operator = scratch / "run" / "local-operator.sock"
+    probe = wc.DoorClient(operator)
+
+    def answering() -> bool:
+        # a REAL round-trip, not file existence: after a crash the stale
+        # socket file lingers and exists() lies about the fresh listener
+        try:
+            probe._request("GET", "/paperclip/coding-job/state/probe")
+            return True
+        except Exception:
+            return False
+
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             log(f"FAIL door exited early rc={proc.returncode}; "
                 f"see {scratch / 'door.log'}")
             raise SystemExit(FAIL)
-        if operator.exists():
-            log(f"door up (pid {proc.pid}), operator socket ready")
+        if answering():
+            log(f"door up (pid {proc.pid}), operator socket answering")
             return proc
         time.sleep(0.5)
-    log("FAIL door operator socket never appeared")
+    log("FAIL door operator socket never answered")
     proc.terminate()
     raise SystemExit(FAIL)
 
@@ -212,6 +223,14 @@ def door_state(scratch: Path, command: str):
     status, body = client._request(
         "GET", f"/paperclip/coding-job/state/{command}")
     return body if status == 200 else {"error": body, "_status": status}
+
+
+def frozen_state(scratch: Path, command: str) -> dict:
+    """The durable record — the only state source once the door is DEAD
+    (its socket is gone with the process); exactly what a fresh door loads."""
+    path = scratch / "run" / "frozen.json"
+    data = json.loads(path.read_text()) if path.exists() else {}
+    return data.get(command) or {}
 
 
 def carrier_admit(issue: dict, scratch: Path, reply_text: str) -> None:
@@ -325,7 +344,7 @@ def scenario_crash(scratch: Path) -> int:
         while time.monotonic() < deadline and proc.poll() is None:
             time.sleep(2.0)
         rc = proc.poll()
-        state = door_state(scratch, command)
+        state = frozen_state(scratch, command)  # the door is DEAD: durable record
         log(f"door exited rc={rc} at phase={state.get('phase')} "
             f"attempt={state.get('attempt_id')}")
         crashed_ok = rc == 90 and state.get("attempt_id")
