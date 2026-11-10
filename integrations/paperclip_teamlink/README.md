@@ -82,8 +82,8 @@ still holds the reverse cursor to prevent an echo.
 ## Event delivery and health
 
 The listener is an owned child of the Paperclip plugin worker. It subscribes to
-T3's existing orchestration thread stream with a short-lived read-only native
-session. It sends only bound root identifiers, sequence hints and health notices
+T3's existing orchestration thread stream with short-lived read-only native
+sessions for qualification and subscription. It sends only bound root identifiers, sequence hints and health notices
 to the plugin. The stream does not send transcript content or become the receipt
 database. Native event sequences never replace the persisted timeline cursor.
 
@@ -101,9 +101,13 @@ are reported as incomplete coverage. Configuration changes pause admission and
 drain the old generation before replacing it. Shutdown closes the owned helper
 and drains admitted work. No detached process is installed.
 
-Connection loss triggers bounded reconnect backoff and a fresh catch-up. An
+Identified connection loss and planned 10-minute session rotation trigger
+bounded reconnect backoff and a fresh catch-up. An
 authorization, scope or protocol refusal remains held; it is not retried as a
-connection failure. The existing native cron still reconciles each minute and
+connection failure. Stalled or incomplete native inventory pagination remains
+visible and held. The helper waits for real stdout backpressure, bounds pending
+notices, and exits on output failure; closing its stdin also cancels a stalled
+connection setup. The existing native cron still reconciles each minute and
 rotates fairly through pending deliveries and bindings. It is the durable
 recovery path after worker restart, missed notifications or degraded coverage.
 Set `realtime: false` to retain only this scheduled path.
@@ -198,6 +202,14 @@ After installing the pinned SDK dependency in this package, also run
 `node test/sdk-lifecycle.mjs`. It uses the SDK's own harness with an empty fake
 database to exercise company scope, concurrent configuration, handler admission
 and shutdown during asynchronous configuration. It makes no live T3 or agent call.
+
+For a real SQL qualification on a host with Paperclip and its embedded PostgreSQL
+installed, run `node test/store-postgres.mjs <paperclip-node-modules> <postgres-bin>`.
+It starts a disposable socket-only database, uses Paperclip's actual guarded
+plugin database service and parameter binding, and stops/removes the owned
+cluster afterward. It tests uniqueness, concurrent claims, revision/cursor CAS,
+pagination/recovery fairness, echo correlation and fresh-connection persistence.
+It does not open the production database or call a native session or agent.
 
 Acceptance additionally requires real consumer proof: a Paperclip bot sends to
 the exact T3 root, receives and consumes the original result, continues with a

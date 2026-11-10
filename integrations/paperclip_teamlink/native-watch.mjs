@@ -2,6 +2,20 @@ import { spawn } from 'node:child_process';
 
 const schema = 'mastermind.teamlink.native-watch.v1';
 const allowed = new Set(['schema', 'type', 'environmentId', 'threadId', 'sequence', 'code']);
+// Native CLI codes are a closed lowercase vocabulary. Keep reconnect decisions
+// in the existing parent lifecycle, with scope/auth refusals distinct from a
+// dropped transport or the helper's deliberate finite-session renewal.
+const nativeCodes = Object.freeze({
+  invalid_request: 'WATCH_REQUEST_INVALID', request_too_large: 'WATCH_REQUEST_TOO_LARGE',
+  environment_mismatch: 'WATCH_ENVIRONMENT_MISMATCH', project_not_found: 'WATCH_PROJECT_NOT_FOUND',
+  thread_not_found: 'WATCH_THREAD_NOT_FOUND', thread_not_root: 'WATCH_THREAD_NOT_ROOT',
+  qualification_failed: 'WATCH_QUALIFICATION_FAILED', qualification_incomplete: 'WATCH_QUALIFICATION_INCOMPLETE',
+  authorization_failed: 'WATCH_AUTHORIZATION_FAILED', server_unreachable: 'WATCH_SERVER_UNREACHABLE',
+  connection_lost: 'WATCH_CONNECTION_UNAVAILABLE',
+  session_failed: 'WATCH_SESSION_FAILED', subscription_failed: 'WATCH_SUBSCRIPTION_FAILED',
+  subscription_closed: 'WATCH_CONNECTION_CLOSED', stdin_closed: 'WATCH_INPUT_CLOSED',
+  lifetime_expired: 'WATCH_SESSION_ROTATE', terminated: 'WATCH_TERMINATED',
+});
 export function parseNotice(line, environmentId, threads) {
   if (Buffer.byteLength(line) > 4096) throw new Error('WATCH_NOTICE_LIMIT');
   const value = JSON.parse(line);
@@ -10,9 +24,10 @@ export function parseNotice(line, environmentId, threads) {
       !['ready', 'changed', 'heartbeat', 'error'].includes(value.type) ||
       value.threadId !== undefined && !threads.has(value.threadId) ||
       value.sequence !== undefined && (!Number.isSafeInteger(value.sequence) || value.sequence < 0) ||
-      value.code !== undefined && !/^[A-Z0-9_]{1,80}$/.test(value.code) ||
+      value.code !== undefined && (typeof value.code !== 'string' ||
+        !Object.hasOwn(nativeCodes, value.code) && !/^[A-Z0-9_]{1,80}$/.test(value.code)) ||
       value.type === 'changed' && !value.threadId) throw new Error('WATCH_NOTICE_INVALID');
-  return value;
+  return value.code === undefined ? value : { ...value, code: nativeCodes[value.code] ?? value.code };
 }
 
 // A read-only native CLI child belongs to this Paperclip worker. It holds no

@@ -2,7 +2,7 @@
 
 Operation: `paperclip-teamlink-t3-20261110`.
 Parent programme: existing Executive ecosystem / Chairman Control Room.
-Protected procedure pin for this continuation: `76cca6bf0d4f54c1c4a732726a16c70dbe8ed679`;
+Protected procedure pin for this continuation: `a717f7dead6d3edceb755f984776c41367e3b83d`;
 mastermind.sol_skillpack.v1, skillpack 1.0.1, bootstrap major 1.
 Source carrier: `sol/paperclip-teamlink-t3-20261110` in Mastermind.
 PLAN_NOT_ORG_LINKED: this source task tree introduces no Agent OS workstream.
@@ -46,9 +46,9 @@ Native per-delivery receipts record transport evidence, never execution authorit
 | P1 qualify | Installed APIs, exact identities, incumbent collision and Teamlink contracts | verified |
 | P2 implement | Native Paperclip plugin tools, exact T3 transport, original-issue return, shared context and scoped telemetry | verified |
 | P3 harden | Duplicate/lost-response/stale-target/restart/concurrent-message/secret-boundary tests | verified |
-| P4 deliver | Same branch, source checks, normal protected PR release and exact merge readback | PR #2419 baseline green and enrolled in merge queue; realtime upgrade under qualification |
-| P5 connect | Native plugin install/configure; role instructions through existing skill owner; fresh native tool discovery | proposed |
-| P6 accept | Real Paperclip to T3 message and correlated return, continuation recovery, native status/process proof | proposed |
+| P4 deliver | Same branch, source checks, normal protected PR release and exact merge readback | Original PR #2419; complete realtime upgrade qualified for protected delivery |
+| P5 connect | Native plugin install/configure; role instructions through existing skill owner; fresh native tool discovery | awaiting protected merged source |
+| P6 accept | Real Paperclip to T3 message and correlated return, continuation recovery, native status/process proof | blocked on active genuine run credential binding and installed plugin |
 
 ## Acceptance and failure boundaries
 
@@ -197,3 +197,76 @@ both directions, a referenced follow-up, original-run/comment/consumption
 receipts, latency measurements and continuity/visibility proof. No Teamlink
 message or valid bot consumption has been produced by this continuation yet.
 
+
+## Recovered helper and complete realtime qualification — 2026-11-10 12:04 UTC
+
+The original Fabric helper returned terminal rc 0 on its original carrier. Its
+complete response digest is
+`af0050dbd25bb5634b3ed63affbcac23f1625eb7fcfa2781eaedc07dea7d0acb`.
+The original patch was recovered with SHA-256
+`9c2c19ae6b47e019ceca092004428be6c2b4d771d9aa6c90557d98e0558851b9`.
+The result is now accepted by deterministic artifact-digest comparison. No
+replacement worker was launched and the completed original artifact is retained.
+The native reasoning advisor returned its bounded source review and stopped.
+
+Parent integration fixed the lowercase helper/uppercase listener error-code
+boundary, removed the unnecessary full-access qualification session, separated
+identified network failures from authorization/protocol refusals, bounded and
+short-circuited native pagination, honored real stdout backpressure, supervised
+writer failure, and made stdin ownership cover a stalled MCP handshake. The
+native MCP issuer now accepts an optional TTL through its existing session
+store; only the watch supplies 15 minutes, preserving other callers' defaults.
+Both watch credentials are limited to `orchestration:read` and expire after
+15 minutes even if normal cleanup cannot run. The helper rotates after 10 minutes.
+
+The final additive patch is
+`5495395fe53c834112067e9220bc6c5456f02a32c5b361090ad73cda962057b7`.
+It applies after the unchanged canonical baseline patch at upstream
+`0770446869d247a8b28c27d7ed93f47f8ff0c1e4`, reproducing the tested native source
+byte for byte. Native provenance records both patch hashes and compiled inputs.
+The qualified relocatable runtime contains 22 dependency packages at
+`/tmp/teamlink-native-qualified-ttl-20261110-2bf416cb`; it is qualification
+staging, not an installed production release.
+
+### Executed proof
+
+- 45 Node transport/lifecycle scenarios and 11 Python boundary tests passed.
+- The actual installed Paperclip database service and embedded PostgreSQL passed
+  all eight SQL checks over 680 guarded statements: namespace/migration guards,
+  unique operations/company isolation, concurrent dispatch claims, binding and
+  cursor CAS, pagination/fair scans, pending-recovery fairness, original-run
+  echo correlation and fresh-connection persistence. The disposable cluster used
+  only a Unix socket and was stopped/removed. No production database was opened.
+- All 61 native focused tests passed; the final TTL change's 23 affected command
+  tests passed again. Effect type checking and lint are clean, and `vp pack`
+  succeeded using the frozen upstream dependency lock and Node 26.8.2.
+- The final live read at 12:04:25 UTC observed the exact existing MAS-4 T3 root
+  ready after 1,262 ms and a heartbeat at 16,177 ms. Native session metadata
+  independently proves both scopes were only `orchestration:read`, both TTLs
+  were exactly 900 seconds, and both sessions were revoked after stdin closed.
+  The helper exited 0 without forced termination or stderr. No model/agent call
+  or message send occurred. Readiness timing is not message-delivery latency.
+
+Machine-readable evidence:
+[2026-11-10-teamlink-realtime-qualification.json](../evidence/2026-11-10-teamlink-realtime-qualification.json).
+The earlier SDK 2026.1106.0 lifecycle proof remains applicable to the unchanged
+prepared lifecycle implementation; the complete final source adds native
+subscription and SQL qualification without claiming live bot consumption.
+
+### Remaining release and acceptance
+
+Publish this complete composition as a descendant of prepared commit
+`837ace0397d0a88b44010400f6b35478ff5401e9` on the same original branch/PR using
+an exact expected-head lease. At the fresh pre-publication read, PR #2419 was
+OPEN/Ready at `bf7574e6b2860f84855f031da52cc681cb4522b2`, already QUEUED at
+position 11; do not duplicate its merge request. Retain protected checks and
+native merge-queue ownership.
+
+MAS-4 remains blocked/unassigned at statusVersion 5 with no checkout or execution
+on a fresh API read. The rejected Secretary-authored preparation evidence and
+original credential refusal remain preserved. After actual protected merge,
+install only the exact merged Teamlink source and native runtime. Genuine
+Meta-CEO acceptance remains conditional on the existing credential-isolation
+release being active in the shared gateway and fresh in-process agent/run
+identity proof. Source/CI/queue, installation, transport delivery, recipient
+consumption and parent acceptance are still separate outcomes.

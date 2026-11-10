@@ -30,6 +30,11 @@ def resolve_package(name, origin):
 
 
 def package(source, built, output):
+    patch_dir = Path(__file__).resolve().parent
+    patch_hashes = {name: hashlib.sha256((patch_dir / name).read_bytes()).hexdigest()
+                    for name in ('t3-native.patch', 't3-realtime.patch')}
+    if patch_hashes['t3-native.patch'] != '74e107769c3b02cba635fd7f64e0ca13eaf1be5c6b5180f221d891df296fd956':
+        raise ValueError('baseline native patch differs from the qualified dependency')
     if output.exists():
         raise ValueError('output must be a fresh directory')
     if not (built / 'bin.mjs').is_file():
@@ -86,7 +91,13 @@ def package(source, built, output):
             raise ValueError('external artifact symlink')
     shutil.copy2(source / 'LICENSE', output / 'LICENSE.t3')
     manifest = {'upstreamCommit': '0770446869d247a8b28c27d7ed93f47f8ff0c1e4',
-                'patchSha256': '74e107769c3b02cba635fd7f64e0ca13eaf1be5c6b5180f221d891df296fd956',
+                'patchSha256': patch_hashes['t3-native.patch'],
+                'realtimePatchSha256': patch_hashes['t3-realtime.patch'],
+                'sourceFiles': {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
+                                for name in ('apps/server/src/cli/thread.ts',
+                                             'apps/server/src/cli/thread-watch.ts',
+                                             'apps/server/src/auth/EnvironmentAuth.ts',
+                                             'apps/server/src/mcp/AcpMcpStdioBridge.ts')},
                 'packages': sorted(metadata, key=lambda x: (x['name'], x.get('version') or ''))}
     (output / 'runtime-provenance.json').write_text(json.dumps(manifest, indent=2) + '\n')
     return {'runtimePackages': len(metadata), 'externalRoots': roots, 'output': str(output)}
@@ -99,3 +110,4 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     print(json.dumps(package(args.source.resolve(), args.built.resolve(), args.output.absolute())))
+

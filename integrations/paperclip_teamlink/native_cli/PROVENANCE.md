@@ -23,8 +23,10 @@ The Paperclip port exposes only environment/project/thread observations and
 Paperclip tool surface. The port discovers actual live schemas and uses the
 existing Mastermind `integrations/session_bridge/t3_native_client.py`.
 
-Build in an isolated checkout at the pinned source, apply the exact patch, use
-the frozen upstream dependency lock, run the three affected test files, and run
+Build in an isolated source tree at the pinned source. Apply `t3-native.patch`
+first, then `t3-realtime.patch`. Use the frozen upstream dependency lock, run
+`thread.test.ts`, `thread.native.test.ts`, `thread-watch.test.ts` and
+`AcpMcpStdioBridge.test.ts`, and run
 `vp pack --out-dir <fresh-build-dir>` in `apps/server`. Then use
 `package_runtime.py --source <checkout> --built <fresh-build-dir> --output <fresh-runtime-dir>`.
 The packager copies the installed lockfile-resolved external dependency graph
@@ -34,3 +36,45 @@ the upstream license. It does not require the build worktree at runtime.
 Install only from the merged Mastermind source receipt. Keep the native bundle
 under an immutable release directory and configure the plugin's exact absolute
 path. Never overwrite `/Applications/T3 Code (Beta).app` or restart user sessions.
+
+
+## Native event subscription upgrade
+
+The original Fabric root `paperclip-teamlink-t3-20261110`, run
+`teamlink-native-watch-upgrade-20261110-01`, returned on its original ubuntu2
+carrier with rc 0 and a verified root. Its returned patch SHA-256 is
+`9c2c19ae6b47e019ceca092004428be6c2b4d771d9aa6c90557d98e0558851b9`;
+the returned response digest is
+`af0050dbd25bb5634b3ed63affbcac23f1625eb7fcfa2781eaedc07dea7d0acb`.
+The parent composed the returned artifact and corrected scope, failure
+classification, pagination and output ownership before qualification.
+
+The integrated `t3-realtime.patch` SHA-256 is
+`5495395fe53c834112067e9220bc6c5456f02a32c5b361090ad73cda962057b7`.
+It adds `thread native-watch`: one bounded JSON request on stdin, exact
+native environment/project/root qualification, and compact JSONL notices from
+T3's existing orchestration subscription. Native source sequences are hints;
+Paperclip's SQL receipts and durable timeline cursor remain authoritative.
+
+The qualification MCP session explicitly requests read-only access. Both it and
+the socket session have only `orchestration:read`, a 15-minute TTL and a 10-minute
+owned rotation. An optional native `issueMcpClientSession` TTL parameter lets the
+watch select that expiry; all existing callers retain their previous default. Both sessions revoke through native scope finalizers. Closing stdin
+cancels connection setup as well as an established watch. No agent credential is
+inherited. Only identified transport failures reconnect; auth/scope/protocol
+refusals and ambiguous failures remain held. Bounded pagination refuses stalled
+or incomplete scans and stops as soon as every requested identity is proven.
+A bounded queue and the native Stdio sink honor actual pipe backpressure;
+output failure or a one-second stalled write terminates the watch and its scopes.
+
+Parent qualification on M2 used the frozen upstream lock, Node 26.8.2, all 61
+focused tests, clean Effect type checking, clean lint and `vp pack`. The upstream
+root engine preference is 26.12.1; the server declares Node 26.8.2 compatible.
+Exact patch reapplication reproduces every tested source byte. The relocatable
+runtime has 22 dependency packages and internal relative symlinks. Packaging
+records both patch digests and the exact compiled source-file digests; it refuses
+a baseline patch different from the canonical pin.
+
+This runtime qualification does not install the Paperclip plugin or establish
+agent consumption, message latency, or project acceptance. Use the protected
+merged-source receipt and the plan's real consumer acceptance sequence.

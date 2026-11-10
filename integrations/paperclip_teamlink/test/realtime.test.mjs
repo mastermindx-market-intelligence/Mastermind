@@ -48,6 +48,19 @@ test('native notice projection rejects unbound roots, body leakage and invalid s
   assert.throws(() => parseNotice(' '.repeat(4097), 'environment', new Set()), /LIMIT/);
 });
 
+test('actual native helper codes preserve renewal, transport and refusal semantics', () => {
+  const parse = code => parseNotice(JSON.stringify({ ...notice('error'), code }), 'environment', new Set(['root']));
+  assert.equal(parse('subscription_closed').code, 'WATCH_CONNECTION_CLOSED');
+  assert.equal(parse('connection_lost').code, 'WATCH_CONNECTION_UNAVAILABLE');
+  assert.equal(parse('server_unreachable').code, 'WATCH_SERVER_UNREACHABLE');
+  assert.equal(parse('authorization_failed').code, 'WATCH_AUTHORIZATION_FAILED');
+  assert.equal(parse('qualification_incomplete').code, 'WATCH_QUALIFICATION_INCOMPLETE');
+  assert.equal(parse('lifetime_expired').code, 'WATCH_SESSION_ROTATE');
+  assert.equal(parse('environment_mismatch').code, 'WATCH_ENVIRONMENT_MISMATCH');
+  assert.equal(parse('session_failed').code, 'WATCH_SESSION_FAILED');
+  for (const code of ['unknown_native_error', 'constructor', 'toString', 123]) assert.throws(() => parse(code));
+});
+
 test('native child holds only allowlisted environment, frames bursts and closes with its owner', async () => {
   let child, launched;
   const spawnProcess = (...args) => {
