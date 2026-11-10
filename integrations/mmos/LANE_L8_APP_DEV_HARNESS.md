@@ -79,3 +79,16 @@ R1a load-bearing facts (verified): tauri lock **2.11.6**; `eval_with_callback` a
 - `build.rs` requires `MM_SOURCE_REVISION`/`MM_BUILD_IDENTITY` at compile time (D0 finding).
 - Trunk refresh `46621f5ad` brought `PROGRAM_PLAN_V3.md` and `LOCAL_OPERATOR_CONTRACT.md`.
 - Old DONE_WHEN 6 (cold-agent) transferred to L9 per PROGRAM_PLAN_V3 §5.
+- L8s item-1 evidence (branch `t3/mmos-v2-l8s`, HEAD `5664dce18`): cargo test rc=0
+  (6 shell_mode + 297 lib + 14 verify_update + 14 doc) and typecheck rc=0 —
+  `~/.mastermind/mmos_evidence/l8s-20261110/cargo-test-item1-first.log`, `typecheck-item1.log`.
+  Full-suite `npx vitest run` is settled as a PRE-EXISTING collection/import problem, not
+  this diff: `vitest-item1-clean.log` (same dir) shows 60 files failing import with
+  **0 failing tests** (3851 passed) in the app suite; the item-1 diff is Rust-only and
+  touches no frontend file. Principal ruling 12:48 UTC: do not investigate; scoped
+  vitest only from here.
+- S1 attack pass (glm-5.3, `integrations/mmos/L8_SHELL_MODE_ATTACK.md`): **PASS**, no
+  spec defeat; two LOW findings (capability test misses config-inline capabilities; no
+  post-load navigation re-validation + doc overclaim). Fixes: exotic-spelling gate test,
+  inline-capability config test, doc softening. Navigation re-validation is deferred to
+  the dev-bundle slice, which logs navigation events.
