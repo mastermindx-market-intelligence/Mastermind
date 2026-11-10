@@ -1,0 +1,172 @@
+{
+  "applicationProof": {
+    "allPostimagesExact": true,
+    "gitApplyCheck": true,
+    "path": "/Volumes/Mastermind 2/agent-workspaces/web/paperclip-hermes-installed-composition-xlnk184e/startup-patch-apply-proof-0826-7f1d",
+    "whitespaceCheck": true
+  },
+  "baseTree": "08ffdd48f5e0ed105fb628b137485073e8939b05",
+  "candidateTree": "82982661d113c989a8551c23d7faab7dfb5fbabc",
+  "contextEmptyLinesNormalized": 17,
+  "latestVerification": [
+    {
+      "exit": 0,
+      "label": "budget-compatibility",
+      "log": "/Volumes/Mastermind 2/agent-workspaces/web/paperclip-hermes-installed-composition-xlnk184e/startup-budget-compatibility-0823-7f1d.log",
+      "sha256": "58efd215891fe3cec7e997ed3f56d7f6173002450caea319714d888ab0f362e2"
+    },
+    {
+      "exit": 0,
+      "label": "budget-checks",
+      "log": "/Volumes/Mastermind 2/agent-workspaces/web/paperclip-hermes-installed-composition-xlnk184e/startup-budget-checks-0823-7f1d.log",
+      "sha256": "d5071c35e113d1a6201fd76faa284b6c9950628074fb069d7ba41c69f3b35b56"
+    }
+  ],
+  "liveInstalled": false,
+  "manifest": {
+    "hermes_bootstrap.py": {
+      "after_sha256": "061b664e0195934628054bb2e00e19b5c7f30748c3be6736e54ff50046bf271d",
+      "before_sha256": "f242036b2d35b92283b9a7e97c7059e537607fc4b02026f657a6d00cb4683f69"
+    },
+    "hermes_cli/cli_chat_error_copy.py": {
+      "after_sha256": "ecae48561d043289aeb1d40c515455dc745a5199fcbfb737204be02e3d3fcb5d",
+      "before_sha256": "eca79aa3f46592c36b858738af3f2225e21274ea52cfdee8bcf8dc881434167b"
+    },
+    "hermes_cli/gateway_client.py": {
+      "after_sha256": "4d7643234e953385ec6cba95b753ae5bca978914e6ec774e921438f8a9e8ad77",
+      "before_sha256": "4edfde2b7c5f62cf8bdf6aabc9fc39371153a2ea5f93e6910025f41090f32a21"
+    },
+    "hermes_cli/gateway_connection.py": {
+      "after_sha256": "c8d57493969d22efa98cd362c9111fd3da5feb1376723f853127ce296759b56c",
+      "before_sha256": "2104ea4df7067bff26bfd2de115008a82fd4a37bce98c7cb821d3781a2ed1da5"
+    },
+    "hermes_cli/gateway_runtime_start.py": {
+      "after_sha256": "7493b0db867d1a0267c10835549547343732648f1c8feaa34ed464f92dec32d0",
+      "before_sha256": "706418ffcd384f9218c5f028aa538f57a52278b3eac0f50755a03e5f74422a36"
+    },
+    "pm/client.py": {
+      "after_sha256": "3295be4ad5d3d0d910d8ef926ddcc069f41b88de9dfe0727cc52b16abb7d9f5d",
+      "before_sha256": "8dcca7cd9ecce89f43122c89aa273dfdf6c8e6775e4a36c0ae5f3e5f815d46f1"
+    },
+    "pm/runtime.py": {
+      "after_sha256": "f7ea89fa518396b44c9f57d75f81419a1724bf9d84986eac9e5a255a2d7c97e2",
+      "before_sha256": "68d6ae47d2e0143f3cc377e462e3588abbb0e857bbc9f22442a3f66ebe54c478"
+    },
+    "tests/hermes_cli/test_gateway_client_startup_timeout.py": {
+      "after_sha256": "745d2bd2fa220e9def051091dc90f77fa768f57bcab3b8b21e63753736a931fb",
+      "before_sha256": null
+    },
+    "tests/hermes_cli/test_gateway_init_failure_copy.py": {
+      "after_sha256": "fcf570b9b9841904be68b308c8d691891df7596c721aeef1d92a8e0de8dfba8a",
+      "before_sha256": null
+    },
+    "tests/pm/test_runtime_probe_uncertainty.py": {
+      "after_sha256": "25de3aee5d5182aa08d0452d6749d1f615e8b47cb6e39f843dc73bbd47b8a833",
+      "before_sha256": null
+    },
+    "tests/pm/test_source_update_launch.py": {
+      "after_sha256": "402643941c3d86c153e5e0f5ec27ace829f0d7e3d2b5be689de6a1619b59caa8",
+      "before_sha256": "91b290e81f2c9027e1d78a5d1f8c45c46b02eb42b02cd6b2cc14eee9a98a2d79"
+    }
+  },
+  "patch": "/Volumes/Mastermind 2/agent-workspaces/web/paperclip-hermes-installed-composition-xlnk184e/native-startup-recovery-final-0826-7f1d.patch",
+  "patchSha256": "c4bdcf89de18ec6772a36f6f16dd3e6ec378528bcc74e237fa2638ae6164df56",
+  "schema": "mastermind.hermes_startup_recovery.v1",
+  "operationId": "paperclip-startup-recovery-20261110-7f1d",
+  "procedurePin": "fe42651763a8c71e71dece27a2d5b7dd02aa913d",
+  "nativeInstalledCommit": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "qualifiedCredentialCandidate": "5de1c0104d42eb406dcad6e3adf8dcacf8d5e968",
+  "verification": {
+    "distinctPassingTests": 158,
+    "linuxPlatformSkips": 2,
+    "nativeChecks": {
+      "passed": 14,
+      "blocking": 0,
+      "advisory": 0
+    },
+    "suites": [
+      {
+        "kind": "pm_uncertainty",
+        "passed": 8,
+        "baselineFailed": 8,
+        "log": "startup-tests-focused-7f1d.log",
+        "sha256": "5cdba32e0cb61994d52563b2a54095dbf2236ffc5df963baa7e3785f2329fb0c"
+      },
+      {
+        "kind": "existing_update_completion",
+        "passed": 34
+      },
+      {
+        "kind": "pm_runtime_and_source_update",
+        "passed": 24,
+        "log": "startup-tests-native-tools-7f1d.log",
+        "sha256": "220de7a5f0e3a18dfeb005f6857c4ae63e3e5f6f4c6f1133b3847138c72751bb"
+      },
+      {
+        "kind": "typed_gateway_copy_and_compatibility",
+        "passed": 19,
+        "skipped": 2,
+        "newCopyBaselineFailed": 3,
+        "log": "startup-copy-compatibility-7f1d.log",
+        "sha256": "1316158655d339b51cc0dfdeea12b5e1d082a4c785af83d0c9d43f0ffa62c834"
+      },
+      {
+        "kind": "startup_budget_and_connection_compatibility",
+        "passed": 73,
+        "newTests": 26,
+        "baselineFailed": 17,
+        "baselinePassed": 7,
+        "additionalDaemonScrubCases": 2,
+        "log": "startup-budget-compatibility-0823-7f1d.log",
+        "sha256": "58efd215891fe3cec7e997ed3f56d7f6173002450caea319714d888ab0f362e2"
+      }
+    ],
+    "rerunsNotCounted": [
+      {
+        "kind": "source_update_after_fixture_name_fix",
+        "passed": 20,
+        "log": "startup-bootstrap-after-fixture-fix-0809-7f1d.log",
+        "sha256": "08eab573f5bf31fc8c81196ee5f6bc7f01ada4d527136989d04ca06abf1399ad"
+      }
+    ],
+    "notes": [
+      "Native tests used scripts/run_tests.sh and the existing qualification interpreter, isolated home/runtime, pinned native uv, and no per-file retries.",
+      "An initial new async test invocation lacked pytest markers; those test definitions were corrected before the recorded 17-failure baseline run.",
+      "The original compatibility invocation lacked uv on PATH; restored native tool availability resolved that assembly error without production-policy changes."
+    ]
+  },
+  "liveBoundary": {
+    "sourceApplied": false,
+    "configurationApplied": false,
+    "fullMigrationAccepted": false,
+    "incumbentPid": 23047,
+    "lastControlObservationUtc": "2026-11-10T08:20:00Z",
+    "identify": "timeout_8_seconds",
+    "status": "timeout_8_seconds",
+    "activeWork": "timeout_8_seconds",
+    "legacyStatus": {
+      "updatedUtc": "2026-11-10T08:20:01Z",
+      "state": "running",
+      "activeAgents": 22
+    },
+    "pendingSourceCompletion": false,
+    "updateMarker": false,
+    "preserves": "Live work, native UpdateLock and update pause/recovery owners; no forced stop or direct live-module patch."
+  },
+  "runtimeIncident": {
+    "successfulArchiveIssue": "MAS-3",
+    "archiveStatus": "done",
+    "archiveStatusObservedUtc": "2026-11-10T07:14:44.878Z",
+    "startupRun": "e1657879-bc64-4bd0-96ac-4e41b93928b0",
+    "capacityRun": "1d226996-af26-42ad-afee-e09844b01306",
+    "capacitySession": "local-d601ea69d97b859ece4a8dd79c62c2359854ef9c74b8ca13d18f1fa09b3df8aa",
+    "capacityReasons": [
+      "FABRIC_ALL_ROUTES_COOLING",
+      "Byteplus five-hour quota exhausted"
+    ],
+    "byteplusReportedResetUtc": "2026-11-10T08:47:08Z",
+    "allFabricRouteResetKnown": false,
+    "recordedUsage": "zero recorded tokens; no settled billing provider/cost; cost unknown",
+    "intermediateIndexError": "Observed without saved stack; cause unresolved and not patched."
+  }
+}
