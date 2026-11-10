@@ -71,6 +71,7 @@ import asyncio
 import os
 import socket
 import stat
+from pathlib import Path
 
 from integrations.executive_mcp.local_operator import (
     LocalOperatorBindError,
@@ -196,3 +197,23 @@ def test_real_same_uid_socket_serves_request(tmp_path):
     assert b"HTTP/1." in response and b"200" in response.split(b"\r\n", 1)[0]
     assert b'{"ok":true}' in response
     assert len(app.scopes) == 1
+
+
+def test_operator_authenticator_attributes_by_digest_only():
+    """(a) the operator principal carries the subject as a digest, never raw."""
+    import hashlib
+    from integrations.executive_mcp.local_operator import LocalOperatorAuthenticator
+
+    clock = [1_800_000_000]
+    auth = LocalOperatorAuthenticator(
+        LocalOperatorConfig(socket_path=Path("/tmp/x.sock"), allowed_uids=(501,),
+                            operator_subject=FAKE_SUBJECT),
+        now=lambda: clock[0])
+    principal = auth.principal()
+    assert principal.subject_digest == hashlib.sha256(FAKE_SUBJECT.encode()).hexdigest()
+    assert FAKE_SUBJECT not in repr(principal) and FAKE_SUBJECT not in str(principal)
+    assert principal.issued_at == 1_800_000_000
+    assert principal.expires_at - principal.issued_at == 60
+    scope = auth.principal_scope()
+    assert isinstance(scope, str) and scope and FAKE_SUBJECT not in scope
+    assert scope == auth.principal_scope()  # deterministic: digest-derived only

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import ctypes
 import dataclasses
+import hashlib
+import time
 from pathlib import Path
 
 
@@ -285,3 +287,60 @@ class LocalOperatorListener:
             return keep
         except Exception:
             return False
+
+
+class LocalOperatorAuthenticator:
+    """Attribute socket-admitted requests to the configured operator subject.
+
+    There is no token: the listener's kernel peer-uid check is the whole
+    admission, and this class projects the configured subject into the same
+    pseudonymous principal shape the OS/workspace transports consume. The raw
+    subject never leaves this class; downstream material carries only its
+    SHA-256 digest.
+    """
+
+    ISSUER = "local-operator-socket"
+    POLICY_ID = "local-operator.socket"
+    RESOURCE = "local-operator-socket"
+    LIFETIME_SECONDS = 60
+    CLIENT_REF = "oauth-client-unavailable"
+
+    def __init__(self, config, *, now=None):
+        if not isinstance(config, LocalOperatorConfig):
+            raise TypeError("LocalOperatorConfig required")
+        if now is None:
+            now = time.time
+        if not callable(now):
+            raise TypeError("now must be callable")
+        self._subject = config.operator_subject
+        self._subject_digest = hashlib.sha256(
+            config.operator_subject.encode("utf-8")).hexdigest()
+        self._issuer_digest = hashlib.sha256(
+            self.ISSUER.encode("utf-8")).hexdigest()
+        self._now = now
+
+    @property
+    def subject_digest(self) -> str:
+        return self._subject_digest
+
+    def principal(self):
+        """One bounded operator principal; the scope derives from the digest."""
+        from integrations.business_mcp_auth.contracts import VerifiedPrincipal
+
+        issued = int(self._now())
+        return VerifiedPrincipal(
+            policy_id=self.POLICY_ID, issuer=self.ISSUER,
+            issuer_digest=self._issuer_digest, resource=self.RESOURCE,
+            subject_digest=self._subject_digest, client_ref=self.CLIENT_REF,
+            scopes=("mastermind.executive.read",), issued_at=issued,
+            expires_at=issued + self.LIFETIME_SECONDS, jti_digest=None)
+
+    def principal_scope(self) -> str:
+        """The same opaque owner namespace the OS transport derives."""
+        from integrations.mastermind_executive_app.os_transport import (
+            principal_scope_from_identity,
+        )
+        return principal_scope_from_identity(
+            issuer_digest=self._issuer_digest,
+            subject_digest=self._subject_digest,
+            client_ref=self.CLIENT_REF)
