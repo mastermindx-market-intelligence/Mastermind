@@ -78,7 +78,7 @@ mod tests {
         for resource in [Resource::Acquisition,Resource::Content,Resource::Executive] {
             let pending=i.pending.as_ref().unwrap();assert_eq!(pending.resource,resource);assert!(pending.intent==SignInIntent::LegacyFull);
             let raw=format!("{CALLBACK}?state={}&code=inert",pending.state);let(p,_,_)=i.consume(&raw).unwrap();
-            let next=i.finish_exchange(&p,Ok(token("fresh")));assert_eq!(next.is_some(),resource!=Resource::Executive);
+            let next=i.finish_exchange(&p,Ok(InitialGrant::fixture(token("fresh"))));assert_eq!(next.is_some(),resource!=Resource::Executive);
         }
         assert!(i.token(Resource::Executive).is_some());assert!(i.pending.is_none());
     }

@@ -1,0 +1,334 @@
+{
+  "schema": "mastermind.t3_computer_browser_qualification.v1",
+  "date": "2026-11-10",
+  "state": "SOURCE_QUALIFIED_RUNTIME_INSTALLATION_PENDING",
+  "procedure_pin": "edd451cd06e54bced7f7b44d151e541e30cb3fba",
+  "source_pr": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2401",
+  "installer_tests": {
+    "command": "python3 -m unittest discover -s tests -p test_t3_computer_use_setup.py -q",
+    "passed": 23,
+    "native_only": "Qualified native owner and computer skill can be composed with an existing remote browser; independent browser updates survive rollback",
+    "native_companion": "Both native compositions refuse missing/changed signed Swift companion; a changed companion invalidates apply; browser-only remains independent"
+  },
+  "protocol_repair": {
+    "existing_owner": "~/.t3/mcp/mmx-browser/server.js",
+    "before_sha256": "854c8397ea5b3547a1faa93e5af27eb071eefc64e9d4f2279695994414727faf",
+    "after_sha256": "325366ad6a64c6e28204727ffa36344c34a3e5bc418047e55e87467dd950fdd9",
+    "change": "Add mandatory jsonrpc:2.0 to the single existing response writer",
+    "strict_client": "official Python mcp ClientSession + stdio_client",
+    "original": "FAILED",
+    "corrected_copy": "CONNECTED",
+    "negotiated_protocol": "2025-11-25",
+    "discovered_tools": [
+      "mmx_browser"
+    ],
+    "browser_actions": 0,
+    "live_server_changed": false
+  },
+  "native": {
+    "sender": "existing quiet Peekaboo 4.9.8 MCP",
+    "protocol": "2025-03-26",
+    "permissions": {
+      "screen_recording": true,
+      "accessibility": true,
+      "event_synthesizing": true
+    },
+    "fixture_bundle": "com.mastermind.t3.computer-use-probe",
+    "field": "T3 quiet proof",
+    "observed_result": "Verified: T3 quiet proof",
+    "click_initial_state": "dispatched_unverified",
+    "click_replayed": false,
+    "reconciliation": "Fresh verify_state on original target satisfied; fresh snapshot confirmed result",
+    "pointer_observer": {
+      "samples": 384,
+      "distinct_frontmost_and_pointer_states": 1
+    },
+    "proof_kind": "direct MCP, not actual T3 agent",
+    "evidence_sha256": {
+      "native-action-proof.json": "8239c944a66a91ea2c694ba0037a1a3553216f4c0e5147a1e66cd70f05050dde",
+      "native-reconciliation.json": "0b77cc26ba716505f7d934305bb2e054cdf3d56a5a9a56d9cde17116427083bc",
+      "pointer-observer.json": "da2fd3cffaebd31ec5155cc9bcf66708f7f393d27dfe464379cfee1b929fa271"
+    },
+    "strict_sdk_startup": {
+      "state": "CONNECTED",
+      "protocol": "2025-11-25",
+      "tools_discovered": 14,
+      "input_actions": 0,
+      "adapter_changed": false,
+      "prior_startup_timeouts_observed": true,
+      "cause": "UNRESOLVED_INTERMITTENT_BACKEND_STARTUP",
+      "evidence_sha256": "ed598ad46f0d0bbcc44865c69444fc77099813984647bb850f2a924ed26601d2"
+    },
+    "cohort_sha256": {
+      "quiet_mcp.py": "09924847ff1fe85c328476b719dfa459a95e92ced6013c0b73eb077d3ea7d822",
+      "peekaboo": "6e2d9f91cf95689cc061d138cb26f023b511c434f571436c1ae139d040a0f3b4",
+      "libswiftCompatibilitySpan.dylib": "a9e85f785846635c6c12658d2ace9e70af018ba999dd2dcaeec7ffc067ba986e"
+    }
+  },
+  "t3_baseline": {
+    "thread_id": "mcp:aa15779a-79c3-404f-85f4-e2aa2ea0944c",
+    "provider": "capacity_fabric",
+    "model": "deepseek-v4.1-flash",
+    "state": "completed",
+    "peekaboo": "absent",
+    "skills": "both absent",
+    "mmx_browser": "configured; CONNECT_TIMEOUT",
+    "builtin_preview": "discovered",
+    "input_actions": 0
+  },
+  "browser": {
+    "release_identity": "5aa30969241163b4abb3e025bc9e52123ee4b478",
+    "release_provenance": "retained direct local release; not a protected GitHub commit",
+    "actions_advertised": 44,
+    "host_ref": "m2",
+    "profile": "mastermindx / Profile 12",
+    "status": "connected; control/screenshot/download/advanced grants present",
+    "ordinary_snapshots": "BROWSER_UNAVAILABLE / NOT_APPLIED on two task-owned loopback tabs and one independent public-origin tab",
+    "browser_input_attempted": false,
+    "live_extension_changed": false,
+    "unknown_effect_replays": 0,
+    "disposable_chrome": {
+      "state": "SNAPSHOT_PROVEN",
+      "version": "0.4.1",
+      "elements": 6,
+      "title": "Mastermind CDP fixture",
+      "user_profiles_touched": false,
+      "browser_mutations": 0,
+      "browser_version": "Chrome for Testing 151.0.7922.34"
+    },
+    "diagnostic_source": {
+      "change": "Fixed stage/API/category for injection and document-message failures",
+      "contract_test": "node tests/browser_control_contract.cjs",
+      "passed": true,
+      "effect_and_permission_rules_changed": false,
+      "activated": false
+    },
+    "branded_chrome_diagnostic": {
+      "browser_version": "157.0.8103.51",
+      "state": "HARNESS_EXTENSION_LOAD_UNAVAILABLE",
+      "observed": "No service worker appeared before timeout; no snapshot or input attempted",
+      "reference": "https://developer.chrome.com/blog/extension-news-june-2025",
+      "user_profiles_touched": false
+    },
+    "latest_registration": {
+      "state": "PROFILE_IDENTITY_MISMATCH",
+      "observed_at": "2026-11-10T04:00:00Z",
+      "profile": "Profile12/mastermindx",
+      "observed_loaded_package": "Mastermind-Browser-0.4.0/Chrome-Default",
+      "previous_loaded_package": "Mastermind-Browser-0.5.0/Chrome-mastermindx",
+      "secure_preferences_mtime": "2026-11-10T03:40:36.973999+00:00",
+      "response_effect": "REFUSED_BEFORE_REQUEST_REFERENCE",
+      "writer": "UNKNOWN; no preferences or enrollment changed by this task",
+      "original_tabs_cleanup": "HELD_AT_ORIGINAL_OWNER"
+    },
+    "other_work_profile_status": {
+      "profile": "Profile17/chatgpt1",
+      "state": "CONNECTED",
+      "control": true,
+      "screenshot": true,
+      "advanced_cdp": true,
+      "input_proof": false
+    },
+    "mini1_owner_ui": {
+      "state": "PAGE_CONTROL_GRANT_STILL_ABSENT",
+      "profile_browser_id": "27ad85b1aa0961c64b4de54179a5c0291dfe52c8be124a78276d9590e1af326e",
+      "options_page": "Observed exact installed extension Options URL in native window75",
+      "enable_action": "Background actionOnly click returned INTERNAL_SWIFT_ERROR: Accessibility action is not supported; effect unverifiable",
+      "reconciliation": "Fresh original-window observations show controls paused; same-owner status control_enabled=false; Chrome window census shows no new permission prompt",
+      "receipt": "/tmp/t3-mini1-enable-reconciliation.json",
+      "permission_denial_observed": false,
+      "replayed": false
+    }
+  },
+  "fleet": {
+    "mini1": "connected; page control/screenshot/download grants disabled",
+    "ubuntu4": "offline",
+    "m1": "enabled T3 capacity_fabric; no discovered MCP or new skills",
+    "ubuntu0": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "ubuntu1": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "ubuntu2": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "ubuntu3": "Enabled capacity_fabric; project-scoped browser skill and local T3 preview proven; global skill/MCP installation pending",
+    "reverse_transport_to_m2": "M1 existing m2-recovery SSH route proven with strict host keys and batch authentication; no credentials, aliases or provider configuration changed",
+    "m1_sdk": "Existing official Python mcp 1.28.1 imports successfully under Python3.12.13",
+    "m1_native": "Complete exact signed native cohort staged and startup-qualified; canonical placement and exact-descriptor SDK/backend permission qualification remain pending. Earlier sender permissions are not 4.9.8 session qualification. This task did not stop or restart the old daemon; exact PID51015 most recently observed absent.",
+    "m1_native_dependency_recovery": {
+      "initial_failure": "Original dyld crash: required @rpath/libswiftCompatibilitySpan.dylib absent from incomplete stage",
+      "diagnosis": "Original crash and Mach-O strong dependency, no unchanged rerun",
+      "repair": "Copied exact signed existing M2 companion beside unchanged staged binary; no loader override or resigning",
+      "version_returncode": 0,
+      "version": "Peekaboo4.9.8 HEAD/70dbc4183",
+      "state": "QUALIFIED_COHORT_STAGED_NOT_INSTALLED"
+    }
+  },
+  "ci_dependency": {
+    "prior_fixture": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
+    "qualified_successor": "0c0521169260d87889da8a7711a90460982eefa2",
+    "owner_proof": "mastermindx-market-intelligence/macro#10740; issuecomment-6757956429",
+    "whole_cohorts_preserved": true,
+    "focused_tests_passed": 412,
+    "consumer_change": ".github/workflows/ci.yml paired fixture ref only",
+    "macro_runtime_release_changed": false,
+    "local_contract_projection": {
+      "passed": 371,
+      "repository_discovery_unavailable": 6,
+      "reason": "Source projection lacks full repository/exclusion manifest",
+      "required_ci_relaxed": false
+    },
+    "candidate_guard_repair": "Rename numeric test-count key to focused_tests_passed; preserve412 and unchanged identity guard"
+  },
+  "pending": [
+    "Protected source delivery",
+    "Live installation with fresh preview and readback",
+    "Fresh actual T3 native consumer proof",
+    "Resolve browser snapshot failure and prove real workflow",
+    "Fleet skill distribution and qualified existing transport",
+    "Reconcile and clean up owned fixtures"
+  ],
+  "builtin_preview_consumer": {
+    "state": "PROVEN_BOUNDED_WORKFLOW",
+    "thread_id": "mcp:517ab39a-f88d-4695-8449-020e197e708d",
+    "run_id": "run:thread:mcp%3A517ab39a-f88d-4695-8449-020e197e708d:ordinal:1",
+    "provider": "capacity_fabric",
+    "model": "deepseek-v4.1-flash",
+    "run_state": "completed",
+    "retained_items": 40,
+    "completed_tool_items": 15,
+    "succeeded_inputs": 5,
+    "fresh_snapshot_before_every_input": true,
+    "form_result": "Verified: T3 preview baseline cd16df0 | advanced | ready",
+    "iframe_result": "Frame verified",
+    "proof_request_http_status": 200,
+    "owned_preview_closed": true,
+    "post_close_preview_sessions": [],
+    "canonical_activity_sha256": "affdaca16018698d261866607d14e77ee933a33d5c10258525e7c67db2fc94dc",
+    "initial_provider_recovery_observed": true,
+    "thread_settled": false,
+    "scope": "Existing M2 T3 preview, not new native/skill/MastermindChrome acceptance"
+  },
+  "linux_preview_qualification": {
+    "state": "CANDIDATE_PROJECT_SKILLS_AND_LOCAL_PREVIEWS_PROVEN_GLOBAL_INSTALL_PENDING",
+    "provider": "capacity_fabric",
+    "model": "deepseek-v4.1-flash",
+    "installed_t3_cli_sha256": "c3af0c4963d40fa887380371c6f7d7d41fcc014119a51a05482ba8f452642158",
+    "setup_owner": "Installed T3 0.1.7 browser setup; existing exact-command administrative grants",
+    "setup_result": "Vendor AppArmor setup applied and native owner readback succeeded on Ubuntu0 through Ubuntu3; real previews then succeeded",
+    "original_skill_sha256": "e8679056534318ddad29000ab699d97dfc65293f206992fab03881141f19db22",
+    "surfaces": [
+      {
+        "host": "ubuntu0",
+        "thread_id": "mcp:8bbbb1ca-23e3-4713-8f6a-bfc86faa18cd",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-final.json",
+        "receipt_sha256": "39bae09a33ab379d2db653dafe2824604bbc80a7a6ca3089f34775b49da6f030",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu0 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": false,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      },
+      {
+        "host": "ubuntu1",
+        "thread_id": "mcp:f5c5b98a-1edc-4585-9464-e24708579c48",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-read.json",
+        "receipt_sha256": "b1fd1043a166a9155f4aa5be56abfe337dcb64fbba3d8a8234dcd4dafbc5ce21",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu1 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": true,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      },
+      {
+        "host": "ubuntu2",
+        "thread_id": "mcp:4400b2cd-46fe-41aa-a7b0-fa281f23fc00",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-read.json",
+        "receipt_sha256": "8aa08b280cd7e7b10c6f7c16894297eef906545867f10988c5bcacb1762f125a",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu2 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": true,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      },
+      {
+        "host": "ubuntu3",
+        "thread_id": "mcp:8616cc0d-5f99-4d88-82da-075508462c4d",
+        "state": "COMPLETED_RESULT_AND_PREVIEW_CLEANUP_OBSERVED",
+        "receipt": "/tmp/t3-computer-browser-4307344-proof/isolated-browser-canonical-read.json",
+        "receipt_sha256": "a3a90fbc5d6c1513c2bab4824fc66c097c2c3427753335792e01fc5d52c6ed8d",
+        "skill_loaded": true,
+        "hidden_owned_preview": true,
+        "result": "Verified: T3 ubuntu3 isolated skill 4307344",
+        "fresh_snapshot_after_each_successful_input": true,
+        "project_skill_cleanup": "PROJECT_SKILL_REMOVED_READBACK"
+      }
+    ],
+    "ubuntu0_initial_gap": "Recovered incorrect target arguments; successful focus click was followed by typing with its prior snapshot reference. Final result and cleanup succeeded; this was not accepted as a fully grounded sequence.",
+    "revised_skill": {
+      "sha256": "eeadc98a23255cdcafa1502494778471dc3ae8db527626fa04d0ea6021551111",
+      "changes": [
+        "Click/type locator examples",
+        "Direct replacement typing with clear=true",
+        "Fresh snapshot after each successful input",
+        "Original-target error reconciliation",
+        "Existing Linux browser setup owner"
+      ],
+      "fresh_project": "/tmp/t3-preview-skill-revision-proof",
+      "thread_id": "mcp:e485cc38-c828-4672-94f6-a63d64414046",
+      "run_id": "run:thread:mcp%3Ae485cc38-c828-4672-94f6-a63d64414046:ordinal:1",
+      "state": "COMPLETED_AND_GROUNDED",
+      "receipt": "/tmp/t3-preview-skill-revision-proof/guided-preview-canonical.json",
+      "receipt_sha256": "1bae20b82ec8adf79e1cbbed5eaeb5a3a913817b2adb9831739a379f7daa2244",
+      "exact_run_items": 21,
+      "successful_inputs": 2,
+      "tool_errors": 0,
+      "result": "Verified: T3 guided preview revision eea",
+      "owned_preview_closed_and_absent": true
+    },
+    "limits": [
+      "Project-scoped candidate qualification, not permanent provider installation",
+      "No Linux fleet MCP transport was installed",
+      "Earlier M2 SSH authentication/trust boundaries remain",
+      "Broader thread settled flags remain false despite completed runs and no active run"
+    ],
+    "revised_candidate_cleanup": {
+      "state": "PROJECT_SKILL_REMOVED_READBACK",
+      "project_id": "8ca64050-6e39-4136-8580-c0962789e11e",
+      "receipt": "/tmp/t3-preview-skill-revision-proof/isolated-project-skill-cleanup.json",
+      "source_proof_sha256": "1bae20b82ec8adf79e1cbbed5eaeb5a3a913817b2adb9831739a379f7daa2244",
+      "removed_skill_sha256": "eeadc98a23255cdcafa1502494778471dc3ae8db527626fa04d0ea6021551111",
+      "recorded_at": "2026-11-10T06:08:08.635399+00:00",
+      "preserved": "Canonical T3 history and proof files"
+    }
+  },
+  "ci_infrastructure_4307344": {
+    "run_id": 42760363734,
+    "attempt": 1,
+    "source_head": "43073443e8ebb4e1260f4a7e7ecba0210bf36898",
+    "tested_merge_sha": "687125633c406e00243e506e1e581116d8509e3f",
+    "terminal_state": "failure",
+    "successful_shards": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "failed_prerequisites": [
+      {
+        "job_id": 129644635687,
+        "shard": 0,
+        "step": "Verify closed application transport in isolated root fixtures",
+        "cause": "APT noble-security index file size differs from signed metadata; mirror sync diagnostic; image build exit100 before fixture tests"
+      },
+      {
+        "job_id": 129644635630,
+        "shard": 2,
+        "step": "H1 required real Linux no-ACL positive journey",
+        "cause": "APT noble-updates universe index file size differs from signed metadata; mirror sync diagnostic; image build exit100 before fixture tests"
+      }
+    ],
+    "test_gate": "failed because required shards failed",
+    "source_repair_for_apt": "none",
+    "replayed": "no; actual skill-consumption findings require a new owned source head"
+  }
+}

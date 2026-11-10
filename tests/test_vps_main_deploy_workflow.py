@@ -4,6 +4,7 @@ This suite tests the trusted workflow SHAPE, not an actual VPS deploy. The
 incumbent archive-and-rollback owner and real production proof remain separate.
 """
 from pathlib import Path
+import os
 import subprocess
 
 import yaml
@@ -42,10 +43,10 @@ def test_release_wake_is_protected_main_only_and_read_only() -> None:
 def test_release_wake_uses_existing_exact_sha_and_rollback_owner() -> None:
     assert PIN.read_text(encoding="utf-8") == EXPECTED_PIN
     steps = _workflow()["jobs"]["deploy"]["steps"]
-    assert len(steps) == 2
+    assert len(steps) == 3
     assert steps[0]["uses"] == "actions/checkout@v4"
-    command = steps[1]["run"]
-    assert steps[1]["env"] == {"VPS_DEPLOY_KEY": "${{ secrets.VPS_DEPLOY_KEY }}"}
+    command = steps[2]["run"]
+    assert steps[2]["env"] == {"VPS_DEPLOY_KEY": "${{ secrets.VPS_DEPLOY_KEY }}"}
     assert '[[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]' in command
     assert "./scripts/deploy_from_git.sh \"$GITHUB_SHA\"" in command
     assert 'MASTERMIND_VPS_KEY="$KEYFILE"' in command
@@ -67,3 +68,64 @@ def test_deploy_command_shell_parses_without_running() -> None:
     parsed = subprocess.run(["bash", "-n"], input=command, text=True,
                             capture_output=True, check=False)
     assert parsed.returncode == 0, parsed.stderr
+
+
+def test_checkout_materialization_precedes_the_secret_bearing_deploy() -> None:
+    job = _workflow()["jobs"]["deploy"]
+    assert job["runs-on"] == "ubuntu-24.04"
+    materialize = job["steps"][1]
+    assert set(materialize) == {"name", "shell", "run"}
+    assert materialize["name"] == "Materialise the full checkout tree"
+    assert materialize["shell"] == "bash"
+    assert "VPS_DEPLOY_KEY" not in materialize["run"]
+    parsed = subprocess.run(["bash", "-n"], input=materialize["run"], text=True,
+                            capture_output=True, check=False)
+    assert parsed.returncode == 0, parsed.stderr
+
+
+def _fixture_environment() -> dict:
+    # No inherited Git directory, global hooks, identity or signing configuration.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+               GIT_TERMINAL_PROMPT="0")
+    return env
+
+
+def _sparse_fixture(root: Path, *, include_pin: bool) -> dict:
+    env = _fixture_environment()
+    def git(*args: str):
+        return subprocess.run(["git", "-c", "user.name=Fixture", "-c",
+            "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+            "-c", "core.hooksPath=" + os.devnull, *args], cwd=root, env=env,
+            text=True, capture_output=True, check=True)
+    (root / "scripts").mkdir()
+    (root / "scripts/ci_profile_capture.py").write_text("# inert fixture\n")
+    if include_pin:
+        (root / "ops").mkdir()
+        (root / "ops/vps_origin_known_hosts").write_text(EXPECTED_PIN)
+    git("init", "-q")
+    git("add", ".")
+    git("commit", "-qm", "Disposable checkout fixture")
+    git("sparse-checkout", "set", "--no-cone", "/scripts/ci_profile_capture.py")
+    assert not (root / "ops/vps_origin_known_hosts").exists()
+    return env
+
+
+def test_materialization_restores_a_real_sparse_checkout(tmp_path: Path) -> None:
+    env = _sparse_fixture(tmp_path, include_pin=True)
+    result = subprocess.run(["bash", "-c", _workflow()["jobs"]["deploy"]["steps"][1]["run"]],
+                            cwd=tmp_path, env=env, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "ops/vps_origin_known_hosts").read_text() == EXPECTED_PIN
+    sparse = subprocess.run(["git", "sparse-checkout", "list"], cwd=tmp_path,
+                            env=env, text=True, capture_output=True, check=False)
+    assert sparse.returncode != 0
+
+
+def test_materialization_refuses_a_missing_pin(tmp_path: Path) -> None:
+    env = _sparse_fixture(tmp_path, include_pin=False)
+    result = subprocess.run(["bash", "-c", _workflow()["jobs"]["deploy"]["steps"][1]["run"]],
+                            cwd=tmp_path, env=env, text=True, capture_output=True, check=False)
+    assert result.returncode != 0
+    assert "VPS host pin missing after full-tree refresh" in result.stdout
+    assert not (tmp_path / "ops/vps_origin_known_hosts").exists()

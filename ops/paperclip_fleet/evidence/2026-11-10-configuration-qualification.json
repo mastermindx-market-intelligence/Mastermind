@@ -1,0 +1,720 @@
+{
+  "observed_at": "2026-11-10T02:24:09.049628+00:00",
+  "company_id": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "paperclip_health": {
+    "status": "ok",
+    "version": "2026.1106.0",
+    "deploymentMode": "local_trusted",
+    "authReady": true,
+    "bootstrapStatus": "ready"
+  },
+  "agents": [
+    {
+      "id": "ec1116b7-e972-40ed-89cb-15ed4f8b04c4",
+      "name": "Engineering",
+      "profile": "engineering",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "382e4dacd417918e2f492da74ab54c0dd4476a67c6a5387bade44865894deea3",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        }
+      ],
+      "native_skill_sources": 56,
+      "model": "claude-fable-5.1",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mmx-executive"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "99a2f7ac-d0cd-4dee-88ab-b18b86797fa3",
+      "name": "Marketing",
+      "profile": "marketing",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "002f8e7c33a0e00c530f8151da6499f1dbdd272de8fc1cbfb43b9be5da1b7da7",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 59,
+      "model": "deepseek-v4.1-flash-uncensored",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mastermind-fabric-capacity"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "70664397-563e-46f5-8b7f-58412c6fb842",
+      "name": "Chief of Staff",
+      "profile": "chief-of-staff",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "b36e0e57fe23b0aab8e210b6fbe4d5a490b8c2ffeaccdfc6a9b8124334a217cb",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        }
+      ],
+      "native_skill_sources": 53,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "e4fdc777-f013-4b08-9f71-6dd6ab52336d",
+      "name": "Product",
+      "profile": "product",
+      "status": "error",
+      "instructions_match": true,
+      "instructions_sha256": "daa4bfa3d698ae24c185c0e9050d4e35f83734e9161d707b29e1d24b740908c4",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 52,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "4a387d84-4ef9-434d-b3d0-30ed97022493",
+      "name": "Reliability",
+      "profile": "reliability",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "8455f703acb259aa3ad92d028cdaa876f6e6953fb8ce9b3175b6ab66b0378383",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 54,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+      "name": "Meta-CEO",
+      "profile": "meta-ceo-uncensored",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "6ab36f656a18a3b7d6f26ee457175f132449e1a9849dea22f1d1c85de83e9037",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-board",
+          "state": "pending_native_materialization",
+          "version_id": "1dac9547-3bf1-488a-839b-25a135d19b44"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-create-agent",
+          "state": "pending_native_materialization"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 53,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mastermind-fabric-capacity",
+        "mastermind-fabric-exec"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+      "name": "Design Lead",
+      "profile": "design-lead",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "7bb67f5b462508669e5459e28136d7b7f3699d98ff5dc8d210c58a6a0381ecd7",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 57,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mastermind-fabric-capacity",
+        "paper"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+      "name": "Assurance",
+      "profile": "assurance",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "4f73275076b75cba7beb0159f83f4e7919bc4b62feb909f34e0b718c65cbad5b",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 53,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "8f8e2529-7b7a-4508-a85c-0717262a7da8",
+      "name": "Mastermind CEO",
+      "profile": "mastermind-ceo",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "4b9f32b6ce8cd98cb795086f40a0803a0b4105420aff699715098c3dcb8a4220",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-board",
+          "state": "pending_native_materialization",
+          "version_id": "1dac9547-3bf1-488a-839b-25a135d19b44"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-create-agent",
+          "state": "pending_native_materialization"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 56,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mastermind-fabric-capacity"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+      "name": "Secretary",
+      "profile": "secretary",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "4aaafae8ee90bb9768488ca076b11c8e7b1999db62892069eb93227c6ca6f95b",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        }
+      ],
+      "native_skill_sources": 69,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mastermind-fabric-capacity",
+        "mastermind-fabric-exec"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "4916e67a-92de-46cd-a193-e0f6f5f31d49",
+      "name": "Autonomy CEO",
+      "profile": "autonomy-ceo",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "bcd379d53d8efcfec02bd4b0c126ac243ae9394e93026296e2e7ba4e4a2a8399",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-board",
+          "state": "pending_native_materialization",
+          "version_id": "1dac9547-3bf1-488a-839b-25a135d19b44"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-create-agent",
+          "state": "pending_native_materialization"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 56,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use",
+        "mastermind-fabric-capacity"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "970ec1e3-10e7-47d9-977b-aa3c9a7ac146",
+      "name": "Intelligence",
+      "profile": "intelligence",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "85594a8b0fb09dc7cb1980303c2769a821dec3503e066d87c1a4db4a4dbfbef9",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        }
+      ],
+      "native_skill_sources": 52,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    },
+    {
+      "id": "cb73c732-c670-4d66-8e97-d97c1fd27a6e",
+      "name": "Delivery",
+      "profile": "delivery",
+      "status": "idle",
+      "instructions_match": true,
+      "instructions_sha256": "acc79323beda200182d03f402af25afd243ec9d05ff6ce4ef45b9fd6bed953d2",
+      "core_skill_ready": "ready",
+      "managed_skills": [
+        {
+          "key": "paperclipai/paperclip/paperclip",
+          "state": "ready",
+          "version_id": "75696eab-0d10-4065-a49b-540ebb9b6af7"
+        },
+        {
+          "key": "paperclipai/paperclip/complain",
+          "state": "ready",
+          "version_id": "a3e67683-6efa-49c0-ac60-2898089b230c"
+        },
+        {
+          "key": "paperclipai/paperclip/suggestion-box",
+          "state": "ready",
+          "version_id": "eccf5f0c-2651-476f-bc26-7e9ffc94fe33"
+        },
+        {
+          "key": "paperclipai/paperclip/paperclip-converting-plans-to-tasks",
+          "state": "ready",
+          "version_id": "f4a1e0fb-eb6f-485e-bf50-f5f220ffb3ec"
+        }
+      ],
+      "native_skill_sources": 52,
+      "model": "glm-5.3",
+      "provider_selection": "auto",
+      "configured_model_provider": "capacity-fabric",
+      "memory_provider": "omh",
+      "mcp_server_names": [
+        "ekko-studio-api",
+        "ekko-studio-browser",
+        "ekko-studio-interaction",
+        "ekko-studio-use"
+      ],
+      "command": "/Users/chriswong/.local/bin/hermes",
+      "persist_session": false,
+      "heartbeat": {
+        "enabled": false,
+        "maxConcurrentRuns": 1
+      },
+      "feedback_disabled": true,
+      "gateway_identity_context_ready": true,
+      "beta_pins_present": false
+    }
+  ],
+  "experimental_flags": {
+    "enableBetaSkills": false,
+    "enableIsolatedWorkspaces": false
+  },
+  "original_canary": {
+    "id": "4f8769dc-1c3f-41f7-bdec-08f137f551ef",
+    "identifier": "MAS-2",
+    "status": "blocked",
+    "executionWorkspaceId": "d9acdda2-21f5-4ad3-a79e-718d4191be53",
+    "workspaceBindingRevision": 2,
+    "executionWorkspacePreference": "reuse_existing",
+    "executionWorkspaceSettings": {
+      "mode": "isolated_workspace"
+    }
+  },
+  "hot_restart": {
+    "version": 1,
+    "requestedAt": "2026-11-10T02:21:00.827Z",
+    "completedAt": "2026-11-10T02:22:40.519Z",
+    "drainRequired": false,
+    "drainReason": null,
+    "previousServerPid": 55585,
+    "newServerPid": 82322,
+    "previousServerVersion": "2026.1106.0",
+    "newServerVersion": "2026.1106.0",
+    "adoptedRunIds": [],
+    "finalizedWhileDownRunIds": [],
+    "lostRunIds": [],
+    "skippedRunIds": [],
+    "runs": []
+  },
+  "qualification": "CONFIGURATION_VERIFIED_END_TO_END_HELD"
+}

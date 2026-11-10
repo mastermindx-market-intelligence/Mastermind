@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-egress-proxy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   proxy-static-and-squid-parse:
     runs-on: ubuntu-24.04

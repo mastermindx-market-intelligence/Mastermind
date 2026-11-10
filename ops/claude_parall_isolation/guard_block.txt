@@ -4,6 +4,11 @@
     import shlex
 
     def shell_clauses(command):
+        # POSIX shell continuation removes a backslash immediately followed
+        # by newline, including when the command is nested in sh/bash/zsh -c.
+        # Preserve surrounding whitespace: "open -a \\\nClaude" must be
+        # seen as "open -a Claude", whereas "Cl\\\naude" becomes "Claude".
+        command = re.sub(r"\\\r?\n", "", command)
         try:
             lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
             lexer.whitespace_split = True
@@ -25,63 +30,157 @@
         return clauses
 
     def is_unmanaged_desktop_launch(argv, depth=0):
-        if not argv:
+        if not argv or depth >= 8:
             return False
-        exe = argv[0].rsplit("/", 1)[-1]
+        exe = argv[0].rsplit("/", 1)[-1].casefold()
+
         if exe == "env":
+            # Unwrap real GNU/BSD env forms, not shell-quoted documentation.
             j = 1
-            while j < len(argv) and "=" in argv[j] and not argv[j].startswith("-"):
-                j += 1
-            return is_unmanaged_desktop_launch(argv[j:], depth)
-        if exe in {"sh", "bash", "zsh"} and depth < 1:
+            while j < len(argv):
+                arg = argv[j]
+                if arg == "--":
+                    j += 1
+                    break
+                if arg in {"-S", "--split-string"} and j + 1 < len(argv):
+                    return any(
+                        is_unmanaged_desktop_launch(clause, depth + 1)
+                        for clause in shell_clauses(argv[j + 1])
+                    )
+                if arg.startswith("--split-string="):
+                    return any(
+                        is_unmanaged_desktop_launch(clause, depth + 1)
+                        for clause in shell_clauses(arg.split("=", 1)[1])
+                    )
+                if arg in {"-", "-i", "--ignore-environment", "-0", "--null", "-v", "--debug"}:
+                    j += 1
+                    continue
+                if arg in {"-u", "--unset", "-C", "--chdir"}:
+                    j += 2
+                    continue
+                if (arg.startswith(("-u", "--unset=", "--chdir="))
+                        and arg not in {"-u", "--unset", "--chdir"}):
+                    j += 1
+                    continue
+                if "=" in arg and not arg.startswith("-"):
+                    j += 1
+                    continue
+                break
+            return is_unmanaged_desktop_launch(argv[j:], depth + 1)
+
+        if exe == "sudo":
+            # Only inspect the command after sudo's launcher flags; this
+            # guard does not elevate privileges or execute sudo.
+            j = 1
+            while j < len(argv):
+                arg = argv[j]
+                if arg == "--":
+                    j += 1
+                    break
+                if arg in {"-u", "--user", "-g", "--group", "-C", "-p", "-R", "-D"}:
+                    j += 2
+                    continue
+                if arg.startswith("-"):
+                    j += 1
+                    continue
+                break
+            return is_unmanaged_desktop_launch(argv[j:], depth + 1)
+
+        if exe in {"nohup", "exec", "command"}:
+            rest = argv[1:]
+            if exe == "command" and rest and rest[0] == "-p":
+                rest = rest[1:]
+            if exe == "exec":
+                while rest:
+                    if rest[0] in {"-c", "-l"}:
+                        rest = rest[1:]
+                        continue
+                    if rest[0] == "-a" and len(rest) >= 2:
+                        rest = rest[2:]
+                        continue
+                    break
+            if rest and rest[0] == "--":
+                rest = rest[1:]
+            return is_unmanaged_desktop_launch(rest, depth + 1)
+
+        if exe == "nice":
+            rest = argv[1:]
+            if len(rest) >= 2 and rest[0] in {"-n", "--adjustment"}:
+                rest = rest[2:]
+            elif rest and (rest[0].startswith("--adjustment=")
+                           or re.fullmatch(r"-[0-9]+", rest[0])):
+                rest = rest[1:]
+            elif rest and rest[0] == "--":
+                rest = rest[1:]
+            return is_unmanaged_desktop_launch(rest, depth + 1)
+
+        if exe in {"time", "caffeinate"}:
+            rest = argv[1:]
+            while rest:
+                if rest[0] == "--":
+                    rest = rest[1:]
+                    break
+                if exe == "caffeinate" and rest[0] in {"-w", "-t"}:
+                    rest = rest[2:]
+                    continue
+                if rest[0].startswith("-"):
+                    rest = rest[1:]
+                    continue
+                break
+            return is_unmanaged_desktop_launch(rest, depth + 1)
+
+        if exe in {"sh", "bash", "zsh"}:
             for i, arg in enumerate(argv[1:], 1):
                 if arg.startswith("-") and "c" in arg[1:] and i + 1 < len(argv):
-                    return any(is_unmanaged_desktop_launch(x, depth + 1)
-                               for x in shell_clauses(argv[i + 1]))
+                    return any(
+                        is_unmanaged_desktop_launch(clause, depth + 1)
+                        for clause in shell_clauses(argv[i + 1])
+                    )
         if exe == "claude" and "--desktop" in argv[1:]:
             return True
         path = argv[0]
         if re.fullmatch(
             r"/Applications/Claude Runtimes/Claude (?:Default|[0-9]+)/"
             r"Claude\.app/Contents/MacOS/Claude",
-            path,
+            path, flags=re.I,
         ):
             return True
         if re.fullmatch(
             r"/Applications/Claude(?: (?:Default|Official))?\.app/Contents/MacOS/[^/]+",
-            path,
+            path, flags=re.I,
         ):
             return True
         if exe == "osascript":
             script = " ".join(argv[1:])
             if re.search(
                 r'\btell\s+application(?:\s+id)?\s+["\x27]'
-                r'(?:Claude(?:\.app)?|com\.anthropic\.claudefordesktop)["\x27]',
+                r'(?:Claude(?:\.app| (?:Default|Official)(?:\.app)?)?'
+                r'|com\.anthropic\.claudefordesktop)["\x27]',
                 script, re.I,
             ):
                 return True
         if exe != "open":
             return False
         unsafe_apps = {
-            "Claude", "Claude.app", "Claude Official", "Claude Official.app",
-            "Claude Default", "Claude Default.app", "/Applications/Claude.app",
-            "/Applications/Claude Official.app", "/Applications/Claude Default.app",
+            "claude", "claude.app", "claude official", "claude official.app",
+            "claude default", "claude default.app", "/applications/claude.app",
+            "/applications/claude official.app", "/applications/claude default.app",
         }
         for i, arg in enumerate(argv[1:], 1):
-            if (arg == "/Applications/Claude" and i + 1 < len(argv)
-                    and argv[i + 1] in {"Default.app", "Official.app"}):
+            if (arg.casefold() == "/applications/claude" and i + 1 < len(argv)
+                    and argv[i + 1].casefold() in {"default.app", "official.app"}):
                 return True
-            if arg.startswith("claude://") or arg in unsafe_apps:
+            if arg.casefold().startswith("claude://") or arg.casefold() in unsafe_apps:
                 return True
             if re.fullmatch(
                 r"/Applications/Claude Runtimes/Claude (?:Default|[0-9]+)/Claude\.app",
-                arg,
+                arg, flags=re.I,
             ):
                 return True
             if i + 1 < len(argv) and arg.startswith("-"):
-                if ("a" in arg[1:] and argv[i + 1] in unsafe_apps
-                        or "b" in arg[1:] and
-                        argv[i + 1] == "com.anthropic.claudefordesktop"):
+                if ("a" in arg[1:].casefold() and argv[i + 1].casefold() in unsafe_apps
+                        or "b" in arg[1:].casefold() and
+                        argv[i + 1].casefold() == "com.anthropic.claudefordesktop"):
                     return True
         return False
 
