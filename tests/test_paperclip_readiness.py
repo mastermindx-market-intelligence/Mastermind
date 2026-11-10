@@ -1,5 +1,7 @@
 """Focused safety/compatibility checks for the one-shot Paperclip installer."""
 import copy
+from contextlib import contextmanager
+import hashlib
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -169,5 +171,98 @@ class ReadinessTests(unittest.TestCase):
             self.assertEqual(list((home / "skills").iterdir()), [])
 
 
+class ForegroundLearningInstructionTests(unittest.TestCase):
+    @contextmanager
+    def harness(self, content, slug="product", response="ok"):
+        aid, (name, _) = next((aid, role) for aid, role in r.ROSTER.items() if role[1] == slug)
+        home = Path("/Users/chriswong/.hermes/profiles") / slug
+        entry_path = f"/agents/{aid}/instructions-bundle/file?path=AGENTS.md"
+        write_path = f"/agents/{aid}/instructions-bundle/file"
+        state = {"content": content, "contentHash": "observed-preimage-hash"}
+        calls = []
+        agent = {"companyId": r.COMPANY, "name": name, "adapterType": "hermes_local",
+                 "status": "idle", "adapterConfig": {}, "runtimeConfig": {}}
+        profile = {"model": {"provider": "capacity-fabric", "default": "glm-5.3"},
+                   "memory": {"provider": "omh"}}
+
+        def request(path, body=None, method="GET"):
+            calls.append((path, copy.deepcopy(body), method))
+            if method == "PUT":
+                self.assertEqual(path, write_path)
+                self.assertEqual(body["baseHash"], "observed-preimage-hash")
+                if response == "conflict":
+                    raise RuntimeError("native content-hash conflict")
+                if response != "mismatch":
+                    state.update(content=body["content"], contentHash="saved-hash", revision={"id": "saved-revision"})
+                if response == "lost":
+                    raise TimeoutError("response lost after native save")
+                return copy.deepcopy(state)
+            self.assertEqual(method, "GET", "instruction mode must not change another owner")
+            if path == entry_path:
+                return copy.deepcopy(state)
+            if path == f"/agents/{aid}":
+                return copy.deepcopy(agent)
+            if path == f"/agents/{aid}/skills":
+                return {"entries": [{"sourcePath": str(home / "skills/existing/SKILL.md"), "managed": False}]}
+            if path.startswith(f"/companies/{r.COMPANY}/heartbeat-runs?"):
+                return []
+            raise AssertionError(f"Unexpected owner access: {path}")
+
+        with patch.object(r, "request", request), patch.object(r, "profile_config", return_value=profile), patch.object(Path, "is_file", return_value=True), patch.object(r, "qualify_versions", return_value=([], [])) as qualify, patch.object(r, "configure_profile_context") as profile_write:
+            yield aid, name, slug, state, calls
+            profile_write.assert_not_called()
+            if qualify.called:
+                self.assertFalse(qualify.call_args.args[2], "native skill materialization must stay read-only")
+
+    def legacy_product(self):
+        return (Path(__file__).parent / "fixtures/paperclip_readiness_v1_product.md").read_text()
+
+    def test_exact_predecessor_upgrades_with_cas_and_no_other_owner_writes(self):
+        legacy = self.legacy_product()
+        self.assertEqual(hashlib.sha256(legacy.encode()).hexdigest(), r.PREVIOUS_MANAGED_V1_SHA256["product"])
+        with self.harness(legacy) as (aid, name, slug, state, calls):
+            result = r.configure_agent(aid, name, slug, apply=True, instructions_only=True)
+            self.assertEqual(state["content"], r.instructions(name, slug))
+            self.assertEqual(result["changes"], ["instructions"])
+            self.assertEqual(result["instruction_revision"], "saved-revision")
+            self.assertEqual([method for _, _, method in calls if method != "GET"], ["PUT"])
+
+    def test_current_instructions_are_idempotent(self):
+        with self.harness(r.instructions("Product", "product")) as (aid, name, slug, _, calls):
+            result = r.configure_agent(aid, name, slug, apply=True, instructions_only=True)
+            self.assertTrue(result["instructions_ready"])
+            self.assertEqual(result["changes"], [])
+            self.assertTrue(all(method == "GET" for _, _, method in calls))
+
+    def test_modified_legacy_and_another_roles_document_are_preserved(self):
+        for content, slug in ((self.legacy_product() + " ", "product"), (self.legacy_product(), "engineering")):
+            with self.subTest(slug=slug), self.harness(content, slug) as (aid, name, slug, state, calls):
+                with self.assertRaisesRegex(ValueError, "custom instructions; preserve and reconcile"):
+                    r.configure_agent(aid, name, slug, apply=True, instructions_only=True)
+                self.assertEqual(state["content"], content)
+                self.assertTrue(all(method == "GET" for _, _, method in calls))
+
+    def test_cas_conflict_stops_without_retry_or_other_writes(self):
+        with self.harness(self.legacy_product(), response="conflict") as (aid, name, slug, state, calls):
+            with self.assertRaisesRegex(RuntimeError, "content-hash conflict"):
+                r.configure_agent(aid, name, slug, apply=True, instructions_only=True)
+            self.assertEqual(state["content"], self.legacy_product())
+            self.assertEqual([method for _, _, method in calls if method != "GET"], ["PUT"])
+
+    def test_lost_response_is_not_replayed(self):
+        with self.harness(self.legacy_product(), response="lost") as (aid, name, slug, state, calls):
+            with self.assertRaisesRegex(TimeoutError, "response lost"):
+                r.configure_agent(aid, name, slug, apply=True, instructions_only=True)
+            self.assertEqual(state["content"], r.instructions(name, slug))
+            self.assertEqual([method for _, _, method in calls if method != "GET"], ["PUT"])
+
+    def test_mismatched_readback_is_not_reported_complete_or_rewritten(self):
+        with self.harness(self.legacy_product(), response="mismatch") as (aid, name, slug, _, calls):
+            with self.assertRaisesRegex(RuntimeError, "Instruction readback mismatch"):
+                r.configure_agent(aid, name, slug, apply=True, instructions_only=True)
+            self.assertEqual([method for _, _, method in calls if method != "GET"], ["PUT"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
