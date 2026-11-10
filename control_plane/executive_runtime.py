@@ -18578,6 +18578,8 @@ class ExpectedChildSelection:
 class _SelectedChildClaim:
     selection: ExpectedChildSelection
     admission_guard: Callable[[], None] | None = dataclasses.field(default=None, repr=False)
+    requester_context: Any | None = dataclasses.field(default=None, repr=False)
+    requester_capability_profile_digest: str | None = None
 
 
 _EXPECTED_CHILD_SELECTION: ContextVar[_SelectedChildClaim | None] = ContextVar(
@@ -18588,16 +18590,26 @@ _EXPECTED_CHILD_SELECTION: ContextVar[_SelectedChildClaim | None] = ContextVar(
 @contextmanager
 def expected_child_selection(
     expected: ExpectedChildSelection | None, *, admission_guard: Callable[[], None] | None = None,
+    requester_context: Any | None = None, requester_capability_profile_digest: str | None = None,
 ):
     """Bind exact selection and private host guard to the incumbent claim task."""
     if expected is not None and type(expected) is not ExpectedChildSelection:
         raise StateConflict("selected child selection is not the host's frozen value")
     if admission_guard is not None and (expected is None or not callable(admission_guard)):
         raise StateConflict("selected child admission guard is unavailable")
+    if requester_context is not None or requester_capability_profile_digest is not None:
+        from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+        if (type(requester_context) is not PrincipalAdmissionContext or admission_guard is None
+                or type(requester_capability_profile_digest) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", requester_capability_profile_digest) is None):
+            raise StateConflict("selected child requester lacks its current authenticated host context")
     bound = _EXPECTED_CHILD_SELECTION.get()
-    if bound is not None and (bound.selection != expected or bound.admission_guard is not admission_guard):
+    if bound is not None and (bound.selection != expected or bound.admission_guard is not admission_guard
+            or bound.requester_context != requester_context
+            or bound.requester_capability_profile_digest != requester_capability_profile_digest):
         raise StateConflict("selected child claim binding cannot be replaced")
-    value = None if expected is None else _SelectedChildClaim(expected, admission_guard)
+    value = None if expected is None else _SelectedChildClaim(
+        expected, admission_guard, requester_context, requester_capability_profile_digest)
     token = _EXPECTED_CHILD_SELECTION.set(value)
     try:
         yield expected
@@ -18695,6 +18707,118 @@ def _assert_expected_child_selection(
             refuse("admitted plan attempt drifted")
         if admission.get("plan_digest") != expected.plan_digest:
             refuse("admitted plan digest drifted")
+
+
+def _selected_child_requester_claim(connection, job_row, command_id):
+    """Retain actual ingress provenance in the original claim transaction.
+
+    Private task custody comes from the current authenticated Control request.
+    Model-supplied requester references never enter this path. Automatic and
+    legacy COO claims omit the optional field, including original replay.
+    """
+    from common import coo_requester_return_contract as wire
+    bound = _EXPECTED_CHILD_SELECTION.get()
+    if bound is None or bound.requester_context is None:
+        return None
+    selected = bound.selection
+    if (bound.admission_guard is None or job_row["orchestration_role"] not in {"work", "repair"}
+            or selected.command_id != command_id or selected.job_id != job_row["job_id"]
+            or any(getattr(selected, name) != job_row[name] for name in (
+                "root_job_id", "parent_job_id", "plan_attempt_id", "plan_digest", "plan_step_id", "repair_round"))
+            or selected.attempt_ordinal != int(job_row["attempt_count"]) + 1
+            or _admission_root_workstream(connection, selected.root_job_id) != bound.requester_context.work_ref):
+        raise StateConflict("selected child requester does not name the original admitted claim")
+    try:
+        return wire.validate_claim({"schema_version": wire.CLAIM_SCHEMA, "family": wire.FAMILY,
+            "context": dataclasses.asdict(bound.requester_context),
+            "capability_profile_digest": bound.requester_capability_profile_digest,
+            "selection": dataclasses.asdict(selected)})
+    except (TypeError, ValueError) as exc:
+        raise StateConflict("selected child requester claim is invalid") from exc
+
+
+def _coo_requester_return_snapshot(connection, *, job_id, command_id, context, capability_profile_digest):
+    """One connection-local join to original claim and canonical result owner."""
+    from common import coo_requester_return_contract as wire
+    from control_plane.executive_terminal_return import reduce_terminal_return
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    if (type(context) is not PrincipalAdmissionContext or type(capability_profile_digest) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", capability_profile_digest) is None):
+        raise StateConflict("COO requester context is unavailable")
+    claim = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id,)).fetchone()
+    if claim is None:
+        return None
+    if (claim["event_type"] != "JOB_CLAIMED" or claim["aggregate_type"] != "job"
+            or claim["aggregate_id"] != job_id or claim["job_id"] != job_id or not claim["attempt_id"]):
+        raise StateConflict("COO requester return lost its original claim")
+    payload = _strict_canonical_json_loads(str(claim["payload_json"]), name="COO requester original claim")
+    if type(payload) is not dict or payload.get("cycle_command_id") != command_id or payload.get("dispatch_job_id") != job_id:
+        raise StateConflict("COO requester dispatch identity changed")
+    if "selected_child_requester" not in payload:
+        return None  # a legacy original never acquires a requester on replay
+    try:
+        original = wire.validate_claim(payload["selected_child_requester"])
+    except (TypeError, ValueError) as exc:
+        raise StateConflict("COO requester original claim is malformed") from exc
+    if (original["context"] != dataclasses.asdict(context)
+            or original["capability_profile_digest"] != capability_profile_digest):
+        return None  # mission-read permission is not original requester identity
+    selected = original["selection"]
+    material = _validated_role_completion_snapshot(connection, job_token=job_id, attempt_token=str(claim["attempt_id"]))
+    job, attempt = material.job, material.attempt
+    if (job.orchestration_role not in {"work", "repair"} or selected["command_id"] != command_id
+            or selected["attempt_ordinal"] != attempt.attempt_number
+            or any(selected[key] != getattr(job, key) for key in (
+                "root_job_id", "parent_job_id", "job_id", "plan_attempt_id", "plan_digest", "plan_step_id", "repair_round"))
+            or command_id != f"coo-cycle:{job.parent_job_id}:dispatch:{job_id}:attempt:{attempt.attempt_number}"
+            or _admission_root_workstream(connection, job.root_job_id) != context.work_ref):
+        raise StateConflict("COO requester lineage or original Attempt changed")
+    marker = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id + ":effect-unknown",)).fetchone()
+    resolved = connection.execute("SELECT * FROM events WHERE command_id=?", (command_id + ":reconciled",)).fetchone()
+    if marker is not None:
+        _validated_coo_dispatch_effect_event(connection, marker, expected_root_id=job.parent_job_id)
+        if resolved is None:
+            raise StateConflict("COO requester original dispatch remains uncertain")
+        _validated_coo_dispatch_effect_event(connection, resolved, expected_root_id=job.parent_job_id)
+    elif resolved is not None:
+        raise StateConflict("COO requester reconciliation lost its original dispatch marker")
+    candidate = reduce_terminal_return(material=material)
+    descriptor = {"schema_version": wire.RETURN_SCHEMA, "family": wire.FAMILY,
+        "command_id": command_id, "work_ref": context.work_ref, "root_job_id": job.root_job_id,
+        "parent_job_id": job.parent_job_id, "job_id": job_id, "attempt_id": attempt.attempt_id,
+        "requester_binding_digest": orchestration_digest(original),
+        "result_envelope_digest": candidate.result_envelope_digest,
+        "terminal_evidence_digest": candidate.terminal_evidence_digest,
+        "consumption": None, "parent_consumed": False, "acceptance": "not_accepted"}
+    receipt = connection.execute("SELECT * FROM events WHERE command_id=?",
+        (wire.consumption_command_id(attempt.attempt_id),)).fetchone()
+    if receipt is not None:
+        if (receipt["event_type"] != wire.CONSUMPTION_EVENT or receipt["aggregate_type"] != "coo_requester_return"
+                or receipt["aggregate_id"] != attempt.attempt_id or receipt["job_id"] != job_id
+                or receipt["attempt_id"] != attempt.attempt_id or receipt["actor"] != "coo-api-principal"
+                or receipt["worker_id"] is not None or receipt["quota_class"] is not None):
+            raise StateConflict("COO requester acknowledgment names another operation")
+        try:
+            consumed = wire.validate_consumption(_strict_canonical_json_loads(
+                str(receipt["payload_json"]), name="COO requester acknowledgment"))
+            if (any(consumed[key] != value for key, value in wire.identity(descriptor).items())
+                    or consumed["acknowledged_at_ms"] != receipt["created_at_ms"]):
+                raise ValueError("acknowledgment result changed")
+        except (TypeError, ValueError) as exc:
+            raise StateConflict("COO requester acknowledgment is malformed") from exc
+        descriptor["consumption"] = consumed
+    return wire.validate_descriptor(descriptor)
+
+
+def _require_coo_requester_guard(guard):
+    if (not callable(guard) or inspect.iscoroutinefunction(guard)
+            or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
+        raise StateConflict("COO requester requires a current synchronous owner guard")
+    result = guard()
+    if result is not None:
+        if inspect.iscoroutine(result):
+            result.close()
+        raise StateConflict("COO requester owner guard refused")
 
 
 def _record_placement_deferral(store, connection, job_id: str, refusal, timestamp: int) -> None:
@@ -19328,6 +19452,9 @@ class AttemptRegistry:
             claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
             claim_payload["exact_worker_target"] = exact_target.evidence()
+        requester = _selected_child_requester_claim(connection, job_row, command_id)
+        if requester is not None:
+            claim_payload["selected_child_requester"] = requester
         if _placement is not None:
             # WO-14: ONE broker transaction (this one) reserves host slot +
             # root concurrency + every shared quota resource and binds the
@@ -28976,52 +29103,70 @@ def _capture_selected_children(
         row = loader.execute(
             "SELECT * FROM jobs WHERE job_id=?", (job_token,)
         ).fetchone()
-        if row is None:
-            raise StateConflict("selected child is not an admitted Job")
-        if (row["root_job_id"] != root_token
-                or row["parent_job_id"] != coordinator["job_id"]
-                or int(row["depth"]) != int(coordinator["depth"]) + 1):
-            raise StateConflict("selected child is outside the chosen coordinator")
-        _decode_orchestration_job_fields(row)
-        if row["orchestration_role"] not in {"work", "repair"}:
-            raise StateConflict("selected child role is unsupported")
-        if (row["plan_attempt_id"] != admission["plan_attempt_id"]
-                or row["plan_digest"] != admission["plan_digest"]):
-            raise StateConflict("selected child is not on the admitted plan")
-        step_id = str(row["plan_step_id"])
-        step = by_step.get(step_id)
-        if step is None or step["current_job_id"] != job_token:
-            raise StateConflict("selected child is superseded")
-        repair_round = int(row["repair_round"])
-        if repair_round not in {0, 1, 2}:
-            raise StateConflict("selected child repair round is unsupported")
-        attempt_count = int(row["attempt_count"])
-        ordinal = attempt_count + 1
-        if ordinal < 1:
-            raise StateConflict("selected child Attempt ordinal is invalid")
-        current_attempt_id = row["current_attempt_id"]
-        if current_attempt_id is not None:
-            attempt = loader.execute(
-                "SELECT * FROM attempts WHERE attempt_id=?", (current_attempt_id,)
-            ).fetchone()
-            if (attempt is None or attempt["job_id"] != job_token
-                    or int(attempt["attempt_number"]) != attempt_count):
-                raise StateConflict("selected child current Attempt is unverified")
-        captured.append({
-            "command_id": (
-                f"coo-cycle:{coordinator['job_id']}:dispatch:{job_token}:attempt:{ordinal}"),
-            "attempt_ordinal": ordinal,
-            "root_job_id": root_token,
-            "parent_job_id": str(coordinator["job_id"]),
-            "job_id": job_token,
-            "plan_attempt_id": admission["plan_attempt_id"],
-            "plan_digest": admission["plan_digest"],
-            "plan_step_id": step_id,
-            "repair_round": repair_round,
-            "expected_current_attempt_id": current_attempt_id,
-        })
+        captured.append(_capture_selected_child_from_row(
+            loader, coordinator, admission, root_token, job_token, row, by_step))
     return tuple(captured)
 
+
+def _capture_selected_child_from_row(
+    loader: _BoundedRoleResultLoader,
+    coordinator: sqlite3.Row,
+    admission: dict[str, Any],
+    root_token: str,
+    job_token: str,
+    row: sqlite3.Row | None,
+    by_step: Mapping[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Validate one already-acquired child on the caller's same snapshot.
+
+    Current-target reads have already acquired this exact leaf row. Reusing
+    it avoids another SELECT and byte guard; all incumbent selection/revision/
+    Attempt checks below remain shared with ordinary selected-child capture.
+    """
+    if row is None or row["job_id"] != job_token:
+        raise StateConflict("selected child is not an admitted Job")
+    if (row["root_job_id"] != root_token
+            or row["parent_job_id"] != coordinator["job_id"]
+            or int(row["depth"]) != int(coordinator["depth"]) + 1):
+        raise StateConflict("selected child is outside the chosen coordinator")
+    _decode_orchestration_job_fields(row)
+    if row["orchestration_role"] not in {"work", "repair"}:
+        raise StateConflict("selected child role is unsupported")
+    if (row["plan_attempt_id"] != admission["plan_attempt_id"]
+            or row["plan_digest"] != admission["plan_digest"]):
+        raise StateConflict("selected child is not on the admitted plan")
+    step_id = str(row["plan_step_id"])
+    step = by_step.get(step_id)
+    if step is None or step["current_job_id"] != job_token:
+        raise StateConflict("selected child is superseded")
+    repair_round = int(row["repair_round"])
+    if repair_round not in {0, 1, 2}:
+        raise StateConflict("selected child repair round is unsupported")
+    attempt_count = int(row["attempt_count"])
+    ordinal = attempt_count + 1
+    if ordinal < 1:
+        raise StateConflict("selected child Attempt ordinal is invalid")
+    current_attempt_id = row["current_attempt_id"]
+    if current_attempt_id is not None:
+        attempt = loader.execute(
+            "SELECT * FROM attempts WHERE attempt_id=?", (current_attempt_id,)
+        ).fetchone()
+        if (attempt is None or attempt["job_id"] != job_token
+                or int(attempt["attempt_number"]) != attempt_count):
+            raise StateConflict("selected child current Attempt is unverified")
+    return {
+        "command_id": (
+            f"coo-cycle:{coordinator['job_id']}:dispatch:{job_token}:attempt:{ordinal}"),
+        "attempt_ordinal": ordinal,
+        "root_job_id": root_token,
+        "parent_job_id": str(coordinator["job_id"]),
+        "job_id": job_token,
+        "plan_attempt_id": admission["plan_attempt_id"],
+        "plan_digest": admission["plan_digest"],
+        "plan_step_id": step_id,
+        "repair_round": repair_round,
+        "expected_current_attempt_id": current_attempt_id,
+    }
 
 # Retained OHF candidate reads reuse the EXISTING one-selection Runtime owner,
 # VM/SQL budgets, original Event ledger and same-read receipt. This additional
@@ -29390,6 +29535,33 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    def read_current_target_identity_bounded(
+        self, *, operation_key: str,
+    ) -> tuple[Job, Any]:
+        """Select one current identity and nested lineage on one bounded read.
+
+        The canonical current-target owner performs the same proof when this
+        identity is part of an original reply observation. No caller-supplied
+        coordinator, additional store or independent inner budget is accepted.
+        """
+        self._select()
+        try:
+            from control_plane.executive_current_target import _current_target_identity_from_snapshot
+
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                return _current_target_identity_from_snapshot(loader, operation_key=operation_key)
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("current target identity VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
     def read_session_live_writer_bounded(
         self, *, read_ref: str,
         original_principals: tuple[tuple[str, ...], ...] | None = None,
@@ -29416,7 +29588,7 @@ class BoundedRuntimeReadObservation:
         try:
             from control_plane.executive_current_target import (
                 _current_target_epoch_from_facts,
-                _current_target_job_identity,
+                _current_target_identity_from_snapshot,
                 _validate_current_target_attempt,
                 _validate_current_target_worker_quota,
                 job_id_from_operation_key,
@@ -29439,12 +29611,8 @@ class BoundedRuntimeReadObservation:
 
                 operation_key = value["context"]["operation_key"]
                 job_id = job_id_from_operation_key(operation_key)
-                row = loader.execute(
-                    "SELECT * FROM jobs WHERE job_id=?", (job_id,)
-                ).fetchone()
-                job = None if row is None else _job_from_row(row)
-                identity = _current_target_job_identity(
-                    operation_key=operation_key, job_id=job_id, job=job)
+                job, identity = _current_target_identity_from_snapshot(
+                    loader, operation_key=operation_key)
                 row = loader.execute(
                     "SELECT * FROM attempts WHERE attempt_id=?",
                     (job.current_attempt_id,),
@@ -32085,6 +32253,58 @@ class Runtime:
                 job_token=job_token,
                 attempt_token=attempt_token,
             )
+
+    def coo_selected_child_requester_return(
+        self, *, job_id: str, command_id: str, context: Any,
+        capability_profile_digest: str, currentness_guard: Callable[[], None],
+    ) -> dict[str, Any] | None:
+        """Read original API-requester evidence; never send or acknowledge."""
+        _require_coo_requester_guard(currentness_guard)
+        with self.store.read() as connection:
+            _require_coo_requester_guard(currentness_guard)
+            descriptor = _coo_requester_return_snapshot(connection, job_id=job_id,
+                command_id=command_id, context=context, capability_profile_digest=capability_profile_digest)
+            _require_coo_requester_guard(currentness_guard)
+        _require_coo_requester_guard(currentness_guard)
+        return descriptor
+
+    def acknowledge_coo_selected_child_result(
+        self, request: Mapping[str, Any], *, context: Any,
+        capability_profile_digest: str, currentness_guard: Callable[[], None],
+    ) -> dict[str, Any]:
+        """Acknowledge only the original API requester's exact reviewed result.
+
+        The authenticated ingress supplies the private current-owner guard.
+        A supplied descriptor is an equality selector, never authority. The
+        receipt uses the existing event transaction and cannot consume a native
+        parent result, approve a review or accept a product.
+        """
+        from common import coo_requester_return_contract as wire
+        selected = wire.acknowledgment(dict(request))
+        expected = wire.identity(selected["result"])
+        _require_coo_requester_guard(currentness_guard)
+        with self.store.transaction() as connection:
+            _require_coo_requester_guard(currentness_guard)
+            original = _coo_requester_return_snapshot(connection, job_id=expected["job_id"],
+                command_id=selected["command"], context=context, capability_profile_digest=capability_profile_digest)
+            if original is None or wire.identity(original) != expected:
+                raise StateConflict("COO requester acknowledgment differs from its original completed result")
+            if original["consumption"] is None:
+                timestamp = self.store.now_ms()
+                consumed = wire.validate_consumption({"schema_version": wire.CONSUMPTION_SCHEMA,
+                    "family": wire.FAMILY, **expected, "acknowledged_at_ms": timestamp})
+                self.store.append_event(connection, aggregate_type="coo_requester_return",
+                    aggregate_id=expected["attempt_id"], event_type=wire.CONSUMPTION_EVENT,
+                    command_id=wire.consumption_command_id(expected["attempt_id"]),
+                    actor="coo-api-principal", job_id=expected["job_id"], attempt_id=expected["attempt_id"],
+                    payload=consumed, timestamp_ms=timestamp)
+            _require_coo_requester_guard(currentness_guard)
+            observed = _coo_requester_return_snapshot(connection, job_id=expected["job_id"],
+                command_id=selected["command"], context=context, capability_profile_digest=capability_profile_digest)
+            if observed is None or wire.identity(observed) != expected or observed["consumption"] is None:
+                raise StateConflict("COO requester acknowledgment lost its original result")
+            _require_coo_requester_guard(currentness_guard)
+        return observed
 
     def current_harness_binding_for_parent_pid(
         self,

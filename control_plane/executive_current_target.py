@@ -6,8 +6,10 @@ from __future__ import annotations
 import dataclasses
 import re
 from typing import Any
-from control_plane.executive_delegation_identity import derive_delegation_identity
-from control_plane.executive_runtime import AttemptStatus, JobStatus, WorkerStatus
+from control_plane.executive_delegation_identity import (
+    derive_coordinator_child_delegation_identity, derive_delegation_identity,
+)
+from control_plane.executive_runtime import AttemptStatus, Job, JobStatus, WorkerStatus
 
 _OPERATION_KEY = re.compile(r"\Aexec-(job-[0-9]{3,})\Z")
 
@@ -45,18 +47,84 @@ def job_id_from_operation_key(operation_key: object) -> str:
     return match.group(1).upper()
 
 
-def _current_target_job_identity(*, operation_key: str, job_id: str, job: Any) -> Any:
+def _current_target_job_identity(
+    *, operation_key: str, job_id: str, job: Any, coordinator_job: Any = None,
+) -> Any:
     """Validate the acquired Job before selecting its current Attempt."""
 
     if job is None:
         _refuse()
-    identity = derive_delegation_identity(job)
+    identity = (
+        derive_delegation_identity(job) if coordinator_job is None
+        else derive_coordinator_child_delegation_identity(job, coordinator_job)
+    )
     if (
         identity.operation_key != operation_key
         or identity.job_id != job_id
         or job.status not in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
         or not job.current_attempt_id
     ):
+        _refuse()
+    return identity
+
+
+def _current_target_identity_from_snapshot(
+    connection: Any, *, operation_key: str,
+) -> tuple[Any, Any]:
+    """Qualify one active Job on the caller's existing bounded snapshot.
+
+    Nested work/repair addressability uses the actual original root, immediate
+    coordinator and current admitted revision. This grants no new work or send
+    capability and opens no store or second read budget.
+    """
+    from control_plane.executive_runtime import (
+        _capture_selected_child_from_row, _current_orchestration_tree_material_for_dispatch,
+        _job_from_row, _selected_child_coordinator_plan,
+    )
+
+    job_id = job_id_from_operation_key(operation_key)
+    row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    if row is None:
+        _refuse()
+    job = _job_from_row(row)
+    if job.status not in {JobStatus.RUNNING, JobStatus.CHECKPOINTED} or not job.current_attempt_id:
+        _refuse()
+    coordinator_job = None
+    if job.parent_job_id not in {None, job.root_job_id}:
+        coordinator = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job.parent_job_id,),
+        ).fetchone()
+        root = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job.root_job_id,),
+        ).fetchone()
+        admission, plan = _selected_child_coordinator_plan(connection, root, coordinator)
+        current = _current_orchestration_tree_material_for_dispatch(
+            connection, coordinator, admission, plan)
+        _capture_selected_child_from_row(connection, coordinator, admission,
+            job.root_job_id, job_id, row, {str(item["plan_step_id"]): item for item in current})
+        coordinator_job = _job_from_row(coordinator)
+    identity = _current_target_job_identity(operation_key=operation_key,
+        job_id=job_id, job=job, coordinator_job=coordinator_job)
+    return job, identity
+
+
+def read_current_target_identity(runtime: Any, job: Any) -> Any:
+    """Read an existing Job's identity without mixing its nested ancestry.
+
+    The direct/root family keeps its incumbent immutable projection. Nested
+    Jobs require Runtime's one-selection observation, its finalized receipt,
+    and equality with the original caller's Job snapshot.
+    """
+    if job is None:
+        _refuse()
+    if not isinstance(job, Job) or job.parent_job_id in {None, job.root_job_id}:
+        return derive_delegation_identity(job)
+    operation_key = f"exec-{job.job_id.lower()}"
+    with runtime.observe_bounded_read() as observation:
+        current, identity = observation.read_current_target_identity_bounded(
+            operation_key=operation_key)
+    _ = observation.receipt
+    if current != job:
         _refuse()
     return identity
 
@@ -131,8 +199,13 @@ def read_current_target(runtime: Any, operation_key: str) -> CurrentTargetEpoch:
     try:
         job_id = job_id_from_operation_key(operation_key)
         job = runtime.jobs.get_job(job_id)
-        identity = _current_target_job_identity(
-            operation_key=operation_key, job_id=job_id, job=job)
+        if isinstance(job, Job) and job.parent_job_id not in {None, job.root_job_id}:
+            identity = read_current_target_identity(runtime, job)
+        else:
+            identity = _current_target_job_identity(
+                operation_key=operation_key, job_id=job_id, job=job)
+        if identity.operation_key != operation_key:
+            _refuse()
         attempt = runtime.attempts.get_attempt(job.current_attempt_id)
         _validate_current_target_attempt(job_id=job_id, job=job, attempt=attempt)
         worker = runtime.workers.get_worker(attempt.worker_id)

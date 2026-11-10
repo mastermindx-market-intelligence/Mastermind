@@ -33,6 +33,7 @@ PRINCIPAL_ACTIONS = (
     "read_current_agentos_context",
     "read_project_discovery",
     "correct_project_discovery",
+    "acknowledge_selected_child_result",
 )
 DEFAULT_PRINCIPAL_ACTIONS = ("bounded_intent",)
 

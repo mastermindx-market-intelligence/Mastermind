@@ -463,7 +463,8 @@ class ServiceRuntime:
             ExecutiveContextConsumerPublication, _canonical,
             publication_from_document, schema_digest, selected_child_publication,
             validate_consumer_publication)
-        from integrations.hermes_harness.native_tool_registration import NATIVE_TOOL_SCHEMA
+        from integrations.hermes_harness.native_tool_registration import (
+            NATIVE_TOOL_SCHEMA, NATIVE_REQUESTER_RETURN_TOOL_SCHEMA)
         with self._lock:
             original_child = self._child
             if original_child is None or original_child.pid != child_pid:
@@ -502,9 +503,11 @@ class ServiceRuntime:
                     "mcp_tools_schema_sha256": publication.tools_schema_digest,
                 }
                 if child is not None:
+                    expected_schema = (NATIVE_REQUESTER_RETURN_TOOL_SCHEMA
+                                       if child.requester_returns else NATIVE_TOOL_SCHEMA)
                     verdict = assert_extension_proof_exact(
                         extension, expected_tool=CONSUMER_EXTENSION_TOOL,
-                        expected_schema_sha256=schema_digest(NATIVE_TOOL_SCHEMA),
+                        expected_schema_sha256=schema_digest(expected_schema),
                         expected_scope=str(self._native_home), expected_binding=expected)
                     proved = verdict["installed"] is True
         except (RuntimeRefusal, ValueError, TypeError, KeyError, AttributeError):

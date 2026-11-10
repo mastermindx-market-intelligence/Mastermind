@@ -23,9 +23,11 @@ from control_plane.executive_agent_capabilities import (
     HERMES_NATIVE_CONTEXT_PROFILE_ID,
     HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID,
     HERMES_NATIVE_DISCOVERY_PROFILE_ID,
+    HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID,
     PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID,
     PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID,
     PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID,
+    PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID,
     ExecutionCapabilityRegistry,
     observed_mcp_tool_schema_digest,
 )
@@ -182,7 +184,8 @@ class CooInstalledSource:
                     CLAUDE_PRINCIPAL_EXECUTION_SURFACE, HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE}
                 or (profile.execution_surface == HERMES_NATIVE_PRINCIPAL_EXECUTION_SURFACE
                     and profile.profile_id not in {HERMES_NATIVE_PRINCIPAL_PROFILE_ID, HERMES_NATIVE_CONTEXT_PROFILE_ID,
-                                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID})
+                                                   HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, HERMES_NATIVE_DISCOVERY_PROFILE_ID,
+                                                   HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID})
                 or profile.auth_realm != CLAUDE_PRINCIPAL_AUTH_REALM):
             _refuse()
         self._profile_catalogue(profile)
@@ -195,12 +198,14 @@ class CooInstalledSource:
     @staticmethod
     def _profile_catalogue(profile):
         from common import coo_agentos_context_contract as wire
+        from common import coo_requester_return_contract as requester_wire
         from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, catalogue_specs
         found = []
         context_profiles = {
             wire.CATALOGUE: (HERMES_NATIVE_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CONTEXT_MCP_CAPABILITY_ID),
             wire.CURRENT_CATALOGUE: (HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID, PRINCIPAL_COO_CURRENT_CONTEXT_MCP_CAPABILITY_ID),
             wire.DISCOVERY_CATALOGUE: (HERMES_NATIVE_DISCOVERY_PROFILE_ID, PRINCIPAL_COO_DISCOVERY_MCP_CAPABILITY_ID),
+            requester_wire.CATALOGUE: (HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID, PRINCIPAL_COO_REQUESTER_RETURN_MCP_CAPABILITY_ID),
         }
         for catalogue in (wire.LEGACY_CATALOGUE, *context_profiles):
             specs = {s.name: {"name": s.name, "inputSchema": s.input_schema, "annotations": s.annotations}
@@ -228,6 +233,7 @@ class CooInstalledSource:
         existing tools does not require this new projection.
         """
         from common import coo_agentos_context_contract as wire
+        from common import coo_requester_return_contract as requester_wire
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_executive_app.coo_binding import select_coo_binding, _digest
         self.require_context_source_current()
@@ -247,7 +253,8 @@ class CooInstalledSource:
             scoped = [row for row in selected if row["work_ref"] == work_ref]
             actions = {HERMES_NATIVE_CONTEXT_PROFILE_ID: wire.ACTION,
                        HERMES_NATIVE_CURRENT_CONTEXT_PROFILE_ID: wire.CURRENT_ACTION,
-                       HERMES_NATIVE_DISCOVERY_PROFILE_ID: wire.CURRENT_ACTION}
+                       HERMES_NATIVE_DISCOVERY_PROFILE_ID: wire.CURRENT_ACTION,
+                       HERMES_NATIVE_REQUESTER_RETURN_PROFILE_ID: requester_wire.ACTION}
             if (not _check_work_ref(work_ref) or len(scoped) != 1
                     or scoped[0]["capability_profile_id"] not in actions
                     or actions[scoped[0]["capability_profile_id"]] not in _authority(scoped[0]).principal_actions):

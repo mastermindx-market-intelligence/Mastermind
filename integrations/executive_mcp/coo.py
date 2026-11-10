@@ -21,6 +21,7 @@ from integrations.executive_mcp.web_ceo import (
 from integrations.hermes_delegate.schema import (
     COMMAND_RE, SELECTED_CHILD_ACTIONS, SubmissionError, parse_selected_child,
 )
+from common import coo_requester_return_contract as requester_wire
 
 COO_SERVER_NAME = "mastermind-executive-coo"
 COO_SERVER_VERSION = "1.0.0"
@@ -85,6 +86,31 @@ def coo_tool_schema_digest():
 COO_TOOL_SCHEMA_DIGEST = (
     "5cf2a0de4a47686c545d1ee3d9c388ab4dc94c880cb0670140de2eca2e54f550"
 )
+
+# A separately selected contract. Existing catalogue grants keep their exact
+# descriptors and digest; a model argument cannot opt into this alternative.
+_REQUESTER_DELEGATE = ToolSpec("mmx_delegate",
+    "Submit or observe the host-frozen Executive child. After reviewing its completed result, explicitly invoke acknowledge_result with the exact requester_return descriptor to acknowledge it as the original authenticated COO API requester. This grants no admission, is not native-parent consumption, independent review or product acceptance. Reconcile uncertainty with selected_child_status on the original command.",
+    {"type": "object", "oneOf": [copy.deepcopy(COO_TOOL_SPECS[-1].input_schema),
+        requester_wire.acknowledgment_input_schema(_SELECTED_CHILD_COMMAND)]},
+    "Original selected-child result and optional API-requester acknowledgment; native parent consumption and product acceptance remain separate.", False)
+COO_REQUESTER_RETURN_TOOL_SPECS = (*COO_TOOL_SPECS[:-1], _REQUESTER_DELEGATE)
+
+
+def coo_requester_return_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_REQUESTER_RETURN_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
+def validate_coo_requester_tool_arguments(name, arguments):
+    if name == "mmx_delegate" and type(arguments) is dict and arguments.get("action") == requester_wire.ACK_ACTION:
+        try:
+            return requester_wire.acknowledgment(arguments)
+        except (ValueError, TypeError, KeyError):
+            raise GatewayError("invalid_input", "invalid original requester acknowledgment") from None
+    return validate_coo_tool_arguments(name, arguments)
 
 # A separate reviewed catalogue. Existing descriptors and the v1 digest above
 # retain their exact meaning for every currently enrolled principal.
@@ -194,6 +220,7 @@ def coo_current_context_tool_schema_digest():
 
 
 def catalogue_specs(catalogue):
+    if catalogue == requester_wire.CATALOGUE: return COO_REQUESTER_RETURN_TOOL_SPECS
     if catalogue == context_wire.LEGACY_CATALOGUE: return COO_TOOL_SPECS
     if catalogue == context_wire.CATALOGUE: return COO_CONTEXT_TOOL_SPECS
     if catalogue == context_wire.CURRENT_CATALOGUE: return COO_CURRENT_CONTEXT_TOOL_SPECS

@@ -81,6 +81,8 @@ CURRENT_CONTEXT_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v
 CURRENT_CONTEXT_TOOLS_SCHEMA_DIGEST = "41644c90bbd8b5927c5cc7f97f65fef144ba9f9ca6e0277d702d7a8a26fa0da0"
 DISCOVERY_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v4"
 DISCOVERY_TOOLS_SCHEMA_DIGEST = "94db08906bd04c78565f6172d7a657c13bbe608f3b14dba5649cbedb23deed42"
+REQUESTER_RETURN_CONSUMER_SCHEMA = "mastermind.hermes_native_executive_consumer/v5"
+REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST = "29d6f504b79e806feefed6ab16f413338dd267de5019c7590fdc3655765537e3"
 _WORKSPACE_RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
 _WORKSPACE_SCOPE = "mastermind.workspace.read"
 _CURRENT_PRIMARY_RESOURCE = "https://mcp.mastermind-x.com/mcp"
@@ -402,6 +404,7 @@ class ExecutiveConsumerPublication:
     session: ConsumerSession
     plugin: ConsumerPlugin
     tools_schema_digest: str
+    requester_returns: bool = False
 
     def __post_init__(self) -> None:
         if _WORK_REF_RE.fullmatch(self.work_ref or "") is None:
@@ -416,6 +419,13 @@ class ExecutiveConsumerPublication:
         _digest(self.capability_profile_digest, "capability_profile_digest")
         _digest(self.principal_binding_digest, "principal_binding_digest")
         _digest(self.tools_schema_digest, "tools_schema_digest")
+        if type(self.requester_returns) is not bool:
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
+        from integrations.executive_mcp.coo import coo_requester_return_tool_schema_digest
+        if (self.requester_returns and (self.tools_schema_digest != REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST
+                or coo_requester_return_tool_schema_digest() != REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST)
+                or not self.requester_returns and self.tools_schema_digest == REQUESTER_RETURN_TOOLS_SCHEMA_DIGEST):
+            raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
         parts = self.command.split(":")
         if parts[3] != self.job_id:
             # The command's own Job segment must be the frozen Job, so the two
@@ -559,7 +569,8 @@ def selected_child_publication(publication: ConsumerPublication) -> ExecutiveCon
     from dataclasses import fields
     return ExecutiveConsumerPublication(**{
         item.name: getattr(child, item.name) if item.name in _CHILD_KEYS
-        else getattr(publication, item.name) for item in fields(ExecutiveConsumerPublication)})
+        else getattr(publication, item.name) for item in fields(ExecutiveConsumerPublication)
+        if item.name != "requester_returns"})  # v2-v4 never opt into v5 acknowledgment
 
 
 def _validate_context_publication(value):
@@ -623,7 +634,7 @@ def validate_consumer_publication(value: Any) -> dict[str, Any]:
         return _validate_context_publication(value)
     if type(value) is not dict or set(value) != _PUBLICATION_KEYS:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
-    if value["schema"] != CONSUMER_SCHEMA:
+    if value["schema"] not in {CONSUMER_SCHEMA, REQUESTER_RETURN_CONSUMER_SCHEMA}:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     principal = value["principal"]
     if type(principal) is not dict or set(principal) != _PRINCIPAL_KEYS:
@@ -641,7 +652,7 @@ def validate_consumer_publication(value: Any) -> dict[str, Any]:
     if type(scopes) is not list:
         raise RuntimeRefusal("NATIVE_CONSUMER_PUBLICATION_INVALID")
     document = {
-        "schema": CONSUMER_SCHEMA,
+        "schema": value["schema"],
         "work_ref": value["work_ref"],
         "command": value["command"],
         "job_id": value["job_id"],
@@ -736,6 +747,7 @@ def _typed_publication(document: Mapping[str, Any]) -> ConsumerPublication:
             name=plugin["name"], source=plugin["source"], digest=plugin["digest"],
         ),
         tools_schema_digest=document["tools_schema_digest"],
+        requester_returns=document["schema"] == REQUESTER_RETURN_CONSUMER_SCHEMA,
     )
 
 
@@ -1122,7 +1134,15 @@ class NativeExecutiveTransport:
 
     def selected_child_status(self, command_id): return self._call("selected_child_status", command_id)
 
-    def _call(self, action, command_id):
+    def acknowledge_result(self, descriptor):
+        from common import coo_requester_return_contract as wire
+        if not self._publication.requester_returns:
+            return _refusal_envelope("NATIVE_REQUESTER_RETURN_NOT_ENROLLED", self._publication)
+        request = wire.acknowledgment({"action": wire.ACK_ACTION,
+            "command": self._publication.command, "result": descriptor})
+        return self._call(wire.ACK_ACTION, self._publication.command, result=request["result"])
+
+    def _call(self, action, command_id, *, result=None):
         publication = self._publication
         try:
             if command_id != publication.command:
@@ -1134,8 +1154,14 @@ class NativeExecutiveTransport:
         except _ConsumerRefused as exc:
             return _refusal_envelope(exc.reason, publication)
         try:
-            raw = self._caller.call(TOOL_NAME, {"action": action, "command": publication.command})
+            arguments = {"action": action, "command": publication.command}
+            if result is not None:
+                arguments["result"] = result
+            raw = self._caller.call(TOOL_NAME, arguments)
             envelope = self._unwrap(raw, action=action)
+            if action == "acknowledge_result" and envelope is not None:
+                from common import coo_requester_return_contract as wire
+                wire.validate_acknowledgment_result(envelope, arguments)
             if envelope is None or (self._currentness is not None and self._currentness() is not True):
                 raise _ConsumerUncertain("native result or original binding is unavailable")
             return envelope
@@ -1434,6 +1460,10 @@ def compare_mandate(mandate: Mapping[str, Any],
         raise RuntimeRefusal("NATIVE_CONSUMER_AUTHORITY_GENERATION_MISMATCH")
     if capability.get("capability_profile_digest") != publication.capability_profile_digest:
         raise RuntimeRefusal("NATIVE_CONSUMER_CAPABILITY_MISMATCH")
+    if publication.requester_returns:
+        from common import coo_requester_return_contract as wire
+        if wire.ACTION not in capability.get("principal_actions", []):
+            raise RuntimeRefusal("NATIVE_CONSUMER_CAPABILITY_MISMATCH")
 
 
 def qualify_executive_consumer(
@@ -1509,5 +1539,6 @@ def qualify_executive_consumer(
         job_id=publication.job_id,
         session_key=session_key,
         task_id=task_id,
+        requester_returns=publication.requester_returns,
     )
     return binding

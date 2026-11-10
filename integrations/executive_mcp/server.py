@@ -2412,10 +2412,12 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     from integrations.executive_mcp.coo import (
         COO_MCP_PATH, COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS,
         COO_CONTEXT_TOOL_SPECS, COO_CURRENT_CONTEXT_TOOL_SPECS, COO_DISCOVERY_TOOL_SPECS,
-        validate_coo_tool_arguments, validate_coo_context_tool_arguments,
+        COO_REQUESTER_RETURN_TOOL_SPECS,
+        validate_coo_requester_tool_arguments, validate_coo_context_tool_arguments,
     )
     from common import coo_agentos_context_contract as context_wire
     from common import coo_discovery_contract as discovery_wire
+    from common import coo_requester_return_contract as requester_wire
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
     from integrations.mastermind_workspace_app.contract import principal_frame as workspace_principal_frame
 
@@ -2447,7 +2449,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     tools = {context_wire.LEGACY_CATALOGUE: descriptors(COO_TOOL_SPECS),
              context_wire.CATALOGUE: descriptors(COO_CONTEXT_TOOL_SPECS),
              context_wire.CURRENT_CATALOGUE: descriptors(COO_CURRENT_CONTEXT_TOOL_SPECS),
-             discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS)}
+             discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS),
+             requester_wire.CATALOGUE: descriptors(COO_REQUESTER_RETURN_TOOL_SPECS)}
     # Opt-in WO-07 preview facet: the read-only shared-law route_preview is
     # appended to the legacy catalogue only, served locally, and never
     # forwarded to the inner App. Compositions that do not opt in keep their
@@ -2529,7 +2532,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         try:
             validated = (validate_coo_context_tool_arguments(name, arguments)
                          if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
-                         else validate_coo_tool_arguments(name, arguments))
+                         else validate_coo_requester_tool_arguments(name, arguments))
         except GatewayError as exc:
             return result(error(name, exc.code))
         if name in discovery_wire.TOOLS:
@@ -2552,7 +2555,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
             # The selected-child branch never answers with an E1 envelope.
             # An unusable answer keeps the original command and reports the
             # effect as unknown.
-            submitting = validated.get("action") == "selected_child_submit"
+            submitting = validated.get("action") in {"selected_child_submit", requester_wire.ACK_ACTION}
             return selected_child_response(
                 "EFFECT_UNKNOWN" if submitting else "UNAVAILABLE",
                 "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN" if submitting
@@ -2623,6 +2626,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                         payload = validate_selected_child_local_envelope(
                             payload, command_id=validated["command"],
                             action=validated["action"])
+                    if validated["action"] == requester_wire.ACK_ACTION:
+                        requester_wire.validate_acknowledgment_result(payload, validated)
                 except (TypeError, ValueError):
                     payload = selected_child_failed()
             elif not preflight and has_receipt:

@@ -872,7 +872,7 @@ REVIEWED_FILES['scripts/enroll_linux_secondary_worker.py'] = {'sha256': '925aa0d
 # Fixed receipt/native-response byte bound in MAX_WIRE_BYTES, not an OS identity.
 # One exact multiplication operand; full-source drift restores the ordinary guard.
 REVIEWED_FILES["integrations/hermes_runtime/native_session_control.py"] = {
-    "sha256": "716b934f77cdc377b769c6cf1cefcfbb199be3e71d885f4624c6e6dc0d93b9c9",
+    "sha256": "3d617c4c58b1940fe8ac3a2a06d839d4dfc8564f5dc3ffdde80f2faf3ae782a5",
     "sites": ((23, 17, 20, "int", "512"),),
 }
 
@@ -960,15 +960,15 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
            (288, 12, 36, 'str', '"_mastermind_alibaba_01"'),
            (296, 12, 36, 'str', '"_mastermind_minimax_01"'))}
 
-# Material protected320 context composition: only line locations/file digest
-# move for the same six accepted Memory HTTP-status operands; no new mask.
-REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '5522cf9369fc4c04e585bd24a32e22fc4690c82f4048c65ed52dbe2467a4ae99',
- 'sites': [(245, 75, 78, 'int', '400'),
-           (255, 93, 96, 'int', '503'),
-           (636, 37, 40, 'int', '400'),
-           (657, 54, 57, 'int', '503'),
-           (677, 54, 57, 'int', '503'),
-           (687, 56, 59, 'int', '503')]}
+# Requester-return composition: file digest/locations move for the same six
+# accepted HTTP-status operands; enclosing statement ASTs are unchanged; no new mask.
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '8210d5d709a7f460e0df71a5c3e2b3f63e071645ea47d75c4d2ac8207918e818',
+ 'sites': [(246, 75, 78, 'int', '400'),
+           (256, 93, 96, 'int', '503'),
+           (647, 37, 40, 'int', '400'),
+           (668, 54, 57, 'int', '503'),
+           (688, 54, 57, 'int', '503'),
+           (698, 56, 59, 'int', '503')]}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.

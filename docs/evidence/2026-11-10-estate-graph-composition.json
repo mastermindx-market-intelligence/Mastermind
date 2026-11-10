@@ -1,7 +1,7 @@
 {
   "schema": "mastermind.estate_graph_composition_qualification.v1",
-  "source_parent": "995ef2e812149ee3aab51472146ddee52888128f",
-  "candidate_code_tree": "2d11e02564c2862478525946d1e69c604cd61448",
+  "source_parent": "03439385ba0deced8f632d323a36ce8a1b8a9b0c",
+  "candidate_code_tree": "52e36d0e823f2d395f14a68373d642731fe723a0",
   "governing_source": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
   "qualification_scope": "COMPOSED_SOURCE_OWNERS_AND_DISPOSABLE_NATIVE_FIXTURES",
   "checks": [
@@ -123,6 +123,65 @@
       "runner": "Ubuntu24.04.5, Node22.23.3, npm10.9.9",
       "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42787466409/job/129732196403",
       "repaired_by": "Existing closed asset owner, exact Company14 profile; no required check or release gate relaxed."
+    },
+    {
+      "scope": "requester_ack_nested_target_and_identity_composition",
+      "source_tree": "52e36d0e823f2d395f14a68373d642731fe723a0",
+      "summary": "1072 tests and 2 subtests passed; 27 incumbent vendor-dependent tests skipped, zero failures/errors and no Unix deselections. JUnit has 1099 testcase elements and 1101 suite tests including subtests.",
+      "passed": 1072,
+      "subtests_passed": 2,
+      "skipped": 27,
+      "failures": 0,
+      "errors": 0,
+      "skip_reason": "MASTERMIND_HERMES_VENDOR_ROOT does not name a checkout of the pinned upstream.",
+      "test_files": [
+        "tests/test_coo_requester_return_ingress.py",
+        "tests/test_coo_requester_ack_classification.py",
+        "tests/test_coo_requester_return.py",
+        "tests/test_coo_requester_return_contract.py",
+        "tests/test_coo_requester_return_app.py",
+        "integrations/hermes_harness/tests/test_native_executive_consumer.py",
+        "integrations/hermes_harness/tests/test_native_tool_registration.py",
+        "tests/test_executive_coo_host.py",
+        "tests/test_executive_coo_app.py",
+        "tests/test_coo_principal_mandate.py",
+        "tests/test_hermes_selected_child_ingress.py",
+        "tests/test_hermes_selected_child_result.py",
+        "tests/test_session_bridge_nested_targets.py",
+        "tests/test_session_bridge_runtime_owner.py",
+        "tests/test_executive_current_target_quota.py",
+        "tests/test_session_bridge_codex_runtime.py",
+        "tests/test_session_bridge_installed.py",
+        "tests/test_session_bridge_native_read.py",
+        "tests/test_workspace_agent_runtime_binding.py",
+        "tests/test_hermes_nested_selected_child.py",
+        "tests/test_executive_fabric_release_identity_review.py",
+        "tests/test_hermes_fabric_native_identity_review.py",
+        "tests/test_executive_reviewed_site_identity_tokens.py"
+      ],
+      "command_prefix": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=/tmp/estate-graph-qa-python-20261110-c4:.:tests python3 -m pytest -q -p anyio.pytest_plugin",
+      "command_suffix": "--maxfail=1 --tb=short --junitxml=/tmp/estate-requester-target-composition-20261110-c4.xml",
+      "junit_sha256": "7ce059078b1496be1429e1867880225e1fcb9489f4e524c0ccdd8efa57b0ad07",
+      "junit_seconds": 236.899,
+      "process_seconds": 241.388,
+      "qualification_environment": "M2 task-private declared mcp==1.28.1; actual SDK ClientSession, signed CooApp and real Unix Control service. Provider execution is inert fixture; no installed enrollment or model run.",
+      "actual_cases": [
+        "Original acknowledgment at hierarchy depths 1/2/3",
+        "Changed digest is strictly REFUSED before physical entry",
+        "Revoked current grant",
+        "Lost response after original receipt commit and original readback",
+        "13 real Control/Runtime pre-effect and possible-effect classifier cases",
+        "All 21 formerly cloud-deselected nested Session Bridge/Control cases",
+        "Existing source-identity suites after two exact record repairs"
+      ]
+    },
+    {
+      "scope": "native_typed_dynamic_tool_input",
+      "repository": "chriswong6031-creator/t3code",
+      "source_base": "924ad5d194287441f825b8f2f6054e9539808534",
+      "summary": "10 client/schema tests, package typecheck, scoped lint/format and exact patch application passed. Canonical function/namespace input reaches actual typed transport; original callback call/thread/turn identity is preserved.",
+      "patch_sha256": "8a876d72d98f48ffa689f2b5145faed7e824806c03d1a9f010573402744c1c43",
+      "scope_note": "Isolated source on Node24.22.1 (project declares26.12.1). No real provider callback/Control native dispatch or installed build claim. Exact patch retained as JSON envelope; fork push access ungranted."
     }
   ],
   "original_custody_patch": {
@@ -202,7 +261,12 @@
     "Actual nested Unix-service claims completed but terminal status returned UNVERIFIED at both depths. Canonical same-connection coordinator evidence and the existing nested identity projection repair the shared reducer; no seal, receipt or acceptance gate relaxed.",
     "Nested Workspace complete-file pin updated to5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa; _handle_project_instructions_frame AST and exactly four403 token sites remain unchanged from995.",
     "Hosted exact archive found the Company's two lazy chunks absent from the closed asset topology. Added exactly the complete Company14 profile through the shared owner; no wildcard, caller MIME or new HTTP branch.",
-    "Existing old9/11/13-to12 publication fixture lacked the root directory's real dual-service traversal permission. It now uses the same explicit0755 fixture setup as the incumbent rich-client transition test; production custody checks unchanged."
+    "Existing old9/11/13-to12 publication fixture lacked the root directory's real dual-service traversal permission. It now uses the same explicit0755 fixture setup as the incumbent rich-client transition test; production custody checks unchanged.",
+    "Requester patch composed with nested Hermes identity imports by exact union of the existing requester and coordinator imports; no claim, capture or seal logic displaced.",
+    "Proven pre-effect acknowledgment failures were previously reported EFFECT_UNKNOWN. Actual Control entry boundary now returns existing REFUSED/UNAVAILABLE only before physical entry, retaining conservative unknown-effect behavior thereafter.",
+    "Nested current-target original reply at the full 17-Job tree/depth 3 used 257 statements under the existing 256 ceiling. Shared row validation reuses the acquired leaf row and removes two redundant statements; no limit increase, cache, store reopening or budget reset.",
+    "Requester source-identity repair updates exactly two existing records and seven reviewed literal sites. Six CooApp refusal Return ASTs and native MAX_WIRE_BYTES assignment AST are unchanged. Proof SHA256:f3c875a738282a571922c3789a6e5e4cc1f4c90d68ec9acd801c6a4a93cdda1a.",
+    "Native unified patch retains exact original bytes in a JSON envelope so blank diff context markers do not violate source whitespace checks; decoded SHA256 is verified, no patch edits or check waiver."
   ],
   "installed_company_read": {
     "observed_at": "2026-11-10T07:22:22.132145Z",
@@ -229,7 +293,8 @@
     "No installed model run, runtime activation, credentials, heartbeats or grant changes.",
     "Codex source custody does not establish installed worker source or live provider execution; versioned G2 remains unqualified.",
     "Native T3 defaults do not prove fixed Job scope or descendant quiescence; fresh governed native launch/acceptance needs the existing owner contract.",
-    "COO API principal, native T3 thread and arbitrary Paperclip teammate identity are not interchangeable; authoritative native requester and explicit consumption remain separate source phases."
+    "Explicit authenticated COO API requester acknowledgment is qualified in source and does not establish native T3 parent consumption, arbitrary Paperclip identity or product acceptance. Native original-connection/source enrollment remains separate.",
+    "Actual project-help read integration requires explicit versioned mission/plan/root enrollment and reached T3/Hermes consumers; this next source phase is ongoing."
   ],
   "counts_note": "Qualification runs overlap. Do not sum these as unique estate-wide cases.",
   "source_inputs": {
@@ -310,9 +375,59 @@
       "patch_sha256": "a9deeecef2ed65418cf93b144056cb3fc8f12644b48f3d3cea998852ff24ed74",
       "files": 3,
       "isolated_passed": 137
+    },
+    "requester_return": {
+      "base": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+      "patch_sha256": "baf1475c88832eb5b876d1c7ad02fb99e207ac0ca76b599e094be5959ef7cdb5",
+      "files": 19,
+      "source_manifest_sha256": "8787633406f9d69c4064207272b61561ff31ece15217c3e86c26c9d06133bb11",
+      "catalogue": "coo.requester_return.v1",
+      "catalogue_digest": "29d6f504b79e806feefed6ab16f413338dd267de5019c7590fdc3655765537e3",
+      "native_publication": "mastermind.hermes_native_executive_consumer/v5",
+      "requester_family": "coo_api_principal",
+      "parent_consumed": false,
+      "acceptance": "not_accepted",
+      "isolated_passed": 406,
+      "incumbent_vendor_skips": 27,
+      "cloud_unix_deselections": 24
+    },
+    "requester_ack_classification": {
+      "patch_sha256": "05b38145ad00f180d7d2ad6af3c09c3f48c59caf6bfb47e5693da919f14bf3f5",
+      "source_manifest_sha256": "187118f66003dc661976a47733435bf2392a1caf0931b7416872dd6e7d7cad7d",
+      "files": 3,
+      "isolated_passed": 66,
+      "new_cases": 13,
+      "scope": "Actual Control owner classifies only proven pre-physical-entry reads as REFUSED/UNAVAILABLE; all exceptions after entry retain original-command EFFECT_UNKNOWN."
+    },
+    "nested_current_target": {
+      "patch_sha256": "2c6f6febc66486f95fe1adaf994d70e5e11e815a8086d75cc61df186ef2a3f75",
+      "source_manifest_sha256": "44a6f9cdba1e7d5ed1572de992e4a77a2402256548251367957be566674a955e",
+      "files": 4,
+      "isolated_passed": 125,
+      "cloud_unix_deselections": 21,
+      "scope": "Existing Runtime/Session Bridge list, resolve and original reply read at supported nested depths; same acquired leaf row, unchanged budgets, no send/consume/admission."
+    },
+    "t3_dynamic_tool_bindings": {
+      "repository": "chriswong6031-creator/t3code",
+      "base": "924ad5d194287441f825b8f2f6054e9539808534",
+      "generator_pin": "687a119f0fcaace47e1f1abcc77cec6c813fd6da",
+      "patch_sha256": "8a876d72d98f48ffa689f2b5145faed7e824806c03d1a9f010573402744c1c43",
+      "patch_bytes": 23587,
+      "files": 3,
+      "envelope": "docs/evidence/2026-11-10-t3-native-dynamic-tools/native-dynamic-tools-bindings.patch.json",
+      "manifest_sha256": "be34621ba1afb4c4c13429ecaccfc352f8e1006ae0978ee386765a5dec0bf40f",
+      "qualification_sha256": "c10922af51c1328319dfe6c0cc5cf341859c7827b1fab24cb6f3cbc4598232db",
+      "passed": 10,
+      "typecheck": "PASS",
+      "lint": "PASS",
+      "format": "PASS",
+      "generated_declarations_before": 2328,
+      "generated_declarations_after": 2328,
+      "node_qualified": "24.22.1",
+      "node_declared": "26.12.1",
+      "publication": "Reviewable exact patch retained in primary source only; native fork has no authorized writable carrier."
     }
   },
-  "source_merge_parent": "3283669eefec8e0e5cf68b2fb11e11139fbefe8d",
   "organizational_knowledge": {
     "repository": "mastermindx-market-intelligence/macro",
     "pr": 10946,
@@ -324,9 +439,11 @@
   },
   "native_origin_design": {
     "path": "docs/T3_NATIVE_REQUESTER_BOUNDARY.md",
-    "sha256": "5e99d7330d06e8f6ac5a94f6560967b81676ef595254fef28be4943b3694cab6",
+    "sha256": "01b751ca8f5e57ff445bfdff4803541e6dff1b18990698dc4542a4be67bde3be",
+    "join_contract_path": "docs/evidence/2026-11-10-t3-native-dynamic-tools/NATIVE_ORIGIN_JOIN_CONTRACT.md",
+    "join_contract_sha256": "f80ba40d25d59f56f58453aab53c1f5af15b732496f9f4190d90a0b4ff23f9d3",
     "native_pin": "924ad5d194287441f825b8f2f6054e9539808534",
     "official_codex_pin": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
-    "scope": "Official experimental dynamicTools support and actual T3 source initialization are proven; installed callback and Control native origin enrollment remain unqualified."
+    "scope": "Typed dynamicTools input is repaired and qualified in the existing generator/client; original-call MCP binding retention and enrolled Control native-source verification remain separate API/source work. Fork publication is ungranted for observed pull-only identities; no installed activation."
   }
 }

@@ -1,0 +1,60 @@
+{
+  "repository": "chriswong6031-creator/t3code",
+  "base_ref": "924ad5d194287441f825b8f2f6054e9539808534",
+  "upstream_schema_ref_unchanged": "687a119f0fcaace47e1f1abcc77cec6c813fd6da",
+  "official_codex_0_167_ref": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
+  "patch": "native-dynamic-tools-bindings.patch",
+  "patch_sha256": "8a876d72d98f48ffa689f2b5145faed7e824806c03d1a9f010573402744c1c43",
+  "files": [
+    {
+      "path": "packages/effect-codex-app-server/scripts/generate.ts",
+      "base_blob": "343738c800c834994444b810261dac7778bcbd57",
+      "base_sha256": "0f768b78e7cd1905f42e35e741da256cf8f8537868b7d56326d51c765deb3036",
+      "post_sha256": "cbe201941bae1c4f90500a601853e240393e92273e289743069860285f2e778f",
+      "post_bytes": 30944
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/_generated/schema.gen.ts",
+      "base_blob": "50fa95918b43057612ef7c62c753a5529b1b9718",
+      "base_sha256": "f55ccb0bc147a3cea45ea274b14b262722b5974c480827eb83440d4d66c8f43d",
+      "post_sha256": "62740337ffbd9732cdc24d37e671b28fd6eb1a51827079ac8d9a1d3980776b53",
+      "post_bytes": 2338838
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/client.test.ts",
+      "base_blob": "56d9dbcebfae14be0ee92d2e036ea094323fa8e3",
+      "base_sha256": "c68c272d13530ad896700241ff7aedc908151ff3b039488bbc349df15f6f295b",
+      "post_sha256": "a44681b809db73fac214c7a69e7c8906f14dfb3e39ab558a1e2205202b524423",
+      "post_bytes": 12395
+    }
+  ],
+  "qualification": "QUALIFICATION.md",
+  "qualification_sha256": "c10922af51c1328319dfe6c0cc5cf341859c7827b1fab24cb6f3cbc4598232db",
+  "checks": {
+    "focused_tests": {
+      "passed": 10,
+      "files": 2,
+      "duration_seconds": 2.83,
+      "exit_code": 0
+    },
+    "typecheck_exit": 0,
+    "lint_exit": 0,
+    "format_exit": 0,
+    "diff_check_exit": 0,
+    "exact_preimage_patch_application": true,
+    "postimages_match": true
+  },
+  "logs": {
+    "focused-tests.log": "30a7053dfe4ea2df85fb265b66c8ce35dcdc953eceaf918fb0e8e6c2dc7c5490",
+    "generate.log": "1ffae518af89665eb8c90f8eb912f5bf1711759ce2898f9e2cabc507cbba5dae",
+    "lint.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "typecheck.log": "9c8f775c328b88107b776b31670c406ca9dff49136d82171d36d501ccdf748ab"
+  },
+  "limits": [
+    "Source-only; no fork publication or installed activation",
+    "No real native model/session/backend call",
+    "Control native-origin attester enrollment remains unqualified",
+    "No production host tool advertised or Executive dispatch route installed",
+    "Local Node24.22.1 differs from declared Node26.12.1"
+  ]
+}

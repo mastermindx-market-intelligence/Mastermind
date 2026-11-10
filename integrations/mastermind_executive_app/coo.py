@@ -29,7 +29,8 @@ from integrations.business_mcp_auth.contracts import (
     AUTH_AUDIT_SCHEMA, AuthAuditEvent, AuthErrorCode, ResourcePolicy, VerifiedPrincipal, validate_resource_policy,
 )
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
-from integrations.executive_mcp.coo import COO_READ_NAMES, COO_SERVER_VERSION, COO_TOOL_NAMES, validate_coo_tool_arguments
+from integrations.executive_mcp.coo import COO_READ_NAMES, COO_SERVER_VERSION, COO_TOOL_NAMES, validate_coo_requester_tool_arguments
+from common import coo_requester_return_contract as requester_wire
 from integrations.executive_mcp.schemas import RESULT_SCHEMA, GatewayError, canonical_json
 from integrations.executive_mcp.e1_http import BoundedE1App, MAX_RESPONSE_BYTES
 from integrations.hermes_delegate.executive import (
@@ -283,7 +284,7 @@ class CooApp:
             return wire.LEGACY_CATALOGUE
         value = await _owner_call(provider, principal, *(() if work_ref is None else (work_ref,)))
         self.require_context_current()
-        if (type(value) is not str or value not in {wire.LEGACY_CATALOGUE, wire.CATALOGUE, wire.CURRENT_CATALOGUE, wire.DISCOVERY_CATALOGUE}
+        if (type(value) is not str or value not in {wire.LEGACY_CATALOGUE, wire.CATALOGUE, wire.CURRENT_CATALOGUE, wire.DISCOVERY_CATALOGUE, requester_wire.CATALOGUE}
                 or self.settings is not settings or settings.catalogue_provider is not provider
                 or not self._policy_current() or self.authorizer.binding_digest(principal) != stamp):
             raise ValueError("authority_refused")
@@ -511,7 +512,7 @@ class CooApp:
         principal, stamp = authenticated
         command = validated["command"]
         action = validated["action"]
-        is_submit = action == "selected_child_submit"
+        is_submit = action in {"selected_child_submit", requester_wire.ACK_ACTION}
 
         def answer(state, reason, *, job_id=None):
             return JSONResponse(selected_child_response(
@@ -539,6 +540,10 @@ class CooApp:
         work_ref = target.work_ref
         try:
             authority, context = await self._authority(principal, work_ref, stamp)
+            if action == requester_wire.ACK_ACTION:
+                if (requester_wire.ACTION not in authority.principal_actions
+                        or await self.catalogue(principal, stamp, work_ref=work_ref) != requester_wire.CATALOGUE):
+                    raise ValueError("requester acknowledgment contract is not enrolled")
         except Exception:
             return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_AUTHORITY_REFUSED", job_id=job_id)
         try:
@@ -552,7 +557,7 @@ class CooApp:
             return answer("REFUSED", "EXECUTIVE_SELECTED_CHILD_TARGET_UNAVAILABLE", job_id=job_id)
         frame = {
             "schema": SELECTED_CHILD_FRAME_SCHEMA,
-            "request": {"action": action, "command": command},
+            "request": dict(validated),
             "target_digest": target_digest,
             "principal": principal_frame(principal),
             "principal_context": dataclasses.asdict(context),
@@ -585,6 +590,8 @@ class CooApp:
             envelope = validate_selected_child_ingress_envelope(
                 response.result, command_id=command, job_id=job_id,
                 target_digest=target_digest)
+            if action == requester_wire.ACK_ACTION:
+                requester_wire.validate_acknowledgment_result(envelope, validated)
         except (TypeError, ValueError):
             # A malformed return after a possible submit is not a no-effect
             # receipt. Retain the original command.
@@ -599,6 +606,10 @@ class CooApp:
                     != authority.capability_profile_digest
                     or not await self._same_auth(request, authenticated)):
                 raise ValueError("selected child principal changed")
+            if action == requester_wire.ACK_ACTION:
+                if (requester_wire.ACTION not in current_authority.principal_actions
+                        or await self.catalogue(principal, stamp, work_ref=work_ref) != requester_wire.CATALOGUE):
+                    raise ValueError("requester acknowledgment contract changed")
             target.require_current()
             if (self.settings.selected_child_target is not target
                     or target.material_digest() != target_digest):
@@ -631,7 +642,7 @@ class CooApp:
             return arguments
         try:
             validated = (validate_coo_context_tool_arguments(name, arguments) if name in extended_tools
-                         else validate_coo_tool_arguments(name, arguments))
+                         else validate_coo_requester_tool_arguments(name, arguments))
         except GatewayError as exc:
             return refused(exc.code, 400)
         if name in discovery_wire.TOOLS:

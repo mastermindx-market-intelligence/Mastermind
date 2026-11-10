@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from control_plane.executive_delegation_identity import derive_delegation_identity
+from control_plane.executive_current_target import read_current_target_identity
 from control_plane.executive_runtime import JobStatus
 from integrations.workspace_agent_return import WorkspaceReturnError
 from integrations.workspace_agent_runtime_binding import (
@@ -84,7 +84,7 @@ class RuntimeFabricTargetProjector:
         runtime: Any,
         *,
         job_reader: Callable[[], Any] | None = None,
-        identity_resolver: Callable[[Any], Any] = derive_delegation_identity,
+        identity_resolver: Callable[[Any], Any] | None = None,
         target_reader: Callable[[str], WorkspaceReturnTargetEpoch] | None = None,
         dialogue_source_reader: Callable[[str], Any] | None = None,
         physical_source_reader: Callable[[str, str, str], WorkspaceReturnPhysicalSource] | None = None,
@@ -93,7 +93,8 @@ class RuntimeFabricTargetProjector:
             raise TypeError("Runtime is required")
         self._runtime = runtime
         self._job_reader = job_reader or runtime.jobs.list_jobs
-        self._identity_resolver = identity_resolver
+        self._identity_resolver = (identity_resolver if identity_resolver is not None
+                                  else lambda job: read_current_target_identity(runtime, job))
         self._target_reader = target_reader or (
             lambda operation_key: _read_current_target(runtime, operation_key)
         )
