@@ -25,6 +25,7 @@ from control_plane.execution_return_wiring import (
     GitHubEvidenceSource,
     execution_return_intent_command_id,
     execution_return_receipt_command_id,
+    install_execution_return_seam,
 )
 from control_plane.executive_runtime import Runtime, RuntimeStore
 from control_plane.remote_worker_broker_client import RemoteWorkerBrokerClient
@@ -521,3 +522,85 @@ def test_receipt_with_foreign_intent_digest_cannot_claim_delivery(sealed, tmp_pa
     monkeypatch.setattr(store, "get_event_by_command_id", corrupt_receipt)
     assert wiring(store, native_session(tmp_path, owner)).deliver(job=job, status=job.status) is None
     assert owner.operations == ["submit"]
+
+
+def test_installed_sync_hook_defers_to_async_owner_without_refusal(sealed, tmp_path):
+    store, job = sealed
+    owner = NativeOwner(store)
+    configured = wiring(store, native_session(tmp_path, owner))
+    runtime = Runtime.from_store(store)
+    installed = install_execution_return_seam(
+        runtime, deliverer=configured._deliverer, t3_adapter=configured._t3_adapter)
+
+    async def finish_original():
+        runtime.attempts._execution_return_seam(job=job, status=job.status)
+        assert return_events(store) == []
+        assert owner.operations == []
+        return await installed.deliver_async(job=job, status=job.status)
+
+    receipt = asyncio.run(finish_original())
+    assert receipt["state"] == "delivered"
+    assert installed.deliver(job=job, status=job.status) == receipt
+    assert owner.operations == ["submit"]
+    assert all(event.event_type != EXECUTION_RETURN_REFUSED_EVENT for event in return_events(store))
+
+
+def test_real_supervisor_finish_awaits_installed_seam_after_durable_terminal(tmp_path, monkeypatch):
+    from tests.test_executive_supervisor import (
+        FakeAdapter, FakeInspector, _runtime_and_job, _supervisor,
+    )
+
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    supervisor = _supervisor(runtime, tmp_path, FakeAdapter(FakeInspector()))
+
+    class NoNativeReturn:
+        async def send(self, **kwargs):
+            raise AssertionError("the ordinary subprocess fixture must not acquire T3 return authority")
+
+    installed = install_execution_return_seam(
+        runtime, deliverer=HermesExecutionReturnDeliverer(NoNativeReturn()))
+    original_delivery = installed.deliver_async
+    observations = []
+
+    async def run():
+        active = await supervisor.start_job(job_id)
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def observe_await(*, job, status):
+            retained = runtime.jobs.get_job(job.job_id)
+            assert retained == job and retained.status.value == "COMPLETED"
+            assert any(event.event_type == "JOB_COMPLETED"
+                       for event in runtime.store.list_events(job_id=job.job_id))
+            observations.append((job.current_attempt_id, status.value))
+            entered.set()
+            await release.wait()
+            return await original_delivery(job=job, status=status)
+
+        monkeypatch.setattr(installed, "deliver_async", observe_await)
+        # The test owns and joins this bounded task. Production finish_job
+        # itself schedules nothing and must not return before the seam settles.
+        finishing = asyncio.create_task(supervisor.finish_job(active))
+        entered_waiter = asyncio.create_task(entered.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {entered_waiter, finishing}, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+            if finishing in done:
+                await finishing  # expose a caller failure instead of obscuring it with a timeout
+            assert entered_waiter in done, "finish_job did not reach its installed return owner"
+            assert not finishing.done(), "finish_job returned before its installed return owner"
+            release.set()
+            return await finishing
+        finally:
+            release.set()
+            if not finishing.done():
+                finishing.cancel()
+            if not entered_waiter.done():
+                entered_waiter.cancel()
+            await asyncio.gather(finishing, entered_waiter, return_exceptions=True)
+
+    receipt = asyncio.run(run())
+    assert receipt.job.status.value == "COMPLETED"
+    assert observations == [(receipt.attempt.attempt_id, "COMPLETED")]
+    assert not any(event.payload.get("refusal_code") == "ASYNC_CONTEXT_UNAVAILABLE"
+                   for event in runtime.store.list_events(job_id=job_id))

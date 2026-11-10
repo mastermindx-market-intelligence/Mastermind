@@ -337,11 +337,11 @@ class ExecutionReturnWiring:
                 payload=payload, command_id=command)
         return receipt
 
-    def _recover_original(self, store: Any, job: Any, attempt_id: str,
-                          event: Any) -> Mapping[str, Any] | None:
+    async def _recover_original(self, store: Any, job: Any, attempt_id: str,
+                                event: Any) -> Mapping[str, Any] | None:
         intent = self._intent(event, job, attempt_id)
         record = intent["record"]
-        receipt = self._await_delivery(record, original=intent["native"])
+        receipt = await self._await_delivery(record, original=intent["native"])
         return self._record_receipt(store, job, attempt_id, record, receipt,
                                     intent=intent, source="read_original")
 
@@ -372,16 +372,29 @@ class ExecutionReturnWiring:
         self.deliver(job=job, status=status)
 
     def deliver(self, *, job: Any, status: Any) -> Mapping[str, Any] | None:
-        """One post-seal delivery attempt; never raises."""
+        """Synchronous post-seal path; an async owner must await deliver_async.
+
+        The terminal hook runs on both kinds of caller. Inside an event loop
+        it leaves delivery to ExecutiveSupervisor.finish_job, without making
+        a refusal receipt or scheduling detached work.
+        """
         try:
-            return self._deliver(job=job, status=status, store=self._store)
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.deliver_async(job=job, status=status))
+        return None
+
+    async def deliver_async(self, *, job: Any, status: Any) -> Mapping[str, Any] | None:
+        """One awaited post-seal delivery, sharing the original intent owner."""
+        try:
+            return await self._deliver(job=job, status=status, store=self._store)
         except Exception:  # last-resort fence: the seal stays durable
             # A receipt write or post-send read may have failed. Never turn
             # that into a clean refusal; the original intent remains the
             # recovery authority, including after process restart.
             return None
 
-    def _deliver(self, *, job: Any, status: Any, store: Any) -> Mapping[str, Any] | None:
+    async def _deliver(self, *, job: Any, status: Any, store: Any) -> Mapping[str, Any] | None:
         binding = self._claim_binding(store, job)
         if not isinstance(binding, dict) or binding.get("runtime_kind") != "t3-native":
             return None  # not a t3-native attempt: the seam does not apply
@@ -407,7 +420,7 @@ class ExecutionReturnWiring:
             if receipt["state"] != "unknown":
                 return receipt
         if original is not None:
-            return self._recover_original(store, job, attempt_id, original)
+            return await self._recover_original(store, job, attempt_id, original)
         provenance = self._admission_provenance(store, job)
         requester_block = (
             provenance.get("original_requester")
@@ -505,19 +518,13 @@ class ExecutionReturnWiring:
             nonlocal owned_intent
             owned_intent = self._reserve_original(store, job, attempt_id, record, original)
 
-        try:
-            receipt = self._await_delivery(record, before_write=before_write)
-        except _AsyncContextUnavailable:
-            self._record_refusal(
-                store, job, attempt_id, "ASYNC_CONTEXT_UNAVAILABLE",
-                "a running event loop owns this thread; no retry is attempted")
-            return None
+        receipt = await self._await_delivery(record, before_write=before_write)
         original = store.get_event_by_command_id(execution_return_intent_command_id(attempt_id))
         if owned_intent is None and original is not None:
             # The callback lost its transaction race (or committed but lost
             # its reply). Its NO_EFFECT classification is about this caller,
             # not the original winner. Read that winner, never mark it refused.
-            return self._recover_original(store, job, attempt_id, original)
+            return await self._recover_original(store, job, attempt_id, original)
         receipt = self._deliverer.validate_receipt(record, receipt)
         if owned_intent is None and receipt["state"] == "delivered":
             receipt = dict(receipt, state="unknown", transport_ref=None, refusal_code=None)
@@ -526,25 +533,13 @@ class ExecutionReturnWiring:
                                         intent=owned_intent, source="submit")
         except _OriginalReturnExists:
             original = store.get_event_by_command_id(execution_return_intent_command_id(attempt_id))
-            return self._recover_original(store, job, attempt_id, original)
+            return await self._recover_original(store, job, attempt_id, original)
 
-    def _await_delivery(self, record: Any, *, before_write: Any = None,
-                        original: Any = None) -> dict[str, Any]:
-        try:
-            running = asyncio.get_running_loop()
-        except RuntimeError:
-            running = None
-        if running is not None:
-            # Never block a live event loop with asyncio.run; reconciliation
-            # of this refusal is the Executive runtime's concern (gap 5).
-            raise _AsyncContextUnavailable()
+    async def _await_delivery(self, record: Any, *, before_write: Any = None,
+                              original: Any = None) -> dict[str, Any]:
         if original is not None:
-            return asyncio.run(self._deliverer.read_original(record, original))
-        return asyncio.run(self._deliverer.deliver(record, before_write=before_write))
-
-
-class _AsyncContextUnavailable(Exception):
-    pass
+            return await self._deliverer.read_original(record, original)
+        return await self._deliverer.deliver(record, before_write=before_write)
 
 
 class _OriginalReturnExists(Exception):
