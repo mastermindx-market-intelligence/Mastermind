@@ -31,7 +31,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
     assert shards["strategy"]["max-parallel"] == 6
-    assert shards["runs-on"] == "ubuntu-latest"
+    assert shards["runs-on"] == "ubuntu-24.04"
     assert type(shards["timeout-minutes"]) is int
     assert 45 <= shards["timeout-minutes"] <= 75
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
@@ -726,3 +726,22 @@ def test_actual_group_prerequisite_budget_cannot_preempt_repository_allowance():
     assert (observed_prerequisite_seconds + 60 * runner['timeout-minutes']
             + 60 * upload['timeout-minutes']) < 60 * job['timeout-minutes']
     assert job['timeout-minutes'] + data['jobs']['test']['timeout-minutes'] <= 100
+
+
+@pytest.mark.parametrize("job", ["pytest_shards", "pr_fast"])
+@pytest.mark.parametrize(
+    "runner",
+    ["ubuntu-latest", ["self-hosted", "linux", "x64"], "${{ vars.TEST_RUNNER }}"],
+)
+def test_test_executing_jobs_cannot_leave_the_hosted_image(job: str, runner) -> None:
+    """Shards and the fast lane run the suite, so a shared-label runner is refused."""
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(encoding="utf-8"), Loader=cip._WorkflowYAMLLoader)
+    assert workflow["jobs"][job]["runs-on"] == fan.HOSTED_TEST_RUNNER == "ubuntu-24.04"
+    # Scope classification and the fan-in run no suite and keep the shared label.
+    assert workflow["jobs"]["pr_scope"]["runs-on"] == "ubuntu-latest"
+    assert workflow["jobs"]["test"]["runs-on"] == "ubuntu-latest"
+    workflow["jobs"][job]["runs-on"] = runner
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))

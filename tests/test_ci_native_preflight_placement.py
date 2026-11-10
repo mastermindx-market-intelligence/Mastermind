@@ -29,7 +29,7 @@ def contract(value):
     job=value['jobs']['pytest_shards']; steps=job['steps']; native=step(job, NAME)
     assert job['strategy']['matrix']['index']==[0,1,2,3,4,5]
     assert job['strategy']['max-parallel']==6 and job['strategy']['fail-fast'] is False
-    assert job['runs-on']=='ubuntu-latest'
+    assert job['runs-on']=='ubuntu-24.04'
     assert job['permissions']=={'contents':'read','actions':'read'}
     assert native['if']=='matrix.index == 5'
     # Prerequisites are unconditional and in the SAME job for every matrix worker.
