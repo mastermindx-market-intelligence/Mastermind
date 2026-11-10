@@ -1,0 +1,95 @@
+{
+  "schema": "mastermind.t3-agent-bus-native-read-proof.v1",
+  "at": "2026-11-10T06:40:11.230527+00:00",
+  "status": "SOURCE_CLIENT_NATIVE_READ_VERIFIED_NOT_INSTALLED",
+  "environment_id": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+  "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+  "tool_names": [
+    "orchestrator_capabilities",
+    "t3_environment_read",
+    "t3_pending_request",
+    "t3_project_list",
+    "t3_queue",
+    "t3_thread_configure",
+    "t3_thread_interrupt",
+    "t3_thread_launch",
+    "t3_thread_list",
+    "t3_thread_organize",
+    "t3_thread_read",
+    "t3_thread_send",
+    "t3_thread_wait"
+  ],
+  "capabilities": {
+    "read": true,
+    "list": true,
+    "launch": true,
+    "message": true,
+    "wait": true,
+    "stop": true,
+    "archive": true,
+    "model_configuration": true,
+    "queue_management": true,
+    "pending_questions": true,
+    "lifecycle_extension": false,
+    "atomic_model_selection": false,
+    "confirmed_delete": false
+  },
+  "thread_page_count": 2,
+  "original_thread_id": "mcp:f7fefa69-16ce-4d02-a95d-8a8ea0f7ca93",
+  "original_thread_status": "completed",
+  "original_item_count": 1,
+  "mutating_actions": 0,
+  "auth_owner": "Original native CLI EnvironmentAuth issue/revoke; no credential values copied",
+  "calls": [
+    {
+      "native_command": [
+        "native-catalog",
+        "--json",
+        "--expected-environment-id"
+      ],
+      "returncode": 0,
+      "stdout_bytes": 29170,
+      "stderr_bytes": 0
+    },
+    {
+      "native_command": [
+        "native",
+        "t3_environment_read",
+        "--json"
+      ],
+      "returncode": 0,
+      "stdout_bytes": 1055,
+      "stderr_bytes": 0
+    },
+    {
+      "native_command": [
+        "native",
+        "t3_thread_list",
+        "--json"
+      ],
+      "returncode": 0,
+      "stdout_bytes": 3649,
+      "stderr_bytes": 0
+    },
+    {
+      "native_command": [
+        "native",
+        "t3_thread_read",
+        "--json"
+      ],
+      "returncode": 0,
+      "stdout_bytes": 8299,
+      "stderr_bytes": 0
+    }
+  ],
+  "source_hashes": {
+    "integrations/session_bridge/t3_native_client.py": "ddf20497a98a1359de94d2f91a1832f03987a0ef7a00eb8652928ac3fde93768",
+    "integrations/session_bridge/t3_cli_transport.py": "907e5282559800a61fbb86608dc3970189e169bb7db3a3d87d373f179858917e"
+  },
+  "native_cli_source_sha256": "22f758d470499e1ebdb8525296fcea428050c76ba03d76efc090bd6f9be9d7ab",
+  "limits": [
+    "Live server does not advertise strict lifecycle; no mutation capability inferred.",
+    "No live thread was created, messaged, stopped, re-modeled, archived or deleted.",
+    "This read proof is not release installation or long-horizon parent acceptance."
+  ]
+}

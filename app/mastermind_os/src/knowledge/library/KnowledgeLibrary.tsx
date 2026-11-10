@@ -985,7 +985,7 @@ function KnowledgeLibraryBody(props: BodyProps) {
         <p className="knowledge-library-note">{copy.refreshPrompt}</p>
       )}
       <div className="knowledge-library-actions-after">
-        <button type="button" className="knowledge-library-button" onClick={() => setTab('FILES')}>
+        <button type="button" className="knowledge-library-button" onClick={() => { setTab('FILES'); setView('LIST'); }}>
           {copy.backToFiles}
         </button>
       </div>
