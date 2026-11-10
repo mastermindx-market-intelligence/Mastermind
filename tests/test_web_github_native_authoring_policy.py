@@ -53,7 +53,7 @@ def test_all_principal_entrypoints_advertise_the_same_route() -> None:
         "AGENTS.md": ("GitHub-native authoring is allowed without a host worktree", "Host-local authoring keeps host-local safeguards"),
         "CLAUDE.md": ("Source-authoring surfaces are alternatives", "host-selected workspace launcher"),
         "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md": ("First-class GitHub-native source authoring", "protected GitHub review/CI/merge queue"),
-        "docs/sol_skills/BOOTSTRAP_KERNEL.md": ("6B. GITHUB-NATIVE AUTHORING:", "No denial/EFFECT_UNKNOWN carrier swap"),
+        "docs/sol_skills/BOOTSTRAP_KERNEL.md": ("6B. GITHUB-NATIVE AUTHORING:", "No denied-effect/EFFECT_UNKNOWN carrier swap"),
     }.items():
         source = _read(path)
         for marker in markers:

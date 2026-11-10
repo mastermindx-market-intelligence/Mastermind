@@ -211,6 +211,14 @@ def test_packet_shape_and_embedded_brief(tmp_path):
     assert isinstance(packet["strategic_state"], dict)
     assert packet["strategic_state"]["company_phase"]
     assert isinstance(packet["strategic_state"]["north_star"], list)
+    assert isinstance(packet["strategic_state"]["resource_policy"], dict)
+    assert isinstance(packet["strategic_state"]["core_product_value_model"], dict)
+    assert packet["strategic_state"]["core_product_value_model"]["products"] == [
+        "Prophet", "Macro Dashboard", "Sector Intelligence", "Research Vault",
+        "Terminal", "Options Intelligence",
+    ]
+    assert isinstance(packet["strategic_state"]["phase_gates"], dict)
+    assert isinstance(packet["strategic_state"]["review_triggers"], list)
     assert isinstance(packet["strategic_state"]["p0"], list)
     assert set(packet["strategic_state"]["p0"][0]) == {
         "id", "department", "objective", "status"
@@ -411,13 +419,13 @@ _LADDER = [
     ("legacy_unblocked_ignored", {"needs_ceo": [], "blocked": [],
                                   "unblocked": [{"workstream": "WS-C", "wave": "W2",
                                                  "title": "t", "next_action": "Draft the spec"}]},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
     ("legacy_unblocked_title_ignored", {"needs_ceo": [], "blocked": [],
                                         "unblocked": [{"workstream": "WS-C", "wave": "W2",
                                                        "title": "Cut the arc"}]},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
     ("quiet", {"needs_ceo": [], "blocked": [], "unblocked": []},
-     "Consult the canonical Improvement Agenda for the highest-priority next work."),
+     "Select the highest-leverage eligible work within the active company P0s (CORE_INTELLIGENCE_PRODUCTIZATION, PREMIUM_PRODUCT_EXPERIENCE, DISTRIBUTION_AND_REVENUE, AUTONOMY_FORCE_MULTIPLIER), using the current resource policy and phase gates. Use the Improvement Agenda only as the ranked domain source for portfolio/intelligence self-improvement candidates."),
 ]
 
 
@@ -519,6 +527,16 @@ def test_text_render_carries_every_section(tmp_path, frozen_git):
     assert "schema mastermind.ceo_boot_packet.v1" in text
     assert "STRATEGY — " in text
     assert "north star:" in text
+    assert "resource bias:" in text
+    assert "core products:" in text
+    assert "P0 CORE_INTELLIGENCE_PRODUCTIZATION [active]" in text
+    assert "P0 PREMIUM_PRODUCT_EXPERIENCE [active]" in text
+    assert "P0 DISTRIBUTION_AND_REVENUE [active]" in text
+    assert "P0 AUTONOMY_FORCE_MULTIPLIER [active]" in text
+    assert "P0 US_PROPHET_ENTRY_TIMING" not in text
+    assert "retired P0 identities preserved; not shown" in text
+    assert "GATE AUTONOMY_BASELINE" in text
+    assert "GATE SELL_READY" in text
     assert "AGENT OS — ceo_brief.v1 @" in text
     assert "WS-CN-LIMIT-ALPHA" in text
     assert "NEEDS CEO (1)" in text
@@ -734,9 +752,22 @@ def test_module_imports_no_execution_plane():
     forbidden = {
         name for name in imported
         if name.startswith("control_plane.")
-        and name != "control_plane.strategic_state"
+        and name not in {"control_plane.strategic_state", "control_plane.company_orientation"}
     }
     assert not forbidden, f"read-only bridge must not import {sorted(forbidden)}"
+    # The one new advisory value projector is itself execution-plane-free;
+    # this is not a blanket exemption for transitive control-plane imports.
+    from control_plane import company_orientation
+    import hashlib
+    helper_source = Path(company_orientation.__file__).read_bytes()
+    assert hashlib.sha256(helper_source).hexdigest() == "7dd83a23f420aff83adc2adb257c2902ca0c72004912cc6f97a0ae3cde924598"
+    helper_imports = set()
+    for node in ast.walk(ast.parse(helper_source.decode("utf-8"))):
+        if isinstance(node, ast.Import):
+            helper_imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            helper_imports.add(node.module)
+    assert helper_imports == {"__future__", "datetime", "copy", "re"}
 
 
 def test_build_packet_in_interpreter_isolated_and_grounded(tmp_path, monkeypatch):

@@ -583,7 +583,7 @@ def test_native_initializer_extends_only_exact_preimage_members():
     before=json.loads(raw)
     native=root/'ops/native_fabric/quota_continuity'
     current_raw=(native/'rollout/native-manifest.json').read_bytes()
-    assert hashlib.sha256(current_raw).hexdigest()=='06079d74361e849beac14436acdd709d40f226fe3bf2f3c905a9945b0325c069'
+    assert hashlib.sha256(current_raw).hexdigest()=='22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada'
     current=json.loads(current_raw)
     assert len(before)==95 and len(current)==107
     assert set(before)<=set(current)
@@ -620,16 +620,27 @@ def test_native_initializer_extends_only_exact_preimage_members():
     # and the application A members in the exact historical diff.
     ubuntu4_changed={'ext/fabric_host_qualification.py'}
     assert before['ext/fabric_host_qualification.py']=='1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899'
-    # The bounded procfs fallback changes only the current lane runtime.
+    # The procfs fallback and atomic load sampling change only the current lane runtime.
     census_changed={'ext/lane_runtime.py'}
     assert before['ext/lane_runtime.py']=='61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329'
-    assert current['ext/lane_runtime.py']=='83b516a07d1262f3f10da5e197ea4b0c776fa1f22d7825a62ae3d068c0b7c35d'
+    assert current['ext/lane_runtime.py']=='b0f8c77af1ddd1eab7b1bd5b3188e6a15f79ceac5a80cbdcdb65c9998a2bce6b'
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     # Census fallback advances exactly one additional historical member.
     assert sum(before[p]==current[p] for p in before)==59
+    core_successors = {
+        "ext/go_lease_capability.py": ("d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940", "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
+        "ext/go_lease_gateway.py": ("adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949", "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
+        "ext/lease_broker.py": ("0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+    }
     for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
-        assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
+        actual=hashlib.sha256(source.read_bytes()).hexdigest()
+        if name in core_successors:
+            predecessor,successor=core_successors[name]
+            assert current[name]==predecessor
+            assert actual==successor
+        else:
+            assert current[name]==actual
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
     source=(native/'rollout/native_install.py').read_text()

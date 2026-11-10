@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { registerUnsavedNavigationHold } from "../../auth-navigation-guard";
-import { LaunchRequestPreview, type LaunchRequestPreviewRead } from "../../activation/LaunchRequestPreview";
+import { LaunchRequestPreview, type LaunchRequestPreviewRead, type LaunchRequestPresentation } from "../../activation/LaunchRequestPreview";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +31,7 @@ export interface LaunchForm {
 
 /** App-owned user input only. These fields never retain a preview or authority. */
 export interface LaunchDetailsDraft {
+  acceptanceCriteria?: string;
   handoffText: string;
   writePathsText: string;
   testTargetsText: string;
@@ -40,7 +41,7 @@ export interface LaunchDetailsDraft {
 }
 
 const emptyLaunchDetails = (): LaunchDetailsDraft => ({
-  handoffText: "", writePathsText: "", testTargetsText: "", diffCheck: true,
+  acceptanceCriteria: "", handoffText: "", writePathsText: "", testTargetsText: "", diffCheck: true,
   projectRef: "", profileRef: "",
 });
 
@@ -115,6 +116,36 @@ export interface LaunchOrchestratorProps {
 
 /** Conservative UI ceiling for user-supplied goal text */
 const MAX_GOAL_BYTES = 16384;
+const MAX_TAGGED_GOAL_BYTES = 4000;
+const MAX_ACCEPTANCE_ITEMS = 6;
+const ACCEPTANCE_MARKER = "[MASTERMIND_ACCEPTANCE_CRITERIA_V1:";
+
+/** Preserve paragraphs using the line separator accepted by the Executive. */
+function executiveGoal(goal: string): string | null {
+  const normalized = goal.trim().replace(/\r\n?|\n/g, "\u2028").replace(/\t/g, " ");
+  return /[\p{Cc}\p{Cs}]/u.test(normalized) ? null : normalized;
+}
+
+/** Requirements in the existing objective, never a product-acceptance verdict. */
+export function composeAcceptanceGoal(
+  goal: string, criteria: string, preserveUntaggedGoal = false,
+): string | null {
+  const lines = criteria.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some(line =>
+    line.length > 500 || /[\p{Cc}\p{Cs}\u2028\u2029]/u.test(line),
+  )) return null;
+  const normalizedGoal = executiveGoal(goal);
+  if (!normalizedGoal || [normalizedGoal, ...lines].some(part => part.includes(ACCEPTANCE_MARKER))) return null;
+  const composed = lines.length
+    ? `${normalizedGoal} ${ACCEPTANCE_MARKER}${JSON.stringify(lines)}]`
+    : preserveUntaggedGoal ? goal : normalizedGoal;
+  // Untagged project objectives retain their exact source text and operation
+  // identity. Ordinary Executive launches still use their normalized wire form.
+  // The stricter wire contract belongs only to tagged objectives. Ordinary
+  // Unicode goals retain their existing UI and current consumer limits.
+  return utf8ByteLength(composed) <= (lines.length ? MAX_TAGGED_GOAL_BYTES : MAX_GOAL_BYTES)
+    ? composed : null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -175,8 +206,20 @@ export function LaunchOrchestrator({
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
+  const criteriaCopy = locale === "zh-CN" ? {
+    label: "验收条件（可选，每行一项）",
+    placeholder: "完成任务时，需要证明哪些结果？",
+    error: "最多填写六项条件，每项不超过 500 个字符（部分符号计为两个）。目标与条件合计不得超过 4,000 个 UTF-8 字节；请移除控制字符和保留标记。",
+    help: "写下完成任务时要验证的结果。填写条件并不代表验证已通过。",
+  } : {
+    label: "Acceptance criteria (optional, one per line)",
+    placeholder: "What must be demonstrably true when this mission is finished?",
+    error: "Use at most six criteria, up to 500 characters each (some symbols count twice). Goal and criteria together must fit 4,000 UTF-8 bytes. Remove control characters and reserved markers.",
+    help: "Describe the results to verify when the work is complete. These requirements do not mean verification has passed.",
+  };
   const formId = useId();
   const goalId = `${formId}-goal`;
+  const acceptanceId = `${formId}-acceptance`;
   const goalInput = useRef<HTMLTextAreaElement>(null);
   useEffect(() => { if (projectExecution) goalInput.current?.focus(); }, [projectExecution, projectFollowUp]);
   const workstreamId = `${formId}-workstream`;
@@ -188,16 +231,18 @@ export function LaunchOrchestrator({
   const [draftGoal, setDraftGoal] = useState(initialDraft);
   const [draftWorkstream, setDraftWorkstream] = useState("");
   const [draftDetails, setDraftDetails] = useState<LaunchDetailsDraft>(() =>
-    projectExecution && initialDetails ? { ...initialDetails } : emptyLaunchDetails());
+    projectExecution && initialDetails ? { ...emptyLaunchDetails(), ...initialDetails }
+      : { ...emptyLaunchDetails(), acceptanceCriteria: initialDetails?.acceptanceCriteria ?? "" });
   const draftDetailsRef = useRef(draftDetails);
   draftDetailsRef.current = draftDetails;
-  const { handoffText, writePathsText, testTargetsText, diffCheck } = draftDetails;
+  const { acceptanceCriteria = "", handoffText, writePathsText, testTargetsText, diffCheck } = draftDetails;
   const updateDetails = (change: Partial<LaunchDetailsDraft>) => {
     const next = { ...draftDetailsRef.current, ...change };
     draftDetailsRef.current = next;
     setDraftDetails(next);
     setRequestPreview(null);
-    if (projectExecution) onDetailsChange?.(next);
+    onDetailsChange?.(projectExecution ? next : next.acceptanceCriteria
+      ? { ...emptyLaunchDetails(), acceptanceCriteria: next.acceptanceCriteria } : null);
   };
   const lines = (text: string) => text.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const selectedWorkstream = workstreamRef ?? (draftWorkstream || defaultWorkstream);
@@ -229,6 +274,8 @@ export function LaunchOrchestrator({
   const [requestPreview, setRequestPreview] = useState<{
     read: LaunchRequestPreviewRead;
     formKey: string;
+    presentationKey: string;
+    presentation?: LaunchRequestPresentation;
     mapper: NonNullable<LaunchOrchestratorProps["previewRequest"]>;
     projects: readonly LaunchChoice[];
     profiles: readonly LaunchChoice[];
@@ -248,10 +295,10 @@ export function LaunchOrchestrator({
   // Draft goals and exact pending-command handles must survive automatic
   // identity renewal. No form content enters browser credential storage.
   useEffect(() => registerUnsavedNavigationHold(() =>
-    draftGoal.length > 0 || handoffText.length > 0 || writePathsText.length > 0 || testTargetsText.length > 0 ||
+    draftGoal.length > 0 || acceptanceCriteria.length > 0 || handoffText.length > 0 || writePathsText.length > 0 || testTargetsText.length > 0 ||
     !diffCheck || draftWorkstream.length > 0 || draftProject.length > 0 || draftProfile.length > 0 ||
     launchTokenRef.current !== null || submitting || launchInFlight
-  ), [draftGoal, handoffText, writePathsText, testTargetsText, diffCheck, draftWorkstream, draftProject, draftProfile, submitting, launchInFlight]);
+  ), [draftGoal, acceptanceCriteria, handoffText, writePathsText, testTargetsText, diffCheck, draftWorkstream, draftProject, draftProfile, submitting, launchInFlight]);
 
   const launchPending = submitting || launchInFlight;
 
@@ -265,14 +312,16 @@ export function LaunchOrchestrator({
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
-      const empty = emptyLaunchDetails();
+      // A follow-up does not submit or consume retained initial-launch criteria.
+      const empty = { ...emptyLaunchDetails(), acceptanceCriteria:
+        projectFollowUp ? draftDetailsRef.current.acceptanceCriteria ?? "" : "" };
       draftDetailsRef.current = empty;
       setDraftDetails(empty);
       onDraftChange?.("");
       if (projectExecution) {
         setDraftChoices({ workstream: selectedWorkstream, project: "", profile: "", frontier: "" });
-        onDetailsChange?.(null);
       }
+      onDetailsChange?.(empty.acceptanceCriteria ? empty : null);
     }
   };
 
@@ -322,6 +371,9 @@ export function LaunchOrchestrator({
   const scopeTooLarge = codeScope && (writePaths.length > 16 || testTargets.length > 8);
 
   const goalBlank = draftGoal.trim().length === 0;
+  const composedGoal = projectFollowUp ? draftGoal : composeAcceptanceGoal(draftGoal, acceptanceCriteria, projectExecution);
+  const acceptanceInvalid = !projectFollowUp && acceptanceCriteria.trim().length > 0 && composedGoal === null;
+  const goalInvalid = !projectFollowUp && !goalBlank && !goalTooLong && !acceptanceInvalid && composedGoal === null;
 
   const canSubmit =
     !blocked &&
@@ -334,10 +386,10 @@ export function LaunchOrchestrator({
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
-    !goalTooLong && !handoffTooLong && !scopeMissing && !scopeTooLarge;
+    !goalTooLong && composedGoal !== null && !handoffTooLong && !scopeMissing && !scopeTooLarge;
 
   const previewForm: LaunchForm = {
-    goal: draftGoal, projectRef: selectedProject, profileRef: selectedProfile,
+    goal: composedGoal ?? draftGoal, projectRef: selectedProject, profileRef: selectedProfile,
     ...(selectedWorkstream !== undefined ? { workstreamRef: selectedWorkstream } : {}),
     ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
     ...(projectExecution ? { handoffText } : {}),
@@ -345,7 +397,8 @@ export function LaunchOrchestrator({
       validation: { pytest_targets: testTargets, git_diff_check: diffCheck } } : {}),
   };
   const previewFormKey = JSON.stringify(previewForm);
-  const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey &&
+  const presentationKey=JSON.stringify({goal:draftGoal,criteria:acceptanceCriteria,followUp:projectFollowUp});
+  const visiblePreview = canSubmit && requestPreview?.formKey === previewFormKey && requestPreview.presentationKey===presentationKey &&
     requestPreview.mapper === previewRequest && requestPreview.projects === projects &&
     requestPreview.profiles === profiles && requestPreview.frontierModels === frontierModels
       ? requestPreview.read : null;
@@ -354,7 +407,10 @@ export function LaunchOrchestrator({
     let read: LaunchRequestPreviewRead;
     try { read = previewRequest(previewForm); }
     catch { read = { state: "UNAVAILABLE" }; }
-    setRequestPreview({ read, formKey: previewFormKey, mapper: previewRequest,
+    const presentation=read.state==="PREPARED"&&read.goal===previewForm.goal&&composedGoal!==null?
+      Object.freeze({preview:read,wireGoal:previewForm.goal,goal:draftGoal,
+        criteria:Object.freeze(projectFollowUp?[]:acceptanceCriteria.split(/\r?\n/).map(line=>line.trim()).filter(Boolean))}):undefined;
+    setRequestPreview({ read, formKey: previewFormKey, presentationKey,presentation,mapper: previewRequest,
       projects, profiles, frontierModels });
   };
 
@@ -388,7 +444,9 @@ export function LaunchOrchestrator({
       : (locale === "zh-CN" ? `目标超过 ${MAX_GOAL_BYTES} 字节的 UTF-8 上限。` : `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`)
     : goalBlank
       ? "Goal is required."
-      : undefined;
+      : goalInvalid
+        ? (locale === "zh-CN" ? "请移除目标中的控制字符和保留标记。" : "Remove unsupported control characters or reserved markers from the goal.")
+        : undefined;
 
   return (
     <section className={`card launch-orchestrator${presentation === "composer" ? " launch-orchestrator-composer" : ""}`}>
@@ -426,7 +484,7 @@ export function LaunchOrchestrator({
               placeholder={projectFollowUp ? (locale === "zh-CN" ? "描述希望团队接下来做什么…" : "What should the team do next?")
                 : (locale === "zh-CN" ? "描述你希望完成的目标…" : "Describe the objective for this launch…")}
               disabled={launchPending}
-              aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
+              aria-describedby={goalTooLong ? `${goalId}-length` : goalInvalid ? `${goalId}-invalid` : undefined}
               aria-invalid={!!goalError}
             />
             {goalTooLong && (
@@ -435,6 +493,19 @@ export function LaunchOrchestrator({
               </p>
             )}
           </div>
+
+          {goalInvalid && <p id={`${goalId}-invalid`} className="field-error" role="alert">{goalError}</p>}
+
+          {!projectFollowUp && <div className="form-field launch-acceptance">
+            <label htmlFor={acceptanceId}>{criteriaCopy.label}</label>
+            <textarea id={acceptanceId} value={acceptanceCriteria}
+              onChange={event => updateDetails({ acceptanceCriteria: event.target.value })}
+              rows={3} placeholder={criteriaCopy.placeholder} disabled={launchPending}
+              aria-invalid={acceptanceInvalid}
+              aria-describedby={`${acceptanceId}-help${acceptanceInvalid ? ` ${acceptanceId}-error` : ""}`} />
+            {acceptanceInvalid && <p id={`${acceptanceId}-error`} className="field-error" role="alert">{criteriaCopy.error}</p>}
+            <p id={`${acceptanceId}-help`} className="muted">{criteriaCopy.help}</p>
+          </div>}
 
           {workstreams !== undefined && <div className="form-field">
             <label htmlFor={workstreamId}>{locale === "zh-CN" ? "工作流" : "Workstream"}</label>
@@ -605,7 +676,7 @@ export function LaunchOrchestrator({
           )}
 
           {/* Actions */}
-          {visiblePreview ? <LaunchRequestPreview preview={visiblePreview}
+          {visiblePreview ? <LaunchRequestPreview preview={visiblePreview} presentation={requestPreview?.presentation}
             projects={projects} profiles={profiles} frontierModels={frontierModels} locale={locale} /> : null}
           <div className="form-actions">
             {previewRequest ? <button type="button" disabled={!canSubmit}

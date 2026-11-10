@@ -211,6 +211,149 @@ class ConsumerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cm.exception.code, "ORIGINAL_REQUEST_SUPERSEDED")
         self.assertEqual(len(self.model.prompts), 0)
 
+
+    def synchronous_model(self, prompt):
+        # Record entry itself: the callback may have an effect before returning
+        # an awaitable, so counting only awaited work would be insufficient.
+        self.model.prompts.append(prompt)
+        return self.model.response
+
+    async def test_role_drift_during_canonical_read_refuses_model_entry(self):
+        self.service.on_read = lambda: setattr(self, "role", "mmmeta")
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "ROLE_CHANGED_BEFORE_MODEL_TURN")
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_binding_generation_drift_during_read_refuses_model_entry(self):
+        self.service.on_read = lambda: setattr(
+            self.resolver, "binding",
+            dataclasses.replace(self.resolver.binding, binding_generation=2))
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "BINDING_CHANGED_BEFORE_MODEL_TURN")
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_process_generation_drift_during_read_refuses_model_entry(self):
+        self.service.on_read = lambda: setattr(
+            self.resolver, "binding",
+            dataclasses.replace(self.resolver.binding, process_generation_id="generation-002"))
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "BINDING_CHANGED_BEFORE_MODEL_TURN")
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_scope_drift_without_generation_change_refuses_model_entry(self):
+        original = self.resolver.binding
+        def change_scope():
+            self.resolver.binding = dataclasses.replace(
+                original, context=dataclasses.replace(
+                    original.context, work_ref="WS:OUT-OF-SCOPE"))
+        self.service.on_read = change_scope
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "BINDING_CHANGED_BEFORE_MODEL_TURN")
+        self.assertEqual(self.resolver.binding.native_session_id, original.native_session_id)
+        self.assertEqual(self.resolver.binding.binding_generation, original.binding_generation)
+        self.assertEqual(self.resolver.binding.process_generation_id, original.process_generation_id)
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_binding_unavailable_after_read_refuses_model_entry(self):
+        self.service.on_read = lambda: setattr(self.resolver, "binding", None)
+        with self.assertRaises(BridgeError) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "binding_unavailable")
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_role_source_failure_after_read_refuses_model_entry(self):
+        state = {"read": False}
+        self.service.on_read = lambda: state.update(read=True)
+        def current(_session):
+            if state["read"]:
+                raise RuntimeError("SYNTHETIC_PRIVATE_ROLE_DIAGNOSTIC")
+            return self.role
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model, current=current).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "ROLE_BINDING_UNAVAILABLE")
+        self.assertNotIn("SYNTHETIC_PRIVATE_ROLE_DIAGNOSTIC", str(cm.exception))
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def test_role_drift_during_binding_recheck_refuses_model_entry(self):
+        original_resolve = self.resolver.resolve
+        calls = 0
+        async def resolve(**arguments):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                await asyncio.sleep(0)
+                self.role = "mmmeta"
+            return original_resolve(**arguments)
+        self.resolver.resolve = resolve
+        with self.assertRaises(ConsumerRefusal) as cm:
+            await self.consumer(model=self.synchronous_model).run(
+                operation_key=OP, in_reply_to=REQUEST)
+        self.assertEqual(cm.exception.code, "ROLE_CHANGED_BEFORE_MODEL_TURN")
+        self.assertEqual(self.model.prompts, [])
+        self.assertEqual(self.send_count(), 0)
+
+    async def assert_check_cancellation(self, entered, *, current=None):
+        pending = asyncio.create_task(self.consumer(
+            model=self.synchronous_model, current=current).run(
+                operation_key=OP, in_reply_to=REQUEST))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=5)
+            pending.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await pending
+            self.assertTrue(pending.cancelled())
+            self.assertEqual(self.model.prompts, [])
+            self.assertEqual(self.send_count(), 0)
+        finally:
+            if not pending.done():
+                pending.cancel()
+                try:
+                    await pending
+                except asyncio.CancelledError:
+                    pass
+
+    async def test_cancellation_during_binding_recheck_has_no_model_effect(self):
+        original_resolve = self.resolver.resolve
+        entered, held = asyncio.Event(), asyncio.Event()
+        calls = 0
+        async def resolve(**arguments):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                entered.set()
+                await held.wait()
+            return original_resolve(**arguments)
+        self.resolver.resolve = resolve
+        await self.assert_check_cancellation(entered)
+
+    async def test_cancellation_during_role_recheck_has_no_model_effect(self):
+        entered, held = asyncio.Event(), asyncio.Event()
+        calls = 0
+        async def current(_session):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                entered.set()
+                await held.wait()
+            return self.role
+        await self.assert_check_cancellation(entered, current=current)
+
     async def test_current_host_role_change_during_inference_holds_send(self):
         self.model.on_infer = lambda: setattr(self, "role", "mmmeta")
         with self.assertRaises(ConsumerRefusal) as cm:

@@ -1693,7 +1693,57 @@ def test_the_mcp_component_update_keeps_its_own_owner_and_behaviour():
     assert "AUTONOMY_TRANSACTION" not in source
     # The MCP component verbs still bind to the MCP helper, not to the new one.
     control = Path(ac.__file__).read_text(encoding="utf-8")
-    assert "mcp_component_update" not in control
+    import ast
+    tree = ast.parse(control)
+    parents = {id(child): node for node in ast.walk(tree)
+               for child in ast.iter_child_nodes(node)}
+    pure_imports = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name != "ops.executive_os.mcp_component_update"
+                       for alias in node.names)
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module == "ops.executive_os":
+            assert all(alias.name != "mcp_component_update" for alias in node.names)
+        if node.module != "ops.executive_os.mcp_component_update":
+            continue
+        assert len(node.names) == 1 and node.names[0].asname is None
+        owner = parents[id(node)]
+        while (not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and id(owner) in parents):
+            owner = parents[id(owner)]
+        assert isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef))
+        pure_imports.append((owner.name, node.names[0].name))
+    # Source adoption shares only these pure reads/transforms. It cannot
+    # import the component's owner, verbs, transaction or a namespace alias.
+    assert sorted(pure_imports) == sorted([
+        ("derive_capability_profile_digests", "derive_sealed_capability_profile_digests"),
+        ("prepare_gateway_publication", "_mission_capability_profile_digests"),
+        ("_verify_gateway_postimages", "_apply_capability_profile_digests"),
+    ])
+    shell = (Path(ac.__file__).parent / "service-control.sh").read_text(encoding="utf-8")
+    dispatch = shell.split("dispatch_mcp_component() {\n", 1)[1].split("\n}\n", 1)[0]
+    assert ('exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B '
+            '"$component_dir/mcp_component_update.py" "${MCP_COMPONENT_ARGV[@]}"') in dispatch
+    assert "autonomy_control.py" not in dispatch
+
+
+
+@pytest.mark.parametrize("foreign_import", [
+    "from ops.executive_os.mcp_component_update import main",
+    "import ops.executive_os.mcp_component_update as component_namespace",
+    "from ops.executive_os import mcp_component_update",
+])
+def test_mcp_effect_or_namespace_import_is_not_a_pure_helper_exception(monkeypatch, foreign_import):
+    path = Path(ac.__file__)
+    original = Path.read_text
+    source = original(path, encoding="utf-8") + "\n" + foreign_import + "\n"
+    def read_text(candidate, *args, **kwargs):
+        return source if candidate == path else original(candidate, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", read_text)
+    with pytest.raises(AssertionError):
+        test_the_mcp_component_update_keeps_its_own_owner_and_behaviour()
 
 
 def test_the_observation_publisher_still_requires_the_genuine_held_owner(host):
@@ -3554,3 +3604,275 @@ def test_the_selection_is_part_of_the_same_pending_source_upgrade(
     assert caught.value.code == "release_not_retargeted"
     assert host.commands == []
     assert host.binding_publications == []
+
+def _prior_role_conversations(tmp_path, dual):
+    from control_plane import executive_fabric_composition as composition
+    member = _hermes_read_member(tmp_path)
+    secretary = dict(member, schema=composition.HERMES_SECRETARY_HOST_SCHEMA,
+        root_id="secretary-root", root_job_id="JOB-001", work_ref="WS:SECRETARY",
+        session_id="secretary-session", profile_id="secretary-profile", principal_id="principal-1")
+    meta = dict(secretary, schema=composition.HERMES_META_HOST_SCHEMA, root_id="meta-root",
+        root_job_id="JOB-002", work_ref="WS:META", session_id="meta-session", profile_id="meta-profile")
+    raw = ccu.compose_binding_candidate(input_document=member, prior_bindings=[],
+        prior_remote_transports=[], prior_secretary_conversation=secretary,
+        prior_meta_conversation=meta if dual else None)
+    # The paired-selection operation requires changed selector coordinates.
+    # Preserve the full prior semantics with its original compact serialization;
+    # the new immutable artifact is rendered by the incumbent pretty composer.
+    raw = json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")).encode()
+    path = tmp_path / "prior-role-conversations.json"
+    path.write_bytes(raw)
+    path.chmod(0o600)
+    return str(path), hashlib.sha256(raw).hexdigest(), json.loads(raw)
+
+
+@pytest.mark.parametrize("dual", [False, True])
+def test_control_update_preserves_complete_role_conversations(host, publisher, tmp_path, root_owned_files, dual):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    composed = _composed(host)
+    assert composed == prior
+    assert len(host.binding_publications) == 1
+    assert hashlib.sha256(Path(prior_path).read_bytes()).hexdigest() == prior_digest
+
+
+@pytest.mark.parametrize("dual", [False, True])
+@pytest.mark.parametrize("field,value", [
+    ("host_ref", "host-" + "f" * 64),
+    ("expected_host_binding_sha256", "f" * 64),
+    ("expected_implementation_sha", "f" * 40),
+])
+def test_control_update_refuses_conversation_source_retarget_before_effect(
+        host, tmp_path, root_owned_files, dual, field, value):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+    _select_binding(host, prior_path, prior_digest)
+    changed = dict(prior["hermes_role_metadata_read"], **{field: value})
+    path, digest = _hermes_input(tmp_path, changed)
+    before = dict(host.files.data)
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    assert caught.value.code == "control_component_hermes_read_binding_conflict"
+    assert host.files.data == before and host.binding_publications == [] and host.commands == []
+
+@pytest.mark.parametrize("dual", [False, True])
+def test_role_conversation_recovery_keeps_original_bytes_without_republication(
+        host, publisher, tmp_path, root_owned_files, dual):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, dual)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
+    planned = _selection_plan(host, hermes_read_input=path, hermes_read_sha256=digest)
+    # The plan's digest/destination and the qualified consumer bytes must agree.
+    observed = host.observe_control_component_update(
+        target_sha=TARGET_SHA, hermes_read=(path, digest))
+    assert observed["candidate"].selection.candidate_sha256 == observed["binding"]["candidate_sha256"]
+    assert observed["candidate"].selection.destination == observed["binding"]["destination"]
+    _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    original = host._component_binding_candidate_bytes
+    assert hashlib.sha256(original).hexdigest() == planned["selection"]["candidate_sha256"]
+    publications = list(host.binding_publications)
+    host.closed = False
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host._component_binding_candidate_bytes == original
+    assert host.binding_publications == publications
+    assert json.loads(original) == prior
+
+
+def test_recovery_keeps_sealed_legacy_v3_policy_for_prior_secretary(
+        host, publisher, tmp_path, root_owned_files, monkeypatch):
+    prior_path, prior_digest, prior = _prior_role_conversations(tmp_path, False)
+    _select_binding(host, prior_path, prior_digest)
+    path, digest = _hermes_input(tmp_path, prior["hermes_role_metadata_read"])
+    compose = ccu.compose_binding_candidate
+    def legacy(**kwargs):
+        kwargs.pop("prior_secretary_conversation", None)
+        kwargs.pop("prior_meta_conversation", None)
+        return compose(**kwargs)
+    # Create an inert historical transaction through the same fake host.
+    with monkeypatch.context() as patch:
+        patch.setattr(ccu, "compose_binding_candidate", legacy)
+        _selection_apply(host, hermes_read_input=path, hermes_read_sha256=digest)
+    original = host._component_binding_candidate_bytes
+    assert json.loads(original)["schema_version"] == BINDING_V3
+    assert "hermes_secretary_conversation" not in json.loads(original)
+    publications = list(host.binding_publications)
+    host.closed = False
+    ccu.reconcile(host, target_sha=TARGET_SHA)
+    assert host._component_binding_candidate_bytes == original
+    assert host.binding_publications == publications
+
+
+# A real update can stop after bootout because macOS leaves an attested
+# per-user distnoted agent. Recovery must continue THAT intent, never replay it.
+def _stop_before_component_publication(host, monkeypatch):
+    plan = ccu.plan(host, target_sha=TARGET_SHA)
+    check = host._recheck_component_quiescence
+    def interrupted(_transaction):
+        raise Crash("stopped before publication")
+    monkeypatch.setattr(host, "_recheck_component_quiescence", interrupted)
+    with pytest.raises(Crash):
+        ccu.apply(host, target_sha=TARGET_SHA, plan_sha256=plan["plan_sha256"])
+    monkeypatch.setattr(host, "_recheck_component_quiescence", check)
+    monkeypatch.setattr(host, "_component_recovery_origin", lambda sha: None)
+    assert host.manifest["phase"] == "CONTROL_BOOTOUT_RECORDED"
+    assert host.labels[CONTROL] is False
+    return dict(target_sha=TARGET_SHA, recovery_sha="9" * 40,
+                transaction_id=host.manifest["transaction_id"],
+                plan_sha256=plan["plan_sha256"])
+
+
+def test_resume_stopped_component_uses_original_plan_without_second_bootout(
+        host, publisher, monkeypatch):
+    args = _stop_before_component_publication(host, monkeypatch)
+    original_id = args["transaction_id"]
+    result = ac.resume_stopped_control_component_update(host, **args)
+    assert result["outcome"] == "RESUMED"
+    assert result["transaction_id"] == original_id
+    assert sum("bootout" in cmd for cmd in host.commands) == 1
+    assert sum("bootstrap" in cmd for cmd in host.commands) == 1
+    assert not any("enable" in cmd for cmd in host.commands)
+    assert host.labels == {CONTROL: True, WORKER: False}
+    assert host.disabled == {CONTROL: False, WORKER: True}
+    assert json.loads(host.files.read(CONTROL_CONFIG))["proof_base_sha"] == TARGET_SHA
+    assert host.files.read(WORKER_CONFIG) == host.worker_raw
+    assert publisher == [original_id]
+    before = (list(host.commands), list(host.files.writes))
+    with pytest.raises(ac.TransactionEffectUnknown):
+        ac.resume_stopped_control_component_update(host, **args)
+    assert before == (host.commands, host.files.writes)
+
+
+@pytest.mark.parametrize("drift", [
+    "transaction", "plan", "target", "phase", "binding", "control_running",
+    "worker_running", "worker_enabled", "control_disabled", "target_seal",
+    "archive", "control_config", "worker_config", "control_plist", "worker_plist",
+    "authority", "ceo_receipt", "component_receipt",
+])
+def test_resume_stopped_component_refuses_drift_without_effect(
+        host, publisher, monkeypatch, drift):
+    args = _stop_before_component_publication(host, monkeypatch)
+    if drift == "transaction":
+        args["transaction_id"] = "autonomy-ffffffffffff"
+    elif drift == "plan":
+        args["plan_sha256"] = "f" * 64
+    elif drift == "target":
+        args["target_sha"] = "f" * 40
+    elif drift == "phase":
+        host.manifest["phase"] = "CONTROL_BOOTSTRAP_RECORDED"
+    elif drift == "binding":
+        host.manifest["component_binding"] = {}
+    elif drift == "control_running":
+        host.labels[CONTROL] = True
+    elif drift == "worker_running":
+        host.labels[WORKER] = True
+    elif drift == "worker_enabled":
+        host.disabled[WORKER] = False
+    elif drift == "control_disabled":
+        host.disabled[CONTROL] = True
+    elif drift == "target_seal":
+        host.release_seals[TARGET_SHA] = "f" * 64
+    elif drift == "archive":
+        host.files.data[os.fspath(ac.AUTONOMY_TRANSACTION / "prior-control.json")] += b" "
+    else:
+        path = {
+            "control_config": CONTROL_CONFIG, "worker_config": WORKER_CONFIG,
+            "control_plist": CONTROL_PLIST, "worker_plist": WORKER_PLIST,
+            "authority": AUTONOMY_RECEIPT, "ceo_receipt": ac.CEO_SUBMIT_RECEIPT,
+            "component_receipt": ac.CONTROL_COMPONENT_RECEIPT,
+        }[drift]
+        host.files.data[os.fspath(path)] = host.files.data.get(os.fspath(path), b"") + b" "
+    before = (list(host.commands), list(host.files.writes), dict(host.files.data))
+    with pytest.raises((ac.TransactionEffectUnknown, ac.ComponentUpdateRefused)):
+        ac.resume_stopped_control_component_update(host, **args)
+    assert before == (host.commands, host.files.writes, host.files.data)
+    assert publisher == []
+
+
+def test_resume_rejects_unsealed_recovery_code_before_claim(host, monkeypatch):
+    claimed = []
+    monkeypatch.setattr(host, "_claim_transaction_owner", lambda: claimed.append(True))
+    with pytest.raises(ac.ComponentUpdateRefused) as caught:
+        ac.resume_stopped_control_component_update(
+            host, target_sha=TARGET_SHA, recovery_sha="9" * 40,
+            transaction_id="autonomy-123456789abc", plan_sha256="f" * 64)
+    assert caught.value.code == "control_component_recovery_origin_invalid"
+    assert claimed == [] and host.commands == [] and host.files.writes == []
+
+
+def test_resume_parser_requires_original_identity():
+    parser = ac._parser()
+    args = parser.parse_args([
+        "resume-control-component", "--expected-sha", TARGET_SHA,
+        "--recovery-sha", "9" * 40, "--transaction-id", "autonomy-123456789abc",
+        "--plan-sha256", "f" * 64])
+    assert args.expected_sha == TARGET_SHA
+    with pytest.raises(SystemExit):
+        parser.parse_args(["resume-control-component", "--expected-sha", TARGET_SHA])
+
+
+def _ambient_component_fixture(monkeypatch, *, classification="attested"):
+    from types import SimpleNamespace
+    from control_plane import executive_ambient_process as ambient
+    from control_plane import executive_worker_broker as broker
+
+    monkeypatch.setattr(ac.pwd, "getpwnam", lambda name: SimpleNamespace(
+        pw_uid=450 if name == ac.CONTROL_USER else 451))
+    monkeypatch.setattr(ac.provider_worker_slots, "get_slot", lambda name: SimpleNamespace(
+        worker_uid=451, worker_user="_component_worker"))
+    pids = {450: (101,), 451: (102,)}
+    monkeypatch.setattr(broker, "_ps_pids_for_uid", lambda uid: pids[uid])
+    identities = {}
+    for uid, rows in pids.items():
+        identities[uid] = ambient.AmbientProcessIdentity(
+            pid=rows[0], uid=uid, launchd_domain=f"user/{uid}",
+            launchd_label="com.apple.distnoted.xpc.agent",
+            launchd_reported_pid=rows[0],
+            plist_path="/System/Library/LaunchAgents/com.apple.distnoted.xpc.agent.plist",
+            program_path="/usr/sbin/distnoted", executable_path="/usr/sbin/distnoted",
+            executable_device=1, executable_inode=2,
+            codesign_identifier="com.apple.distnoted", codesign_verified=True)
+    class Classifier:
+        def classify(self, *, worker_uid):
+            return ambient.AmbientClassification(
+                classification, (identities[worker_uid],)
+                if classification == "attested" else ())
+    monkeypatch.setattr(ambient, "DarwinDistnotedClassifier", Classifier)
+    return pids, identities
+
+
+def test_source_component_accepts_only_attested_ambient_control_and_worker(monkeypatch):
+    _ambient_component_fixture(monkeypatch)
+    ac.ProductionControlComponentHost().require_service_uids_quiescent()
+    # The execution/arming owner retains the original stricter Control gate.
+    with pytest.raises(ac.ArmAdmissionError) as caught:
+        ac.ProductionArmHost().require_service_uids_quiescent()
+    assert caught.value.code == "service_uid_process_live"
+
+
+@pytest.mark.parametrize("failure", ["unattested", "extra_control", "extra_worker",
+                                    "unsigned", "wrong_uid", "wrong_launchd_pid",
+                                    "changed_pid"])
+def test_source_component_ambient_census_fails_closed(monkeypatch, failure):
+    import dataclasses
+    from control_plane import executive_worker_broker as broker
+    pids, identities = _ambient_component_fixture(
+        monkeypatch, classification="failed_closed" if failure == "unattested" else "attested")
+    if failure == "extra_control":
+        pids[450] = (101, 103)
+    elif failure == "extra_worker":
+        pids[451] = (102, 103)
+    elif failure == "unsigned":
+        identities[450] = dataclasses.replace(identities[450], codesign_verified=False)
+    elif failure == "wrong_uid":
+        identities[450] = dataclasses.replace(identities[450], uid=999)
+    elif failure == "wrong_launchd_pid":
+        identities[450] = dataclasses.replace(identities[450], launchd_reported_pid=999)
+    elif failure == "changed_pid":
+        calls = []
+        def changing(uid):
+            calls.append(uid)
+            return pids[uid] if len(calls) == 1 else (999,)
+        monkeypatch.setattr(broker, "_ps_pids_for_uid", changing)
+    with pytest.raises(ac.ArmAdmissionError):
+        ac.ProductionControlComponentHost().require_service_uids_quiescent()

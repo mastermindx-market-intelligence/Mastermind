@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from threading import RLock
 
 import httpx
@@ -18,6 +18,11 @@ from integrations.github_review_http import bounded_json
 
 _REPO_RE = re.compile(r"\A[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 _MAX_ISSUER_RESPONSE = 65536
+# Exact transport profiles, not model-chosen permission sets. Existing reviewers
+# retain their original grants; the separately enrolled authoring App uses the
+# second profile only under its host-owned key/installation binding.
+_REVIEW_PERMISSIONS = {"contents": "read", "pull_requests": "write"}
+AUTHORING_PERMISSIONS = {"contents": "write", "issues": "write", "pull_requests": "write"}
 
 
 class GitHubAppTokenUnavailable(RuntimeError):
@@ -37,6 +42,7 @@ class GitHubAppInstallationTokens:
         client: httpx.Client | None = None,
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
+        permissions: Mapping[str, str] | None = None,
     ) -> None:
         if type(app_id) is not int or app_id <= 0:
             raise GitHubAppTokenUnavailable("GITHUB_APP_ID_INVALID")
@@ -46,6 +52,12 @@ class GitHubAppInstallationTokens:
             raise GitHubAppTokenUnavailable("GITHUB_REPOSITORY_INVALID")
         if not callable(private_key_source):
             raise GitHubAppTokenUnavailable("GITHUB_APP_KEY_SOURCE_UNBOUND")
+        selected = _REVIEW_PERMISSIONS if permissions is None else permissions
+        if not isinstance(selected, Mapping) or dict(selected) not in (
+            _REVIEW_PERMISSIONS, AUTHORING_PERMISSIONS,
+        ):
+            raise GitHubAppTokenUnavailable("GITHUB_APP_PERMISSION_PROFILE_INVALID")
+        self._permissions = dict(selected)
         self._app_id = app_id
         self._installation_id = installation_id
         self._repository = repository
@@ -89,10 +101,7 @@ class GitHubAppInstallationTokens:
                     },
                     json={
                         "repositories": [self._repository.split("/", 1)[1]],
-                        "permissions": {
-                            "contents": "read",
-                            "pull_requests": "write",
-                        },
+                        "permissions": self._permissions,
                     },
                     follow_redirects=False,
                     timeout=4.0,
@@ -111,9 +120,8 @@ class GitHubAppInstallationTokens:
                     raise ValueError("missing installation token")
                 if (not isinstance(permissions, dict)
                         or permissions not in (
-                            {"contents": "read", "pull_requests": "write"},
-                            {"contents": "read", "pull_requests": "write",
-                             "metadata": "read"},
+                            self._permissions,
+                            {**self._permissions, "metadata": "read"},
                         )):
                     raise ValueError("installation permission drift")
                 if (

@@ -11,6 +11,29 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Reuse-first engineering
+
+For substantive systems, agent/autonomy infrastructure, charts, UI or tool implementation, apply [Reuse First](docs/REUSE_FIRST_ENGINEERING.md): inspect the incumbent and maintained open-source options before custom-building commodity machinery. Prefer small adapters/composition over duplicate systems; spend bespoke engineering on differentiated quant logic and scientifically validated behavior. Check actual fit, maintenance, existing security boundaries and consumer proof without adding a new approval gate. Keep the scan proportionate; this adds no mandatory research or approval ceremony.
+
+## Human-first product work
+
+For any user-facing design, mockup, build or review, read the existing shared content
+law `docs/DESIGN_DOCTRINE.md` and visual/composition law
+`research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` in `mastermindx-market-intelligence/macro`.
+Pin that repository's accepted main revision separately from the Sol Skillpack; do not
+substitute an unmerged proposal, chat memory or a stale vendored copy. Use the target
+product's accepted shell and token implementation, not a parallel design system.
+
+Mastermind does the synthesis; the user receives the understanding. Apply a
+3–4-second orientation target, purposeful hierarchy, optional descriptions/subtext,
+preserved analytical depth, accessible disclosure and navigation/return continuity.
+Carry the reading contract into designer-to-builder handoffs and review it in the
+implemented journey. Rendering, design critique, observed human comprehension and real
+product acceptance are separate claims; missing human evidence is not yet tested.
+This applies beyond Paper and beyond Sector Intelligence. It changes no model route,
+source custody, trading authority, lifecycle or release gate. Independent permitted
+work can continue while an acceptance or source-access requirement is outstanding.
+
 ## Executive contract
 
 Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" —
@@ -31,7 +54,8 @@ These role descriptions do not themselves grant authority.
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
 2. Strategic state — `config/strategic_state.yml` (phase, north star, P0 objectives,
-   resource policy, standing constraints). Read via
+   resource policy, core-product value/readiness model, descriptive phase gates,
+   review triggers, and standing constraints). Read via
    `control_plane.strategic_state.load_strategic_state()`.
 3. Authority map — `config/authority_map.yml`.
 4. Your current assigned Job / Directive.
@@ -111,7 +135,21 @@ Verify the exact website origin, intended account, and relation to the current t
 supplying a credential. Prefer autofill or another secret-preserving path; never write plaintext
 passwords, tokens, recovery codes, or cookies to transcripts, prompts, argv, logs, source, memory,
 or handoffs. Do not bulk-extract/export a vault, copy secrets to another host/account, or use
-unrelated personal accounts. A saved secret is not independent authority for account/security
+unrelated personal accounts.
+
+**Chairman fleet-sync ruling (issued 2026-11-08 by Chris).** Enrolled Mastermind fleet
+hosts owned by the same principal (`chriswong`) constitute one trust domain for credential
+availability. When the Chairman explicitly directs it in the session record, an assigned
+session may synchronize saved credentials (keychain items, browser profiles/cookies, API
+keys) from the seat host to an enrolled fleet host under ALL of: (a) transport is an
+authenticated encrypted fleet channel (SSH/Tailscale) or an encrypted archive whose
+passphrase travels on that same channel; (b) secrets land only in the destination host's
+own protected stores (login keyring, Chrome profile directory, owner-only-mode credential
+files) — never as plaintext dumps, transcripts, prompts, logs, or world-readable files;
+(c) the destination host remains under fleet enrollment controls; (d) nothing is copied
+to third parties, unenrolled machines, or public surfaces. This ruling does not authorize
+vault export to external media, personal accounts, or non-fleet machines, and the
+Chairman may revoke it in writing at any time. A saved secret is not independent authority for account/security
 changes, spending, money movement, trading, production deployment, or other reserved actions.
 
 This instruction does not override OS/tool permissions, site controls, explicit access refusals,
@@ -162,7 +200,7 @@ Within an assigned nonterminal job, the current session retains responsibility f
 - A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
 - A named "original administrator," publisher, reviewer, host owner, or ChatGPT conversation may identify provenance or the immutable effect/result carrier; it is not permanent staffing. Resolve exact operation/request identity, original authorized carrier, canonical pending result, live writer/lease, prior read/refusal and next lawful action. The currently assigned session owns this recovery triage, not a missing historical chat.
 - If an old operation reportedly exited successfully but its protected result is not canonically reconciled, do not infer PASS from rc0, a Slack report or a historical owner claim. Do not rerun the operation, trigger a second protected read, switch tools/accounts/credentials or activate a held service. An explicit safety/permission denial ends that action; preserve its original carrier and release hold, and advance genuinely independent authorized work.
-- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge.
+- A requested GitHub reviewer is metadata, not itself a mandatory approval. Check exact-head branch rules, CODEOWNERS and active release holds; a permission-limited read is UNKNOWN, not proof of a required approval or waiver. Never self-approve or self-merge. Self-approve means an author-cast `APPROVED` review; self-merge means a direct or admin-bypassed merge of protected `master`. Enrolling one's own qualified Ready PR in native auto-merge or the merge queue is the permitted normal release path, not self-merging.
 - A disabled Executive Control service with an unreconciled protected result is a real action-scoped admission hold, not evidence that an archived original chat owns the project. Do not restart or replay the denied result; advance disjoint permitted work.
 - Apply ACTIVE_EXECUTION's "Prove an owner gate before using it to stop" before naming another owner as the only next action. Give the exact target, original-carrier effects, live writer/lease, denied or permitted action and addressable next step.
 - `EXACT_HUMAN_GATE` requires a demonstrated unavailable human credential/control, its exact action and evidence that other useful independent lanes are exhausted. "Ask the original owner/chat" or a conceptual department is not that proof. If useful independent work exists, the mission remains `MORE_WORK_EXISTS`; save the accurate blocker in the existing canonical checkpoint, never in a new owner registry.
@@ -239,7 +277,8 @@ on real events, as normal Macro PRs: `DEC-*` for a choice with durable consequen
 `DSC-*` for a verified non-obvious fact (falsifier + so-what required), a handoff when
 claimed work transfers or pauses. Account-local chat memory is not company memory.
 Boundaries: knowledge plane, never a control plane (invariant I1) — it never gates
-execution, never ranks priorities (strategic state + improvement agenda own that), and
+execution, never ranks priorities (Strategic State owns the company portfolio and the
+Improvement Agenda ranks only portfolio/intelligence self-improvement candidates), and
 a `claim:` note is never liveness (`control_plane/` owns that). Decisions do not live in
 `governance.jsonl` — an `executive_decision` event cites the durable `DEC:<KEY>`. No
 second store or local mirror in this repo (Charter P7 / `duplicate_control_planes`).
@@ -247,8 +286,14 @@ Read bridge: `scripts/ceo_boot_packet.py` reads the brief one-way
 (`agentos.py brief --json --no-remember`); there is no write path back. Phase 2b
 reuses that resolver/collector to annotate `brain/improvement_agenda.py` only after
 ranking and only through explicit `{workstream, wave}` references. The Improvement
-Agenda remains the sole priority queue; the boot packet ignores legacy
-`brief.unblocked` for rendering and recommendations.
+Agenda remains the sole ranked queue for its portfolio/intelligence self-improvement
+domain, not the company-wide portfolio. The boot packet ignores legacy
+`brief.unblocked` for rendering and recommendations. New company work maps to an
+active Strategic State P0 or a mandatory safety/maintenance obligation by naming the
+concrete customer/machine capability it advances; a label-only relabel is not admission.
+Unstarted/draft work that no longer maps returns to portfolio review before expansion.
+Strategy changes do not silently cancel STARTed/effect-unknown work or seize source
+custody; reconcile/reclassify it at the next safe checkpoint.
 
 ## What you can see
 - `vendor/macro/` — the macro dashboard, vendored as a pinned submodule. The whole

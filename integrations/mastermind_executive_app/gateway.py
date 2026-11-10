@@ -960,10 +960,22 @@ class CeoIngressReadGateway:
 
         if value is None:
             return True
-        if type(value) is not dict or set(value) != {
+        legacy_keys = {
             "schema", "company_phase", "north_star", "p0", "constraints"
-        }:
+        }
+        extension_keys = {
+            "resource_policy", "core_product_value_model", "phase_gates",
+            "review_triggers",
+        }
+        if type(value) is not dict or set(value) not in (
+            legacy_keys, legacy_keys | extension_keys,
+            legacy_keys | extension_keys | {"authored_orientation"},
+        ):
             return False
+        if "authored_orientation" in value:
+            from control_plane.company_orientation import validate
+            try: validate(value["authored_orientation"])
+            except (ValueError, TypeError): return False
         receipts = receipts or {}
         consumed = consumed if consumed is not None else set()
         if (
@@ -1015,7 +1027,7 @@ class CeoIngressReadGateway:
         current_constraint_keys = set(strategic_state.REQUIRED_CONSTRAINTS) | {
             "unbounded_autonomous_strategic_modification"
         }
-        return (
+        if not (
             set(value["constraints"]) == current_constraint_keys
             and all(
                 type(name) is str
@@ -1024,7 +1036,80 @@ class CeoIngressReadGateway:
                 and level
                 for name, level in value["constraints"].items()
             )
-        )
+        ):
+            return False
+        if set(value) == legacy_keys:
+            return True
+
+        # The v1 producer now includes the complete strategy review rubric.
+        # Keep its wire shape closed, then reuse the strategy owner's semantic
+        # validators after authenticating every bounded narrative leaf.
+        policy = value["resource_policy"]
+        model = value["core_product_value_model"]
+        gates = value["phase_gates"]
+        if (
+            type(policy) is not dict
+            or not policy
+            or any(type(name) is not str or not name.strip() for name in policy)
+            or any(type(weight) not in (int, float) for weight in policy.values())
+            or type(model) is not dict
+            or set(model) != {
+                "products", "dimensions", "evidence_rule", "production_readiness"
+            }
+            or type(model["products"]) is not list
+            or not model["products"]
+            or any(type(item) is not str or not item.strip() for item in model["products"])
+            or type(model["dimensions"]) is not dict
+            or not model["dimensions"]
+            or any(type(name) is not str or not name.strip() for name in model["dimensions"])
+            or any(type(weight) not in (int, float) for weight in model["dimensions"].values())
+            or type(gates) is not dict
+            or not gates
+        ):
+            return False
+        narratives = [
+            (model["evidence_rule"], "strategic_state.core_product_value_model.evidence_rule")
+        ]
+        lists = [
+            (model["production_readiness"], "strategic_state.core_product_value_model.production_readiness"),
+            (value["review_triggers"], "strategic_state.review_triggers"),
+        ]
+        for name, gate in gates.items():
+            if (
+                type(name) is not str
+                or re.fullmatch(r"[A-Z][A-Z0-9_]*", name) is None
+                or type(gate) is not dict
+                or set(gate) != {"purpose", "criteria", "on_pass"}
+            ):
+                return False
+            prefix = f"strategic_state.phase_gates.{name}"
+            narratives.extend((gate[field], f"{prefix}.{field}") for field in ("purpose", "on_pass"))
+            lists.append((gate["criteria"], f"{prefix}.criteria"))
+        for items, field in lists:
+            if type(items) is not list or not items:
+                return False
+            narratives.extend((item, f"{field}[{index}]") for index, item in enumerate(items))
+        if not all(
+            CeoIngressReadGateway._valid_bounded_text(
+                item, field=field, receipts=receipts, consumed=consumed,
+                allow_empty=False,
+            )
+            for item, field in narratives
+        ):
+            return False
+        projected = {
+            key: CeoIngressReadGateway._fabric_preview_projection(value[key])
+            for key in extension_keys
+        }
+        try:
+            where = Path("<executive strategic summary>")
+            strategic_state._validate_resource_policy(projected, where)
+            strategic_state._validate_core_product_value_model(projected, where)
+            strategic_state._validate_phase_gates(projected, where)
+            strategic_state._str_list(projected, "review_triggers", where)
+        except strategic_state.StrategicStateError:
+            return False
+        return True
 
     @staticmethod
     def _valid_runtime_counts(value: object) -> bool:

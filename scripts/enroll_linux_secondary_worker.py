@@ -72,7 +72,7 @@ RELEASE_PATHS = (
     "scripts/ohf/fixtures/__init__.py",
     # First-party runtime/native-BYOK source and role data only. This does not
     # install third-party dependencies, enroll credentials, attest a running
-    # interpreter/unit, or package the broader hermesctl delegation CLI.
+    # interpreter/unit, or install a delegation CLI entrypoint.
     "common",
     "integrations/__init__.py",
     "integrations/hermes_runtime",
@@ -85,9 +85,42 @@ RELEASE_PATHS = (
     "ops/native_fabric/quota_continuity/candidate/paid_initializer.py",
     "ops/native_fabric/quota_continuity/candidate/linux_process_identity.py",
     "integrations/hermes_harness",
+    # Native consumer imports include this package and its eager bridge/tool closure.
+    "integrations/hermes_delegate",
     "integrations/hermes_models",
+    # Optional frozen EVAL inputs reuse the incumbent immutable artifact store,
+    # contract/finalizer rules and the existing manual-effort route owner.
+    "scripts/agent_eval/__init__.py",
+    "scripts/agent_eval/contracts.py",
+    "scripts/agent_eval/canonical.py",
+    "scripts/agent_eval/errors.py",
+    "scripts/agent_eval/harness2_native.py",
+    "scripts/agent_eval/harness2_context.py",
+    "scripts/ohf/harness2_recursion.py",
+    "scripts/agent_eval/privacy.py",
+    "scripts/agent_eval/store.py",
+    "scripts/agent_eval/verification.py",
+    "scripts/agent_eval/validity.py",
+    "scripts/agent_eval/resolver.py",
+    "scripts/agent_eval/scoring.py",
+    "integrations/hermes_omh/__init__.py",
+    "integrations/hermes_omh/effort_config.py",
+    "integrations/hermes_omh/hae_zai_extension.py",
+    "integrations/hermes_omh/adapter.py",
+    "integrations/hermes_omh/vendor/__init__.py",
+    "integrations/hermes_omh/vendor/dag_core.py",
     "integrations/hermes_steward",
     "integrations/hermes_qualification",
+    # Original finite COO descriptors and their eager first-party import closure.
+    "integrations/executive_mcp/__init__.py",
+    "integrations/executive_mcp/schemas.py",
+    "integrations/executive_mcp/coo.py",
+    "integrations/executive_mcp/web_ceo.py",
+    "integrations/executive_mcp/adapter.py",
+    "integrations/executive_mcp/installed.py",
+    # Native context uses the incumbent Agent OS capture helpers.
+    "ops/fabric_launch/agentos.py",
+    "ops/fabric_launch/context.py",
     "integrations/business_mcp_auth/__init__.py",
     "integrations/business_mcp_auth/claims.py",
     "integrations/business_mcp_auth/contracts.py",
@@ -822,6 +855,21 @@ def _verify_release_tree(root: Path) -> None:
                 raise EnrollmentError("installed_release_metadata_invalid")
 
 
+def _prepare_native_dependencies(repo: Path, destination: Path, expected_sha: str,
+                                 expected_tree: str, hermes_runtime) -> None:
+    if hermes_runtime is None or not any("native_gateway" in row for row in hermes_runtime["roles"]):
+        return
+    # Same immutable release, same frozen input, before unit/config selection.
+    # Failure leaves the source release inert and eligible for exact adoption.
+    _run([
+        "/usr/bin/python3", "-I", "-S", "-B",
+        os.fspath(repo / "ops/executive_os/release_manifest.py"),
+        "prepare-hermes-dependencies", "--root", os.fspath(destination),
+        "--commit-sha", expected_sha, "--tree-sha", expected_tree,
+        "--hermes-runtime-json", _hermes_runtime_argument(hermes_runtime),
+    ])
+
+
 def install_release(repo: Path, expected_sha: str, expected_tree: str,
                      *, hermes_runtime: Mapping[str, Any] | None = None) -> Path:
     """Create or adopt the immutable release at its final path.
@@ -930,6 +978,7 @@ def install_release(repo: Path, expected_sha: str, expected_tree: str,
                 pass
             if staging.exists():
                 shutil.rmtree(staging)
+    _prepare_native_dependencies(repo, destination, expected_sha, expected_tree, hermes_runtime)
     return destination
 
 

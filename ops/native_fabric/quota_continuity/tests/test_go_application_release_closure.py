@@ -19,7 +19,10 @@ class ExternalComponentTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "source-root"
         self.output = Path(self.temp.name) / "stage"
-        for rel in ("source/go_shim.py", "candidate/go_shim.py", *("candidate/" + name for name in BUILDER.GO_APPLICATION_DEPENDENCIES)):
+        for rel in ("source/go_shim.py", "candidate/go_shim.py",
+                    *("candidate/" + name for name in BUILDER.GO_APPLICATION_DEPENDENCIES),
+                    *("rollout/preimages/glm_application_core_5c3d/" + name
+                      for name in BUILDER.GO_APPLICATION_DEPENDENCIES)):
             dest = self.root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / rel, dest)
@@ -88,7 +91,14 @@ class ExternalComponentTests(unittest.TestCase):
         self.assertEqual(record["native_stage_dependencies"], {name: manifest["ext/" + name] for name in BUILDER.GO_APPLICATION_DEPENDENCIES})
         shutil.rmtree(self.output / "external-go-component")
         source = self.root / "candidate/lease_broker.py"
-        source.write_bytes(source.read_bytes() + b"\n# changed after staging\n")
+        candidate = source.read_bytes()
+        source.write_bytes(candidate + b"\n# changed after staging\n")
+        with self.assertRaisesRegex(ValueError, "GLM native core source commitment differs"):
+            BUILDER.stage_external_go_component(self.root, self.output, "/fixture/original/ext", staged_manifest=manifest)
+        self.assertFalse((self.output / "external-go-component").exists())
+        source.write_bytes(candidate)
+        staged = self.output / "native-code-stage/ext/lease_broker.py"
+        staged.write_bytes(staged.read_bytes() + b"\n# changed captured stage\n")
         with self.assertRaisesRegex(ValueError, "captured native stage"):
             BUILDER.stage_external_go_component(self.root, self.output, "/fixture/original/ext", staged_manifest=manifest)
         self.assertFalse((self.output / "external-go-component").exists())

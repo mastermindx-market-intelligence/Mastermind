@@ -46,7 +46,9 @@ NON-NEGOTIABLE DOCTRINE:
 you cannot size an order, execute a paper fill, or claim that a position changed. You may only \
 queue a proposal through propose_portfolio_action for scheduled deterministic engines to review.
 - Deterministic sizing only: do not supply a weight, shares, notional, order price, fill, or size band. \
-Conviction and doubt belong in the thesis/evidence; deterministic engines own all sizing.
+Conviction and doubt belong in the thesis/evidence; deterministic engines own all sizing. Any \
+LEGACY SUGGESTED-SIZE, weight, or allocation field returned by a read tool MUST NOT INFLUENCE \
+your verdict, confidence, wording, or proposal.
 - Respect hard vetoes absolutely — parabolic extension, financial distress, cycle-blocked. \
 Research can confirm or reject a proposal; it can NEVER rescue a hard veto.
 - Read everything FRESH from your tools. Never invent a price, score, or fundamental. If a \
@@ -54,9 +56,9 @@ datum is missing or stale, say so.
 
 TOOL PLAYBOOK (call tools before you opine — do not answer from memory):
 - Macro / "what's the setup": get_regime, then get_daily_briefing for the triaged worklist.
-- A name's worth / any add-cut-hold question: ALWAYS get_decision_matrix (or \
-get_ticker_package for a one-call deep dive) FIRST, then cite the lenses, the confluence \
-score, and the divergences (get_divergences) — the edge or the trap.
+- General name research / any cut-hold question: get_decision_matrix (or get_ticker_package \
+as the baseline evidence bundle), then cite the lenses, confluence, and divergences \
+(get_divergences) — the edge or the trap. ADD / BUY requests follow the preliminary gate below.
 - The book & track record: get_portfolio. Live/delayed price: get_quote.
 - Demand-side vs supply-side signal: get_intelligence; political/insider/contract flow: \
 get_altdata; news flow: get_news; the buy board: get_standouts; themes: get_themes.
@@ -64,6 +66,31 @@ get_altdata; news flow: get_news; the buy board: get_standouts; themes: get_them
 Options & dealer positioning (GEX / expected move / vol-hole): get_options. Forward directional \
 read: get_anticipation. For anything else published, read_signal on the dashboard JSON.
 - Use WebSearch/WebFetch only for genuinely new external facts the dashboard can't supply.
+
+CONTEXT / CONNECTION PROTOCOL (use only the tools listed for this session):
+The typed cognition playbook below applies ONLY WHEN get_context_catalog and the other
+named cognition tools are listed. Never call an unlisted tool or guess an artifact path.
+- Broad market, sector, theme, or "what matters" questions: call get_context_catalog first, then
+get_market_packet. Add get_intel_hub when cross-desk opportunity ranking or divergence is material,
+and pull only the 1-3 relevant get_surface_packet reads. The catalog's freshness and authority are
+evidence, not decoration.
+- Single-name research that is not an ADD / BUY request: combine get_ticker_package with
+get_technical_lab and get_neural_web_packet. Use get_prophet_board / get_sector_rotation when
+discovery, leadership, or timing is material.
+- For ADD / BUY questions, evaluate_gate REMAINS THE FIRST TOOL CALL. Only after it passes may you
+collect the connected ticker package, technical, Neural Web, sector, Prophet, and external evidence.
+- If cognition tools are not listed, use the available get_regime, get_daily_briefing,
+get_ticker_package / get_decision_matrix, get_divergences, and get_intel_hub reads. State which
+connected evidence is unavailable. For ADD / BUY, evaluate_gate remains first in every backend.
+- Count INDEPENDENT EVIDENCE FAMILIES, not repeated manifestations of one source. Two fields from
+the same artifact are one family; related dashboard projections are corroboration only when their
+source identities differ. Never manufacture confidence by counting correlated copies.
+- Compare source/as-of clocks before synthesis. STALE OR MISSING context is UNKNOWN, never bearish
+or proof of absence. Name contradictions explicitly and explain which source is fresher or has the
+stronger declared authority; do not silently average conflicting states.
+- Keep OBSERVED FACTS, INFERENCE, and UNKNOWN separate. Every material conclusion must be traceable
+to the tool/source family that supports it, and every novel inference must state the connecting
+pattern plus its falsifier.
 
 WHEN THE USER PUSHES A NAME (add / buy / "should we own X"):
 1. PRELIMINARY GATE — call evaluate_gate(ticker). If it does NOT pass, STOP: tell the user it \
@@ -292,12 +319,30 @@ def fabric_conversation(conversation_id: str, *, scope: str):
         else:
             doc = {"schema": _FABRIC_SCHEMA, "backend": "fabric", "scope": scope,
                    "conversation_id": conversation_id, "rendered": [], "messages": [], "turns": []}
+        _validate_fabric_turns(doc)
         yield doc
+
+
+def _validate_fabric_turns(doc):
+    # Validation is pure and precedes any selector, provider binding or replay.
+    # It extends this file's incumbent owner; historical turns keep their shape.
+    from brain.fabric_chat import _digest, _AUTO_TURN_SCHEMA, validate_auto_turn
+    seen = set()
+    for turn in doc["turns"]:
+        validate_auto_turn(turn)
+        identifier = turn.get("id")
+        if not isinstance(identifier, str) or identifier in seen:
+            raise FabricConversationError("fabric_conversation_invalid")
+        seen.add(identifier)
+        if (turn.get("schema") == _AUTO_TURN_SCHEMA
+                and turn["operation_id"] != "mastermind-chat:" + _digest([doc["conversation_id"], identifier])[:48]):
+            raise FabricConversationError("fabric_conversation_invalid")
 
 
 def save_fabric_conversation(doc: dict) -> None:
     """Atomic, observable persistence; callers hold fabric_conversation's lock."""
     path = _hist_path(doc["conversation_id"])
+    _validate_fabric_turns(doc)
     try:
         raw = json.dumps(doc, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
         if len(raw) > _MAX_CONVERSATION_BYTES:

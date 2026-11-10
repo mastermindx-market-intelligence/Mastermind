@@ -10,11 +10,15 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 
 MAX_SOURCE = 2 * 1024 * 1024
 MAX_SNAPSHOT = 2 ** 18
 MAX_PROGRESS = 2 ** 9
 MAX_FAILURES = 2 ** 7
+EXIT_EVENTS = ('SESSION_FINISH_ENTERED', 'SESSION_FINISH_RETURNED',
+               'UNCONFIGURE_ENTERED', 'UNCONFIGURE_RETURNED')
+MAX_EXIT_SOURCES = 64
 PHASES = frozenset(('collect', 'setup', 'call', 'teardown'))
 KINDS = {kind: kind.__name__ for kind in (AssertionError, ValueError, TypeError,
     KeyError, IndexError, RuntimeError, OSError, PermissionError, FileNotFoundError,
@@ -177,6 +181,7 @@ class FixedDiagnostics:
         self.catalog = catalog
         self.progress = []
         self.failures = []
+        self.lifecycle = []
         self.native_catalog = None
         # Per-instance admitted row identity/content, never serialized or reused.
         # Commission and a_f may report the same leaf; membership alone cannot bind its origin.
@@ -201,6 +206,47 @@ class FixedDiagnostics:
         # An interrupted collection still leaves a closed empty observation,
         # rather than inventing a last module that never started.
         self.flush()
+
+    def lifecycle_record(self, event, exitstatus):
+        """Observation only: no locals/names/IDs, no waiter or process control.
+
+        A Python code filename is not execution attestation. Exact public-source
+        qualification limits disclosure, not authority; phases never prove exit.
+        """
+        if (type(event) is not str or len(self.lifecycle) >= len(EXIT_EVENTS)
+                or event != EXIT_EVENTS[len(self.lifecycle)]
+                or (exitstatus is not None and not _integer(exitstatus, 5))):
+            return
+        sources = set()
+        try:
+            frames = list(sys._current_frames().values())[:128]
+            for frame in frames:
+                for _ in range(64):
+                    if frame is None: break
+                    filename = frame.f_code.co_filename
+                    if type(filename) is str and Path(filename).is_absolute():
+                        try: module = Path(filename).relative_to(self.catalog.root).as_posix()
+                        except ValueError: module = None
+                        # Resolve only existing exact-HEAD public test members.
+                        # Foreign/private paths never cause a source read.
+                        source = self.catalog.source(module) if module in self.catalog.blobs else None
+                        line = frame.f_lineno
+                        if source is not None and _integer(line) and 0 < line <= source['lines']:
+                            sources.add((module, line))
+                    frame = frame.f_back
+            value = dict(event=event, exitstatus=exitstatus,
+                         sources=[dict(module=m,line=n) for m,n in sorted(sources)[:MAX_EXIT_SOURCES]])
+        except (OSError, ValueError, TypeError, RuntimeError):
+            value = dict(event=event, exitstatus=exitstatus, sources=[])
+        self.lifecycle.append(value)
+        self.flush()
+
+    def _payload(self):
+        value = dict(schema='ci.fixed-diagnostics.v1', head=self.catalog.head,
+                     progress=self.progress, failures=self.failures, truncated=self.truncated)
+        if self.lifecycle:
+            value.update(schema='ci.fixed-diagnostics.v2', lifecycle=self.lifecycle)
+        return value
 
     def progress_record(self, event, module, **fields):
         if self.catalog.source(module) is None:
@@ -271,6 +317,20 @@ class FixedDiagnostics:
                     or value['cases_finished']>value['cases_started']
                     or type(seconds) not in (int,float) or not math.isfinite(seconds) or not 0<=seconds<=7200):
                 return False
+        if type(self.lifecycle) is not list or len(self.lifecycle) > len(EXIT_EVENTS):
+            return False
+        for index, value in enumerate(self.lifecycle):
+            if (type(value) is not dict or set(value) != {'event','exitstatus','sources'}
+                    or value['event'] != EXIT_EVENTS[index]
+                    or (value['exitstatus'] is not None and not _integer(value['exitstatus'],5))
+                    or type(value['sources']) is not list or len(value['sources']) > MAX_EXIT_SOURCES):
+                return False
+            for source in value['sources']:
+                if (type(source) is not dict or set(source) != {'module','line'}
+                        or type(source['module']) is not str or source['module'] not in self.catalog.cache
+                        or not _integer(source['line']) or source['line'] == 0
+                        or source['line'] > self.catalog.cache[source['module']]['lines']):
+                    return False
         native_indices=set()
         for index,value in enumerate(self.failures):
             if type(value) is not dict:return False
@@ -326,14 +386,12 @@ class FixedDiagnostics:
         fd = tmp = None
         temporary_identity = None
         try:
-            raw = json.dumps(dict(schema='ci.fixed-diagnostics.v1', head=self.catalog.head,
-                progress=self.progress, failures=self.failures, truncated=self.truncated),
+            raw = json.dumps(self._payload(),
                 sort_keys=True, separators=(',', ':'), allow_nan=False).encode('ascii')
             while len(raw) > MAX_SNAPSHOT and self.progress:
                 del self.progress[0]
                 self.truncated = True
-                raw = json.dumps(dict(schema='ci.fixed-diagnostics.v1', head=self.catalog.head,
-                    progress=self.progress, failures=self.failures, truncated=self.truncated),
+                raw = json.dumps(self._payload(),
                     sort_keys=True, separators=(',', ':'), allow_nan=False).encode('ascii')
             if len(raw) > MAX_SNAPSHOT:
                 return

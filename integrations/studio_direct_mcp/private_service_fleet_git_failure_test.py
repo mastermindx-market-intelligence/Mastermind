@@ -34,6 +34,10 @@ SUCCESSOR_SIZE = 102141
 SUCCESSOR_GIT_BLOB = "c02bcdada5217bbc987099e90ebdce236f023b86"
 ACCOUNT = "chatgpt1"
 PORT = 45018
+RETAINED_SUCCESSOR_DIGEST = "77c2c136852a783a1e2572c145af7536ee6cd0d7f443daa4c09795c333fd3dc7"
+RETAINED_TARGET_GENERATION = "28faaf101463bcabef578ab1acabdcd270e301c7ed9cedf294e82fd459ccfcce"
+CURRENT_GENERATION = "9eec6f73903fabfdd6d15bfe6f815f652f0946b5838cef6d40e96ca5b7e7f185"
+CURRENT_PREVIOUS = "b" * 64
 
 
 def sha(blob: bytes) -> str:
@@ -325,7 +329,7 @@ class Base(unittest.TestCase):
     def gateway_sha(self) -> str:
         return sha((self.roots["base"] / "gateway.mjs").read_bytes())
 
-    def applied_pin(self, *, paper=False):
+    def applied_pin(self, *, paper=False, live_native=False):
         """A complete retained intent, actual one-field pin and selected bridge.
 
         Only the native generation context and cohort data are synthetic;
@@ -350,10 +354,28 @@ class Base(unittest.TestCase):
         path = _write_pin_transaction(self.roots, config_before=config_before,
             config_after=config_after, manifest_before=manifest_before,
             manifest_after=manifest_after)
-        binding = {"successor_digest": "a" * 64, "target_generation": "b" * 64,
-            "expected_selection": {"generation": "c" * 64, "sequence": 24},
-            "pool_target": str(pool), "pool_previous": sha(b"previous bridge"),
-            "pool_bridge": sha(pool.read_bytes()), "phase": "SELECTED"}
+        if live_native:
+            # The live proof must return this exact selected identity. It is the
+            # one completed historical successor, not a new native selection.
+            binding = {
+                "successor_digest": RETAINED_SUCCESSOR_DIGEST,
+                "target_generation": RETAINED_TARGET_GENERATION,
+                "expected_selection": {
+                    "schema": "native-code-selection.v1",
+                    "generation": "c" * 64,
+                    "previous": "d" * 64,
+                    "sequence": 23,
+                },
+                "pool_target": str(pool),
+                "pool_previous": sha(b"previous bridge"),
+                "pool_bridge": sha(pool.read_bytes()),
+                "phase": "SELECTED",
+            }
+        else:
+            binding = {"successor_digest": "a" * 64, "target_generation": "b" * 64,
+                "expected_selection": {"generation": "c" * 64, "sequence": 24},
+                "pool_target": str(pool), "pool_previous": sha(b"previous bridge"),
+                "pool_bridge": sha(pool.read_bytes()), "phase": "SELECTED"}
         plan = json.loads((path / "plan.json").read_bytes())
         plan.update({k: v for k, v in binding.items() if k != "phase"})
         plan["successor_bundle"] = str(self.home / "native-successor")
@@ -370,10 +392,14 @@ class Base(unittest.TestCase):
         self.install.manifest = new_manifest
         self.install.write_manifest()
         self.native_context_events, self.native_context_active = [], False
+        self.native_purposes = []
+        if live_native:
+            return path, plan, binding
 
         @contextmanager
         def native(args):
             self.native_context_events.append(("enter", args.operation))
+            self.native_purposes.append(getattr(args, "retained_proof_purpose", ""))
             self.native_context_active = True
             try:
                 yield binding
@@ -409,6 +435,111 @@ class Base(unittest.TestCase):
             self.install.manifest = selection["manifest"]
             self.install.write_manifest()
         return path, plan, binding
+
+    def pruned_bootstrap_rollout(self, *, diverge=False, altered_receipt=False):
+        """Point the real native proof at a pruned-bootstrap fixture.
+
+        The production proof script and publication lock stay in place. Only
+        the historical bootstrap reader is replaced, and it still refuses to
+        invent the missing artifact.
+        """
+        # Platform temp aliases must not bypass the real canonical-store check.
+        store = (self.home / "native-code-releases").resolve()
+        store.mkdir(mode=0o700)
+        store.chmod(0o700)
+        pool = self.home / "native-pool"
+        old = {"schema": "native-code-selection.v1", "generation": "c" * 64,
+               "previous": "d" * 64, "sequence": 23}
+        plan = {
+            "digest": RETAINED_SUCCESSOR_DIGEST,
+            "store": str(store),
+            "expected_selection": old,
+            "target_generation": RETAINED_TARGET_GENERATION,
+            "entries": {"pool": {
+                "target": str(pool),
+                "previous": sha(b"previous bridge"),
+                "bridge": sha(pool.read_bytes()),
+            }},
+        }
+        bundle = self.home / "native-successor"
+        bundle.mkdir(mode=0o700)
+        (bundle / "PLAN.json").write_text(json.dumps(plan))
+        receipt = b"altered-receipt" if altered_receipt else b"exact-retained-receipt"
+        (bundle / "receipt.json").write_bytes(receipt)
+        current = {"schema": "native-code-selection.v1",
+                   "generation": CURRENT_GENERATION,
+                   "previous": CURRENT_PREVIOUS, "sequence": 26}
+        (store / "CURRENT.json").write_text(json.dumps(current))
+        (store / "VERIFIED.json").write_text(json.dumps([
+            RETAINED_TARGET_GENERATION, CURRENT_GENERATION, CURRENT_PREVIOUS]))
+        if diverge:
+            (store / "DIVERGE").write_text("1")
+        rollout = self.home / "fixture-rollout"
+        rollout.mkdir(mode=0o700)
+        (rollout / "native_install.py").write_text(
+            "import json\n"
+            "from pathlib import Path\n"
+            "def read_successor(bundle):\n"
+            " raise FileNotFoundError('historical bootstrap artifact pruned')\n"
+            "def read_retained_successor_after_bootstrap_prune(bundle):\n"
+            " receipt=(Path(bundle)/'receipt.json').read_bytes()\n"
+            " if receipt!=b'exact-retained-receipt':\n"
+            "  raise ValueError('retained successor evidence changed')\n"
+            " return json.loads((Path(bundle)/'PLAN.json').read_text()), {}\n"
+            "def _upgrade_entries(p, complete=False):\n"
+            " raw=Path(p['entries']['pool']['target']).read_bytes()\n"
+            " if raw!=b'selected native bridge':\n"
+            "  raise ValueError('ingress does not match reviewed bridge')\n"
+        )
+        (rollout / "native_generation.py").write_text(
+            "import json\n"
+            "from pathlib import Path\n"
+            "POINTER_SCHEMA='native-code-selection.v1'\n"
+            "def current(store):\n"
+            " store=Path(store)\n"
+            " value=json.loads((store/'CURRENT.json').read_text())\n"
+            " if not (store/'DIVERGE').exists():\n"
+            "  return value\n"
+            " count_path=store/'proof-calls'\n"
+            " count=int(count_path.read_text()) if count_path.exists() else 0\n"
+            " count_path.write_text(str(count+1))\n"
+            " if count>=1:\n"
+            "  value=dict(value); value['sequence']=value['sequence']+1\n"
+            " return value\n"
+            "def verify(store, identity):\n"
+            " allowed=json.loads((Path(store)/'VERIFIED.json').read_text())\n"
+            " if identity not in allowed: raise ValueError('unverified generation')\n"
+        )
+        real_run = svc.subprocess.run
+        self.proof_invocations = []
+
+        def wrapped(argv, *args, **kwargs):
+            argv = list(argv)
+            code_at = next((index for index, item in enumerate(argv)
+                            if isinstance(item, str) and "import native_install as i" in item),
+                           None)
+            if code_at is not None:
+                argv[code_at + 1] = str(rollout)
+                account = argv[code_at + 4]
+                operation = argv[code_at + 5]
+                purpose = argv[code_at + 6] if len(argv) > code_at + 6 else ""
+                self.proof_invocations.append((account, operation, purpose))
+            return real_run(argv, *args, **kwargs)
+
+        patch = mock.patch.object(svc.subprocess, "run", side_effect=wrapped)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return store
+
+    def native_generation(self):
+        import importlib.util
+        rollout = (Path(svc.__file__).resolve().parents[2]
+                   / "ops/native_fabric/quota_continuity/rollout")
+        spec = importlib.util.spec_from_file_location(
+            "c1_pin_generation", rollout / "native_generation.py")
+        generation = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generation)
+        return generation
 
 
 class CompilerTests(Base):
@@ -765,6 +896,7 @@ class OwnerTransactionTests(Base):
         self.assertTrue((path / "result.json").exists())
         self.assertEqual(original, {p.name: p.read_bytes() for p in path.iterdir()})
         self.assertEqual(self.native_context_events, [("enter", "apply"), ("exit", "apply")])
+        self.assertEqual(self.native_purposes, [svc.C1_GATEWAY_RETAINED_PROOF_PURPOSE])
 
 
 class SelectedPinCompositionTests(Base):
@@ -789,7 +921,8 @@ class SelectedPinCompositionTests(Base):
         with self.running(), mock.patch.object(svc, "_atomic_write_bytes") as write:
             result = self.call(self.args(preflight=True))
         self.assertEqual(result["effect"], "NOT_APPLIED")
-        self.assertEqual(self.native_context_events, [("enter", "status"), ("exit", "status")])
+        self.assertEqual(self.native_context_events, [("enter", "preview"), ("exit", "preview")])
+        self.assertEqual(self.native_purposes, [svc.C1_GATEWAY_RETAINED_PROOF_PURPOSE])
         write.assert_not_called()
         self.assertEqual(before, {p.name: p.read_bytes() for p in path.iterdir()})
 
@@ -872,6 +1005,141 @@ class SelectedPinCompositionTests(Base):
             with self.assertRaisesRegex(SystemExit, "FUTURE_PIN_NOT_READY"):
                 self.call(self.args())
         write.assert_not_called()
+
+
+class PrunedBootstrapFormatterTests(Base):
+    """Missing historical bootstrap: formatter preview and apply share one proof."""
+
+    def setUp(self):
+        super().setUp()
+        self.pin_path, self.pin_plan, _ = self.applied_pin(live_native=True)
+        self.store = self.pruned_bootstrap_rollout()
+        self.purpose = svc.C1_GATEWAY_RETAINED_PROOF_PURPOSE
+        self.before_modules = {
+            path.name: path.read_bytes()
+            for path in self.roots["base"].iterdir() if path.is_file()}
+        self.before_pin = {path.name: path.read_bytes() for path in self.pin_path.iterdir()}
+        self.before_pointer = (self.store / "CURRENT.json").read_text()
+
+    def test_missing_bootstrap_preview_and_gateway_apply_share_proof(self):
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_PIN_SUCCESSOR_REFUSED"):
+            with pin.selected_applied_context(svc, ACCOUNT, self.roots, operation="apply"):
+                self.fail("generic native apply admitted without the closed purpose")
+        with self.assertRaisesRegex(SystemExit, "INPUT_REFUSED"):
+            with pin.selected_applied_context(
+                    svc, ACCOUNT, self.roots, operation="reconcile"):
+                self.fail("generic native reconcile admitted")
+        reconcile = SimpleNamespace(
+            account=ACCOUNT, successor_bundle=self.home / "native-successor",
+            successor_plan_sha256=RETAINED_SUCCESSOR_DIGEST, operation="reconcile")
+        with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_PIN_SUCCESSOR_REFUSED"):
+            with svc._pin_native_context(reconcile):
+                self.fail("reconcile reached publication")
+        with self.assertRaisesRegex(SystemExit, "INPUT_REFUSED"):
+            with pin.selected_applied_context(
+                    svc, "chatgpt4", self.roots, operation="apply",
+                    retained_proof_purpose=self.purpose):
+                self.fail("foreign account admitted")
+        with self.assertRaisesRegex(SystemExit, "INPUT_REFUSED"):
+            with pin.selected_applied_context(
+                    svc, ACCOUNT, self.roots, operation="apply",
+                    retained_proof_purpose="foreign-purpose"):
+                self.fail("foreign purpose admitted")
+        self.assertEqual(self.before_modules["gateway.mjs"],
+                         (self.roots["base"] / "gateway.mjs").read_bytes())
+
+        self.proof_invocations.clear()
+        with self.running():
+            preview = self.call(self.args(preflight=True))
+        self.assertEqual(preview["effect"], "NOT_APPLIED")
+        self.assertEqual(preview["nativePoolPin"]["state"], "COMPLETE")
+        self.assertTrue(all(item[1:] == ("preview", self.purpose)
+                            for item in self.proof_invocations))
+        generation = self.native_generation()
+        with generation.publication_lock(self.store):
+            pass
+        self.assertEqual(self.before_modules,
+                         {path.name: path.read_bytes()
+                          for path in self.roots["base"].iterdir() if path.is_file()})
+
+        self.proof_invocations.clear()
+        original_write = svc._atomic_write_bytes
+        held = []
+
+        def locked_write(path, data, mode=svc.FILE_MODE):
+            try:
+                with generation.publication_lock(self.store):
+                    held.append(False)
+            except ValueError as exc:
+                self.assertIn("native publication already in progress", str(exc))
+                held.append(True)
+            return original_write(path, data, mode)
+
+        with self.stopped(), mock.patch.object(
+                svc, "_atomic_write_bytes", side_effect=locked_write):
+            receipt = self.call(self.args())
+        self.assertEqual(receipt["effect"], "APPLIED")
+        self.assertTrue(held)
+        self.assertTrue(all(item is True for item in held))
+        self.assertGreaterEqual(len(self.proof_invocations), 2)
+        self.assertTrue(all(item == (ACCOUNT, "apply", self.purpose)
+                            for item in self.proof_invocations))
+        modules = {path.name: path.read_bytes()
+                   for path in self.roots["base"].iterdir() if path.is_file()}
+        self.assertEqual(sha(modules["gateway.mjs"]), SUCCESSOR_SHA256)
+        unchanged = {"gateway.mjs", "manifest.json"}
+        self.assertEqual(
+            {name: payload for name, payload in modules.items() if name not in unchanged},
+            {name: payload for name, payload in self.before_modules.items()
+             if name not in unchanged})
+        self.assertEqual(self.before_pin,
+                         {path.name: path.read_bytes() for path in self.pin_path.iterdir()})
+        self.assertEqual((self.store / "CURRENT.json").read_text(), self.before_pointer)
+        self.assertFalse((self.store / "proof-calls").exists())
+        manifest = json.loads(self.roots["manifest"].read_text())
+        self.assertEqual(manifest["files"]["gateway.mjs"], SUCCESSOR_SHA256)
+        self.assertEqual(manifest["configHash"], sha(self.roots["config"].read_bytes()))
+        before_manifest = manifest
+        with mock.patch.object(svc, "_frozen_paper_fleet_module",
+                               return_value=SimpleNamespace(COHORTS={})):
+            pin.require_start(svc, ACCOUNT, self.roots)
+        self.assertEqual(json.loads(self.roots["manifest"].read_text()), before_manifest)
+        self.assertEqual((self.store / "CURRENT.json").read_text(), self.before_pointer)
+
+    def test_changed_selection_refuses_before_gateway_publication(self):
+        (self.store / "DIVERGE").write_text("1")
+        with self.stopped(), mock.patch.object(svc, "_atomic_write_bytes") as write:
+            with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_PIN_SUCCESSOR_CHANGED"):
+                self.call(self.args())
+        write.assert_not_called()
+        self.assertEqual((self.roots["base"] / "gateway.mjs").read_bytes(),
+                         self.before_modules["gateway.mjs"])
+        self.assertEqual(self.before_pin,
+                         {path.name: path.read_bytes() for path in self.pin_path.iterdir()})
+
+    def test_altered_retained_receipt_refuses_preview_and_apply(self):
+        (self.home / "native-successor" / "receipt.json").write_bytes(b"altered-receipt")
+        for preflight in (True, False):
+            with self.subTest(preflight=preflight), self.stopped():
+                with self.assertRaisesRegex(SystemExit, "NATIVE_POOL_PIN_SUCCESSOR_REFUSED"):
+                    self.call(self.args(preflight=preflight))
+        self.assertEqual((self.roots["base"] / "gateway.mjs").read_bytes(),
+                         self.before_modules["gateway.mjs"])
+
+    def test_unqualified_paper_state_refuses_before_gateway_publication(self):
+        drifted = json.loads(self.roots["config"].read_bytes())
+        drifted["paperDesign"] = {"generation": "unqualified"}
+        self.roots["config"].write_bytes(svc._fabric_release_json(drifted))
+        unqualified = SimpleNamespace(COHORTS={})
+        with self.stopped(), mock.patch.object(svc, "_atomic_write_bytes") as write, \
+                mock.patch.object(svc, "_frozen_paper_fleet_module",
+                                  return_value=unqualified):
+            with self.assertRaisesRegex(
+                    SystemExit, "retained native-pool pin is not the current installed state"):
+                self.call(self.args())
+        write.assert_not_called()
+        self.assertEqual((self.roots["base"] / "gateway.mjs").read_bytes(),
+                         self.before_modules["gateway.mjs"])
 
 
 class PublisherLineageTests(Base):

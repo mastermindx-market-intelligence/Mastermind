@@ -263,3 +263,36 @@
   .discovery-tools-layout .discovery-capabilities { order: 1; }
   .discovery-tools-layout .discovery-tool-inspector { order: 0; }
 }
+
+/* Explicit tool inspection gestures retain a full focus outline. */
+.discovery-tools-layout .discovery-section-title:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+/* The shared shell header row must not turn the Tools title into a column. */
+.discovery-tools-view .discovery-heading { display: block; }
+
+/* Native disclosure markers make the closed Tools provenance discoverable. */
+.discovery-tools-view details > summary { display: list-item; list-style: disclosure-closed inside; align-content: center; }
+.discovery-tools-view details[open] > summary { list-style-type: disclosure-open; }
+/* Keep the existing owner action and the selection return visibly separate. */
+.discovery-tool-inspector > .discovery-capability + .discovery-action { margin-top: 16px; }
+
+/* Explicit source inspection has the same full outline as tool inspection. */
+.discovery-sources-view h2:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.discovery-sources-view .discovery-results > h2 { margin-bottom: 16px; }
+.discovery-sources-view .discovery-preview .discovery-action { margin-bottom: 16px; }
+.discovery-sources-return { margin-top: 24px; }
+.discovery-sources-view .discovery-heading { display: block; }
+
+/* Keep raw source tuples progressive and diagnostic pairs readable in this view. */
+.discovery-sources-view details > summary { display: list-item; list-style: disclosure-closed inside; align-content: center; }
+.discovery-sources-view details[open] > summary { list-style-type: disclosure-open; }
+.discovery-sources-view .discovery-limitations-list { grid-template-columns: minmax(0, 1fr); }
+.discovery-sources-view .discovery-limitation { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+
+/* Narrow Sources inspectors give each literal metadata value its full row. */
+@media (max-width: 480px) {
+  .discovery-sources-view .discovery-preview .discovery-meta-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}

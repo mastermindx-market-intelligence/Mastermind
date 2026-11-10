@@ -317,7 +317,7 @@ describe("stage-two current operation presentation", () => {
     await user.type(screen.getByLabelText("Goal"),"Inspect only this requested scope");
     await user.click(screen.getByRole("button",{name:"Preview requested scope"}));
     expect(screen.getByRole("heading",{name:"Launch request preview"})).toBeTruthy();
-    expect(screen.getByText("Inspect only this requested scope",{selector:"dd"})).toBeTruthy();
+    expect(screen.getByText("Inspect only this requested scope",{selector:"p.launch-request-preview-goal"})).toBeTruthy();
     expect(made.prepare).not.toHaveBeenCalled();expect(reserve).not.toHaveBeenCalled();
     expect(made.submit).not.toHaveBeenCalled();expect(made.readOperation).not.toHaveBeenCalled();
   });

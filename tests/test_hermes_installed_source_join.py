@@ -484,7 +484,8 @@ def test_the_policy_is_never_installed_late_by_the_initializer():
     assert "paid_initializer" not in head
     assert "held_runtime_custody" not in head
     # The sentinels are installed before the first ordinary import.
-    block = source.index('if len(sys.argv) > 1 and sys.argv[1] == "hermes-runtime":')
+    assert '{"hermes-runtime", "prepare-hermes-dependencies"}' in head
+    block = head.index("_install_no_site_sentinels()\n    _HERMES_EARLY_NO_SITE = True")
     assert block < source.index("import argparse")
     assert (source.index("_install_no_site_sentinels()", block)
             < source.index("import argparse"))
@@ -981,3 +982,73 @@ async def test_expired_source_stage_does_not_start_the_pid1_query(monkeypatch):
     with pytest.raises(status.RoleStatusError):
         await instance._read_fixed_snapshot(
             held, deadline=asyncio.get_running_loop().time() + 0.005)
+
+
+# Enrollment selects one existing native authority; legacy recipes remain exact.
+def _enrollment_installation(request_id="secretary-original"):
+    document = copy.deepcopy(INSTALLATION)
+    document["roles"][1]["native_gateway"] = {
+        "schema": "mastermind.hermes_native_gateway_installation/v2",
+        "python": copy.deepcopy(document["launch_python"]),
+        "startup": copy.deepcopy(document["startup"]),
+        "vendor_root": "/opt/hermes/vendor", "import_roots": ["/opt/hermes/vendor"],
+        "dependency_inventory": {"path": "/opt/hermes/inventory.json", "sha256": "f" * 64, "size": 100},
+        "session_enrollment": {
+            "schema": "mastermind.hermes_secretary_session_enrollment/v1", "request_id": request_id},
+    }
+    return document
+
+
+def test_secretary_v2_selects_one_enrollment_reload_and_preserves_meta():
+    selected = _enrollment_installation()
+    result = manifest_owner.validate_hermes_runtime_installation(selected)
+    units = system_service.render_role_units_from_installation(result, release_commit=RELEASE_SHA)
+    legacy = system_service.render_role_units_from_installation(INSTALLATION, release_commit=RELEASE_SHA)
+    assert units["mmmeta"] == legacy["mmmeta"]
+    assert units["mmsecretary"].count("ExecReload=") == 1
+    assert "hermes-runtime enroll-secretary-session --profile" in units["mmsecretary"]
+    assert "hermes-runtime canary --profile" not in units["mmsecretary"]
+    selected["roles"][1]["native_gateway"]["session_enrollment"]["request_id"] = "changed"
+    assert result["roles"][1]["native_gateway"]["session_enrollment"]["request_id"] == "secretary-original"
+
+
+@pytest.mark.parametrize("request_id", ["", "a" * 257, "bad\nid", "\ud800", True, None])
+def test_enrollment_recipe_rejects_unusable_original_identity(request_id):
+    with pytest.raises(manifest_owner.ReleaseManifestError):
+        manifest_owner.validate_hermes_runtime_installation(_enrollment_installation(request_id))
+
+
+def test_enrollment_recipe_is_secretary_only_and_closed():
+    selected = _enrollment_installation()
+    selected["roles"][0]["native_gateway"] = selected["roles"][1].pop("native_gateway")
+    with pytest.raises(manifest_owner.ReleaseManifestError):
+        manifest_owner.validate_hermes_runtime_installation(selected)
+    for extra in ("session_id", "provider", "model"):
+        selected = _enrollment_installation()
+        selected["roles"][1]["native_gateway"]["session_enrollment"][extra] = "untrusted"
+        with pytest.raises(manifest_owner.ReleaseManifestError):
+            manifest_owner.validate_hermes_runtime_installation(selected)
+    selected = _enrollment_installation()
+    native = selected["roles"][1]["native_gateway"]
+    native["schema"] = "mastermind.hermes_native_gateway_installation/v1"
+    with pytest.raises(manifest_owner.ReleaseManifestError):
+        manifest_owner.validate_hermes_runtime_installation(selected)
+    native.pop("session_enrollment")
+    result = manifest_owner.validate_hermes_runtime_installation(selected)
+    assert "session_enrollment" not in result["roles"][1]["native_gateway"]
+
+
+def test_selected_secretary_pid1_decode_does_not_require_meta_and_allows_reload(world):
+    properties = dict(world.rows[1]["unit_properties"])
+    assert properties["Id"] == "hermes-runtime-mmsecretary.service"
+    properties.update(ActiveState="reloading", SubState="reload")
+    raw = ("\n".join(k + "=" + v for k, v in properties.items()) + "\n").encode()
+    rows = observer._decode_pid1(raw, role="mmsecretary")
+    assert len(rows) == 1 and rows[0]["role"] == "mmsecretary"
+    with observer._HeldRoleQualification(IMPLEMENTATION) as held:
+        assert held.role_facts("mmsecretary", rows[0]["unit_properties"], BOOT)["main_pid"] == 101
+    with pytest.raises(status.RoleStatusError):
+        observer._decode_pid1(raw)
+    for wrong in ("other", "", True, [], 7):
+        with pytest.raises(status.RoleStatusError):
+            observer._decode_pid1(raw, role=wrong)

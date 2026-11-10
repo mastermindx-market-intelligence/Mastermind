@@ -156,3 +156,47 @@ it('keeps real archived turns visible beside an optional attended component that
   expect(screen.getByText(fixture.turn_request.message)).toBeTruthy();
   expect(s.transport.readFreshReference).toHaveBeenCalledTimes(1);
 });
+
+it('handles Escape at the fresh and archived reader focus handoff without reacquiring the list',async()=>{
+  const s=make(),view=render(<ProjectConversations workRef={work} owner={s.owner}/>);
+  const gestures:{unrelatedPrevented:boolean;readerRetained:boolean;escapePrevented:boolean}[]=[];
+  let escapeOnFocus=true;
+  const onFocus=(event:FocusEvent)=>{
+    if(!escapeOnFocus||event.target!==screen.queryByRole('heading',{name:'Conversation'})||
+       !screen.queryByRole('button',{name:'Back to conversations'}))return;
+    const unrelated=new KeyboardEvent('keydown',{key:'x',bubbles:true,cancelable:true});
+    window.dispatchEvent(unrelated);
+    const readerRetained=!!screen.queryByRole('button',{name:'Back to conversations'});
+    const escape=new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true});
+    window.dispatchEvent(escape);
+    gestures.push({unrelatedPrevented:unrelated.defaultPrevented,readerRetained,escapePrevented:escape.defaultPrevented});
+  };
+  document.addEventListener('focusin',onFocus);
+  try{
+    fireEvent.click(screen.getByRole('button',{name:'Read project conversations'}));
+    await screen.findByRole('button',{name:'Open'});
+    fireEvent.change(screen.getByRole('textbox',{name:'Find in these conversations'}),{target:{value:'新对话'}});
+    for(const [index,value] of [fixture.initial_read,fixture.archived_read].entries()){
+      s.state.window=value;
+      await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Open'}));});
+      expect(gestures).toHaveLength(index+1);
+      expect(gestures[index]).toEqual({unrelatedPrevented:false,readerRetained:true,escapePrevented:true});
+      expect(screen.queryByRole('button',{name:'Back to conversations'})).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole('button',{name:'Open'}));
+      expect((screen.getByRole('textbox',{name:'Find in these conversations'}) as HTMLInputElement).value).toBe('新对话');
+      expect(s.transport.freshReferences).toHaveBeenCalledTimes(1);expect(s.transport.readFreshReference).toHaveBeenCalledTimes(index+1);
+      const afterReturn=new KeyboardEvent('keydown',{key:'Escape',cancelable:true});
+      window.dispatchEvent(afterReturn);expect(afterReturn.defaultPrevented).toBe(false);
+    }
+    escapeOnFocus=false;
+    await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Open'}));});
+    expect(screen.getByRole('button',{name:'Back to conversations'})).toBeTruthy();
+    view.unmount();
+    const afterUnmount=new KeyboardEvent('keydown',{key:'Escape',cancelable:true});
+    window.dispatchEvent(afterUnmount);expect(afterUnmount.defaultPrevented).toBe(false);
+    expect(s.transport.freshReferences).toHaveBeenCalledTimes(1);expect(s.transport.readFreshReference).toHaveBeenCalledTimes(3);
+    expect(s.transport.read).not.toHaveBeenCalled();
+  }finally{
+    document.removeEventListener('focusin',onFocus);
+  }
+});

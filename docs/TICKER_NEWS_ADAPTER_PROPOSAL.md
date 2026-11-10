@@ -15,6 +15,8 @@ reads carry `freshness` (`asof`, `source_asof`, `retained_from_previous_build`,
 vendored file: it is as old as the last vendor sync and the last nightly build, and it
 has no per-row rights receipt.
 
+The unified bundle also carries an additive `news_freshness` envelope for its news input: `source_asof`, `source_asof_basis`, `retained_from_previous_build`, and `retained_reason`. The bot returns it separately from the unified build's `freshness`, including under transport compaction. The portfolio lens pairs it with unified news rows; legacy unified files keep unknown news provenance instead of borrowing the clocks of a newer standalone feed. This does not change the vendored evidence grade or implement the authenticated adapter below.
+
 Macro already serves a fresher, rights-scoped read: the private ticker-news API in
 Macro `app/ticker_news.py`, mounted by Macro `app/main.py`.
 

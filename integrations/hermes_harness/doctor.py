@@ -39,9 +39,11 @@ _ENDPOINTS = (
     "HERMES_CURSOR_POOL_BASE_URL",
     "MASTERMIND_STEWARD_MCP_URL",
 )
+# Slack transport is the single-identity bridge: the roster's hermes-mmrelay
+# row owns mmrelay.secrets.env. The legacy two-unit transport files are no
+# longer gateway credential files (role-private plane still reads its own).
 _SECRET_FILES = (
-    "mmmeta.secrets.env",
-    "mmsecretary.secrets.env",
+    "mmrelay.secrets.env",
 )
 _ALWAYS_MISSING_GRANTS = (
     "grant:executive_admission",

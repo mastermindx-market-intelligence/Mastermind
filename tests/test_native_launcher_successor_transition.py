@@ -97,6 +97,10 @@ def source_owners(tmp_path_factory):
     assert long_retained['source_commit'] == '9f65957e29eba92245d78609f032aaea523b7cb4'
     assert set(long_retained['files']) == long_names
     base_paths = {
+        # Only historical102 lacks this retained APPLICATION carrier predecessor.
+        # Historical95 already carries its distinct support bytes in its fixture.
+        'ext/support_bundle.py':
+            ROLLOUT / 'preimages/support_bundle_e5e6153.py',
         'ext/artifact_delivery.py':
             ROLLOUT.parents[1] / 'grok47/overlay/artifact_delivery.py',
         'ext/fabric_operator_contract.py':
@@ -160,7 +164,16 @@ def source_owners(tmp_path_factory):
         'bytes': runtime['original_bytes'], 'sha256': runtime['original_sha256'],
         'zlib_base64': runtime['zlib_base64'],
     }
-    predecessor_files = {**retained['files'], **diagnostic['files'],
+    # Restore the exact protected host-pull predecessors only in this
+    # historical102 fixture. CURRENT retains the repaired source payloads.
+    host_raw = fixture.with_name('native-host-pull-predecessors-9141013f.json').read_bytes()
+    assert g.digest(host_raw) == 'f73799e6bb662c7a807ed4865723f770a759d73ae226768709b9bca3d6df3383'
+    host = json.loads(host_raw)
+    assert host['schema'] == 'mastermind.test_native_host_pull_predecessors/v1'
+    assert host['source_commit'] == '9141013f5a969d59f508784b9f4f76794983caa5'
+    assert set(host['files']) == {'ext/host_pull.sh', 'ext/host_pull_backend.py',
+                                 'ext/host_pull_daemon.sh'}
+    predecessor_files = {**retained['files'], **diagnostic['files'], **host['files'],
                          **observer['files'], 'ext/pick.py': selection,
                          'ext/fabric_host_qualification.py': qualification,
                          'ext/lane_runtime.py': runtime_predecessor}
@@ -566,7 +579,7 @@ def test_installed_control_resolves_actual_completed_successor(owner, tmp_path):
     with mock.patch.object(bundle.Path, "home", return_value=home):
         installed = bundle.install(source=control_source, control_root=control,
                                    launcher=launcher)
-    assert len(installed["files"]) == 13
+    assert len(installed["files"]) == 63
     code = r"""
 import importlib.util,json,sys
 from pathlib import Path

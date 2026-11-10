@@ -58,11 +58,13 @@ _PROJECT_JOURNAL_ROUTE = "/workspace/project-journal/current"
 _PROJECT_KNOWLEDGE_CATALOGUE_ROUTE = "/workspace/project-knowledge/current"
 _PROJECT_KNOWLEDGE_MEMORY_ROUTE = "/workspace/project-memory/current"
 _PROJECT_KNOWLEDGE_SOURCE_ROUTE = "/workspace/project-source/current"
+_PROJECT_DISCOVERY_SOURCE_ROUTE = "/workspace/project-discovery-source/current"
 _PROJECT_SESSION_ROUTE = "/workspace/project-session/current"
 _PROJECT_DIRECTION_ROUTE = "/workspace/project-direction/current"
 _PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
+_MODEL_CONFIGURATION_ROUTE = "/workspace/resources/models/current"
 _HOST_OBSERVATION_ROUTE = "/workspace/resources/host-observation/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
@@ -345,7 +347,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return selection(dict(query))
         except (TypeError, ValueError):
             return None
-    if operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"):
+    if operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source"):
         from common.workspace_project_knowledge_read_contract import selection
         try: return selection(dict(query), operation=operation)
         except (TypeError, ValueError): return None
@@ -1055,7 +1057,7 @@ async def _dispatch_v2(
         principal_frame = contract.principal_frame(principal)
         latest_gate = None
         latest_before = None
-        if operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"}:
+        if operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source"}:
             context = config.source_operation_context
             if context is not None and context.policy == config.authenticator.policy:
                 from integrations.mastermind_workspace_app.project_authoring_grant import workspace_project_authorizers
@@ -1063,6 +1065,8 @@ async def _dispatch_v2(
                     load_bindings=context._load_bindings,action="read_latest_project_data")
                 if latest_gate(principal) is True:
                     latest_before = latest_gate.binding_digest(principal)
+            if operation == "project_discovery_source" and latest_before is None:
+                return _refuse_json(HTTPStatus.FORBIDDEN, "access_denied")
     except ValueError:
         return _refuse_json(403, "access_denied")
 
@@ -1080,9 +1084,9 @@ async def _dispatch_v2(
             from common import workspace_project_session_contract as session_wire
             frame = session_wire.validate_frame({"schema": session_wire.FRAME_SCHEMA,
                 "operation": session_wire.OPERATION, "selection": selection_value, "principal": principal_frame})
-        elif operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"):
+        elif operation in ("project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source"):
             from common import workspace_project_knowledge_read_contract as knowledge_wire
-            frame = knowledge_wire.validate_frame({"schema": knowledge_wire.FRAME_SCHEMA,
+            frame = knowledge_wire.validate_frame({"schema": knowledge_wire.frame_schema(operation),
                 "operation": operation, "selection": selection_value, "principal": principal_frame})
         elif operation == "project_journal":
             from common import workspace_project_journal_contract as plan_wire
@@ -1168,22 +1172,26 @@ async def _dispatch_v2(
         if latest_before is not None and (latest_gate(principal) is not True
                 or latest_gate.binding_digest(principal) != latest_before):
             return _refuse_json(403, "access_denied")
-        if (operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source"}
+        if (operation in {"project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source"}
                 and type(envelope) is dict and type(envelope.get("result")) is dict
                 and envelope["result"].get("data_observation") is not None and latest_before is None):
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "autonomy", "project_instructions") and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("admitted_plan", "retained_activity", "resource_capacity", "result_references", "project_plan", "project_journal", "project_session", "project_direction", "project_knowledge_catalogue", "project_knowledge_memory", "project_knowledge_source", "project_discovery_source", "autonomy", "project_instructions") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
-        expected_selection = ({key: item for key, item in selection_value.items() if key != "expected_revision"}
-                              if operation == "project_knowledge_source" else selection_value)
+        expected_selection = ({key: item for key, item in selection_value.items() if key not in {"expected_revision", "expected_source_commit"}}
+                              if operation in {"project_knowledge_source", "project_discovery_source"} else selection_value)
         if type(body) is not dict or body.get("selection") != expected_selection:
             return _refuse_json(503, "source_unavailable")
         if (operation == "project_knowledge_source" and body.get("availability") == "AVAILABLE"
                 and (type(body.get("source")) is not dict
                      or body["source"].get("revision") != selection_value["expected_revision"])):
             return _refuse_json(503, "source_unavailable")
+        if (operation == "project_discovery_source" and body.get("availability") == "AVAILABLE"
+                and (type(body.get("source")) is not dict
+                     or body["source"].get("commit") != selection_value["expected_source_commit"])):
+            return _refuse_json(HTTPStatus.SERVICE_UNAVAILABLE, "source_unavailable")
     if operation == "mission_v4":
         return _mission_v4_envelope_response(envelope, selection_value)
     if operation == "mission_v4_original":
@@ -1558,6 +1566,12 @@ async def project_source_current(request: Request, *, config: WorkspaceAppConfig
         response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_knowledge_source"))
 
 
+async def project_discovery_source_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    return await _dispatch_v2(request, config=config, operation="project_discovery_source",
+        required_keys=frozenset({"work_ref", "discovery_ref", "expected_source_commit"}),
+        response_fn=lambda envelope: _project_knowledge_envelope_response(envelope, operation="project_discovery_source"))
+
+
 def _project_journal_envelope_response(envelope):
     from common import workspace_project_journal_contract as plan_wire
     if type(envelope) is not dict or envelope.get("ok") is not True:
@@ -1670,6 +1684,7 @@ class _RawPathFence:
     #: Starlette also binds HEAD for GET routes; the exact map refuses it.
     _READ_ROUTES = (
         "/workspace/native-draft-identity/current",
+        "/workspace/native-authorization-identity/acquisition/current",
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
@@ -1687,6 +1702,7 @@ class _RawPathFence:
         _AUTONOMY_ROUTE,
         _ACTIVITY_ROUTE,
         _RESOURCE_CAPACITY_ROUTE,
+        _MODEL_CONFIGURATION_ROUTE,
         _HOST_OBSERVATION_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
@@ -1799,6 +1815,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def native_authorization_identity_endpoint(request: Request):
+        from .native_authorization_identity import acquisition_identity_current
+        return await acquisition_identity_current(request, config=config)
+
     async def native_draft_identity_endpoint(request: Request):
         from .native_draft_identity import native_draft_identity_current
         return await native_draft_identity_current(request, config=config)
@@ -1827,6 +1847,8 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         return await project_memory_current(request, config=config)
     async def project_source_endpoint(request: Request) -> JSONResponse:
         return await project_source_current(request, config=config)
+    async def project_discovery_source_endpoint(request: Request) -> JSONResponse:
+        return await project_discovery_source_current(request, config=config)
     async def project_journal_endpoint(request: Request) -> JSONResponse:
         return await project_journal_current(request, config=config)
 
@@ -1862,6 +1884,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def resource_capacity_endpoint(request: Request) -> JSONResponse:
         return await resource_capacity_current(request, config=config)
 
+    async def model_configuration_endpoint(request: Request) -> Response:
+        from integrations.mastermind_workspace_app.model_configuration import model_configuration_current
+        return await model_configuration_current(request, config=config)
+
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
@@ -1887,6 +1913,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route("/workspace/source-operation/context", source_operation_context_endpoint, methods=["GET"]),
         Route("/workspace/source-operation/options", source_operation_endpoint("options"), methods=["GET"]),
         Route("/workspace/source-operation/operation", source_operation_endpoint("read"), methods=["GET"]),
+        Route("/workspace/source-operation/original", source_operation_endpoint("read_original"), methods=["GET"]),
         Route("/workspace/source-operation/prepare", source_operation_endpoint("prepare"), methods=["POST"]),
         Route("/workspace/source-operation/submit", source_operation_endpoint("submit"), methods=["POST"]),
         Route("/workspace/source-operation/reconcile", source_operation_endpoint("reconcile"), methods=["POST"]),
@@ -1901,6 +1928,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route("/workspace/native-draft-identity/current", native_draft_identity_endpoint, methods=["GET"]),
+        Route("/workspace/native-authorization-identity/acquisition/current", native_authorization_identity_endpoint, methods=["GET"]),
         Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
         Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
@@ -1908,6 +1936,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_PROJECT_KNOWLEDGE_CATALOGUE_ROUTE, project_knowledge_endpoint, methods=["GET"]),
         Route(_PROJECT_KNOWLEDGE_MEMORY_ROUTE, project_memory_endpoint, methods=["GET"]),
         Route(_PROJECT_KNOWLEDGE_SOURCE_ROUTE, project_source_endpoint, methods=["GET"]),
+        Route(_PROJECT_DISCOVERY_SOURCE_ROUTE, project_discovery_source_endpoint, methods=["GET"]),
         Route(_PROJECT_SESSION_ROUTE, project_session_endpoint, methods=["GET"]),
         Route(_PROJECT_DIRECTION_ROUTE, project_direction_endpoint, methods=["GET"]),
         Route(_PROJECT_ARCHIVE_ROUTE, project_archive_endpoint, methods=["GET"]),
@@ -1922,6 +1951,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
 
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),
+        Route(_MODEL_CONFIGURATION_ROUTE, model_configuration_endpoint, methods=["GET"]),
         Route(_HOST_OBSERVATION_ROUTE, host_observation_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),

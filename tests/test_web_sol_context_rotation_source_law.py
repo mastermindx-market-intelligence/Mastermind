@@ -371,15 +371,15 @@ def test_isolated_failure_allows_only_bounded_mode_recovery() -> None:
 def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() -> None:
     kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
-        "human-attended mode fit/stickiness",
+        "ACTIVE_EXECUTION 1B governs attended mode fit/stickiness",
         "Capabilities vary by action/session",
         "Extra High is a recovery candidate, not guaranteed access",
-        "Text cannot self-switch",
-        "No unchanged retry/reconnect loops",
+        "Text cannot switch modes",
+        "Bound unchanged-failure diagnosis",
         "Tool failure is not chat corruption",
-        "HARD_ROTATION after repeated thinking/session failure",
+        "HARD_ROTATION: repeated thinking/session failure",
         "NOT_CANONICALLY_PERSISTED",
-        "MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states",
+        "Mode/fresh-chat needs are reasons, not states",
     ):
         assert phrase in kernel
 
@@ -427,10 +427,10 @@ def test_compact_kernel_projects_phase_fence_and_mode_stickiness() -> None:
     kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
         "mode fit/stickiness",
-        "Keep DONE_WHEN and allowed surfaces",
+        "Preserve DONE_WHEN/surfaces",
         "Depth allowed; breadth fenced",
-        "same healthy chat",
-        "mission is incomplete",
+        "same healthy turn",
+        "MORE_WORK_EXISTS is incomplete",
         "fresh same-mode chat",
     ):
         assert phrase in kernel
@@ -503,7 +503,8 @@ def test_persistence_failure_maps_to_existing_truthful_dispositions() -> None:
         "`MORE_WORK_EXISTS`",
     ):
         assert phrase in skill
-    assert "Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN" in kernel
+    assert "Persistence failure: NOT_CANONICALLY_PERSISTED" in kernel
+    assert "fabricated HUMAN_GATE/EFFECT_UNKNOWN" in kernel
 
 
 def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() -> None:
@@ -569,13 +570,13 @@ def test_cross_phase_continuation_is_projected_into_session_reliability_and_kern
     ):
         assert phrase in skill
     for phrase in (
-        "After any task/phase completes, verify/save it, reassess the mission",
-        "WAITING_EXTERNAL/review/CI/messages are lane-local",
-        "`DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return",
-        "Other Step-8 stops still apply",
-        "A clean phase boundary is not a stop",
-        "MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains",
-        "task/phase/checkpoint completion alone never qualifies",
+        "Verify/save each phase, reassess and start the next safe phase in the same healthy turn",
+        "Block one lane, not independent work",
+        "DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING plus return path",
+        "CHECKPOINTED_CONTINUATION needs real continuity/surface boundary",
+        "Phase completion means save-and-continue",
+        "MORE_WORK_EXISTS is incomplete: continue while healthy useful authorized work remains",
+        "CHECKPOINTED_CONTINUATION needs real continuity/surface boundary",
     ):
         assert phrase in kernel
     project_block = kernel_raw.split("```text\n", 1)[1].split("```", 1)[0]

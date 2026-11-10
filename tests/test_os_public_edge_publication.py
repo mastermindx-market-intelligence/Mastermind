@@ -21,7 +21,10 @@ from ops.executive_os import os_public_edge_publication as m
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
 from ops.executive_os.os_public_edge import (HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES,
-    GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES, asset_routes)
+    GET_ROUTES, POST_ROUTES, SOURCE_POST_ROUTES, MCP_METADATA_ROUTE, MCP_ROUTES,
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES,
+    PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_COMPANY_PRIORITIES_POST_ROUTES, asset_routes, render)
 
 
 def git(repo, *args):
@@ -123,7 +126,7 @@ def inputs(tmp_path, monkeypatch, request):
     git(repo, "update-ref", "refs/remotes/origin/master", sha)
     settings = getattr(request, "param", (False, False))
     old_notices, new_notices = settings[:2]
-    retired_edge_profile = len(settings) == 3 and settings[2] is True
+    retired_edge_profile = settings[2] if len(settings) == 3 else None
     monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(
         app, "new", noir_notices=new_notices))
     bundle = tmp_path / "bundle"
@@ -132,12 +135,15 @@ def inputs(tmp_path, monkeypatch, request):
     qualified = assets.qualify(bundle, expected_sha=sha, tree_sha=tree, source_repo=repo)
     old = tmp_path / "old"
     make_dist(old / "app/mastermind_os", "old", noir_notices=old_notices)
+    # Model the installed release root even under a restrictive host umask.
+    # Keep the real service-UID traversal check active.
+    old.chmod(0o755)
     manifest = entry.build_os_asset_manifest(old)
     (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(manifest))
     seals.create(old, "a" * 40, "b" * 40)
     live = tmp_path / "live.json"
     config = fullconfig(manifest)
-    if retired_edge_profile:
+    if retired_edge_profile is True:
         # The retired production edge predates the Control Room routes, the
         # dedicated source branch and the public MCP entrypoints: the complete
         # legacy three-branch predecessor profile, not a partial list.
@@ -145,6 +151,14 @@ def inputs(tmp_path, monkeypatch, request):
         branches[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(manifest)))
         branches[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
         del branches[2:5]
+    elif retired_edge_profile == "pre-native":
+        branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+        from ops.executive_os.os_public_edge import PRE_DIRECT_NATIVE_GET_ROUTES
+        branches[0]["match"][0]["path"] = sorted(set(PRE_DIRECT_NATIVE_GET_ROUTES) | set(asset_routes(manifest)))
+        branches[1]["match"][0]["path"] = list(PRE_DIRECT_NATIVE_POST_ROUTES)
+        # Isolate the native POST upgrade from the already accepted COO upgrade.
+        branches[3]["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+        branches[4]["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
     live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
@@ -255,6 +269,109 @@ def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(s
     assert route[2]["match"][0]["path"] == list(SOURCE_POST_ROUTES)
     assert route[2]["handle"][0]["max_size"] == 98304
     assert len(route) == 4 and route[3] == ABORT_BRANCH
+
+
+@pytest.mark.parametrize("inputs", [(False, False, "pre-native")], indirect=True)
+def test_native_post_contract_survives_real_stage_prepare_and_finalize(staged):
+    """Exercise rendered policy and both real publisher phases with inert HTTP."""
+    i, _, relay = staged
+    # These are the actual retained 39-path profile and the three POST paths
+    # dispatched by the native Executive transport, independent of the table.
+    historical = (
+        "/os/executive/context",
+        "/os/executive/submit",
+        "/os/executive/status",
+        "/os/executive/session/context",
+        "/os/executive/session/reply",
+        "/os/executive/session/references",
+        "/workspace/control-room/open",
+        "/workspace/control-room/bind",
+        "/workspace/control-room/unbind",
+        "/workspace/control-room/refresh-builds",
+        "/workspace/project-admission/pause",
+        "/workspace/project-admission/resume",
+        "/workspace/instruction-admission/pause",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
+        "/os/executive/session/history-context",
+        "/os/executive/session/conversations",
+        "/os/executive/session/conversation-read",
+        "/os/executive/session/fresh-conversations",
+        "/os/executive/session/fresh-conversation-read",
+        "/os/executive/conversation/preview",
+        "/os/executive/conversation/create",
+        "/os/executive/conversation/status",
+        "/os/executive/conversation/read",
+        "/os/executive/conversation/consume",
+        "/os/executive/conversation/turn",
+        "/os/executive/conversation/turn/status",
+        "/os/executive/conversation/turn/read",
+        "/os/executive/conversation/consume/status",
+        "/os/executive/conversation/turn/preview",
+        "/os/executive/session/send",
+        "/os/executive/project-execution/preview",
+        "/os/executive/project-execution/submit",
+        "/os/executive/project-execution/status",
+        "/os/executive/session/project-executions",
+        "/os/executive/session/project-execution-read",
+    )
+    native = (
+        "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+    )
+    assert PRE_DIRECT_NATIVE_POST_ROUTES == historical
+    assert DIRECT_NATIVE_POST_ROUTES == native
+    company = ("/os/executive/company-priorities",)
+    assert PRE_COMPANY_PRIORITIES_POST_ROUTES == historical + native
+    current_posts = historical + native + company
+    assert POST_ROUTES == current_posts
+    branches = lambda config: config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    before = copy.deepcopy(relay.current)
+    original = branches(before)
+    assert original[1]["match"][0]["path"] == list(historical)
+    rendered = render(entry.build_os_asset_manifest(i["new_bundle"]), i["relay_port"])
+    post_matcher = rendered.split("    @post {", 1)[1].split("    handle @post {", 1)[0]
+    assert post_matcher.split("      path ", 1)[1].splitlines()[0].split() == list(current_posts)
+    assert "method POST" in post_matcher
+    assert all(path not in rendered.split("    handle @get {", 1)[0] for path in native + company)
+
+    for phase, expected_state in (("prepare", "PREPARED"), ("finalize", "FINAL")):
+        if phase == "finalize":
+            assert ready(staged)["state"] == "CUTOVER_READY"
+            assert relay.selected == "old"
+            relay.selected = "new"  # The explicit test-host switch, never the publisher.
+        assert publish(staged, phase)["state"] == expected_state
+        current = branches(relay.current)
+        assert current[1]["match"][0] == {"method": ["POST"], "path": list(current_posts)}
+        # Body bounds, proxy/header identity and terminal refusal remain exact.
+        assert current[1]["handle"] == original[1]["handle"]
+        assert current[1]["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert current[2:] == original[2:]
+        assert current[2]["handle"][0] == {"handler": "request_body", "max_size": 98304}
+        assert current[4]["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert current[-1] == {"handle": [{"handler": "static_response", "abort": True}]}
+        assert relay.current["apps"]["tls"] == before["apps"]["tls"]
+        assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][1:] == before["apps"]["http"]["servers"]["srv0"]["routes"][1:]
+        # Closed Caddy method/path matchers forward each actual native POST to
+        # the existing proxy. Other methods and paths reach only terminal abort.
+        def matching(method, path):
+            return [branch for branch in current[:-1]
+                    if any(method in match["method"] and path in match["path"]
+                           for match in branch["match"])]
+        for path in native + company:
+            assert matching("POST", path) == [current[1]]
+            for method in ("GET", "PUT", "DELETE", "OPTIONS"):
+                assert matching(method, path) == []
+        for path in ("/os/executive/direct-native/arbitrary", native[0] + "/",
+                     "/os/executive/direct-native/submit", "/os/executive/direct-native/*"):
+            assert matching("POST", path) == []
+        assert matching("POST", "/os/executive/session/send") == [current[1]]
+    assert relay.events.count(("POST", "config")) == 2
+    with pytest.raises(ValueError):
+        publish(staged, "finalize")
 
 
 def test_real_consumer_two_phase_order_and_single_selected_release(staged):
@@ -617,7 +734,7 @@ def test_closed_json_refusals(raw):
 
 
 
-def _expand_noir_dist(app, *, rich=False, notices=False):
+def _expand_noir_dist(app, *, rich=False, notices=False, private_entry=False):
     """Only exact already-approved static asset names in the local release fixture."""
     dist = app / "dist"
     fixed = {
@@ -633,7 +750,9 @@ def _expand_noir_dist(app, *, rich=False, notices=False):
             "assets/SourceMarkdown-fixture.js": b"export const proof=true;",
             "assets/SourceMarkdown-fixture.css": b".source-markdown{color:inherit}",
         })
-    if rich or notices:
+    if private_entry:
+        fixed["assets/private-entry-fixture.jpg"] = b"fixture private entry JPEG"
+    if rich or notices or private_entry:
         fixed.update({
             "third-party/deepseek-client-dependency-NOTICES.txt": b"Fixture dependency notice",
             "third-party/deepseek-harness-LICENSE.txt": b"Fixture MIT notice",
@@ -649,6 +768,7 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     """Must fail on an obsolete 4/10 index gate, not just pass earlier staging."""
     old = tmp_path / ("old-licensed" if old_licensed else "old-noir")
     make_dist(old / "app/mastermind_os", "oldnoir")
+    old.chmod(0o755)  # Preserve the real dual-service traversal requirement.
     _expand_noir_dist(old / "app/mastermind_os", notices=old_licensed)
     old_manifest = entry.build_os_asset_manifest(old)
     assert len(old_manifest["files"]) == (11 if old_licensed else 9)
@@ -697,3 +817,149 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     assert "/os/assets/SourceMarkdown-fixture.js" in paths
     assert "/os/assets/SourceMarkdown-fixture.css" in paths
     assert "/os/assets/index-oldnoir.js" not in paths
+
+
+@pytest.mark.parametrize("old_count", [9, 11, 13])
+def test_original_publication_9_11_13_to_12_closes_entire_two_phase_path(inputs, monkeypatch, tmp_path, old_count):
+    """Real licensed12 must survive private stage loading and both publication phases."""
+    old = tmp_path / ("old-"+str(old_count))
+    make_dist(old / "app/mastermind_os", "oldnoir")
+    _expand_noir_dist(old / "app/mastermind_os", notices=old_count >= 11, rich=old_count == 13)
+    old_manifest = entry.build_os_asset_manifest(old)
+    assert len(old_manifest["files"]) == old_count
+    (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(old_manifest))
+    seals.create(old, inputs["old_sha"], inputs["old_tree"])
+    live = tmp_path / "live-private.json"
+    live.write_bytes(m.canonical(fullconfig(old_manifest)))
+
+    def build_private(app, **kw):
+        tools = make_dist(app, "private")
+        _expand_noir_dist(app, private_entry=True)
+        return tools
+
+    monkeypatch.setattr(assets, "_build", build_private)
+    new_bundle = tmp_path / "bundle-private"
+    assets.prepare(source_repo=inputs["source_repo"], expected_sha=inputs["new_sha"],
+                   web_client_id="test-public-client", output=new_bundle,
+                   build_user="fixture", node=Path("/fixture/node"),
+                   npm_cli=Path("/fixture/npm"))
+    qualified = assets.qualify(new_bundle, expected_sha=inputs["new_sha"],
+                               tree_sha=inputs["new_tree"], source_repo=inputs["source_repo"])
+    new_manifest = entry.build_os_asset_manifest(new_bundle)
+    assert len(new_manifest["files"]) == 12
+    configured = {**inputs, "old_root": old, "live_config": live,
+                  "new_bundle": new_bundle, "new_digest": qualified.digest,
+                  "out": tmp_path / "stage-private"}
+    receipt = m.stage_host(**configured)
+    descriptor = m.decode((configured["out"] / m.DESCRIPTOR).read_bytes())
+    assert len(descriptor["indexes"]["old"]) == old_count + 1
+    assert len(descriptor["indexes"]["new"]) == 13
+    relay = InertRelay(configured)
+    monkeypatch.setattr(m, "_http", relay.http)
+    monkeypatch.setattr(m, "_listener", lambda port, pid: m.require(
+        (port, pid) == (49152, 123), "listener differs"))
+    monkeypatch.setattr(m, "_validate", lambda stage, phase, config: m.require(
+        m.decode(stage.read("prepare.json" if phase == "prepare" else "final.json")) == config,
+        "validation bytes differ"))
+    original = (configured, receipt, relay)
+    assert publish(original)["state"] == "PREPARED"
+    assert ready(original)["state"] == "CUTOVER_READY"
+    assert not any(event[:2] == ("GET", "new") for event in relay.events)
+    relay.selected = "new"  # Test-host switch only. The production owner remains external.
+    assert publish(original, "finalize")["state"] == "FINAL"
+    assert relay.events.count(("POST", "config")) == 2
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    assert "/os/assets/SourceMarkdown-fixture.js" not in paths
+    assert "/os/assets/SourceMarkdown-fixture.css" not in paths
+    assert "/os/assets/private-entry-fixture.jpg" in paths
+    assert "/os/third-party/deepseek-client-dependency-NOTICES.txt" in paths
+    assert "/os/third-party/deepseek-harness-LICENSE.txt" in paths
+    assert "/os/assets/index-oldnoir.js" not in paths
+
+
+# --- Public COO route pair (#2120) ------------------------------------------------
+# The publisher is the existing owner of the whole-configuration capture. It
+# must stage the complete CEO+COO public-MCP pair and refuse a staged
+# configuration that no longer binds it.
+
+
+def public_mcp_branches(config):
+    """The two public-MCP matcher branches of a captured configuration."""
+    branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    metadata = [b for b in branches if b.get("match")
+                and b["match"][0]["method"] == ["GET"]
+                and b["match"][0]["path"][0].startswith("/.well-known/")]
+    transport = [b for b in branches if b.get("match")
+                 and b["match"][0]["method"] == ["POST"]
+                 and b["match"][0]["path"][0] == "/mcp"]
+    assert len(metadata) == 1 and len(transport) == 1
+    return metadata[0], transport[0]
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_binds_the_complete_public_coo_route_pair(inputs):
+    result = m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        live = json.loads(stage.read("live.json"))
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    # The observed live configuration carries the CEO-only pair.
+    meta, transport = public_mcp_branches(live)
+    assert meta["match"][0]["path"] == [MCP_METADATA_ROUTE]
+    assert transport["match"][0]["path"] == list(MCP_ROUTES)
+    # Both staged configurations carry the complete CEO+COO pair, with the
+    # metadata branch on the public Host and the transport branch on the
+    # gateway's loopback Host under its 64000-byte cap.
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+        assert meta["handle"][-1]["headers"]["request"]["set"]["Host"] == [HOST]
+        assert transport["handle"][-1]["headers"]["request"]["set"]["Host"] == ["127.0.0.1"]
+        assert transport["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert meta["handle"][-1]["headers"]["request"]["delete"] == [
+            "Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"]
+    assert result["published"] is False
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_publisher_stage_accepts_an_already_complete_public_coo_pair(inputs):
+    # An observed edge that already carries the complete pair is staged with
+    # exactly the same bytes: the transition is idempotent, not a widening.
+    live = json.loads(inputs["live_config"].read_bytes())
+    meta, transport = public_mcp_branches(live)
+    meta["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+    transport["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
+    inputs["live_config"].write_bytes(m.canonical(live))
+    m.stage_host(**inputs)
+    with m.private(inputs["out"]) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        final = json.loads(stage.read("final.json"))
+    for config in (prepared, final):
+        meta, transport = public_mcp_branches(config)
+        assert meta["match"][0]["path"] == list(COMPLETE_MCP_METADATA_ROUTES)
+        assert transport["match"][0]["path"] == list(COMPLETE_MCP_ROUTES)
+
+
+@pytest.mark.parametrize("inputs", [(False, False)], indirect=True)
+def test_staged_prepare_without_the_coo_route_pair_is_refused(staged):
+    i, r, relay = staged
+    stage_path = i["out"]
+    # Drop the COO path pair from the staged prepare configuration and repair
+    # the descriptor's own recorded digest, so only the publisher's independent
+    # recomputation can detect the stale binding.
+    with m.private(stage_path) as stage:
+        prepared = json.loads(stage.read("prepare.json"))
+        meta, transport = public_mcp_branches(prepared)
+        meta["match"][0]["path"] = [MCP_METADATA_ROUTE]
+        transport["match"][0]["path"] = list(MCP_ROUTES)
+        raw = m.canonical(prepared)
+        descriptor = json.loads(stage.read(m.DESCRIPTOR))
+        descriptor["files"]["prepare.json"] = {"sha256": m.digest(raw), "bytes": len(raw)}
+        descriptor_raw = m.canonical(descriptor)
+    (stage_path / "prepare.json").write_bytes(raw)
+    (stage_path / m.DESCRIPTOR).write_bytes(descriptor_raw)
+    with pytest.raises(ValueError, match="transition bindings differ"):
+        publish(staged, stage_digest=m.digest(descriptor_raw))
+    assert ("POST", "config") not in relay.events

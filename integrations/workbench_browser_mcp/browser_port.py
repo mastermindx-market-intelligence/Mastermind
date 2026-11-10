@@ -19,6 +19,9 @@ from typing import Any
 from control_plane.browser_resource_contract import (
     ALLOWED_BROWSER_TOOLS,
     READ_ONLY_BROWSER_TOOLS,
+    APP_CONTROL_TOOLS,
+    APP_CONTROL_READ_TOOLS,
+    browser_tools_for_digest,
 )
 from control_plane.codex_worker import ProcessIdentityError, ProcessInspector
 from integrations.workbench_action_mcp.action_artifacts import (
@@ -55,6 +58,11 @@ from .relay import (
     RELAY_RESPONSE_SCHEMA,
     BrowserRelayError,
     relay_request,
+)
+from .credential_use import (
+    CREDENTIAL_ACTION_SCHEMA, CREDENTIAL_TOOL, CredentialUseRefused,
+    validate_private_use, validate_credential_result,
+    credential_selection_digest,
 )
 
 
@@ -104,6 +112,7 @@ class BrowserActionPort:
         relay_requester: RelayRequester = relay_request,
         action_ttl_ms: int = 5 * 60 * 1000,
         relay_timeout_seconds: float = 30.0,
+        resolve_credential_use: Callable[..., object] | None = None,
     ) -> None:
         if not callable(resolve_binding) or not callable(clock_ms) or not callable(relay_requester):
             raise TypeError("browser port callbacks must be callable")
@@ -149,6 +158,9 @@ class BrowserActionPort:
         self._relay_requester = relay_requester
         self._action_ttl_ms = action_ttl_ms
         self._relay_timeout = float(relay_timeout_seconds)
+        if resolve_credential_use is not None and not callable(resolve_credential_use):
+            raise TypeError("credential use owner is invalid")
+        self._resolve_credential_use = resolve_credential_use
 
     @property
     def codec(self) -> BrowserRefCodec:
@@ -283,16 +295,17 @@ class BrowserActionPort:
         request_id: str,
         tool: str,
         arguments: Mapping[str, Any],
+        credential_use: dict | None = None,
     ) -> dict[str, Any]:
         response = self._relay_requester(
             socket_path,
             {
                 "schema": RELAY_REQUEST_SCHEMA,
-                "kind": "tool",
+                "kind": "credential_fill" if credential_use is not None else "tool",
                 "request_id": request_id,
                 "resource_id": browser.start_action_id,
-                "tool": tool,
-                "arguments": dict(arguments),
+                **({"use": credential_use} if credential_use is not None
+                   else {"tool": tool, "arguments": dict(arguments)}),
             },
             timeout=self._relay_timeout,
         )
@@ -313,7 +326,7 @@ class BrowserActionPort:
         tool: str,
         arguments: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        if tool not in READ_ONLY_BROWSER_TOOLS:
+        if tool not in READ_ONLY_BROWSER_TOOLS | APP_CONTROL_READ_TOOLS or tool not in self._codec.allowed_tools:
             raise BrowserPortRefused("MUTATING_TOOL_REQUIRES_ACTION_REF")
         try:
             canonical = canonical_browser_arguments(arguments)
@@ -325,6 +338,8 @@ class BrowserActionPort:
         browser, _binding, socket_path = self._resource(
             caller, browser_ref, require_fresh=False
         )
+        if tool not in browser_tools_for_digest(browser.tool_schema_digest):
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         request_id = secrets.token_hex(16)
         try:
             response = self._relay(
@@ -347,13 +362,38 @@ class BrowserActionPort:
         tool: str,
         arguments: Mapping[str, Any],
     ) -> str:
-        if tool not in ALLOWED_BROWSER_TOOLS:
+        return self._prepare_action(caller, browser_ref, tool, arguments, credential=False)
+
+    def _credential_use(self, caller, browser, grant_ref, expected_selection=None):
+        if self._resolve_credential_use is None:
+            raise BrowserPortRefused("CREDENTIAL_USE_NOT_GRANTED")
+        try:
+            selected = validate_private_use(self._resolve_credential_use(caller, browser, grant_ref),
+                resource_id=browser.start_action_id, now_ms=self._now())
+            if expected_selection is not None and credential_selection_digest(selected) != expected_selection:
+                raise CredentialUseRefused()
+            return selected
+        except (CredentialUseRefused, TypeError, ValueError):
+            raise BrowserPortRefused("CREDENTIAL_USE_NOT_GRANTED") from None
+
+    def prepare_credential_fill(self, caller, browser_ref, grant_ref) -> str:
+        return self._prepare_action(caller, browser_ref, CREDENTIAL_TOOL,
+                                    {"grant_ref": grant_ref}, credential=True)
+
+    def _prepare_action(self, caller, browser_ref, tool, arguments, *, credential: bool) -> str:
+        if (not credential and tool not in self._codec.allowed_tools) or (credential and tool != CREDENTIAL_TOOL):
             raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
-        if tool in READ_ONLY_BROWSER_TOOLS:
+        if tool in READ_ONLY_BROWSER_TOOLS | APP_CONTROL_READ_TOOLS:
             raise BrowserPortRefused("READ_ONLY_TOOL_NEEDS_NO_ACTION_REF")
         if type(browser_ref) is not str:
             raise BrowserPortRefused("BROWSER_REF_INVALID")
         browser, binding, _socket_path = self._resource(caller, browser_ref)
+        if not credential and tool not in browser_tools_for_digest(browser.tool_schema_digest):
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
+        credential_use = self._credential_use(caller, browser, arguments.get("grant_ref")) if credential else None
+        if credential_use is not None:
+            arguments = {"grant_ref": arguments["grant_ref"],
+                         "selection_sha256": credential_selection_digest(credential_use)}
         try:
             arguments_json = canonical_browser_arguments(arguments)
         except BrowserContractError as error:
@@ -365,10 +405,12 @@ class BrowserActionPort:
             binding.scope.expires_at_ms,
             caller.expires_at * 1000,
         )
+        if credential_use is not None:
+            expires_at_ms = min(expires_at_ms, credential_use["expires_at_ms"])
         if expires_at_ms <= now_ms:
             raise BrowserPortRefused("BROWSER_ACTION_EXPIRED")
         prepared = PreparedBrowserAction(
-            schema=ACTION_SCHEMA,
+            schema=CREDENTIAL_ACTION_SCHEMA if credential else ACTION_SCHEMA,
             action_id=secrets.token_hex(16),
             browser_ref_sha256=hashlib.sha256(browser_ref.encode("utf-8")).hexdigest(),
             subject_digest=browser.subject_digest,
@@ -440,11 +482,12 @@ class BrowserActionPort:
             binding = self._binding(caller, browser)
             socket_path = self._relay_root / f"{browser.start_action_id}.sock"
         try:
-            prepared = self._codec.decode_action(
-                action_ref, now_ms=self._now(), require_fresh=require_live
-            )
+            prepared = (self._codec.decode_action(action_ref, now_ms=self._now()) if require_live
+                        else self._codec.decode_recovery_action(action_ref, now_ms=self._now()))
         except BrowserContractError as error:
             raise BrowserPortRefused("BROWSER_ACTION_INVALID") from error
+        if prepared.schema != CREDENTIAL_ACTION_SCHEMA and prepared.tool_name not in browser_tools_for_digest(browser.tool_schema_digest):
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         if (
             prepared.browser_ref_sha256
             != hashlib.sha256(browser_ref.encode("utf-8")).hexdigest()
@@ -559,6 +602,10 @@ class BrowserActionPort:
                 current_browser, current_binding, current_socket = self._resource(
                     caller, browser_ref
                 )
+                credential_use = (self._credential_use(caller, current_browser,
+                    json.loads(prepared.arguments_json)["grant_ref"],
+                    json.loads(prepared.arguments_json)["selection_sha256"])
+                    if prepared.schema == CREDENTIAL_ACTION_SCHEMA else None)
             except BrowserPortRefused:
                 # Only this invocation's new claim, before any relay dispatch.
                 # Clock or persistence failures must remain observable.
@@ -606,6 +653,7 @@ class BrowserActionPort:
                     request_id=prepared.action_id,
                     tool=prepared.tool_name,
                     arguments=json.loads(prepared.arguments_json),
+                    credential_use=credential_use,
                 )
             except BrowserRelayError:
                 # The durable claim already exists. A transport failure after
@@ -650,6 +698,20 @@ class BrowserActionPort:
                     "observed_sha256": None,
                     "reconciled": False,
                 }
+            if prepared.schema == CREDENTIAL_ACTION_SCHEMA:
+                try:
+                    observed = validate_credential_result(result)
+                except CredentialUseRefused:
+                    return {"status": "OK", "effect_state": "EFFECT_UNKNOWN",
+                            "observed_sha256": None, "reconciled": False}
+                digest = hashlib.sha256(json.dumps(observed, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                record = finalize_action(self._store, identity,
+                    effect_state=observed["effect_state"], observed_sha256=digest,
+                    completed_at_ms=self._now(), durability="durable",
+                    details={"tool": CREDENTIAL_TOOL, "credential_fill_only": True, "code": observed["code"]})
+                return {"status": "OK", "effect_state": record.effect_state,
+                        "observed_sha256": digest, "reconciled": False,
+                        "credential_result": observed}
             try:
                 result_bytes = json.dumps(
                     result,
@@ -669,6 +731,15 @@ class BrowserActionPort:
             effect_state = (
                 "APPLIED" if result.get("isError") is False else "EFFECT_UNKNOWN"
             )
+            if prepared.tool_name in APP_CONTROL_TOOLS:
+                # Classify only the UI dispatch, never downstream completion.
+                # A missing result remains unknown; reconciliation never repeats it.
+                app_result = result.get("structuredContent")
+                app_status = app_result.get("status") if (type(app_result) is dict
+                    and app_result.get("schema") == "mastermind.os.app-control.v1"
+                    and type(app_result.get("code")) is str and 0 < len(app_result["code"]) <= 160
+                    and result.get("isError") is (app_result.get("status") in {"REFUSED", "EFFECT_UNKNOWN"})) else None
+                effect_state = {"DISPATCHED": "APPLIED", "NO_CHANGE": "NOT_APPLIED", "REFUSED": "NOT_APPLIED"}.get(app_status, "EFFECT_UNKNOWN")
             result_record = finalize_action(
                 self._store,
                 identity,
@@ -687,7 +758,7 @@ class BrowserActionPort:
                 "observed_sha256": observed_sha256,
                 "reconciled": False,
             }
-            if effect_state == "APPLIED":
+            if effect_state == "APPLIED" or prepared.tool_name in APP_CONTROL_TOOLS:
                 response_receipt["result"] = result
             return response_receipt
 

@@ -1,0 +1,133 @@
+{
+  "attempt_columns": 13,
+  "attempt_count_mismatches": 0,
+  "attempt_sessions": 46,
+  "attempts": 8583,
+  "correction_counts": {
+    "missing": 71039,
+    "original": 75630,
+    "supersedes": 49807,
+    "unchanged": 276724
+  },
+  "defect_capture_dates": {
+    "2026-08-26": 27
+  },
+  "finite_by_observation_type": {
+    "average": 66869,
+    "covering_analyst_count": 67264,
+    "growth": 66319,
+    "high": 66869,
+    "low": 66869,
+    "median": 0,
+    "year_ago": 66319
+  },
+  "finite_less_empty_coverage_defects": 400482,
+  "finite_values": 400509,
+  "ieee_nan_values": 0,
+  "input_commit": "ff420e6841a2468e4b718340cff240abbef114f1",
+  "inputs": {
+    "attempts.parquet": {
+      "bytes": 1169700,
+      "sha256": "05507a186772eb0de0cfcc2e21714091dca4247cbf0957aaf0c51a3324db691e"
+    },
+    "observations.parquet": {
+      "bytes": 37020102,
+      "sha256": "3db55f485c01bd307f1419ff04f392ae5f1994d2e7d8071b977abe9bbb562b93"
+    }
+  },
+  "limitations": [
+    "No source/publication-clock or rights attestation",
+    "No independent event sample or predictive outcome evaluated",
+    "Snapshot retention is not historical cross-commit immutability proof",
+    "Full scheduled producer/CI receipts were reviewed as source documents, not independently rerun",
+    "No identity or economic-basis inference"
+  ],
+  "missing_attempt_links": 0,
+  "null_counts": {
+    "basis": 473200,
+    "currency": 473200,
+    "issuer_ref": 473200,
+    "period_end": 24612,
+    "security_ref": 473200,
+    "source_effective_at": 473200,
+    "source_published_at": 473200,
+    "unit": 473200
+  },
+  "observation_columns": 31,
+  "observation_sessions": 44,
+  "observation_types": {
+    "average": 67600,
+    "covering_analyst_count": 67600,
+    "growth": 67600,
+    "high": 67600,
+    "low": 67600,
+    "median": 67600,
+    "year_ago": 67600
+  },
+  "observations": 473200,
+  "orphan_supersedes_links": 0,
+  "present_measurements_without_positive_coverage": 27,
+  "rights_counts": {
+    "UNKNOWN": 473200
+  },
+  "scope": "outcome_blind_frozen_snapshot_not_release_acceptance",
+  "supersedes_links": 49807,
+  "system_clock_range": {
+    "max": "2026-10-02T12:20:08.635917Z",
+    "min": "2026-08-25T03:40:06.778559Z"
+  },
+  "ticker_symbols": 1506,
+  "true_null_values": 72691,
+  "unique_attempt_ids": 8583,
+  "unique_observation_ids": 473200,
+  "witness_checks": {
+    "JBGS_partial": {
+      "both_retained": true,
+      "different_sessions": true,
+      "expected_correction_state": "missing",
+      "later_system_clock": true,
+      "new_correction_state": "missing",
+      "new_value_missing": true,
+      "same_anchor": null,
+      "same_metric_horizon": true,
+      "same_nonmissing_value": null,
+      "supersedes_exact_prior": false
+    },
+    "KBH_rollover": {
+      "both_retained": true,
+      "different_sessions": true,
+      "expected_correction_state": "original",
+      "later_system_clock": true,
+      "new_correction_state": "original",
+      "new_value_missing": false,
+      "same_anchor": false,
+      "same_metric_horizon": true,
+      "same_nonmissing_value": false,
+      "supersedes_exact_prior": false
+    },
+    "UVV_unchanged": {
+      "both_retained": true,
+      "different_sessions": true,
+      "expected_correction_state": "unchanged",
+      "later_system_clock": true,
+      "new_correction_state": "unchanged",
+      "new_value_missing": false,
+      "same_anchor": true,
+      "same_metric_horizon": true,
+      "same_nonmissing_value": true,
+      "supersedes_exact_prior": false
+    },
+    "V_supersedes": {
+      "both_retained": true,
+      "different_sessions": true,
+      "expected_correction_state": "supersedes",
+      "later_system_clock": true,
+      "new_correction_state": "supersedes",
+      "new_value_missing": false,
+      "same_anchor": true,
+      "same_metric_horizon": true,
+      "same_nonmissing_value": false,
+      "supersedes_exact_prior": true
+    }
+  }
+}

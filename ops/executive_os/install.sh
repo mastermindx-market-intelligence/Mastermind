@@ -31,6 +31,9 @@ CONTROL_CONFIG_SOURCE=""
 CONTROL_AEAD_BUNDLE=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
+HERMES_ATTENDED_SOURCE=""
+HERMES_ATTENDED_CONFIGURATION=""
+HERMES_ATTENDED_CONFIGURATION_SHA256=""
 OPERATOR_USER=""
 PYTHON_BINARY=""
 PYTHON_RUNTIME_ROOT=""
@@ -400,6 +403,9 @@ while [ "$#" -gt 0 ]; do
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
     --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
+    --hermes-attended-source) HERMES_ATTENDED_SOURCE="${2:-}"; shift 2 ;;
+    --hermes-attended-configuration) HERMES_ATTENDED_CONFIGURATION="${2:-}"; shift 2 ;;
+    --hermes-attended-configuration-sha256) HERMES_ATTENDED_CONFIGURATION_SHA256="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
     --python-team-identifier) PYTHON_TEAM_ID="${2:-}"; shift 2 ;;
@@ -480,6 +486,12 @@ if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
 fi
 if [ -n "$OS_WEB_ASSETS" ]; then
   case "$OS_WEB_ASSETS" in /*) ;; *) /bin/echo "OS web asset path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+  case "$HERMES_ATTENDED_SOURCE" in /*) ;; *) /bin/echo "Hermes attended source path must be absolute" >&2; exit 65 ;; esac
+  [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] || {
+    /bin/echo "admin-checkout staging does not publish Hermes dependency sources" >&2; exit 65
+  }
 fi
 if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
   case "$CONTROL_AEAD_BUNDLE" in /*) ;; *) /bin/echo "control AEAD bundle path must be absolute" >&2; exit 65 ;; esac
@@ -1002,8 +1014,15 @@ install_codex_code_mode_host() {
   exit 65
 }
 CODEX_CODE_MODE_HOST_BINARY="$(/usr/bin/dirname "$CODEX_BINARY")/codex-code-mode-host"
-verify_codex_component "$CODEX_BINARY" "$CODEX_SHA256" codex 0 || exit 65
-verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 0 || exit 65
+# --- BEGIN stage-only Codex package isolation ---
+# Source/asset staging and the inert admin checkout never launch or install
+# Codex. A newer installed Codex must not block those source-only operations.
+# Every normal install still verifies the exact pinned package BEFORE effects.
+if [ "${STAGE_RELEASE_ONLY:-0}" != "1" ] && [ "${STAGE_ADMIN_CHECKOUT_ONLY:-0}" != "1" ]; then
+  verify_codex_component "$CODEX_BINARY" "$CODEX_SHA256" codex 0 || exit 65
+  verify_codex_component "$CODEX_CODE_MODE_HOST_BINARY" "$CODEX_CODE_MODE_HOST_SHA256" codex-code-mode-host 0 || exit 65
+fi
+# --- END stage-only Codex package isolation ---
 [ "$CODEX_CODE_MODE_HOST_PREDECESSOR_SHA256" != "$CODEX_CODE_MODE_HOST_SHA256" ] || {
   /bin/echo "Codex helper predecessor and current generation hashes must differ" >&2
   exit 65
@@ -1268,6 +1287,29 @@ if [ -n "$OS_WEB_ASSETS" ]; then
       exit 65
     }
 fi
+# The attended projection is inert source data tied to this reviewed release.
+# Validate it before maintenance; no Git or projected Python executes here.
+if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" check-hermes-attended-source \
+    --archive "$HERMES_ATTENDED_SOURCE" \
+    --commitment "$SOURCE_REPO/integrations/hermes_application_fabric/macro-source.json" >/dev/null || {
+      /bin/echo "Hermes attended source preflight refused before maintenance" >&2
+      exit 65
+    }
+fi
+if [ -n "$HERMES_ATTENDED_CONFIGURATION" ] || [ -n "$HERMES_ATTENDED_CONFIGURATION_SHA256" ]; then
+  [ -n "$HERMES_ATTENDED_CONFIGURATION" ] && [ -n "$HERMES_ATTENDED_CONFIGURATION_SHA256" ] \
+    && [ -n "$HERMES_ATTENDED_SOURCE" ] && [ "$STAGE_RELEASE_ONLY" = "0" ] \
+    && [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "0" ] || {
+      /bin/echo "Hermes configuration requires its exact digest, source artifact and full installer" >&2; exit 65
+    }
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" check-hermes-attended-configuration \
+    --capsule "$HERMES_ATTENDED_CONFIGURATION" --sha256 "$HERMES_ATTENDED_CONFIGURATION_SHA256" \
+    --archive "$HERMES_ATTENDED_SOURCE" \
+    --commitment "$SOURCE_REPO/integrations/hermes_application_fabric/macro-source.json" >/dev/null || {
+      /bin/echo "Hermes attended configuration preflight refused before maintenance" >&2; exit 65
+    }
+fi
 # Optional event-only dependency artifact is qualified against committed lock
 # bytes before maintenance/service stop. It never reuses the MCP network runtime.
 if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
@@ -1438,9 +1480,12 @@ builder = rollout / "build_review_stage.py"
 records = {name: (rollout / name).read_bytes()
            for name in ("native-manifest.json", "native-source-inventory.json")}
 sys.argv = [str(builder), "--output", str(rollout)]
-runpy.run_path(str(builder), run_name="__main__")
-if any((rollout / name).read_bytes() != expected for name, expected in records.items()):
-    raise ValueError("native closure differs from the reviewed release inventory")
+builder_owner = runpy.run_path(str(builder), run_name="__main__")
+if any(((rollout / name).read_bytes() != expected for name, expected in records.items())):
+    try:
+        builder_owner['verify_glm_core_release_records'](rollout.parent, records, {name: (rollout / name).read_bytes() for name in records})
+    except (ValueError, TypeError, KeyError, OSError):
+        raise ValueError('native closure differs from the reviewed release inventory')
 # The installer uses umask077. These are public reviewed code bytes, not state;
 # both service UIDs must traverse/read them after the root-owned seal.
 stage = rollout / "native-code-stage"
@@ -1449,6 +1494,11 @@ for directory in (stage, stage / "ext"):
 for relative in json.loads(records["native-manifest.json"]):
     (stage / relative).chmod(0o644)
 MASTERMIND_RELEASE_NATIVE_STAGE
+    if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+      "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" stage-hermes-attended-source \
+        --archive "$HERMES_ATTENDED_SOURCE" --release-root "$STAGING" \
+        --published-release-root "$RELEASE_ROOT" >/dev/null || return 65
+    fi
     # Seal and verify while the directory is still operation-owned staging. A
     # settled interruption must never expose a canonical release without a seal.
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \
@@ -1483,6 +1533,15 @@ MASTERMIND_RELEASE_NATIVE_STAGE
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" check \
       --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
       --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
+      --release-root "$RELEASE_ROOT" >/dev/null || return 65
+  fi
+  # Full release verification above proves every projected payload file. This
+  # join then verifies its reviewed Macro identity and exact installed records.
+  # A same-SHA release without the projection refuses; it is never grafted.
+  if [ -n "$HERMES_ATTENDED_SOURCE" ]; then
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" check-hermes-attended-source \
+      --archive "$HERMES_ATTENDED_SOURCE" \
+      --commitment "$RELEASE_ROOT/integrations/hermes_application_fabric/macro-source.json" \
       --release-root "$RELEASE_ROOT" >/dev/null || return 65
   fi
 }
@@ -1532,7 +1591,9 @@ if [ "$NEED_CLONE" = "1" ]; then
   # Root reads the operator-owned source through Git transport; the local-copy
   # optimization has a distinct ownership boundary. Trust only the validated
   # source path for this command, never persist a host-wide exception.
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local "$SOURCE_REPO" "$ADMIN_CHECKOUT"
+  # Only the qualified source HEAD and its complete ancestry are needed.
+  # Unrelated development branches/tags must not enter this private checkout.
+  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" clone --no-hardlinks --no-checkout --no-local --single-branch --no-tags "$SOURCE_REPO" "$ADMIN_CHECKOUT"
   /usr/bin/git -C "$ADMIN_CHECKOUT" checkout --detach "$EXPECTED_SHA"
   /usr/bin/git -C "$ADMIN_CHECKOUT" remote remove origin
 fi
@@ -1633,6 +1694,62 @@ if [ "$STAGE_ADMIN_CHECKOUT_ONLY" = "1" ]; then
 fi
 # --- END admin-checkout-only dispatch ---
 
+# --- BEGIN gateway audit parent provisioning ---
+provision_gateway_audit_parent() {
+  # The normal publisher owns the Studio-identity leaf, not this root-owned
+  # parent. Existing occupants are checked without changing their custody.
+  require_native_no_acl one "$SYSTEM_ROOT" || return 65
+  "$PYTHON_BINARY" -I -S -B - "$SYSTEM_ROOT" <<'MASTERMIND_GATEWAY_AUDIT_PARENT' || return 65
+import os
+import stat
+import sys
+
+flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def require_directory(info):
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0
+            or stat.S_IMODE(info.st_mode) & 0o022):
+        raise SystemExit("gateway audit parent requires a direct root:wheel directory without group/other write")
+
+def identity(info):
+    return info.st_dev, info.st_ino
+
+base = os.open(sys.argv[1], flags)
+try:
+    base_info = os.fstat(base)
+    require_directory(base_info)
+    created = False
+    try:
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    except FileNotFoundError:
+        # Exclusive creation under the held sealed parent; a racing occupant
+        # refuses, and no existing directory is chowned or chmodded.
+        os.mkdir("audit", 0o700, dir_fd=base)
+        created = True
+        before = os.stat("audit", dir_fd=base, follow_symlinks=False)
+    audit = os.open("audit", flags, dir_fd=base)
+    try:
+        if identity(os.fstat(audit)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+        if created:
+            os.fchown(audit, 0, 0)
+            os.fchmod(audit, 0o755)
+            os.fsync(audit)
+            os.fsync(base)
+        require_directory(os.fstat(audit))
+        if identity(os.stat("audit", dir_fd=base, follow_symlinks=False)) != identity(before):
+            raise SystemExit("gateway audit parent changed during provisioning")
+    finally:
+        os.close(audit)
+    if identity(os.stat(sys.argv[1], follow_symlinks=False)) != identity(base_info):
+        raise SystemExit("gateway audit base changed during provisioning")
+finally:
+    os.close(base)
+MASTERMIND_GATEWAY_AUDIT_PARENT
+  require_native_no_acl one "$SYSTEM_ROOT/audit" || return 65
+}
+# --- END gateway audit parent provisioning ---
+
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps all
 # install-owned daemons, including a separately prepared C1 Relay, disabled
@@ -1697,6 +1814,7 @@ wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
 wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 stage_sealed_release || exit 65
+provision_gateway_audit_parent || exit 65
 
 # This remains a substep of the existing serialized installer publication.
 # Same-profile occupants verify exactly; missing/changed occupants are not reset.
@@ -1745,6 +1863,11 @@ require_native_no_acl one "$INSTALLED_CODEX" || {
   /bin/echo "installed Codex has a filesystem ACL" >&2; exit 65
 }
 
+if [ -n "$HERMES_ATTENDED_CONFIGURATION" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/capacity_host_artifacts.py" stage-hermes-attended-configuration \
+    --capsule "$HERMES_ATTENDED_CONFIGURATION" --sha256 "$HERMES_ATTENDED_CONFIGURATION_SHA256" \
+    --release-root "$RELEASE_ROOT" >/dev/null
+fi
 prepare_admin_checkout
 (
   cd "$RELEASE_ROOT"
@@ -1753,7 +1876,7 @@ prepare_admin_checkout
     "$BACKUP_ROOT" "$RECEIPTS_ROOT" "$PROVIDER_HOME" "$RUN_ROOT" \
     "$CANARY_RECEIPT" "$CONTROL_ENV_ATTESTATION" "$CONTROL_UID" "$WORKER_UID" "$WORKER_GID" \
     "$OPERATOR_UID" "$INSTALLED_HASH" "$CODEX_VERSION" "$ARM_PRIVILEGED_BROKER" \
-    "$PYTHON_RUNTIME_PROVENANCE_DIGEST" <<'PY'
+    "$PYTHON_RUNTIME_PROVENANCE_DIGEST" "$HERMES_ATTENDED_CONFIGURATION_SHA256" <<'PY'
 import json, os, pathlib, re, sys
 release_root = sys.argv.pop(1)
 sys.path.insert(0, release_root)
@@ -1784,6 +1907,7 @@ from scripts.executive_os_phase1c import (
     operator_harness_version,
     arm_privileged_broker,
     python_runtime_provenance_digest,
+    hermes_attended_configuration_sha256,
 ) = sys.argv[1:]
 
 ceo_ingress_expected = {
@@ -1877,7 +2001,18 @@ defaults = {
 }
 if source:
     source_path = pathlib.Path(source)
-    value = json.loads(source_path.read_text(encoding="utf-8"))
+    def unique_source_object(pairs):
+        result = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate control config key")
+            result[key] = item
+        return result
+    try:
+        value = json.loads(source_path.read_text(encoding="utf-8"),
+                           object_pairs_hook=unique_source_object)
+    except (ValueError, RecursionError):
+        raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
     if not isinstance(value, dict):
         raise SystemExit("control config source must contain an object")
     if value.get("python_runtime_provenance_digest") not in (None, python_runtime_provenance_digest):
@@ -1888,6 +2023,16 @@ if source:
     value["python_runtime_provenance_digest"] = python_runtime_provenance_digest
 else:
     value = {**expected, **defaults}
+
+# The existing full installer remains the sole selector/publisher. A same-SHA
+# renewal changes private Control data, never the sealed release. Revocation is
+# an explicitly supplied preserved Control config with this optional key removed.
+if hermes_attended_configuration_sha256:
+    value["hermes_attended_configuration_sha256"] = hermes_attended_configuration_sha256
+if "hermes_attended_configuration_sha256" in value:
+    from ops.executive_os.capacity_host_artifacts import check_installed_hermes_attended_configuration
+    check_installed_hermes_attended_configuration(
+        pathlib.Path(release_root), value["hermes_attended_configuration_sha256"])
 
 # Older installed inputs can omit these optional fields. Materialize only the
 # reviewed disabled defaults admitted by this release; retain every explicit
@@ -1936,7 +2081,16 @@ if missing or unknown:
         f"control config schema drift; missing={sorted(missing)}, unknown={sorted(unknown)}"
     )
 for key, expected_value in expected.items():
-    if value.get(key) != expected_value:
+    # Python equality aliases booleans/integers and integers/floats, including
+    # nested policy fields. Preserve the Control loader's JSON type boundary
+    # before replacing the config; matching host values must also match types.
+    try:
+        matches = json.dumps(value.get(key), sort_keys=True, allow_nan=False) == (
+            json.dumps(expected_value, sort_keys=True, allow_nan=False)
+        )
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
         raise SystemExit(f"control config {key} differs from the reviewed host policy")
 blocked = re.compile(
     r"(?i)(password|credential|lease[_-]?token|api[_-]?key|access[_-]?token|secret_value)"
@@ -1945,12 +2099,17 @@ for key in value:
     if blocked.search(str(key)):
         raise SystemExit(f"control config contains forbidden secret-bearing key: {key}")
 
+# Validate the complete output before opening even the temporary file.
+# Strict serialization catches both non-finite tokens and exponent overflow;
+# UTF-8 encoding also refuses unpaired surrogates before any destination effect.
+try:
+    encoded = (json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False,
+                          allow_nan=False) + "\n").encode("utf-8")
+except (TypeError, ValueError, RecursionError):
+    raise SystemExit("control config source must contain unambiguous finite UTF-8 JSON") from None
 path = pathlib.Path(destination)
 temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-temporary.write_text(
-    json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
-    encoding="utf-8",
-)
+temporary.write_bytes(encoded)
 os.chmod(temporary, 0o440)
 os.replace(temporary, path)
 PY

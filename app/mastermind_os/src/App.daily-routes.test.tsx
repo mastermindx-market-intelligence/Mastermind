@@ -25,7 +25,22 @@ const signed = {
   content: true,
 };
 const visible = paired.window.view.items.find((item) => item.text)!.text!;
-async function hostFixture() {
+const recordedPlan = {
+  schema: "mastermind.workspace_project_plan.v1",
+  selection: {work_ref: paired.selection.work_ref},
+  availability: "AVAILABLE",
+  source: {repository: "mastermindx-market-intelligence/macro",
+    path: "agentos/workstreams/WS-FABRIC.md", commit: "a".repeat(40),
+    content_sha256: "b".repeat(64)},
+  plan: {title: "Integration-ready project plan",
+    objective: "Complete current work, then verify return.",
+    status: "active", owner: "Project continuity",
+    next_action: "Inspect current work", waves: [],
+    adoption: {state: "UNAVAILABLE", reason: "NOT_DECLARED"},
+    version_history: {state: "UNAVAILABLE", reason: "NOT_SUPPLIED_BY_OWNER"}},
+  reason_codes: [],
+};
+async function hostFixture(planAvailable = false) {
   const room = controlRoomFixture();
   room.work = [room.work[0]];
   room.autonomy.responsibilities = [room.autonomy.responsibilities[0]];
@@ -57,7 +72,9 @@ async function hostFixture() {
   const invoke = vi.fn(async (command: string) => {
     if (command === "auth_status") return signed;
     const value =
-      command === "read_programs"
+      command === "read_project_plan"
+        ? (planAvailable ? recordedPlan : paired.window)
+        : command === "read_programs"
         ? { ...structuredClone(programs), control_room: room }
         : command === "read_mission_v3"
           ? mission
@@ -224,7 +241,7 @@ describe("owner-backed daily routes in App", () => {
   });
 
   it("opens a conversation-first project with Files/Details and preserves legacy reader reachability", async () => {
-    const e = await hostFixture();
+    const e = await hostFixture(true);
     window.MastermindMissionHost = e.host;
     const user = userEvent.setup();
     render(<App />);
@@ -250,12 +267,14 @@ describe("owner-backed daily routes in App", () => {
     expect(screen.getByText("Review and acceptance")).toBeTruthy();
 
     await user.click(within(tabs).getByRole("tab", { name: "Plan" }));
-    expect(
-      screen.getByText(
-        "Agent OS plan content is not projected through the current approved app source.",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("Current project context")).toBeTruthy();
+    // The legacy tab consumes the same exact project-plan owner as the new
+    // workspace. A missing reader stays visibly unavailable; the obsolete
+    // hard-coded NOT_PROJECTED card cannot hide a qualified future reader.
+    const plan = screen.getByRole("region", { name: "Project plan" });
+    expect(await within(plan).findByRole("heading", { name: "Integration-ready project plan", level: 3 })).toBeTruthy();
+    expect(within(plan).getByText("Complete current work, then verify return.")).toBeTruthy();
+    expect(e.invoke.mock.calls.filter(([command]) => command === "read_project_plan").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Agent OS plan content is not projected through the current approved app source.")).toBeNull();
 
     await user.click(within(tabs).getByRole("tab", { name: "Work" }));
     expect(
@@ -270,7 +289,9 @@ describe("owner-backed daily routes in App", () => {
     ).toBeTruthy();
 
     await user.click(within(tabs).getByRole("tab", { name: "More" }));
-    expect(screen.getByRole("heading", { name: "Journal" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Project journal" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Read project journal" })).toBeTruthy();
+    expect(screen.queryByText("No qualified journal source is installed in this project view. No history is inferred.")).toBeNull();
     const operations = screen.getByRole("navigation", { name: "Project operations" });
     expect(within(operations).getAllByRole("button").map(button => button.textContent)).toEqual(["Work", "Open Programs", "Control Room", "Fleet & Capacity"]);
     expect(

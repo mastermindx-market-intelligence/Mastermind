@@ -2,6 +2,10 @@ import {freshConversationArguments} from "./orchestration/fresh-conversation-tra
 import {projectConversationArguments} from './conversations/project-conversation-transport';
 import { projectHistoryArguments } from "./orchestration/project-history-arguments";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
+import {
+  normalizeExecutiveSessionSelection,
+  sessionSelectionWire,
+} from "./orchestration/executive-session-command-port";
 import {sessionSendArguments} from "./orchestration/session-send-arguments";
 import type { ProjectConversationHistoryTransport } from "./conversations/project-conversation-history-owner";
 import { projectHistorySelection } from "./conversations/project-history-selection";
@@ -78,7 +82,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     }
   })();
 
-  function call(command: "executive_context" | "executive_submit" | "executive_status" |
+  function call(command: "read_company_priorities" | "executive_context" | "executive_submit" | "executive_status" |
     "executive_session_context" | "executive_session_send" | "executive_session_reply" | "executive_session_references" |
     "executive_project_session_references" |
     "executive_project_history_context" | "executive_fresh_conversation" | "executive_project_conversations_read" |
@@ -120,6 +124,7 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     diagnostics,
     context: (signal) => call("executive_context", signal),
+    companyPriorities: (signal) => call("read_company_priorities", signal),
     submit: (arguments_, signal) => call("executive_submit", signal, { arguments: arguments_ }),
     status: (arguments_, signal) => call("executive_status", signal, { intentId: arguments_.intent_id }),
     projectPlanning: {request:(operation,arguments_,signal)=>call("executive_project_planning",signal,
@@ -171,10 +176,9 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
       },
     },
   };
-  // Session history and the separately qualified fixed continuation reuse
-  // the same native bearer owner/epoch. The backend supplies the current
-  // target and SEND capability. The independent native executive_submit F2
-  // review remains separate; this does not modify that route.
+  // History and qualified Fabric/Secretary continuations reuse the same
+  // native bearer owner, fixed SEND command and auth epoch.
+  // The independent executive_submit F2 review remains unchanged.
   const sessionTransport: ProjectConversationHistoryTransport = {
     projectConversations: {request: (operation,arguments_,signal) => {
       const closed=projectConversationArguments(operation,arguments_);
@@ -189,10 +193,11 @@ export async function createNativeExecutiveTransport(invoke: Invoke, listen: Lis
         : Promise.reject(new Error("SESSION_HISTORY_SELECTION_INVALID"));
     },
     context: async (selection, signal) => {
-      if (!WORK.test(selection.workRef) || !ROOT.test(selection.rootJobId))
-        throw new Error("SESSION_SELECTION_INVALID");
+      const normalized = normalizeExecutiveSessionSelection(selection);
+      if (!normalized) throw new Error("SESSION_SELECTION_INVALID");
+      // The Session owner validates the returned target and capability.
       return call("executive_session_context", signal, {
-        selection: { work_ref: selection.workRef, root_job_id: selection.rootJobId },
+        selection: sessionSelectionWire(normalized),
       });
     },
     reply: (args, signal) => OPERATION.test(args.operation_key)

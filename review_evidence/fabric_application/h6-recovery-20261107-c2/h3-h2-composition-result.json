@@ -1,0 +1,21 @@
+{
+  "schema": "mastermind.h2-h3-source-composition-qualification.v1",
+  "source_head": "a88488670bc99f7156eff193101b76795c16733f",
+  "h3_source": "ef95049fa2e1f8c981497c8a21b643fcbe59f25b",
+  "root": "/tmp/h6-h3-h2-qualification-ezhym46i",
+  "returncode": 0,
+  "seconds": 3.127,
+  "runtime_selected": false,
+  "provider_calls": false,
+  "native_builder_changed": false,
+  "files": {
+    "lease_broker.py": {
+      "sha256": "760a4432373c5785d107096af410dbcae77cdd3c77cb8dc0cab54a2ca8fe0815",
+      "bytes": 222103
+    },
+    "quota_remote.py": {
+      "sha256": "8218b1f98e4b20c1dbe4f34b2d9525532865f98f09954278cd28ad32a4deaa7a",
+      "bytes": 80850
+    }
+  }
+}

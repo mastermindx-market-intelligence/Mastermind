@@ -706,10 +706,57 @@ ALLOWED_PATHS = frozenset(
         "evidence/CHAIRMAN_C2_RULING_AND_SELF_REVIEW.md",
         "scripts/agent_eval/harness_convergence.py",
         "tests/test_agent_eval_harness_convergence.py",
+        # Harness2 evidence-only extension: direct Chairman integration
+        # commission 2026-10-21. Exact files only; no new execution scope.
+        "docs/superpowers/plans/2026-10-21-harness2-agentos-native-adaptation.md",
+        "scripts/agent_eval/harness2_bridge.py",
+        "tests/test_agent_eval_harness2_bridge.py",
+        # Same Chairman-authorized Harness2/1663 continuation: pure byte-bound
+        # importer plus tests. Runtime/provider/config restrictions stay intact.
+        "scripts/agent_eval/harness2_native.py",
+        "tests/test_agent_eval_harness2_native.py",
+        "scripts/agent_eval/harness2_context.py",
+        "tests/test_agent_eval_harness2_context.py",
+        # Same PR1663 native-method laboratory extension. The callback-based
+        # runner stays OUTSIDE the inert core; no provider/runtime import is
+        # admitted inside scripts/agent_eval and no control-plane file changes.
+        "scripts/ohf/harness2_recursion.py",
+        "tests/test_agent_eval_harness2_recursion.py",
         # Pro-turn conformance extension, Chairman-authorized 2026-09-17,
         # operation pro-turn-conformance-corpus-20260917-sol-001.
         "docs/superpowers/plans/2026-09-17-pro-turn-conformance-corpus.md",
         "tests/test_agent_eval_pro_turn_corpus.py",
+        # Chairman Hermes teammate commission, 2026-11-06/07; PR #2234.
+        # Frozen native input binding and incomplete-attempt accounting.
+        # Exact EVAL-owned paths trigger the fence; shared owner connections
+        # below are contextual allowances, not additional program ownership.
+        "integrations/hermes_runtime/native_eval_inputs.py",
+        "integrations/hermes_runtime/tests/test_native_eval_inputs.py",
+        "integrations/hermes_runtime/native_eval_publication.py",
+        "integrations/hermes_runtime/tests/test_native_eval_publication.py",
+        "integrations/hermes_runtime/native_eval_operator.py",
+        "integrations/hermes_runtime/tests/test_native_eval_operator.py",
+        "docs/hermes/NATIVE_EVAL_INPUT_SELECTION.md",
+        "integrations/hermes_qualification/native_eval_inputs/README.md",
+        "integrations/hermes_qualification/native_eval_inputs/UPSTREAM_LICENSE",
+        "integrations/hermes_qualification/native_eval_inputs/__init__.py",
+        "integrations/hermes_qualification/native_eval_inputs/guard.patch",
+        "integrations/hermes_qualification/native_eval_inputs/manifest.json",
+        "integrations/hermes_qualification/native_eval_inputs/qualify.py",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/agent__reasoning_effort.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_cli__runtime_provider.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_cli__runtime_provider_custom.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_mutation_retirement.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_runtime.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_common.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/hermes_state_schema.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/legacy_marker_v1.json",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/plugins__model-providers__custom____init__.py.source",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/provenance.json",
+        "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/providers__base.py.source",
+        "docs/HERMES_NATIVE_EVAL_RUN_V2.md",
+        "tests/test_agent_eval_run_v2.py",
+        "scripts/agent_eval/hermes_memory_grounding.py",
     }
 )
 
@@ -726,6 +773,47 @@ ALLOWED_PATHS = frozenset(
 # while reusing the same filename/type guard below. Any further widening
 # still needs explicit principal authorization and its own operation citation.
 ALLOWED_PATH_PREFIXES = frozenset({"corpus/agent_eval/", "corpus/agent_eval_pro_turns/"})
+
+# Same native commission, original owners only. This finite connection set
+# is deliberately excluded from PROGRAM_SURFACE_PATHS: an unrelated Hermes
+# change must not become an EVAL wave just because it touches a shared owner.
+# No imports, forbidden prefixes, dependency paths, or workflow exceptions.
+NATIVE_EVAL_INTEGRATION_PATHS = frozenset({
+    # Principal amendment: hermes-native-auth-observation-20261107-c3.
+    # Canonical plan §54 at 2e796df3a464f22928240ed56595c423d69918a8.
+    # Existing credential owner and exact test-only source qualifications;
+    # no core environment/import/forbidden-path or execution grant change.
+    "integrations/hermes_harness/native_model_credential.py",
+    "integrations/hermes_harness/tests/test_native_model_credentials.py",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__secret_scope.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__client_lifecycle.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/agent__agent_runtime_helpers.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/gateway__session_worker_construct.py.source",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/provenance.json",
+    "integrations/hermes_runtime/tests/test_native_transport_observation.py",
+    "integrations/hermes_runtime/native_request_observation.py",
+    "integrations/hermes_runtime/native_transport_observation.py",
+    "integrations/hermes_runtime/native_session_control.py",
+    "integrations/hermes_runtime/tests/test_native_session_control.py",
+    "tests/test_hermes_isolated_entry.py",
+    "integrations/hermes_runtime/native_agentos_memory.py",
+    "integrations/hermes_runtime/native_gateway_entry.py",
+    "integrations/hermes_runtime/install.py",
+    "integrations/hermes_runtime/supervisor.py",
+    "integrations/hermes_runtime/cli.py",
+    "integrations/hermes_harness/native_byok.py",
+    "ops/executive_os/release_manifest.py",
+    "ops/executive_os/native_gateway_sources.py",
+    "scripts/enroll_linux_secondary_worker.py",
+    # Assigned-principal §55 amendment, existing sol/hermes-native-eval-inputs-20261107-c3:
+    # git:mastermindx-market-intelligence/Mastermind@d78673689ecd381fb9241c87626518f7460484e0
+    # research/HERMES_TEAMMATE_EVOLUTION_MASTERPLAN_2026-11-06.md
+    "tests/test_linux_secondary_worker_enrollment.py",
+    "tests/executive_fabric_release_identity_review.py",
+    "ops/hermes_egress/squid.conf",
+    "ops/hermes_egress/README.md",
+    "ops/hermes_egress/tests/test_proxy_policy.py",
+})
 
 # NB-8 repair: a prefix in ALLOWED_PATH_PREFIXES is NOT a blanket allowance
 # for any file type dropped under that tree -- admission is further
@@ -747,7 +835,7 @@ def _corpus_prefix_path_is_allowed(path: str, prefix: str) -> bool:
 
 
 def _changed_path_is_allowed(path: str) -> bool:
-    if path in ALLOWED_PATHS:
+    if path in ALLOWED_PATHS or path in NATIVE_EVAL_INTEGRATION_PATHS:
         return True
     for prefix in ALLOWED_PATH_PREFIXES:
         if path.startswith(prefix) and _corpus_prefix_path_is_allowed(path, prefix):
@@ -771,10 +859,12 @@ def _changed_path_is_allowed(path: str) -> bool:
 # gate on every PR that happens to run this test file.
 #
 # Repair: the fence is now SELF-SCOPING. It applies (enforces the strict
-# whole-delta-within-ALLOWED_PATHS rule, ratchet discipline unchanged) only
+# whole delta within owned paths, exact shared connections, and constrained
+# corpus paths; ratchet discipline unchanged) only
 # when the PR's OWN delta touches at least one path under this program's
 # surface. A delta touching NONE of it is simply not this program's
-# business -- not-applicable, never failed.
+# business -- not-applicable, never failed. Shared native connections alone
+# never trigger applicability; only the EVAL-owned set defines that boundary.
 # ---------------------------------------------------------------------------
 
 #: The frozen, minimal prefix set naming "this is unambiguously an
@@ -1410,6 +1500,64 @@ def _bind_root_to_private_fixture(monkeypatch, repo: Path) -> None:
     """
     monkeypatch.setattr(sys.modules[__name__], "ROOT", repo)
     monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+
+
+@pytest.mark.parametrize("owned", [
+    "integrations/hermes_runtime/native_eval_inputs.py",
+    "integrations/hermes_qualification/native_eval_inputs/manifest.json",
+    "tests/test_agent_eval_run_v2.py",
+])
+def test_native_eval_owned_delta_reaches_real_fences_with_shared_connections(tmp_path, monkeypatch, owned):
+    files = [(owned, "fixture\n"), ("integrations/hermes_runtime/supervisor.py", "fixture\n"),
+             ("ops/hermes_egress/squid.conf", "fixture\n"),
+             *[(path, "fixture\n") for path in NATIVE_EVAL_INTEGRATION_PATHS
+               if path.startswith("integrations/hermes_harness/")
+               or path == "integrations/hermes_runtime/tests/test_native_transport_observation.py"]]
+    repo = _standalone_prefix_delta_repo(tmp_path, "native_eval_owned", files)
+    _bind_root_to_private_fixture(monkeypatch, repo)
+    assert _fence_not_applicable_reason(compute_pr_diff_paths(repo)) is None
+    assert _real_fence_outcome(test_changed_paths_are_within_the_allowed_r0_surface) == "PASS"
+    assert _real_fence_outcome(test_no_control_plane_config_dependency_or_workflow_file_touched) == "PASS"
+
+
+def test_shared_native_changes_do_not_claim_eval_program_ownership(tmp_path, monkeypatch):
+    files = [("integrations/hermes_runtime/supervisor.py", "fixture\n"),
+             ("tests/test_linux_secondary_worker_enrollment.py", "fixture\n"),
+             ("ops/hermes_egress/squid.conf", "fixture\n"),
+             ("integrations/hermes_runtime/unrelated_hermes_owner.py", "fixture\n"),
+             ("integrations/hermes_harness/native_model_credential.py", "fixture\n"),
+             ("integrations/hermes_harness/tests/test_native_model_credentials.py", "fixture\n")]
+    repo = _standalone_prefix_delta_repo(tmp_path, "shared_native_only", files)
+    _bind_root_to_private_fixture(monkeypatch, repo)
+    changed = compute_pr_diff_paths(repo)
+    assert _fence_not_applicable_reason(changed) is not None
+    assert not (NATIVE_EVAL_INTEGRATION_PATHS & PROGRAM_SURFACE_PATHS)
+    for fence in (test_changed_paths_are_within_the_allowed_r0_surface,
+                  test_no_control_plane_config_dependency_or_workflow_file_touched):
+        with pytest.raises(pytest.skip.Exception):
+            fence()
+
+
+@pytest.mark.parametrize("foreign", [
+    "integrations/hermes_runtime/unlisted_native_owner.py",
+    "tests/test_linux_secondary_worker_unlisted.py",
+    "integrations/hermes_harness/unlisted_credential_owner.py",
+    "integrations/hermes_harness/tests/test_unlisted_credentials.py",
+    "integrations/hermes_harness/tests/fixtures/native_credential_observation/unlisted.source",
+    "integrations/hermes_qualification/native_eval_inputs/extra.py",
+    "integrations/hermes_runtime/tests/fixtures/native_eval_inputs/unlisted.source",
+    "control_plane/bypass.py", "config/agent_eval.yaml", ".github/workflows/agent-eval.yml", "requirements/new.in",
+])
+def test_native_eval_delta_cannot_admit_nearby_or_forbidden_foreign_paths(tmp_path, monkeypatch, foreign):
+    files = [("integrations/hermes_runtime/native_eval_inputs.py", "fixture\n"),
+             ("integrations/hermes_runtime/supervisor.py", "fixture\n"), (foreign, "fixture\n")]
+    repo = _standalone_prefix_delta_repo(tmp_path, "native_eval_foreign", files)
+    _bind_root_to_private_fixture(monkeypatch, repo)
+    assert _fence_not_applicable_reason(compute_pr_diff_paths(repo)) is None
+    assert "outside the allowed R0 surface" in _real_fence_outcome(test_changed_paths_are_within_the_allowed_r0_surface)
+    forbidden = foreign.startswith(("control_plane/", "config/", ".github/workflows/", "requirements"))
+    result = _real_fence_outcome(test_no_control_plane_config_dependency_or_workflow_file_touched)
+    assert ("unexpected control-plane/config/workflow change" in result) if forbidden else result == "PASS"
 
 
 def test_pro_turn_prefix_only_delta_reaches_both_real_fences(

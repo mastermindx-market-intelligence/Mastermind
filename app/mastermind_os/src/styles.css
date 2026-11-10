@@ -612,6 +612,18 @@ code {
   cursor: pointer;
   color: var(--text);
 }
+/* Existing native connection disclosure: comfortable keyboard/touch target. */
+.work-connection-details > summary {
+  min-height: 44px;
+  padding-block: var(--sp-2);
+  box-sizing: border-box;
+}
+.work-connection-details dl { grid-template-columns: minmax(0, 1fr); }
+.work-connection-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: var(--sp-3);
+}
 .reason-details code {
   display: block;
   margin-top: 8px;
@@ -1055,11 +1067,16 @@ main .launch-orchestrator-composer.card { background: transparent; border: 0; pa
 .launch-orchestrator-composer > .section-title { margin-bottom: 12px; }
 .launch-orchestrator-composer > .section-title h2 { font-size: 14px; line-height: 20px; color: var(--muted); }
 .launch-orchestrator-composer form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-main .launch-orchestrator-composer .form-field { margin: 0; min-width: 0; }
+main .launch-orchestrator-composer .form-field { margin: 0; min-width: 0; align-self: start; }
 .launch-orchestrator-composer .launch-goal,
+.launch-orchestrator-composer .launch-acceptance,
+.launch-orchestrator-composer .launch-request-preview,
 .launch-orchestrator-composer .form-error,
 .launch-orchestrator-composer .form-actions { grid-column: 1 / -1; }
 main .launch-orchestrator-composer .launch-goal textarea { min-height: 72px; resize: vertical; }
+.launch-request-preview-content { min-width: 0; }
+.launch-request-preview-goal { white-space: pre-wrap; overflow-wrap: anywhere; }
+.launch-request-preview-content li { overflow-wrap: anywhere; }
 main .launch-orchestrator-composer select { min-height: 44px; width: 100%; }
 main .launch-orchestrator-composer .form-actions { justify-content: flex-end; margin: 0; }
 @media (max-width: 600px) { .launch-orchestrator-composer form { grid-template-columns: 1fr; } }

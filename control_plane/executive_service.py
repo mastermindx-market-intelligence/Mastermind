@@ -50,8 +50,10 @@ from control_plane.executive_agent_capabilities import (
 )
 from control_plane.executive_coo_cycle import CooCycle, CooCycleOutcome
 from control_plane.executive_runtime import (
+    Attempt,
     AttemptStatus,
     EXECUTIVE_DIALOGUE_SOURCE_SCHEMA,
+    ExpectedChildSelection,
     Job,
     JobStatus,
     NATIVE_RETURN_TX5_EXECUTION_PROFILE,
@@ -78,6 +80,7 @@ from control_plane.executive_runtime import (
     _job_from_row,
     _strict_canonical_json_loads,
     _validated_role_completion_material,
+    expected_child_selection,
     normalize_executive_dialogue_source,
 )
 from control_plane.executive_dialogue_observation import (
@@ -117,7 +120,7 @@ from control_plane.executive_terminal_return import (
     TerminalReturnCandidate,
     TerminalReturnError,
     TerminalReturnProjectionError,
-    reduce_terminal_return,
+    reduce_terminal_return, selected_child_result_capsule,
 )
 from control_plane.model_router import ModelRouter, RoutingPolicyError
 from control_plane.operator_harness_contract import AttemptExecutionMode
@@ -2049,6 +2052,84 @@ CEO_APP_READ_TOOLS_BY_SCHEMA = {
 }
 
 
+#: The closed private App-to-Control selected-child discriminator.
+#:
+#: The integration owner holds the same literal in
+#: ``integrations/hermes_delegate/schema.py`` because the core never imports
+#: that package. ``tests/test_hermes_selected_child_ingress.py`` keeps the two
+#: byte-identical.
+SELECTED_CHILD_FRAME_SCHEMA = "mastermind.ceo_ingress.selected_child.v1"
+_SELECTED_CHILD_FRAME_KEYS = frozenset({
+    "schema", "request", "target_digest", "principal", "principal_context",
+    "capability_profile_digest",
+})
+_SELECTED_CHILD_REQUEST_KEYS = frozenset({"action", "command"})
+_SELECTED_CHILD_ACTIONS = frozenset({"selected_child_submit", "selected_child_status"})
+_SELECTED_CHILD_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+#: The exact reviewed frozen target type. The core never imports the
+#: integration package, so the type is proven by its qualified identity and
+#: its exact frozen field set.
+_SELECTED_CHILD_TARGET_MODULE = "integrations.hermes_delegate.executive"
+_SELECTED_CHILD_TARGET_NAME = "ExecutiveSelectedChildTarget"
+
+
+def _exact_selected_child_target(value: Any) -> bool:
+    """Recognize only the reviewed frozen selected-child target."""
+
+    target_type = type(value)
+    fields = getattr(target_type, "__dataclass_fields__", None)
+    return (
+        getattr(target_type, "__module__", None) == _SELECTED_CHILD_TARGET_MODULE
+        and getattr(target_type, "__qualname__", None) == _SELECTED_CHILD_TARGET_NAME
+        and type(fields) is dict
+        and set(fields) == {"work_ref", "children", "currentness_guard"}
+    )
+
+
+def _selected_child_frame(parsed: Any) -> dict[str, Any]:
+    """Validate one closed private selected-child frame.
+
+    The frame's authority fields are never trusted here: the Control
+    re-proves the principal, the admission context and the capability
+    profile against its own installed host facts.
+    """
+
+    from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+    from control_plane.coo_principal_host import FACT_PRINCIPAL_KEYS
+
+    if type(parsed) is not dict or set(parsed) != _SELECTED_CHILD_FRAME_KEYS:
+        raise ValueError("selected-child frame is not the closed shape")
+    if parsed["schema"] != SELECTED_CHILD_FRAME_SCHEMA:
+        raise ValueError("selected-child frame has a foreign discriminator")
+    request = parsed["request"]
+    if type(request) is not dict or set(request) != _SELECTED_CHILD_REQUEST_KEYS:
+        raise ValueError("selected-child request is not the closed shape")
+    if (type(request["action"]) is not str
+            or request["action"] not in _SELECTED_CHILD_ACTIONS):
+        raise ValueError("selected-child action is not admitted")
+    if type(request["command"]) is not str or not request["command"]:
+        raise ValueError("selected-child command is not canonical")
+    for key in ("target_digest", "capability_profile_digest"):
+        value = parsed[key]
+        if type(value) is not str or _SELECTED_CHILD_DIGEST_RE.fullmatch(value) is None:
+            raise ValueError("selected-child digest is invalid")
+    principal = parsed["principal"]
+    if (type(principal) is not dict or set(principal) != FACT_PRINCIPAL_KEYS
+            or type(principal["scopes"]) is not list or not 1 <= len(principal["scopes"]) <= 16
+            or any(type(scope) is not str or not 1 <= len(scope) <= 96 for scope in principal["scopes"])
+            or principal["scopes"] != sorted(set(principal["scopes"]))
+            or any(type(principal[key]) is not str or not 1 <= len(principal[key]) <= 256
+                   for key in FACT_PRINCIPAL_KEYS - {"scopes"})):
+        raise ValueError("selected-child principal is invalid")
+    context = parsed["principal_context"]
+    if type(context) is not dict or set(context) != {
+            "work_ref", "principal_binding_digest", "mission_authority_ref",
+            "authority_generation_digest"}:
+        raise ValueError("selected-child context is invalid")
+    PrincipalAdmissionContext(**context)
+    return request
+
+
 @dataclasses.dataclass(frozen=True)
 class CeoIngressAppBinding:
     """Host-owned capability for one App peer on the existing ingress.
@@ -2081,6 +2162,9 @@ class CeoIngressAppBinding:
     # Fixed optional App-peer owner; old positional/default construction stays unchanged.
     fresh_conversation_provider_factory: Callable[[Runtime], Any] | None = None
     project_conversation_read_provider_factory: Callable[[Runtime], Any] | None = None
+    # The trusted host's frozen selected-child target. It defaults to unbound:
+    # the Control never selects or derives a child on its own.
+    selected_child_target: Any | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -2119,6 +2203,9 @@ class CeoIngressAppBinding:
         if (self.principal_dialogue_provider_factory is not None
                 and not callable(self.principal_dialogue_provider_factory)):
             raise ValueError("principal dialogue requires a host provider")
+        if (self.selected_child_target is not None
+                and not _exact_selected_child_target(self.selected_child_target)):
+            raise ValueError("selected child requires the exact frozen target")
 
 
 class CompanyConsultationHostProtocol(Protocol):
@@ -5513,7 +5600,7 @@ class ExecutiveControlService:
                     # failure cannot manufacture a NOT_DISPATCHED receipt.
                     response = workspace_error("source_unavailable", 503)
                 await self._send_ceo_ingress_response(writer, response,
-                    response_ceiling=source_operation_wire.MAX_RESPONSE_BYTES)
+                    response_ceiling=source_operation_wire.operation_response_limit(parsed.get("operation")))
                 return
             if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
                 if not app_peer:
@@ -5741,17 +5828,25 @@ class ExecutiveControlService:
             from common import workspace_project_archive_contract as project_archive_wire
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
+            from common import workspace_model_configuration_contract as model_configuration_wire
             from common import workspace_host_observation_contract as host_observation_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
-                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA}:
+                    project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, model_configuration_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == byok_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+                    ceiling = model_configuration_wire.MAX_RESPONSE_BYTES
+                    try:
+                        model_configuration_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == byok_wire.FRAME_SCHEMA:
                     ceiling = byok_wire.MAX_RESPONSE_BYTES
                     try:
                         byok_wire.validate_frame(parsed)
@@ -5814,7 +5909,7 @@ class ExecutiveControlService:
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
                         return
-                elif parsed.get("schema") == knowledge_wire.FRAME_SCHEMA:
+                elif parsed.get("schema") in {knowledge_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                     ceiling = knowledge_wire.MAX_RESPONSE_BYTES
                     try:
                         knowledge_wire.validate_frame(parsed)
@@ -6001,6 +6096,10 @@ class ExecutiveControlService:
                         result = await factory(self._require_runtime()).handle_frame(parsed)
                     except Exception:
                         result = workspace_error("source_unavailable", 503)
+                if (parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA
+                        and (self._ceo_ingress_app_binding is not app_binding
+                             or app_binding.workspace_read_provider_factory is not factory)):
+                    result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
                     result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 try:
@@ -6350,6 +6449,84 @@ class ExecutiveControlService:
                     )
                 return
             from control_plane.coo_principal_host import FACT_SCHEMA, CooHostProvider
+            from control_plane import protected_memory_evaluation_assignment as evaluation
+            if isinstance(parsed, dict) and parsed.get('schema') == evaluation.INGRESS:
+                if (not app_peer or not app_binding.principal_admission_armed
+                        or not callable(app_binding.principal_facts_factory)):
+                    await self._send_ceo_ingress_error(writer, 'peer_denied', 'evaluation ingress unavailable')
+                    return
+                try:
+                    if self._closing or self._service_state not in {'READY', 'AWAITING_CANARY'}:
+                        raise ValueError('evaluation unavailable')
+                    provider = app_binding.principal_facts_factory(self._require_runtime())
+                    supervisor = self._require_supervisor()
+                    from control_plane.workspace_owned_task import await_owned
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(
+                        evaluation.assess_from_installed_app, connection, parsed, provider, supervisor)))
+                    if self._closing or self._ceo_ingress_app_binding is not app_binding:
+                        await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                        return
+                    await self._send_ceo_ingress_response(writer, result)
+                except evaluation.AssessmentCommitUnknown:
+                    await self._send_ceo_ingress_error(writer, 'effect_unknown', 'reconcile original assessment command')
+                except Exception:
+                    await self._send_ceo_ingress_error(writer, 'source_unavailable', 'evaluation unavailable')
+                return
+            from common import coo_agentos_context_contract as context_wire
+            if type(parsed) is dict and parsed.get("schema") in {context_wire.FRAME_SCHEMA, context_wire.CURRENT_FRAME_SCHEMA, context_wire.DISCOVERY_FRAME_SCHEMA}:
+                if not app_peer or not callable(app_binding.principal_facts_factory):
+                    await self._send_ceo_ingress_error(writer, "peer_denied", "COO context requires the installed App peer")
+                    return
+                try:
+                    parsed = context_wire.decode(raw, limit=context_wire.MAX_REQUEST_BYTES)
+                    discovery_context = parsed["schema"] == context_wire.DISCOVERY_FRAME_SCHEMA
+                    current_context = discovery_context or parsed["schema"] == context_wire.CURRENT_FRAME_SCHEMA
+                    validator = context_wire.validate_discovery_frame if discovery_context else context_wire.validate_current_frame if current_context else context_wire.validate_frame
+                    validator(parsed)
+                    factory = app_binding.principal_facts_factory
+                    runtime = self._require_runtime()
+                    arms = (app_binding.armed, app_binding.principal_admission_armed)
+                    def require_context_host_current():
+                        if (self._closing or not self._ceo_ingress_ready
+                                or self._service_state not in {"READY", "AWAITING_CANARY"}
+                                or self._ceo_ingress_app_binding is not app_binding
+                                or app_binding.principal_facts_factory is not factory
+                                or (app_binding.armed, app_binding.principal_admission_armed) != arms
+                                or self._require_runtime() is not runtime
+                                or writer.get_extra_info("socket") is not connection
+                                or _peer_uid(connection) != app_binding.peer_uid or reader.at_eof()
+                                or writer.is_closing() or writer.transport.is_closing()):
+                            raise ValueError("COO context source changed")
+                        from control_plane.runtime_namespace_custody import ServiceRuntimeNamespaceCustody
+                        if type(self._namespace_custody) is not ServiceRuntimeNamespaceCustody:
+                            raise ValueError("COO context Runtime namespace unavailable")
+                        self._namespace_custody.bound_runtime(runtime)
+                    require_context_host_current()
+                    provider = factory(runtime)
+                    if type(provider) is not CooHostProvider or provider.workspace.runtime is not runtime:
+                        raise ValueError("COO context owner unavailable")
+                    source, workspace, context_reader = provider.source, provider.workspace, provider.agentos_context_reader
+                    data_binding = workspace._canonical_project_data
+                    require_context_host_current()
+                    from control_plane.workspace_owned_task import await_owned
+                    context_read = provider.read_discovery_agentos_context if discovery_context else provider.read_current_agentos_context if current_context else provider.read_agentos_context
+                    result = await await_owned(asyncio.create_task(asyncio.to_thread(context_read, parsed)))
+                    require_context_host_current()
+                    if (provider.source is not source or provider.workspace is not workspace
+                            or provider.agentos_context_reader is not context_reader or workspace.runtime is not runtime
+                            or workspace._canonical_project_data is not data_binding):
+                        raise ValueError("COO context owner changed")
+                    validator = context_wire.validate_current_result if current_context else context_wire.validate_result
+                    validator(result, expected_context=parsed["principal_context"],
+                        capability_profile_digest=parsed["capability_profile_digest"],
+                        **({"expected_workspace_principal": parsed["workspace_principal"]} if current_context else {}))
+                    response = {"ok": True, "result": result}
+                    context_wire.encode(response, limit=context_wire.MAX_RESPONSE_BYTES - 1)
+                    await self._send_ceo_ingress_response(writer, response, response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                except Exception:
+                    await self._send_ceo_ingress_response(writer, workspace_error("source_unavailable", 503),
+                        response_ceiling=context_wire.MAX_RESPONSE_BYTES)
+                return
             if isinstance(parsed, dict) and parsed.get("schema") == FACT_SCHEMA:
                 if not app_peer or not callable(app_binding.principal_facts_factory):
                     await self._send_ceo_ingress_error(writer, "peer_denied", "COO facts require the installed App peer")
@@ -6391,6 +6568,22 @@ class ExecutiveControlService:
                     # No ordinary refusal can prove that a committed admission
                     # or launch did not happen. Retain the original pointer.
                     return
+                return
+            is_selected_child_frame = (
+                isinstance(parsed, Mapping)
+                and parsed.get("schema") == SELECTED_CHILD_FRAME_SCHEMA
+            )
+            if is_selected_child_frame:
+                # A closed private selected-child frame runs before the
+                # catch-all App-peer schema refusal.
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied",
+                        "selected-child frame is not authorized for this peer",
+                    )
+                    return
+                await self._handle_selected_child_frame(
+                    writer, parsed, app_binding=app_binding)
                 return
             principal_frame = (
                 isinstance(parsed, Mapping) and isinstance(parsed.get("schema"), str)
@@ -6499,6 +6692,190 @@ class ExecutiveControlService:
                 pass
             if task is not None:
                 self._ceo_ingress_tasks.discard(task)
+
+    async def _handle_selected_child_frame(
+        self,
+        writer: asyncio.StreamWriter,
+        parsed: Mapping[str, Any],
+        *,
+        app_binding: CeoIngressAppBinding,
+    ) -> None:
+        """Admit one private selected-child frame on the existing ingress.
+
+        The Control independently re-proves the App peer, the unchanged App
+        binding, the exact frozen target and its material digest, the current
+        Runtime, the exact host provider, and the principal's actual row,
+        fact and authority. The frame's own authority fields are never
+        trusted: they are compared with the host facts, not accepted.
+
+        The common read/currentness guard is separate from the fresh
+        admission guard. An already claimed original command stays readable
+        in the incumbent reconciliation posture; only a fresh claim demands
+        the current admission, arming and READY posture.
+        """
+
+        from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+        from control_plane.coo_principal_host import CooHostProvider
+        from control_plane.coo_principal_mandate import project_coo_principal_mandate
+        from control_plane.workspace_owned_task import await_owned
+
+        try:
+            request = _selected_child_frame(parsed)
+        except (TypeError, ValueError):
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input", "selected-child frame is invalid"
+            )
+            return
+        command = request["command"]
+        action = request["action"]
+        target = app_binding.selected_child_target
+        if not _exact_selected_child_target(target):
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child target is unavailable",
+            )
+            return
+
+        def require_current():
+            # The common read/currentness guard. It never demands an open
+            # new-effect mandate, so an already claimed original command
+            # stays readable in the legitimate reconciliation posture.
+            if (app_binding is not self._ceo_ingress_app_binding
+                    or self._closing or not self._ceo_ingress_ready
+                    or app_binding.selected_child_target is not target
+                    or writer.is_closing()):
+                raise ValueError("selected-child request is no longer current")
+            target.require_current()
+            if target.material_digest() != parsed["target_digest"]:
+                raise ValueError("selected-child target changed")
+
+        def require_fresh_request():
+            # The fresh admission guard. It adds the current admission
+            # arming and the READY service posture on top of the common
+            # guard. The repaired C17 composition invokes it at the fresh
+            # canonical claim boundary only.
+            require_current()
+            if (not app_binding.principal_admission_armed
+                    or self._service_state != "READY"):
+                raise ValueError("selected-child admission is unavailable")
+
+        try:
+            require_current()
+            child = target.child_for(command)
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child target is unavailable",
+            )
+            return
+        if child is None:
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input", "selected-child command is not frozen"
+            )
+            return
+        runtime = self._require_runtime()
+        factory = app_binding.principal_facts_factory
+        if not callable(factory):
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        try:
+            provider = factory(runtime)
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        if type(provider) is not CooHostProvider:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        source = provider.source
+        workspace = provider.workspace
+        frame_context = PrincipalAdmissionContext(**parsed["principal_context"])
+
+        def require_read_current():
+            # Read authority is independent of fresh READY/arming/mandate
+            # gates. Re-prove the same owner, source and principal around
+            # the Workspace read, including after an awaited observation.
+            require_current()
+            if (self._require_runtime() is not runtime
+                    or app_binding.principal_facts_factory is not factory
+                    or provider.source is not source or provider.workspace is not workspace):
+                raise ValueError("selected-child receiving source changed")
+            before = source.for_principal(parsed["principal"], target.work_ref)
+            row, fact, authority = before
+            actual_context = PrincipalAdmissionContext(
+                row["work_ref"], fact.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest,
+            )
+            projection = project_coo_principal_mandate(
+                principal=fact, authority=authority,
+                mission_workspace=workspace.read_mission_for_work_ref(target.work_ref),
+            )
+            if (actual_context != frame_context
+                    or authority.work_ref != target.work_ref
+                    or authority.capability_profile_digest != parsed["capability_profile_digest"]
+                    or projection["mission"]["work_ref"] != target.work_ref
+                    or projection["mission"]["root_job_id"] != child.selection.root_job_id
+                    or source.for_principal(parsed["principal"], target.work_ref) != before):
+                raise ValueError("selected-child principal is not current")
+            require_current()
+            if (self._require_runtime() is not runtime
+                    or app_binding.principal_facts_factory is not factory
+                    or provider.source is not source or provider.workspace is not workspace):
+                raise ValueError("selected-child receiving source changed")
+            return actual_context, authority
+
+        try:
+            actual_context, authority = require_read_current()
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "authority_refused",
+                "the selected-child principal is not current",
+            )
+            return
+        try:
+            composition = target.new_composition(
+                service=self, runtime=runtime, loop=asyncio.get_running_loop(),
+                authority=provider, context=actual_context,
+                capability_profile_digest=authority.capability_profile_digest,
+                receiving_request_guard=require_fresh_request,
+            )
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child source is unavailable",
+            )
+            return
+        try:
+            # The existing mutation/task ownership keeps the original command
+            # on its original carrier if this private connection drops.
+            if action == "selected_child_submit":
+                result = await await_owned(asyncio.create_task(
+                    composition.submit_async(command)))
+            else:
+                result = await await_owned(asyncio.create_task(
+                    composition.status_async(command)))
+            # Never disclose an original observation through a moved owner
+            # or revoked principal. A post-await refusal is not a no-effect
+            # receipt, even when this request was a replay.
+            require_read_current()
+            result = {**result, "target_digest": target.material_digest()}
+        except Exception:
+            # The original owner may already hold an effect. A refusal here
+            # is never read as proof that no effect happened.
+            await self._send_ceo_ingress_error(
+                writer, "internal_error",
+                "the selected-child observation failed",
+            )
+            return
+        await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
 
     @staticmethod
     def _request(request: Any) -> tuple[str, dict[str, Any]]:
@@ -8094,141 +8471,385 @@ class ExecutiveControlService:
     async def _dispatch_cycle_job_exact(
         self, job_id: str, command_id: str
     ) -> OrchestrationDispatchOutcome:
-        runtime = self._require_runtime()
         async with self._dispatch_lock:
-            async with self._workspace_lock:
-                live = {
-                    value
-                    for value, task in self._dispatch_tasks.items()
-                    if not task.done()
-                }
-                job = runtime.jobs.get_job(job_id)
-                if job is None:
-                    raise StateConflict(f"job {job_id!r} does not exist")
-                root = self._require_bound_coo_job(job)
-                if live and live != {job_id}:
-                    live_jobs = [runtime.jobs.get_job(value) for value in live]
-                    if (
-                        any(value is None for value in live_jobs)
-                        or any(
-                            value.root_job_id != job.root_job_id
-                            for value in live_jobs
-                            if value is not None
-                        )
-                        or any(
-                            value.status not in {
-                                JobStatus.RUNNING,
-                                JobStatus.CHECKPOINTED,
-                            }
-                            for value in live_jobs
-                            if value is not None
-                        )
-                    ):
-                        raise StateConflict(
-                            "the serialized worker already has another active dispatch"
-                        )
-                    for value in live_jobs:
-                        assert value is not None
-                        self._require_bound_coo_job(value)
-                if job.status not in {
-                    JobStatus.QUEUED,
+            return await self._dispatch_cycle_job_exact_locked(job_id, command_id)
+
+    async def _dispatch_cycle_job_exact_locked(
+        self, job_id: str, command_id: str
+    ) -> OrchestrationDispatchOutcome:
+        """The incumbent dispatch body; caller owns the existing dispatch lock."""
+        if not self._dispatch_lock.locked():
+            raise StateConflict("exact cycle dispatch requires its existing lock")
+        runtime = self._require_runtime()
+        async with self._workspace_lock:
+            live = {
+                value
+                for value, task in self._dispatch_tasks.items()
+                if not task.done()
+            }
+            job = runtime.jobs.get_job(job_id)
+            if job is None:
+                raise StateConflict(f"job {job_id!r} does not exist")
+            root = self._require_bound_coo_job(job)
+            if live and live != {job_id}:
+                live_jobs = [runtime.jobs.get_job(value) for value in live]
+                if (
+                    any(value is None for value in live_jobs)
+                    or any(
+                        value.root_job_id != job.root_job_id
+                        for value in live_jobs
+                        if value is not None
+                    )
+                    or any(
+                        value.status not in {
+                            JobStatus.RUNNING,
+                            JobStatus.CHECKPOINTED,
+                        }
+                        for value in live_jobs
+                        if value is not None
+                    )
+                ):
+                    raise StateConflict(
+                        "the serialized worker already has another active dispatch"
+                    )
+                for value in live_jobs:
+                    assert value is not None
+                    self._require_bound_coo_job(value)
+            if job.status not in {
+                JobStatus.QUEUED,
+                JobStatus.RUNNING,
+                JobStatus.CHECKPOINTED,
+            }:
+                # Resolve only an already-terminal command-bound ambiguity.
+                # No supervisor, placement selection, lease replay or provider
+                # start is involved, including after a service restart.
+                terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
+                    job_id, command_id=command_id
+                )
+                await self._project_terminal_return(
+                    job_id, expected_attempt_id=terminal.attempt.attempt_id
+                )
+                return terminal
+            self._require_foreground_only_source(root.job_id)
+            if job.status is JobStatus.QUEUED:
+                from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
+                if (job.orchestration_role in {"work", "review", "repair"}
+                        and root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY):
+                    from control_plane import project_execution_admission as project_source
+                    child_source = self.config.proof_source_repository
+                    if project_source.read_source(runtime, root) is not None:
+                        self._require_project_execution_root(root)
+                        # A research turn following code retains the exact
+                        # derived base in its own allocator-owned root clone.
+                        # Keep readonly/v1 intact and clone only that proven
+                        # root, never a caller-selected repository or SHA.
+                        if project_source.workspace_base_for_job(self._require_supervisor(), root) != root.constraints["base_sha"]:
+                            raise StateConflict("readonly project child source changed")
+                        child_source = Path(root.worktree)
+                    await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
+                        source_repository=child_source, shared_gid=self.config.proof_shared_gid)
+                    if child_source != self.config.proof_source_repository:
+                        self._require_project_execution_root(root)
+                        if project_source.workspace_base_for_job(self._require_supervisor(), root) != root.constraints["base_sha"]:
+                            raise StateConflict("readonly project child source changed during allocation")
+                await self._prepare_project_cycle_workspace(job, root)
+                self._require_coo_workspace(job)
+            if runtime.operator_harness.is_interactive_job(job.job_id):
+                raise StateConflict(
+                    "interactive plan Jobs are not routed to the planner supervisor"
+                )
+            supervisor: Any = (
+                self._require_operator_supervisor()
+                if (
+                    job.orchestration_role == "plan"
+                    and self._coo_binding_for_root(root)["operator_harness_armed"]
+                )
+                else self._require_supervisor()
+            )
+            try:
+                async def start_current_cycle_job():
+                    # The physical cycle schedules a different callback
+                    # task. Recheck its inherited exact source immediately
+                    # before the synchronous canonical claim, not task-id
+                    # equality with the original request.
+                    self._require_foreground_only_source(root.job_id)
+                    return await supervisor.start_cycle_job(job_id, command_id=command_id)
+                started = await self._run_owned_coroutine(
+                    start_current_cycle_job()
+                )
+            except Exception as exc:
+                current = runtime.jobs.get_job(job_id)
+                if current is not None and current.status in {
                     JobStatus.RUNNING,
                     JobStatus.CHECKPOINTED,
+                    JobStatus.CANCEL_REQUESTED,
                 }:
-                    # Resolve only an already-terminal command-bound ambiguity.
-                    # No supervisor, placement selection, lease replay or provider
-                    # start is involved, including after a service restart.
-                    terminal = runtime.attempts.terminal_cycle_dispatch_outcome(
-                        job_id, command_id=command_id
+                    self._dispatch_errors[job_id] = (
+                        f"{type(exc).__name__}: ambiguous cycle worker start; "
+                        "restart reconciliation required"
                     )
+                    self._service_state = "QUARANTINED"
+                raise
+            if isinstance(started, OrchestrationDispatchOutcome):
+                if started.outcome == "TERMINAL":
                     await self._project_terminal_return(
-                        job_id, expected_attempt_id=terminal.attempt.attempt_id
+                        started.job_id,
+                        expected_attempt_id=started.attempt.attempt_id,
                     )
-                    return terminal
-                self._require_foreground_only_source(root.job_id)
-                if job.status is JobStatus.QUEUED:
-                    from control_plane.executive_runtime import CHILD_WORKSPACE_POLICY, CHILD_WORKSPACE_POLICY_KEY
-                    if (job.orchestration_role in {"work", "review", "repair"}
-                            and root.constraints.get(CHILD_WORKSPACE_POLICY_KEY) == CHILD_WORKSPACE_POLICY):
-                        from control_plane import project_execution_admission as project_source
-                        child_source = self.config.proof_source_repository
-                        if project_source.read_source(runtime, root) is not None:
-                            self._require_project_execution_root(root)
-                            # A research turn following code retains the exact
-                            # derived base in its own allocator-owned root clone.
-                            # Keep readonly/v1 intact and clone only that proven
-                            # root, never a caller-selected repository or SHA.
-                            if project_source.workspace_base_for_job(self._require_supervisor(), root) != root.constraints["base_sha"]:
-                                raise StateConflict("readonly project child source changed")
-                            child_source = Path(root.worktree)
-                        await self._run_physical(runtime.jobs.prepare_coo_child_workspace, job.job_id,
-                            source_repository=child_source, shared_gid=self.config.proof_shared_gid)
-                        if child_source != self.config.proof_source_repository:
-                            self._require_project_execution_root(root)
-                            if project_source.workspace_base_for_job(self._require_supervisor(), root) != root.constraints["base_sha"]:
-                                raise StateConflict("readonly project child source changed during allocation")
-                    await self._prepare_project_cycle_workspace(job, root)
-                    self._require_coo_workspace(job)
-                if runtime.operator_harness.is_interactive_job(job.job_id):
-                    raise StateConflict(
-                        "interactive plan Jobs are not routed to the planner supervisor"
-                    )
-                supervisor: Any = (
-                    self._require_operator_supervisor()
-                    if (
-                        job.orchestration_role == "plan"
-                        and self._coo_binding_for_root(root)["operator_harness_armed"]
-                    )
-                    else self._require_supervisor()
+                return started
+            lease = getattr(started, "lease", None)
+            attempt = getattr(lease, "attempt", None)
+            token = getattr(lease, "lease_token", None)
+            if attempt is None or not token:
+                raise ServiceError("cycle supervisor returned no active leased Attempt")
+            task = asyncio.create_task(
+                self._finish_dispatched(job_id, started),
+                name=f"executive-cycle-finish-{job_id}",
+            )
+            self._dispatch_tasks[job_id] = task
+            return OrchestrationDispatchOutcome(
+                command_id=command_id,
+                job_id=job_id,
+                attempt=attempt,
+                outcome="ACTIVE",
+                lease_token=token,
+            )
+
+    async def dispatch_selected_child(
+        self, *, job_id: str, command_id: str,
+        expected_selection: ExpectedChildSelection, admission_guard: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Use the original command under the incumbent dispatch lock.
+
+        A concurrent request reobserves the first claim before workspace or
+        supervisor work. The private host guard travels in the existing task
+        binding and is repeated inside the canonical fresh claim transaction.
+        """
+        runtime = self._require_runtime()
+        if (type(expected_selection) is not ExpectedChildSelection
+                or expected_selection.job_id != job_id
+                or expected_selection.command_id != command_id):
+            raise StateConflict("selected child selection does not name this claim")
+        async with self._dispatch_lock:
+            job = runtime.jobs.get_job(job_id)
+            if job is None or job.orchestration_role not in {"work", "repair"}:
+                raise StateConflict("selected child role is not dispatchable")
+            if (job.parent_job_id != expected_selection.parent_job_id
+                    or job.root_job_id != expected_selection.root_job_id):
+                raise StateConflict("selected child is outside its frozen root")
+            observed = self._selected_child_attempt(job_id, command_id)
+            if observed is not None:
+                return self._selected_child_observation(job_id, command_id, observed)
+            self._require_selected_child_readiness()
+            if (not callable(admission_guard) or inspect.iscoroutinefunction(admission_guard)
+                    or inspect.iscoroutinefunction(getattr(admission_guard, "__call__", None))):
+                raise StateConflict("selected child admission guard must be synchronous")
+            guarded = admission_guard()
+            if guarded is not None:
+                if inspect.iscoroutine(guarded):
+                    guarded.close()
+                raise StateConflict("selected child admission guard refused")
+            root = self._require_bound_coo_job(job)
+            try:
+                with expected_child_selection(expected_selection, admission_guard=admission_guard):
+                    outcome = await self._dispatch_cycle_job_exact_locked(job_id, command_id)
+            except Exception:
+                # The original owner has returned. Only a successful canonical
+                # absence read proves that no child claim was committed. If
+                # that read fails, propagate ambiguity to the same command.
+                claimed = self._selected_child_attempt(job_id, command_id)
+                if claimed is None:
+                    return {"command_id": command_id, "job_id": job_id,
+                        "attempt_id": None, "attempt_status": None,
+                        "job_status": job.status.value, "state": "REFUSED",
+                        "reason": "EXECUTIVE_SELECTED_CHILD_CLAIM_REFUSED"}
+                self._record_selected_child_effect_unknown(root.job_id, job_id, command_id)
+                return self._selected_child_observation(job_id, command_id, claimed, uncertain=True)
+            attempt = self._selected_child_attempt(job_id, command_id)
+            if attempt is None:
+                attempt = outcome.attempt
+            return self._selected_child_observation(job_id, command_id, attempt)
+
+    async def selected_child_status(
+        self, *, job_id: str, command_id: str
+    ) -> dict[str, Any]:
+        """Resolve one selected child through its exact command and Attempt.
+
+        A completed status is sourced from the canonical validated role
+        completion. This read never replaces terminal-return ownership and
+        never delivers a second message.
+        """
+
+        runtime = self._require_runtime()
+        job = runtime.jobs.get_job(job_id)
+        if job is None:
+            raise StateConflict(f"job {job_id!r} does not exist")
+        if job.orchestration_role not in {"work", "repair"}:
+            raise StateConflict("selected child role is not dispatchable")
+        attempt = self._selected_child_attempt(job_id, command_id)
+        if attempt is None:
+            # Nothing durable is owned by this command yet. Answering that
+            # question is an authority question, so the incumbent readiness and
+            # host-authority fences apply.
+            self._require_selected_child_readiness()
+            return {
+                "command_id": command_id,
+                "job_id": job_id,
+                "root_job_id": job.root_job_id,
+                "orchestration_role": job.orchestration_role,
+                "job_status": job.status.value,
+                "attempt_id": None,
+                "attempt_number": None,
+                "attempt_status": None,
+                "state": "NOT_CLAIMED",
+                "reason": "EXECUTIVE_SELECTED_CHILD_NOT_CLAIMED",
+            }
+        return self._selected_child_observation(job_id, command_id, attempt)
+
+    def _require_selected_child_readiness(self) -> None:
+        """Apply the incumbent readiness and host-authority fences."""
+
+        if self._closing:
+            raise StateConflict("Executive control service is closing")
+        if not self.config.coo_autonomy_armed:
+            raise StateConflict(
+                "COO autonomy is not armed in reviewed host configuration"
+            )
+        self._require_current_autonomy()
+        if self._service_state != "READY":
+            raise StateConflict(
+                f"Executive control service is {self._service_state}"
+            )
+        self._require_coo_worker_composed()
+
+    def _selected_child_attempt(
+        self, job_id: str, command_id: str
+    ) -> Attempt | None:
+        """Return the canonical Attempt that owns this exact command."""
+
+        runtime = self._require_runtime()
+        event = runtime.events.get_event_by_command_id(command_id)
+        if event is None:
+            return None
+        if (
+            event.event_type != "JOB_CLAIMED"
+            or event.aggregate_id != job_id
+            or event.job_id != job_id
+            or not isinstance(event.attempt_id, str)
+        ):
+            raise StateConflict(
+                "selected child command is bound to another Job"
+            )
+        attempt = runtime.attempts.get_attempt(event.attempt_id)
+        if attempt is None or attempt.job_id != job_id:
+            raise StateConflict("selected child command lost its bound Attempt")
+        return attempt
+
+    def _record_selected_child_effect_unknown(
+        self, root_job_id: str, job_id: str, command_id: str
+    ) -> None:
+        """Retain ambiguity in the incumbent owner even if marker I/O fails."""
+        self._dispatch_errors.setdefault(job_id,
+            "selected child original dispatch requires reconciliation")
+        self._service_state = "QUARANTINED"
+        try:
+            self._require_runtime().jobs.record_cycle_dispatch_effect_unknown(
+                root_job_id, selected_job_id=job_id, dispatch_command_id=command_id)
+        except (StateConflict, PersistenceError):
+            # The per-job dispatch error remains until the original owner's
+            # reconciliation; a missing marker is never proof of no effect.
+            return
+
+    def _selected_child_observation(
+        self,
+        job_id: str,
+        command_id: str,
+        attempt: Attempt,
+        *,
+        uncertain: bool = False,
+    ) -> dict[str, Any]:
+        """Project one canonical selected-child fact without a second effect."""
+
+        runtime = self._require_runtime()
+        job = runtime.jobs.get_job(job_id)
+        body: dict[str, Any] = {
+            "command_id": command_id,
+            "job_id": job_id,
+            "root_job_id": job.root_job_id if job is not None else None,
+            "orchestration_role": (
+                job.orchestration_role if job is not None else None
+            ),
+            "job_status": job.status.value if job is not None else None,
+            "attempt_id": attempt.attempt_id,
+            "attempt_number": attempt.attempt_number,
+            "attempt_status": attempt.status.value,
+            "state": "ACTIVE",
+            "reason": None,
+        }
+        marker = runtime.events.get_event_by_command_id(
+            f"{command_id}:effect-unknown"
+        )
+        resolution = runtime.events.get_event_by_command_id(
+            f"{command_id}:reconciled"
+        )
+        if (
+            uncertain
+            or (resolution is None and (marker is not None
+                or (job is not None and job.current_attempt_id == attempt.attempt_id
+                    and job_id in self._dispatch_errors)))
+            or attempt.status is AttemptStatus.LOST
+        ):
+            body["state"] = "EFFECT_UNKNOWN"
+            body["reason"] = "EXECUTIVE_SELECTED_CHILD_EFFECT_UNKNOWN"
+            return body
+        if attempt.status is AttemptStatus.COMPLETED:
+            if job is None or job.status is not JobStatus.COMPLETED:
+                # A completed Attempt whose Job is not complete is not a
+                # canonical completion.
+                body["state"] = "UNVERIFIED"
+                body["reason"] = "EXECUTIVE_COMPLETION_UNVERIFIED"
+                return body
+            try:
+                material = runtime.validated_role_completion(
+                    job_id, expected_attempt_id=attempt.attempt_id
                 )
-                try:
-                    async def start_current_cycle_job():
-                        # The physical cycle schedules a different callback
-                        # task. Recheck its inherited exact source immediately
-                        # before the synchronous canonical claim, not task-id
-                        # equality with the original request.
-                        self._require_foreground_only_source(root.job_id)
-                        return await supervisor.start_cycle_job(job_id, command_id=command_id)
-                    started = await self._run_owned_coroutine(
-                        start_current_cycle_job()
-                    )
-                except Exception as exc:
-                    current = runtime.jobs.get_job(job_id)
-                    if current is not None and current.status in {
-                        JobStatus.RUNNING,
-                        JobStatus.CHECKPOINTED,
-                        JobStatus.CANCEL_REQUESTED,
-                    }:
-                        self._dispatch_errors[job_id] = (
-                            f"{type(exc).__name__}: ambiguous cycle worker start; "
-                            "restart reconciliation required"
-                        )
-                        self._service_state = "QUARANTINED"
-                    raise
-                if isinstance(started, OrchestrationDispatchOutcome):
-                    if started.outcome == "TERMINAL":
-                        await self._project_terminal_return(
-                            started.job_id,
-                            expected_attempt_id=started.attempt.attempt_id,
-                        )
-                    return started
-                lease = getattr(started, "lease", None)
-                attempt = getattr(lease, "attempt", None)
-                token = getattr(lease, "lease_token", None)
-                if attempt is None or not token:
-                    raise ServiceError("cycle supervisor returned no active leased Attempt")
-                task = asyncio.create_task(
-                    self._finish_dispatched(job_id, started),
-                    name=f"executive-cycle-finish-{job_id}",
-                )
-                self._dispatch_tasks[job_id] = task
-                return OrchestrationDispatchOutcome(
-                    command_id=command_id,
-                    job_id=job_id,
-                    attempt=attempt,
-                    outcome="ACTIVE",
-                    lease_token=token,
-                )
+            except RuntimeProofError:
+                body["state"] = "UNVERIFIED"
+                body["reason"] = "EXECUTIVE_COMPLETION_UNVERIFIED"
+                return body
+            try:
+                candidate = reduce_terminal_return(material=material)
+            except TerminalReturnError:
+                body["state"] = "UNVERIFIED"
+                body["reason"] = "EXECUTIVE_COMPLETION_UNVERIFIED"
+                return body
+            body["state"] = "COMPLETED"
+            body["result_status"] = candidate.result_status
+            body["role"] = candidate.role
+            body["operation_key"] = candidate.operation_key
+            body["session_ref"] = candidate.session_ref
+            body["result_envelope_digest"] = candidate.result_envelope_digest
+            body["terminal_evidence_digest"] = candidate.terminal_evidence_digest
+            capsule = selected_child_result_capsule(candidate, command_id=command_id)
+            if capsule is not None:
+                body["result_capsule"] = capsule
+            else:
+                # Completion remains true; omitted text is not a complete synopsis.
+                body["reason"] = "EXECUTIVE_RESULT_CONTENT_TOO_LARGE"
+            return body
+        if attempt.status is AttemptStatus.FAILED:
+            body["state"] = "FAILED"
+            return body
+        if attempt.status is AttemptStatus.CANCELLED:
+            body["state"] = "CANCELLED"
+            return body
+        if attempt.status is AttemptStatus.RATE_LIMITED:
+            body["state"] = "RATE_LIMITED"
+            return body
+        if attempt.status is AttemptStatus.CANCEL_REQUESTED:
+            body["state"] = "CANCEL_REQUESTED"
+            return body
+        return body
 
     def _native_return_source(self, root: Job):
         """Reuse the existing authenticated Company/Dialogue composition."""

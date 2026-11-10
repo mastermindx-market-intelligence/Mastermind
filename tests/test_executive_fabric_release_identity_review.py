@@ -8,6 +8,23 @@ from tests.executive_identity_review import reviewed_literal_spans
 from tests.test_executive_a2_identity_review import scan
 
 
+def test_preview_block_unit_pin_exposes_even_nonidentity_byte_drift():
+    from tests.test_ceo_submit_armed_composition import (
+        _d8_frozen_source_diff, _scan_added_identity_diff,
+    )
+    path = 'ops/fleet_storage_cleanup/linux_cache_preview.py'
+    text = (Path(__file__).parents[1] / path).read_text()
+    assert reviewed_literal_spans(path, text) == ((204, 43, 46, 'int'),)
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, text), source_postimages={path: text},
+    ) == []
+    changed = text + '\n# unrelated byte drift\n'
+    assert reviewed_literal_spans(path, changed) == ()
+    assert _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+    ) == ['512']
+
+
 @pytest.mark.parametrize('path', tuple(REVIEWED_FILES))
 def test_only_exact_reviewed_file_and_spelling_qualifies(path):
     text = (Path(__file__).parents[1]/path).read_text()
@@ -25,7 +42,18 @@ def test_only_exact_reviewed_file_and_spelling_qualifies(path):
         ['_mastermind_operator_canary', '0o700'] if path ==
         'control_plane/codex_operator_adapter.py' else
         ['430', '512', '401', '403', '409', '503', '503', '503', '503'] if path ==
-        'app/mastermind_os/src-tauri/src/auth.rs' else [])
+        'app/mastermind_os/src-tauri/src/auth.rs' else
+        # Exact protected installer60fb9e55 retains these17 findings unchanged;
+        # only the newly reviewed initial directory-mode token is masked.
+        ['_mastermind_exec', '_mastermind_exec', '_mastermind_worker',
+         '_mastermind_worker', '_mastermind_ops', '_mastermind_ops',
+         '_mastermind_ops', '_mastermind_ops', '452', '457',
+         '_mastermind_worker', '_mastermind_worker', '452', '432', '457',
+         '432', '432'] if path == 'ops/executive_os/install.sh' else
+        # Incumbent provider findings remain visible; only the ten new exact
+        # subscription principal sites are qualified by this source record.
+        ["_mastermind_worker","451","_mastermind_","_mastermind_worker","451","453","453","400","500","400","500","451","453","453"] if path ==
+        'ops/executive_os/provider_worker_slots.py' else [])
     assert scan(text, path) == expected
     assert reviewed_literal_spans('unreviewed/'+path, text) == ()
 
@@ -56,6 +84,8 @@ def test_changed_or_extended_file_cannot_reuse_review(path):
     'ops/executive_os/bootstrap-host.sh',
     'integrations/session_bridge/original_validator_compat/artifact_delivery.py.base',
     'research/fabric_glm_account_admission_20261014/BASELINE.xml',
+    'review_evidence/fabric_application/shared-relay-source-qualification-20261107.json',
+    'review_evidence/fabric_application/protected-hermes-readiness-join-20261107.json',
 ])
 def test_non_python_review_still_requires_exact_diff_postimage(path):
     from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff

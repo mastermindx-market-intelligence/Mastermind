@@ -39,7 +39,7 @@ describe("Daily Office consumer", () => {
     reads.mission!.value!.principal.owed_turn = { seat: "chairman", reason: "Reserved decision from owner.",
       source_refs: [{ owner: "EXECUTIVE_OS", ref: "decision:one", observed_at: "2026-10-04T08:00:00Z", freshness }] };
     render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
-    const attention = screen.getByRole("region", { name: freshness === "current" ? "The owner has requested Chairman attention." : "Chairman attention is not established." });
+    const attention = screen.getByRole("region", { name: freshness === "current" ? "The owner has requested Chairman attention." : "Decisions not yet known." });
     expect(attention.textContent.includes("Reserved decision from owner.")).toBe(freshness === "current");
   });
   it("passes only a current owner's exact worker result reference to the existing reader callback", () => {
@@ -80,11 +80,11 @@ describe("Daily Office consumer", () => {
   });
   it("puts the qualified answer before movement and exposes missing producers", () => {
     render(<MetaCeoOffice projection={projectOffice(input(), context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
-    expect(screen.getByRole("heading", { name: "Keep the whole company moving with intention." })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Meta-CEO" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Meta-CEO answer" }).textContent).toContain("One");
     expect(screen.getByText(/Company total is not established/)).toBeTruthy();
     expect(screen.getByText(/Work details are unavailable/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^send$/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send unavailable" }).hasAttribute("disabled")).toBe(true);
   });
 
   it.each<SourceState>(["CURRENT", "STALE", "UNKNOWN", "UNAVAILABLE", "WITHHELD", "UNASSOCIATED"])("renders %s by name without substituting a healthy empty state", (state) => {

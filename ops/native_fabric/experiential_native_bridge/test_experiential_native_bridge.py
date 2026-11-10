@@ -228,8 +228,40 @@ def sandbox_with_bridge(tmp_path: Path, _no_adapter: bool = False, **adapter_kwa
 # Composition (against the real pinned release).
 # --------------------------------------------------------------------------
 
+@pytest.fixture(scope="session", autouse=True)
+def fixed_release_source(tmp_path_factory):
+    """Reconstruct the original sealed 75-file parent from exact verified bytes.
+
+    The working source also contains later preimages and a Go shim. They are
+    not members of this historical release. Do not change its manifest seal
+    or teach the production composer to ignore extra files.
+    """
+    global RELEASE_ROOT
+    current = RELEASE_ROOT
+    manifest = json.loads(MANIFEST.read_text())
+    files = json.loads((MODULE_DIR / "fixtures" /
+                       "legacy-release-source-9bbd4ca7.sha256.json").read_text())
+    assert len(files) == manifest["release_tree_file_count"] == 75
+    binding = hashlib.sha256(
+        "".join(f"{name}:{files[name]}\n" for name in sorted(files)).encode()).hexdigest()
+    assert binding == manifest["release_tree_manifest_sha256"]
+    tree = tmp_path_factory.mktemp("sealed_legacy_release") / "source"
+    tree.mkdir()
+    for name, digest in files.items():
+        assert Path(name).name == name and name not in {".", ".."}
+        raw = (current / name).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == digest, name
+        (tree / name).write_bytes(raw)
+        (tree / name).chmod((current / name).stat().st_mode & 0o777)
+    RELEASE_ROOT = tree
+    try:
+        yield tree
+    finally:
+        RELEASE_ROOT = current
+
+
 @pytest.fixture(scope="session")
-def composed_overlay(tmp_path_factory):
+def composed_overlay(tmp_path_factory, fixed_release_source):
     """Compose from a content-CAS-verified plain copy of the pinned release.
 
     The copy is bound to the shipped manifest's tree digest and preimages, so

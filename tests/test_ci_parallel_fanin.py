@@ -33,11 +33,79 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert shards["strategy"]["max-parallel"] == 6
     assert shards["runs-on"] == "ubuntu-latest"
     assert type(shards["timeout-minutes"]) is int
-    assert 45 <= shards["timeout-minutes"] <= 60
+    assert 45 <= shards["timeout-minutes"] <= 75
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
     assert data["jobs"]["test"]["name"] == "test"
     assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pytest_shards"]
+
+
+def test_smoke_checkout_uses_the_full_shard_pinned_fixture_without_credentials():
+    import yaml
+
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    workflow = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    smoke = workflow["jobs"]["pr_fast"]["steps"][3]
+    full = next(
+        step for step in workflow["jobs"]["pytest_shards"]["steps"]
+        if step.get("name") == "Checkout pinned Macro engine"
+    )
+    assert smoke["name"] == "Checkout pinned Macro engine for source-proximate tests"
+    assert smoke["uses"] == full["uses"] == "actions/checkout@v4"
+    assert smoke["with"] == full["with"]
+    assert smoke["with"]["persist-credentials"] is False
+    assert smoke["if"] == "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
+    fan.validate_parallel_workflow(text)
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing", "duplicate", "ref", "repository", "path", "sparse-checkout",
+    "credentials", "missing-credentials", "string-credentials", "numeric-credentials",
+    "token", "action", "condition", "missing-condition", "reordered",
+    "continue-on-error", "extra-command",
+])
+def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pr_fast"]["steps"]
+    fixture = steps[3]
+    assert fixture["name"] == "Checkout pinned Macro engine for source-proximate tests"
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    if mutation == "missing":
+        steps.pop(3)
+    elif mutation == "duplicate":
+        steps.insert(4, dict(fixture))
+    elif mutation in {"ref", "repository", "path", "sparse-checkout", "token"}:
+        fixture["with"][mutation] = {
+            "ref": "master",
+            "repository": "other/repository",
+            "path": ".",
+            "sparse-checkout": "engine\n",
+            "token": "${{ secrets.OTHER_TOKEN }}",
+        }[mutation]
+    elif mutation == "credentials":
+        fixture["with"]["persist-credentials"] = True
+    elif mutation == "missing-credentials":
+        fixture["with"].pop("persist-credentials")
+    elif mutation == "string-credentials":
+        fixture["with"]["persist-credentials"] = "false"
+    elif mutation == "numeric-credentials":
+        fixture["with"]["persist-credentials"] = 0
+    elif mutation == "action":
+        fixture["uses"] = "actions/checkout@v3"
+    elif mutation == "condition":
+        fixture["if"] = "${{ always() }}"
+    elif mutation == "missing-condition":
+        fixture.pop("if")
+    elif mutation == "reordered":
+        steps[3], steps[4] = steps[4], steps[3]
+    elif mutation == "continue-on-error":
+        fixture["continue-on-error"] = True
+    else:
+        fixture["run"] = "echo unexpected"
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
 @pytest.mark.parametrize(
@@ -45,16 +113,16 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     [
         # Finite wall-clock budgets are mandatory; no silent removal or
         # enormous timeout may bypass the queue's 100-minute check window.
-        ("    timeout-minutes: 60", ""),
-        ("    timeout-minutes: 60", "    timeout-minutes: null"),
-        ("    timeout-minutes: 60", "    timeout-minutes: true"),
-        ("    timeout-minutes: 60", '    timeout-minutes: "60"'),
-        ("    timeout-minutes: 60", "    timeout-minutes: 0"),
-        ("    timeout-minutes: 60", "    timeout-minutes: -5"),
-        ("    timeout-minutes: 60", "    timeout-minutes: 44"),
-        ("    timeout-minutes: 60", "    timeout-minutes: 61"),
-        ("    timeout-minutes: 60", "    timeout-minutes: 93"),
-        ("    timeout-minutes: 60", "    timeout-minutes: 120"),
+        ("    timeout-minutes: 75", ""),
+        ("    timeout-minutes: 75", "    timeout-minutes: null"),
+        ("    timeout-minutes: 75", "    timeout-minutes: true"),
+        ("    timeout-minutes: 75", '    timeout-minutes: "75"'),
+        ("    timeout-minutes: 75", "    timeout-minutes: 0"),
+        ("    timeout-minutes: 75", "    timeout-minutes: -5"),
+        ("    timeout-minutes: 75", "    timeout-minutes: 44"),
+        ("    timeout-minutes: 75", "    timeout-minutes: 76"),
+        ("    timeout-minutes: 75", "    timeout-minutes: 93"),
+        ("    timeout-minutes: 75", "    timeout-minutes: 120"),
         ("    timeout-minutes: 8", ""),
         ("    timeout-minutes: 8", "    timeout-minutes: null"),
         ("    timeout-minutes: 8", "    timeout-minutes: 0"),
@@ -547,7 +615,9 @@ _GATE_PASS_CASES = [
     ("pull_request", "full", ("success", "skipped", "success")),
     ("pull_request", "fast", ("success", "success", "skipped")),
     ("pull_request", "smoke", ("success", "success", "skipped")),
-    ("merge_group", "", ("skipped", "skipped", "success")),
+    ("merge_group", "full", ("success", "skipped", "success")),
+    ("merge_group", "fast", ("success", "success", "skipped")),
+    ("merge_group", "smoke", ("success", "success", "skipped")),
     ("push", "", ("skipped", "skipped", "success")),
     ("workflow_dispatch", "", ("skipped", "skipped", "success")),
 ]
@@ -620,7 +690,7 @@ def test_actual_shell_gate_rejects_unqualified_pr_modes(tmp_path, mode, states):
     assert calls == []
 
 
-@pytest.mark.parametrize("event", ["merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
 @pytest.mark.parametrize("mode", ["fast", "smoke"])
 def test_actual_shell_gate_never_uses_pr_fast_results_for_release(tmp_path, event, mode):
     result, calls = _run_exact_workflow_gate(
@@ -637,3 +707,22 @@ def test_actual_shell_gate_preserves_canonical_plan_failure(tmp_path, event, mod
     )
     assert result.returncode == 17
     assert calls == ["scripts/ci_pytest.py --plan-only --jobs 6"]
+
+
+def test_actual_group_prerequisite_budget_cannot_preempt_repository_allowance():
+    """Group514aa2/run42499015733: preflight16:16:23→repo16:39:17.
+
+    The real job60 deadline cancelled repo after37m14, before its45m allowance.
+    This is budget assembly only; final module summary did not prove process exit.
+    """
+    import yaml
+    data = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    job = data['jobs']['pytest_shards']
+    runner = next(s for s in job['steps'] if s.get('name') == 'Run repository test shard')
+    upload = next(s for s in job['steps'] if s.get('name') == 'Upload fixed test diagnostics')
+    observed_prerequisite_seconds = 22 * 60 + 54
+    assert runner['timeout-minutes'] == 45
+    assert upload['timeout-minutes'] == 2
+    assert (observed_prerequisite_seconds + 60 * runner['timeout-minutes']
+            + 60 * upload['timeout-minutes']) < 60 * job['timeout-minutes']
+    assert job['timeout-minutes'] + data['jobs']['test']['timeout-minutes'] <= 100
