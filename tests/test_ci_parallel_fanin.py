@@ -590,7 +590,10 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
     import yaml
 
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
-    scope = workflow["jobs"]["pr_scope"]["steps"][1]
+    scope = next(
+        step for step in workflow["jobs"]["pr_scope"]["steps"]
+        if step.get("id") == "scope"
+    )
     fallback = [
         line.strip() for line in scope["run"].splitlines()
         if line.strip().startswith("printf 'mode=full")

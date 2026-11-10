@@ -70,6 +70,21 @@ on the original issue. Downloaded bytes and document bodies must match exactly.
 Final issue visibility, assignment, native object membership, and zero wake
 requests must be read back before `verified-publication.json` is written.
 
+After verified publication, the archive card moves from `backlog` to `done`.
+The completion step reconciles every attachment ID/hash and document body with
+the saved publication receipts, including the asset supplement when present.
+It refuses incomplete publication, assignment, active execution, related work,
+reviews, interactions, or wake history. One status-only update is followed by
+fresh status, ownership, live-run, and zero-wake readback. No comment, assignment,
+or agent wake is needed to finish this archive.
+
+For an already-published archive, run `publish_history.py --output <archive-directory>
+--complete-only` to perform that reconciliation without exporting or uploading
+again. A lost response stays bound to the same issue: an observed `done` state
+is reconciled without another write; an unresolved pending update is not replayed.
+`completion.verified.json` records the result. This terminal status covers the
+imported snapshot only; the live fleet acceptance below remains separate.
+
 The HTML attachment is downloaded for local viewing; it is not rendered inline
 as trusted Paperclip UI. The native reader's security policy remains in effect.
 The raw private snapshot and original Hermes data are retained for recovery.
