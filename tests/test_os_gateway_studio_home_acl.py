@@ -616,6 +616,11 @@ class HomeAclFixture:
         backend_dir = self.tools / "backend"
         backend_dir.mkdir()
         (backend_dir / "server.py").write_bytes(b"print('backend')\n")
+        # These are new, private fixture entries. Give them the secure premise
+        # explicitly instead of inheriting the runner's creation umask.
+        for path in [self.root, *self.root.rglob("*")]:
+            path.chmod(0o700 if path.is_dir() else 0o600)
+        node.chmod(0o755)
         return self
 
     def inode(self, path: Path) -> int:
@@ -670,7 +675,10 @@ def reader_overrides(
 
 class HomeAclReaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        self._tmp = tempfile.mkdtemp(prefix="acl-reader-", dir=REPO_ROOT)
+        # A checkout may be group-writable; it is not part of this synthetic
+        # publication. Use an owned home-side temp tree, without changing or
+        # reading payload from the live home or the checkout's permissions.
+        self._tmp = tempfile.mkdtemp(prefix="acl-reader-", dir=Path.home().resolve())
         self.addCleanup(cleanup_owned_fixture, self._tmp)
         self.fx = HomeAclFixture(Path(self._tmp) / "fx").build()
 

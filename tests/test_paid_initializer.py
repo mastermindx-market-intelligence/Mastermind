@@ -445,7 +445,9 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    bootstrap=Path(sys.executable).with_name('python3')
+    # Canonicalize only the fixture directory. Keep python3's final selector
+    # symlink so the real owner still checks its image and alias identity.
+    bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
     monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
