@@ -2,9 +2,10 @@
 
 Session-bridge-side mirror of the #2180 native-path continuity contract
 (``app/mastermind_os/src/hermes-native/continuity.ts``).  It separates WHY a
-bot conversation is not progressing — viewer disconnected, gateway busy, model
-429/quota, native terminal, effect-unknown — instead of collapsing them into a
-single native error, and it names the exact permitted continuation.
+bot conversation is not progressing — viewer disconnected, gateway busy,
+gateway stopped, model 429/quota, native terminal, effect-unknown — instead of
+collapsing them into a single native error, and it names the exact permitted
+continuation.
 
 Binding rules (T3_HANDOFF_V2 §6 failure matrix):
 
@@ -43,18 +44,22 @@ TURN_RUNNING = "turn_running"
 NATIVE_TERMINAL = "native_terminal"
 MODEL_LIMITED = "model_limited"
 GATEWAY_BUSY = "gateway_busy"
+GATEWAY_STOPPED = "gateway_stopped"
 VIEWER_DISCONNECTED = "viewer_disconnected"
 AUTH_CHANGED = "auth_changed"
 EFFECT_UNKNOWN = "effect_unknown"
 UNCLASSIFIED = "unclassified"
 STATES = frozenset({
     IDLE, TURN_RUNNING, NATIVE_TERMINAL, MODEL_LIMITED, GATEWAY_BUSY,
-    VIEWER_DISCONNECTED, AUTH_CHANGED, EFFECT_UNKNOWN, UNCLASSIFIED,
+    GATEWAY_STOPPED, VIEWER_DISCONNECTED, AUTH_CHANGED, EFFECT_UNKNOWN,
+    UNCLASSIFIED,
 })
 
 _BUSY_CODES = {"NATIVE_SESSION_BUSY": "session_busy",
                "NATIVE_PROMPT_PENDING": "prompt_pending",
                "NATIVE_BUSY": "port_busy"}
+_STOPPED_CODES = {"NATIVE_GATEWAY_STOPPED": "gateway_not_running",
+                  "NATIVE_GATEWAY_NOT_RUNNING": "gateway_not_running"}
 _VIEWER_CODES = {"NATIVE_CLIENT_INTERRUPTED": "host_interrupted",
                  "NATIVE_CLIENT_UNAVAILABLE": "client_unavailable",
                  "NATIVE_PIPE_UNAVAILABLE": "client_unavailable",
@@ -81,6 +86,8 @@ def classify_error_code(code, *, pending=None):
         return _state(GATEWAY_BUSY, reason=_BUSY_CODES[code])
     if code in _VIEWER_CODES:
         return _state(VIEWER_DISCONNECTED, reason=_VIEWER_CODES[code])
+    if code in _STOPPED_CODES:
+        return _state(GATEWAY_STOPPED, reason=_STOPPED_CODES[code])
     if code in _AUTH_CODES:
         return _state(AUTH_CHANGED)
     if pending is not None:
@@ -177,6 +184,10 @@ def permitted_continuations(state):
             row = {"operation": "status", "idempotent": True,
                    "why": "port busy; re-observe before any mutation"}
         return [row]
+    if state["state"] == GATEWAY_STOPPED:
+        return [{"operation": "status", "idempotent": True,
+                 "why": "gateway stopped; its owner starts it — no auto-restart, "
+                        "reconnect or remake from here"}]
     if state["state"] == VIEWER_DISCONNECTED:
         if state.get("session_id"):
             return [{"operation": "read", "session_id": state["session_id"],

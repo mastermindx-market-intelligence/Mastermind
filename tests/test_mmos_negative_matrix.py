@@ -13,10 +13,10 @@ Rows proven here (with the §6 failure case they kill):
   the exact writer (correct epoch) may retire it; expiry alone is never
   reclaim-safety.  Boundary: ``WorkspaceLeaseStore.acquire_single_writer`` /
   ``release`` / ``reclaim_eligible``.
-* NM-06 gateway stopped: a stopped-gateway error code must stay an honest
-  unknown that carries the code and offers no mutation.  The distinct-label
-  half is ``xfail(strict=True)``: the vocabulary has no gateway-stopped state
-  yet (defect, handed off).  Boundary:
+* NM-06 gateway stopped: a stopped-gateway error code classifies as a
+  distinct ``gateway_stopped`` label (never busy/disconnected/effect-unknown)
+  and offers only read/status continuations — the gateway's owner starts it,
+  never an auto-restart/remake from here.  Boundary:
   ``hermes_native_continuity.classify_error_code``.
 * NM-09 provider 429: a rate-limited quota readback must become a typed
   unknown with probe evidence — never observed numbers, never a silent retry
@@ -142,28 +142,24 @@ def test_nm13_expiry_alone_is_never_reclaim_safety_settlement_is(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# NM-06 — gateway stopped: honest unknown now; distinct label missing (defect)
+# NM-06 — gateway stopped: distinct typed label; no mutation offered
 # ---------------------------------------------------------------------------
 
 
-def test_nm06_stopped_shaped_code_stays_unknown_carries_code_and_offers_no_mutation():
+def test_nm06_stopped_code_is_typed_gateway_stopped_and_offers_no_mutation():
     stopped = continuity.classify_error_code("NATIVE_GATEWAY_STOPPED")
-    # Unknown stays unknown: never idle/healthy, and the observed code is kept.
-    assert stopped["state"] == continuity.UNCLASSIFIED
-    assert stopped["code"] == "NATIVE_GATEWAY_STOPPED"
-    # No mutation is offered for an unclassified state — in particular no
-    # fresh send and no auto-retry/remake of the gateway.
+    # A stopped gateway is a stopped gateway: typed gateway_stopped, never
+    # idle/healthy, never collapsed into an honest-unknown blob.
+    assert stopped["state"] == continuity.GATEWAY_STOPPED
+    assert stopped["reason"] == "gateway_not_running"
+    # No mutation is offered — in particular no fresh send and no
+    # auto-retry/restart/remake of the gateway.
     assert continuity.fresh_send_allowed(stopped) is False
-    assert continuity.permitted_continuations(stopped) == []
+    continuations = continuity.permitted_continuations(stopped)
+    assert [c["operation"] for c in continuations] == ["status"]
+    assert all(c["idempotent"] for c in continuations)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="NM-06: hermes_native_continuity has no gateway-stopped state; a "
-           "stopped-gateway code classifies UNCLASSIFIED instead of a label "
-           "distinct from gateway_busy/viewer_disconnected (TS mirror + "
-           "adapter must add it — see NEGATIVE_MATRIX_V1.md NM-06)",
-)
 def test_nm06_gateway_stopped_needs_a_label_distinct_from_busy_and_disconnected():
     stopped = continuity.classify_error_code("NATIVE_GATEWAY_STOPPED")
     assert stopped["state"] not in (
