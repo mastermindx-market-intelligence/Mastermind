@@ -24,10 +24,11 @@ connection permits it. Source tests alone do not prove live model completion.
 
 - Reuse `MissionBrief`, `HandoffBrief`, `T3CliClient` and native T3 `delegate_task`,
   `task_status`, thread read/send and native completion propagation.
-- Native delegation already handles nested child work, but children at the
-  inspected revision share the parent's checkout. Disjoint file ownership is
-  therefore required for concurrent writers unless an incumbent workspace owner
-  supplies qualified isolation. Do not pretend a role label creates isolation.
+- Native delegation already handles nested child work. Exact schema/implementation
+  verification corrected an initial docs-only assumption: the inspected revision
+  supports both shared and native worktree isolation. Reuse native preparation;
+  enforce disjoint parallel scopes in shared checkouts and require actual native
+  workspace observations before treating a requested partition as qualified.
 - PR #2375 at `336062e39625b4231553fd725af01931fa5df87c` owns shared task-plan
   context and T3/Hermes long-horizon continuity. Do not edit its branch or files.
   Its original task tree remains the source-plan owner; this extension adds team
@@ -51,10 +52,14 @@ connection permits it. Source tests alone do not prove live model completion.
 
 Allowed new source paths: `integrations/session_bridge/t3_project_team.py`,
 `integrations/session_bridge/t3_project_team_cli.py`,
+`integrations/session_bridge/t3_project_team_inventory.py`,
 `tests/test_t3_project_team.py`, `tests/test_t3_project_team_cli.py`,
+`tests/test_t3_project_team_inventory.py`,
 `docs/plans/2026-11-09-t3-coo-project-graph.md`,
-`docs/T3_PROJECT_TEAMS.md`, `examples/t3_project_teams/` and a scoped packaging
-script if necessary. No edits to the adjacent live writer's files.
+`docs/T3_PROJECT_TEAMS.md`, `examples/t3_project_teams/`,
+`scripts/build_t3_project_team.py`, `scripts/qualify_t3_project_team.mjs`,
+`docs/evidence/2026-11-09-t3-project-team-native-contracts.json`.
+No edits to the adjacent live writer's files.
 
 ## Execution and proof boundaries
 
@@ -70,9 +75,32 @@ Native completion, evidence verification and principal acceptance remain distinc
 
 ## Current frontier
 
-G1 inspected. Managed source workspace acquired, clean at the procedure base.
+G1-G4 source implementation exists: validated role graph; native shared/worktree
+requests; original-parent/root bindings; immutable-reference progressive disclosure;
+source-backed dependency evidence; existing-client launch composition; read-only
+CLI; importable native project actions; deterministic standalone packaging and a
+nine-role MMOS planning template. The example is explicitly not dispatch authority.
+
+Qualification so far: 110 focused tests and 85 subtests pass, including incumbent
+client regressions and a fresh-process package consumer. Ten actual pinned native
+parser/schema positive and negative checks pass; their report is retained under
+`docs/evidence/2026-11-09-t3-project-team-native-contracts.json`. This is contract
+consumption, not live model execution or active-project installation.
+
+G5 review found a real remaining gap: native `t3 thread list` hardcodes
+`includeSubagents: false`. A known-binding-only graph cannot certify that no other
+native children exist. Next implement bounded, explicit native MCP child inventory
+and make incomplete/unavailable inventory prevent full-native-result claims and
+new delegation offers. Also check case/Unicode path aliases on shared Mac checkouts.
+Do not release the current candidate before those negative cases are qualified.
+
+Current connection discovery: no T3-specific connected plugin was returned;
+Executive V3's target kinds are fabric_attempt/codex/claude and the actual current
+`session_targets` read returned an empty list. Browser exposes read-only tabs.
+Generic Studio host commands are not a nested-agent handoff interface. These facts
+limit live canary execution from this caller; they do not block source, packaging,
+native contract qualification or an existing-owner handoff through lawful transport.
+
 No native threads, provider calls, application restarts, profile edits or new
-credentials have been created. No uncertain modifying effects.
-Next: implement G2-G5 on the disjoint source paths, test the real incumbent client
-composition, then qualify the supported installed consumer without disturbing
-active T3 work. Preserve outstanding native/UI proof when unavailable.
+credentials have been created. No uncertain modifying effects. Continue G5 and
+G6 in this same operation; preserve remaining native/UI proof rather than invent it.
