@@ -20455,6 +20455,7 @@ class AttemptRegistry:
         expected_fence_generation: int,
         lease_owner: str,
         lease_seconds: int | None = None,
+        reattach_provider_session_id: str | None = None,
     ) -> AttemptLease:
         """Rotate a live persisted lease for a restarted trusted supervisor.
 
@@ -20463,7 +20464,19 @@ class AttemptRegistry:
         attempt status; the adopter must inspect the persisted process identity
         and then heartbeat, acknowledge cancellation, or explicitly mark it
         lost.  Rotating both fence and token makes every prior owner stale.
+
+        ``reattach_provider_session_id`` is the L1B3-5 recovery path: an
+        attempt crashed between the persisted adapter launch receipt and
+        ``record_process`` has no durable identity on its row, but the
+        receipt is durable evidence the launch took effect and names the
+        provider session.  Supplying that id here records it (plus an
+        ``ATTEMPT_PROCESS_RECORDED`` event) in the SAME adoption transaction,
+        under the SAME CAS fence rotation — no second window and no separate
+        record_process call that could race a concurrent adopter.
         """
+        reattach_session = (
+            str(reattach_provider_session_id or "").strip() or None
+        )
         owner = str(lease_owner).strip()
         if not owner:
             raise StateConflict("lease_owner is required for adoption")
@@ -20526,8 +20539,14 @@ class AttemptRegistry:
             ):
                 raise StateConflict(f"attempt {attempt_id} is no longer current")
             if row["pid"] is None and row["provider_session_id"] is None:
+                if reattach_session is None:
+                    raise StateConflict(
+                        f"attempt {attempt_id} has no durable process/provider identity to adopt"
+                    )
+            elif reattach_session is not None:
                 raise StateConflict(
-                    f"attempt {attempt_id} has no durable process/provider identity to adopt"
+                    f"attempt {attempt_id} already has a durable process/provider "
+                    "identity; reattach would rewrite it"
                 )
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
             next_fence = current_fence + 1
@@ -20551,13 +20570,18 @@ class AttemptRegistry:
             if updated_quota.rowcount != 1:
                 raise StateConflict(f"attempt {attempt_id} lost the adoption race")
             updated_attempt = connection.execute(
-                """
-                UPDATE attempts
-                SET fence_generation=?,lease_token=?,lease_owner=?,lease_expires_at_ms=?,
-                    heartbeat_at_ms=?,updated_at_ms=?,version=version+1
-                WHERE attempt_id=? AND fence_generation=? AND lease_token=?
-                  AND status IN ('CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
-                """,
+                (
+                    """
+                    UPDATE attempts
+                    SET fence_generation=?,lease_token=?,lease_owner=?,lease_expires_at_ms=?,
+                        heartbeat_at_ms=?,updated_at_ms=?,version=version+1
+                    """
+                    + (",provider_session_id=?" if reattach_session else "")
+                    + """
+                    WHERE attempt_id=? AND fence_generation=? AND lease_token=?
+                      AND status IN ('CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
+                    """
+                ),
                 (
                     next_fence,
                     replacement_token,
@@ -20565,6 +20589,7 @@ class AttemptRegistry:
                     expiry,
                     timestamp,
                     timestamp,
+                    *(((reattach_session,) if reattach_session else ())),
                     attempt_id,
                     current_fence,
                     row["lease_token"],
@@ -20575,6 +20600,26 @@ class AttemptRegistry:
             reissued = _reissue_placement_binding(
                 connection, row, fence_counter=next_fence, lease_expires_at_ms=expiry
             )
+            if reattach_session is not None:
+                # same transaction, same fence rotation: the durable provider
+                # receipt's session id becomes the attempt's identity
+                self.store.append_event(
+                    connection,
+                    aggregate_type="attempt",
+                    aggregate_id=attempt_id,
+                    event_type="ATTEMPT_PROCESS_RECORDED",
+                    actor="supervisor",
+                    job_id=str(row["job_id"]),
+                    attempt_id=attempt_id,
+                    worker_id=str(row["worker_id"]),
+                    quota_class=str(row["quota_class"]),
+                    payload={
+                        "process_kind": "provider",
+                        "reattached_from_receipt": True,
+                        "provider_session_id": reattach_session,
+                    },
+                    timestamp_ms=timestamp,
+                )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",

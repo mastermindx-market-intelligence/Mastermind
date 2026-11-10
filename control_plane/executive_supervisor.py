@@ -1566,6 +1566,7 @@ class ExecutiveSupervisor:
         product_acceptance_macro_root: str | Path | None = None,
         product_acceptance_context_reader: Any | None = None,
         project_input_owner: "ExecutiveSupervisor | None" = None,
+        provider_receipt_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self.runtime = runtime
         self._product_acceptance_review_owner = None
@@ -1609,6 +1610,9 @@ class ExecutiveSupervisor:
                     "paid Supervisor requires actual remote identity and private local Control inputs"
                 )
         self.cleanup_policy = cleanup_policy
+        if provider_receipt_reader is not None and not callable(provider_receipt_reader):
+            raise SupervisorError("provider receipt reader must be callable")
+        self._provider_receipt_reader = provider_receipt_reader
         if exact_target_provider is not None and not callable(exact_target_provider):
             raise SupervisorError("exact worker target provider must be callable")
         self._exact_target_provider = exact_target_provider
@@ -4990,11 +4994,66 @@ class ExecutiveSupervisor:
             lease_token=lease.lease_token,
         )
 
+    def _receipt_provider_session_id(self, attempt: Attempt) -> str | None:
+        """The persisted adapter receipt's provider session id, if any.
+
+        The injected reader is the L1B3-5 discriminator: a durable receipt
+        proves the launch TOOK EFFECT even when the crash landed before
+        ``record_process`` could persist the identity on the attempt row.
+        """
+        if self._provider_receipt_reader is None:
+            return None
+        receipt = self._provider_receipt_reader(attempt.attempt_id)
+        if not isinstance(receipt, Mapping):
+            return None
+        session = receipt.get("provider_session_id")
+        if type(session) is not str or not session.strip():
+            return None
+        return session.strip()
+
+    def _adopt_with_receipt_identity(
+        self, attempt: Attempt, *, session_id: str
+    ) -> ReconcileReceipt | None:
+        """Adopt an identity-less claim under its durable receipt, no requeue.
+
+        Used at reconcile_restart's unbound-claim point: the receipt proves a
+        launch took effect, so expiry → requeue would arm a SECOND launch of
+        the same work.  Adoption records the provider session id and rotates
+        the fence to this supervisor instead; a StateConflict means another
+        reconciler won (returns its receipt) or the attempt moved on (None).
+        """
+        try:
+            self.runtime.attempts.adopt_attempt(
+                attempt.attempt_id,
+                expected_fence_generation=attempt.fence_generation,
+                lease_owner=self.instance_id,
+                reattach_provider_session_id=session_id,
+            )
+        except StateConflict:
+            current = self.runtime.attempts.get_attempt(attempt.attempt_id)
+            if (
+                current is None
+                or current.status not in _ACTIVE_ATTEMPT_STATUSES
+            ):
+                return ReconcileReceipt(
+                    attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                    status=ReconcileStatus.ALREADY_RECOVERED,
+                    process_was_live=False,
+                )
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.STALE_FENCE_QUARANTINED,
+                process_was_live=False,
+                error="receipt adoption lost the fence race",
+            )
+        return None
+
     def _recover_existing_attempt(
         self,
         attempt: Attempt,
         *,
         presence: ProcessPresence,
+        reattach_provider_session_id: str | None = None,
     ) -> ReconcileReceipt:
         process_was_live = presence is ProcessPresence.LIVE
         if paid_supervisor.is_paid_adapter(self.adapter):
@@ -5075,6 +5134,9 @@ class ExecutiveSupervisor:
                 attempt.attempt_id,
                 expected_fence_generation=attempt.fence_generation,
                 lease_owner=self.instance_id,
+                **({"reattach_provider_session_id":
+                    reattach_provider_session_id}
+                   if reattach_provider_session_id else {}),
             )
         except StateConflict as exc:
             current = self.runtime.attempts.get_attempt(attempt.attempt_id)
@@ -5282,6 +5344,12 @@ class ExecutiveSupervisor:
         provider execution without another start. Healthy legacy executions
         lacking that binding remain active and quarantined; cancellation is the
         only path that may identity-safely terminate one during reconciliation.
+
+        When a ``provider_receipt_reader`` is installed, an identity-less
+        claim (crash between the persisted adapter receipt and
+        ``record_process``) is reconciled from that durable receipt — adopted
+        under its provider session id — never expired and requeued into a
+        second launch.
         """
 
         if attempt_ids is not None and (
@@ -5334,10 +5402,19 @@ class ExecutiveSupervisor:
                 ):
                     presence = ProcessPresence.UNKNOWN
                 else:
+                    # L1B3-5: a crash between the persisted launch receipt and
+                    # record_process leaves the row identity-less; the receipt
+                    # still names the live provider session to reattach as
                     outcomes.append(
                         self._recover_existing_attempt(
                             attempt,
                             presence=presence,
+                            reattach_provider_session_id=(
+                                self._receipt_provider_session_id(attempt)
+                                if attempt.provider_session_id is None
+                                and attempt.pid is None
+                                else None
+                            ),
                         )
                     )
                     continue
@@ -5389,6 +5466,31 @@ class ExecutiveSupervisor:
                     )
                 presence = ProcessPresence.ABSENT
             if presence is ProcessPresence.UNKNOWN and self._is_unbound_claim(attempt):
+                receipt_session = self._receipt_provider_session_id(attempt)
+                if receipt_session is not None:
+                    # L1B3-5: the durable receipt proves this claim's launch
+                    # took effect; cleanup → expiry → requeue would arm a
+                    # SECOND launch.  Adopt under the receipt's identity; the
+                    # execution stays owned, never re-armed.
+                    raced = self._adopt_with_receipt_identity(
+                        attempt, session_id=receipt_session)
+                    if raced is not None:
+                        outcomes.append(raced)
+                        continue
+                    outcomes.append(
+                        ReconcileReceipt(
+                            attempt_id=attempt.attempt_id,
+                            job_id=attempt.job_id,
+                            status=ReconcileStatus.LIVE_QUARANTINED,
+                            process_was_live=False,
+                            error=(
+                                "identity-less claim adopted under its durable "
+                                f"provider receipt (session {receipt_session}); "
+                                "execution preserved, no requeue"
+                            ),
+                        )
+                    )
+                    continue
                 try:
                     uid_sweep = self._cleanup_unbound_claim(attempt)
                 except Exception as exc:
