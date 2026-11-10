@@ -30819,6 +30819,7 @@ async function readRosterTruth(ctx, companyId) {
   const out = {
     companyId,
     generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    moduleRevision: "r2-reload-proof",
     counts: {
       configuredRoles: null,
       enrolledAgents: null,
@@ -30889,6 +30890,13 @@ var plugin = definePlugin({
       const companyId = String(params.companyId || "");
       const snapshot = await readRosterTruth(ctx, companyId);
       await persistLastSnapshot(ctx, snapshot);
+      try {
+        await ctx.metrics.write("roster.read", 1, { companyId: companyId || "none" });
+      } catch (err) {
+        ctx.logger.warn("roster-truth: metric write failed", {
+          error: String(err && err.message || err)
+        });
+      }
       return snapshot;
     });
     ctx.tools.register(

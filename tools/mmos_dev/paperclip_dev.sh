@@ -498,11 +498,13 @@ import json, sys
 raw = sys.argv[2]
 start = raw.find("{")
 data = json.loads(raw[start:]) if start >= 0 else {}
-prefix = data.get("shortname") or data.get("prefix") or data.get("shortName") or data.get("company", {}).get("shortname") or ""
+prefix = (data.get("shortname") or data.get("prefix") or data.get("shortName")
+          or data.get("issuePrefix") or data.get("company", {}).get("shortname")
+          or data.get("company", {}).get("issuePrefix") or "")
 if not prefix:
     for v in data.values():
-        if isinstance(v, dict) and isinstance(v.get("shortname") or v.get("prefix"), str):
-            prefix = v.get("shortname") or v.get("prefix")
+        if isinstance(v, dict) and isinstance(v.get("shortname") or v.get("prefix") or v.get("issuePrefix"), str):
+            prefix = v.get("shortname") or v.get("prefix") or v.get("issuePrefix")
             break
 print(prefix)
 PYEOF
@@ -621,6 +623,18 @@ PYEOF
 }
 
 # Print the installed plugin record whose packagePath matches $1, as JSON.
+worker_pid() { # $1=base $2=plugin_id — echoes the plugin worker pid ("" if none)
+  local diag pid
+  diag="$(http_get "$1/api/plugins/$2/dashboard" 2>/dev/null)" || { echo ""; return 0; }
+  pid="$(printf '%s' "$diag" | "$PY" -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    w = d.get("worker") or {}
+    print(w.get("pid") if w.get("status") == "running" else "")
+except Exception: print("")' 2>/dev/null || true)"
+  echo "${pid:-}"
+}
+
 installed_plugin_by_path() { # $1=base $2=module_dir
   local base="$1" dir="$2" out
   # No status filter: a plugin in error status is exactly when a reload is
@@ -829,8 +843,10 @@ except Exception:
 for r in rows:
     if r.get("status") == "uninstalled":
         continue
-    print("[paperclip-dev] plugin       : %s (%s) status=%s" % (
-        r.get("pluginKey"), r.get("displayName"), r.get("status")))
+    m = r.get("manifestJson") or {}
+    name = r.get("displayName") or m.get("displayName") or r.get("pluginKey")
+    print("[paperclip-dev] plugin       : %s (%s %s) status=%s" % (
+        r.get("pluginKey"), name, r.get("version"), r.get("status")))
 PYEOF
     fi
   fi
@@ -874,8 +890,15 @@ try:
 except Exception:
     print("(no parseable log rows)")
     sys.exit(0)
+if not rows:
+    # Truthful, not silent: build 2026.1106.0 persists metrics.write rows to
+    # plugin_logs; ctx.logger lines only reach the server log.
+    print("(plugin_logs has no rows; worker ctx.logger lines go to the server log: paperclip_dev.sh logs)")
+    sys.exit(0)
 for r in rows:
-    print("%s [%s] %s %s" % (r.get("createdAt"), r.get("level"), r.get("message"), r.get("dataJson") or ""))
+    meta = r.get("meta")
+    meta_s = json.dumps(meta, separators=(",", ":")) if meta else ""
+    print("%s [%s] %s %s" % (r.get("createdAt"), r.get("level"), r.get("message"), meta_s))
 PYEOF
     exit 0
   fi
@@ -968,16 +991,46 @@ cmd_reload_module() {
   identity="$(dynamic_identity_check "$base")"
   [ "$identity" = "dev" ] || die 1 "dev instance not healthy (identity: $identity)."
 
-  local worker plugin_row plugin_id
+  local worker plugin_row plugin_id plugin_key
   worker="$(module_worker_entry "$module_dir")" || die 1
   plugin_row="$(installed_plugin_by_path "$base" "$module_dir")" || \
     die 1 "no installed plugin with packagePath == $module_dir; run 'install-module' first."
-  plugin_id="$(printf '%s' "$plugin_row" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
-  local plugin_key; plugin_key="$(printf '%s' "$plugin_row" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["pluginKey"])')"
+  plugin_id="$(printf '%s' "$plugin_row" | "$PY" -c 'import json,sys
+try: print(json.load(sys.stdin)["id"])
+except Exception: print("")')"
+  plugin_key="$(printf '%s' "$plugin_row" | "$PY" -c 'import json,sys
+try: print(json.load(sys.stdin)["pluginKey"])
+except Exception: print("")')"
+  [ -n "$plugin_id" ] || die 1 "could not read plugin id from registry row."
 
+  worker_pid_before="$(worker_pid "$base" "$plugin_id")"
+
+  # The host dev watcher attaches ONLY at server startup (app.js: watch after
+  # loadAll()), so a plugin installed at runtime is NOT watched and touching
+  # its worker entry does nothing. Touch first; if the worker pid did not
+  # change, fall back to delete + reinstall (soft uninstall keeps the row and
+  # the plugin id; the install re-forks the CURRENT dist).
   log "touching $worker (host dev watcher restarts the worker, 500ms debounce)"
   touch "$worker"
-  sleep 3
+  sleep 4
+
+  local pid_after
+  pid_after="$(worker_pid "$base" "$plugin_id")"
+  if [ -z "$pid_after" ] || [ "$pid_after" = "$worker_pid_before" ]; then
+    log "watcher did not restart the worker (pid unchanged: ${pid_after:-none}) — reinstalling the module."
+    local resp code body
+    resp="$(curl -sS -m 60 -X DELETE -o /dev/null -w '%{http_code}' \
+      -H 'x-instance-role: local_trusted' "$base/api/plugins/$plugin_id" 2>/dev/null || echo 000)"
+    [ "$resp" = "200" ] || [ "$resp" = "204" ] || \
+      { err "reload: DELETE /api/plugins/$plugin_id failed (HTTP $resp)."; die 1 "reload-module failed."; }
+    sleep 1
+    resp="$(http_post_json "$base/api/plugins/install" "{\"packageName\":\"$module_dir\",\"isLocalPath\":true}")"
+    code="${resp%%$'\n'*}"
+    body="${resp#*$'\n'}"
+    if [ "$code" != "200" ]; then
+      err "reload: reinstall failed (HTTP $code):"; printf '%s\n' "$body" >&2; die 1 "reload-module failed."
+    fi
+  fi
 
   # Report worker diagnostics via the plugin dashboard route (read-only).
   local diag

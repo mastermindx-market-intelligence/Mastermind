@@ -18,6 +18,7 @@ export const manifest = {
     'agent.tools.register',
     'plugin.state.read',
     'plugin.state.write',
+    'metrics.write',
   ],
   entrypoints: {
     worker: 'dist/worker.js',

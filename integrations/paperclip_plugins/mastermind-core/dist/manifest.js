@@ -14,7 +14,8 @@ var manifest = {
     "ui.dashboardWidget.register",
     "agent.tools.register",
     "plugin.state.read",
-    "plugin.state.write"
+    "plugin.state.write",
+    "metrics.write"
   ],
   entrypoints: {
     worker: "dist/worker.js",
