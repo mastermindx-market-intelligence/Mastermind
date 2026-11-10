@@ -57,8 +57,8 @@ def test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection(pu
         assert not (published.ext / "quota_cache.json").exists()
         again = entry.inspect(verified_root=published.release, verified_metadata=published.meta)
         assert again.handler is startup.handler
-        assert entry._LOADED_MODULES["quota_remote"] is remote
-        assert entry._LOADED_MODULES["glm_keys"] is keys
+        assert entry._LOADED_MODULES["quota_remote"][0] is remote
+        assert entry._LOADED_MODULES["glm_keys"][0] is keys
 
 
 @pytest.mark.parametrize("name", ("quota_remote", "glm_keys"))
