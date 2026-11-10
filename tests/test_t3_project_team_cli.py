@@ -111,7 +111,7 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     assert manifest["source_status"] == "qualification_only" and manifest["source_revision"] is None
     assert archive_bytes(root)[0] == payload
     with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert len(archive.namelist()) == 9
+        assert len(archive.namelist()) == 10
         assert all(not name.startswith("/") and ".." not in name for name in archive.namelist())
     app = tmp_path / "team.pyz"
     app.write_bytes(payload)
