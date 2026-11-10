@@ -2761,6 +2761,7 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
+        _log.warning("Self-Directed book unavailable: %s", type(exc).__name__)
         # A read we could not perform renders `unavailable` — never a fabricated funded book
         # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
         try:
@@ -2772,7 +2773,8 @@ def api_self_directed() -> JSONResponse:
                    "reason_code": "self_directed_book_unreadable",
                    "nav": None, "cash": None, "invested": None,
                    "starting_nav": None, "positions": [], "pending": [],
-                   "allocation": None, "market": market, "error": str(exc)}
+                   "allocation": None, "market": market, "valuation_complete": False,
+                   "error": "self_directed_unavailable"}
         # E13: the typed invalid-account error keeps its own reason code and evidence instead
         # of collapsing into the generic unreadable string.
         reason_code = getattr(exc, "reason_code", None)
