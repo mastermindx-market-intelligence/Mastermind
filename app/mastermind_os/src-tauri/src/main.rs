@@ -75,11 +75,21 @@ fn readiness() -> Readiness {
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
-/// Reads `MM_SHELL_URL` exactly once.
-///
-/// Unset returns `None` and changes nothing anywhere. A set but invalid value is
-/// recorded through the dev log (best effort) and then treated exactly like unset.
+/// Reads the shell URL exactly once, preferring `MM_SHELL_URL_FILE` over the
+/// legacy `MM_SHELL_URL`. The file keeps a one-time pairing fragment out of argv
+/// and the process environment. Unset settings change nothing; refused settings
+/// are logged without their input and are treated exactly like unset.
 fn shell_url_from_env() -> Option<url::Url> {
+    #[cfg(unix)]
+    if let Some(path) = std::env::var_os("MM_SHELL_URL_FILE").filter(|value| !value.is_empty()) {
+        return match shell_mode::read_shell_url_file(std::path::Path::new(&path)) {
+            Ok(url) => Some(url),
+            Err(refusal) => {
+                shell_mode::log_file_refusal(refusal);
+                None
+            }
+        };
+    }
     let raw = std::env::var("MM_SHELL_URL").ok()?;
     match shell_mode::parse_shell_url(&raw) {
         Ok(url) => Some(url),

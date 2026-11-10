@@ -102,9 +102,11 @@ Carries over, unchanged in value:
 | Lane | Outcome | State |
 | --- | --- | --- |
 | T1 shared conversation | DONE_WHEN 1 to 3, in the dev bundle against an isolated T3 server, then paired to the real one by the principal | stage 1 accepted 2026-11-10 at trunk `6a2634bb6` (stock client signs in, opens one thread by URL, queues, survives a restart, two views; see `T1_SHARED_CONVERSATION_FINDINGS.md`). Stage 2 (the window) starts when L8 has returned |
-| T1s live answer text | Answer text shown while it is written for Claude-driver threads: a pinned T3 server patch that handles text deltas the way the Codex adapter already does, proven on the dev server | started 2026-11-10. See section 8 |
+| T1s live answer text | Claude-driver threads stream answer text the way Codex-driver threads already do | accepted 2026-11-10 at trunk `1bc6b7574` (patch sha256 `661566e1…5400`, 355 tests in the principal's run; see section 11) |
+| T6 team server | An always-on headless T3 server owned by Mastermind, separate from the Chairman's T3 Code app, that the window and the teammates use | **accepted and installed 2026-11-10** at trunk `54da298e1`. See section 12 |
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
-| T3 Team fork | Teammate list and work cards as a thin fork of the T3 web client | starts when T1 is proven |
+| T3 Team view | Teammate list and work cards. **No fork first:** the stock T3 client already shows a roster when each teammate is one pinned, titled thread in a "Team" project | investigation (T3i) accepted 2026-11-10 at trunk `c7dd3ef4d`; see section 13 and `T3_TEAM_VIEW_OPTIONS.md`. **Closed with no fork 2026-11-10** (T7 verdict: fork needed for nothing; section 14) |
+| T7 team roster | Two real teammates (Assurance, Design Lead) set up on the team server as pinned threads, checked in a headless browser, with the eight open questions answered | **accepted 2026-11-10** at trunk `e1b338021` (39 tests in the principal's run; see `T7_TEAM_ROSTER.md` and section 14) |
 | T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
 | T4b governed coding job | DONE_WHEN 10: a task that needs code becomes one governed coding job through the socket door and the L1 engine | after T45 |
 | L9 module platform | Land what exists (dev instance script, module, template), runbook, close | closing |
@@ -237,3 +239,206 @@ follows it; it is not part of the first milestone.
 **After the dev proofs, two acts stay with the principal:** pairing the Mastermind window
 to the real T3 server, and moving one installed Paperclip agent onto this path (the six
 steps in the T2 note), with its old heartbeat fenced first.
+
+## 11. Amendment, 2026-11-10 17:40 UTC: T1s accepted, the team gets its own T3 server
+
+**T1s accepted (trunk `1bc6b7574`).** The patch makes the Claude driver send answer text as
+it is written, into one item per message, the same way the Codex driver does. The
+principal reran the adapter and filter suites on pin plus patch: 355 passed. An attack
+found that the unpatched server writes the same text two or three times when a message
+mixes text and tools; the patch fixes that too.
+
+**"Live text" in T3 is paragraph by paragraph, by upstream design.** T3 has two settings
+for answer text: whole turn, or paragraph (the default). In paragraph mode the server
+releases text at a blank line, a list item, a closed code block or a heading, at most
+every 400 ms. That rule applies to every driver, Codex included. The proof prompt I
+pinned for T1s (count 1 to 40 on tight lines) has no such boundary, so it showed no
+change; the fault was my prompt, not the lane. With paragraphs the patched server grows
+the answer during the turn. We keep upstream's rule and add no third mode. DONE_WHEN 2
+now reads: thinking and tools live, answer text paragraph by paragraph.
+
+**Decision: the team runs on its own T3 server, not inside the Chairman's T3 Code app.**
+The facts that force it:
+
+1. The Chairman's server (port 3773) is a child of the T3 Code desktop app. When the app
+   quits, it stops. A routine with no window open cannot depend on it.
+2. The app is a vendor-signed, self-updating bundle. Our server patch cannot go into it
+   without breaking the signature and the updates. Port 3774 is not listening today.
+3. Adding a teammate means adding a provider instance to that server's settings, which
+   T2 did with the server stopped. Stopping the Chairman's server stops his work and this
+   program.
+
+So "the real server" in this plan now means the **team server**: headless, loopback only,
+kept alive by launchd, its own home directory and port, started from the same T3 release
+the Chairman runs. The Mastermind window pairs to it. Teammate threads live on it. The
+Chairman's T3 Code app is never restarted, reconfigured or patched by this program.
+Installing the team server is one act by the principal after lane T6 proves it in a dev
+root. The patched build is a switch on the team server, off until T6 shows that the stock
+and patched builds can share one home directory without harming state.
+
+**What this changes in DONE_WHEN 3** ("Code shows the same thread"): the T3 Code app shows
+a team thread only if it can add the team server as a second environment. T6 answers that
+from the source and a dev proof. If it cannot, team threads open in the Mastermind window
+and in a browser, and DONE_WHEN 3 is met there.
+
+**Offered upstream, not done:** the duplicate-text fix and the streaming patch are useful
+to T3 itself. Sending them upstream is a public act under the Chairman's name and waits
+for his word.
+
+## 12. Amendment, 2026-11-10 18:50 UTC: T6 accepted, the team server is installed
+
+Lane T6 returned and the principal verified it: 23 tests pass, the launcher selftest
+passes, every evidence file is valid JSON, and the lane left no launchd job, listener or
+home behind. The principal then installed the real server. The note is
+`integrations/mmos/T6_TEAM_SERVER.md`; the tool is `tools/mmos_team_server/team_server.sh`.
+
+**What is running now**
+
+| Item | Value |
+|---|---|
+| launchd label | `com.mastermind.t3-team` (user LaunchAgent, KeepAlive, no secrets in the plist) |
+| Address | `127.0.0.1:3780` only. The server process has no other listener |
+| Home | `~/.mastermind/t3-team` (state in `home/userdata`, route keys in `fabric.env` mode 0600) |
+| Server build | `~/.mastermind/t3-team-server/bin/t3`, a link to `t3-0770446-textdelta`: upstream pin `0770446` plus the T1s patch, bundle sha256 `37271af3a1c6…`, run by `/opt/homebrew/bin/node` |
+| Pairing | `~/.mastermind/t3-team/run/access.txt` (0600). The token changes on every server start; a paired browser keeps working across restarts |
+
+Checked on the real server by the principal: one turn on the stock build, `kill -9` and
+back in about one second with the thread intact, a second turn after the revival, the
+switch to the patched build, a third turn there, and the Chairman's T3 Code server
+(pid 17210, port 3773) unchanged throughout. Not checked on the real server: answer text
+arriving in steps in a browser. The lane showed 13 steps with this same build file in a
+dev root; the principal's own attempt polled too slowly to see them.
+
+**The team server does not run the Chairman's app.** The stock command `~/.t3/bin/t3` is
+a wrapper around the T3 Code app bundle, so a team server on it would change whenever the
+app updates itself and would run as a second copy of his app. The team server therefore
+runs its own build from its own directory. Updating T3 Code no longer touches the team.
+
+**Correction to the lane's report.** T6 wrote that the installed app carries a database
+change newer than our build. It is the other way round. The installed app is 0.1.7,
+built from upstream commit `322f6544dfad` of 2026-11-04. Our pin `0770446` is 408 commits
+later and adds database change 80 (a `thread_mode` column on scheduled tasks). So:
+
+- Our build moves a home forward to 80. The stock app's server then opens that home, logs
+  one warning that it does not know change 80, and still works. The principal tested this
+  on a throwaway copy of the team home.
+- The team home is at 80 now. It was switched while it held one test thread, so nothing
+  of value went through the change.
+- The stock command prints that warning on standard output, in front of its JSON. A
+  script that reads JSON from `~/.t3/bin/t3` against the team home will fail.
+
+**Rule that follows:** anything that talks to the team server uses the team server's own
+command, `~/.mastermind/t3-team-server/bin/t3`, with `T3CODE_HOME=~/.mastermind/t3-team/home`.
+That includes the wake carrier's `t3_bin` setting for every teammate bound there.
+
+**DONE_WHEN 3, answered.** The T3 Code app cannot hold a second server connection. T3's
+supported way is an environment link: `t3 pair` on one server, `t3 environment link` on
+the other, and the linked server's threads appear as a group in the sidebar. It needs the
+Labs setting for linked environments on both sides. On the team server that is ours to
+set. On the Chairman's app it is a change to his app, so it is his to make or to order.
+Until then team threads open in the Mastermind window and in a browser, which section 11
+already accepts for DONE_WHEN 3.
+
+**Known limits of the install**
+
+- It depends on `/opt/homebrew/bin/node`. A Homebrew upgrade of node changes the runtime
+  under it. A pinned node copy is a small follow-up, not done.
+- The build directory is a 4 GB copy of a full source tree with its packages. A packed
+  build is a follow-up, not done.
+- Nothing has run on it for days yet, and it has not been through a reboot.
+- The seeded settings give it one provider, the Capacity Fabric route. Teammate personas
+  are added when the first installed agent is moved, after T45 returns.
+
+## 13. Amendment, 2026-11-10 19:15 UTC: the Team view starts with no fork
+
+**What was asked.** Lane T3 was written as "a thin fork of the T3 web client". Before
+paying for a fork, lane T3i read the client's source (pin `0770446`, read only) to find
+the smallest change that gives a teammate list. Its memo is `T3_TEAM_VIEW_OPTIONS.md`.
+The principal read it in full and checked four of its source citations; all four matched.
+
+**Decision.** The Team view is built on the stock client first, with no code change:
+
+| Part of the Team view | How the stock client gives it |
+| --- | --- |
+| Teammate list | One T3 project named "Team". Each teammate is one pinned primary thread titled `Name — role`. Pinned threads form a fixed block at the top of the sidebar, in an order we set, and stay there while working |
+| Who is busy, who needs you | Each row already shows a status word (Working, Waiting, Approval, Input, Failed, Done and others), a running timer and the time of the last activity |
+| Whose voice | Each teammate is its own provider instance with the teammate's name and an accent colour, so its badge shows on the row |
+| Selected conversation | The window opens `http://127.0.0.1:3780/<environmentId>/<threadId>` |
+| Work cards | A plain markdown link renders as a link with the site icon; a `t3-thread://` link renders as a live thread chip. The carrier writes the issue as a labelled link next to its marker |
+
+**Three rules that follow**
+
+1. The window never opens the server's root address `/`. The stock client starts a new
+   empty thread in the most recent project when it lands there. The window always opens a
+   thread address.
+2. T3's own "needs you" means a pending request inside a running turn. A Paperclip
+   `request_confirmation` is invisible in the sidebar unless the carrier writes it into
+   the teammate's thread. So the carrier relays it there, with the issue as a labelled
+   link. This is added to the carrier after T45 returns (T45 is the writer on the carrier
+   now).
+3. A turn that ends with a plain-text question shows as ready, not as "Input". A teammate
+   that needs an answer must ask through the request mechanism or through the carrier.
+
+**What the stock client does not give.** A separate role line under the name, one place
+that adds up every "Needs you" item across teammates, and a per-thread field for extra
+data (there is none; a thread can only be pinned, snoozed, settled, archived or marked
+unread). These are the only reasons to fork. The memo sizes that fork at 100 to 200 lines
+in one file (`SidebarThreadRow.tsx`), a file that upstream changed four times in five
+days, so each upstream update would need the fork redone. A server-fed list (the memo's
+candidate 2) is the most expensive and is not built.
+
+**Lane T7 (started 19:05 UTC, GLM 5.3).** It makes the roster real on the team server
+with two teammates named after installed agents, Assurance and Design Lead: a home,
+a charter, a provider instance, a pinned thread and a write limit for each. It proves a
+restart keeps the same thread and that "remember this" lands in the teammate's own
+`CLAUDE.md`. It answers in a headless browser the eight questions the memo could not
+answer from source (for example whether the pinned block reads as a list at rest, and
+whether titles are cut off at window width), checks live text on the real server, and
+returns a verdict line: "fork needed for: <list or nothing>". It writes
+`tools/mmos_team_server/team_roster.py`, so a third teammate is one command.
+
+T7 sets up the T3 side only. It writes nothing to Paperclip and moves no installed agent.
+The installed Assurance and Design Lead agents keep running on Hermes until the cut-over
+after T45, which then binds each agent to the thread T7 made. This replaces the last
+line of section 12 ("personas are added when the first installed agent is moved").
+
+**Fork decision is deferred to evidence.** If T7 returns "nothing", lane T3 closes with no
+fork. If it returns a list, the fork is scoped to that list and nothing else.
+
+## 14. Amendment, 2026-11-10 19:55 UTC: T7 accepted, two teammates are on the team server
+
+**What is there now** (checked by the principal on the running server, not from the report)
+
+| Item | Value |
+| --- | --- |
+| Project | "Team", workspace `~/.mastermind/t3-team/team-project` |
+| Assurance | provider instance `assurance`, pinned thread "Assurance — quality & security", home `~/.mastermind/t3-team/teammates/assurance` |
+| Design Lead | provider instance `design-lead`, pinned thread "Design Lead — product design", home `~/.mastermind/t3-team/teammates/design-lead` |
+| Charters | persona prose copied from each agent's existing Hermes `SOUL.md`; nothing else was copied |
+| Memory | each teammate's own `CLAUDE.md`; a fact told to each came back after a server restart and is on disk |
+| Tool limit | read and search anywhere, write only inside its own home, no shell. Both refused a write to `/tmp` |
+| Thread addresses | `~/.mastermind/t3-team/run/team_urls.json` (0600, no credential) |
+| Tool | `tools/mmos_team_server/team_roster.py apply|status <spec>`; a third teammate is a spec block, one `apply` and one pin |
+
+**Lane T3 closes with no fork.** In a headless browser at 1280 by 800 the two pinned rows
+read as a roster: name, status word, time, coloured badge with the teammate's initials. Live
+text showed eight separate states on the real server. The sidebar is open by default on a
+thread address. The carrier's marker wraps cleanly.
+
+**What is not right yet, and what happens about it**
+
+| Finding | Action |
+| --- | --- |
+| The role is cut off: "Assurance — quality & secu…" at the default sidebar width. The title box holds about 24 characters | Shorten role lines to fit when the next teammates are added. Needs a thread rename, which like pinning exists only in the web client |
+| Pinning has no server command. It was done through the headless browser | Accepted. The paired browser profile for this is kept at `~/.mastermind/t3-team/run/browser-profile` (0700). It holds a session cookie, so it is a credential: the principal moved it there out of the evidence directory |
+| The "Done" mark cleared for one teammate on opening and stayed for the other across two opens | Not chased. It follows a visit rule in the client that a headless open may not trigger. To be looked at in the real window |
+| A pairing link from `run/access.txt` stops working about two minutes after the server starts | The window is paired with a freshly made code, not the start-up file. Lane T1w's note covers how |
+| The page is still T3 Code to look at: its name, a project panel offering "Open in Cursor" and "Initialize Git", a composer hint about files and commands | Not a roster problem and not fixed by this lane. It is the first real reason a small fork might be wanted later, and it is a product call for after the first milestone |
+| Teammates have no shell | Deliberate for now. Work that needs to run code goes through the governed coding job (lane T4b), not through a teammate's own shell |
+
+**Settings reload.** The server reads `settings.json` again while running, so a teammate can
+be added without a restart. This answers the open item from T45's brief.
+
+**What T7 did not do.** It wrote nothing to Paperclip. The installed Assurance and Design
+Lead agents still run on Hermes. Binding each installed agent to the thread above is the
+cut-over, one agent at a time, after T45 returns with the carrier.

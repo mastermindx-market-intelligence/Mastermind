@@ -152,10 +152,16 @@ cmd_selftest() {
   return $fail
 }
 
-case "${1:-}" in
-  start) cmd_start ;;
-  stop) cmd_stop ;;
-  status) cmd_status ;;
-  selftest) cmd_selftest ;;
-  *) echo "usage: $0 start|stop|status|selftest" >&2; exit 2 ;;
-esac
+# T3_DEV_LIB_ONLY=1: define guards/functions only, run no command. Narrow
+# opt-in so tools/mmos_team_server/team_server.sh can source this launcher's
+# guard logic (port/home safety) instead of copying it. No other behavior
+# changes; unset (the normal case) dispatches exactly as before.
+if [ "${T3_DEV_LIB_ONLY:-0}" != "1" ]; then
+  case "${1:-}" in
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    status) cmd_status ;;
+    selftest) cmd_selftest ;;
+    *) echo "usage: $0 start|stop|status|selftest" >&2; exit 2 ;;
+  esac
+fi

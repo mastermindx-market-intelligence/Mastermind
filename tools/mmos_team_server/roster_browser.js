@@ -1,0 +1,283 @@
+#!/usr/bin/env node
+// Lane T7 — headless Chromium driver for the Team roster on the team T3
+// server (127.0.0.1:3780). Reuses the mmos-dev playwright-core install.
+// Modes:
+//   pair <accessFile> <profileDir> <outJson>
+//       One-time-token pairing (token read from the 0600 file in-process,
+//       never printed or recorded). No screenshot of the pairing page.
+//   pin <profileDir> <threadUrl> <outJson> <shotPng>
+//       Open a deep thread URL, right-click its sidebar row, click the
+//       "Pin thread" menu item, verify the Pinned marker, screenshot.
+//   snapshot <profileDir> <url> <outJson> <shotPng> [label]
+//       Dump the sidebar roster DOM state at a 1280x800 viewport + shot.
+//   livetext <profileDir> <threadUrl> <promptFile> <outJson>
+//       Send a prompt in the thread and record every distinct state of the
+//       answer text in the DOM (sample interval 120 ms).
+const fs = require("fs");
+const path = require("path");
+const { chromium } = require(path.join(
+  process.env.HOME,
+  ".mastermind/mmos-dev/t3/tooling/node_modules/playwright-core",
+));
+
+const EXECUTABLE = path.join(
+  process.env.HOME,
+  "Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+);
+
+async function launch(profileDir) {
+  return chromium.launchPersistentContext(profileDir, {
+    headless: true,
+    executablePath: EXECUTABLE,
+    viewport: { width: 1280, height: 800 },
+    args: ["--no-first-run", "--no-default-browser-check"],
+  });
+}
+
+function safeUrl(u) {
+  try {
+    const url = new URL(u);
+    url.hash = "";
+    url.search = "";
+    return url.toString();
+  } catch {
+    return "<invalid>";
+  }
+}
+
+async function sidebarState(page) {
+  return page.evaluate(() => {
+    const rows = [...document.querySelectorAll(
+      '[data-testid="sidebar-row-card"], [data-testid="sidebar-row-slim"]')];
+    const out = [];
+    for (const row of rows) {
+      // Card rows carry the full accessibility label (title + meta); the
+      // visible title line is the first element whose text appears twice
+      // (title + sr-only echo). Fall back to the row aria-label.
+      const status = [...row.querySelectorAll('[role="status"]')]
+        .map((n) => n.textContent.trim())
+        .filter((t) => t && t !== "Pinned");
+      const accent = row.querySelector("[data-provider-accent-color]");
+      const badge = accent ? accent.lastElementChild : null;
+      const leaves = [...row.querySelectorAll("span, div")]
+        .filter((n) => n.children.length === 0 && n.textContent.trim());
+      const titleNode = leaves
+        .filter((n) => n.getBoundingClientRect().width > 40)
+        .find((n) => n.textContent.includes("—")) ||
+        leaves.filter((n) => n.getBoundingClientRect().width > 40)[0] ||
+        null;
+      const rect = titleNode ? titleNode.getBoundingClientRect() : null;
+      const ariaLabel = row.getAttribute("aria-label");
+      out.push({
+        ariaLabel,
+        title: titleNode ? titleNode.textContent.trim() : null,
+        truncated: titleNode
+          ? titleNode.scrollWidth > titleNode.clientWidth + 1
+          : null,
+        titleBox: rect
+          ? { w: Math.round(rect.width), h: Math.round(rect.height) }
+          : null,
+        statuses: [
+          ...status,
+          ...(ariaLabel || "").split(", ").slice(1),
+        ].filter((t) => t && t !== "Pinned"),
+        pinned: !!row.querySelector('[aria-label="Pinned"], [aria-label="Unpin thread"]'),
+        woke: !!row.querySelector('[aria-label="Dismiss Woke notification"]'),
+        accentColor: accent
+          ? accent.getAttribute("data-provider-accent-color")
+          : null,
+        badgeInitials: badge ? badge.textContent.trim() : null,
+        badgeBackground: badge ? getComputedStyle(badge).backgroundColor : null,
+        rowTestid: row.getAttribute("data-testid"),
+      });
+    }
+    const toggle = document.querySelector('[aria-label="Toggle main sidebar"]');
+    // The sidebar panel is the nearest common ancestor of the thread rows.
+    let listParent = null;
+    if (rows.length) {
+      let node = rows[0];
+      while (node && !rows.every((r) => node.contains(r))) node = node.parentElement;
+      listParent = node;
+    }
+    return {
+      url: location.pathname,
+      rows: out,
+      toggleButton: !!toggle,
+      sidebarWidth: listParent
+        ? Math.round(listParent.getBoundingClientRect().width)
+        : null,
+      sidebarExpanded: listParent
+        ? listParent.getBoundingClientRect().width > 100
+        : false,
+    };
+  });
+}
+
+async function openThread(page, url) {
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForSelector(
+    '[data-testid="sidebar-row-card"], [data-testid="sidebar-row-slim"]',
+    { timeout: 45000 });
+  await page.waitForTimeout(1500);
+}
+
+async function writeOut(outPath, payload) {
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  const tmp = outPath + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2));
+  fs.renameSync(tmp, outPath);
+}
+
+async function modePair(accessFile, profileDir, outJson) {
+  const lines = fs.readFileSync(accessFile, "utf8").split("\n");
+  const pairingLine = lines.find((l) => l.startsWith("Pairing URL:"));
+  const tokenLine = lines.find((l) => l.startsWith("Token:"));
+  if (!pairingLine || !tokenLine) throw new Error("no pairing data in access file");
+  const pairingUrl = pairingLine.slice("Pairing URL:".length).trim();
+  const token = tokenLine.slice("Token:".length).trim();
+  const context = await launch(profileDir);
+  const page = context.pages()[0] || (await context.newPage());
+  await page.goto(pairingUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.waitForTimeout(3000);
+  if (page.url().includes("/pair")) {
+    // The fragment auto-submit did not complete; use the page's own paste
+    // flow: fill the token input and click Continue.
+    const input = page.getByRole("textbox").first();
+    await input.waitFor({ state: "visible", timeout: 15000 });
+    await input.fill(token);
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
+  await page
+    .waitForURL((u) => !u.pathname.includes("/pair"), { timeout: 45000 })
+    .catch(() => {});
+  await page.waitForLoadState("networkidle", { timeout: 45000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+  const cookies = (await context.cookies()).map((c) => c.name);
+  const landed = safeUrl(page.url());
+  await context.close();
+  await writeOut(outJson, {
+    when: new Date().toISOString(),
+    landed,
+    cookieNames: cookies,
+    note: "pairing token used once in-page; never printed, logged or stored",
+  });
+  console.log("PAIR_DONE");
+}
+
+async function modePin(profileDir, threadUrl, titleContains, outJson, shotPng) {
+  const context = await launch(profileDir);
+  const page = context.pages()[0] || (await context.newPage());
+  await openThread(page, threadUrl);
+  const before = await sidebarState(page);
+  // Right-click the row whose title matches, then click "Pin thread".
+  const target = page
+    .locator('[data-testid="sidebar-row-card"], [data-testid="sidebar-row-slim"]')
+    .filter({ hasText: titleContains })
+    .first();
+  await target.waitFor({ state: "visible", timeout: 20000 });
+  await target.click({ button: "right" });
+  const item = page.getByRole("menuitem", { name: "Pin thread" });
+  await item.waitFor({ state: "visible", timeout: 15000 });
+  await item.click();
+  await page.waitForTimeout(2500);
+  const after = await sidebarState(page);
+  await page.screenshot({ path: shotPng });
+  await context.close();
+  await writeOut(outJson, {
+    when: new Date().toISOString(),
+    url: safeUrl(threadUrl),
+    titleContains,
+    pinnedTitles: after.rows.filter((r) => r.pinned).map((r) => r.title),
+    before: before.rows.map((r) => ({ title: r.title, pinned: r.pinned })),
+    after: after.rows.map((r) => ({ title: r.title, pinned: r.pinned })),
+  });
+  console.log("PIN_DONE");
+}
+
+async function modeSnapshot(profileDir, url, outJson, shotPng, label) {
+  const context = await launch(profileDir);
+  const page = context.pages()[0] || (await context.newPage());
+  await openThread(page, url);
+  const state = await sidebarState(page);
+  const aria = await page
+    .locator("body")
+    .ariaSnapshot()
+    .catch(() => "<ariaSnapshot unavailable>");
+  await page.screenshot({ path: shotPng });
+  await context.close();
+  await writeOut(outJson, {
+    when: new Date().toISOString(),
+    label: label || "",
+    url: safeUrl(url),
+    viewport: "1280x800",
+    sidebar: state,
+    ariaExcerpt: aria.slice(0, 4000),
+  });
+  console.log("SNAPSHOT_DONE");
+}
+
+async function modeLivetext(profileDir, threadUrl, promptFile, outJson) {
+  const prompt = fs.readFileSync(promptFile, "utf8");
+  const context = await launch(profileDir);
+  const page = context.pages()[0] || (await context.newPage());
+  await openThread(page, threadUrl);
+  const box = page.getByRole("textbox").first();
+  await box.waitFor({ state: "visible", timeout: 30000 });
+  await box.click();
+  await box.fill(prompt);
+  const submit = page.getByRole("button", { name: "Submit message" });
+  await submit.waitFor({ state: "visible", timeout: 10000 });
+  const sentAt = Date.now();
+  await submit.click();
+  const states = [];
+  let lastText = null;
+  let finalText = "";
+  while (Date.now() - sentAt < 300000) {
+    const sample = await page.evaluate(() => {
+      const nodes = document.querySelectorAll('[data-message-role="assistant"]');
+      const last = nodes[nodes.length - 1];
+      const stop = document.querySelector(
+        'button[aria-label*="top" i], button[aria-label*="nterrupt" i]');
+      return {
+        text: last ? last.textContent : "",
+        stopVisible: !!stop,
+      };
+    });
+    if (sample.text && sample.text !== lastText) {
+      lastText = sample.text;
+      states.push({
+        tMs: Date.now() - sentAt,
+        length: sample.text.length,
+        head: sample.text.slice(0, 110),
+        tail: sample.text.slice(-70),
+      });
+      finalText = sample.text;
+    }
+    const quiet = states.length > 1 && !sample.stopVisible &&
+      Date.now() - sentAt > 20000 && sample.text === lastText;
+    if (quiet) break;
+    await page.waitForTimeout(120);
+  }
+  await context.close();
+  await writeOut(outJson, {
+    when: new Date().toISOString(),
+    url: safeUrl(threadUrl),
+    sampleIntervalMs: 120,
+    distinctStates: states.length,
+    states,
+    finalLength: finalText.length,
+  });
+  console.log(`LIVETEXT_DONE states=${states.length}`);
+}
+
+(async () => {
+  const [mode, ...args] = process.argv.slice(2);
+  if (mode === "pair") return modePair(...args);
+  if (mode === "pin") return modePin(...args);
+  if (mode === "snapshot") return modeSnapshot(...args);
+  if (mode === "livetext") return modeLivetext(...args);
+  throw new Error(`unknown mode ${mode}`);
+})().catch((e) => {
+  console.error("ROSTER_BROWSER_FAILED", e.message);
+  process.exit(1);
+});

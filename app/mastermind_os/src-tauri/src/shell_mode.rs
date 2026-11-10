@@ -95,6 +95,102 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
     }
 }
 
+/// Read the one-time shell URL from a user-private file (the T3 pairing-file path).
+///
+/// The path is supplied by `MM_SHELL_URL_FILE`; its contents are the URL, not a
+/// command or an environment file. The no-follow open and post-open metadata check
+/// prevent symlink substitution. Neither the path nor contents appear in errors.
+#[cfg(unix)]
+pub fn read_shell_url_file(path: &std::path::Path) -> Result<Url, ShellUrlFileRefusal> {
+    read_shell_url_file_for_uid(path, unsafe { libc::getuid() })
+}
+
+#[cfg(unix)]
+fn read_shell_url_file_for_uid(
+    path: &std::path::Path,
+    current_uid: libc::uid_t,
+) -> Result<Url, ShellUrlFileRefusal> {
+    use std::io::Read;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                ShellUrlFileRefusal::Missing
+            } else {
+                ShellUrlFileRefusal::Unreadable
+            }
+        })?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| ShellUrlFileRefusal::Unreadable)?;
+    if !metadata.file_type().is_file() {
+        return Err(ShellUrlFileRefusal::NotRegularFile);
+    }
+    if metadata.uid() != current_uid {
+        return Err(ShellUrlFileRefusal::WrongOwner);
+    }
+    if metadata.permissions().mode() & 0o777 != 0o600 {
+        return Err(ShellUrlFileRefusal::WrongPermissions);
+    }
+    if metadata.len() > 16 * 1024 {
+        return Err(ShellUrlFileRefusal::InvalidContents);
+    }
+    let mut input = String::new();
+    file.take(16 * 1024 + 1)
+        .read_to_string(&mut input)
+        .map_err(|_| ShellUrlFileRefusal::Unreadable)?;
+    if input.len() > 16 * 1024 {
+        return Err(ShellUrlFileRefusal::InvalidContents);
+    }
+    let input = input.trim();
+    if input.is_empty() || input.contains(['\r', '\n', '\0']) {
+        return Err(ShellUrlFileRefusal::InvalidContents);
+    }
+    parse_shell_url(input).map_err(ShellUrlFileRefusal::Url)
+}
+
+/// Stable, input-free reasons the pairing file could not be used.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellUrlFileRefusal {
+    Missing,
+    Unreadable,
+    NotRegularFile,
+    WrongOwner,
+    WrongPermissions,
+    InvalidContents,
+    Url(ShellUrlRefusal),
+}
+
+impl ShellUrlFileRefusal {
+    pub fn subcode(self) -> String {
+        match self {
+            Self::Missing => "missing".into(),
+            Self::Unreadable => "unreadable".into(),
+            Self::NotRegularFile => "not_regular_file".into(),
+            Self::WrongOwner => "wrong_owner".into(),
+            Self::WrongPermissions => "wrong_permissions".into(),
+            Self::InvalidContents => "invalid_contents".into(),
+            Self::Url(refusal) => format!("url.{}", refusal.subcode()),
+        }
+    }
+}
+
+/// Log a fixed refusal code only; never the setting path or file contents.
+pub fn log_file_refusal(refusal: ShellUrlFileRefusal) {
+    // Dots keep every component below dev_log's conservative long-token redactor.
+    let code = format!("SHELL_URL_FILE.REFUSED.{}", refusal.subcode());
+    if let Some(root) = dev_root() {
+        if let Ok(log) = DevLog::open(&root.join("app.log")) {
+            let _ = log.native_failure("shell_mode", &code);
+        }
+    }
+    eprintln!("Mastermind OS shell mode: {code}; using the normal window.");
+}
+
 /// Dev root: `MMOS_DEV_ROOT`, else `~/.mastermind/mmos_dev`.
 pub fn dev_root() -> Option<PathBuf> {
     if let Some(root) = std::env::var_os("MMOS_DEV_ROOT") {
@@ -263,7 +359,13 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("mmos-shell-mode-{}-{}", std::process::id(), nanos))
+        let path = std::env::temp_dir().join(format!(
+            "mmos-shell-mode-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&path).expect("create unique temp directory");
+        path
     }
 
     #[test]
@@ -433,7 +535,10 @@ mod tests {
             "http://[::ffff:127.0.0.1]",
             "http://127.0.0.1\t.evil.com",
         ] {
-            assert!(parse_shell_url(refused).is_err(), "{refused} must be refused");
+            assert!(
+                parse_shell_url(refused).is_err(),
+                "{refused} must be refused"
+            );
         }
     }
 
@@ -448,5 +553,198 @@ mod tests {
             .to_ascii_lowercase()
             .contains("authorization"));
         assert!(SHELL_PAGE_BOOTSTRAP.lines().count() <= 120);
+    }
+
+    #[cfg(unix)]
+    mod file_setting {
+        use super::*;
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn write_file(dir: &std::path::Path, name: &str, contents: &str, mode: u32) -> PathBuf {
+            let path = dir.join(name);
+            let mut file = fs::File::create(&path).expect("create");
+            file.write_all(contents.as_bytes()).expect("write");
+            file.sync_all().expect("sync");
+            drop(file);
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).expect("chmod");
+            path
+        }
+
+        fn current_uid() -> libc::uid_t {
+            unsafe { libc::getuid() }
+        }
+
+        #[test]
+        fn accepts_a_private_loopback_url_file_and_keeps_path_query_fragment() {
+            let dir = unique_temp_dir();
+            let path = write_file(
+                &dir,
+                "url.txt",
+                "http://127.0.0.1:3796/pair#token=synthetic0123456789\n",
+                0o600,
+            );
+            let url = read_shell_url_file(&path).expect("accepted");
+            assert_eq!(url.host_str(), Some("127.0.0.1"));
+            assert_eq!(url.port(), Some(3796));
+            assert_eq!(url.path(), "/pair");
+            assert_eq!(url.fragment(), Some("token=synthetic0123456789"));
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn refusal_matrix_covers_every_required_case() {
+            let dir = unique_temp_dir();
+            let uid = current_uid();
+
+            let missing = dir.join("absent.txt");
+            assert_eq!(
+                read_shell_url_file_for_uid(&missing, uid),
+                Err(ShellUrlFileRefusal::Missing)
+            );
+
+            assert_eq!(
+                read_shell_url_file_for_uid(&dir, uid),
+                Err(ShellUrlFileRefusal::NotRegularFile)
+            );
+
+            let target = write_file(&dir, "target.txt", "http://127.0.0.1:3796/", 0o600);
+            let link = dir.join("link.txt");
+            std::os::unix::fs::symlink(&target, &link).expect("symlink");
+            assert_eq!(
+                read_shell_url_file_for_uid(&link, uid),
+                Err(ShellUrlFileRefusal::Unreadable),
+                "symlink must be refused (no-follow open)"
+            );
+
+            for mode in [0o644, 0o640, 0o606, 0o700, 0o400] {
+                let path = write_file(
+                    &dir,
+                    &format!("mode-{mode:o}.txt"),
+                    "http://127.0.0.1/",
+                    mode,
+                );
+                assert_eq!(
+                    read_shell_url_file_for_uid(&path, uid),
+                    Err(ShellUrlFileRefusal::WrongPermissions),
+                    "mode {mode:o}"
+                );
+            }
+
+            let owned = write_file(&dir, "owned.txt", "http://127.0.0.1/", 0o600);
+            assert_eq!(
+                read_shell_url_file_for_uid(&owned, uid.wrapping_add(1)),
+                Err(ShellUrlFileRefusal::WrongOwner),
+                "a file owned by someone else must be refused"
+            );
+
+            let empty = write_file(&dir, "empty.txt", "", 0o600);
+            assert_eq!(
+                read_shell_url_file_for_uid(&empty, uid),
+                Err(ShellUrlFileRefusal::InvalidContents)
+            );
+            let multiline = write_file(
+                &dir,
+                "multi.txt",
+                "http://127.0.0.1/\nhttp://127.0.0.1:2/",
+                0o600,
+            );
+            assert_eq!(
+                read_shell_url_file_for_uid(&multiline, uid),
+                Err(ShellUrlFileRefusal::InvalidContents)
+            );
+            let oversized = write_file(&dir, "big.txt", &"a".repeat(17 * 1024), 0o600);
+            assert_eq!(
+                read_shell_url_file_for_uid(&oversized, uid),
+                Err(ShellUrlFileRefusal::InvalidContents)
+            );
+
+            for (contents, expected) in [
+                ("https://127.0.0.1:3796/", ShellUrlRefusal::WrongScheme),
+                ("http://example.com/", ShellUrlRefusal::HostNotLoopback),
+                (
+                    "http://user:pass@127.0.0.1:3796/",
+                    ShellUrlRefusal::UserInfo,
+                ),
+                ("not a url", ShellUrlRefusal::Unparseable),
+            ] {
+                let path = write_file(&dir, &format!("url-{expected:?}.txt"), contents, 0o600);
+                assert_eq!(
+                    read_shell_url_file_for_uid(&path, uid),
+                    Err(ShellUrlFileRefusal::Url(expected)),
+                    "contents {expected:?}"
+                );
+            }
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn refusal_subcodes_are_distinct_and_input_free() {
+            let subcodes: Vec<String> = [
+                ShellUrlFileRefusal::Missing,
+                ShellUrlFileRefusal::Unreadable,
+                ShellUrlFileRefusal::NotRegularFile,
+                ShellUrlFileRefusal::WrongOwner,
+                ShellUrlFileRefusal::WrongPermissions,
+                ShellUrlFileRefusal::InvalidContents,
+                ShellUrlFileRefusal::Url(ShellUrlRefusal::Unparseable),
+                ShellUrlFileRefusal::Url(ShellUrlRefusal::WrongScheme),
+                ShellUrlFileRefusal::Url(ShellUrlRefusal::MissingHost),
+                ShellUrlFileRefusal::Url(ShellUrlRefusal::UserInfo),
+                ShellUrlFileRefusal::Url(ShellUrlRefusal::HostNotLoopback),
+            ]
+            .into_iter()
+            .map(ShellUrlFileRefusal::subcode)
+            .collect();
+            let mut unique = subcodes.clone();
+            unique.sort();
+            unique.dedup();
+            assert_eq!(unique.len(), subcodes.len());
+            // Every component stays below dev_log's 20-byte base64url redactor.
+            for code in &subcodes {
+                for part in code.split('.') {
+                    assert!(part.len() < 20, "{code} part {part} too long");
+                }
+            }
+        }
+
+        #[test]
+        fn refusal_logging_never_echoes_path_or_contents() {
+            let dir = unique_temp_dir();
+            let secret_url = "http://user:p4iringt0kenSecretValue000@127.0.0.1:3796/pair#token=abc";
+            let path = write_file(&dir, "pairing.txt", secret_url, 0o600);
+            let refusal = read_shell_url_file(&path).unwrap_err();
+            assert_eq!(refusal, ShellUrlFileRefusal::Url(ShellUrlRefusal::UserInfo));
+
+            let log_root = unique_temp_dir();
+            let previous = std::env::var_os("MMOS_DEV_ROOT");
+            std::env::set_var("MMOS_DEV_ROOT", &log_root);
+            log_file_refusal(refusal);
+            let contents = fs::read_to_string(log_root.join("app.log")).expect("app.log written");
+            match previous {
+                Some(value) => std::env::set_var("MMOS_DEV_ROOT", value),
+                None => std::env::remove_var("MMOS_DEV_ROOT"),
+            }
+
+            let record: serde_json::Value =
+                serde_json::from_str(contents.lines().next().expect("one record"))
+                    .expect("jsonl record");
+            assert_eq!(record["kind"], "native_failure");
+            assert_eq!(record["command"], "shell_mode");
+            let code = record["code"].as_str().expect("code string");
+            assert!(code.contains("SHELL_URL_FILE.REFUSED"), "{code}");
+            assert!(code.contains("userinfo"), "{code}");
+            assert!(
+                !contents.contains("p4iringt0kenSecretValue000"),
+                "userinfo leaked"
+            );
+            assert!(!contents.contains("pairing.txt"), "file path leaked");
+            assert!(!contents.contains("token=abc"), "fragment leaked");
+            assert!(!contents.contains("http://"), "raw url leaked");
+            assert!(!contents.contains("127.0.0.1"), "raw host leaked");
+
+            fs::remove_dir_all(&dir).ok();
+            fs::remove_dir_all(&log_root).ok();
+        }
     }
 }

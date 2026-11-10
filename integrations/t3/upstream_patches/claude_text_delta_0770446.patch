@@ -1,8 +1,8 @@
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-index 4877eed6..788c1447 100644
+index 4877eed6..dd78c223 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts
-@@ -6104,6 +6104,455 @@ describe("ClaudeAdapterV2 background wake turns", () => {
+@@ -6104,6 +6104,652 @@ describe("ClaudeAdapterV2 background wake turns", () => {
        ),
    );
  
@@ -453,13 +453,210 @@ index 4877eed6..788c1447 100644
 +          ),
 +        ),
 +    );
++
++    // Adversarial (kimi-k3.1-pro review): the SDK snapshots each completed
++    // block, so ONE message id with [text, tool_use] yields two cumulative
++    // snapshots with distinct uuids. Completing the streamed item on the first
++    // snapshot must not let the second snapshot re-emit the text.
++    it.effect(
++      "attack: one message [text, tool_use], two cumulative per-block snapshots emits text once",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-attack1"),
++              text: "Use the tool",
++              attachments: [],
++            }),
++          );
++          for (const frame of textStream("msg_attack_1", ["Before the tool"])) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_attack_1",
++              uuid: "snap-attack-1a",
++              content: [{ type: "text", text: "Before the tool." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_attack_1",
++              uuid: "snap-attack-1b",
++              content: [
++                { type: "text", text: "Before the tool." },
++                { type: "tool_use", id: "toolu-attack-1", name: "Bash", input: { command: "echo hi" } },
++              ],
++            }),
++          );
++          yield* harness.offerAndWait(
++            claudeSdkFrame({
++              type: "user",
++              uuid: "tool-result-attack-1",
++              session_id: WAKE_NATIVE_SESSION,
++              parent_tool_use_id: null,
++              message: {
++                role: "user",
++                content: [
++                  {
++                    type: "tool_result",
++                    tool_use_id: "toolu-attack-1",
++                    content: [{ type: "text", text: "hi" }],
++                    is_error: false,
++                  },
++                ],
++              },
++            }),
++          );
++          yield* harness.offerAndWait(
++            makeResultFrame({ uuid: "result-attack-1", result: "Before the tool." }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "completed");
++          const items = assistantItems(harness.events);
++          const texts = [...items.values()].map((item) => item.text).sort();
++          assert.equal(
++            items.size,
++            1,
++            `per-block snapshots must not duplicate text, got ${items.size}: ${JSON.stringify(texts)}`,
++          );
++          assert.equal(texts[0], "Before the tool.");
++          for (const item of items.values()) assert.equal(item.streaming, false);
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
++
++    // Same attack extended: [text, tool_use, text] with three cumulative
++    // snapshots; the second text block must land in the SAME item with no
++    // loss and no stuck streaming.
++    it.effect(
++      "attack: one message [text, tool_use, text], three snapshots keeps one item with both parts",
++      () =>
++        Effect.gen(function* () {
++          const harness = yield* makeWakeHarness;
++          yield* harness.runtime.startTurn(
++            makeClaudeTestTurnInput({
++              threadId: harness.threadId,
++              providerThread: harness.providerThread,
++              now: yield* DateTime.now,
++              attemptId: RunAttemptId.make("attempt-text-stream-attack2"),
++              text: "Use the tool twice",
++              attachments: [],
++            }),
++          );
++          for (const frame of textStream("msg_attack_2", ["Before the tool"])) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_attack_2",
++              uuid: "snap-attack-2a",
++              content: [{ type: "text", text: "Before the tool." }],
++            }),
++          );
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_attack_2",
++              uuid: "snap-attack-2b",
++              content: [
++                { type: "text", text: "Before the tool." },
++                { type: "tool_use", id: "toolu-attack-2", name: "Bash", input: { command: "echo hi" } },
++              ],
++            }),
++          );
++          yield* harness.offerAndWait(
++            claudeSdkFrame({
++              type: "user",
++              uuid: "tool-result-attack-2",
++              session_id: WAKE_NATIVE_SESSION,
++              parent_tool_use_id: null,
++              message: {
++                role: "user",
++                content: [
++                  {
++                    type: "tool_result",
++                    tool_use_id: "toolu-attack-2",
++                    content: [{ type: "text", text: "hi" }],
++                    is_error: false,
++                  },
++                ],
++              },
++            }),
++          );
++          for (const frame of [
++            streamFrame({
++              type: "content_block_start",
++              index: 2,
++              content_block: { type: "text", text: "" },
++            }),
++            streamFrame({
++              type: "content_block_delta",
++              index: 2,
++              delta: { type: "text_delta", text: " After the tool." },
++            }),
++            streamFrame({ type: "content_block_stop", index: 2 }),
++          ]) {
++            yield* harness.offerAndWait(frame);
++          }
++          yield* harness.offerAndWait(
++            textSnapshot({
++              id: "msg_attack_2",
++              uuid: "snap-attack-2c",
++              content: [
++                { type: "text", text: "Before the tool." },
++                { type: "tool_use", id: "toolu-attack-2", name: "Bash", input: { command: "echo hi" } },
++                { type: "text", text: " After the tool." },
++              ],
++            }),
++          );
++          yield* harness.offerAndWait(
++            makeResultFrame({ uuid: "result-attack-2", result: "Before the tool. After the tool." }),
++          );
++          const terminal = yield* Queue.take(harness.terminalReceipts);
++          assert.equal(terminal.status, "completed");
++          const items = assistantItems(harness.events);
++          const texts = [...items.values()].map((item) => item.text).sort();
++          assert.equal(
++            items.size,
++            1,
++            `three snapshots must keep one text item, got ${items.size}: ${JSON.stringify(texts)}`,
++          );
++          const finalText = texts[0]!;
++          assert.include(finalText, "Before the tool", "first text part must survive");
++          assert.include(finalText, "After the tool", "second text part must survive");
++          for (const item of items.values()) assert.equal(item.streaming, false);
++        }).pipe(
++          Effect.scoped,
++          Effect.provide(
++            Layer.mergeAll(
++              IdAllocator.layer,
++              McpProviderSessions.layer,
++              NodeServices.layer,
++              NodeCrypto.layer,
++            ),
++          ),
++        ),
++    );
 +  });
 +
    // regression: #15892 non-execution metadata is carried through, not guessed from result text
    it.effect.each(["cancelled", "denied", "permission_denied", undefined])(
      "preserves native tool non-execution metadata %s without inferring a denial from text",
 diff --git a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
-index 2824552b..1f9ea8d2 100644
+index 2824552b..a00a34a3 100644
 --- a/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 +++ b/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts
 @@ -4284,6 +4284,98 @@ function buildAssistantArtifacts(input: {
@@ -561,21 +758,25 @@ index 2824552b..1f9ea8d2 100644
  const CLAUDE_USAGE_LIMIT_WINDOWS = {
    five_hour: "5-hour",
    seven_day: "7-day",
-@@ -4343,6 +4435,13 @@ interface ActiveClaudeTurnContext {
+@@ -4343,6 +4435,17 @@ interface ActiveClaudeTurnContext {
      emittedNativeItemIds: Set<string>;
      // The CLI repeats a notice that ends a prompt as the turn's result text.
      noticeTexts: Set<string>;
 +    // Live answer-text streaming (mirrors Codex agentMessageDeltas): the API
-+    // message id currently streaming, whether a text block is open, and the
-+    // startedAt of each streamed item (one per API message id).
++    // message id currently streaming, whether a text block is open, the
++    // startedAt of each streamed item (one per API message id), and the
++    // authoritative text each streamed message has settled to so far (the SDK
++    // snapshots every completed block, so one message settles repeatedly with
++    // cumulative content).
 +    streamMessageId: string | null;
 +    textBlockOpen: boolean;
 +    streamedAnyText: boolean;
 +    readonly streamedItemStartedAt: Map<string, DateTime.Utc>;
++    readonly streamedItemSettledText: Map<string, string>;
    };
    readonly reasoning: {
      messageId: string | null;
-@@ -7893,6 +7992,50 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -7893,6 +7996,50 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
              }),
          });
  
@@ -626,7 +827,7 @@ index 2824552b..1f9ea8d2 100644
          const endToolCalls = Effect.fnUntraced(function* (input: {
            readonly context: ActiveClaudeTurnContext | null;
            readonly toolCalls: ReadonlyArray<ActiveClaudeToolCall>;
-@@ -7954,6 +8097,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -7954,6 +8101,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            readonly result?: SDKResultMessage;
          }) {
            yield* reasoningDeltas.flushTurn(input.context.nativeTurnId);
@@ -636,7 +837,7 @@ index 2824552b..1f9ea8d2 100644
            if (input.context.compaction?.status === "running") {
              const reason = input.result?.subtype === "success" ? input.result.result.trim() : "";
              yield* emitProviderEvent({
-@@ -8023,6 +8169,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -8023,6 +8173,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
  
            if (
              input.context.assistant.emittedNativeItemIds.size === 0 &&
@@ -644,7 +845,7 @@ index 2824552b..1f9ea8d2 100644
              input.context.assistant.fallbackText.length > 0
            ) {
              const ordinal = yield* resolveItemOrdinal(
-@@ -9029,6 +9176,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -9029,6 +9180,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
              if (event.type === "message_start") {
                reasoning.messageId = event.message.id;
                reasoning.streamBlocks.clear();
@@ -653,7 +854,7 @@ index 2824552b..1f9ea8d2 100644
                const usage: ClaudeMessageUsage | undefined = event.message.usage;
                context.streamUsage =
                  usage === undefined ? null : { messageId: event.message.id, usage };
-@@ -9067,7 +9216,35 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -9067,7 +9220,49 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                    delta: event.delta.thinking,
                  });
                }
@@ -672,6 +873,20 @@ index 2824552b..1f9ea8d2 100644
 +                // Reserve the ordinal at first sight so streamed text keeps its
 +                // place before tool items of the same snapshot.
 +                yield* resolveItemOrdinal(context, itemId);
++              } else {
++                // A later block re-opens an item an earlier snapshot settled:
++                // re-arm the coalescer with the cumulative prefix so the live
++                // text never regresses to just this block's deltas.
++                const settled = context.assistant.streamedItemSettledText.get(
++                  context.assistant.streamMessageId,
++                );
++                if (settled !== undefined && settled.length > 0) {
++                  yield* assistantTextDeltas.append({
++                    turnId: context.nativeTurnId,
++                    itemId,
++                    delta: settled,
++                  });
++                }
 +              }
 +            } else if (
 +              event.type === "content_block_delta" &&
@@ -689,7 +904,7 @@ index 2824552b..1f9ea8d2 100644
                const itemId = reasoning.streamBlocks.get(event.index);
                if (itemId !== undefined) {
                  yield* reasoningDeltas.complete({
-@@ -9941,6 +10118,27 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -9941,6 +10136,39 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
            ) {
              return;
            }
@@ -702,22 +917,34 @@ index 2824552b..1f9ea8d2 100644
 +            // This snapshot settles a message we streamed live: complete the
 +            // streamed item with the authoritative text (one item, no second
 +            // uuid-keyed emission) and let the guard below skip the uuid path.
++            // The SDK snapshots each completed block, so the SAME message id
++            // settles repeatedly with cumulative content: re-settle the same
++            // item whenever the authoritative text grew, and never let a later
++            // snapshot re-open a second uuid-keyed item for it.
 +            const itemId = `assistant-text:${message.message.id}`;
-+            context.assistant.streamedItemStartedAt.delete(itemId);
 +            context.assistant.emittedNativeItemIds.add(message.uuid);
-+            yield* assistantTextDeltas.complete({
-+              turnId: context.nativeTurnId,
-+              itemId,
-+              ...(assistantText !== null && assistantText.text.length > 0
-+                ? { finalText: assistantText.text }
-+                : {}),
-+              emitEmpty: false,
-+            });
++            if (
++              assistantText !== null &&
++              assistantText.text.length > 0 &&
++              context.assistant.streamedItemSettledText.get(message.message.id) !==
++                assistantText.text
++            ) {
++              context.assistant.streamedItemSettledText.set(
++                message.message.id,
++                assistantText.text,
++              );
++              yield* assistantTextDeltas.complete({
++                turnId: context.nativeTurnId,
++                itemId,
++                finalText: assistantText.text,
++                emitEmpty: false,
++              });
++            }
 +          }
            if (assistantText !== null && assistantText.text.length > 0) {
              yield* emitAssistantTextArtifacts({
                context,
-@@ -10000,6 +10198,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -10000,6 +10228,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                message.local_command === "compact"
              ) &&
              context.assistant.emittedNativeItemIds.size === 0 &&
@@ -725,7 +952,7 @@ index 2824552b..1f9ea8d2 100644
              context.assistant.fallbackText.length === 0 &&
              resultText !== null &&
              resultText.text.length > 0 &&
-@@ -11230,6 +11429,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
+@@ -11230,6 +11459,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                  fallbackNativeItemId: `assistant:${turnInput.runId}`,
                  emittedNativeItemIds: new Set(),
                  noticeTexts: new Set(),
@@ -733,6 +960,7 @@ index 2824552b..1f9ea8d2 100644
 +                textBlockOpen: false,
 +                streamedAnyText: false,
 +                streamedItemStartedAt: new Map(),
++                streamedItemSettledText: new Map(),
                },
                reasoning: {
                  messageId: null,
