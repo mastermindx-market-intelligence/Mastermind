@@ -82,3 +82,16 @@ it('retains the incumbent cancel control for an active native flow even without 
  expect(requests(x)).toHaveLength(0);expect(screen.queryByRole('button',{name:'Cancel sign in'})).toBeNull();
  expect((screen.getByRole('button',{name:'Sign in to account'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it.each(['en','zh-CN'] as const)('explicitly clears a known callback conflict before a new account gesture: %s',async locale=>{
+ const x=await mount(locale),zh=locale==='zh-CN';
+ await x.publish({...out,status:'error',reason:'TOKEN_EXCHANGE_FAILED'});
+ const reset=screen.getByRole('button',{name:zh?'清除已保存的登录':'Clear saved sign-in'});
+ expect(x.invoke.mock.calls.filter(([c])=>c==='sign_out')).toHaveLength(0);
+ fireEvent.click(reset);
+ await waitFor(()=>expect(x.invoke.mock.calls.filter(([c])=>c==='sign_out')).toEqual([['sign_out']]));
+ expect(requests(x)).toHaveLength(0);expect(x.client.executive!.available()).toBe(false);
+ const signIn=screen.getByRole('button',{name:zh?'登录账户':'Sign in to account'});
+ await waitFor(()=>expect((signIn as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(signIn);await waitFor(()=>expect(requests(x)).toEqual([['sign_in_primary']]));
+});

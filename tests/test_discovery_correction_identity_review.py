@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 
 RECORDS = {
-    'app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs': ('71b76671de68819ac6ed92a4d705800aed84b9d51cf46f3858f6f974788cb2cb', ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))),
+    'app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs': ('66a8938bd1488245d2598be46689801d467ba65250df898e6c61636d64e72e05', ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))),
     'integrations/mastermind_workspace_app/native_authorization_identity.py': ('db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))),
-    "app/mastermind_os/src-tauri/src/auth.rs": ('244f2012d4c7f19f8f7f5d2c8231a92436521e7421d7e2eafcfe6544b7bb258f', ((3794, 68, 71, 'int', '503'), (3799, 69, 72, 'int', '503'), (3803, 67, 70, 'int', '503'))),
+    "app/mastermind_os/src-tauri/src/auth.rs": ('8fda1fa0401d89f31cce67f10e325ee21183a267ea046c71b0805b9827fe0933', ((3874, 68, 71, 'int', '503'), (3879, 69, 72, 'int', '503'), (3883, 67, 70, 'int', '503'))),
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),
