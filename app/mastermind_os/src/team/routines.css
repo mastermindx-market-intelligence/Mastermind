@@ -1,0 +1,255 @@
+/* HC10 Routines · Schedule, run and delivery (15GA-0) — editor column 744 +
+   schedule/history rail 344. Noir tokens from the shared shell; reuses the
+   card/chip/eyebrow/back-link classes from team.css where they fit. Unknown
+   rows stay secondary — never green — and the next occurrence never samples a
+   time or zone (no scheduler projection exists in this build). */
+
+.mm-routines {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.mm-routines h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.3;
+  font-weight: 500;
+}
+.mm-routines-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 744px) 344px;
+  gap: 32px;
+  align-items: start;
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+}
+
+/* Editor column. */
+.mm-routines-editor {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.mm-routines-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mm-routines-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+.mm-routines .mm-chip[data-routine-status="scheduled"] {
+  color: var(--noir-sage);
+}
+.mm-routines .mm-chip[data-routine-status="paused"] {
+  color: var(--noir-champagne);
+}
+
+.mm-routines-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.mm-routines-field > label {
+  font-size: 13px;
+  color: var(--noir-text-secondary);
+}
+.mm-routines-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--noir-text-tertiary);
+}
+.mm-routines-instruction {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  font: inherit;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--noir-text-primary);
+  background: var(--noir-raised);
+  border: 1px solid var(--noir-selected);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.mm-routines-select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--noir-text-primary);
+  background: var(--noir-raised);
+  border: 1px solid var(--noir-selected);
+  border-radius: 10px;
+  padding: 10px 12px;
+  max-width: 420px;
+}
+
+.mm-routines-card {
+  display: grid;
+  gap: 12px;
+}
+.mm-routines-card h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+.mm-routines-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.mm-routines-fact {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.mm-routines-fact dt {
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.mm-routines-fact dd {
+  margin: 0;
+  color: var(--noir-text-primary);
+  font-size: 14px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.mm-routines-unknown {
+  color: var(--noir-text-secondary);
+  font-size: 13px;
+}
+
+/* Run states: observed values from the record only. Unknown stays neutral —
+   never rendered green. */
+.mm-routines-state[data-execution="running"],
+.mm-routines-state[data-delivery="delivered"] {
+  color: var(--noir-sage);
+}
+.mm-routines-state[data-execution="finished"] {
+  color: var(--noir-steel);
+}
+.mm-routines-state[data-execution="failed"],
+.mm-routines-state[data-delivery="failed"] {
+  color: var(--noir-rose);
+}
+.mm-routines-state[data-delivery="pending"] {
+  color: var(--noir-champagne);
+}
+.mm-routines-state[data-execution="unknown"],
+.mm-routines-state[data-delivery="unknown"] {
+  color: var(--noir-text-secondary);
+}
+
+.mm-routines-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mm-routines-toggle {
+  border-radius: 9px;
+  border: 1px solid var(--noir-selected);
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  background: var(--noir-champagne);
+  color: #17140f;
+  cursor: pointer;
+}
+.mm-routines-toggle:disabled {
+  background: var(--noir-raised);
+  color: var(--noir-text-secondary);
+  cursor: not-allowed;
+}
+.mm-routines-reason {
+  margin: 0;
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+}
+.mm-routines-open-result {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  color: var(--noir-champagne);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.mm-routines-open-result:disabled {
+  color: var(--noir-text-tertiary);
+  cursor: not-allowed;
+}
+
+/* Right rail — SCHEDULE & HISTORY (344). */
+.mm-routines-rail {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.mm-routines-rail-heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--noir-champagne);
+}
+.mm-routines-rail-card {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+}
+.mm-routines-rail-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.mm-routines-rail-card .mm-routines-fact dd {
+  font-size: 13px;
+  text-align: left;
+}
+.mm-routines-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--noir-text-secondary);
+}
+.mm-routines-pause-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--noir-text-tertiary);
+}
+
+/* Null record — explicit unavailable state. */
+.mm-routines-unavailable {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+  padding: 24px;
+}
+.mm-routines-unavailable > p {
+  margin: 0;
+}
+
+/* Keyboard: visible focus on every interactive control. */
+.mm-routines :is(button, select, textarea):focus-visible {
+  outline: 2px solid var(--noir-champagne);
+  outline-offset: 2px;
+}
+
+@media (max-width: 800px) {
+  .mm-routines-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

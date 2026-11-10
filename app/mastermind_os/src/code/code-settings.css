@@ -1,0 +1,326 @@
+/* HC11 Code settings (15QF-0) — location bar, settings nav 248 + content.
+   Noir tokens from the shared shell; reuses card/chip/eyebrow classes from
+   code.css where they fit. Placeholder tabs say "not configured in this
+   build"; unknown provider fields stay neutral, never green. */
+
+.mm-cs {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+}
+
+/* Location bar. */
+.mm-cs-location {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--noir-selected);
+}
+.mm-cs-location p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--noir-text-secondary);
+}
+.mm-cs-close {
+  margin-inline-start: auto;
+  background: var(--noir-raised);
+  border: 1px solid var(--noir-selected);
+  color: var(--noir-text-secondary);
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mm-cs-close:disabled {
+  color: var(--noir-text-tertiary);
+  cursor: not-allowed;
+}
+.mm-cs-reason {
+  margin: 8px 0 0;
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+}
+
+/* Nav + content grid (248 + content). */
+.mm-cs-body {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  padding-top: 24px;
+}
+
+.mm-cs-nav {
+  display: grid;
+  gap: 20px;
+}
+.mm-cs-nav-group {
+  display: grid;
+  gap: 2px;
+}
+.mm-cs-nav-group > p {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--noir-text-tertiary);
+}
+.mm-cs-nav-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: var(--noir-text-secondary);
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.mm-cs-nav-item:hover {
+  background: var(--noir-hover);
+  color: var(--noir-text-primary);
+}
+.mm-cs-nav-item[aria-current="page"] {
+  background: var(--noir-raised);
+  color: var(--noir-text-primary);
+  font-weight: 500;
+}
+
+/* Content column. */
+.mm-cs-content {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.mm-cs-heading {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.3;
+  font-weight: 500;
+}
+.mm-cs-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.mm-cs-head > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.mm-cs-add {
+  margin-inline-start: auto;
+  border-radius: 9px;
+  border: 1px solid var(--noir-selected);
+  background: var(--noir-raised);
+  color: var(--noir-text-primary);
+  padding: 9px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.mm-cs-status {
+  margin: 0;
+  color: var(--noir-champagne);
+  font-size: 13px;
+}
+
+.mm-cs-env {
+  display: grid;
+  gap: 6px;
+  max-width: 480px;
+  min-width: 0;
+}
+.mm-cs-env-label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--noir-text-secondary);
+}
+.mm-cs-select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--noir-text-primary);
+  background: var(--noir-raised);
+  border: 1px solid var(--noir-selected);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.mm-cs-env-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--noir-text-tertiary);
+}
+
+/* Provider card. */
+.mm-cs-provider {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.mm-cs-provider-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mm-cs-provider-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+.mm-cs .mm-chip[data-ready="ready"] {
+  color: var(--noir-sage);
+}
+.mm-cs .mm-chip[data-ready="not-ready"] {
+  color: var(--noir-champagne);
+}
+.mm-cs .mm-chip[data-ready="unknown"] {
+  color: var(--noir-text-secondary);
+}
+.mm-cs-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.mm-cs-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.mm-cs-facts dt {
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.mm-cs-facts dd {
+  margin: 0;
+  color: var(--noir-text-primary);
+  font-size: 14px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.mm-cs-unknown {
+  color: var(--noir-text-secondary);
+  font-size: 13px;
+}
+.mm-cs-auth[data-auth="held"] {
+  color: var(--noir-text-primary);
+}
+.mm-cs-auth[data-auth="missing"] {
+  color: var(--noir-champagne);
+}
+.mm-cs-auth[data-auth="unknown"] {
+  color: var(--noir-text-secondary);
+}
+.mm-cs-credentials {
+  margin: 0;
+  font-size: 12px;
+  color: var(--noir-text-tertiary);
+}
+
+/* Capabilities from this connection. */
+.mm-cs-capabilities {
+  display: grid;
+  gap: 8px;
+}
+.mm-cs-capabilities h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--noir-text-secondary);
+}
+.mm-cs-capabilities dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.mm-cs-capabilities dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mm-cs-capabilities dt {
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.mm-cs-capabilities dd {
+  margin: 0;
+  font-size: 13px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.mm-cs-capability[data-state="available"] {
+  color: var(--noir-sage);
+}
+.mm-cs-capability[data-state="discovered"] {
+  color: var(--noir-steel);
+}
+.mm-cs-capability[data-state="not-provided"] {
+  color: var(--noir-text-secondary);
+}
+.mm-cs-capability[data-state="unknown"] {
+  color: var(--noir-champagne);
+}
+.mm-cs-capability small {
+  display: block;
+  color: var(--noir-text-tertiary);
+  font-size: 12px;
+}
+
+/* More providers + placeholder/unavailable panes. */
+.mm-cs-more {
+  justify-self: start;
+  background: none;
+  border: 0;
+  color: var(--noir-champagne);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.mm-cs-more:disabled {
+  color: var(--noir-text-tertiary);
+  cursor: not-allowed;
+}
+.mm-cs-placeholder {
+  display: grid;
+  gap: 8px;
+  padding: 20px 24px;
+}
+.mm-cs-placeholder > p {
+  margin: 0;
+  color: var(--noir-text-secondary);
+  font-size: 14px;
+}
+.mm-cs-unavailable {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+  padding: 24px;
+}
+.mm-cs-unavailable > p {
+  margin: 0;
+}
+
+/* Keyboard: visible focus on every interactive control. */
+.mm-cs :is(button, select):focus-visible {
+  outline: 2px solid var(--noir-champagne);
+  outline-offset: 2px;
+}
+
+@media (max-width: 800px) {
+  .mm-cs-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
