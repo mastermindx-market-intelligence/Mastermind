@@ -2163,13 +2163,32 @@ def api_overnight_tape() -> JSONResponse:
 
 @router.get("/api/research")
 def api_research() -> JSONResponse:
-    notes_dir = _data() / "research" / "notes"
-    if not notes_dir.exists():
-        return JSONResponse([])
     try:
+        notes_dir = _data() / "research" / "notes"
+        try:
+            paths = list(notes_dir.iterdir())
+        except FileNotFoundError:
+            # Missing evidence is empty only below an observed real directory.
+            # Dangling links, changed paths and other scan failures stay failed.
+            import stat
+
+            ancestor = notes_dir
+            while True:
+                try:
+                    mode = ancestor.lstat().st_mode
+                except FileNotFoundError:
+                    if ancestor == ancestor.parent:
+                        raise
+                    ancestor = ancestor.parent
+                    continue
+                if ancestor == notes_dir or not stat.S_ISDIR(mode):
+                    raise
+                return JSONResponse([])
         parsed: list[dict[str, Any]] = []
-        for p in notes_dir.glob("*.md"):
-            note = _parse_note(p)
+        for p in paths:
+            if not p.name.endswith(".md"):
+                continue
+            note = _parse_note(p, strict=True)
             if note:
                 parsed.append(note)
         # sort newest first
@@ -2193,8 +2212,13 @@ def api_research() -> JSONResponse:
             note["body_md_zh"] = _cached_zh(note.get("body_md") or "")
             out.append(note)
         return JSONResponse(out)
-    except Exception:
-        return JSONResponse([])
+    except Exception as exc:
+        _log.warning("research feed read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "research_status": "unavailable",
+            "error": "research_feed_unavailable",
+            "notes": None,
+        }, status_code=500)
 
 
 @router.get("/api/research_papers")
@@ -2208,62 +2232,67 @@ def api_research_papers() -> JSONResponse:
     """
     try:
         from brain import research_paper
-        papers = research_paper.load_papers()
+        papers = research_paper.load_papers(strict=True)
+
+        # join with the latest book: ticker -> (research_block, action, trade_time, weight)
+        gate: dict[str, dict] = {}
+        try:
+            book = json.loads((_data() / "portfolio" / "latest.json").read_text())
+            for pos in book.get("positions", []):
+                rb = pos.get("research")
+                if rb and pos.get("sleeve") == "conviction":
+                    gate[(pos.get("ticker") or "").upper()] = {
+                        "block": rb, "action": "buy_confirmed",
+                        "trade_time": pos.get("opened_at"), "weight": pos.get("weight"),
+                    }
+            for held in book.get("research_held", []):
+                t = (held.get("ticker") or "").upper()
+                gate.setdefault(t, {"block": held, "action": "research_held",
+                                    "trade_time": None, "weight": 0.0})
+        except Exception:
+            pass
+
+        out: list[dict[str, Any]] = []
+        for p in papers:
+            t = (p.get("ticker") or "").upper()
+            g = gate.get(t, {})
+            rb = g.get("block") or {}
+            summary = p.get("summary") or ""
+            out.append({
+                "id": p.get("id"),
+                "ticker": t,
+                "asof": p.get("asof"),
+                "reviewed_at": p.get("generated_at"),
+                "trade_time": g.get("trade_time"),
+                "action": g.get("action", "evaluated"),
+                "mode": p.get("mode"),
+                # prefer the live book's gate result; fall back to the gate the paper stamped on
+                # itself at review time (so a reviewed-but-not-traded name still shows its scores)
+                "engine_score": rb.get("engine_score", p.get("engine_score")),
+                "research_score": p.get("research_score"),
+                "combined": rb.get("combined", p.get("combined")),
+                "confirmed": rb.get("confirmed", p.get("confirmed")),
+                "viability": p.get("viability"),
+                "recommend": p.get("recommend"),
+                "confidence": p.get("confidence"),
+                "fair_value": p.get("fair_value"),
+                "price_at_review": p.get("price_at_review"),
+                "price_assessment": p.get("price_assessment"),
+                "weight": g.get("weight"),
+                "summary": summary,
+                "summary_zh": _cached_zh(summary) if summary else None,
+                "report_md": p.get("report_md"),
+                "report_md_zh": _cached_zh(p.get("report_md") or "") if p.get("report_md") else None,
+                "key_risks": p.get("key_risks") or [],
+            })
+        return JSONResponse({"papers": out})
     except Exception as exc:
-        return JSONResponse({"papers": [], "error": str(exc)})
-
-    # join with the latest book: ticker -> (research_block, action, trade_time, weight)
-    gate: dict[str, dict] = {}
-    try:
-        book = json.loads((_data() / "portfolio" / "latest.json").read_text())
-        for pos in book.get("positions", []):
-            rb = pos.get("research")
-            if rb and pos.get("sleeve") == "conviction":
-                gate[(pos.get("ticker") or "").upper()] = {
-                    "block": rb, "action": "buy_confirmed",
-                    "trade_time": pos.get("opened_at"), "weight": pos.get("weight"),
-                }
-        for held in book.get("research_held", []):
-            t = (held.get("ticker") or "").upper()
-            gate.setdefault(t, {"block": held, "action": "research_held",
-                                "trade_time": None, "weight": 0.0})
-    except Exception:
-        pass
-
-    out: list[dict[str, Any]] = []
-    for p in papers:
-        t = (p.get("ticker") or "").upper()
-        g = gate.get(t, {})
-        rb = g.get("block") or {}
-        summary = p.get("summary") or ""
-        out.append({
-            "id": p.get("id"),
-            "ticker": t,
-            "asof": p.get("asof"),
-            "reviewed_at": p.get("generated_at"),
-            "trade_time": g.get("trade_time"),
-            "action": g.get("action", "evaluated"),
-            "mode": p.get("mode"),
-            # prefer the live book's gate result; fall back to the gate the paper stamped on
-            # itself at review time (so a reviewed-but-not-traded name still shows its scores)
-            "engine_score": rb.get("engine_score", p.get("engine_score")),
-            "research_score": p.get("research_score"),
-            "combined": rb.get("combined", p.get("combined")),
-            "confirmed": rb.get("confirmed", p.get("confirmed")),
-            "viability": p.get("viability"),
-            "recommend": p.get("recommend"),
-            "confidence": p.get("confidence"),
-            "fair_value": p.get("fair_value"),
-            "price_at_review": p.get("price_at_review"),
-            "price_assessment": p.get("price_assessment"),
-            "weight": g.get("weight"),
-            "summary": summary,
-            "summary_zh": _cached_zh(summary) if summary else None,
-            "report_md": p.get("report_md"),
-            "report_md_zh": _cached_zh(p.get("report_md") or "") if p.get("report_md") else None,
-            "key_risks": p.get("key_risks") or [],
-        })
-    return JSONResponse({"papers": out})
+        _log.warning("research papers read failed: %s", type(exc).__name__)
+        return JSONResponse({
+            "paper_status": "unavailable",
+            "error": "research_papers_unavailable",
+            "papers": None,
+        }, status_code=500)
 
 
 @router.get("/api/outcome_ledger")
