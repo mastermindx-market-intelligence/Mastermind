@@ -45,8 +45,44 @@ def _execution_provenance() -> dict:
     return dict(_INFERENCE_PROVENANCE.get() or {"source": "claude_cli"})
 
 
+_JSON_TRANSPORT_LIMIT_BYTES = 8_000
+_JSON_TRANSPORT_ERRORS = {
+    "too_large": '{"error":"MCP_RESPONSE_TOO_LARGE"}',
+    "not_json": '{"error":"MCP_RESPONSE_NOT_JSON"}',
+}
+
+
+# These fields qualify the evidence or a modifying outcome. Compaction must keep
+# their complete values; an explicit transport error is safer than losing a fence.
+_JSON_TRANSPORT_QUALIFICATION_KEYS = frozenset({
+    "evidence_grade", "missing_reason", "fallback",
+    "read_status", "failed_sources", "degraded_sources", "error", "note",
+    "intake_note", "salience_note", "regime_status", "overnight_status",
+    "live", "status", "portfolio_id", "active", "lifecycle",
+    "data_degraded", "stockdata_present", "n_scored", "thin_evidence",
+    "gate_status", "passed", "size_authority", "vetoes", "reason",
+    "write_status", "proposal_queued", "paper_saved",
+})
+
+
 def _ok(text: str) -> dict:
     return {"content": [{"type": "text", "text": text}]}
+
+
+def _json_transport_error(kind: str) -> dict:
+    return {
+        "content": [{"type": "text", "text": _JSON_TRANSPORT_ERRORS[kind]}],
+        "is_error": True,
+    }
+
+
+def _serialize_json_transport(value):
+    """Serialize strict JSON and return its UTF-8 transport status."""
+    try:
+        payload = json.dumps(value, default=str, ensure_ascii=False, allow_nan=False)
+        return payload, "ok" if len(payload.encode("utf-8")) <= _JSON_TRANSPORT_LIMIT_BYTES else "too_large"
+    except Exception:
+        return None, "not_json"
 
 
 def _compact_json_value(
@@ -61,7 +97,8 @@ def _compact_json_value(
         return "<nested context omitted>"
     if isinstance(value, dict):
         return {
-            str(k): _compact_json_value(
+            str(k): v if k in _JSON_TRANSPORT_QUALIFICATION_KEYS or k in _FRESHNESS_KEYS
+            else _compact_json_value(
                 v,
                 list_limit=list_limit,
                 str_limit=str_limit,
@@ -92,36 +129,66 @@ def _compact_json_value(
 
 
 def _json(obj) -> dict:
-    """Return a valid JSON tool result under the 8k transport budget.
-
-    The old implementation sliced serialized bytes, which emitted malformed JSON.  Progressive
-    structural compaction keeps top-level keys and the highest-ranked list rows instead.
-    """
-    payload = json.dumps(obj, default=str, ensure_ascii=False)
-    if len(payload) <= 8000:
-        return _ok(payload)
-    for list_limit, str_limit in ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72)):
-        compact = _compact_json_value(
-            obj,
-            list_limit=list_limit,
-            str_limit=str_limit,
-        )
-        if isinstance(compact, dict):
-            compact["_transport_truncated"] = True
-        payload = json.dumps(compact, default=str, ensure_ascii=False)
-        if len(payload) <= 8000:
+    """Return strict, UTF-8-bounded JSON or a fixed transport error result."""
+    try:
+        # Validate the complete original value before compaction can omit a bad row.
+        payload, status = _serialize_json_transport(obj)
+        if status == "ok":
             return _ok(payload)
-    # Extremely wide objects still return valid JSON with their top-level scalar contract, plus
-    # the small freshness blocks: a read must never reach the model without its clocks.
-    fallback = {
-        str(k): v
-        for k, v in (obj.items() if isinstance(obj, dict) else [])
-        if v is None or isinstance(v, (bool, int, float, str))
-        or (k in _FRESHNESS_KEYS and isinstance(v, dict))
-    }
-    fallback["_transport_truncated"] = True
-    fallback["_note"] = "Nested payload exceeded the MCP transport budget."
-    return _ok(json.dumps(fallback, default=str, ensure_ascii=False))
+        if status == "not_json":
+            return _json_transport_error("not_json")
+        if not isinstance(obj, dict):
+            return _json_transport_error("too_large")
+        limits = ((20, 400), (10, 240), (5, 160), (3, 100), (1, 72))
+        for list_limit, str_limit in limits:
+            compact = _compact_json_value(
+                obj, list_limit=list_limit, str_limit=str_limit,
+            )
+            compact["_transport_truncated"] = True
+            payload, status = _serialize_json_transport(compact)
+            if status == "ok":
+                return _ok(payload)
+            if status == "not_json":
+                return _json_transport_error("not_json")
+
+        # Preserve the current scalar fallback: wide nested evidence is omitted as
+        # a whole, while its original clocks, health and outcome fences remain.
+        required = _JSON_TRANSPORT_QUALIFICATION_KEYS.union(_FRESHNESS_KEYS)
+        fallback = {
+            str(k): v for k, v in obj.items()
+            if v is None or isinstance(v, (bool, int, float, str)) or k in required
+        }
+        if not fallback:
+            return _json_transport_error("too_large")
+        metadata = {
+            "_transport_truncated": True,
+            "_note": "Nested payload exceeded the MCP transport budget.",
+        }
+        payload, status = _serialize_json_transport({**fallback, **metadata})
+        if status == "ok":
+            return _ok(payload)
+        if status == "not_json":
+            return _json_transport_error("not_json")
+
+        # A wide scalar mapping may also exceed the cap. Retain a ranked prefix
+        # plus every qualifier, even when those qualifiers occur after the prefix.
+        for list_limit, str_limit in limits:
+            compact = {
+                k: v if k in required else _compact_json_value(
+                    v, list_limit=list_limit, str_limit=str_limit,
+                )
+                for index, (k, v) in enumerate(fallback.items())
+                if index < list_limit or k in required
+            }
+            compact.update(metadata)
+            payload, status = _serialize_json_transport(compact)
+            if status == "ok":
+                return _ok(payload)
+            if status == "not_json":
+                return _json_transport_error("not_json")
+        return _json_transport_error("too_large")
+    except Exception:
+        return _json_transport_error("not_json")
 
 
 def _mapping_field_checked(mapping, key):
