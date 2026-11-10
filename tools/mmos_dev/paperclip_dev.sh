@@ -366,12 +366,14 @@ EOF
 # --------------------------------------------------------------------------- #
 # CLI invocation (scrubbed environment; never inherits ambient PAPERCLIP_*)
 # --------------------------------------------------------------------------- #
-cli_env() {
-  env -u PORT -u HOST \
-      -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
-      -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
-      -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID
-}
+# Scrub list as an array so the launch path can hand it to nohup(1), which
+# cannot exec a shell function ("nohup cli_env …" dies with ENOENT).
+SCRUB_ENV=(env -u PORT -u HOST \
+    -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
+    -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
+    -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID)
+
+cli_env() { "${SCRUB_ENV[@]}" "$@"; }
 
 # --------------------------------------------------------------------------- #
 # Seeding
@@ -603,7 +605,7 @@ cmd_up() {
   {
     printf '%s [%s] dev controller launching paperclipai run\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROG"
   } >> "$SERVER_LOG"
-  nohup cli_env "$PAPERCLIP_CLI" run -d "$DEV_HOME" -i "$INSTANCE_ID" \
+  nohup "${SCRUB_ENV[@]}" "$PAPERCLIP_CLI" run -d "$DEV_HOME" -i "$INSTANCE_ID" \
       </dev/null >>"$SERVER_LOG" 2>&1 &
   local cli_pid=$!
   echo "$cli_pid" > "$PIDFILE"
