@@ -5,8 +5,13 @@ protected PR base commit, not the PR checkout, or an untrusted PR could edit the
 qualifier it is trying to pass. No review approval, protected-check waiver,
 deployment, branch or runtime mutation is issued here.
 
-FAST and STANDARD: quick PR checks, with the complete discovery-first suite
-required on the exact native merge_group candidate before protected merge.
+FAST: quick static checks, on the PR and on the exact native merge_group
+candidate.
+STANDARD: bounded source-proximate smoke on the PR for quick feedback, and the
+complete canonical suite on the exact native merge_group candidate. Selection
+cannot be made complete (cross-repository pins, package-membership counts and
+other tests no path mapping reaches), so merge-queue certification of an
+executable change is never weaker than full.
 CRITICAL/HOLD/unverifiable: full PR tests as well as full merge_group tests.
 """
 from __future__ import annotations
@@ -23,7 +28,6 @@ from pathlib import Path
 from control_plane.github_review_risk_policy import (
     ReviewChangeFacts, ReviewFileStat, ReviewTier, assess_review_risk,
 )
-from scripts.ci_pr_smoke import SmokeUnqualified, _reviewed_registries, select_modules
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _VISUAL = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2")
@@ -142,7 +146,7 @@ def classify(repo_path: Path, payload: dict, *, expected_repository: str) -> Sco
 def _classify_verified_change(
     repo_path: Path, base: str, head: str, number: int, *,
     expected_repository: str,
-    require_complete_smoke: bool = False,
+    merge_group: bool = False,
 ) -> ScopeDecision:
     # The shared canonical risk assessor sees the complete verified source
     # diff, not event labels, user-authored text, or PR-only shortcuts.
@@ -201,23 +205,18 @@ def _classify_verified_change(
         ))
     except (ValueError, TypeError):
         raise CIScopeUnqualified("CANONICAL_RISK_SOURCE_UNQUALIFIED") from None
+    reason = "SOURCE_VERIFIED"
     if assessment.tier is ReviewTier.FAST:
         mode = "fast"
+    elif assessment.tier is ReviewTier.STANDARD and merge_group:
+        # Not a different risk tier: the queue candidate is what merges, and a
+        # bounded selection cannot prove the tests it did not select. A PR
+        # ejected from a full group must not re-enter and merge on smoke.
+        mode, reason = "full", "MERGE_GROUP_STANDARD_REQUIRES_FULL"
     elif assessment.tier is ReviewTier.STANDARD:
         mode = "smoke"
     else:
         mode = "full"
-    reason = "SOURCE_VERIFIED"
-    if mode == "smoke" and require_complete_smoke:
-        try:
-            select_modules(
-                root, changed, identity_registries=_reviewed_registries(root, ancestor),
-                require_complete=True,
-            )
-        except SmokeUnqualified as exc:
-            # Coverage overflow is not a different risk tier. The existing
-            # canonical full-suite path supplies the missing acceptance.
-            mode, reason = "full", str(exc)
     needs_node = any(path.startswith("app/mastermind_os/") for path in changed)
     return ScopeDecision(mode, assessment.tier.value, reason, len(changed), needs_node,
                          source_base=ancestor, source_head=head)
@@ -267,7 +266,7 @@ def classify_merge_group(
     return _classify_verified_change(
         repo_path, protected_base_sha, event_head, 1,
         expected_repository=expected_repository,
-        require_complete_smoke=True,
+        merge_group=True,
     )
 
 def select_scope(repo_path: Path, event_path: Path, *, expected_repository: str,
