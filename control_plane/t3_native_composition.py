@@ -640,11 +640,19 @@ def compose_t3_native_adapter(
     REQUIRED — the explicit ``launch_arguments=`` mapping, or the file named
     by ``MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE`` — and an enrolled host
     without one is a typed ``T3_ENROLLMENT_BROKEN`` (never a port whose
-    every launch would fail upstream).  A ``port_factory`` caller owns port
+    every launch would fail upstream).  Precedence (L1B3-2): an explicit
+    ``launch_arguments`` mapping WINS — supplying BOTH an explicit mapping
+    and an explicit ``launch_arguments_file`` is a typed
+    ambiguous-configuration refusal, but an explicit mapping with
+    ``launch_arguments_file=None`` never consults the ambient env var, so a
+    host that sets ``MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE`` cannot refuse a
+    caller's explicit arguments.  A ``port_factory`` caller owns port
     construction entirely (the canary pattern: launch arguments ride the
-    factory), so the file is not required there; combining a ``port_factory``
-    with an explicit launch-arguments source is a contradictory call and
-    raises typed at composition time.
+    factory), so NO launch-arguments source is consulted there — not even
+    the ambient env var, which is never read, validated and then silently
+    dropped (L1B3-3); combining a ``port_factory`` with an explicit
+    launch-arguments source is a contradictory call and raises typed at
+    composition time.
     """
     if port_factory is not None and (
         launch_arguments is not None or launch_arguments_file is not None
@@ -694,20 +702,35 @@ def compose_t3_native_adapter(
                 f"MCP-client bearer session: {exc}"
             ),
         )
-    resolved_launch_file = resolve_t3_launch_arguments_file(
-        launch_arguments_file, environ=environ
-    )
-    if launch_arguments is not None and resolved_launch_file is not None:
+    # L1B3-2: the both-sources refusal fires ONLY when the caller explicitly
+    # supplied BOTH sources.  An explicit ``launch_arguments`` mapping with
+    # ``launch_arguments_file=None`` never consults the ambient env var: a
+    # host that sets ``MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE`` (the standard
+    # deployment shape) cannot refuse — or silently shadow — a caller's
+    # explicit arguments.  The explicit mapping wins.
+    if launch_arguments is not None and launch_arguments_file is not None:
         return T3NativeComposition(
             status=COMPOSITION_ENROLLMENT_BROKEN,
             store_placement=placement,
             endpoint_url=url,
             reason=(
-                "both explicit launch_arguments and a launch arguments file "
-                f"({T3_LAUNCH_ARGUMENTS_FILE_ENV} or launch_arguments_file) "
-                "are configured; refusing an ambiguous launch configuration"
+                "both launch_arguments and launch_arguments_file were "
+                "supplied; specify at most one launch-arguments source"
             ),
         )
+    # L1B3-3: the ambient env var is consulted ONLY when the caller supplied
+    # no explicit mapping (L1B3-2) AND this composition builds the port.  A
+    # ``port_factory`` caller owns port construction entirely (launch
+    # arguments ride the factory), so the ambient file is neither read,
+    # validated and then silently dropped, nor allowed to refuse the
+    # composition on a host where the env var happens to be set.
+    resolved_launch_file = (
+        resolve_t3_launch_arguments_file(
+            launch_arguments_file, environ=environ
+        )
+        if launch_arguments is None and port_factory is None
+        else None
+    )
     port_launch_arguments: dict[str, Any] | None = None
     try:
         if launch_arguments is not None:
