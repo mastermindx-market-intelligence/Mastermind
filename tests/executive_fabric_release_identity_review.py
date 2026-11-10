@@ -875,10 +875,11 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
-# 2026-11-09 attended self-check of merged #2365 (6696153d323):
-# MANUAL_POOLS gained three named request options and nine lines. The two
-# unchanged 500-character input limits moved by exactly nine lines; no new
-# token is exempted. This is source qualification, not an independent approval.
+# Re-pinned after the accepted manual-pool enumeration (xai, anthropic-oauth,
+# openai-codex) changed only this whole-file identity and moved the same two
+# reason-length tokens by nine lines (48->57, 271->280). Their enclosing
+# validation expressions are unchanged; no new identity site is qualified.
+# Previous source SHA 9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),
