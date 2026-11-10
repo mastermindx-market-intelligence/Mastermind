@@ -118,12 +118,17 @@ wait_http() {
   return 1
 }
 
-# Capture the pairing banner (never print it) into <root>/run/access.txt 0600.
+# Capture the LAST complete pairing banner (never print it) into
+# <root>/run/access.txt 0600. Each server start mints a fresh one-time token
+# and launchd appends banners across restarts, so stale blocks must not win.
 capture_access() {
   _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"
   _i=0
   while [ "$_i" -lt 20 ]; do
-    grep -E '^(Connection string|Token|Pairing URL):' "$_log" > "$_acc" 2>/dev/null || true
+    awk '/^(Connection string|Token|Pairing URL):/ {
+      blk = blk $0 "\n"
+      if ($0 ~ /^Pairing URL:/) { last = blk; blk = "" }
+    } END { printf "%s", last }' "$_log" > "$_acc" 2>/dev/null || true
     grep -q '^Pairing URL:' "$_acc" 2>/dev/null && break
     _i=$((_i + 1)); sleep 1
   done
