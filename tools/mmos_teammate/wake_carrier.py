@@ -304,16 +304,21 @@ class PaperclipClient:
     def interactions(self, issue_id):
         return self._request("GET", f"/api/issues/{issue_id}/interactions")
 
-    def request_confirmation(self, issue_id, idem_key, prompt):
+    def request_confirmation(self, issue_id, idem_key, prompt, target=None):
         """A pending request_confirmation interaction is this build's review
         path: without it, an agent PATCH to in_review is refused with
-        invalid_issue_disposition (422). CAUTION: re-POSTing an idempotencyKey
+        invalid_issue_disposition (422). With the native_completion_review
+        target, a board accept completes the issue (done) and a reject
+        resumes it to todo for revision. CAUTION: re-POSTing an idempotencyKey
         that already exists from ANOTHER run is answered with 409, not a
         dedupe — callers check interactions() first."""
+        payload = {"version": 1, "prompt": prompt}
+        if target is not None:
+            payload["target"] = target
         return self._request(
             "POST", f"/api/issues/{issue_id}/interactions",
             {"kind": "request_confirmation", "idempotencyKey": idem_key,
-             "payload": {"version": 1, "prompt": prompt}},
+             "payload": payload},
         )
 
     def set_status(self, issue_id, status):
@@ -461,8 +466,9 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
             pc.request_confirmation(
                 issue["id"], f"{op}-confirm",
                 "The teammate answered in its T3 thread and the answer is posted as a "
-                "comment. Confirm it completes this issue (accept) or send it back "
-                "(reject with a reason).")
+                "comment. Accept completes this issue; reject with a reason sends it "
+                "back for one revision round.",
+                target={"type": "custom", "key": "native_completion_review"})
         final = "in_review"
     doc = parse_output_block(reply)
     if doc:
@@ -708,6 +714,22 @@ def handle_feedback(pc, t3, issue, opts):
     return 0
 
 
+def confirmation_verdict(pc, issue_id, op):
+    """The board's verdict on THIS op's confirmation: 'accepted', 'rejected',
+    'pending', or None when the confirmation does not exist yet."""
+    key = f"{op}-confirm"
+    try:
+        rows = pc.interactions(issue_id)
+    except CarrierError:
+        return None
+    if isinstance(rows, dict):
+        rows = rows.get("interactions") or rows.get("rows") or []
+    for row in rows:
+        if row.get("idempotencyKey") == key:
+            return row.get("status")
+    return None
+
+
 def run_carrier(pc, t3_factory, opts):
     """One wake. Returns an exit code; raises nothing."""
     crash_after = opts.get("crash_after")
@@ -782,8 +804,21 @@ def run_carrier(pc, t3_factory, opts):
                                  ask_child_op(ask_children[0]
                                               .get("description") or ""),
                                  opts)
+        # The board sent a rejected answer back (often resuming the issue to
+        # todo, which the inbox serves): one revision round, not a resend.
+        if board_feedback(pc, issue) is not None:
+            return handle_feedback(pc, t3, issue, opts)
         content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
         op = op_id(issue["id"], content)
+        verdict = confirmation_verdict(pc, issue["id"], op)
+        if verdict == "accepted":
+            # The board accepted this op's answer (the build may have handed
+            # the issue back to todo): the accepted work is complete.
+            if issue.get("status") != "done":
+                pc.set_status(issue["id"], "done")
+            log(f"board accepted the answer on {issue.get('identifier')}; "
+                "issue done")
+            return 0
         state, existing = scan_marker(t3.messages()[1], op)
         if state is None:
             message = build_message(issue.get("identifier"), issue.get("title"),

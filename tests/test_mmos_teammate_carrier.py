@@ -76,7 +76,7 @@ class FakePaperclip:
     def interactions(self, issue_id):
         return [dict(row) for row in self.interaction_rows]
 
-    def request_confirmation(self, issue_id, idem_key, prompt):
+    def request_confirmation(self, issue_id, idem_key, prompt, target=None):
         self._guard("interaction")
         # Real dev-server behavior (verified live 2026-11-10): a re-POST of an
         # idempotencyKey that exists from ANOTHER run is 409, not a dedupe.
@@ -86,7 +86,8 @@ class FakePaperclip:
                 '{"error":"Interaction idempotency key already exists"}')
         self.interaction_rows.append(
             {"id": f"ix-{len(self.interaction_rows) + 1}", "kind": "request_confirmation",
-             "status": "pending", "idempotencyKey": idem_key})
+             "status": "pending", "idempotencyKey": idem_key,
+             "payloadTarget": target})
         self.calls.append(("interaction", issue_id, idem_key))
         return {"id": "ix-1"}
 
@@ -874,4 +875,62 @@ def test_bound_todo_issue_falls_through_to_the_inbox_path():
         os.environ.pop("PAPERCLIP_ISSUE_ID", None)
     op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
     assert len(t3.sends) == 1 and f"[{op}]" in t3.sends[0]  # original task op
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_board_accept_completes_the_issue():
+    # native_completion_review accept: the build hands the issue back to todo;
+    # the carrier sees its op's confirmation accepted and finishes it
+    op = fb_op()
+    issues = feedback_issue()
+    issues["is-1"]["status"] = "todo"  # resumed by the accept
+    pc = FakePaperclip(issues=issues)
+    pc.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "accepted",
+         "idempotencyKey": f"{op}-confirm"}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+                          ("assistant", "r1", "answer v1")])
+    assert run(pc, t3) == 0
+    assert t3.sends == []  # no second send of the original task
+    statuses = [c for c in pc.calls if c[0] == "status"]
+    assert statuses == [("status", "is-1", "done")]
+    assert pc.issues["is-1"]["status"] == "done"
+
+
+def test_deliver_requests_a_completion_review_target():
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.issues["is-1"]["status"] = "todo"
+    t3 = FakeT3(replies=["answer v1"])
+    assert run(pc, t3) == 0
+    rows = [r for r in pc.interaction_rows
+            if r.get("idempotencyKey") == f"{op}-confirm"]
+    assert rows and rows[0].get("payloadTarget") == \
+        {"type": "custom", "key": "native_completion_review"}
+
+
+def test_reject_reaches_the_inbox_path_as_feedback():
+    # the native_completion_review reject resumes the issue to todo, so the
+    # comment wake reaches it through the inbox, not the env binding
+    op = fb_op()
+    issues = feedback_issue()
+    issues["is-1"]["status"] = "todo"
+    pc = FakePaperclip(issues=issues)
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "wrong unit", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "idempotencyKey": f"{op}-confirm",
+         "result": {"reason": "lines, not words"}}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+                          ("assistant", "r1", "answer v1")],
+                replies=["answer v2"])
+    assert run(pc, t3) == 0
+    assert len(t3.sends) == 1 and f"[{op}-rev1]" in t3.sends[0]
+    assert "lines, not words" in t3.sends[0] and "wrong unit" in t3.sends[0]
+    assert f"[{op}]\n" not in t3.sends[0]  # never a resend of the original op
+    keys = [c[2] for c in pc.calls if c[0] == "interaction"]
+    assert keys == [f"{op}-rev1-confirm"]
     assert pc.issues["is-1"]["status"] == "in_review"
