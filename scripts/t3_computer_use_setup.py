@@ -19,6 +19,8 @@ import tempfile
 SKILLS = ("mastermind-computer-use", "mastermind-browser-use")
 QUIET_SHA256 = "09924847ff1fe85c328476b719dfa459a95e92ced6013c0b73eb077d3ea7d822"
 PEEKABOO_SHA256 = "6e2d9f91cf95689cc061d138cb26f023b511c434f571436c1ae139d040a0f3b4"
+BROWSER_SERVER_ORIGINAL_SHA256 = "854c8397ea5b3547a1faa93e5af27eb071eefc64e9d4f2279695994414727faf"
+BROWSER_SERVER_FIXED_SHA256 = "325366ad6a64c6e28204727ffa36344c34a3e5bc418047e55e87467dd950fdd9"
 SCHEMA = "mastermind.t3_computer_use_install.v1"
 
 
@@ -38,6 +40,29 @@ def file_digest(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def qualified_browser_server(raw: bytes) -> bytes:
+    """Repair the exact incumbent adapter, preserving its transport and custody.
+
+    Its single response writer omitted JSON-RPC's mandatory version field.
+    Strict MCP clients ignored every response and timed out at initialization.
+    Accept only the observed source or this exact successor; unknown writers
+    require separate qualification. Existing running processes are not restarted.
+    """
+    checksum = digest(raw)
+    if checksum == BROWSER_SERVER_FIXED_SHA256:
+        return raw
+    if checksum != BROWSER_SERVER_ORIGINAL_SHA256:
+        raise SetupError("Existing browser adapter differs from the qualified revision")
+    before = b'process.stdout.write(JSON.stringify(object) + "\\n");'
+    after = b'process.stdout.write(JSON.stringify({ ...object, jsonrpc: "2.0" }) + "\\n");'
+    if raw.count(before) != 1:
+        raise SetupError("Qualified browser response writer is not unique")
+    fixed = raw.replace(before, after)
+    if digest(fixed) != BROWSER_SERVER_FIXED_SHA256:
+        raise SetupError("Browser protocol repair postimage differs")
+    return fixed
 
 
 def read_regular(path: Path, maximum: int = 8 * 1024 * 1024) -> bytes:
@@ -133,7 +158,8 @@ def run_mcp_command(op: dict, remove: bool = False):
                          f"diagnostic sha256={digest(result.stderr)}; reconcile {op['path']}")
 
 
-def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -> dict:
+def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
+              *, browser_skills_only: bool = False) -> dict:
     t3_home = t3_home.resolve()
     user_home = (user_home or Path.home()).resolve()
     settings_path = t3_home / "userdata/settings.json"
@@ -158,36 +184,42 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
     if not providers or len({p for _, p in providers}) != len(providers):
         raise SetupError("Missing or ambiguously shared enabled provider homes")
 
-    quiet = user_home / ".cursor/quiet-computer-use/quiet_mcp.py"
-    peekaboo = quiet.parent / "vendor/peekaboo-macos-arm64/peekaboo"
-    browser = t3_home / "mcp/mmx-browser/server.js"
-    runtime = browser.with_name("runtime.json")
-    node = user_home / ".local/share/mastermind-runtime/node/bin/node"
-    claude = (user_home / ".local/bin/claude").resolve()
-    if not claude.is_file() or not os.access(claude, os.X_OK):
-        raise SetupError("Existing Claude configuration CLI is unavailable")
-    claude_sha256 = file_digest(claude)
-    if digest(read_regular(quiet)) != QUIET_SHA256:
-        raise SetupError("Existing quiet adapter differs from the qualified revision")
-    if not peekaboo.is_file() or not os.access(peekaboo, os.X_OK) or file_digest(peekaboo) != PEEKABOO_SHA256:
-        raise SetupError("Existing signed Peekaboo binary differs from the qualified artifact")
-    read_regular(browser)
-    descriptor = load_json(runtime)
-    if descriptor.get("schema") != "mastermind.browser.mcp_runtime/v1":
-        raise SetupError("Existing Mastermind browser descriptor has an unknown schema")
-    if not node.is_file() or not os.access(node, os.X_OK):
-        raise SetupError("Existing Mastermind browser Node runtime is unavailable")
-    expected = {
-        "peekaboo": {"type": "stdio", "command": "/usr/bin/python3", "args": [str(quiet)]},
-        "mmx-browser": {"type": "stdio", "command": str(node), "args": [str(browser)]},
-    }
     operations = []
-    dependencies = [{"path": str(settings_path), "sha256": digest(settings_raw)},
-                    {"path": str(quiet), "sha256": QUIET_SHA256},
-                    {"path": str(peekaboo), "sha256": PEEKABOO_SHA256},
-                    {"path": str(claude), "sha256": claude_sha256},
-                    {"path": str(browser), "sha256": digest(read_regular(browser))},
-                    {"path": str(runtime), "sha256": digest(read_regular(runtime))}]
+    dependencies = [{"path": str(settings_path), "sha256": digest(settings_raw)}]
+    selected_skills = ("mastermind-browser-use",) if browser_skills_only else SKILLS
+    expected = {}
+    if not browser_skills_only:
+        quiet = user_home / ".cursor/quiet-computer-use/quiet_mcp.py"
+        peekaboo = quiet.parent / "vendor/peekaboo-macos-arm64/peekaboo"
+        browser = t3_home / "mcp/mmx-browser/server.js"
+        runtime = browser.with_name("runtime.json")
+        node = user_home / ".local/share/mastermind-runtime/node/bin/node"
+        claude = (user_home / ".local/bin/claude").resolve()
+        if not claude.is_file() or not os.access(claude, os.X_OK):
+            raise SetupError("Existing Claude configuration CLI is unavailable")
+        claude_sha256 = file_digest(claude)
+        if digest(read_regular(quiet)) != QUIET_SHA256:
+            raise SetupError("Existing quiet adapter differs from the qualified revision")
+        if not peekaboo.is_file() or not os.access(peekaboo, os.X_OK) or file_digest(peekaboo) != PEEKABOO_SHA256:
+            raise SetupError("Existing signed Peekaboo binary differs from the qualified artifact")
+        browser_raw = read_regular(browser)
+        browser_fixed = qualified_browser_server(browser_raw)
+        descriptor = load_json(runtime)
+        if descriptor.get("schema") != "mastermind.browser.mcp_runtime/v1":
+            raise SetupError("Existing Mastermind browser descriptor has an unknown schema")
+        if not node.is_file() or not os.access(node, os.X_OK):
+            raise SetupError("Existing Mastermind browser Node runtime is unavailable")
+        expected = {
+            "peekaboo": {"type": "stdio", "command": "/usr/bin/python3", "args": [str(quiet)]},
+            "mmx-browser": {"type": "stdio", "command": str(node), "args": [str(browser)]},
+        }
+        dependencies += [
+            {"path": str(quiet), "sha256": QUIET_SHA256},
+            {"path": str(peekaboo), "sha256": PEEKABOO_SHA256},
+            {"path": str(claude), "sha256": claude_sha256},
+            {"path": str(browser), "sha256": digest(browser_raw)},
+            {"path": str(runtime), "sha256": digest(read_regular(runtime))},
+        ]
 
     def file_change(path: Path, data: bytes, expected_before: dict | None = None):
         if not path.parent.resolve().is_relative_to(t3_home):
@@ -202,7 +234,10 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
             operations.append({"path": str(path), "before": before, "after": after,
                                "content": data.decode("utf-8")})
 
-    for skill in SKILLS:
+    if not browser_skills_only:
+        file_change(browser, browser_fixed)
+
+    for skill in selected_skills:
         skill_source = source_root / "skills" / skill / "SKILL.md"
         data = read_regular(skill_source)
         text = data.decode("utf-8")
@@ -212,12 +247,13 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
 
     for name, provider_home in sorted(providers):
         config_path = provider_home / ".claude.json"
-        config_raw = read_regular(config_path)
-        config = parse_json(config_raw, config_path)
+        config_raw = read_regular(config_path) if expected else None
+        config = parse_json(config_raw, config_path) if config_raw is not None else {}
         servers = config.setdefault("mcpServers", {})
         if not isinstance(servers, dict):
             raise SetupError(f"Invalid MCP map in {name}")
-        dependencies.append({"path": str(config_path), "sha256": digest(config_raw)})
+        if config_raw is not None:
+            dependencies.append({"path": str(config_path), "sha256": digest(config_raw)})
         for server_name, desired in expected.items():
             old = servers.get(server_name)
             comparable = normalized_server(old)
@@ -228,7 +264,7 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
                                    "server_name": server_name, "server": desired,
                                    "cli": str(claude), "cli_sha256": claude_sha256,
                                    "before": {"kind": "absent"}, "after": server_state(desired)})
-        for skill in SKILLS:
+        for skill in selected_skills:
             target = t3_home / "skills" / skill
             link = provider_home / "skills" / skill
             if not link.parent.resolve().is_relative_to(t3_home):
@@ -241,6 +277,7 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
             operations.append({"path": str(link), "before": before,
                                "after": {"kind": "symlink", "target": str(target)}})
     public = {"schema": SCHEMA, "t3_home": str(t3_home), "providers": [n for n, _ in sorted(providers)],
+              "components": ["browser-skills"] if browser_skills_only else ["native", "browser", "skills"],
               "dependencies": dependencies, "operations": [public_operation(op) for op in operations]}
     plan_sha256 = digest(json.dumps(public, sort_keys=True, separators=(",", ":")).encode())
     return dict(public, plan_sha256=plan_sha256, operations=operations)
@@ -400,6 +437,8 @@ def main():
     parser.add_argument("--t3-home", type=Path, default=Path.home() / ".t3")
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--expected-plan-sha256")
+    parser.add_argument("--browser-skills-only", action="store_true",
+                        help="Install only the portable browser skill; do not configure or claim a runtime")
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--expected-receipt-sha256")
     args = parser.parse_args()
@@ -409,7 +448,7 @@ def main():
                 parser.error("rollback needs --receipt and --expected-receipt-sha256")
             result = rollback(args.receipt, args.expected_receipt_sha256)
         else:
-            plan = make_plan(args.t3_home, args.source_root)
+            plan = make_plan(args.t3_home, args.source_root, browser_skills_only=args.browser_skills_only)
             if args.action == "apply":
                 if not args.expected_plan_sha256:
                     parser.error("apply needs the preceding preview's --expected-plan-sha256")

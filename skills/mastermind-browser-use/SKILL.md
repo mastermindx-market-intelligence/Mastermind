@@ -19,19 +19,29 @@ Do not create another CDP listener, browser launcher, profile clone, credential 
 1. Call `mmx_browser` with `{"action":"browsers"}` and, when needed, `{"action":"hosts"}`. Inventory membership or `LOADED` does not prove an active connection.
 2. Select the authorized host/profile using returned `host_ref`, `browser_id` and label. Preserve exact identity; never pick the first, newest or personal/default profile merely because it is available. Do not print account details unnecessarily.
 3. Call `status` on that browser, then `tabs`. Retain returned connection identity and the exact task tab. Use `options: {"probe": true}` on inventory only when a live census is actually needed; it can contact remote hosts.
-4. For an existing tab, observe a `snapshot`, `dom`, `accessibility` or `locate` result and preserve its connection, URL fingerprint, snapshot/reference IDs and frame identity. A tab ID alone is insufficient after navigation or reconnection.
+4. For an existing tab, call ordinary `snapshot` first with the exact connection, tab and URL fingerprint. Advanced `dom`, `accessibility` and `locate` require an attached CDP session; they cannot bootstrap it. Preserve the returned snapshot/reference IDs and frame identity. A tab ID alone is insufficient after navigation or reconnection.
 
 Minimal discovery examples (substitute actual returned IDs):
 
 ```json
 {"action":"browsers"}
 {"action":"status","host_ref":"OBSERVED_HOST","browser_id":"OBSERVED_BROWSER"}
-{"action":"tabs","host_ref":"OBSERVED_HOST","browser_id":"OBSERVED_BROWSER"}
+{"action":"tabs","host_ref":"OBSERVED_HOST","browser_id":"OBSERVED_BROWSER","connection_id":"OBSERVED_CONNECTION"}
 ```
 
 ## Perform one grounded action
 
-Prefer semantic `locate` and `interact`, or the ordinary `click` / `fill` / `select` actions using fresh references. Re-observe after navigation or a mutation changes the DOM. For frames, explicitly bind the returned `frame_id`; do not guess iframe offsets or reuse a reference in another frame.
+For ordinary forms, use `click` / `fill` / `select` with the fresh snapshot's `ref`. Every action after `status` needs `connection_id`; tab actions also need `tab_id` and `url_fingerprint`. Ordinary input additionally needs `snapshot_id` and `ref`. The installed bridge rejects unexpected or missing fields, so do not send empty optional arguments indiscriminately.
+
+For advanced browser work, follow the actual attachment lifecycle:
+
+1. Obtain an ordinary `snapshot` of the exact task tab.
+2. Call `cdp_attach` with that same tab identity, its fresh `snapshot_id`, and `options: {}`. Verify the returned attachment; attachment consumes the ordinary snapshot. Never invent a snapshot ID to get around a failed read.
+3. Use bounded advanced reads such as `frames`, `dom`, `accessibility`, `locate`, `network` and `events`, with their required `options` object. These reads do not take the ordinary `snapshot_id`. A `CDP_SESSION_REQUIRED` result is a missing prerequisite, not a reason to attach an ambient debugging port.
+4. Before advanced mutation, obtain a fresh ordinary snapshot and a fresh semantic node reference for the same document. `interact` takes the node `ref` inside `options`, alongside `kind`; the ordinary `snapshot_id` stays at the top level. Each mutation consumes its ordinary snapshot. Re-observe the actual result before another action.
+5. Use `cdp_detach` with the same connection/tab/URL identity and `options: {}` when this task is finished. It does not require a snapshot. Verify cleanup before closing this task's tab.
+
+For frames, explicitly bind the observed `frame_id` in the advanced locator/read options; do not guess iframe offsets or reuse a reference in another frame. A Chrome API failure during ordinary snapshot blocks the dependent attachment/input sequence until diagnosed. It does not authorize changing browser grants or substituting another execution route.
 
 Read the live schema. The installed bridge includes snapshots, screenshots, DOM/accessibility, locators, frames, events, network/response-body observations, dialogs, uploads/downloads, capture/PDF and controlled CDP. Tool exposure is not evidence that the selected host/profile grants every action. `cdp_attach`, browser focus/launch, file access and extension/site access can have separate consent or ownership requirements.
 

@@ -17,7 +17,7 @@ Call `permissions` once when needed. Screen Recording, Accessibility and Event S
 
 ## Observe, act once, verify
 
-1. Use `app` / `window` with `action: "list"` to locate the intended app and window. Prefer an exact PID and `window_id` over a broad title.
+1. Use `app` / `window` with `action: "list"` to locate the intended app and window. Prefer an exact PID and `window_id` over a broad title. For the installed `window` tool, pass a process as `app: "PID:OBSERVED_PID"`; a bare numeric string can be interpreted as an app name.
 2. Call `see` or `inspect_ui` with that exact window. Request `include_elements: true` when useful. Read the screenshot and accessibility tree; copy the returned opaque snapshot and element IDs exactly.
 3. Prefer `set_value` for an intended field replacement, `click` for a button, or `type` for text entry. Supply the fresh `snapshot` and target `on` element. Keep clicks background; global coordinates and foreground flags are not available through the quiet adapter.
 4. Observe again after each mutation before using another element ID. A changed page, window bounds, focus or process can invalidate the earlier snapshot.
@@ -44,7 +44,7 @@ For a noninterference claim, measure the frontmost app and pointer before and af
 
 ## Recovery and completion
 
-On a timeout or `EFFECT_UNKNOWN`, retain the original session, snapshot, target and request. Observe that target before deciding on the next action; do not replay the input. A stale-target refusal permits a fresh read, not a blind replay or target substitution. An explicit permission refusal remains binding.
+On a timeout, `EFFECT_UNKNOWN`, or Peekaboo's `dispatched_unverified` / `effect: "unverifiable"`, retain the original session, snapshot, target and request. A tool result can have `isError: true` while also reporting `mutation_dispatched: true`; do not interpret that as no effect. Observe the original target with `verify_state` or a fresh exact-window capture before deciding on the next action; do not replay the input. If `verify_state` explicitly requires another identical predicate observation to settle incomplete evidence, repeat that read only. A stale-target refusal permits a fresh read, not a blind replay or target substitution. An explicit permission refusal remains binding.
 
 When MCP is absent, distinguish missing configuration, an unrefreshed agent session, startup/protocol failure and permissions. The qualified server supports MCP `2025-03-26`. Configuration changes affect fresh agent sessions; preserve running work. T3's **Restart agent session** keeps conversation history, but use it only when the target thread is idle and it is appropriate to restart its agent.
 

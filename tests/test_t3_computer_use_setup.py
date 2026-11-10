@@ -2,6 +2,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,6 +12,19 @@ SOURCE = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("t3_computer_use_setup", SOURCE / "scripts/t3_computer_use_setup.py")
 setup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(setup)
+
+LEGACY_BROWSER = b'''const readline = require("node:readline");
+function send(object) { process.stdout.write(JSON.stringify(object) + "\\n"); }
+readline.createInterface({input: process.stdin}).on("line", line => {
+  const m = JSON.parse(line);
+  if (m.id === undefined) return;
+  if (m.method === "initialize") send({id:m.id,result:{protocolVersion:m.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:"fixture",version:"1"}}});
+  else if (m.method === "tools/list") send({id:m.id,result:{tools:[{name:"mmx_browser",inputSchema:{type:"object"}}]}});
+  else send({id:m.id,error:{code:-32601,message:"Method not found"}});
+});
+'''
+FIXED_BROWSER = LEGACY_BROWSER.replace(
+    b'JSON.stringify(object)', b'JSON.stringify({ ...object, jsonrpc: "2.0" })')
 
 
 class SetupTests(unittest.TestCase):
@@ -41,7 +56,8 @@ class SetupTests(unittest.TestCase):
         self.binary = binary
         browser = self.t3 / "mcp/mmx-browser/server.js"
         browser.parent.mkdir(parents=True)
-        browser.write_text("// existing browser owner\n")
+        browser.write_bytes(LEGACY_BROWSER)
+        self.browser = browser
         self.write_json(browser.with_name("runtime.json"), {"schema": "mastermind.browser.mcp_runtime/v1"})
         node = self.home / ".local/share/mastermind-runtime/node/bin/node"
         node.parent.mkdir(parents=True)
@@ -68,7 +84,9 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
 ''')
         cli.chmod(0o700)
         self.patches = [patch.object(setup, "QUIET_SHA256", setup.digest(quiet.read_bytes())),
-                        patch.object(setup, "PEEKABOO_SHA256", setup.digest(binary.read_bytes()))]
+                        patch.object(setup, "PEEKABOO_SHA256", setup.digest(binary.read_bytes())),
+                        patch.object(setup, "BROWSER_SERVER_ORIGINAL_SHA256", setup.digest(LEGACY_BROWSER)),
+                        patch.object(setup, "BROWSER_SERVER_FIXED_SHA256", setup.digest(FIXED_BROWSER))]
         for p in self.patches:
             p.start()
             self.addCleanup(p.stop)
@@ -96,6 +114,7 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
                                  (SOURCE / "skills" / skill / "SKILL.md").read_bytes())
         self.assertEqual((self.homes[2] / ".claude.json").read_bytes(), self.originals[self.homes[2]])
         self.assertFalse((self.homes[2] / "skills").exists())
+        self.assertEqual(self.browser.read_bytes(), FIXED_BROWSER)
         saved = Path(receipt["receipt"]).read_text()
         self.assertNotIn("never-print-this-value", saved)
         self.assertNotIn("not-for-receipts", saved)
@@ -144,6 +163,7 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
         plan = self.plan()
         result = setup.apply_plan(plan, plan["plan_sha256"])
         setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
+        self.assertEqual(self.browser.read_bytes(), LEGACY_BROWSER)
         for home in self.homes:
             self.assertEqual(json.loads((home / ".claude.json").read_text()), json.loads(self.originals[home]))
         for home in self.homes[:2]:
@@ -224,6 +244,60 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
         self.settings.write_text('{"providerInstances":{},"providerInstances":{}}')
         with self.assertRaisesRegex(setup.SetupError, "Duplicate JSON key"):
             self.plan()
+
+    def test_browser_protocol_repair_preserves_unknown_and_newer_writers(self):
+        self.browser.write_bytes(LEGACY_BROWSER + b"// newer owner\n")
+        with self.assertRaisesRegex(setup.SetupError, "browser adapter differs"):
+            self.plan()
+        self.browser.write_bytes(LEGACY_BROWSER)
+        plan = self.plan()
+        self.browser.write_bytes(LEGACY_BROWSER + b"// concurrent owner\n")
+        with self.assertRaisesRegex(setup.SetupError, "Dependency changed"):
+            setup.apply_plan(plan, plan["plan_sha256"])
+        self.assertTrue(self.browser.read_bytes().endswith(b"// concurrent owner\n"))
+
+    def test_browser_protocol_repair_initialization_catalog_and_errors(self):
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node is required for the MCP wire contract")
+        requests = [
+            {"jsonrpc": "2.0", "id": "init", "method": "initialize",
+             "params": {"protocolVersion": "2025-03-26", "capabilities": {}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "unknown"},
+        ]
+        wire = "".join(json.dumps(m) + "\n" for m in requests)
+        def exchange():
+            output = subprocess.run([node, str(self.browser)], input=wire, text=True,
+                                    capture_output=True, check=True, timeout=10)
+            return [json.loads(line) for line in output.stdout.splitlines()]
+        self.assertTrue(all("jsonrpc" not in m for m in exchange()))
+        plan = self.plan()
+        setup.apply_plan(plan, plan["plan_sha256"])
+        messages = exchange()
+        self.assertEqual([m["id"] for m in messages], ["init", 2, 3])
+        self.assertTrue(all(m.get("jsonrpc") == "2.0" for m in messages))
+        self.assertTrue(all(("result" in m) != ("error" in m) for m in messages))
+        self.assertEqual(messages[0]["result"]["protocolVersion"], "2025-03-26")
+        self.assertEqual(messages[1]["result"]["tools"][0]["name"], "mmx_browser")
+        self.assertEqual(messages[2]["error"]["code"], -32601)
+
+    def test_browser_skill_distribution_needs_no_mac_binary_or_mcp_configuration(self):
+        shutil.rmtree(self.home / ".cursor")
+        shutil.rmtree(self.t3 / "mcp")
+        shutil.rmtree(self.home / ".local")
+        for home in self.homes:
+            (home / ".claude.json").unlink()
+        plan = setup.make_plan(self.t3, SOURCE, self.home, browser_skills_only=True)
+        self.assertEqual(plan["components"], ["browser-skills"])
+        result = setup.apply_plan(plan, plan["plan_sha256"])
+        for home in self.homes[:2]:
+            self.assertTrue((home / "skills/mastermind-browser-use/SKILL.md").is_file())
+            self.assertFalse((home / "skills/mastermind-computer-use").exists())
+            self.assertFalse((home / ".claude.json").exists())
+        self.assertFalse((self.homes[2] / "skills").exists())
+        setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
+        self.assertFalse((self.t3 / "skills/mastermind-browser-use/SKILL.md").exists())
 
     def test_provider_or_skill_escape_is_refused(self):
         outside = self.home / "outside"
