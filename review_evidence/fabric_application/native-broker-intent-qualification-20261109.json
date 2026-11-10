@@ -1,0 +1,138 @@
+{
+  "schema": "h4.native-broker-intent-source-qualification.v1",
+  "recorded_at": "2026-11-09T02:34:42.584991+00:00",
+  "source_base": "d13f83f2f9e17596f5f9327730f34e3e10d5c53c",
+  "source_files": {
+    "integrations/hermes_attended_fabric/README.md": "b60a9879723c7bcded5aafefdb7a73597987003e4ac9cc8340f5e99fa0ebedba",
+    "integrations/hermes_attended_fabric/native_evidence.py": "6e86b65dd61103ee12a6a6c4d4d6ba1061005e39f756f357ae26d59fc8ce24f5",
+    "integrations/hermes_attended_fabric/tests/native_owner_qualification.py": "6e22b9cbbf2062c3d7cc3886f7cdc6b0fb0d59a917b5d4ab8d1c860e9eec0966",
+    "tests/test_hermes_native_intent_evidence.py": "c7bea1f49f49b9a0780e349a1b0f677c78f2373126be88fb28af7f9e0fde0a9f"
+  },
+  "problem": "Real native lazy dispatcher forwards a single local call with its original outer identity; the existing read-only evidence reader only recognized direct worker records.",
+  "repair": "One canonical direct/single-broker argument projection shared by frontend qualification and independent backend verification; matching task filtering precedes the unchanged257-row/256-copy bound; broker-compatible noncanonical prior envelopes and ambiguous batches remain visible as conflicts and refuse.",
+  "preserved": [
+    "outer call ID and native durable UID",
+    "exact complete argument equality and digest",
+    "lineage/current turn/generation/lease",
+    "one original submit across direct and broker representations",
+    "completed-result and conflicting-identity refusal",
+    "original Fabric reservation/admission/request owner",
+    "existing native41 APPLICATION composition"
+  ],
+  "canonical_live_discovery": {
+    "session_id": "local-5d4c3f7d8b0ec64c3fab6125fd32bb83b1c9de015d7e5b45d5c521e30d023bf6",
+    "assistant_message_id": 489,
+    "outer_call_id": "call_4465e917cc374368ba466de7",
+    "durable_tool_call_uids": {
+      "call_4465e917cc374368ba466de7": "8fce41b932db48d0be617d2f5920dd16"
+    },
+    "proof_sha256": "292f86e7c9f765a01994b6a8209b8a2a421f0f6ace857377909bd8493ca59106",
+    "result": {
+      "parent_id": null,
+      "reason": "NATIVE_DURABLE_INTENT_NOT_CURRENT",
+      "root_id": null,
+      "run_id": null,
+      "schema": "mastermind.hermes_fabric_native.v1",
+      "state": "REFUSED"
+    },
+    "original_call_replayed": false,
+    "native_parent_exit": {
+      "schema": "h4.original-attended-native-turn-exit.v1",
+      "completed_at": "2026-11-09T02:14:05.221383+00:00",
+      "wait_status": 0,
+      "exit_code": 0,
+      "transcript_sha256": "b4c48b4bffd74408621570a1e7305c62c20637dbf58d2bf2f0e2ed3be67ccbfe",
+      "intent_sha256": "837c6562db60a930739e5d7b513a752daed9c13596bdea8d8291b3cacb5aa8cb"
+    },
+    "application_primary_proven": false
+  },
+  "validation": {
+    "offline": {
+      "receipt_sha256": "7b962435bfb57ddc1eeced92d4fbd6b579841f71ec9a6bed7fd7676c4b8b4b24",
+      "test_functions_passed": 109,
+      "junit_entries": {
+        "tests": 181,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "subtests_passed": 72,
+      "source_unchanged": true
+    },
+    "real_native_owner": {
+      "receipt_sha256": "2c648a9c9e2311cb2d86774549e02b5a8ebec80553129539a339cd7071535155",
+      "tests": 34,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "network_attempts": [],
+      "live_forwarding_files": {
+        "model_tools.py": "24850d5ce74f7bcf17e58638fc787d6b955bfb89f4980e74b361d7927de74581",
+        "tools/tool_search.py": "87e06c029304dae1ff1f592fa97f238165a04f1406cbdab68a2e3a0c3fd489a5",
+        "agent/tool_executor.py": "c85e239d1d56ad415902db2371e9e28c2216f6fd72e29860cff7f97b2e05a0c2"
+      },
+      "original_pm_fixture": {
+        "bootstrap_recovery_and_activation_fenced_in_harness": true,
+        "dependency_environment": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home/installs/2cbfac626b7e881b/environments/083480fc0778415596b16671f0e9d8a9/venv",
+        "errors": 0,
+        "execution_engine_fixture": true,
+        "failures": 0,
+        "fixture_home": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/observational-native-home",
+        "live_worker_start": false,
+        "native_pm_selection_real": true,
+        "native_source": "/private/tmp/mmx-hermes-auto-qualification-ptnsvanb/native-patched",
+        "network_attempts": [],
+        "schema": "mastermind.hermes_native_owner_qualification.v1",
+        "skips": 0,
+        "tests": 34
+      },
+      "source_unchanged": true
+    },
+    "first_native_run": {
+      "receipt_sha256": "93db3263e3b15c8ea936240998eb10eb1a9de693dd67c2085fc65920411e6124",
+      "tests": 34,
+      "failures": 1,
+      "explanation": "Completed-result fixture incorrectly used separate append_message calls, which do not share a durable tool UID index. Corrected to original append_messages_batch and verified the paired UID before dispatch; production code unchanged."
+    }
+  },
+  "profile_activation": {
+    "default": {
+      "receipt_sha256": "243bcfdf0f58baf9c1bc5e94f9d1c3323d41d1bc867b1a10cf7ddcce94d408bf",
+      "registration_sha256": "41af2a97fac4bcd52ca4a84e39e7202d93b8237d7a52a6048377bc6798728e2d",
+      "original_gateway_identity_preserved": true,
+      "shared_gateway_stop_or_start": false,
+      "installed_worker_revision": "0a59c93a5fc5944fa096ac1a49dc36e697e5681f"
+    },
+    "secretary": {
+      "receipt_sha256": "bb745f973ef8545f3b7ebd0256377b11b4f8cf971d5c706bfe06ef7349f6d4f8",
+      "registration_sha256": "9b6bff0bdaefa4d64d8942c861fa94a285b893eab91f54cbb726dbf7b6260c42",
+      "original_gateway_identity_preserved": true,
+      "shared_gateway_stop_or_start": false,
+      "installed_worker_revision": "0a59c93a5fc5944fa096ac1a49dc36e697e5681f"
+    },
+    "meta-ceo-uncensored": {
+      "receipt_sha256": "8ab265fa6b888186415573fa578096755c07a56a60c6552afc718b223893084a",
+      "registration_sha256": "a56b1d0059e0196c55bad6bbb5af01a17272861322b8d69f84cf15a1b4c3eb21",
+      "original_gateway_identity_preserved": true,
+      "shared_gateway_stop_or_start": false,
+      "installed_worker_revision": "0a59c93a5fc5944fa096ac1a49dc36e697e5681f"
+    }
+  },
+  "delivery_custody": {
+    "original_d13_auto_request_disabled": true,
+    "receipt_sha256": "00b791be1ba2b9fb1f479452cfffd1f6b7b3d76a975c8fecc38eacb1da6cf2d5",
+    "no_merge_bypass": true
+  },
+  "limitations": [
+    "Source qualification is not live worker START or settlement.",
+    "Installed worker cohort remains the previously prepared revision until original protected publication and native PM update.",
+    "Original refused live call remains closed; no replay, synthetic database row or grant was used.",
+    "Real APPLICATION primary/tool/worker/parent-consumption/recovery acceptance remains owed."
+  ],
+  "meta_capacity_preparation": {
+    "receipt_sha256": "14dac8770d6344c3ec9e6f52897dea2676538f80ccdec401ab19fdd9dbed8505",
+    "configuration_applied": true,
+    "runtime_readiness_proven": false,
+    "preview_or_worker_invocations": 0
+  }
+}

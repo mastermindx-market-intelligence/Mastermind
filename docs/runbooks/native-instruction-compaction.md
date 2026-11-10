@@ -1,26 +1,30 @@
 # Native instruction compaction through the existing writer
 
-This is an opt-in rendering profile for `scripts/project_execution_brief.py`, not
-another installer, policy owner, startup hook or execution gate. The accepted
-protected policy and actual host grants remain controlling. The shorter profile
-is `docs/NATIVE_EXECUTION_BRIEF.md`; the renderer is pure
-`scripts/native_instruction_compaction.py`. A source merge alone installs neither.
+`scripts/project_execution_brief.py` selects `docs/NATIVE_EXECUTION_BRIEF.md`
+by default for the `codex` and `claude` profiles. `--brief` is an explicit source
+override; the `memory` profile retains its built-in `MEMORY_NOTICE` contract.
+The pure `scripts/native_instruction_compaction.py` renderer supports reviewed
+managed-block compaction through that existing writer. It creates no installer,
+policy owner, startup hook or execution gate. Protected policy and actual host
+grants remain controlling; accepted source is not an installation receipt.
 
 ## Scope and ownership
 
 Parent: Mastermind #917; existing task tree
 `docs/superpowers/plans/2026-11-02-delivery-turnaround-execution.md`, nodes
 P2.C2.N1-N4. Operation: `native-instruction-compaction-20261105-web-001`.
-The active #2064 supplier owns the policy counts, root AGENTS.md/CLAUDE.md,
-full account instructions and existing installer changes. This additive profile
-changes none of those paths and does not turn its proposed policy into law.
-Do not install either source over a live or uncertain instruction writer.
+The compact default and subsequent TASK FIRST instruction change are accepted
+source. Historical supplier/PR references do not establish a current writer or
+an owner wait. Reconcile actual source custody and outstanding effects before
+changing a target. This runbook changes no root AGENTS.md/CLAUDE.md, full account
+instructions or installer code. Never install over a live or uncertain writer.
 
 ## What changes and what does not
 
-The core brief is 8,101 UTF-8 bytes / 134 lines after the fenced-example repair, versus
-24,048 bytes in the same-pin canonical full account brief: 66.31% fewer source
-bytes. This is not a measured reduction in total model context or elapsed time.
+At protected source `a9f0b4e1fc7f419e2cf377d3132061169c986a21`, the complete native
+brief is 8,135 UTF-8 bytes / 136 lines. Recompute the complete selected source
+when it changes and retain its exact identity in the installation evidence.
+This source-size measurement is not a reduction in total model context or elapsed time.
 Repository, ancestor, plugin, hook and retained host-specific instructions may
 still load. A Markdown import that loads the old text is not a context saving.
 
@@ -85,13 +89,15 @@ receipt = apply(TARGET_PATH, plan['text'], plan['before_sha256'], BACKUP_DIRECTO
 assert receipt['after_sha256'] == plan['after_sha256']
 ```
 
-The existing `--brief` CLI supports core-only source selection. Its original
-legacy-block behavior remains its own contract; use this explicit renderer when
-exact whole-block retirement evidence is needed. A later ordinary full-brief
-installation can expand the file again, so the operation's normal consumer must
-select this compact source deliberately. This PR does not silently change the
-installer default while #2064 owns that path. Consolidating the accepted default
-is a follow-on integration, not an installed behavior claim in this source slice.
+The existing CLI uses the compact brief by default for `--profile codex` and
+`--profile claude`; an explicit `--brief` can still select a different source.
+Its original legacy-block behavior remains its own contract. Use the explicit
+compaction renderer when exact whole-block retirement evidence is needed.
+The `memory` profile intentionally ignores `--brief` and renders `MEMORY_NOTICE`;
+do not treat it as a generic installer for another harness. Default selection is
+covered by `tests/test_native_brief_default_integration.py`. Installing those
+accepted bytes, loading them in a fresh session and observing behavior remain
+separate proofs for each actual consumer.
 
 ## Fresh consumer acceptance, not hidden-instruction disclosure
 

@@ -312,17 +312,46 @@ def test_missing_admitted_record_refuses_instead_of_default(monkeypatch):
     with pytest.raises(backend.PaidOwnerRefused):backend.admitted_pool_class_env(dict(p))
 
 
-def test_env_value_disagreeing_with_admitted_digest_refuses(monkeypatch):
+@pytest.mark.parametrize('name,value', [
+    ('POOL_TASK_CLASS','domain_orchestration'),
+    ('POOL_TASK_COMPLEXITY','C3_FRONTIER_JUDGMENT'),
+    ('POOL_WITNESS_DISPOSITION','accepted'),
+    ('POOL_POLICY_REVISION','unrelated-policy'),
+])
+def test_env_value_disagreeing_with_admitted_digest_refuses(monkeypatch,name,value):
+    _clear_pool_env(monkeypatch)
     p,*_=material()
     payload={**p,'paid_child_admission':admitted_record(p)}
-    monkeypatch.setenv('POOL_TASK_COMPLEXITY','C3_FRONTIER_JUDGMENT')
+    expected=backend.admitted_pool_class_env(payload)
+    # Isolate each field: another disagreeing field must not make this pass.
+    monkeypatch.setenv(name,value)
     with pytest.raises(backend.PaidOwnerRefused):
-        backend.admitted_pool_class_env(payload)  # a lane env cannot promote the class
-    monkeypatch.setenv('POOL_TASK_CLASS','domain_orchestration')
-    with pytest.raises(backend.PaidOwnerRefused):backend.admitted_pool_class_env(payload)
-    monkeypatch.setenv('POOL_TASK_CLASS','research')
-    monkeypatch.setenv('POOL_TASK_COMPLEXITY','C2_COMPLEX_BOUNDED')
-    assert backend.admitted_pool_class_env(payload)['POOL_TASK_COMPLEXITY']=='C2_COMPLEX_BOUNDED'
+        backend.admitted_pool_class_env(payload)
+    for field,admitted in expected.items():
+        monkeypatch.setenv(field,admitted)
+    assert backend.admitted_pool_class_env(payload)==expected
+
+
+def test_restamped_admission_cannot_reuse_original_control_launch_pin():
+    from control_plane import fabric_control_start as command
+    p,*_=material()
+    payload={**p,'paid_child_admission':admitted_record(p)}
+    # Pure projection validation; this is not an authenticated Control owner.
+    projection=dict(schema_version=command.SCHEMA,
+        attempt_id=p['binding']['attempt_id'],fence_generation=1,pin_version=2,
+        pin_identity_sha256=launch_identity(payload),
+        lease_expires_at='2099-01-01T00:00:00Z')
+    assert command._validate(projection,payload)>0
+    changed=deepcopy(payload)
+    record=changed['paid_child_admission']
+    record.update(effective_complexity='C3_FRONTIER_JUDGMENT',
+                  witness_disposition='accepted')
+    record['admission_digest']=backend.admitted_class_digest(record)
+    assert backend.admitted_child_class_record(changed)[1]=='C3_FRONTIER_JUDGMENT'
+    assert launch_identity(changed)!=projection['pin_identity_sha256']
+    with pytest.raises(command.ControlStartRefused,
+                       match='control_start_projection_mismatch'):
+        command._validate(projection,changed)
 
 
 def test_restamped_record_cannot_self_promote_past_digest(monkeypatch):

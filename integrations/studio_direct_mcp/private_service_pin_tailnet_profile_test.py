@@ -1,5 +1,8 @@
 """Public exact Tailnet manifest states; no private config or host/runtime effects."""
+import ast
 import copy
+import hashlib
+import shlex
 import json
 from pathlib import Path
 import sys
@@ -11,6 +14,8 @@ import private_service as svc
 PROFILES = json.loads(r'''[
   {
     "account": "fabric-design",
+    "forward_config_sha256": "d8224ad799b9927b43026d07f2716f63b5ecbdb41580f0eb2e15ba7a0ba84750",
+    "forward_canonical_manifest": "a1c9117bfd3d210072b16aacd8f4b32e0c23ecf08eb28406d6218f7cf590a25c",
     "old_canonical_manifest": "87de91f4fd0d51571c2350cf4fe53704ad035eba8f095c13b09352732307671c",
     "post_canonical_manifest": "b08c021b6c3c9cd9a1acdd57957fbf5e88b6d63daa11b963b7476d993b1a8b46",
     "post_config_sha256": "64dbdea9bd2dd7d3cba3df3c130d3095c8926c9424772146e9d31d58d7d66f52",
@@ -40,10 +45,15 @@ PROFILES = json.loads(r'''[
       "port": 45118,
       "source": "/Users/chriswong/.local/share/studio-direct-mcp/source/pr1217-e79bd9ae/integrations/studio_direct_mcp",
       "version": 2
-    }
+    },
+    "application_config_sha256": "182dab20123410d0939eef3179ff24d38c773a28b82d31591403cac974ec9aa5",
+    "application_canonical_manifest": "070cebf2c4b4bbd41eb7fd687347292e40e13519a98a303bafca13202e971e8c",
+    "application_raw_manifest_sha256": "5c8c3f30f922c50e0f923bed4509785b5745bc2a7c05ef7d386befa9e6be67eb"
   },
   {
     "account": "fabric-read",
+    "forward_config_sha256": "ab8443c18e485cd15107b2d87ac28455ed9754cd08dc5b6c90d24ac38a7e15c7",
+    "forward_canonical_manifest": "6738294cefcca0be4d2696d51ebd41eb937e25a8515ca556f72c4b52d3f2f20c",
     "old_canonical_manifest": "f39e118cb770d4f793dd92c31e9f17f7153e7daef4e9703be7408fde702d40bb",
     "post_canonical_manifest": "328c25399daf9ab16c994ea30bd4a628ef40483e5f9af89fe34f191ac4f48819",
     "post_config_sha256": "e25f99f3d599f9bdabdb7e647474a0bb09869bb8982fef568012f916b8e4722c",
@@ -74,7 +84,10 @@ PROFILES = json.loads(r'''[
       "port": 45117,
       "source": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/paid-operator-delegation-20261012/gateway-candidate",
       "version": 2
-    }
+    },
+    "application_config_sha256": "121600753ad7bf2f13f30006577e049401cd5e53023b1297dc03e20a0a00fe4c",
+    "application_canonical_manifest": "32f76d5282f1187a3c355835bd5b34bb73f4e00fe05b9de9a84c958780ef9836",
+    "application_raw_manifest_sha256": "c3000a6c60194ce50ca23f4901a351e28f4f93d37b0596e928b9d3fe65295ffc"
   }
 ]''')
 
@@ -85,11 +98,25 @@ def post(row):
     return value
 
 
+def forward(row):
+    value = post(row)
+    value["configHash"] = row["forward_config_sha256"]
+    return value
+
+
+def application(row):
+    value = forward(row)
+    value["configHash"] = row["application_config_sha256"]
+    return value
+
+
 class TailnetPublicProfileTests(unittest.TestCase):
-    def test_exact_old_and_native_pin_post_states(self):
+    def test_exact_old_native_pin_forward_and_application_states(self):
         for row in PROFILES:
             for value, digest in ((row["public_manifest"], row["old_canonical_manifest"]),
-                                  (post(row), row["post_canonical_manifest"])):
+                                  (post(row), row["post_canonical_manifest"]),
+                                  (forward(row), row["forward_canonical_manifest"]),
+                                  (application(row), row["application_canonical_manifest"])):
                 with self.subTest(account=row["account"], state=digest):
                     self.assertEqual(svc._canonical_json_sha256(value), digest)
                     self.assertTrue(svc._native_pin_manifest_valid(
@@ -130,13 +157,81 @@ class TailnetPublicProfileTests(unittest.TestCase):
                     self.assertFalse(svc._native_pin_manifest_valid(
                         value, row["account"], value["label"]))
 
-    def test_only_two_accounts_and_four_fixed_states_select_tailnet(self):
+    def test_only_two_accounts_and_eight_fixed_states_select_tailnet(self):
         self.assertEqual(set(svc._NATIVE_POOL_PIN_TAILNET_CANONICAL),
                          {row["account"] for row in PROFILES})
         for row in PROFILES:
             self.assertEqual(svc._NATIVE_POOL_PIN_TAILNET_CANONICAL[row["account"]],
                              frozenset((row["old_canonical_manifest"],
-                                        row["post_canonical_manifest"])))
+                                        row["post_canonical_manifest"],
+                                        row["forward_canonical_manifest"],
+                                        row["application_canonical_manifest"])))
+
+
+    def test_application_state_reproduces_public_manifest_hashes(self):
+        # Config hashes are opaque authenticated native evidence. Public inputs
+        # reproduce complete manifest hashes, not the private config preimages.
+        for row in PROFILES:
+            with self.subTest(account=row["account"]):
+                value = application(row)
+                self.assertEqual({k: v for k, v in value.items() if k != "configHash"},
+                                 {k: v for k, v in row["public_manifest"].items() if k != "configHash"})
+                self.assertEqual(svc._canonical_json_sha256(value),
+                                 row["application_canonical_manifest"])
+                self.assertEqual(hashlib.sha256(svc._fabric_release_json(value)).hexdigest(),
+                                 row["application_raw_manifest_sha256"])
+
+    def test_application_state_keeps_every_identity_and_account_fence(self):
+        for row in PROFILES:
+            for field in ("configHash", "nodeHash", "backendHash", "dependencyTreeHash",
+                          "plistHash", "source", "node", "backend", "host", "port",
+                          "account", "label"):
+                with self.subTest(account=row["account"], field=field):
+                    value = application(row)
+                    value[field] = 1 if field == "port" else "foreign"
+                    self.assertFalse(svc._native_pin_manifest_valid(
+                        value, row["account"], row["public_manifest"]["label"]))
+            for name in row["public_manifest"]["files"]:
+                with self.subTest(account=row["account"], module=name):
+                    value = application(row)
+                    value["files"][name] = "a" * 64
+                    self.assertFalse(svc._native_pin_manifest_valid(
+                        value, row["account"], value["label"]))
+            other = next(item for item in PROFILES if item["account"] != row["account"])
+            value = application(row)
+            value["configHash"] = other["application_config_sha256"]
+            self.assertFalse(svc._native_pin_manifest_valid(
+                value, row["account"], value["label"]))
+
+    def test_original_bridge_source_binds_exact_application_launcher(self):
+        root = Path(__file__).resolve().parents[2]
+        rollout = root / "ops/native_fabric/quota_continuity/rollout"
+        source = (rollout / "native_install.py").read_text()
+        nodes = []
+        for node in ast.parse(source).body:
+            if (isinstance(node, ast.FunctionDef) and node.name == "shell_bridge"
+                    or isinstance(node, ast.Assign) and any(
+                        isinstance(target, ast.Name) and target.id == "BRIDGE_MARKER"
+                        for target in node.targets)):
+                nodes.append(node)
+        self.assertEqual(len(nodes), 2)
+        namespace = {"shlex": shlex}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), "<original-shell-bridge>", "exec"),
+             namespace)
+        store = Path("/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/native-code-releases")
+        python = "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+        old = "fb516277cca4f77654454fe3bbf82dca4c1c03f5ee2c9abb379b68f84312dfea"
+        current = "b602bfeb2dff3216b18417f1673f308221594d2c3274bb59bc7be1fe4c65c1ec"
+        self.assertEqual(hashlib.sha256((rollout / "native_generation.py").read_bytes()).hexdigest(),
+                         current)
+        for launcher, wanted in (
+            (old, "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf"),
+            (current, "b17b1c008bfea2a3841bccbcf360a3cc5dd0d4bc38f1842a573f1a1885e1bd00"),
+        ):
+            bridge = namespace["shell_bridge"](
+                python, store / "launchers" / (launcher + ".py"), store, "pool")
+            self.assertEqual(len(bridge), 547)
+            self.assertEqual(hashlib.sha256(bridge).hexdigest(), wanted)
 
 
 if __name__ == "__main__":

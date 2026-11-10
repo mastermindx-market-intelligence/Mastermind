@@ -331,3 +331,49 @@ def test_signal_denied_symlink_never_reads_content(bot_mcp, monkeypatch, tmp_pat
         audit = tmp_path / "denied.jsonl"
         rows = [json.loads(line) for line in audit.read_text().splitlines()]
         assert rows[-1]["denied_path"] == str(target)
+
+
+@pytest.mark.parametrize("kind", ["cycle", "nonfinite", "invalid_utf8", "unfit_qualification"])
+def test_strict_transport_refusal_enters_existing_read_boundary(bot_mcp, kind):
+    value = {"note": "private-read-canary"}
+    if kind == "cycle":
+        value["cycle"] = value
+    elif kind == "nonfinite":
+        value["value"] = float("nan")
+    elif kind == "invalid_utf8":
+        value["value"] = "\ud800"
+    else:
+        value["note"] *= 1000
+    result = bot_mcp._json(value)
+    assert result["is_error"] is True
+    payload = json.loads(_text(result))
+    assert payload["error"] in {"MCP_RESPONSE_NOT_JSON", "MCP_RESPONSE_TOO_LARGE"}
+    assert "private-read-canary" not in _text(result)
+    assert len(_text(result).encode("utf-8")) <= 8000
+    with pytest.raises(ValueError, match="^read payload unavailable$"):
+        bot_mcp._json_read(value)
+
+
+def test_read_transport_keeps_healthy_payload_and_process_cancellation(bot_mcp):
+    value = {"quotes": {"AAPL": 0.0}, "read_status": "partial", "failed_sources": ["fixture"]}
+    assert bot_mcp._json_read(value) == bot_mcp._json(value)
+
+    class CancelledValue:
+        def __str__(self):
+            raise asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        bot_mcp._json_read({"value": CancelledValue()})
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), "\ud800"],
+                         ids=["nonfinite-nan", "nonfinite-inf", "invalid-utf8"])
+def test_quote_strict_serialization_refusal_keeps_source_unknown(bot_mcp, monkeypatch, value):
+    from data_layer import polygon
+
+    monkeypatch.setattr(polygon, "quotes", lambda _tickers: {"AAPL": value})
+    result = asyncio.run(bot_mcp.get_quote.handler({"tickers": ["AAPL"]}))
+    assert json.loads(_text(result)) == {
+        "read_status": "unavailable", "error": "live_quotes_unavailable",
+        "failed_sources": ["quotes"], "quotes": None,
+    }

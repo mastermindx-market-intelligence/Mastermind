@@ -128,14 +128,26 @@ class RequestTurnBudget(unittest.TestCase):
 
 
 
+    def test_uncapped_complex_request_does_not_invent_a_limit(self):
+        from contextlib import redirect_stderr
+        output = io.StringIO()
+        with redirect_stderr(output):
+            result = api.request('fixture-complex-default', 'fix_build', cwd='~', packet=None,
+                stdin_bytes=b'bounded complex assignment', root_id='fixture-root',
+                parent_run_id='fixture-parent', task_complexity='C2_COMPLEX_BOUNDED')
+        self.assertEqual(result, 0)
+        self.assertNotIn('REQUEST_TURN_BUDGET', output.getvalue())
+        self.assertNotIn('POOL_REQUEST_MAX_TURNS', self.calls[0][1])
+
+
 class ExistingShellProfile(unittest.TestCase):
-    def profile(self, *, requested=None, incumbent=None, pool='glm', model='glm-5.3'):
+    def profile(self, *, requested=None, incumbent=None, pool='glm', model='glm-5.3', complexity='C0_MECHANICAL'):
         text = (ROOT / 'candidate/sub.sh').read_text()
         body = text.split('CLAUDE_WORKER_MAX_TURNS=120\n', 1)[1]
         body = body.split('\n}\n', 1)[0] + '\n}\n'
         script = 'CLAUDE_WORKER_MAX_TURNS=120\n' + body
         script += '\n_claude_worker_profile "$1" "$2" || exit $?\nprintf "%s\\n" "$CLAUDE_WORKER_MAX_TURNS"\n'
-        env = {'PATH': '/usr/bin:/bin', 'POOL_TASK_COMPLEXITY': 'C0_MECHANICAL'}
+        env = {'PATH': '/usr/bin:/bin', 'POOL_TASK_COMPLEXITY': complexity}
         if requested is not None:
             env['POOL_REQUEST_MAX_TURNS'] = str(requested)
         if incumbent is not None:
@@ -159,6 +171,16 @@ class ExistingShellProfile(unittest.TestCase):
                 result = self.profile(pool=pool, model=model)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), str(expected))
+
+    def test_complex_defaults_and_intentional_64_turn_ceiling(self):
+        for complexity, expected in (('C2_COMPLEX_BOUNDED', 240), ('C3_FRONTIER_JUDGMENT', 400)):
+            with self.subTest(complexity=complexity):
+                default = self.profile(complexity=complexity)
+                capped = self.profile(complexity=complexity, requested=64)
+                self.assertEqual(default.returncode, 0, default.stderr)
+                self.assertEqual(default.stdout.strip(), str(expected))
+                self.assertEqual(capped.returncode, 0, capped.stderr)
+                self.assertEqual(capped.stdout.strip(), '64')
 
     def test_malformed_request_or_incumbent_is_not_sanitized_into_a_grant(self):
         for value in ('0', '-1', '401', '1.5', 'bad'):

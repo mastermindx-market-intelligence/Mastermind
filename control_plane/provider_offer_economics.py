@@ -130,6 +130,42 @@ def _card(card: ApiRateCard, surface: str) -> None:
             raise ModelEconomicsError("invalid rate price")
 
 
+def _has_effective_weekly_overlap(
+    start: datetime, end: datetime,
+    left: tuple[tuple[int, int], ...], right: tuple[tuple[int, int], ...],
+) -> bool:
+    """Whether recurring windows coincide inside one half-open UTC interval.
+
+    Effective dates and weekday windows must coincide at the SAME instant.
+    Integer microseconds preserve boundary precision without walking days or
+    constructing next-week datetimes that can overflow at the calendar limit.
+    The sorted, disjoint window lists were already checked by ``_windows``.
+    """
+    if start >= end:
+        return False
+    minute_us = 60 * 1_000_000
+    week_us = _WEEK * minute_us
+    offset = (((start.weekday() * 24 + start.hour) * 60 + start.minute)
+              * minute_us + start.second * 1_000_000 + start.microsecond)
+    delta = end - start
+    stop = offset + ((delta.days * 86400 + delta.seconds) * 1_000_000
+                     + delta.microseconds)
+    i = j = 0
+    while i < len(left) and j < len(right):
+        lo = max(left[i][0], right[j][0]) * minute_us
+        hi = min(left[i][1], right[j][1]) * minute_us
+        if lo < hi:
+            # Only this week's interval and its first future occurrence matter.
+            # A later occurrence cannot precede the first one.
+            if (offset < hi and lo < stop) or lo + week_us < stop:
+                return True
+        if left[i][1] <= right[j][1]:
+            i += 1
+        else:
+            j += 1
+    return False
+
+
 def _validated(offer: ReviewedApiOffer):
     if not isinstance(offer, ReviewedApiOffer):
         raise ModelEconomicsError("invalid reviewed offer")
@@ -162,7 +198,7 @@ def _validated(offer: ReviewedApiOffer):
             a, b = left.card, right.card
             overlap = ((a.max_context_tokens is None or b.min_context_tokens <= a.max_context_tokens)
                        and (b.max_context_tokens is None or a.min_context_tokens <= b.max_context_tokens))
-            if overlap and any(max(x, p) < min(y, q) for x, y in lw for p, q in rw):
+            if overlap and _has_effective_weekly_overlap(max(ls, rs), min(le, re_), lw, rw):
                 raise ModelEconomicsError("overlapping time/context rate variants")
     return lease_end, parsed
 

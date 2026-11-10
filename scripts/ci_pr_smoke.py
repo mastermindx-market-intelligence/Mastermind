@@ -1,7 +1,6 @@
-"""Bounded PR-only smoke tests; NOT a substitute for merge-group full pytest.
+"""Bounded source-proximate tests for trusted PR/merge-group smoke scope.
 
-The trusted-base CI scope selects this non-privileged path; merge_group still
-executes the full canonical discovery-first suite. This advisory selector
+The trusted-base CI scope selects this non-privileged path. This selector
 never edits branch protection, suppresses a required check, or publishes a
 review verdict. No remote access, shell interpolation, credentials or workers.
 """
@@ -20,6 +19,14 @@ _MAX_MODULE_BYTES = 160_000
 # Run one deterministic always-present policy smoke even when source path
 # naming does not map to an exact test. It is not claimed as complete coverage.
 _BASELINE = "tests/test_ci_pytest_policy.py"
+
+# The bridge's reviewed generation is owned by runtime_stage, not by a
+# same-stem bridge test. Keep this dependency inside the existing module cap.
+_PAPER_STAGE_SOURCES = frozenset({
+    "integrations/paper_desktop/bridge.py",
+    "integrations/paper_desktop/runtime_stage.py",
+})
+_PAPER_STAGE_TEST = "tests/test_paper_runtime_stage.py"
 
 
 class SmokeUnqualified(ValueError):
@@ -51,7 +58,7 @@ def _diff_paths(repo: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
 
 
 def select_modules(repo: pathlib.Path, changed: Sequence[str]) -> tuple[str, ...]:
-    """Pick direct changed tests then colocated same-stem tests, at most 3."""
+    """Pick fixed dependencies then source-proximate tests, at most 3."""
     root = repo.resolve(strict=True)
     selected: set[str] = set()
     for path in changed:
@@ -67,13 +74,28 @@ def select_modules(repo: pathlib.Path, changed: Sequence[str]) -> tuple[str, ...
                 candidate = root / "tests" / ("test_" + file.stem + ".py")
                 if candidate.exists() and candidate.is_file():
                     selected.add(candidate.relative_to(root).as_posix())
-    # Prefer direct changed test modules before inferred ones, deterministic
+    required = (_PAPER_STAGE_TEST,) if _PAPER_STAGE_SOURCES.intersection(changed) else ()
+    for path in required:
+        file = root / path
+        try:
+            available = (not file.is_symlink() and file.is_file()
+                         and file.resolve().is_relative_to(root)
+                         and file.stat().st_size <= _MAX_MODULE_BYTES)
+        except OSError:
+            available = False
+        if not available:
+            raise SmokeUnqualified("SMOKE_REQUIRED_TEST_UNAVAILABLE")
+    # Fixed dependencies cannot be lost to alphabetic ties or the module cap.
+    # Other source-proximate tests retain their deterministic
     # alphabetic ties and fixed cap. Never let a PR path select a workflow,
     # executable, shell expression, URL, or arbitrary filesystem target.
     ordered = sorted(selected)
     bounded = tuple(p for p in ordered
                     if (root / p).stat().st_size <= _MAX_MODULE_BYTES)
-    return tuple(dict.fromkeys((_BASELINE, *bounded[:_MAX_SELECTED_MODULES])))
+    remaining = tuple(p for p in bounded if p not in required)
+    return tuple(dict.fromkeys((
+        _BASELINE, *required, *remaining[:_MAX_SELECTED_MODULES - len(required)],
+    )))
 
 
 def check_changed_python(repo: pathlib.Path, changed: Sequence[str]) -> None:

@@ -160,7 +160,8 @@ class CooApp:
         self._client = CeoIngressClient(connect_timeout=settings.executive.connect_timeout,
                                        read_timeout=settings.executive.read_timeout)
         self._read_gateway = WebCeoV2CeoIngressReadGateway(settings.executive.ceo_ingress_socket_path, self._client)
-        self._app = Starlette(routes=[Route("/v1/tools/{tool}", self.call, methods=["POST"])])
+        self._app = Starlette(routes=[Route("/v1/tools/{tool}", self.call, methods=["POST"]),
+            Route("/v1/memory/evaluation-assessment", self.assess_memory_evaluator, methods=["POST"])])
         self._app.router.redirect_slashes = False
         self._bounded = BoundedE1App(self._app)
 
@@ -225,6 +226,45 @@ class CooApp:
     async def _same_auth(self, request, expected):
         observed = await self._auth(request)
         return not isinstance(observed, JSONResponse) and observed == expected
+
+    async def assess_memory_evaluator(self, request):
+        """Actual JWT/binding ingress; no rating text/private results returned.
+
+        The dedicated frame is further gated by the installed gateway process,
+        explicit sealed study delegation and current mission on Control.
+        """
+        from common import memory_evaluation_contract as evaluation
+        from control_plane.protected_memory_evaluation_assignment import INGRESS, ASSIGN, purpose_document
+        from integrations.mastermind_executive_app.coo_binding import principal_frame
+        authenticated = await self._auth(request)
+        if isinstance(authenticated, JSONResponse): return authenticated
+        sent = False
+        decision = None
+        try:
+            raw = await request.body()
+            if not 1 <= len(raw) <= 32768: return refused('invalid_input', 400)
+            from common.memory_participant_view import _json
+            decision = purpose_document(_json(raw))
+            principal, stamp = authenticated
+            authority, _ = await self._authority(principal, decision['work_ref'], stamp)
+            mandate = await self._mandate(principal, stamp, authority)
+            if mandate['new_effect_gate'] != 'OPEN' or not await self._same_auth(request, authenticated): return refused()
+            frame = dict(schema=INGRESS, principal=principal_frame(principal), verified_expires_at=principal.expires_at, assessment=decision)
+            sent = True
+            result = await self._client.send_frame(self.settings.executive.ceo_ingress_socket_path, frame)
+            if result.transport == TRANSPORT_NOT_SENT: return refused('ingress_unavailable', 503)
+            if result.transport != TRANSPORT_SENT_OK: return unknown(decision['command_id'])
+            if not await self._same_auth(request, authenticated): return unknown(decision['command_id'])
+            if result.ok is not True:
+                return unknown(decision['command_id']) if (result.error or {}).get('code') == 'effect_unknown' else refused()
+            receipt = result.result
+            assignment=decision['schema']==ASSIGN
+            evaluation.w.exact(receipt, 'schema event_id '+('assignment_sha256' if assignment else 'admission_sha256')+' verification scientific_admission')
+            if (receipt['schema'] != ('mastermind.memory_evaluation_assignment_receipt.v1' if assignment else 'mastermind.memory_evaluator_admission_receipt.v1')
+                    or receipt['verification'] != evaluation.w.FLAGS or receipt['scientific_admission'] is not False): return unknown(decision['command_id'])
+            return JSONResponse({'ok':True, 'result':receipt}, headers={'Cache-Control':'no-store'})
+        except Exception:
+            return unknown(decision['command_id']) if sent else refused()
 
     def require_context_current(self):
         settings = self._context_settings
@@ -665,7 +705,8 @@ class CooApp:
             path = scope.get("path", "")
             if (not path.isascii() or scope.get("raw_path") != path.encode("ascii")
                     or scope.get("query_string") or scope.get("method") != "POST"
-                    or path not in {"/v1/tools/" + name for name in (*COO_TOOL_NAMES, context_tool, current_context_tool, *discovery_tools)}):
+                    or path not in ({"/v1/tools/" + name for name in (*COO_TOOL_NAMES, context_tool, current_context_tool, *discovery_tools)}
+                                    | {"/v1/memory/evaluation-assessment"})):
                 await refused("invalid_input", 404)(scope, receive, send)
                 return
         await self._bounded(scope, receive, send)

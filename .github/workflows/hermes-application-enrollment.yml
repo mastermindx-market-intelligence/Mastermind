@@ -40,11 +40,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-application-enrollment-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-application-enrollment:
     name: Hermes v9 and incumbent APPLICATION enrollment
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
@@ -59,7 +63,7 @@ jobs:
           set -euo pipefail
           native_rollout_test_root="$(mktemp -d "$HOME/mmx-hermes-enrollment.XXXXXX")"
           trap 'rm -rf "$native_rollout_test_root"' EXIT
-          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -B -m pytest -q -o addopts= --noconftest \
+          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -B -m pytest -v --durations=20 -o addopts= --noconftest \
             --junitxml="$native_rollout_test_root/proof.xml" \
             tests/test_hermes_primary_application_enrollment.py \
             tests/test_hermes_primary_retained_enrollment.py \

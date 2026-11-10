@@ -1,0 +1,3084 @@
+{
+  "scope": {
+    "files": 9,
+    "pages": 30,
+    "metadataArtboards": 317,
+    "screenshots": 8,
+    "jsxBoards": 11,
+    "treeBoards": 6,
+    "sourcePin": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+    "macroPin": "b5674d8ef898e503d6164922654f5ff89be9981c",
+    "noBrowser": true,
+    "noExternalWrites": true,
+    "noArchiveActions": true,
+    "notExhaustiveVisualAudit": true
+  },
+  "findings": [
+    {
+      "priority": "P0",
+      "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "pageId": "p-1-0",
+      "nodes": [
+        "WB-0",
+        "WG-0"
+      ],
+      "finding": "Migrated S&P allocation boards contain only headings (mobile also status bar).",
+      "repair": "Mark placeholders incomplete and point to completed source-backed boards; recover/reuse completed compositions rather than invent new allocation UI.",
+      "recovery": {
+        "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+        "pageId": "p-18-0",
+        "boards": {
+          "stage-phone": "1XGS-0",
+          "allocation-desktop": "1XGT-0",
+          "allocation-phone": "1XGU-0"
+        }
+      },
+      "source": "docs/d06-macro-20261104.md; docs/pr-crops/d06-macro-20261104/paper/manifest.json",
+      "limits": "Completion source and manifest verified; recovery destination not re-read in this cohort. Parent should inspect exact target before mutation."
+    },
+    {
+      "priority": "P1",
+      "fileId": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+      "pageId": "p-1-0",
+      "nodes": [
+        "1-0",
+        "2B-0",
+        "26-0"
+      ],
+      "finding": "Start board's index and footer still point to the old giant-file node IDs/location and unnamed manual brief.",
+      "repair": "Replace visible IDs with current local mapping, identify old provenance as historical, and expose verified architecture, S0 plan and held PR #673 URLs.",
+      "map": {
+        "U-0": "2C-0",
+        "X-0": "77-0",
+        "10-0": "CI-0",
+        "13-0": "IC-0",
+        "16-0": "NS-0",
+        "19-0": "SG-0",
+        "1E-0": "WM-0",
+        "1H-0": "11E-0",
+        "1K-0": "14D-0",
+        "1N-0": "17U-0",
+        "1Q-0": "1CP-0",
+        "1T-0": "1EI-0"
+      }
+    },
+    {
+      "priority": "P1",
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "pageId": "p-D-0",
+      "nodes": [
+        "10NB-0",
+        "10QQ-0"
+      ],
+      "finding": "Full-contract label names a PR and basename without an exported URL/href. Several draft generations remain visible; no approved canonical reference.",
+      "repair": "Provide exact draft-guide URL and a concise lineage pointer. Preserve ZE5-0 and original Fabric effect fences; do not promote draft or archive retained contracts."
+    },
+    {
+      "priority": "P1",
+      "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "pageId": "p-2-0",
+      "nodes": [
+        "MH-0",
+        "RE-0"
+      ],
+      "finding": "Blue source label has no exported URL. Referenced candidate implementation files return 404 at protected Macro b5674d8.",
+      "repair": "Link exact c742039f candidate guide/template, explicitly candidate/HOLD; preserve all existing reference-clock and unavailable-state work.",
+      "candidate": "https://github.com/mastermindx-market-intelligence/macro/pull/10493"
+    },
+    {
+      "priority": "P1",
+      "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+      "pageId": "p-2-0",
+      "nodes": [
+        "3UR-0",
+        "QK-0"
+      ],
+      "finding": "Research-program source label has no exported URL. Existing build note correctly identifies current-template matched-only denominator mismatch and ticker-only URL restore limitation.",
+      "repair": "Add exact current source paths/URLs. Preserve recently accepted content; carry existing P0/P1 issues into implementation plan rather than repeating redesign."
+    },
+    {
+      "priority": "P2",
+      "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+      "pageId": "p-3-0",
+      "nodes": [
+        "V1-0"
+      ],
+      "finding": "Strong current recovery/build contract has no exported implementation URL.",
+      "repair": "Link current authenticated shell/builder and qualified draft D12 guide. Retain source values 111.5/111.4, withheld difference, missing units, cutoff unknown, exact identities and recovery states."
+    },
+    {
+      "priority": "P2",
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "pageId": "p-3-0",
+      "nodes": [
+        "16B-0"
+      ],
+      "finding": "Origin/flow/vol/watch contracts remain informative but source ownership/guide URLs are absent.",
+      "repair": "Expose verified D08 integration guide with candidate status and current source owners; keep existing origin adoption and data/receipt state distinctions."
+    },
+    {
+      "priority": "P2",
+      "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "pageId": "p-1-0",
+      "nodes": [
+        "1-0"
+      ],
+      "finding": "Separate mobile study lacks a discoverable link to owning W3 desktop/build/help pages.",
+      "repair": "Add a compact reference pointer to parent Options file p-2-0/p-3-0/p-4-0 and D08 guide. Keep fired/disarmed, manual re-arm, revision and receipt distinctions. Treat fixture quote clock versus receipt source clock as a wiring verification case, not a verified runtime defect."
+    },
+    {
+      "priority": "P2",
+      "fileId": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "pageId": "p-1-0",
+      "nodes": [
+        "U9-0",
+        "6D-0"
+      ],
+      "finding": "Component reference describes data cadence but has no usable implementation source map.",
+      "repair": "Link canonical options.html template, OEU workspace specification and D08 guide. Existing gex.html and options_screener.html templates redirect to options.html#ticker/#scanner; do not recreate independent destinations."
+    }
+  ],
+  "pages": [
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-D-0",
+      "pageName": "00 · Start here · D03 build contract · DRAFT",
+      "disposition": "current",
+      "qualification": "Current draft directory/proposals; no canonical Prophet reference approved.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "10NB-0"
+        ],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "10NB-0",
+          "name": "D03 · Product directory & build contract · 1440 · Light · EN · DRAFT",
+          "width": 1440,
+          "height": null,
+          "children": 8
+        },
+        {
+          "id": "10R9-0",
+          "name": "D03 · Shell content-width stress & adaptation · candidate.4 · DRAFT",
+          "width": 1440,
+          "height": 1000,
+          "children": 3
+        },
+        {
+          "id": "10TD-0",
+          "name": "D03 · 390 · Source unjudgeable · Light · EN · PROVISIONAL",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "10WD-0",
+          "name": "D03 · 320 · Source unjudgeable · Light EN · DRAFT",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "110D-0",
+          "name": "D03 · 320 · Source unjudgeable · Dark ZH · DRAFT",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "1133-0",
+          "name": "D03 · 390 · Source unjudgeable · Dark ZH · DRAFT",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "11DZ-0",
+          "name": "D03 · 390 · Unjudgeable · Light ZH · DRAFT",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "11B9-0",
+          "name": "D03 · 320 · Unjudgeable · Light ZH · DRAFT",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "115T-0",
+          "name": "D03 · 320 · Unjudgeable · Dark EN · DRAFT",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "118J-0",
+          "name": "D03 · 390 · Unjudgeable · Dark EN · DRAFT",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "10Z3-0",
+          "name": "D03 T35 · Foresight entry states · Light EN · DRAFT",
+          "width": 960,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "11HT-0",
+          "name": "D03 T36 · Confirmation-only · EN ZH · DRAFT",
+          "width": 960,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "11GP-0",
+          "name": "D03 T46 · Shadow source coverage · DRAFT",
+          "width": 960,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "11JL-0",
+          "name": "D03 T37 · Pending outcomes · EN ZH · DRAFT",
+          "width": 960,
+          "height": 720,
+          "children": 1
+        },
+        {
+          "id": "135O-0",
+          "name": "D03 proposal · Selected compare · 320 Light EN",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "133D-0",
+          "name": "D03 proposal · Selected compare · 390 Dark EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "13L8-0",
+          "name": "D03 proposal · Compare and save contract · 960",
+          "width": 960,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "13HK-0",
+          "name": "D03 proposal · Watchlist destination · 390 Dark EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "13V8-0",
+          "name": "D03 · Compare selected · 320 Light ZH · DRAFT",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "13RK-0",
+          "name": "D03 · Compare selected · 390 Dark ZH · DRAFT",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "13YQ-0",
+          "name": "D03 · Watchlist review · 390 Dark ZH · DRAFT",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "11KZ-0",
+          "name": "D03 T47 · Pick Lab navigation · component DRAFT",
+          "width": 960,
+          "height": 760,
+          "children": 4
+        },
+        {
+          "id": "11MU-0",
+          "name": "D03 W07 · Winner Health availability · component DRAFT",
+          "width": 960,
+          "height": 700,
+          "children": 3
+        },
+        {
+          "id": "11NP-0",
+          "name": "D03 T49 · 768 · Scan + compare · Light EN · PROVISIONAL",
+          "width": 768,
+          "height": 1024,
+          "children": 3
+        },
+        {
+          "id": "11OT-0",
+          "name": "D03 T48 · Compact rich-card scan + compare · 390 · Light EN · PROVISIONAL",
+          "width": 390,
+          "height": 1950,
+          "children": 10
+        },
+        {
+          "id": "127F-0",
+          "name": "D03 T48 · Scan+Compare · 390 Light ZH · DRAFT",
+          "width": 390,
+          "height": 1800,
+          "children": 10
+        },
+        {
+          "id": "11Y9-0",
+          "name": "D03 T48 · Scan+Compare · 390 Dark EN · DRAFT",
+          "width": 390,
+          "height": 1950,
+          "children": 10
+        },
+        {
+          "id": "122U-0",
+          "name": "D03 T48 · Scan+Compare · 390 Dark ZH · DRAFT",
+          "width": 390,
+          "height": 1800,
+          "children": 10
+        },
+        {
+          "id": "11TO-0",
+          "name": "D03 T48 · Compact rich-card scan + compare · 320 · Light EN · PROVISIONAL",
+          "width": 320,
+          "height": 2110,
+          "children": 10
+        },
+        {
+          "id": "12PR-0",
+          "name": "D03 T48 · Public Featured Empty · 320 Light EN",
+          "width": 320,
+          "height": 1160,
+          "children": 11
+        },
+        {
+          "id": "12L6-0",
+          "name": "D03 T48 · Scan+Compare · 320 Light ZH · DRAFT",
+          "width": 320,
+          "height": 1900,
+          "children": 10
+        },
+        {
+          "id": "12C0-0",
+          "name": "D03 T48 · Scan+Compare · 320 Dark EN · DRAFT",
+          "width": 320,
+          "height": 2110,
+          "children": 10
+        },
+        {
+          "id": "12GL-0",
+          "name": "D03 T48 · Scan+Compare · 320 Dark ZH · DRAFT",
+          "width": 320,
+          "height": 1900,
+          "children": 10
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-C-0",
+      "pageName": "01 · Opportunity studies · R7–R8 · DRAFT",
+      "disposition": "current",
+      "qualification": "Current R7/R8 draft studies; ZE5-0 unresolved original effect remains held. No new screenshot in this pass.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "SYI-0",
+          "name": "R7-01 Today · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1292,
+          "children": 4
+        },
+        {
+          "id": "X4F-0",
+          "name": "R7-17 Compare · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1112,
+          "children": 3
+        },
+        {
+          "id": "YCY-0",
+          "name": "R7-25 Save to list · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1112,
+          "children": 4
+        },
+        {
+          "id": "W0A-0",
+          "name": "R7-14 Lens · Early leadership · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1446,
+          "children": 4
+        },
+        {
+          "id": "WDG-0",
+          "name": "R7-15 Lens · Quality earnings · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1190,
+          "children": 4
+        },
+        {
+          "id": "WV1-0",
+          "name": "R7-16 Lens · Cycle capture · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1004,
+          "children": 4
+        },
+        {
+          "id": "THR-0",
+          "name": "R7-03 Today · 1440 · Light · ZH",
+          "width": 1440,
+          "height": 1314,
+          "children": 4
+        },
+        {
+          "id": "T8V-0",
+          "name": "R7-02 Today · 1440 · Dark · EN",
+          "width": 1440,
+          "height": 1292,
+          "children": 4
+        },
+        {
+          "id": "TQN-0",
+          "name": "R7-04 Today · 1440 · Dark · ZH",
+          "width": 1440,
+          "height": 1314,
+          "children": 4
+        },
+        {
+          "id": "TZJ-0",
+          "name": "R7-05 Today · 390 · Light · EN",
+          "width": 390,
+          "height": 3361,
+          "children": 8
+        },
+        {
+          "id": "YMJ-0",
+          "name": "R7-27 Today · 768 · Light · EN",
+          "width": 768,
+          "height": 2120,
+          "children": 8
+        },
+        {
+          "id": "V1X-0",
+          "name": "R7-09 Today · 320 · Light · EN · stress reflow",
+          "width": 320,
+          "height": 4035,
+          "children": 8
+        },
+        {
+          "id": "USF-0",
+          "name": "R7-08 Today · 390 · Dark · ZH",
+          "width": 390,
+          "height": 3420,
+          "children": 8
+        },
+        {
+          "id": "UIX-0",
+          "name": "R7-07 Today · 390 · Light · ZH",
+          "width": 390,
+          "height": 3420,
+          "children": 8
+        },
+        {
+          "id": "U9F-0",
+          "name": "R7-06 Today · 390 · Dark · EN",
+          "width": 390,
+          "height": 3361,
+          "children": 8
+        },
+        {
+          "id": "VBF-0",
+          "name": "R7-10 Setup detail · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1474,
+          "children": 5
+        },
+        {
+          "id": "VHM-0",
+          "name": "R7-11 Setup detail · 1440 · Dark · EN",
+          "width": 1440,
+          "height": 1474,
+          "children": 5
+        },
+        {
+          "id": "VO1-0",
+          "name": "R7-12 Setup detail · 390 · Light · EN",
+          "width": 390,
+          "height": 2821,
+          "children": 5
+        },
+        {
+          "id": "VU9-0",
+          "name": "R7-13 Setup detail · 390 · Dark · EN",
+          "width": 390,
+          "height": 2821,
+          "children": 5
+        },
+        {
+          "id": "XHQ-0",
+          "name": "R7-18 Compare · 390 · Light · EN",
+          "width": 390,
+          "height": 2704,
+          "children": 6
+        },
+        {
+          "id": "XO9-0",
+          "name": "R7-19 Saved list · 1440 · Light · EN",
+          "width": 1440,
+          "height": 1071,
+          "children": 4
+        },
+        {
+          "id": "XUP-0",
+          "name": "R7-20 Save to list · 390 · Light · EN",
+          "width": 390,
+          "height": 844,
+          "children": 6
+        },
+        {
+          "id": "Y1G-0",
+          "name": "R7-21 Save outcomes · 390 · Light · EN",
+          "width": 390,
+          "height": 1416,
+          "children": 5
+        },
+        {
+          "id": "Y39-0",
+          "name": "R7-22 State · Decision unavailable · 390 · Light · EN",
+          "width": 390,
+          "height": 1937,
+          "children": 5
+        },
+        {
+          "id": "Y6V-0",
+          "name": "R7-23 State · Stale quote · 390 · Light · EN",
+          "width": 390,
+          "height": 1970,
+          "children": 5
+        },
+        {
+          "id": "YAG-0",
+          "name": "R7-24 State · Refusal receipt · 390 · Light · EN",
+          "width": 390,
+          "height": 1146,
+          "children": 4
+        },
+        {
+          "id": "YJ5-0",
+          "name": "R7-26 Board states · 390 · Light · EN",
+          "width": 390,
+          "height": 1608,
+          "children": 5
+        },
+        {
+          "id": "YW1-0",
+          "name": "R8 Full Prophet · 1440 · Light · EN · design illustration",
+          "width": 1440,
+          "height": 2446,
+          "children": 2
+        },
+        {
+          "id": "ZRL-0",
+          "name": "R8 Full Prophet · 390 · Light · EN · design illustration",
+          "width": 390,
+          "height": 5210,
+          "children": 3
+        },
+        {
+          "id": "1092-0",
+          "name": "R8 Full Prophet · 390 · Dark · ZH · design illustration",
+          "width": 390,
+          "height": 5068,
+          "children": 3
+        },
+        {
+          "id": "ZE5-0",
+          "name": "R8 Full Prophet · 1440 · Dark · EN · design illustration",
+          "width": 1440,
+          "height": 2446,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-E-0",
+      "pageName": "Build · Clarity preservation",
+      "disposition": "reference",
+      "qualification": "Build/contract reference; preserve existing owner and acceptance semantics.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [
+          "15E0-0"
+        ],
+        "screenshotBoards": [],
+        "depth": "Selected tree/structure inspection"
+      },
+      "artboards": [
+        {
+          "id": "15E0-0",
+          "name": "BUILD REFERENCES · Prophet preservation",
+          "width": 1680,
+          "height": null,
+          "children": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-1-0",
+      "pageName": "PROPHET",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "82Z-0",
+          "name": "00A · SPEC · Prophet Family + State Map",
+          "width": 1440,
+          "height": 1080,
+          "children": 3
+        },
+        {
+          "id": "CWV-0",
+          "name": "00B · START HERE · Prophet Workspace Index",
+          "width": 1440,
+          "height": 1000,
+          "children": 7
+        },
+        {
+          "id": "DAY-0",
+          "name": "Frame",
+          "width": 100,
+          "height": 100,
+          "children": 0
+        },
+        {
+          "id": "DAZ-0",
+          "name": "103 · R4.5 · Prophet Daily Brief + Top Picks · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "EUE-0",
+          "name": "107 · R4.7 · Prophet Daily Brief · Data Health States · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "E36-0",
+          "name": "105 · R4.6 · Prophet Daily Brief · Entry Cleared · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "DPQ-0",
+          "name": "104 · R4.5 · Prophet Daily Brief + Top Picks · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "FL7-0",
+          "name": "108 · R4.7 · Prophet Daily Brief · Data Health States · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "EHM-0",
+          "name": "106 · R4.6 · Prophet Daily Brief · Entry Cleared · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "G9H-0",
+          "name": "109 · R4.8 · Compare · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "GDO-0",
+          "name": "110 · R4.8 · Compare · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "GJP-0",
+          "name": "111 · R4.9 · Full change log · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "GNQ-0",
+          "name": "112 · R4.9 · Full change log · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "HY5-0",
+          "name": "113 · R5.0 · Daily Brief · First Failure · No Prior Brief · Desktop",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "HY6-0",
+          "name": "114 · R5.0 · Daily Brief · First Failure · No Prior Brief · Mobile",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "I2B-0",
+          "name": "115 · R5.1 · Brief History Unknown · Desktop",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "I46-0",
+          "name": "116 · R5.1 · Brief History Unknown · Mobile",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "IH8-0",
+          "name": "117 · Compare · One selected · Static recovery",
+          "width": 390,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "IH9-0",
+          "name": "118 · Compare · None selected · Static recovery",
+          "width": 390,
+          "height": null,
+          "children": 5
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-B-0",
+      "pageName": "REF · REJECTED · R6 text-row direction · R1–R4",
+      "disposition": "reference",
+      "qualification": "Explicitly rejected lineage; preserve rejection.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "J0R-0",
+          "name": "01 · Scan + study · Dark EN · 1440",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "J58-0",
+          "name": "02 · Scan + study · Light EN · 1440",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "J9G-0",
+          "name": "03 · 浏览与研究 · Dark ZH · 1440",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "JDO-0",
+          "name": "04 · 浏览与研究 · Light ZH · 1440",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "JHW-0",
+          "name": "05 · Scan · Dark EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "JM4-0",
+          "name": "06 · Scan · Light EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "JQC-0",
+          "name": "07 · 浏览 · Dark ZH · 390",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "JUK-0",
+          "name": "08 · 浏览 · Light ZH · 390",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "JZX-0",
+          "name": "09 · Study · Evidence + conditions · Dark EN",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "K2M-0",
+          "name": "10 · Mobile study → sources → return",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "K2N-0",
+          "name": "11 · Compare · Aligned evidence · Light EN",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "K2O-0",
+          "name": "12 · Compare → save → revisit · Mobile",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "KQT-0",
+          "name": "19 · 研究→来源→返回 · 中文 · Dark",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "KV5-0",
+          "name": "20 · 对比→保存→回看 · 中文 · Light",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "K2P-0",
+          "name": "13 · Saved & return · Correction · Light EN",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "K2Q-0",
+          "name": "14 · Plan relations + availability",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "K2R-0",
+          "name": "15 · Recovery + persistence states",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "K2S-0",
+          "name": "00 · Read first · Direction + design review",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "KJ3-0",
+          "name": "16 · Earnings + cycle · Distinct study lenses",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "KMH-0",
+          "name": "17 · Select, record intent + alert preview",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "KOG-0",
+          "name": "18 · Sorting contract · Open menus EN/ZH · Theme tokens",
+          "width": 1440,
+          "height": 900,
+          "children": 2
+        },
+        {
+          "id": "KYH-0",
+          "name": "21 · Coverage inspector + regional recovery · DRAFT",
+          "width": 1440,
+          "height": 1120,
+          "children": 2
+        },
+        {
+          "id": "L0X-0",
+          "name": "22 · Entry truth · Alternate card states · DRAFT",
+          "width": 1440,
+          "height": 1120,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-A-0",
+      "pageName": "07 · R6 successor · Opportunity workspace · DRAFT",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "L3E-0",
+          "name": "01 · Card-first · Today · Light EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "PCL-0",
+          "name": "25 · Full Prophet · All strategies · Complete R3 cards · Light EN · DRAFT",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "LPF-0",
+          "name": "02 · Card-first · Today · Dark EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "LYQ-0",
+          "name": "03 · 完整卡片 · 今日 · Light ZH",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "PPA-0",
+          "name": "26 · 完整卡片 · 全部策略 · Light ZH · R3.1 产品界面 · DRAFT",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "Q9K-0",
+          "name": "31 · Full Prophet · All strategies · Dark EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "QM9-0",
+          "name": "32 · 完整卡片 · 全部策略 · 深色中文",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "M81-0",
+          "name": "04 · 完整卡片 · 今日 · Dark ZH",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "LEW-0",
+          "name": "12 · Rich-card states · Dark · Caution disclosure",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "LCH-0",
+          "name": "13 · Complete card · Long-price layout · Mobile EN",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "LKU-0",
+          "name": "09 · Setup + timing · NVDA · Light EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "MHC-0",
+          "name": "05 · Complete cards · Today · Mobile Light EN",
+          "width": 390,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "QYY-0",
+          "name": "33 · All strategies · Mobile · Light EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "R6L-0",
+          "name": "34 · All strategies · Mobile · Dark EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "RE8-0",
+          "name": "35 · 全部策略 · 手机 · Light ZH",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "RLV-0",
+          "name": "36 · 全部策略 · 手机 · Dark ZH",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "MP1-0",
+          "name": "06 · Complete cards · Today · Mobile Dark EN",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "MP2-0",
+          "name": "07 · 完整卡片 · 今日 · Mobile Light ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "MP3-0",
+          "name": "08 · 完整卡片 · 今日 · Mobile Dark ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "NCP-0",
+          "name": "10 · Same card → Setup → Evidence · Mobile",
+          "width": 960,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "NFW-0",
+          "name": "11 · Compare selected cards · Timing and risk · Light EN",
+          "width": 1440,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "NMN-0",
+          "name": "14 · Save to list · Uncertain result · Revisit rich card",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "NQT-0",
+          "name": "15 · Complete cards · Three strategy lenses · Early/Earnings/Cycle · Light EN",
+          "width": 1440,
+          "height": 1050,
+          "children": 3
+        },
+        {
+          "id": "NY9-0",
+          "name": "16 · From complete card to evidence · Earnings + Cycle · Light EN",
+          "width": 1440,
+          "height": 1080,
+          "children": 3
+        },
+        {
+          "id": "O3P-0",
+          "name": "17 · Strategy-specific complete cards · Mobile EN · Earnings/Cycle",
+          "width": 960,
+          "height": 1170,
+          "children": 2
+        },
+        {
+          "id": "O8I-0",
+          "name": "18 · 策略专属完整卡片 · 手机中文 · 财报/周期",
+          "width": 960,
+          "height": 1170,
+          "children": 2
+        },
+        {
+          "id": "ODB-0",
+          "name": "19 · Complete cards · Early/Earnings/Cycle · Dark EN",
+          "width": 1440,
+          "height": 1050,
+          "children": 3
+        },
+        {
+          "id": "OKP-0",
+          "name": "20 · 策略专属完整卡片 · 手机深色中文 · 财报/周期",
+          "width": 960,
+          "height": 1170,
+          "children": 2
+        },
+        {
+          "id": "OTP-0",
+          "name": "21 · 保存到已有列表 → 原结果待核验 → 回看历史卡片 · 中文手机",
+          "width": 1440,
+          "height": 1130,
+          "children": 2
+        },
+        {
+          "id": "OXR-0",
+          "name": "22 · 中文 · 同策略完整卡片对比 · 不混合财报/周期",
+          "width": 1440,
+          "height": 1280,
+          "children": 3
+        },
+        {
+          "id": "P4D-0",
+          "name": "23 · 中文手机 · 同策略逐题对比 → 返回原卡片 · 选择不足恢复",
+          "width": 1440,
+          "height": 1150,
+          "children": 2
+        },
+        {
+          "id": "P8J-0",
+          "name": "24 · 320px mobile reflow stress · Full rich cards · EN/ZH",
+          "width": 800,
+          "height": 1200,
+          "children": 3
+        },
+        {
+          "id": "Q1Z-0",
+          "name": "27 · Implementation · Current decision unavailable · Light EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "Q3W-0",
+          "name": "28 · Implementation · Current decision unavailable · Dark EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "Q5S-0",
+          "name": "29 · 当前决策暂缺 · 中文浅色 · 390",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "Q7O-0",
+          "name": "30 · 当前决策暂缺 · 中文深色 · 390",
+          "width": 390,
+          "height": null,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-9-0",
+      "pageName": "06 · R6 · Flagship candidate · Design draft",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "IJW-0",
+          "name": "R6 · Candidate / study · Light · EN · 1440",
+          "width": 1440,
+          "height": 980,
+          "children": 3
+        },
+        {
+          "id": "IML-0",
+          "name": "R6 · Candidate / study · Dark · EN · 1440",
+          "width": 1440,
+          "height": 980,
+          "children": 3
+        },
+        {
+          "id": "IPV-0",
+          "name": "R6 · Candidate / study · Light · ZH · 1440",
+          "width": 1440,
+          "height": 980,
+          "children": 3
+        },
+        {
+          "id": "IS8-0",
+          "name": "R6 · Candidate / study · Dark · ZH · 1440",
+          "width": 1440,
+          "height": 980,
+          "children": 3
+        },
+        {
+          "id": "IVH-0",
+          "name": "R6 · Candidate / glance · Light · EN · 390",
+          "width": 390,
+          "height": 940,
+          "children": 3
+        },
+        {
+          "id": "IWU-0",
+          "name": "R6 · Candidate / glance · Dark · EN · 390",
+          "width": 390,
+          "height": 940,
+          "children": 3
+        },
+        {
+          "id": "IXX-0",
+          "name": "R6 · Candidate / glance · Light · ZH · 390",
+          "width": 390,
+          "height": 940,
+          "children": 3
+        },
+        {
+          "id": "IZ0-0",
+          "name": "R6 · Candidate / glance · Dark · ZH · 390",
+          "width": 390,
+          "height": 940,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-8-0",
+      "pageName": "REF · Prophet Quote + Assessment Reviews · R4.0–4.4",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "AN9-1",
+          "name": "93 · R4.0 · AEIS refreshed quote · Assessment unchanged · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "AU9-1",
+          "name": "94 · R4.0 · AEIS refreshed quote · Assessment unchanged · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "AZL-1",
+          "name": "95 · R4.1 · AEIS quote refresh failed · No observation · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "B5I-1",
+          "name": "96 · R4.1 · AEIS quote refresh failed · No observation · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "BAM-1",
+          "name": "97 · R4.2 · AEIS assessment health states · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "BMW-1",
+          "name": "98 · R4.2 · AEIS assessment health states · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "BWF-1",
+          "name": "99 · R4.3 · AEIS assessment review · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 9
+        },
+        {
+          "id": "C8Q-0",
+          "name": "100 · R4.3 · AEIS assessment review · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "CKY-0",
+          "name": "101 · R4.4 · AEIS assessment review outcomes · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 9
+        },
+        {
+          "id": "CY9-0",
+          "name": "102 · R4.4 · AEIS assessment review outcomes · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-7-0",
+      "pageName": "REF · Prophet Setup, Evidence + Playbooks · R3.1–3.9",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "839-0",
+          "name": "70 · R3.1 · Today · Complete cards · Light",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "8CC-0",
+          "name": "71 · R3.1 · Card states + details · Dark",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "8HV-0",
+          "name": "72 · R3.1 · Mobile · Full card · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "8KA-0",
+          "name": "73 · R3.2 · Setup + timing · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "8OM-0",
+          "name": "74 · R3.2 · Evidence + source detail · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "8SL-0",
+          "name": "75 · R3.2 · Setup + timing · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "8VD-0",
+          "name": "76 · R3.2 · Evidence list · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "8XB-0",
+          "name": "77 · R3.2 · Source detail + return · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "8YU-0",
+          "name": "78 · R3.2 · Return to Today · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "919-0",
+          "name": "79 · R3.2 · Quote + assessment inputs · Detail states",
+          "width": 1100,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "93W-0",
+          "name": "80 · R3.2 · Journey + return contract · Builder map",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "94Y-0",
+          "name": "81 · R3.3 · Trade playbook · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "99O-0",
+          "name": "82 · R3.3 · Draft review · Price changed · Light",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "9CI-0",
+          "name": "83 · R3.3 · Trade playbook · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "9EQ-1",
+          "name": "84 · R3.4 · Mobile · Changed-price review",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "9G7-1",
+          "name": "85 · R3.4 · Mobile · Return with newer quote",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "9IF-1",
+          "name": "86 · R3.4 · BUILDER · Decision + return contract",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "9KC-1",
+          "name": "87 · R3.5 · Why selected / Why not now · Desktop",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "9PH-1",
+          "name": "88 · R3.6 · AEIS evidence · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "9XO-1",
+          "name": "89 · R3.7 · AEIS trade playbook · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "A49-1",
+          "name": "90 · R3.8 · AEIS trade playbook · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "ABR-1",
+          "name": "91 · R3.9 · AEIS quote health states · Desktop · Light",
+          "width": 1440,
+          "height": null,
+          "children": 8
+        },
+        {
+          "id": "AIU-1",
+          "name": "92 · R3.9 · AEIS quote health states · Mobile · Light",
+          "width": 390,
+          "height": null,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-6-0",
+      "pageName": "05 · SOURCE ONLY · Prophet US Live Baseline",
+      "disposition": "reference",
+      "qualification": "Source-only historical baseline; no fresh served proof.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "146Z-0",
+          "name": "SOURCE ONLY · 01 · Prophet US · Live baseline · 1440",
+          "width": 1440,
+          "height": 3623.17,
+          "children": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-5-0",
+      "pageName": "04 · Shared Contracts + State Coverage",
+      "disposition": "reference",
+      "qualification": "Build/contract reference; preserve existing owner and acceptance semantics.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "00 · SPEC · Shared Contract · EN",
+          "width": 1440,
+          "height": 1200,
+          "children": 6
+        },
+        {
+          "id": "5ZG-0",
+          "name": "03 · R2 SPEC · Engineering + Interaction",
+          "width": 1440,
+          "height": null,
+          "children": 4
+        },
+        {
+          "id": "7WZ-0",
+          "name": "04 · R2 SPEC · Coverage + Release Matrix",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "3A-0",
+          "name": "01 · SPEC · Interaction States · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "children": 9
+        },
+        {
+          "id": "8B-0",
+          "name": "02 · SPEC · Interaction States · Light · EN",
+          "width": 1440,
+          "height": null,
+          "children": 9
+        },
+        {
+          "id": "7OC-0",
+          "name": "07 · R2 STATE · Desktop · Interaction Overlays",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "5U5-0",
+          "name": "05 · R2 STATE · Honesty + Degraded",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "51Q-0",
+          "name": "06 · R2 SPEC · Regional Variants",
+          "width": 1440,
+          "height": null,
+          "children": 6
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-4-0",
+      "pageName": "03 · Screener · Table, Grid + Compare",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "2Z0-0",
+          "name": "50 · SCREENER · Desktop · Table · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "37W-0",
+          "name": "53 · R2 REF · MPWR Filtered Table · EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "3AI-0",
+          "name": "51 · SCREENER · Desktop · Grid · Dark · EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "6RE-0",
+          "name": "54 · R2 · SCREENER · Mobile · Dark · EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "3NO-0",
+          "name": "52 · SCREENER · Desktop · Grid · Light · EN",
+          "width": 1440,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "6Y0-0",
+          "name": "55 · SCREENER · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "79J-0",
+          "name": "56 · R2 STATE · Mobile · Screener Compare · EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "IDX-0",
+          "name": "57 · Mobile Compare · Scenario payoff expanded",
+          "width": 390,
+          "height": null,
+          "children": 5
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-3-0",
+      "pageName": "02 · R2 · Today, Setup + Plans",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "2NW-0",
+          "name": "30 · R2 REF · MPWR Today · Desktop · EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "2H8-0",
+          "name": "31 · R2 · Today · Desktop · Dark · ZH",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "2QN-0",
+          "name": "32 · R2 · Today · Desktop · Light · ZH",
+          "width": 1440,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "64A-0",
+          "name": "37 · R2 · Today · Tablet · Dark · EN",
+          "width": 768,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "6FU-0",
+          "name": "38 · R2 · Today · Tablet · Light · EN",
+          "width": 768,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "6A2-0",
+          "name": "39 · R2 · Today · Tablet · Dark · ZH",
+          "width": 768,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "6LM-0",
+          "name": "40 · R2 · Today · Tablet · Light · ZH",
+          "width": 768,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "56C-0",
+          "name": "33 · R2 · Today · Mobile · EN",
+          "width": 390,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "5HE-0",
+          "name": "34 · R2 · Today · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "5BV-0",
+          "name": "35 · R2 · Today · Mobile · Dark · ZH",
+          "width": 390,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "5MX-0",
+          "name": "36 · R2 · Today · Mobile · Light · ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "2E6-0",
+          "name": "41 · R2 STATE · Today · No Entries Cleared",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "4DB-0",
+          "name": "60 · R2 · SETUP · Desktop · US Plan Study",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "4IZ-0",
+          "name": "61 · R2 REF · MPWR Setup · Desktop · EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "4MM-0",
+          "name": "63 · R2 · PLANS · Desktop · US Model Plan",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "4U6-0",
+          "name": "64 · R2 · PLANS · Desktop · Light · EN",
+          "width": 1440,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "7BU-0",
+          "name": "62 · R2 REF · MPWR Setup · Mobile · ZH",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "7E4-0",
+          "name": "65 · R2 · PLANS · Mobile · Dark · EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "7J8-0",
+          "name": "66 · R2 · PLANS · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "children": 5
+        },
+        {
+          "id": "I8J-0",
+          "name": "67 · Plan definitions + History unavailable",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "IBC-0",
+          "name": "68 · Plan guide · Dark / 中文",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+      "fileName": "PROPHET",
+      "pageId": "p-2-1",
+      "pageName": "01 · Regional · Hong Kong + Canada",
+      "disposition": "reference",
+      "qualification": "Retained earlier design/contract/region; no archival or replacement authority inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "DC-0",
+          "name": "10 · REGIONAL · HK · Desktop · Dark · EN",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "LA-0",
+          "name": "11 · REGIONAL · HK · Desktop · Light · EN",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "HB-0",
+          "name": "12 · REGIONAL · HK · Mobile · Dark · EN",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "X7-0",
+          "name": "13 · REGIONAL · HK · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "194-0",
+          "name": "20 · REGIONAL · HK · Desktop · Dark · ZH",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "1H2-0",
+          "name": "21 · REGIONAL · HK · Desktop · Light · ZH",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "1D3-0",
+          "name": "22 · REGIONAL · HK · Mobile · Dark · ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "1SZ-0",
+          "name": "23 · REGIONAL · HK · Mobile · Light · ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "1WY-0",
+          "name": "24 · STRESS · HK · 320 · Light · ZH",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "P9-0",
+          "name": "14 · REGIONAL · Canada · Desktop · Dark · EN",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "155-0",
+          "name": "15 · REGIONAL · Canada · Desktop · Light · EN",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "T8-0",
+          "name": "16 · REGIONAL · Canada · Mobile · Dark · EN",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "116-0",
+          "name": "17 · REGIONAL · Canada · Mobile · Light · EN",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "1L1-0",
+          "name": "25 · REGIONAL · Canada · Desktop · Dark · ZH",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "29D-0",
+          "name": "26 · REGIONAL · Canada · Desktop · Light · ZH",
+          "width": 1440,
+          "height": 1200,
+          "children": 7
+        },
+        {
+          "id": "1P0-0",
+          "name": "27 · REGIONAL · Canada · Mobile · Dark · ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "216-0",
+          "name": "28 · REGIONAL · Canada · Mobile · Light · ZH",
+          "width": 390,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "255-0",
+          "name": "29 · STRESS · Canada · 320 · Light · ZH",
+          "width": 320,
+          "height": null,
+          "children": 7
+        },
+        {
+          "id": "2DC-0",
+          "name": "18 · SUPERSEDED · Canada Shell · Light · EN",
+          "width": 1440,
+          "height": 1200,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "fileName": "Terminal · Options R1 · Design Upgrade · 2026-10-21",
+      "pageId": "p-1-0",
+      "pageName": "W1 · Sector origin → Exposure → Change · 2026-10-21",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "1-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "U01 · Exposure origin strip · States atlas · Desktop dark",
+          "width": 1440,
+          "height": 1730,
+          "children": 2
+        },
+        {
+          "id": "2-0",
+          "name": "U02 · Rotation with eligibility states · Desktop dark",
+          "width": 1440,
+          "height": 1040,
+          "children": 2
+        },
+        {
+          "id": "3-0",
+          "name": "U03 · What changed in reported Gamma · Inspector · Desktop dark",
+          "width": 1440,
+          "height": 1059,
+          "children": 2
+        },
+        {
+          "id": "4-0",
+          "name": "U04 · Origin strip + Inspector · Mobile dark 390",
+          "width": 390,
+          "height": 898,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "fileName": "Terminal · Options R1 · Design Upgrade · 2026-10-21",
+      "pageId": "p-4-0",
+      "pageName": "User help · Methods & behavior",
+      "disposition": "reference",
+      "qualification": "Retained user help; methods and behavior read in JSX.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "16E-0"
+        ],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "16E-0",
+          "name": "HELP REFERENCES · Options",
+          "width": 1800,
+          "height": null,
+          "children": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "fileName": "Terminal · Options R1 · Design Upgrade · 2026-10-21",
+      "pageId": "p-3-0",
+      "pageName": "Build · Origin & interaction contracts",
+      "disposition": "reference",
+      "qualification": "Build/contract reference; preserve existing owner and acceptance semantics.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "16B-0"
+        ],
+        "treeBoards": [
+          "16B-0"
+        ],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "16B-0",
+          "name": "BUILD REFERENCES · Options contracts",
+          "width": 2860,
+          "height": null,
+          "children": 1
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EPQ16VBT7SBW2NQVX2RJG4",
+      "fileName": "Terminal · Options R1 · Design Upgrade · 2026-10-21",
+      "pageId": "p-2-0",
+      "pageName": "W3 · Flow → Volatility → Watch & review · 2026-10-21",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "ET-0",
+          "name": "U05 · Flow print inspector · Side estimate, lineage, possible legs · Desktop dark",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "KT-0",
+          "name": "U06 · Volatility comparison · Constant tenor, labelled interpolation, event window · Desktop dark",
+          "width": 1440,
+          "height": 1480,
+          "children": 3
+        },
+        {
+          "id": "TP-0",
+          "name": "U07 · Watch and review · One-shot price touch, firing receipt, assessment revision · Desktop dark",
+          "width": 1440,
+          "height": null,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M5FNCKAND6CBSJNYM5FZWR8Y",
+      "fileName": "Terminal · Options R1 · Design Upgrade · W3 mobile · 2026-10-21",
+      "pageId": "p-1-0",
+      "pageName": "U08 · Watch & review · Mobile study",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "1-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "U08 · Watch and review · 390 mobile stack · answer, receipt, assessment, named landings",
+          "width": 390,
+          "height": 1447,
+          "children": 8
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+      "fileName": "Expectation Surface · R1 · 2026-10-21",
+      "pageId": "p-1-0",
+      "pageName": "00 · Start · Estimate revisions",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "2NZ-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "6-0",
+          "name": "ES/1440/Dark/EN",
+          "width": 1440,
+          "height": 2189,
+          "children": 2
+        },
+        {
+          "id": "1SD-0",
+          "name": "ES/1440/Dark/ZH",
+          "width": 1440,
+          "height": 2166,
+          "children": 2
+        },
+        {
+          "id": "WI-0",
+          "name": "ES/1440/Light/EN",
+          "width": 1440,
+          "height": 2189,
+          "children": 2
+        },
+        {
+          "id": "2NZ-0",
+          "name": "ES/390/Dark/EN",
+          "width": 390,
+          "height": 3276,
+          "children": 2
+        },
+        {
+          "id": "392-0",
+          "name": "ES/390/Light/ZH",
+          "width": 390,
+          "height": 3182,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+      "fileName": "Expectation Surface · R1 · 2026-10-21",
+      "pageId": "p-3-0",
+      "pageName": "01 · Study · Coverage + methods",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "3TX-0"
+        ],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "3TX-0",
+          "name": "Study · EN dark · Coverage and method",
+          "width": 1208,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "3U3-0",
+          "name": "Study · EN light · Coverage and method",
+          "width": 1208,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "3U9-0",
+          "name": "Study · 中文深色 · 覆盖与方法",
+          "width": 1208,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "3UF-0",
+          "name": "Study · 390 EN dark · Coverage and method",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "3UL-0",
+          "name": "Study · 390 中文浅色 · 覆盖与方法",
+          "width": 390,
+          "height": null,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M5EX8RTPR7YEZD2A144XED2S",
+      "fileName": "Expectation Surface · R1 · 2026-10-21",
+      "pageId": "p-2-0",
+      "pageName": "02 · Build · States + implementation",
+      "disposition": "reference",
+      "qualification": "Build/contract reference; preserve existing owner and acceptance semantics.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "3UR-0"
+        ],
+        "treeBoards": [
+          "3UR-0"
+        ],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "3UR-0",
+          "name": "Build · Start here · Logic, motion and preserved states",
+          "width": 1208,
+          "height": null,
+          "children": 6
+        },
+        {
+          "id": "3UX-0",
+          "name": "Build · Mobile EN · Expanded details",
+          "width": 390,
+          "height": null,
+          "children": 10
+        },
+        {
+          "id": "3V3-0",
+          "name": "Build · Mobile 中文 · 展开详情",
+          "width": 390,
+          "height": null,
+          "children": 10
+        },
+        {
+          "id": "3V9-0",
+          "name": "buildLight · Preserved implementation",
+          "width": 1208,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "3VF-0",
+          "name": "buildZH · Preserved implementation",
+          "width": 1208,
+          "height": null,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+      "fileName": "Market Memory · Revision evidence · R1 · 2026-11-05",
+      "pageId": "p-1-0",
+      "pageName": "01 · Revision evidence · Screens & states",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [],
+        "depth": "Metadata only"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "MM · Revision lens · Light EN · 1440",
+          "width": 1440,
+          "height": 1000,
+          "children": 2
+        },
+        {
+          "id": "C9-0",
+          "name": "MM · Revision lens · Dark EN · 390",
+          "width": 390,
+          "height": 1938,
+          "children": 3
+        },
+        {
+          "id": "HG-0",
+          "name": "R1 · Dark · ZH · 390",
+          "width": 390,
+          "height": 1912,
+          "children": 3
+        },
+        {
+          "id": "9N-0",
+          "name": "MM · Revision lens · Light EN · 390",
+          "width": 390,
+          "height": 1938,
+          "children": 3
+        },
+        {
+          "id": "EV-0",
+          "name": "R1 · Light · ZH · 390",
+          "width": 390,
+          "height": 1912,
+          "children": 3
+        },
+        {
+          "id": "7C-0",
+          "name": "MM · 修订证据 · 深色 · ZH · 1440",
+          "width": 1440,
+          "height": 1056,
+          "children": 2
+        },
+        {
+          "id": "51-0",
+          "name": "MM · 修订证据 · 浅色 · ZH · 1440",
+          "width": 1440,
+          "height": 1056,
+          "children": 2
+        },
+        {
+          "id": "2Q-0",
+          "name": "MM · Revision lens · Dark EN · 1440",
+          "width": 1440,
+          "height": 1000,
+          "children": 2
+        },
+        {
+          "id": "K1-0",
+          "name": "R1 · Light · Evidence states",
+          "width": 1440,
+          "height": 900,
+          "children": 3
+        },
+        {
+          "id": "KX-0",
+          "name": "R1 · Dark · Evidence states",
+          "width": 1440,
+          "height": 900,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+      "fileName": "Market Memory · Revision evidence · R1 · 2026-11-05",
+      "pageId": "p-3-0",
+      "pageName": "Build · Record states & implementation",
+      "disposition": "reference",
+      "qualification": "Build/contract reference; preserve existing owner and acceptance semantics.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "V1-0"
+        ],
+        "treeBoards": [
+          "V1-0"
+        ],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "V1-0",
+          "name": "R2 proposal · Record states and build contract",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M6PXFEP1E1T59M2B3N673PMG",
+      "fileName": "Market Memory · Revision evidence · R1 · 2026-11-05",
+      "pageId": "p-2-0",
+      "pageName": "02 · Record comparison · Proposed",
+      "disposition": "current",
+      "qualification": "R2 proposed comparison, source values retained; unit qualification and authenticated consumer still owed.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "MX-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "MX-0",
+          "name": "R2 proposal · Record comparison · Light EN · 1440",
+          "width": 1440,
+          "height": null,
+          "children": 2
+        },
+        {
+          "id": "P7-0",
+          "name": "R2 proposal · Record comparison · Light EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "105-0",
+          "name": "R2 proposal · Record comparison · Dark EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "17H-0",
+          "name": "R2 proposal · Record comparison · Light ZH · 390",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "194-0",
+          "name": "R2 proposal · Record comparison · Dark ZH · 390",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "YI-0",
+          "name": "R2 proposal · Earlier source record · Light EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 3
+        },
+        {
+          "id": "163-0",
+          "name": "R2 proposal · Later source record · Light EN · 390",
+          "width": 390,
+          "height": null,
+          "children": 3
+        }
+      ]
+    },
+    {
+      "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "fileName": "Macro · Policy Monitor · Production Design",
+      "pageId": "p-1-0",
+      "pageName": "01 · Policy Monitor · Implementation & states",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred. Current implementation-reference candidate is PR #10493 at c742039f, not present at inspected protected Macro pin.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "AQ-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "01 · Desktop · EN · Dark · Full monitor",
+          "width": 1440,
+          "height": 2304,
+          "children": 12
+        },
+        {
+          "id": "59-0",
+          "name": "02 · Desktop · EN · Light · Full monitor",
+          "width": 1440,
+          "height": 2304,
+          "children": 12
+        },
+        {
+          "id": "AQ-0",
+          "name": "03 · Mobile · EN · Light · Full monitor",
+          "width": 390,
+          "height": 3910,
+          "children": 2
+        },
+        {
+          "id": "GE-0",
+          "name": "04 · Mobile · 中文 · Dark · Full monitor",
+          "width": 390,
+          "height": 3620,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+      "fileName": "Macro · Policy Monitor · Production Design",
+      "pageId": "p-2-0",
+      "pageName": "Build · Evidence states & interaction",
+      "disposition": "reference",
+      "qualification": "Build/contract reference; preserve existing owner and acceptance semantics. Current implementation-reference candidate is PR #10493 at c742039f, not present at inspected protected Macro pin.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "MH-0"
+        ],
+        "treeBoards": [
+          "MH-0"
+        ],
+        "screenshotBoards": [],
+        "depth": "Selected full JSX/text inspection"
+      },
+      "artboards": [
+        {
+          "id": "MH-0",
+          "name": "05 · Evidence states & interaction contract",
+          "width": 1440,
+          "height": 1107,
+          "children": 6
+        },
+        {
+          "id": "RG-0",
+          "name": "PROPOSED · Source notes · EN/ZH · 30 Oct fixture",
+          "width": 1440,
+          "height": null,
+          "children": 6
+        }
+      ]
+    },
+    {
+      "fileId": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+      "fileName": "Mastermind - Bot Paper Portfolio - V3 Design",
+      "pageId": "p-1-0",
+      "pageName": "Bot Paper Portfolio · V3 Upgrade · 2026-10-09",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "1-0"
+        ],
+        "treeBoards": [
+          "1-0"
+        ],
+        "screenshotBoards": [
+          "2C-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "00 · Start Here · Portfolio V3 Manual Handoff",
+          "width": 1440,
+          "height": 1098,
+          "children": 5
+        },
+        {
+          "id": "2C-0",
+          "name": "01 · Today · Desktop · Dark",
+          "width": 1440,
+          "height": 1175,
+          "children": 2
+        },
+        {
+          "id": "77-0",
+          "name": "02 · Portfolio · Holdings & Risk · Desktop",
+          "width": 1440,
+          "height": 1281,
+          "children": 2
+        },
+        {
+          "id": "CI-0",
+          "name": "03 · Portfolio · Performance · Desktop",
+          "width": 1440,
+          "height": 1485,
+          "children": 2
+        },
+        {
+          "id": "IC-0",
+          "name": "04 · Portfolio · Decisions & Orders · Desktop",
+          "width": 1440,
+          "height": 1220,
+          "children": 2
+        },
+        {
+          "id": "NS-0",
+          "name": "05 · Opportunities · Desktop · Dark",
+          "width": 1440,
+          "height": 1053,
+          "children": 2
+        },
+        {
+          "id": "SG-0",
+          "name": "06 · Research · Desktop · Dark",
+          "width": 1440,
+          "height": 1011,
+          "children": 2
+        },
+        {
+          "id": "WM-0",
+          "name": "07 · Learn · Desktop · Dark",
+          "width": 1440,
+          "height": 1181,
+          "children": 2
+        },
+        {
+          "id": "11E-0",
+          "name": "08 · Today · Mobile 390 · Dark",
+          "width": 390,
+          "height": 1438,
+          "children": 5
+        },
+        {
+          "id": "14D-0",
+          "name": "09 · Portfolio · Mobile 390 · Dark",
+          "width": 390,
+          "height": 1551,
+          "children": 5
+        },
+        {
+          "id": "17U-0",
+          "name": "10 · Today · Desktop · Light",
+          "width": 1440,
+          "height": 1175,
+          "children": 2
+        },
+        {
+          "id": "1CP-0",
+          "name": "11 · Shared Self-Directed · 320 · Light · 中文",
+          "width": 320,
+          "height": 1154,
+          "children": 5
+        },
+        {
+          "id": "1EI-0",
+          "name": "12 · State Atlas · Data, Risk & Access",
+          "width": 1440,
+          "height": 1800,
+          "children": 6
+        }
+      ]
+    },
+    {
+      "fileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "fileName": "Mastermind - Market Structure, Stages and Allocation - D06 R1",
+      "pageId": "p-1-0",
+      "pageName": "D06 - Market structure, stages and model allocation - R1",
+      "disposition": "current",
+      "qualification": "Partial migration: WB-0 and WG-0 are heading-only; completed S&P boards are elsewhere. Do not use placeholders as implementation authority.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "WB-0",
+          "WG-0"
+        ],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "WB-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "GG-0",
+          "name": "01 · Market structure · Light EN · 1440",
+          "width": 1440,
+          "height": 1723,
+          "children": 7
+        },
+        {
+          "id": "K5-0",
+          "name": "02 · 市场结构 · Dark ZH · 390",
+          "width": 390,
+          "height": 1802,
+          "children": 8
+        },
+        {
+          "id": "O4-0",
+          "name": "03 · Stage analysis · Dark EN · 1440",
+          "width": 1440,
+          "height": 1443,
+          "children": 5
+        },
+        {
+          "id": "U9-0",
+          "name": "04 · 阶段分析 · Light ZH · 390",
+          "width": 390,
+          "height": 1693,
+          "children": 7
+        },
+        {
+          "id": "WB-0",
+          "name": "05 · S&P model allocation · Light EN · 1440",
+          "width": 1440,
+          "height": 900,
+          "children": 1
+        },
+        {
+          "id": "WG-0",
+          "name": "06 · 标普模型配置 · Dark ZH · 390",
+          "width": 390,
+          "height": 900,
+          "children": 2
+        }
+      ]
+    },
+    {
+      "fileId": "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+      "fileName": "Mastermind - Options Research Desk - R1",
+      "pageId": "p-1-0",
+      "pageName": "Options · Research Desk · R1 · 2026-11-02",
+      "disposition": "current",
+      "qualification": "Current design candidate; runtime and release acceptance not inferred.",
+      "inspection": {
+        "metadata": true,
+        "jsxBoards": [
+          "U9-0"
+        ],
+        "treeBoards": [],
+        "screenshotBoards": [
+          "6D-0"
+        ],
+        "depth": "Representative screenshot + content where listed"
+      },
+      "artboards": [
+        {
+          "id": "1-0",
+          "name": "Options / Brief / Desktop 1440 / Light",
+          "width": 1440,
+          "height": 1179,
+          "children": 7
+        },
+        {
+          "id": "6D-0",
+          "name": "Options / Brief / Mobile 390 / Dark",
+          "width": 390,
+          "height": 2104,
+          "children": 8
+        },
+        {
+          "id": "CT-0",
+          "name": "Options / Flow / Desktop 1440 / Dark",
+          "width": 1440,
+          "height": 2270,
+          "children": 8
+        },
+        {
+          "id": "L2-0",
+          "name": "Options / Scanner / Desktop 1440 / Light",
+          "width": 1440,
+          "height": 2021,
+          "children": 7
+        },
+        {
+          "id": "U9-0",
+          "name": "Options / Components / Desktop 1440 / Light",
+          "width": 1440,
+          "height": 1875,
+          "children": 6
+        },
+        {
+          "id": "YX-0",
+          "name": "Options / Recovery / Mobile 390 / Dark",
+          "width": 390,
+          "height": 2491,
+          "children": 8
+        },
+        {
+          "id": "12Y-0",
+          "name": "Options / Ticker / Desktop 1440 / Dark",
+          "width": 1440,
+          "height": 6794.296875,
+          "children": 23
+        },
+        {
+          "id": "1R2-0",
+          "name": "Options / Flow / Mobile 390 / Light",
+          "width": 390,
+          "height": 3676,
+          "children": 9
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "repo": "macro",
+      "path": "scripts/build_expectation_surface.py",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/scripts/build_expectation_surface.py"
+    },
+    {
+      "repo": "macro",
+      "path": "templates/expectation_surface.html.j2",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/expectation_surface.html.j2"
+    },
+    {
+      "repo": "macro",
+      "path": "docs/d06-macro-20261104.md",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/docs/d06-macro-20261104.md"
+    },
+    {
+      "repo": "macro",
+      "path": "scripts/build_market_memory_page.py",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/scripts/build_market_memory_page.py"
+    },
+    {
+      "repo": "macro",
+      "path": "research/design_candidates/production_design_20261102/D03_US_PROPHET_PHASE_2A.md",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/D03_US_PROPHET_PHASE_2A.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": false,
+      "url": null
+    },
+    {
+      "repo": "macro",
+      "path": "templates/_policy_monitor_dialog.html.j2",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": false,
+      "url": null
+    },
+    {
+      "repo": "macro",
+      "path": "docs/OPTIONS_ISSUE_DESK.md",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/docs/OPTIONS_ISSUE_DESK.md"
+    },
+    {
+      "repo": "macro",
+      "path": "docs/pr-crops/d06-macro-20261104/paper/manifest.json",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/docs/pr-crops/d06-macro-20261104/paper/manifest.json"
+    },
+    {
+      "repo": "macro",
+      "path": "research/design_candidates/production_design_20261102/SESSION_INDEX.md",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/SESSION_INDEX.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md",
+      "ref": "c742039f32d3ae73b557b8b2b5f6ff4df36b23c2",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/c742039f32d3ae73b557b8b2b5f6ff4df36b23c2/research/policy_monitor/POLICY_MONITOR_UPGRADE_2026-11-01.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/design_candidates/production_design_20261102/handoffs/D08-options.md",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/handoffs/D08-options.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/design_candidates/production_design_20261102/handoffs/D12-memory.md",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/handoffs/D12-memory.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/design_candidates/production_design_20261102/handoffs/D22-portfolio.md",
+      "ref": "2e59365eeae7c5ba9e60e274e03dac83aacbebdc",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/2e59365eeae7c5ba9e60e274e03dac83aacbebdc/research/design_candidates/production_design_20261102/handoffs/D22-portfolio.md"
+    },
+    {
+      "repo": "macro",
+      "path": "templates/options.html.j2",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/options.html.j2"
+    },
+    {
+      "repo": "macro",
+      "path": "templates/gex.html.j2",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/gex.html.j2"
+    },
+    {
+      "repo": "macro",
+      "path": "templates/options_screener.html.j2",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/options_screener.html.j2"
+    },
+    {
+      "repo": "macro",
+      "path": "research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_UI_EVIDENCE_2026-10-21.md",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/research/alpha_intelligence/expectation_market_dynamics/EXPECTATION_SURFACE_UI_EVIDENCE_2026-10-21.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/options_estate/WORKSPACE_DESIGN_SPEC.md",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/research/options_estate/WORKSPACE_DESIGN_SPEC.md"
+    },
+    {
+      "repo": "macro",
+      "path": "research/options_estate/OEU_MASTERPLAN.md",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/research/options_estate/OEU_MASTERPLAN.md"
+    },
+    {
+      "repo": "macro",
+      "path": "templates/market_memory.html.j2",
+      "ref": "b5674d8ef898e503d6164922654f5ff89be9981c",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/b5674d8ef898e503d6164922654f5ff89be9981c/templates/market_memory.html.j2"
+    },
+    {
+      "repo": "Mastermind",
+      "path": "docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md",
+      "ref": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/docs/superpowers/specs/2026-09-15-mastermind-portfolio-v3-risk-first-autonomous-manager-design.md"
+    },
+    {
+      "repo": "Mastermind",
+      "path": "docs/superpowers/plans/2026-09-15-mastermind-portfolio-v3-s0-decision-snapshot.md",
+      "ref": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+      "readable": true,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/1d0579c0540f5281e52faf069dd7dba2f480c7c6/docs/superpowers/plans/2026-09-15-mastermind-portfolio-v3-s0-decision-snapshot.md"
+    }
+  ]
+}

@@ -370,7 +370,7 @@ def test_native_rollback_refuses_different_recipe_before_switching(tmp_path):
         folder = state / "releases" / release
         (folder / "bin").mkdir(parents=True)
         (folder / "bin/hermes").symlink_to(launcher)
-        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": {"version": release}}))
+        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": {"version": release}, "hermes_config_sha256": "c" * 64}))
     (state / "current").symlink_to("releases/2")
     with pytest.raises(RuntimeRefusal, match="MATCHING_RELEASE_RECIPE"):
         installer.rollback(state)
@@ -385,7 +385,7 @@ def test_matching_native_tuple_can_roll_back_without_claiming_service_restart(tm
         folder = state / "releases" / release
         (folder / "bin").mkdir(parents=True)
         (folder / "bin/hermes").symlink_to(launcher)
-        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": native_recipe()}))
+        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": native_recipe(), "hermes_config_sha256": "c" * 64}))
     (state / "current").symlink_to("releases/2")
     (state / "install-manifest.json").write_text(json.dumps({"current_release": "2"}))
     result = installer.rollback(state)
@@ -427,7 +427,7 @@ def test_rollback_refuses_variant_drift_before_changing_current(tmp_path):
         folder.mkdir(parents=True)
         native = native_recipe()
         native["vendor_derivation"] = derivation(kind)
-        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": native}))
+        (folder / "install-receipt.json").write_text(json.dumps({"native_gateway": native, "hermes_config_sha256": "c" * 64}))
     (state / "current").symlink_to("releases/2")
     with pytest.raises(RuntimeRefusal, match="MATCHING_RELEASE_RECIPE"):
         installer.rollback(state)

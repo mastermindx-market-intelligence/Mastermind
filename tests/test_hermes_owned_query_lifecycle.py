@@ -46,9 +46,14 @@ async def test_fixed_query_cancellation_awaits_exact_owned_child(monkeypatch, mo
     actual_create = asyncio.create_subprocess_exec
     started = asyncio.Event()
     captured = []
+    deadline = asyncio.timeout(None)
 
     async def inert_create(*args, **kwargs):
         assert args[0] == '/usr/bin/systemctl' and args[-2:] == tuple(observer.UNITS)
+        if mode == 'timeout':
+            # Startup deliberately exceeds the owned-child deadline. The test
+            # must establish custody before it arms cancellation.
+            await asyncio.sleep(0.1)
         process = await actual_create(sys.executable, '-I', '-S', '-B', '-c',
             'import time; time.sleep(60)', stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
@@ -62,7 +67,7 @@ async def test_fixed_query_cancellation_awaits_exact_owned_child(monkeypatch, mo
 
     async def request():
         if mode == 'timeout':
-            async with asyncio.timeout(0.05):
+            async with deadline:
                 published.append(await observer._query_fixed_pid1())
         else:
             published.append(await observer._query_fixed_pid1())
@@ -70,7 +75,9 @@ async def test_fixed_query_cancellation_awaits_exact_owned_child(monkeypatch, mo
     task = asyncio.create_task(request())
     await asyncio.wait_for(started.wait(), 2)
     try:
-        if mode != 'timeout':
+        if mode == 'timeout':
+            deadline.reschedule(asyncio.get_running_loop().time() + 0.05)
+        else:
             task.cancel()
             if mode == 'cancel-twice':
                 await asyncio.sleep(0)
