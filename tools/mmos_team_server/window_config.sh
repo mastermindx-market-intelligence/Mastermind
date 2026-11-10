@@ -19,7 +19,15 @@
 #   window_config.sh write --bundle release|dev|t8 --url URL [--pair-helper PATH]
 #   window_config.sh show   --bundle release|dev|t8
 #   window_config.sh clear  --bundle release|dev|t8
+# Secret handling (attack review 2026-11-10): a URL that carries a `token=`
+# parameter is refused outright, and anything this script echoes about a URL
+# is redacted first, so a rejection message can never become a token's log
+# line. The pair helper must itself be a regular non-group-writable file in
+# a non-group-writable directory — the window runs it, so a path anyone else
+# can rewrite is not a credential the config may name.
 set -eu
+
+redact() { printf '%s\n' "$1" | sed -E 's/(token=)[^&[:space:]]+/\1<redacted>/g'; }
 
 usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
@@ -56,19 +64,37 @@ case "$CMD" in
   write)
     [ -n "$URL" ] || { echo "window_config: --url is required for write" >&2; exit 2; }
     # The address must be loopback http with a real path (the server root '/'
-    # opens a new empty thread), and must never carry a fragment: pairing
-    # tokens do not belong in the config file.
+    # opens a new empty thread), and must never carry a fragment or a token
+    # parameter: pairing tokens do not belong in the config file.
     case "$URL" in
       http://127.0.0.1:*/?*|http://127.0.0.1/?*|http://localhost:*/?*|http://localhost/?*) ;;
-      *) echo "window_config: refusing '$URL': must be http://127.0.0.1:<port>/<thread-path>" >&2; exit 1 ;;
+      *) echo "window_config: refusing '$(redact "$URL")': must be http://127.0.0.1:<port>/<thread-path>" >&2; exit 1 ;;
     esac
     case "$URL" in
       *#*) echo "window_config: refusing a URL with a fragment (pairing tokens never belong in the config)" >&2; exit 1 ;;
     esac
+    case "$URL" in
+      *token=*) echo "window_config: refusing a URL that carries a token parameter (pairing tokens never belong in the config)" >&2; exit 1 ;;
+    esac
     if [ -n "$HELPER" ]; then
       case "$HELPER" in
-        /*) [ -x "$HELPER" ] || { echo "window_config: pair helper is not executable: $HELPER" >&2; exit 1; } ;;
+        /*) ;;
         *) echo "window_config: --pair-helper must be an absolute path" >&2; exit 2 ;;
+      esac
+      [ -f "$HELPER" ] || { echo "window_config: pair helper is not a regular file: $HELPER" >&2; exit 1; }
+      [ ! -L "$HELPER" ] || { echo "window_config: refusing a symlinked pair helper: $HELPER" >&2; exit 1; }
+      [ -x "$HELPER" ] || { echo "window_config: pair helper is not executable: $HELPER" >&2; exit 1; }
+      helper_mode=$(stat -f '%Lp' "$HELPER")
+      g=${helper_mode#?}; g=${g%?}
+      o=${helper_mode#??}
+      case "$g$o" in
+        *[2367]*) echo "window_config: refusing a group- or other-writable pair helper (mode $helper_mode)" >&2; exit 1 ;;
+      esac
+      parent_mode=$(stat -f '%Lp' "$(dirname "$HELPER")")
+      pg=${parent_mode#?}; pg=${pg%?}
+      po=${parent_mode#??}
+      case "$pg$po" in
+        *[2367]*) echo "window_config: refusing a pair helper in a group- or other-writable directory (mode $parent_mode)" >&2; exit 1 ;;
       esac
     fi
     mkdir -p "$DIR"
@@ -88,7 +114,7 @@ case "$CMD" in
     for name in shell-url pair-helper; do
       f="$DIR/$name"
       if [ -f "$f" ]; then
-        printf '%s mode=%s owner=%s -> %s\n' "$f" "$(stat -f '%Lp' "$f")" "$(stat -f '%u' "$f")" "$(cat "$f")"
+        printf '%s mode=%s owner=%s -> %s\n' "$f" "$(stat -f '%Lp' "$f")" "$(stat -f '%u' "$f")" "$(redact "$(cat "$f")")"
       else
         printf '%s (absent)\n' "$f"
       fi

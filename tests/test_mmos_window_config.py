@@ -203,6 +203,92 @@ class TestWriteShowClear:
         with pytest.raises(subprocess.CalledProcessError):
             run_tool("write", "--bundle", "other", "--url", "http://127.0.0.1:1/a/b")
 
+    def test_write_refuses_token_bearing_urls_without_echoing_them(self):
+        # Attack finding: a `token=` query parameter slipped past the fragment
+        # check, and refusals echoed the URL — a credential printed to a log.
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in [
+                "http://127.0.0.1:3780/env-1/t?token=supersecret123",
+                "http://127.0.0.1:3780/env-1/t?x=1&token=supersecret123",
+            ]:
+                result = run_tool(
+                    "write", "--bundle", "dev", "--url", bad,
+                    env_extra={"HOME": tmp}, check=False,
+                )
+                assert result.returncode != 0, bad
+                assert "supersecret123" not in result.stderr, "refusal echoed the token"
+                assert "token" in result.stderr
+            assert not (Path(tmp) / ".mastermind/mmos_dev/window-dev/shell-url").exists()
+
+    def test_show_redacts_a_token_that_reached_the_file_by_hand(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / ".mastermind/mmos_dev/window-dev"
+            config_dir.mkdir(parents=True)
+            (config_dir / "shell-url").write_text(
+                "http://127.0.0.1:3780/env-1/t?token=supersecret123\n"
+            )
+            shown = run_tool("show", "--bundle", "dev", env_extra={"HOME": tmp}, check=False)
+            assert shown.returncode == 0
+            assert "supersecret123" not in shown.stdout
+            assert "token=<redacted>" in shown.stdout
+
+    def test_write_refuses_substitutable_pair_helpers(self):
+        # Attack finding: the 0600 config file's checks said nothing about the
+        # executable it named. A symlinked, group-writable, or planted-in-a-
+        # writable-directory helper must be refused at configuration time.
+        import stat as stat_mod
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            clean = tmp_path / "clean-helper.sh"
+            clean.write_text("#!/bin/sh\ntrue\n")
+            clean.chmod(0o755)
+            run_tool(
+                "write", "--bundle", "dev",
+                "--url", "http://127.0.0.1:3780/env-1/t",
+                "--pair-helper", str(clean),
+                env_extra={"HOME": tmp},
+            )  # the clean helper is accepted
+
+            groupy = tmp_path / "groupy-helper.sh"
+            groupy.write_text("#!/bin/sh\ntrue\n")
+            groupy.chmod(0o770)
+            result = run_tool(
+                "write", "--bundle", "dev",
+                "--url", "http://127.0.0.1:3780/env-1/t",
+                "--pair-helper", str(groupy),
+                env_extra={"HOME": tmp}, check=False,
+            )
+            assert result.returncode != 0
+            assert "group- or other-writable" in result.stderr
+
+            open_dir = tmp_path / "open-dir"
+            open_dir.mkdir()
+            open_dir.chmod(0o777)
+            planted = open_dir / "planted-helper.sh"
+            planted.write_text("#!/bin/sh\ntrue\n")
+            planted.chmod(0o755)
+            result = run_tool(
+                "write", "--bundle", "dev",
+                "--url", "http://127.0.0.1:3780/env-1/t",
+                "--pair-helper", str(planted),
+                env_extra={"HOME": tmp}, check=False,
+            )
+            assert result.returncode != 0
+            assert "writable directory" in result.stderr
+
+            linked = tmp_path / "linked-helper.sh"
+            linked.symlink_to(clean)
+            result = run_tool(
+                "write", "--bundle", "dev",
+                "--url", "http://127.0.0.1:3780/env-1/t",
+                "--pair-helper", str(linked),
+                env_extra={"HOME": tmp}, check=False,
+            )
+            assert result.returncode != 0
+            assert "symlink" in result.stderr
+            assert stat_mod.S_ISLNK(linked.lstat().st_mode)  # untouched by the refusal
+
 
 class TestPairHelper:
     def test_extracts_the_pairing_url_line_and_only_it(self):
