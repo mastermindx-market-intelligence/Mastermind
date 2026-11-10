@@ -8,7 +8,8 @@ state, and never read another uid's bytes. Mechanical fixtures are disclosed:
    so temp-owned fixtures qualify; the shipped constant remains 501.
 2. ``reader.pwd`` is replaced with a fake account database so the sole
    pwd-qualified exception home is the disposable fixture directory. The real
-   host home directory is never read or modified.
+   host payload files are never read or modified; only ancestor directory
+   metadata is checked when selecting a private fixture parent.
 3. ``reader.has_macos_acl`` and ``reader.has_macos_everyone_deny_delete_only_acl``
    are monkeypatched at the reader boundary for reader-wiring tests, and
    ``fs_security._bind_acl_classifier_functions`` is replaced with a pure
@@ -673,12 +674,49 @@ def reader_overrides(
         ) = saved
 
 
+def _fixture_parent() -> Path:
+    """Choose an existing safe prefix without changing runner permissions."""
+    policy = reader._make_home_prefix_policy(CURRENT_UID, CURRENT_GID)
+    candidates = [REPO_ROOT, *REPO_ROOT.parents]
+    if IS_DARWIN:
+        # A service environment can default to /tmp instead of macOS's
+        # private per-user directory. Qualify the OS-selected path as usual.
+        try:
+            selected = subprocess.check_output(
+                ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"],
+                text=True, timeout=5,
+            ).strip()
+            if selected and Path(selected).is_absolute():
+                candidates.append(Path(selected))
+        except (OSError, subprocess.SubprocessError):
+            pass
+    candidates.append(Path.home())
+    seen = set()
+    for candidate in candidates:
+        try:
+            candidate = candidate.resolve(strict=True)
+            if candidate in seen or candidate.parent == candidate:
+                continue
+            seen.add(candidate)
+            info = candidate.lstat()
+            if (info.st_uid != CURRENT_UID or info.st_gid != CURRENT_GID
+                    or not info.st_mode & stat.S_IWUSR):
+                continue
+            for prefix in (*reversed(candidate.parents), candidate):
+                info = prefix.lstat()
+                policy(info)
+                if reader.has_macos_acl(prefix, expected_identity=info) is not False:
+                    break
+            else:
+                return candidate
+        except (OSError, FilesystemSecurityError, reader.StudioObservationError):
+            continue
+    raise RuntimeError("No owned, nonwritable ancestor chain for ACL fixture")
+
+
 class HomeAclReaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
-        # A checkout may be group-writable; it is not part of this synthetic
-        # publication. Use an owned home-side temp tree, without changing or
-        # reading payload from the live home or the checkout's permissions.
-        self._tmp = tempfile.mkdtemp(prefix="acl-reader-", dir=Path.home().resolve())
+        self._tmp = tempfile.mkdtemp(prefix="acl-reader-", dir=_fixture_parent())
         self.addCleanup(cleanup_owned_fixture, self._tmp)
         self.fx = HomeAclFixture(Path(self._tmp) / "fx").build()
 
@@ -694,6 +732,24 @@ class HomeAclReaderTestCase(unittest.TestCase):
 
 
 class ReaderExceptionWiringTests(HomeAclReaderTestCase):
+    def test_writable_fixture_ancestor_refuses_before_payload(self) -> None:
+        calls = []
+        counts = {}
+        self.fx.root.chmod(0o770)
+        try:
+            with reader_overrides(
+                pwd_fixture=PwdFixture(
+                    pwd_record(str(self.fx.home), CURRENT_UID, CURRENT_GID)
+                ),
+                acl_presence=acl_presence_for({self.fx.inode(self.fx.home)}),
+                classifier=permissive_classifier(calls),
+            ), counted_reads(counts):
+                self.assertRefused(self.fx.observe)
+        finally:
+            self.fx.root.chmod(0o700)
+        self.assertEqual(calls, [])
+        self.assertEqual(counts, {})
+
     def test_no_acl_behavior_preserved_without_any_fixture(self) -> None:
         """Real helpers, no pwd fixture: the original no-ACL rules hold."""
 
