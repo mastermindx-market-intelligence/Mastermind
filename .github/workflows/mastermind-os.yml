@@ -12,8 +12,10 @@ on:
       - tests/test_workbench_browser_port.py
       - .github/workflows/mastermind-os.yml
       - tests/test_native_macos_ci.py
-  merge_group:
-    types: [checks_requested]
+  # No merge_group trigger: this workflow is not a required check, so the merge
+  # queue never waits for it, and every built, rebuilt or discarded queue group
+  # would spend runners on it. The path-filtered push run below proves each
+  # landed change instead. Policy: tests/test_ci_merge_group_capacity.py.
   push:
     branches: [master]
     paths:
@@ -156,8 +158,22 @@ jobs:
         run: MM_NATIVE_REFRESH_ENABLED=1 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
       - name: Test opt-in native rotating refresh path
         run: MM_NATIVE_REFRESH_ENABLED=1 cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml
-      - name: Construct unsigned macOS app
-        run: ./node_modules/.bin/tauri build --ci --no-sign --bundles app -- --locked
+      # Native persistence rollout 2026-11-09: the packaged unsigned app
+      # compiles the rotating Keychain refresh path in. It stays inert without
+      # a build-time MM_NATIVE_CLIENT_ID; a client-configured install then
+      # requests offline_access and persists renewals without re-login.
+      - name: Construct unsigned macOS app (native rotating refresh path enabled)
+        run: MM_NATIVE_REFRESH_ENABLED=1 ./node_modules/.bin/tauri build --ci --no-sign --bundles app -- --locked
+      # The --no-sign bundle ships an ad-hoc executable signature without a
+      # sealed CodeResources manifest, so `codesign --verify --deep --strict`
+      # fails on it (verified on the M2, 2026-11-09). Seal the exact bundle
+      # ad hoc under the declared bundle identifier and strictly verify before
+      # the artifact can be staged, installed or archived anywhere.
+      - name: Ad-hoc seal the unsigned app and strictly verify
+        run: |
+          bundle="$CARGO_TARGET_DIR/release/bundle/macos/Mastermind OS.app"
+          /usr/bin/codesign --force --deep --sign - --identifier com.mastermind.os "$bundle"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
       - name: Verify package and locked inputs
         run: |
           bundle="$CARGO_TARGET_DIR/release/bundle/macos/Mastermind OS.app"

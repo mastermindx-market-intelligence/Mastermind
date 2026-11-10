@@ -53,9 +53,12 @@ jobs:
             trusted_base="$(git rev-parse --verify refs/remotes/origin/master 2>/dev/null || true)"
           fi
           if [ -n "$trusted_base" ] &&
+             git cat-file -e "${trusted_base}:scripts/__init__.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&
+             git cat-file -e "${trusted_base}:scripts/ci_pr_smoke.py" 2>/dev/null &&
+             git cat-file -e "${trusted_base}:control_plane/__init__.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
-            git archive "$trusted_base" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |
+            git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py scripts/ci_pr_smoke.py control_plane/__init__.py control_plane/github_review_risk_policy.py |
               tar -x -C "$trusted"
             if grep -q '^def classify_merge_group(' "$trusted/scripts/ci_pr_scope.py"; then
               PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
@@ -83,7 +86,8 @@ jobs:
     name: PR fast checks
     needs: [pr_scope]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
-    runs-on: ubuntu-latest
+    # Test-executing jobs run on a GitHub-hosted image only (see pytest_shards).
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
       contents: read
@@ -189,7 +193,14 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    # GitHub-hosted image only. In this organization `ubuntu-latest` can also be
+    # served by persistent, multi-slot self-hosted runners. This suite asserts
+    # single-tenant host invariants (ancestor directory identity, modes, ACLs,
+    # a private temp tree), so a shared persistent host fails it regardless of
+    # the change under test. No self-hosted runner carries `ubuntu-24.04`.
+    # Scope classification and the `test` fan-in execute no suite and stay on
+    # `ubuntu-latest`.
+    runs-on: ubuntu-24.04
     # Keep every prerequisite and the full 45-minute repository allowance.
     # Actual setup took ~23m; a successful test/upload then crossed job60 in
     # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
@@ -261,10 +272,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Isolated CAP-S1 observers must see every installed pytest dependency.
+      # Ignore runner user-site packages during dependency resolution.
       - name: Install project
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -I -m pip install --upgrade pip
+          python -I -m pip install -e ".[dev]"
 
       # Fast deterministic release-source checks before expensive hosted work.
       # Reuse the incumbent strict EVAL changed-path and fixed-role package

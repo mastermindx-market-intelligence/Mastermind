@@ -312,13 +312,18 @@ def compose(arguments: dict[str, Any], *, source: RoutePreviewSource | None = No
                            "the shared routing law refused the requested lane")
     requested_complexity = canonical_task_complexity(
         CANONICAL_ROUTE_OPTIONS[normalized["route_option"]]["task_complexity"])
-    request = WorkRequest(
-        normalized["task_kind"] or ROUTE_OPTION_TASK_KINDS[normalized["route_option"]],
-        risk=normalized["risk"] or "routine",
-        ambiguity=normalized["ambiguity"] or "low",
-        required_capabilities=tuple(normalized["required_capabilities"] or ()),
-    )
     try:
+        task_kind = normalized["task_kind"] or ROUTE_OPTION_TASK_KINDS[decision.resolved]
+        if decision.resolved == "review" and task_kind != "review":
+            raise RoutingPolicyError("the reviewer lane requires the review task kind")
+        request = WorkRequest(
+            task_kind,
+            risk=normalized["risk"] or "routine",
+            ambiguity=normalized["ambiguity"] or "low",
+            required_capabilities=tuple(normalized["required_capabilities"] or ()),
+            # REVIEWER is a separate lane, not a C0-C3 complexity rung.
+            effective_complexity="" if decision.resolved == "review" else decision.task_complexity,
+        )
         router = ModelRouter.load(source.policy_path if source else None)
         explanation = router.explain_route(request)
     except RoutingPolicyError as exc:

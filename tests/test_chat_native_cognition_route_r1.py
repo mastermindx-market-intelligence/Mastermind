@@ -51,8 +51,6 @@ def test_lead_work_defaults_to_included_chat_non_pro_without_receipts() -> None:
         WorkRequest("planning"),
         WorkRequest("judgment"),
         WorkRequest("escalation"),
-        WorkRequest("implementation", risk="critical"),
-        WorkRequest("implementation", ambiguity="high"),
     ):
         decision = router.route(request)
         assert decision.mode is RouteMode.FRONTIER_LEAD

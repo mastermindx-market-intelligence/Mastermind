@@ -23,6 +23,7 @@ from pathlib import Path
 from control_plane.github_review_risk_policy import (
     ReviewChangeFacts, ReviewFileStat, ReviewTier, assess_review_risk,
 )
+from scripts.ci_pr_smoke import SmokeUnqualified, _reviewed_registries, select_modules
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _VISUAL = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".ico", ".woff", ".woff2")
@@ -141,6 +142,7 @@ def classify(repo_path: Path, payload: dict, *, expected_repository: str) -> Sco
 def _classify_verified_change(
     repo_path: Path, base: str, head: str, number: int, *,
     expected_repository: str,
+    require_complete_smoke: bool = False,
 ) -> ScopeDecision:
     # The shared canonical risk assessor sees the complete verified source
     # diff, not event labels, user-authored text, or PR-only shortcuts.
@@ -205,8 +207,19 @@ def _classify_verified_change(
         mode = "smoke"
     else:
         mode = "full"
+    reason = "SOURCE_VERIFIED"
+    if mode == "smoke" and require_complete_smoke:
+        try:
+            select_modules(
+                root, changed, identity_registries=_reviewed_registries(root, ancestor),
+                require_complete=True,
+            )
+        except SmokeUnqualified as exc:
+            # Coverage overflow is not a different risk tier. The existing
+            # canonical full-suite path supplies the missing acceptance.
+            mode, reason = "full", str(exc)
     needs_node = any(path.startswith("app/mastermind_os/") for path in changed)
-    return ScopeDecision(mode, assessment.tier.value, "SOURCE_VERIFIED", len(changed), needs_node,
+    return ScopeDecision(mode, assessment.tier.value, reason, len(changed), needs_node,
                          source_base=ancestor, source_head=head)
 
 
@@ -254,6 +267,7 @@ def classify_merge_group(
     return _classify_verified_change(
         repo_path, protected_base_sha, event_head, 1,
         expected_repository=expected_repository,
+        require_complete_smoke=True,
     )
 
 def select_scope(repo_path: Path, event_path: Path, *, expected_repository: str,

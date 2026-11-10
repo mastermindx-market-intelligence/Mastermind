@@ -78,7 +78,9 @@ def test_admission_class_and_fast_name_are_not_price_evidence(tmp_path):
 
 
 def test_principal_judgment_does_not_become_worker_admission():
-    report = ModelRouter.load().explain_route(WorkRequest("implementation", ambiguity="high"))
+    # OQ-8 (WO-06): the principal-judgment lane is a lead task_kind; critical
+    # risk / high ambiguity no longer inflate worker cognition into it.
+    report = ModelRouter.load().explain_route(WorkRequest("planning"))
     assert report["decision"]["mode"] == "frontier_lead"
     assert report["decision"]["worker_eligible"] is False
     assert _rows(report)["frontier.orchestrator"]["source_disposition"] == "FRONTIER_JUDGMENT_ROUTE"
@@ -256,10 +258,62 @@ def test_route_preview_frontier_witness_gate_matches_the_shared_law():
     assert witnessed["witness_disposition"] == "accepted"
     assert witnessed["requested_complexity"] == "C3_FRONTIER_JUDGMENT"
     assert witnessed["effective_complexity"] == "C3_FRONTIER_JUDGMENT"
+    assert witnessed["suitability_tiers"][0] == "frontier.lead"
+    assert "effective_complexity_frontier_judgment" in witnessed["candidate_reason_codes"]
     downgraded = compose({"route_option": "frontier", "goal": "make it big and critical"})
     assert downgraded["requested_complexity"] == "C3_FRONTIER_JUDGMENT"
     assert downgraded["effective_complexity"] == "C2_COMPLEX_BOUNDED"
     assert downgraded["witness_disposition"] == "downgraded"
+    assert downgraded["suitability_tiers"][0] == "implementation.routine.primary"
+    assert not any(tier.startswith("frontier.") for tier in downgraded["suitability_tiers"])
+    assert "effective_complexity_c2_complex_bounded" in downgraded["candidate_reason_codes"]
+
+
+@pytest.mark.parametrize("route,complexity", [
+    ("mechanical", "C0_MECHANICAL"),
+    ("routine", "C1_ROUTINE_BOUNDED"),
+    ("hard", "C2_COMPLEX_BOUNDED"),
+])
+@pytest.mark.parametrize("review_input,reason", [
+    ({"risk": "critical"}, "critical_risk"),
+    ({"ambiguity": "high"}, "high_ambiguity"),
+])
+def test_route_preview_bounded_classes_retain_principal_review(route, complexity, review_input, reason):
+    preview = compose({"route_option": route, "goal": "bounded module", **review_input})
+    assert preview["effective_complexity"] == complexity
+    assert not any(tier.startswith("frontier.") for tier in preview["suitability_tiers"])
+    assert reason in preview["candidate_reason_codes"]
+    assert "principal_review_required" in preview["candidate_reason_codes"]
+    assert "effective_complexity_" + complexity.lower() in preview["candidate_reason_codes"]
+
+
+@pytest.mark.parametrize("task_kind", [None, "review"])
+def test_route_preview_reviewer_remains_separate_from_complexity(task_kind):
+    arguments = {"route_option": "review", "goal": "independent source review"}
+    if task_kind is not None:
+        arguments["task_kind"] = task_kind
+    preview = compose(arguments)
+    assert preview["requested_complexity"] == preview["effective_complexity"] == "REVIEWER"
+    assert preview["suitability_tiers"][0] == "review.routine.primary"
+    assert not any(tier.startswith("frontier.") for tier in preview["suitability_tiers"])
+    assert "bounded_review" in preview["candidate_reason_codes"]
+    assert not any(reason.startswith("effective_complexity_") for reason in preview["candidate_reason_codes"])
+    assert preview["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+    assert preview["production_armed"] is False
+
+
+@pytest.mark.parametrize("route,task_kind,context", [
+    ("hard", "planning", ""),
+    ("routine", "judgment", ""),
+    ("review", "judgment", ""),
+    ("review", "implementation", ""),
+    ("frontier", "implementation", "witness: unresolved cross-system carrier contract left open"),
+])
+def test_route_preview_refuses_task_kind_incompatible_with_effective_lane(route, task_kind, context):
+    with pytest.raises(GatewayError) as refused:
+        compose({"route_option": route, "goal": "bounded module",
+                 "task_kind": task_kind, "context": context})
+    assert refused.value.code == "invalid_input"
 
 
 def _observation_files(tmp_path, *, with_host=True, with_registry=True, with_quota=True):

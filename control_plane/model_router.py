@@ -29,6 +29,11 @@ from control_plane.worker_adapter import adapter_descriptor
 from control_plane.executive_responsibility import (
     ResponsibilityIntent, ResponsibilityIntentError, normalize_responsibility_intent,
 )
+from control_plane.child_execution_contracts import (
+    C3_FRONTIER_JUDGMENT,
+    CANONICAL_TASK_COMPLEXITIES,
+    canonical_task_complexity,
+)
 
 
 ROUTER_SCHEMA_VERSION = "mastermind.executive_worker_routes/v2"
@@ -456,6 +461,7 @@ class WorkRequest:
     required_capabilities: tuple[str, ...] = ()
     excluded_worker_ids: tuple[str, ...] = ()
     responsibility_intent: ResponsibilityIntent | dict[str, str] | None = None
+    effective_complexity: str = ""
 
     def __post_init__(self) -> None:
         raw_role = self.responsibility_intent
@@ -476,6 +482,19 @@ class WorkRequest:
             raise RoutingPolicyError(f"unsupported risk {risk!r}")
         if ambiguity not in _AMBIGUITIES:
             raise RoutingPolicyError(f"unsupported ambiguity {ambiguity!r}")
+        # The wrapper's effective complexity is the authority for child
+        # cognition class (WO-06 / OQ-8): accept the shared canonical
+        # vocabulary (long names, C0..C3 shorthand) and refuse anything the
+        # shared law has not classified. The reviewer lane is a lane, not a
+        # complexity rung, so it is not a lawful effective_complexity here.
+        complexity = canonical_task_complexity(self.effective_complexity)
+        if complexity:
+            if complexity not in CANONICAL_TASK_COMPLEXITIES:
+                raise RoutingPolicyError(
+                    "effective_complexity must be a canonical class, got "
+                    f"{self.effective_complexity!r}"
+                )
+        object.__setattr__(self, "effective_complexity", complexity)
         capabilities = tuple(
             sorted(
                 {
@@ -527,6 +546,8 @@ class RoutingDecision(_RoutingDecisionCompatibility):
     metered_cognition_receipt: MeteredCognitionReceipt | None = None
     pro_mode_receipt: ProModeReceipt | None = None
     responsibility_intent: ResponsibilityIntent | None = None
+    effective_complexity: str | None = None
+    principal_review_required: bool = False
 
     @property
     def worker_eligible(self) -> bool:
@@ -580,11 +601,20 @@ class RoutingDecision(_RoutingDecisionCompatibility):
         return value
 
     def job_constraints(self) -> dict[str, Any]:
-        """Return worker-placement constraints, never raw credentials or authority."""
+        """Return worker-placement constraints only for a dispatchable preview.
+
+        Principal-reviewed admission belongs to the incumbent owner. Until
+        that disposition is integrated, a required-review preview cannot be
+        converted into an executable worker request by a legacy caller.
+        """
 
         if not self.worker_eligible:
             raise RoutingPolicyError(
                 "frontier-lead work must be decomposed or adjudicated before worker dispatch"
+            )
+        if self.principal_review_required:
+            raise RoutingPolicyError(
+                "principal review required before worker dispatch"
             )
         role_fields: dict[str, Any] = {}
         if self.responsibility_intent is not None:
@@ -870,16 +900,38 @@ class ModelRouter:
         pro_mode_receipt: ProModeReceipt | None = None,
     ) -> RoutingDecision:
         reasons: list[str] = []
-        lead_required = False
-        if request.task_kind in _LEAD_TASKS:
-            lead_required = True
+        review_reasons: list[str] = []
+        lead_required = request.task_kind in _LEAD_TASKS
+        if lead_required:
             reasons.append(f"task_kind_{request.task_kind}")
+        # OQ-8 (WO-06): critical risk / high ambiguity no longer inflate child
+        # cognition to frontier-lead. Each worker's cognition is classified
+        # independently by its wrapper-asserted effective_complexity; the
+        # required principal/authority review survives as a flag the caller
+        # reads off RoutingDecision.principal_review_required.
         if request.risk == "critical":
-            lead_required = True
-            reasons.append("critical_risk")
+            review_reasons.append("critical_risk")
         if request.ambiguity == "high":
-            lead_required = True
-            reasons.append("high_ambiguity")
+            review_reasons.append("high_ambiguity")
+        principal_review_required = bool(review_reasons)
+        if principal_review_required:
+            review_reasons.append("principal_review_required")
+        if request.effective_complexity == C3_FRONTIER_JUDGMENT:
+            if not lead_required:
+                raise RoutingPolicyError(
+                    "effective_complexity C3_FRONTIER_JUDGMENT requires a lead "
+                    "task_kind; worker cognition cannot self-select frontier"
+                )
+            reasons.append("effective_complexity_frontier_judgment")
+        elif request.effective_complexity:
+            if lead_required:
+                raise RoutingPolicyError(
+                    "a non-frontier effective_complexity cannot downgrade a "
+                    "lead task_kind"
+                )
+            reasons.append(
+                f"effective_complexity_{request.effective_complexity.lower()}"
+            )
 
         if lead_required:
             resolved_cognition_route = (
@@ -975,11 +1027,15 @@ class ModelRouter:
                 ),
                 required_capabilities=request.required_capabilities,
                 excluded_worker_ids=request.excluded_worker_ids,
-                reason_codes=tuple(reasons),
+                reason_codes=tuple(reasons + review_reasons),
                 cognition_route=resolved_cognition_route,
                 chat_reasoning_mode=resolved_chat_reasoning_mode,
                 metered_cognition_receipt=metered_cognition_receipt,
                 pro_mode_receipt=pro_mode_receipt,
+                effective_complexity=(
+                    request.effective_complexity or None
+                ),
+                principal_review_required=principal_review_required,
             )
 
         if frontier_model_alias is not None:
@@ -1009,7 +1065,12 @@ class ModelRouter:
             )
 
         route = self.routes[request.task_kind]
-        suitability_tiers = tuple(route[request.risk])
+        # The bounded policy grammar defines routine/elevated tiers only. A
+        # critical-risk child (OQ-8) is served at the strictest bounded tier
+        # instead of being re-inflated; the principal review requirement stays
+        # on the RoutingDecision flag the caller reads.
+        bounded_risk = "elevated" if request.risk == "critical" else request.risk
+        suitability_tiers = tuple(route[bounded_risk])
         first_profile = self.model_aliases[
             suitability_tiers[0].model_aliases[0]
         ]
@@ -1033,6 +1094,9 @@ class ModelRouter:
                 "economical_worker_first",
             ]
         )
+        if request.risk == "critical":
+            reasons.append("critical_risk_elevated_tiers")
+        reasons.extend(review_reasons)
         if request.task_kind == "review" and request.excluded_worker_ids:
             reasons.append("review_worker_exclusion")
         return RoutingDecision(
@@ -1050,6 +1114,8 @@ class ModelRouter:
             required_capabilities=capabilities,
             excluded_worker_ids=request.excluded_worker_ids,
             reason_codes=tuple(reasons),
+            effective_complexity=(request.effective_complexity or None),
+            principal_review_required=principal_review_required,
         )
 
     def explain_route(
@@ -1159,6 +1225,7 @@ def route_work(
     policy_path: str | Path | None = None,
     capability_policy_path: str | Path | None = None,
     responsibility_intent: ResponsibilityIntent | dict[str, str] | None = None,
+    effective_complexity: str = "",
 ) -> RoutingDecision:
     """Convenience entry point used by CLI and future 1F child-job creation."""
 
@@ -1172,6 +1239,7 @@ def route_work(
             ambiguity=ambiguity,
             required_capabilities=tuple(required_capabilities),
             excluded_worker_ids=tuple(excluded_worker_ids),
+            effective_complexity=effective_complexity,
         ),
         frontier_model_alias=frontier_model_alias,
         cognition_route=cognition_route,

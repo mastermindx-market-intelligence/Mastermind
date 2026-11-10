@@ -359,6 +359,9 @@ def test_route_preview_real_mcp_consumer_is_opt_in_and_read_only(
                     assert payload["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
                     assert payload["production_armed"] is False
                     assert payload["effective_complexity"] == complexity
+                    assert payload["suitability_tiers"][0] == "implementation.routine.primary"
+                    assert not any(tier.startswith("frontier.") for tier in payload["suitability_tiers"])
+                    assert "effective_complexity_" + complexity.lower() in payload["candidate_reason_codes"]
                     assert payload["capacity_knowledge"] == "unknown"
                     assert payload["rank_basis"] == "suitability_only"
                     assert payload["decision_id"] == payload["attempt_ref"] == ""
