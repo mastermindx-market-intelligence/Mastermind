@@ -136,7 +136,8 @@ cmd_install() {
   require_root_label
   label_valid "$LABEL" || die "invalid label: $LABEL"
   port_forbidden "$PORT" && die "port $PORT is reserved for the live T3 servers"
-  port_busy "$PORT" && die "port $PORT is busy"
+  # An install over this same label must --replace; boot it out BEFORE the
+  # port-busy check so our own server does not count as a foreign occupant.
   if label_loaded "$LABEL" && [ "$REPLACE" -ne 1 ]; then
     die "label $LABEL is already loaded; pass --replace to replace it"
   fi
@@ -151,11 +152,14 @@ cmd_install() {
     _pl=$(basename "$_p" .plist)
     [ "$_pl" = "$LABEL" ] || die "root already used by label $_pl ($_p); one label per root"
   done
+  # Boot out a previous job for this label before replacing (idempotent).
+  if label_loaded "$LABEL"; then
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null; sleep 2
+  fi
+  port_busy "$PORT" && die "port $PORT is busy"
   # Server binary setting: default stock vendor CLI.
   [ -n "$SERVER_BIN" ] || SERVER_BIN="$HOME/.t3/bin/t3"
   [ -x "$SERVER_BIN" ] || die "server binary not executable: $SERVER_BIN"
-  # Boot out a previous job for this label before replacing (idempotent).
-  label_loaded "$LABEL" && launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null; sleep 1
   mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home"
   cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh"
   chmod 700 "$ROOT/bin/server_runner.sh"
@@ -187,7 +191,10 @@ cmd_install() {
 </plist>
 EOF
   chmod 644 "$PLIST"
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
+  # Bootstrap from an empty environment: launchd snapshots the caller's env
+  # into the job ("inherited environment"); env -i keeps provider keys from
+  # riding into `launchctl print` and the server process.
+  env -i /bin/launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
     || launchctl load -w "$PLIST" 2>/dev/null \
     || die "launchctl bootstrap failed for $LABEL"
   wait_http "$PORT" 90 || { launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null; die "server did not answer on 127.0.0.1:$PORT; see $ROOT/run/server.log"; }
@@ -204,7 +211,7 @@ cmd_start() {
   if label_loaded "$LABEL"; then
     launchctl kickstart "gui/$(id -u)/$LABEL" || die "kickstart failed"
   else
-    launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null || die "bootstrap failed"
+    env -i /bin/launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null || die "bootstrap failed"
   fi
   wait_http "$PORT" 90 || die "server did not answer on 127.0.0.1:$PORT"
   capture_access
@@ -229,7 +236,7 @@ cmd_status() {
   echo "label=$LABEL loaded=$(label_loaded "$LABEL" && echo yes || echo no)"
   _pid=""
   if label_loaded "$LABEL"; then
-    _pid=$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n 's/^\s*"pid" = \([0-9]*\).*/\1/p' | head -1)
+    _pid=$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n 's/^\s*pid = \([0-9]*\).*/\1/p' | head -1)
   fi
   echo "pid=${_pid:-none}"
   if [ "$PORT" != "?" ]; then

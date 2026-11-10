@@ -51,7 +51,12 @@ import fcntl, os, sys
 root, server_bin, env_file, log_file = sys.argv[1:5]
 with open(env_file) as fh:
     env_rows = [ln.rstrip("\n") for ln in fh if ln.strip() and not ln.startswith("#")]
-env = dict(os.environ)
+
+# Minimal environment: launchd may pass the installer shell's whole env (any
+# unrelated provider keys) into the job; never forward it. The server env is
+# exactly: the few vars a CLI needs + the root's 0600 fabric.env + T3 settings.
+env = {k: v for k, v in os.environ.items()
+       if k in ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL")}
 for row in env_rows:
     name, _, value = row.partition("=")
     if name == name.strip() and name:
@@ -77,8 +82,6 @@ env["T3CODE_HOME"] = os.path.join(root, "home")
 env["T3CODE_PORT"] = port
 env["T3CODE_HOST"] = "127.0.0.1"
 env["T3CODE_NO_BROWSER"] = "1"
-os.environ.clear()
-os.environ.update(env)
 os.chdir(os.path.join(root, "scratch-project"))
-os.execv(server_bin, [server_bin, "serve"])
+os.execve(server_bin, [server_bin, "serve"], env)
 PY
