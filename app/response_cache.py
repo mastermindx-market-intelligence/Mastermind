@@ -72,15 +72,16 @@ def _cacheable(path: str) -> bool:
 def _cache_key(path: str, query: str) -> str:
     """Path + CANONICALISED query.
 
-    Sorting the parameters makes ``?a=1&b=2`` and ``?b=2&a=1`` one cache identity instead of two.
-    These handlers read parameters by name and never depend on their order, so this only collapses
-    duplicates — it cannot merge two semantically different requests. Falls back to the raw query
-    when it cannot be parsed, which is still a stable key for a given input.
+    Sorting by parameter name makes ``?a=1&b=2`` and ``?b=2&a=1`` one cache identity.
+    Preserve the relative order of repeated names: FastAPI scalar parameters use the last value,
+    while list parameters retain value order. Sorting values would merge different requests.
+    Falls back to the raw query when it cannot be parsed, which is still a stable key.
     """
     if not query:
         return path + "?"
     try:
-        return path + "?" + urlencode(sorted(parse_qsl(query, keep_blank_values=True)))
+        pairs = parse_qsl(query, keep_blank_values=True)
+        return path + "?" + urlencode(sorted(pairs, key=lambda pair: pair[0]))
     except Exception:  # noqa: BLE001 — an unparseable query still deserves a stable key
         return path + "?" + query
 
