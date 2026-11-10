@@ -198,6 +198,14 @@ def _parser() -> argparse.ArgumentParser:
     route.add_argument("--capability", action="append", default=[])
     route.add_argument("--exclude-worker-id", action="append", default=[])
     route.add_argument("--routing-policy", type=Path)
+    route.add_argument(
+        "--explain", action="store_true",
+        help="Explain source-only eligibility; does not observe runtime or compare prices.",
+    )
+    route.add_argument(
+        "--consider-model-alias", action="append", default=[],
+        help="Include an alias in --explain without enrolling or selecting it (maximum 32).",
+    )
 
     sub.add_parser("workers", help="List durable worker identities and quota classes.")
     sub.add_parser("jobs", help="List durable jobs.")
@@ -249,16 +257,20 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "route":
-            decision = ModelRouter.load(args.routing_policy).route(
-                WorkRequest(
-                    task_kind=args.task_kind,
-                    risk=args.risk,
-                    ambiguity=args.ambiguity,
-                    required_capabilities=tuple(args.capability),
-                    excluded_worker_ids=tuple(args.exclude_worker_id),
-                )
+            if args.consider_model_alias and not args.explain:
+                raise RoutingPolicyError("--consider-model-alias requires --explain")
+            router = ModelRouter.load(args.routing_policy)
+            request = WorkRequest(
+                task_kind=args.task_kind,
+                risk=args.risk,
+                ambiguity=args.ambiguity,
+                required_capabilities=tuple(args.capability),
+                excluded_worker_ids=tuple(args.exclude_worker_id),
             )
-            _print(decision.to_dict())
+            if args.explain:
+                _print(router.explain_route(request, considered_aliases=args.consider_model_alias))
+            else:
+                _print(router.route(request).to_dict())
             return 0
 
         runtime = Runtime.at(args.root)

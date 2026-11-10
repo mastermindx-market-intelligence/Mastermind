@@ -1,0 +1,77 @@
+.conversations-list {
+  width: min(100%, 960px);
+  min-width: 0;
+  margin-inline: auto;
+  padding-block: var(--sp-6) var(--sp-8);
+  color: var(--text);
+  font-family: var(--font-ui);
+  overflow-wrap: anywhere;
+}
+.conversations-list__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--sp-6);
+}
+.conversations-list h1 {
+  margin: 0 0 var(--sp-3);
+  font: 500 40px/48px var(--font-display);
+  letter-spacing: -0.025em;
+}
+.conversations-list h2 { margin: 0; font: 600 18px/28px var(--font-ui); }
+.conversations-list h3 { margin: 0; font: 500 18px/28px var(--font-ui); }
+.conversations-list p { margin-block: var(--sp-2); color: var(--muted); font-size: 14px; line-height: 22px; }
+.conversations-list__header p { font-size: 16px; line-height: 24px; }
+.conversations-list button,
+.conversations-list input,
+.conversations-list summary { min-height: 44px; }
+.conversations-list button {
+  flex: 0 0 auto;
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  color: var(--text);
+  background: transparent;
+  font: 500 14px/20px var(--font-ui);
+}
+.conversations-list button:hover:not(:disabled) { background: var(--raised); }
+.conversations-list :is(button, input, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.conversations-list__coverage { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-block: var(--sp-5); }
+.conversations-list__coverage p { margin: 0; max-width: 620px; font-size: 13px; line-height: 20px; }
+.conversations-list__filter { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin-block: var(--sp-6) var(--sp-7); }
+.conversations-list__filter label { flex-basis: 100%; color: var(--muted); font-size: 13px; line-height: 20px; }
+.conversations-list__filter input { flex: 1 1 240px; min-width: 0; width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--control-border); border-radius: var(--r-btn); background: var(--panel); color: var(--text); font: 400 15px/24px var(--font-ui); }
+.conversations-list__section { margin-block: var(--sp-7); }
+.conversations-list__row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding-block: var(--sp-5); border-bottom: 1px solid var(--border); }
+.conversations-list__row-copy { min-width: 0; }
+.conversations-list__project { font-size: 13px; line-height: 20px; }
+.conversations-list__row-copy h3 + p { margin-top: var(--sp-1); }
+.conversations-list__meta { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--faint); font-size: 12px; line-height: 20px; }
+.conversations-list__scope { max-width: 660px; }
+.conversations-list__more { margin-top: var(--sp-4); }
+.conversations-list__footer { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); margin-block: var(--sp-7); }
+.conversations-list__sources { margin-top: var(--sp-6); padding: var(--sp-3) var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-btn); }
+.conversations-list__sources summary { display: list-item; align-content: center; cursor: pointer; color: var(--muted); font-size: 13px; line-height: 20px; }
+.conversations-list__sources[open] { background: var(--raised); }
+.conversations-list__sources dl { margin: var(--sp-4) 0 0; }
+.conversations-list__sources dl > div { margin-block: var(--sp-4); }
+.conversations-list__sources dt { font-weight: 600; }
+.conversations-list__sources dd { margin: var(--sp-2) 0 0; color: var(--muted); }
+.conversations-list__sources code { display: block; overflow-wrap: anywhere; font-size: 12px; line-height: 20px; }
+.conversations-list[data-theme="light"] .conversations-list__sources[open] { background: var(--panel); box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 6%, transparent); }
+.conversations-list[lang="zh-CN"] :is(h1, button, summary, label) { letter-spacing: normal; text-transform: none; }
+@media (max-width: 640px) {
+  .conversations-list { padding-block: var(--sp-4) var(--sp-7); }
+  .conversations-list h1 { font-size: 30px; line-height: 36px; }
+  .conversations-list__header,
+  .conversations-list__coverage,
+  .conversations-list__footer { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
+  .conversations-list__row { flex-direction: column; align-items: stretch; gap: var(--sp-3); padding-block: var(--sp-4); }
+  .conversations-list__row > button { align-self: start; min-width: 124px; max-width: 100%; }
+  .conversations-list__coverage button,
+  .conversations-list__footer button { align-self: start; }
+  .conversations-list__filter { margin-block: var(--sp-5) var(--sp-6); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .conversations-list :is(button, input, summary) { transition: none; }
+}

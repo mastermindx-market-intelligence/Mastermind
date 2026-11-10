@@ -1,0 +1,66 @@
+{
+  "limits": "observational workload confounding; 60s periodic probe; absence of samples above threshold is not safety acceptance",
+  "method": "parse host_pull tctl_c/load1/cpu_busy_pct/active_lanes samples; no synthetic load or extra collector",
+  "observations": {
+    "ubuntu0": {
+      "above_configured_tctl_count": 0,
+      "checkout_reserve_gib": 15,
+      "configured_slots": 12,
+      "configured_tctl_ceiling_c": 85.0,
+      "disk_floor_gib": 300,
+      "hot90_count": 0,
+      "max_active_observed": 5,
+      "max_tctl_c": 72.375,
+      "max_temp_at_8_plus_active": null,
+      "observations_24h": 1324,
+      "observations_at_8_plus": 0,
+      "unique_minutes_24h": 1324
+    },
+    "ubuntu1": {
+      "above_configured_tctl_count": 4,
+      "checkout_reserve_gib": 15,
+      "configured_slots": 18,
+      "configured_tctl_ceiling_c": 80.0,
+      "disk_floor_gib": 150,
+      "hot90_count": 0,
+      "max_active_observed": 9,
+      "max_tctl_c": 86.0,
+      "max_temp_at_8_plus_active": 86.0,
+      "observations_24h": 1324,
+      "observations_at_8_plus": 13,
+      "unique_minutes_24h": 1324
+    },
+    "ubuntu2": {
+      "above_configured_tctl_count": 0,
+      "checkout_reserve_gib": 15,
+      "configured_slots": 12,
+      "configured_tctl_ceiling_c": 80.0,
+      "disk_floor_gib": 150,
+      "hot90_count": 0,
+      "max_active_observed": 3,
+      "max_tctl_c": 73.75,
+      "max_temp_at_8_plus_active": null,
+      "observations_24h": 1324,
+      "observations_at_8_plus": 0,
+      "unique_minutes_24h": 1324
+    },
+    "ubuntu3": {
+      "above_configured_tctl_count": 0,
+      "checkout_reserve_gib": 15,
+      "configured_slots": 12,
+      "configured_tctl_ceiling_c": 80.0,
+      "disk_floor_gib": 300,
+      "hot90_count": 0,
+      "max_active_observed": 4,
+      "max_tctl_c": 72.125,
+      "max_temp_at_8_plus_active": null,
+      "observations_24h": 1324,
+      "observations_at_8_plus": 0,
+      "unique_minutes_24h": 1324
+    }
+  },
+  "schema": "mastermind.fabric_host_24h_observational_capacity.v1",
+  "source": "M2 installed incumbent state/host_pull.log[.1]",
+  "window_end_utc": "2026-10-15T23:54:31.878993+00:00",
+  "window_hours": 24
+}

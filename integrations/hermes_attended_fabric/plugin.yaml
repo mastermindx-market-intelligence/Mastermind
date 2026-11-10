@@ -1,0 +1,8 @@
+name: mastermind-fabric-worker
+kind: standalone
+version: "1.0.0"
+requires_hermes: ">=0.23.0"
+description: "Native attended worker requests through the enrolled Mastermind Fabric owner, with original-run recovery."
+author: Mastermind-X
+provides_tools:
+  - mmx_fabric_worker

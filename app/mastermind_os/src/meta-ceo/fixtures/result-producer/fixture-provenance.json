@@ -1,0 +1,13 @@
+{
+  "proof": "real signed HTTP and Unix socket; closed test-owned namespace only",
+  "selection": {
+    "work_ref": "WS:ONE",
+    "root_job_id": "JOB-001",
+    "job_id": "JOB-004",
+    "attempt_id": "ATT-56863c3c85d34a6c88e4db8b7fa478ef",
+    "result_envelope_digest": "014dcee8974a2559430c98b5e6ac161e43be5245edf75656d1d9b2bc1c7171bd"
+  },
+  "result_http_bytes": 3229,
+  "result_socket_bytes": 3251,
+  "result_sql_statements": 77
+}

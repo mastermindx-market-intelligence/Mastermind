@@ -1,0 +1,48 @@
+# SOURCE DEPLOYMENT PROPOSAL ONLY. Insert within the existing mcp origin route
+# before its abort, after current owner review. Never install this standalone.
+# Same-host Linux Caddy/Research topology and Caddy999:988 are observed.
+# Active/autosaved Caddy overlay owns the routes; startup files omit them.
+# Preserve its owner and recovery path before any deployment; no file-only reload.
+# This fragment is not selected for installation. HTML reuses the
+# existing immutable OS index via rewrite; ExecutivePathFence sees only /os/.
+# Research MCP /mcp and metadata remain tunnel-only (H04); no other paths match.
+@researchEvidence {
+  host mcp.mastermind-x.com
+  protocol https
+  method GET
+  path_regexp researchEvidence ^/os/research/evidence/rvitem[.]v1[.][0-9a-f]{64}$
+  expression `{http.request.uri}.matches("^/os/research/evidence/rvitem[.]v1[.][0-9a-f]{64}$")`
+}
+handle @researchEvidence {
+  header Cache-Control "private, no-store"
+  header X-Robots-Tag "noindex, noarchive"
+  header Referrer-Policy "no-referrer"
+  header +Vary "Accept"
+  @researchEvidenceJson header Accept application/json
+  handle @researchEvidenceJson {
+    reverse_proxy unix//run/mastermind-research/citation.sock {
+      header_up -Forwarded
+      header_up -X-Forwarded-*
+      header_up -X-Real-IP
+      header_up -CF-Connecting-IP
+      header_up -EO-Connecting-IP
+      header_up -EO-Client-IP
+      header_up Host mcp.mastermind-x.com
+    }
+  }
+  handle {
+    rewrite * /os/
+    reverse_proxy 127.0.0.1:__OS_RELAY_PORT__ {
+      header_up -Forwarded
+      header_up -X-Forwarded-Host
+      header_up -X-Forwarded-Port
+      header_up -X-Real-IP
+      header_up -CF-Connecting-IP
+      header_up -EO-Connecting-IP
+      header_up -EO-Client-IP
+      header_up Host mcp.mastermind-x.com
+      header_up X-Forwarded-Proto https
+      header_up X-Forwarded-For 127.0.0.1
+    }
+  }
+}

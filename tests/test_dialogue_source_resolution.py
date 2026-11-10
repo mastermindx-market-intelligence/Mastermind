@@ -128,3 +128,37 @@ def test_physical_identity_wire_is_closed(mutation: str) -> None:
 
     with pytest.raises(DialogueSourceResolutionError, match="fields drifted"):
         PhysicalDialogueSourceIdentity.from_dict(wire)
+
+
+def test_requester_answer_identity_is_versioned_digest_bound_and_separate() -> None:
+    from control_plane.dialogue_source_resolution import (
+        REQUESTER_ANSWER_SOURCE_SCHEMA,
+        RequesterAnswerAvailableSourceIdentity,
+        requester_answer_attention_source_ref,
+    )
+
+    identity = RequesterAnswerAvailableSourceIdentity.create(
+        consultation_id="consult-6bdf4a6f9a664bbcf1a93d67a41ba51d",
+        answer_message_key="asd-consultation-answer-exact",
+        answer_fingerprint="d" * 64,
+        semantic_answer_digest="e" * 64,
+        root_job_id="JOB-100",
+        requester_job_id="JOB-101",
+        requester_attempt_id="ATT-" + "2" * 32,
+        requester_binding_id="bind-" + "a" * 40,
+        requester_binding_generation=3,
+        requester_reasoning_surface="codex",
+    )
+
+    assert identity.schema == REQUESTER_ANSWER_SOURCE_SCHEMA
+    assert requester_answer_attention_source_ref(identity).startswith(
+        "consultation_answer_attention:"
+    )
+    assert requester_answer_attention_source_ref(identity) != (
+        "agent_dialogue_attention:" + identity.digest
+    )
+
+    drifted = identity.to_dict()
+    drifted["answer_fingerprint"] = "f" * 64
+    with pytest.raises(DialogueSourceResolutionError, match="digest disagrees"):
+        RequesterAnswerAvailableSourceIdentity.from_dict(drifted)

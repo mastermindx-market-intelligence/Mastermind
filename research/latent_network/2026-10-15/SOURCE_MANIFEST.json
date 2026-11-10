@@ -1,0 +1,16 @@
+[
+  {
+    "filename": "49_Industry_Portfolios_daily_CSV.zip",
+    "sha256": "8f394fe34bea54d41b9aafed410425ee8f8e252ede3c71a7c1cd20bab83040de",
+    "source_url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/49_Industry_Portfolios_daily_CSV.zip",
+    "source_vintage": "202608 CRSP reconstructed historical data; not original release-time data",
+    "public_redistribution": "inputs retained private; source hashes and experiment aggregates only"
+  },
+  {
+    "filename": "F-F_Research_Data_Factors_daily_CSV.zip",
+    "sha256": "2f29e22546069914890a712680a6f81f3680ebc3543b52864484d209ca13a7db",
+    "source_url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_daily_CSV.zip",
+    "source_vintage": "202608 CRSP reconstructed historical data; not original release-time data",
+    "public_redistribution": "inputs retained private; source hashes and experiment aggregates only"
+  }
+]

@@ -1,0 +1,5219 @@
+{
+  "schema": "mastermind.paper_migration_inventory.v1",
+  "operation": "terminal-paper-reorganization-20261108-c4",
+  "sourceFileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+  "sourceName": "Terminal",
+  "sourcePin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "observedDate": "2026-11-09",
+  "totals": {
+    "pages": 51,
+    "artboards": 521,
+    "nodes": 84529
+  },
+  "tokensHash": "55dd37b7",
+  "notes": [
+    "Counts are design-node observations, not storage bytes or vendor capacity.",
+    "Baseline predates section dividers; no design content has been transferred."
+  ],
+  "families": [
+    {
+      "key": "00",
+      "name": "Terminal · Start Here & Shared Shell",
+      "pageIds": [
+        "p-R-0",
+        "p-10-0",
+        "p-G-0",
+        "p-E-0",
+        "p-Z-0",
+        "p-1A-0",
+        "p-C-0"
+      ]
+    },
+    {
+      "key": "01",
+      "name": "Terminal · Charts & Scripting",
+      "pageIds": [
+        "p-17-0",
+        "p-19-0",
+        "p-W-0",
+        "p-I-1",
+        "p-1E-0"
+      ]
+    },
+    {
+      "key": "02",
+      "name": "Terminal · Company Research",
+      "pageIds": [
+        "p-11-0",
+        "p-S-0",
+        "p-1-0",
+        "p-9-1",
+        "p-A-1",
+        "p-B-1",
+        "p-F-0",
+        "p-1B-0",
+        "p-L-1",
+        "p-J-1",
+        "p-K-1",
+        "p-M-1"
+      ]
+    },
+    {
+      "key": "03",
+      "name": "Terminal · Options Flow, Exposure & Volatility",
+      "pageIds": [
+        "p-16-0",
+        "p-14-0",
+        "p-12-0",
+        "p-V-0",
+        "p-U-0",
+        "p-D-0",
+        "p-H-0",
+        "p-T-0"
+      ]
+    },
+    {
+      "key": "04",
+      "name": "Terminal · Options Planning & Review",
+      "pageIds": [
+        "p-15-0",
+        "p-13-0",
+        "p-3-1",
+        "p-4-1",
+        "p-5-1",
+        "p-6-1",
+        "p-7-1",
+        "p-2-0",
+        "p-P-1"
+      ]
+    },
+    {
+      "key": "05",
+      "name": "Terminal · Heatmaps & Comparison",
+      "pageIds": [
+        "p-8-1",
+        "p-N-1",
+        "p-O-1",
+        "p-1D-0",
+        "p-1C-0"
+      ]
+    },
+    {
+      "key": "06",
+      "name": "Terminal · Portfolio & Returns",
+      "pageIds": [
+        "p-X-0",
+        "p-Y-0",
+        "p-1F-0",
+        "p-Q-0"
+      ]
+    },
+    {
+      "key": "macro",
+      "name": "Existing Macro · Market Structure, Stages & Allocation",
+      "pageIds": [
+        "p-18-0"
+      ],
+      "existingFileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2"
+    }
+  ],
+  "pages": [
+    {
+      "pageId": "p-R-0",
+      "pageName": "00 · TERMINAL · Start Here · Product Directory",
+      "nodeCount": 147,
+      "artboardCount": 2,
+      "artboards": [
+        {
+          "id": "1BCX-0",
+          "name": "00 · Start Here · Terminal Product Map · Current + Reference",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1NDQ-0",
+          "name": "00B · Terminal Reference Index · Exact URLs & Review State",
+          "childCount": 9,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-1-0",
+      "pageName": "Company Intelligence · 2026-09-20",
+      "nodeCount": 5967,
+      "artboardCount": 35,
+      "artboards": [
+        {
+          "id": "1S2W-0",
+          "name": "Exposure matrix",
+          "childCount": 1,
+          "width": 824,
+          "height": 514,
+          "worldX": 248,
+          "worldY": 336
+        },
+        {
+          "id": "94K-0",
+          "name": "14 · COMPANY · Decision Brief · Dark · R2",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1140,
+          "worldX": -4098.999,
+          "worldY": -9372
+        },
+        {
+          "id": "KQJ-1",
+          "name": "16 · R2 · Desktop Brief · Dark ZH",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 4061,
+          "worldY": -9372
+        },
+        {
+          "id": "LOA-1",
+          "name": "18 · R2 · Desktop Brief · Light ZH",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 7101,
+          "worldY": -9372
+        },
+        {
+          "id": "9EJ-0",
+          "name": "00 · START HERE · Company R2 · Journey + Retained Depth",
+          "childCount": 5,
+          "width": 1440,
+          "height": 1800,
+          "worldX": -6139,
+          "worldY": -11872
+        },
+        {
+          "id": "9HC-0",
+          "name": "01 · BUILD CONTRACT · Company R2 · Existing vs New",
+          "childCount": 9,
+          "width": 1440,
+          "height": 2120,
+          "worldX": -4619,
+          "worldY": -11872
+        },
+        {
+          "id": "212W-0",
+          "name": "PRODUCT REFERENCES · Connected Drivers · Light and dark",
+          "childCount": 2,
+          "width": 2960,
+          "height": 2340,
+          "worldX": 9571,
+          "worldY": -6072
+        },
+        {
+          "id": "OSO-1",
+          "name": "00A · Company · Current File Reference Map",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": -7699,
+          "worldY": -11872
+        },
+        {
+          "id": "V37-0",
+          "name": "44 · R2 · Cash Reconciliation · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 6445,
+          "worldY": -15400
+        },
+        {
+          "id": "1141-0",
+          "name": "57 · R2 · Company Change Ledger · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 14405,
+          "worldY": -15400
+        },
+        {
+          "id": "10NC-0",
+          "name": "55 · R2 · Peer Comparison · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 12415,
+          "worldY": -15400
+        },
+        {
+          "id": "WBM-0",
+          "name": "49 · R2 · Event Research · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 9485,
+          "worldY": -15400
+        },
+        {
+          "id": "126W-0",
+          "name": "67 · R2 · Call + Q&A · Transcript Unavailable · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 18935,
+          "worldY": -15400
+        },
+        {
+          "id": "12I6-0",
+          "name": "69 · R2 · Sources + Coverage · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 20925,
+          "worldY": -15400
+        },
+        {
+          "id": "165P-0",
+          "name": "97 · R2 · Peer Comparison · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 881,
+          "worldY": -11872
+        },
+        {
+          "id": "15UK-0",
+          "name": "95 · R2 · Event Research · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": -639,
+          "worldY": -11872
+        },
+        {
+          "id": "16CL-0",
+          "name": "98 · R2 · Call + Q&A · Transcript Unavailable · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 18935,
+          "worldY": -13820
+        },
+        {
+          "id": "16GR-0",
+          "name": "99 · R2 · Sources + Coverage · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": -59,
+          "worldY": -6072
+        },
+        {
+          "id": "W2R-0",
+          "name": "48 · R2 · Margin Reconciliation · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 6445,
+          "worldY": -13131
+        },
+        {
+          "id": "VUB-0",
+          "name": "47 · R2 · Revenue Drivers · Light EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 7965,
+          "worldY": -15400
+        },
+        {
+          "id": "15FN-0",
+          "name": "92 · R2 · Cash Reconciliation · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 14405,
+          "worldY": -12769
+        },
+        {
+          "id": "15PE-0",
+          "name": "94 · R2 · Margin Reconciliation · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 6445,
+          "worldY": -11476
+        },
+        {
+          "id": "15KN-0",
+          "name": "93 · R2 · Revenue Drivers · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 12415,
+          "worldY": -12537
+        },
+        {
+          "id": "189S-0",
+          "name": "HELD · ZH Research Watch localization · Hidden · Safety-blocked",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": -4729,
+          "worldY": 2820
+        },
+        {
+          "id": "17JT-0",
+          "name": "104 · R2 · Company Change Ledger · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 8051,
+          "worldY": -6072
+        },
+        {
+          "id": "8NL-0",
+          "name": "APP UI · Market Memory · 1440 × 1020",
+          "childCount": 5,
+          "width": 1440,
+          "height": 1020,
+          "worldX": -18.998,
+          "worldY": -9372
+        },
+        {
+          "id": "8VY-0",
+          "name": "APP UI STATES · Watch flow · individual specimens",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": -6138.997,
+          "worldY": -7112.001
+        },
+        {
+          "id": "99O-0",
+          "name": "APP UI · Valuation Lab · 1440 × 1060",
+          "childCount": 6,
+          "width": 1440,
+          "height": 1060,
+          "worldX": 2021,
+          "worldY": -9372
+        },
+        {
+          "id": "16RB-0",
+          "name": "APP UI · Market Memory · 1440 × 1020",
+          "childCount": 5,
+          "width": 1440,
+          "height": 1020,
+          "worldX": 3500.998,
+          "worldY": -6072
+        },
+        {
+          "id": "16V0-0",
+          "name": "APP UI · Valuation Lab · 1440 × 1060",
+          "childCount": 6,
+          "width": 1440,
+          "height": 1060,
+          "worldX": 5541.001,
+          "worldY": -6072
+        },
+        {
+          "id": "V2D-0",
+          "name": "APP UI · Results + Outlook · 1440px",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 4405.002,
+          "worldY": -15400.001
+        },
+        {
+          "id": "158O-0",
+          "name": "APP UI · Results + Outlook · 1440px",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 20781,
+          "worldY": -9372
+        },
+        {
+          "id": "8BP-0",
+          "name": "APP UI · Company Brief · 1440 × 1140",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1140,
+          "worldX": -6138.997,
+          "worldY": -9372
+        },
+        {
+          "id": "8HK-0",
+          "name": "APP UI · Expectations · 1440 × 1080",
+          "childCount": 6,
+          "width": 1440,
+          "height": 1080,
+          "worldX": -2059.002,
+          "worldY": -9372
+        },
+        {
+          "id": "16MM-0",
+          "name": "APP UI · Expectations · 1440 × 1080",
+          "childCount": 6,
+          "width": 1440,
+          "height": 1080,
+          "worldX": 1461,
+          "worldY": -6072
+        }
+      ]
+    },
+    {
+      "pageId": "p-1E-0",
+      "pageName": "Proposed · Chart reader recovery",
+      "nodeCount": 193,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "23MJ-0",
+          "name": "PROPOSED · Chart reader recovery · EN/ZH",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 7600,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-1D-0",
+      "pageName": "Proposed · Heatmap inspector refresh",
+      "nodeCount": 326,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "22UK-0",
+          "name": "PROPOSED · Heatmap selected reading · EN/ZH",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 6080,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-1C-0",
+      "pageName": "Proposed · Historical benchmarks",
+      "nodeCount": 225,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "21ZR-0",
+          "name": "PROPOSED · Historical benchmark chooser · EN/ZH",
+          "childCount": 2,
+          "width": 1440,
+          "height": null,
+          "worldX": 9120,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-1B-0",
+      "pageName": "Build · Clarity & company contracts",
+      "nodeCount": 915,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "20K2-0",
+          "name": "BUILD REFERENCES · Company and chart contracts",
+          "childCount": 2,
+          "width": 8400,
+          "height": null,
+          "worldX": null,
+          "worldY": null
+        }
+      ]
+    },
+    {
+      "pageId": "p-1A-0",
+      "pageName": "Archive · Original product geometry",
+      "nodeCount": 913,
+      "artboardCount": 8,
+      "artboards": [
+        {
+          "id": "8M8-0",
+          "name": "ARCHIVE · 12 · R2 BUILD · Connected Drivers · Evidence + Ontology · Original geometry",
+          "childCount": 5,
+          "width": 1440,
+          "height": 2820,
+          "worldX": -3098.997,
+          "worldY": -6072
+        },
+        {
+          "id": "15YJ-0",
+          "name": "ARCHIVE · 96 · R2 BUILD · Connected Drivers · Dark EN · Original geometry",
+          "childCount": 5,
+          "width": 1440,
+          "height": 2820,
+          "worldX": -1579,
+          "worldY": -6072
+        },
+        {
+          "id": "13MY-0",
+          "name": "ARCHIVE · 80 · R2 · Mobile Call + Q&A · Transcript Unavailable · Light ZH · Original geometry",
+          "childCount": 4,
+          "width": 390,
+          "height": 2300,
+          "worldX": 9375,
+          "worldY": -13131
+        },
+        {
+          "id": "13MZ-0",
+          "name": "ARCHIVE · 81 · R2 · Mobile Sources + Coverage · Light ZH · Original geometry",
+          "childCount": 4,
+          "width": 390,
+          "height": 2300,
+          "worldX": 9845.001,
+          "worldY": -13131
+        },
+        {
+          "id": "1498-0",
+          "name": "ARCHIVE · 82 · R2 · Mobile Call + Q&A · Transcript Unavailable · Dark ZH · Original geometry",
+          "childCount": 4,
+          "width": 390,
+          "height": 2300,
+          "worldX": 5253.003,
+          "worldY": -11997
+        },
+        {
+          "id": "14BV-0",
+          "name": "ARCHIVE · 83 · R2 · Mobile Sources + Coverage · Dark ZH · Original geometry",
+          "childCount": 4,
+          "width": 390,
+          "height": 2300,
+          "worldX": 5722.998,
+          "worldY": -11997
+        },
+        {
+          "id": "212X-0",
+          "name": "UTILITY · Hidden empty template 0",
+          "childCount": 1,
+          "width": 1,
+          "height": 1,
+          "worldX": null,
+          "worldY": null
+        },
+        {
+          "id": "2132-0",
+          "name": "UTILITY · Hidden empty template 1",
+          "childCount": 1,
+          "width": 1,
+          "height": 1,
+          "worldX": null,
+          "worldY": null
+        }
+      ]
+    },
+    {
+      "pageId": "p-19-0",
+      "pageName": "D06 · Build · Script interaction contracts",
+      "nodeCount": 49,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "1ZAH-0",
+          "name": "BUILD · D06 script states and ownership",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": null,
+          "worldY": null
+        }
+      ]
+    },
+    {
+      "pageId": "p-18-0",
+      "pageName": "D06 · Macro completion · Stages & S&P allocation",
+      "nodeCount": 259,
+      "artboardCount": 3,
+      "artboards": [
+        {
+          "id": "1XGS-0",
+          "name": "01 · 阶段分析 · Light ZH · 390 · Complete",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1XGT-0",
+          "name": "02 · S&P model allocation · Light EN · 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 470,
+          "worldY": 0
+        },
+        {
+          "id": "1XGU-0",
+          "name": "03 · 标普模型配置 · Dark ZH · 390",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 1990,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-17-0",
+      "pageName": "D06 · Terminal · Production workspace · R2",
+      "nodeCount": 3719,
+      "artboardCount": 10,
+      "artboards": [
+        {
+          "id": "1U01-0",
+          "name": "D06-01 · Chart + Context · 1440 · Dark EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": 900,
+          "worldX": 565,
+          "worldY": -656
+        },
+        {
+          "id": "1UEL-0",
+          "name": "D06-02 · Chart + Inline context · 390 · Dark EN",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 565,
+          "worldY": 324
+        },
+        {
+          "id": "1US3-0",
+          "name": "D06-03 · Constrained workspace · 1024 · Light EN",
+          "childCount": 3,
+          "width": 1024,
+          "height": null,
+          "worldX": 2085,
+          "worldY": -656
+        },
+        {
+          "id": "1V6P-0",
+          "name": "D06-04 · 行情与图表解读 · 390 · Light ZH",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 1035,
+          "worldY": 324
+        },
+        {
+          "id": "1W4S-0",
+          "name": "D06-05 · Rail controls + focused return · behavior reference",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 3189,
+          "worldY": -656
+        },
+        {
+          "id": "1WI8-0",
+          "name": "D06-06 · Scripts · Durable save outcomes · 1440 · Dark EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 4709,
+          "worldY": -656
+        },
+        {
+          "id": "1WI9-0",
+          "name": "D06-07 · 脚本编辑 · 390 · Light ZH",
+          "childCount": 1,
+          "width": 390,
+          "height": null,
+          "worldX": 6229,
+          "worldY": -656
+        },
+        {
+          "id": "1WIA-0",
+          "name": "D06-08 · Public snapshot · Ready and unavailable · Light EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 6699,
+          "worldY": -656
+        },
+        {
+          "id": "1WYN-0",
+          "name": "D06-09 · Embedded chart · Browser and recovery · Light EN",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 8219,
+          "worldY": -656
+        },
+        {
+          "id": "1WYO-0",
+          "name": "D06-10 · 嵌入图表 · 浏览器与原生状态 · Dark ZH",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 9739,
+          "worldY": -656
+        }
+      ]
+    },
+    {
+      "pageId": "p-16-0",
+      "pageName": "D08A · Options Overview & Flow · Candidate R1",
+      "nodeCount": 1165,
+      "artboardCount": 10,
+      "artboards": [
+        {
+          "id": "1SIB-0",
+          "name": "A01 · Flow Command · Desktop 1440 · Dark EN",
+          "childCount": 5,
+          "width": 1440,
+          "height": 1160,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1Y3I-0",
+          "name": "A05 · Flow in shared shell · 1440 · Noir EN · DRAFT",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 3510,
+          "worldY": 0
+        },
+        {
+          "id": "21FC-0",
+          "name": "A09 · Flow evidence modal · 1280 · DRAFT",
+          "childCount": 3,
+          "width": 1280,
+          "height": null,
+          "worldX": 6440,
+          "worldY": 0
+        },
+        {
+          "id": "21KT-0",
+          "name": "A10 · Flow after evidence closes · 1280 · DRAFT",
+          "childCount": 2,
+          "width": 1280,
+          "height": null,
+          "worldX": 7800,
+          "worldY": 0
+        },
+        {
+          "id": "1SO0-0",
+          "name": "A03 · Source & Access State Atlas · 1440 · Dark EN",
+          "childCount": 2,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1STH-0",
+          "name": "A04 · Flow scan · Phone 390 · Dark EN",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "21Y1-0",
+          "name": "A11 · Tape filter draft · 390 · Source-default fixture · DRAFT",
+          "childCount": 5,
+          "width": 390,
+          "height": 844,
+          "worldX": 9160,
+          "worldY": 0
+        },
+        {
+          "id": "1Y9X-0",
+          "name": "A06 · Flow evidence & exact return · 390 · Noir EN · DRAFT",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 5030,
+          "worldY": 0
+        },
+        {
+          "id": "1YJQ-0",
+          "name": "A07 · Global navigation open · 390 · Noir EN · DRAFT",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 5500,
+          "worldY": 0
+        },
+        {
+          "id": "1YLD-0",
+          "name": "A08 · Options views open · 390 · Noir EN · DRAFT",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 5970,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-15-0",
+      "pageName": "00 · D08C · Read me & Build contract",
+      "nodeCount": 247,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "1S0R-0",
+          "name": "C00 · D08C Read me & Build contract / R2",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-14-0",
+      "pageName": "00 · Read me & Build contract · D08B",
+      "nodeCount": 42,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "1PVF-0",
+          "name": "B00 · Read me and build contract · R1",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1060,
+          "worldX": 0,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-13-0",
+      "pageName": "10 · D08C · Plan, Compare & Review · Candidate R2",
+      "nodeCount": 1262,
+      "artboardCount": 18,
+      "artboards": [
+        {
+          "id": "1NZZ-0",
+          "name": "C01 · Research plan / Expiry payoff / 1440 / Noir EN / R2",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1152,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1OGC-0",
+          "name": "C02 · Compare entry assumptions / 1440 / Noir EN / R2",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1100,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1OL8-0",
+          "name": "C03 · Revisit verified research / 1024 / Noir EN / R2",
+          "childCount": 1,
+          "width": 1024,
+          "height": 1056,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "1OUZ-0",
+          "name": "C04 · Research plan / 390 / Noir EN / R2",
+          "childCount": 1,
+          "width": 390,
+          "height": 844,
+          "worldX": 4144,
+          "worldY": 0
+        },
+        {
+          "id": "24AK-0",
+          "name": "C18 · Higher-entry plan / Payoff cleared / 390 full-scroll / Provisional",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 4144,
+          "worldY": 924
+        },
+        {
+          "id": "1OXF-0",
+          "name": "C05 · 研究计划 / 320 / Light ZH / R2",
+          "childCount": 1,
+          "width": 320,
+          "height": 1220,
+          "worldX": 4614,
+          "worldY": 0
+        },
+        {
+          "id": "1PU1-0",
+          "name": "C06 · Adjust assumptions / 768 / Light EN / R2",
+          "childCount": 1,
+          "width": 768,
+          "height": 1024,
+          "worldX": 5014,
+          "worldY": 0
+        },
+        {
+          "id": "23BH-0",
+          "name": "C11 · Choose comparison scenario / 768 / Light EN / Provisional",
+          "childCount": 1,
+          "width": 768,
+          "height": 1024,
+          "worldX": 5014,
+          "worldY": 1104
+        },
+        {
+          "id": "23K7-0",
+          "name": "C15 · Review interrupted / Same-owner draft changed / 768 / Provisional",
+          "childCount": 1,
+          "width": 768,
+          "height": 1024,
+          "worldX": 9772,
+          "worldY": 0
+        },
+        {
+          "id": "23DM-0",
+          "name": "C12 · Review higher-entry scenario / 768 / Light EN / Provisional",
+          "childCount": 1,
+          "width": 768,
+          "height": 1024,
+          "worldX": 5014,
+          "worldY": 2208
+        },
+        {
+          "id": "23FL-0",
+          "name": "C13 · Review lower-entry scenario / 768 / Light EN / Provisional",
+          "childCount": 1,
+          "width": 768,
+          "height": 1024,
+          "worldX": 5862,
+          "worldY": 2208
+        },
+        {
+          "id": "23IV-0",
+          "name": "C14 · Higher-entry draft applied / Payoff cleared / 768 / Provisional",
+          "childCount": 2,
+          "width": 768,
+          "height": 1024,
+          "worldX": 6710,
+          "worldY": 2208
+        },
+        {
+          "id": "1PXO-0",
+          "name": "C07 · Save & watch state specimens / Light EN / R2",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1944,
+          "worldX": 5862,
+          "worldY": 0
+        },
+        {
+          "id": "1Q8U-0",
+          "name": "C08 · Research states / Noir ZH / R2",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1200,
+          "worldX": 7382,
+          "worldY": 0
+        },
+        {
+          "id": "1RQJ-0",
+          "name": "C09 · Exact-leg editor / 390 / Noir EN / R2",
+          "childCount": 1,
+          "width": 390,
+          "height": 844,
+          "worldX": 8902,
+          "worldY": 0
+        },
+        {
+          "id": "2478-0",
+          "name": "C17 · Review higher entry / 390 full-scroll / Noir EN / Provisional",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 10620,
+          "worldY": 0
+        },
+        {
+          "id": "243N-0",
+          "name": "C16 · Choose entry scenario / 390 / Noir EN / Provisional",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 8902,
+          "worldY": 924
+        },
+        {
+          "id": "1RV0-0",
+          "name": "C10 · Research details / 320 / Light ZH / R2",
+          "childCount": 1,
+          "width": 320,
+          "height": 844,
+          "worldX": 9372,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-12-0",
+      "pageName": "D08B · Exposure & Volatility · Candidate R1",
+      "nodeCount": 2063,
+      "artboardCount": 17,
+      "artboards": [
+        {
+          "id": "1NZL-0",
+          "name": "B01 · Exposure + node · 1440 · Dark EN · R1",
+          "childCount": 9,
+          "width": 1440,
+          "height": 1050,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1OD3-0",
+          "name": "B02 · Exposure slice · 390 · Dark EN · R1",
+          "childCount": 9,
+          "width": 390,
+          "height": 1284,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1OD4-0",
+          "name": "B03 · Exact node · 320 · Light ZH · R1",
+          "childCount": 8,
+          "width": 320,
+          "height": 1310,
+          "worldX": 1990,
+          "worldY": 0
+        },
+        {
+          "id": "1OMF-0",
+          "name": "B04 · Expiry-led volatility · 1440 · Light EN · R1",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1050,
+          "worldX": 2390,
+          "worldY": 1430
+        },
+        {
+          "id": "1P0P-0",
+          "name": "B05 · 3D + exact slice · 1024 · Dark EN · R1",
+          "childCount": 6,
+          "width": 1024,
+          "height": 1060,
+          "worldX": 3910,
+          "worldY": 1430
+        },
+        {
+          "id": "1P85-0",
+          "name": "B06 · Exact 2D table · 768 · Light ZH · R1",
+          "childCount": 5,
+          "width": 768,
+          "height": 1140,
+          "worldX": 5014,
+          "worldY": 1430
+        },
+        {
+          "id": "1PBQ-0",
+          "name": "B07 · Matched change · 1440 · Dark EN · R1",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1050,
+          "worldX": 5862,
+          "worldY": 2690
+        },
+        {
+          "id": "1PG1-0",
+          "name": "B08 · Missing expiry · 390 · Light EN · R1",
+          "childCount": 6,
+          "width": 390,
+          "height": 1120,
+          "worldX": 7382,
+          "worldY": 2690
+        },
+        {
+          "id": "1PI4-0",
+          "name": "B09 · State and interaction atlas · Dark EN · R1",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1020,
+          "worldX": 1990,
+          "worldY": 2690
+        },
+        {
+          "id": "1Q0P-0",
+          "name": "B10 · Phone open research controls · 390 · Dark EN · R1",
+          "childCount": 5,
+          "width": 390,
+          "height": 1210,
+          "worldX": 2390,
+          "worldY": 0
+        },
+        {
+          "id": "1Q35-0",
+          "name": "B11 · Phone exact 2D and cell states · 390 · Dark EN · R1",
+          "childCount": 5,
+          "width": 390,
+          "height": 1310,
+          "worldX": 2860,
+          "worldY": 0
+        },
+        {
+          "id": "1QA0-0",
+          "name": "B12 · Interaction and state annotations · R1",
+          "childCount": 9,
+          "width": 1440,
+          "height": 1170,
+          "worldX": 3330,
+          "worldY": 0
+        },
+        {
+          "id": "1QC6-0",
+          "name": "B13 · Published chain 3D + table · 1440 · Dark EN · R1",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1220,
+          "worldX": 4850,
+          "worldY": 0
+        },
+        {
+          "id": "1QGP-0",
+          "name": "B14 · Levels and positioning context · 1440 · Light EN · R1",
+          "childCount": 7,
+          "width": 1440,
+          "height": 1120,
+          "worldX": 6370,
+          "worldY": 0
+        },
+        {
+          "id": "1QXD-0",
+          "name": "B15 · Rendered loading empty failure access · R1",
+          "childCount": 7,
+          "width": 1440,
+          "height": 1834,
+          "worldX": 7890,
+          "worldY": 0
+        },
+        {
+          "id": "1REL-0",
+          "name": "B16 · Nonzero cohort differences · 1440 · Dark EN · R1",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1120,
+          "worldX": 9410,
+          "worldY": 0
+        },
+        {
+          "id": "1RIU-0",
+          "name": "B17 · Exact contract and ambiguous terms · 390 · Light EN · R1",
+          "childCount": 5,
+          "width": 390,
+          "height": 1420,
+          "worldX": 10930,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-11-0",
+      "pageName": "00 · Read me & Build contract · D07 Company",
+      "nodeCount": 689,
+      "artboardCount": 14,
+      "artboards": [
+        {
+          "id": "1NFS-0",
+          "name": "D07 · Phase 2A · Read me & Build contract",
+          "childCount": 12,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1NH5-0",
+          "name": "D07 · Provisional task study A · 320 · Historical comparison",
+          "childCount": 10,
+          "width": 320,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "22CM-0",
+          "name": "D07 · Provisional Study I · 320 EN dark · Historical source & calculation",
+          "childCount": 9,
+          "width": 320,
+          "height": null,
+          "worldX": 6306,
+          "worldY": 0
+        },
+        {
+          "id": "22SU-0",
+          "name": "D07 · Provisional Study M · 320 ZH light · Historical source & calculation",
+          "childCount": 9,
+          "width": 320,
+          "height": null,
+          "worldX": 7906,
+          "worldY": 0
+        },
+        {
+          "id": "1NII-0",
+          "name": "D07 · Study B · 390 · Historical comparison",
+          "childCount": 10,
+          "width": 390,
+          "height": null,
+          "worldX": 1920,
+          "worldY": 0
+        },
+        {
+          "id": "1NPG-0",
+          "name": "D07 · Study F · 390 ZH light · Historical",
+          "childCount": 10,
+          "width": 390,
+          "height": null,
+          "worldX": 4966,
+          "worldY": 0
+        },
+        {
+          "id": "1NR7-0",
+          "name": "D07 · Study G · 320 ZH light · Historical",
+          "childCount": 10,
+          "width": 320,
+          "height": null,
+          "worldX": 5436,
+          "worldY": 0
+        },
+        {
+          "id": "1NJL-0",
+          "name": "D07 · Study C · Financials 664 + evidence 320",
+          "childCount": 2,
+          "width": 1008,
+          "height": null,
+          "worldX": 2390,
+          "worldY": 0
+        },
+        {
+          "id": "1NMQ-0",
+          "name": "D07 · Study D · Revenue FY2025 selected",
+          "childCount": 2,
+          "width": 1008,
+          "height": null,
+          "worldX": 3478,
+          "worldY": 0
+        },
+        {
+          "id": "1NPF-0",
+          "name": "D07 · Study E · 320 evidence return",
+          "childCount": 2,
+          "width": 320,
+          "height": null,
+          "worldX": 4566,
+          "worldY": 0
+        },
+        {
+          "id": "22LN-0",
+          "name": "D07 · Provisional Study L · 320 EN light · FY2024 history evidence",
+          "childCount": 2,
+          "width": 320,
+          "height": null,
+          "worldX": 7506,
+          "worldY": 0
+        },
+        {
+          "id": "22GR-0",
+          "name": "D07 · Provisional Study J · 320 EN light · Full history FY2025 selected",
+          "childCount": 2,
+          "width": 320,
+          "height": null,
+          "worldX": 6706,
+          "worldY": 0
+        },
+        {
+          "id": "22K0-0",
+          "name": "D07 · Provisional Study K · 320 EN light · Full history FY2024 selected",
+          "childCount": 2,
+          "width": 320,
+          "height": null,
+          "worldX": 7106,
+          "worldY": 0
+        },
+        {
+          "id": "1NSA-0",
+          "name": "D07 · Study H · 320 Financials chooser",
+          "childCount": 8,
+          "width": 320,
+          "height": null,
+          "worldX": 5906,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-V-0",
+      "pageName": "Options · Exposure Intelligence · R2 · 2026-10-20",
+      "nodeCount": 5217,
+      "artboardCount": 15,
+      "artboards": [
+        {
+          "id": "1GO5-0",
+          "name": "01 · R2 · Exposure Map · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1H4T-0",
+          "name": "02 · R2 · Price context · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1HWG-0",
+          "name": "03 · R2 · Replay · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 1000
+        },
+        {
+          "id": "1I64-0",
+          "name": "04 · R2 · Compare · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 1520,
+          "worldY": 1000
+        },
+        {
+          "id": "1IAD-0",
+          "name": "05 · R2 · Discover · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 3040,
+          "worldY": 1000
+        },
+        {
+          "id": "1IEM-0",
+          "name": "06 · R2 · 3D lab · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 4560,
+          "worldY": 1000
+        },
+        {
+          "id": "1IIV-0",
+          "name": "07 · R2 · Scenarios · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 6080,
+          "worldY": 1000
+        },
+        {
+          "id": "1IN4-0",
+          "name": "08 · R2 · Session review · Desktop 1440",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 7600,
+          "worldY": 1000
+        },
+        {
+          "id": "1HL2-0",
+          "name": "09 · R2 · Exposure Map · Mobile 390",
+          "childCount": 8,
+          "width": 390,
+          "height": 844,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "1SWN-0",
+          "name": "10 · By strike workspace · UX completion · 1440 · Dark EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1200,
+          "worldX": 9120,
+          "worldY": 1000
+        },
+        {
+          "id": "1TR5-0",
+          "name": "14 · By strike · Tablet · Dark EN",
+          "childCount": 1,
+          "width": 820,
+          "height": null,
+          "worldX": 12160,
+          "worldY": 1000
+        },
+        {
+          "id": "1TD2-0",
+          "name": "12 · By strike · Phone · Dark EN",
+          "childCount": 1,
+          "width": 390,
+          "height": null,
+          "worldX": 9120,
+          "worldY": 2280
+        },
+        {
+          "id": "1TK8-0",
+          "name": "13 · By strike · Phone · Light ZH",
+          "childCount": 1,
+          "width": 390,
+          "height": null,
+          "worldX": 9590,
+          "worldY": 2280
+        },
+        {
+          "id": "1T68-0",
+          "name": "11 · By strike · Desktop · Light EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1200,
+          "worldX": 10640,
+          "worldY": 1000
+        },
+        {
+          "id": "1TY2-0",
+          "name": "15 · By strike · Data and interaction states",
+          "childCount": 2,
+          "width": 1140,
+          "height": 1080,
+          "worldX": 13060,
+          "worldY": 1000
+        }
+      ]
+    },
+    {
+      "pageId": "p-U-0",
+      "pageName": "Options · Rotation & Positioning · R1 · 2026-10-20",
+      "nodeCount": 1212,
+      "artboardCount": 9,
+      "artboards": [
+        {
+          "id": "1DAR-0",
+          "name": "RP01 · Rotation & Positioning · Desktop · Illustrative",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1E0M-0",
+          "name": "RP02 · AAPL · Instrument investigation · Desktop · Illustrative",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1EWE-0",
+          "name": "RP03 · What changed in reported Gamma? · Desktop · Illustrative",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "1FCZ-0",
+          "name": "RP04 · AAPL · Flow investigation · Desktop · Illustrative",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "1FKT-0",
+          "name": "RP05 · AAPL · Volatility context · Desktop · Illustrative",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 6080,
+          "worldY": 0
+        },
+        {
+          "id": "1FTV-0",
+          "name": "RP06 · Save the investigation. Define the next question. · Desktop · Illustrative",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 7600,
+          "worldY": 0
+        },
+        {
+          "id": "1G0B-0",
+          "name": "RP07 · Rotation to holding · Mobile · Illustrative",
+          "childCount": 4,
+          "width": 390,
+          "height": 844,
+          "worldX": 9120,
+          "worldY": 0
+        },
+        {
+          "id": "1G4F-0",
+          "name": "RP08 · Instrument continuation · Mobile · Illustrative",
+          "childCount": 4,
+          "width": 390,
+          "height": 844,
+          "worldX": 9590,
+          "worldY": 0
+        },
+        {
+          "id": "1GEB-0",
+          "name": "RP09 · Evidence correction & recovery · Tablet light · Illustrative",
+          "childCount": 3,
+          "width": 768,
+          "height": 1024,
+          "worldX": 10060,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-T-0",
+      "pageName": "Options · Exposure Intelligence · TerraShade study · 2026-10-20",
+      "nodeCount": 1753,
+      "artboardCount": 9,
+      "artboards": [
+        {
+          "id": "1D9L-0",
+          "name": "01 · Exposure Map · Complete book concept",
+          "childCount": 7,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1DOH-0",
+          "name": "02 · Price context & historical replay",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1DPS-0",
+          "name": "03 · Cross-market comparison",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "1EOZ-0",
+          "name": "04 · Discover · Concentration and candidate screening",
+          "childCount": 6,
+          "width": 1440,
+          "height": 900,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "1EQD-0",
+          "name": "05 · 3D Research Lab · Exposure lens",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 6080,
+          "worldY": 0
+        },
+        {
+          "id": "1FBJ-0",
+          "name": "06 · Scenario Lab · Conditional hedge response",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 7600,
+          "worldY": 0
+        },
+        {
+          "id": "1FC9-0",
+          "name": "07 · Session review · Evidence and watch rules",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 9120,
+          "worldY": 0
+        },
+        {
+          "id": "1FMW-0",
+          "name": "08 · Data quality · Capability and source states",
+          "childCount": 7,
+          "width": 1440,
+          "height": 900,
+          "worldX": 10640,
+          "worldY": 0
+        },
+        {
+          "id": "1FUR-0",
+          "name": "09 · Mobile · Exposure investigation",
+          "childCount": 11,
+          "width": 390,
+          "height": 844,
+          "worldX": 12160,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-S-0",
+      "pageName": "Company · Production Suite · R3",
+      "nodeCount": 1652,
+      "artboardCount": 13,
+      "artboards": [
+        {
+          "id": "1BEK-0",
+          "name": "01 · R3 · Intelligence Brief · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1CD3-0",
+          "name": "06 · R3 · Lab Expectations · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1019,
+          "worldX": 7600,
+          "worldY": 0
+        },
+        {
+          "id": "1CIP-0",
+          "name": "07 · R3 · Lab Valuation · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1053,
+          "worldX": 9120,
+          "worldY": 0
+        },
+        {
+          "id": "1COB-0",
+          "name": "08 · R3 · Lab Replay · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1064,
+          "worldX": 10640,
+          "worldY": 0
+        },
+        {
+          "id": "1BKQ-0",
+          "name": "02 · R3 · Financials · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 946,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "1BQC-0",
+          "name": "03 · R3 · Earnings · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 960,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "1BVY-0",
+          "name": "04 · R3 · Market · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1170,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "1C1K-0",
+          "name": "05 · R3 · Ownership · Desktop",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1138,
+          "worldX": 6080,
+          "worldY": 0
+        },
+        {
+          "id": "1D9K-0",
+          "name": "09 · R3 · Expectations · Mobile · Provisional",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 12160,
+          "worldY": 0
+        },
+        {
+          "id": "28O8-0",
+          "name": "10 · R3 · Expectations · 320 · Provisional",
+          "childCount": 2,
+          "width": 320,
+          "height": 814,
+          "worldX": 0,
+          "worldY": 1158
+        },
+        {
+          "id": "28PK-0",
+          "name": "11 · R3 · 预期 · Mobile · Provisional",
+          "childCount": 2,
+          "width": 390,
+          "height": 814,
+          "worldX": 0,
+          "worldY": 1158
+        },
+        {
+          "id": "28PX-0",
+          "name": "12 · R3 · Period mismatch · Proposed",
+          "childCount": 2,
+          "width": 390,
+          "height": 709,
+          "worldX": 0,
+          "worldY": 1158
+        },
+        {
+          "id": "28RS-0",
+          "name": "13 · R3 · Mobile expectations · Build amendment",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1484,
+          "worldX": 0,
+          "worldY": 1158
+        }
+      ]
+    },
+    {
+      "pageId": "p-W-0",
+      "pageName": "Terminal · Chart Context · R1 · 2026-10-18",
+      "nodeCount": 1003,
+      "artboardCount": 2,
+      "artboards": [
+        {
+          "id": "1K9F-0",
+          "name": "01 · Chart Context · Desktop · Sidebar reader",
+          "childCount": 3,
+          "width": 1440,
+          "height": 900,
+          "worldX": -955,
+          "worldY": -656
+        },
+        {
+          "id": "1KNZ-0",
+          "name": "02 · Chart Context · Mobile · Below the chart",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 565,
+          "worldY": -656
+        }
+      ]
+    },
+    {
+      "pageId": "p-X-0",
+      "pageName": "Terminal Portfolio · Builder + Acceptance References",
+      "nodeCount": 249,
+      "artboardCount": 4,
+      "artboards": [
+        {
+          "id": "1L19-0",
+          "name": "07 · Product blueprint · Source census & Market Ontology destination",
+          "childCount": 4,
+          "width": 1440,
+          "height": 1120,
+          "worldX": -1480,
+          "worldY": -580
+        },
+        {
+          "id": "1L4E-0",
+          "name": "08 · States & interactions · Builder acceptance specimens",
+          "childCount": 4,
+          "width": 1440,
+          "height": 1160,
+          "worldX": 40,
+          "worldY": -580
+        },
+        {
+          "id": "216F-0",
+          "name": "09 · Current recovery references · 08 Nov 2026",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 1560,
+          "worldY": -580
+        },
+        {
+          "id": "26NL-0",
+          "name": "10 · Portfolio object & comparison references",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 3080,
+          "worldY": -580
+        }
+      ]
+    },
+    {
+      "pageId": "p-Y-0",
+      "pageName": "Terminal · Portfolio · Personal Desk · 2026-10-11",
+      "nodeCount": 1615,
+      "artboardCount": 8,
+      "artboards": [
+        {
+          "id": "1L71-0",
+          "name": "01 · Portfolio Overview · Current-data redesign",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1080,
+          "worldX": -2240,
+          "worldY": -1410
+        },
+        {
+          "id": "1LE4-0",
+          "name": "02 · Holdings · Record-level editing & coverage repair",
+          "childCount": 2,
+          "width": 1440,
+          "height": null,
+          "worldX": -720,
+          "worldY": -1410
+        },
+        {
+          "id": "1LLF-0",
+          "name": "03 · Risk & exposure · Honest coverage, not empty widgets",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 800,
+          "worldY": -1410
+        },
+        {
+          "id": "1LQD-0",
+          "name": "04 · Targets · Your allocation, never automated trade advice",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1080,
+          "worldX": -2240,
+          "worldY": -10
+        },
+        {
+          "id": "1LVI-0",
+          "name": "05 · Research · Market Ontology joined journey · FUTURE PREVIEW",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1160,
+          "worldX": -720,
+          "worldY": -10
+        },
+        {
+          "id": "1M0X-0",
+          "name": "06 · Mobile · Portfolio overview · 390px",
+          "childCount": 3,
+          "width": 390,
+          "height": 1420,
+          "worldX": 800,
+          "worldY": -10
+        },
+        {
+          "id": "1ZET-0",
+          "name": "08 · Portfolio targets · Read, retention and removal · DESIGN",
+          "childCount": 5,
+          "width": 1440,
+          "height": null,
+          "worldX": 3840,
+          "worldY": -1410
+        },
+        {
+          "id": "1Z0H-0",
+          "name": "07 · Portfolio · Record repair and recovery · DESIGN",
+          "childCount": 5,
+          "width": 1440,
+          "height": null,
+          "worldX": 2320,
+          "worldY": -1410
+        }
+      ]
+    },
+    {
+      "pageId": "p-1F-0",
+      "pageName": "Proposed · Portfolio objects & comparison",
+      "nodeCount": 459,
+      "artboardCount": 1,
+      "artboards": [
+        {
+          "id": "261Q-0",
+          "name": "PROPOSED · Portfolio objects & comparison · EN/ZH",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 9120,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-Z-0",
+      "pageName": "Terminal · R3 Refraction · Top-edge only",
+      "nodeCount": 386,
+      "artboardCount": 6,
+      "artboards": [
+        {
+          "id": "1M4U-0",
+          "name": "01 · REFRACTION · Actual Terminal context",
+          "childCount": 2,
+          "width": 1440,
+          "height": 900,
+          "worldX": -1715,
+          "worldY": -450
+        },
+        {
+          "id": "1M53-0",
+          "name": "02 · REFRACTION · Original mobile sheet",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": -195,
+          "worldY": -450
+        },
+        {
+          "id": "1M58-0",
+          "name": "03 · REFRACTION · Material and motion detail",
+          "childCount": 4,
+          "width": 1440,
+          "height": 650,
+          "worldX": 275,
+          "worldY": -450
+        },
+        {
+          "id": "1MFJ-0",
+          "name": "REJECTED · R2 grey wave · Desktop",
+          "childCount": 3,
+          "width": 1440,
+          "height": 900,
+          "worldX": -1715,
+          "worldY": 714
+        },
+        {
+          "id": "1ML8-0",
+          "name": "REJECTED · R2 grey wave · Mobile",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": -195,
+          "worldY": 714
+        },
+        {
+          "id": "1MNZ-0",
+          "name": "REJECTED · R2 grey-wave specification",
+          "childCount": 6,
+          "width": 1440,
+          "height": 720,
+          "worldX": 275,
+          "worldY": 714
+        }
+      ]
+    },
+    {
+      "pageId": "p-10-0",
+      "pageName": "Terminal · Account & settings · 2026-10-11",
+      "nodeCount": 288,
+      "artboardCount": 2,
+      "artboards": [
+        {
+          "id": "1MP2-0",
+          "name": "REJECTED · Entire-pane redesign · Desktop",
+          "childCount": 3,
+          "width": 1440,
+          "height": 900,
+          "worldX": -955,
+          "worldY": -491
+        },
+        {
+          "id": "1MU2-0",
+          "name": "REJECTED · Entire-pane redesign · Mobile",
+          "childCount": 1,
+          "width": 390,
+          "height": null,
+          "worldX": 565,
+          "worldY": -491
+        }
+      ]
+    },
+    {
+      "pageId": "p-Q-0",
+      "pageName": "Returns Calendar · Terminal + Stock Dossier",
+      "nodeCount": 756,
+      "artboardCount": 11,
+      "artboards": [
+        {
+          "id": "1BBQ-0",
+          "name": "START HERE · Returns Calendar · Terminal + Dossier",
+          "childCount": 4,
+          "width": 1440,
+          "height": 680,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "1AVD-0",
+          "name": "00 · Returns Calendar · Stock Dossier · Desktop",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1000,
+          "worldX": 0,
+          "worldY": 900
+        },
+        {
+          "id": "1AZW-0",
+          "name": "01 · Returns Calendar · Stock Dossier · Mobile",
+          "childCount": 1,
+          "width": 390,
+          "height": 844,
+          "worldX": 1520,
+          "worldY": 900
+        },
+        {
+          "id": "1B3F-0",
+          "name": "02 · HISTORICAL Early Close · Superseded 20:00 fixture",
+          "childCount": 1,
+          "width": 760,
+          "height": 440,
+          "worldX": 1990,
+          "worldY": 900
+        },
+        {
+          "id": "1B4J-0",
+          "name": "03 · Returns Calendar · Rail Entry · 360",
+          "childCount": 1,
+          "width": 360,
+          "height": 320,
+          "worldX": 1450,
+          "worldY": 2250
+        },
+        {
+          "id": "1B5H-0",
+          "name": "HOLD · v2 Desktop 613W-0 · source p-15",
+          "childCount": 0,
+          "width": 1440,
+          "height": 900,
+          "worldX": 3000,
+          "worldY": 2250
+        },
+        {
+          "id": "1B5I-0",
+          "name": "05 · HISTORICAL Returns v2 · 390 Expansion Concept",
+          "childCount": 1,
+          "width": 390,
+          "height": 1290,
+          "worldX": 0,
+          "worldY": 2250
+        },
+        {
+          "id": "28FS-0",
+          "name": "08 · Returns current source · Early close 17:00 · 390 phone",
+          "childCount": 1,
+          "width": 390,
+          "height": 1290,
+          "worldX": 0,
+          "worldY": 3620
+        },
+        {
+          "id": "1BAE-0",
+          "name": "06 · HISTORICAL Returns v2 · Sessions + Recovery Concept",
+          "childCount": 1,
+          "width": 900,
+          "height": 620,
+          "worldX": 470,
+          "worldY": 2250
+        },
+        {
+          "id": "28BZ-0",
+          "name": "07 · Returns current source · Early close 17:00 · Values unavailable",
+          "childCount": 1,
+          "width": 900,
+          "height": 620,
+          "worldX": 470,
+          "worldY": 2950
+        },
+        {
+          "id": "28LZ-0",
+          "name": "09 · Returns current source · Loading, pending, closed and unavailable",
+          "childCount": 1,
+          "width": 900,
+          "height": 620,
+          "worldX": 1450,
+          "worldY": 2950
+        }
+      ]
+    },
+    {
+      "pageId": "p-P-1",
+      "pageName": "Options · Build Contracts + Source Proof · Reference",
+      "nodeCount": 987,
+      "artboardCount": 12,
+      "artboards": [
+        {
+          "id": "CVN-0",
+          "name": "00 · R6 · Read first · Tested + integration gates",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1400,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "FN2-0",
+          "name": "N90 · BUILD ATLAS · Journey, contracts and implementation map",
+          "childCount": 6,
+          "width": 1440,
+          "height": 2420,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "FPC-0",
+          "name": "N91 · SCIENCE + SOURCES · Signals, formulas and release gates",
+          "childCount": 6,
+          "width": 1440,
+          "height": 2540,
+          "worldX": 0,
+          "worldY": 2860
+        },
+        {
+          "id": "G6A-0",
+          "name": "N92 · Builder atlas · Plan Watch Review contracts and state receipts · R1",
+          "childCount": 1,
+          "width": 1440,
+          "height": 3400,
+          "worldX": 1520,
+          "worldY": 2860
+        },
+        {
+          "id": "EJ5-0",
+          "name": "90 · HOLD · Expiry comparison · Unfinished shell",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1024,
+          "worldX": 3040,
+          "worldY": 2860
+        },
+        {
+          "id": "KOW-0",
+          "name": "HOLD · N11 comparison guard · Empty shell · NOT FOR BUILD",
+          "childCount": 0,
+          "width": 560,
+          "height": 1000,
+          "worldX": 4560,
+          "worldY": 2860
+        },
+        {
+          "id": "KOX-0",
+          "name": "N94 · Compare contracts · PARTIAL source card / integration proof owed",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1600,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "LIJ-1",
+          "name": "N95 · Capture Verify Reopen · Builder map",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 6700
+        },
+        {
+          "id": "M89-1",
+          "name": "N96 · Evidence qualification · Build + research",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 9680
+        },
+        {
+          "id": "OND-1",
+          "name": "N97 · Inspector states + source contract · Builder atlas",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 9680
+        },
+        {
+          "id": "HD6-0",
+          "name": "N93 · Scenario build contract · 2026-09-28",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 6700
+        },
+        {
+          "id": "V0K-0",
+          "name": "V04 · Volatility · Source-linked build contract · R1",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 6700
+        }
+      ]
+    },
+    {
+      "pageId": "p-O-1",
+      "pageName": "Market Heatmaps · Saved Views + Recovery · R7–R8",
+      "nodeCount": 837,
+      "artboardCount": 14,
+      "artboards": [
+        {
+          "id": "TQ2-0",
+          "name": "25 · R7 · Mobile Save Choice · Fixed Company",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "TS6-0",
+          "name": "26 · R7 · Mobile Save Choice · Live Filter",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 0
+        },
+        {
+          "id": "TUE-0",
+          "name": "27 · R7 · Mobile Save Pending · One Request",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 0
+        },
+        {
+          "id": "TW0-0",
+          "name": "28 · R7 · Mobile Save Unknown · Check Original Request",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 0
+        },
+        {
+          "id": "TXO-0",
+          "name": "29 · R7 · Mobile Save Confirmed · Exact Fixed Group",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1550
+        },
+        {
+          "id": "TZC-0",
+          "name": "30 · R7 · Mobile Save Rejected · Draft Preserved",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 1550
+        },
+        {
+          "id": "U0X-0",
+          "name": "31 · R7 · Mobile Preview Outdated · Review Before Apply",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 1550
+        },
+        {
+          "id": "U2M-0",
+          "name": "32 · R7 · Mobile Refreshed Preview · Same Count New Company",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 1550
+        },
+        {
+          "id": "U68-0",
+          "name": "33 · R7 · Mobile Updated Result · WDC and Reversible Filter",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 3190
+        },
+        {
+          "id": "UDE-0",
+          "name": "34 · R8 · Mobile Saved Views · Resume and Recover",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 3190
+        },
+        {
+          "id": "UFD-0",
+          "name": "35 · R8 · Mobile Private Views · Authentication Boundary",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 940,
+          "worldY": 3190
+        },
+        {
+          "id": "UGO-0",
+          "name": "36 · R8 · Mobile Reopened Live Filter · Zero Observed Matches",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 3190
+        },
+        {
+          "id": "UIW-0",
+          "name": "37 · R8 · Mobile Live Refresh Unavailable · Not Zero Matches",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4740
+        },
+        {
+          "id": "28BB-0",
+          "name": "38 · Build · Heatmap save and recovery",
+          "childCount": 4,
+          "width": 1310,
+          "height": null,
+          "worldX": null,
+          "worldY": null
+        }
+      ]
+    },
+    {
+      "pageId": "p-N-1",
+      "pageName": "Market Heatmaps · Mobile Atlas + Comparison · R6",
+      "nodeCount": 712,
+      "artboardCount": 8,
+      "artboards": [
+        {
+          "id": "SCZ-0",
+          "name": "17 · R6 · Mobile Atlas · Semiconductors",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "SGC-0",
+          "name": "18 · R6 · Mobile Memory · Full Four",
+          "childCount": 6,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 0
+        },
+        {
+          "id": "SIT-0",
+          "name": "19 · R6 · Mobile Memory · Matched Change",
+          "childCount": 6,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 0
+        },
+        {
+          "id": "SOG-0",
+          "name": "20 · R6 · Mobile MU Inspector · Return to Comparison",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 0
+        },
+        {
+          "id": "STD-0",
+          "name": "21 · R6 · Mobile Filter Preview · All Four Accounted For",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1700
+        },
+        {
+          "id": "SVM-0",
+          "name": "22 · R6 · Mobile Applied Result · Undo to Four",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 1700
+        },
+        {
+          "id": "SXB-0",
+          "name": "23 · R6 · Mobile Reopened Fixed Group · Membership Not Prices",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 1700
+        },
+        {
+          "id": "SZ2-0",
+          "name": "24 · R6 · Tablet Memory Comparison · Context Beside Company",
+          "childCount": 5,
+          "width": 768,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 1700
+        }
+      ]
+    },
+    {
+      "pageId": "p-M-1",
+      "pageName": "Company R2 · Chinese Mobile + 320px Variants",
+      "nodeCount": 3433,
+      "artboardCount": 18,
+      "artboards": [
+        {
+          "id": "AS7-0",
+          "name": "24 · R2 · Mobile Brief · Dark ZH",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 4340.997,
+          "worldY": -2971.985
+        },
+        {
+          "id": "AYN-0",
+          "name": "25 · R2 · Mobile Evidence · Dark ZH",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 4810.999,
+          "worldY": -2971.985
+        },
+        {
+          "id": "B63-0",
+          "name": "26 · R2 · Mobile Brief · Light ZH",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 5281,
+          "worldY": -2971.985
+        },
+        {
+          "id": "BCJ-0",
+          "name": "27 · R2 · Mobile Evidence · Light ZH",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 5751.001,
+          "worldY": -2971.985
+        },
+        {
+          "id": "11UI-0",
+          "name": "63 · R2 · Mobile Results + Analysis · Light ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 17525,
+          "worldY": -15400
+        },
+        {
+          "id": "11XD-0",
+          "name": "64 · R2 · Mobile Research + Relationships · Light ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 17995.001,
+          "worldY": -15400
+        },
+        {
+          "id": "120Q-0",
+          "name": "65 · R2 · Mobile Results + Analysis · Dark ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 17525,
+          "worldY": -13287
+        },
+        {
+          "id": "123K-0",
+          "name": "66 · R2 · Mobile Research + Relationships · Dark ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 18465.002,
+          "worldY": -15400
+        },
+        {
+          "id": "17TO-0",
+          "name": "108 · R2 · Mobile Expectations · Light ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 6221.002,
+          "worldY": -2972
+        },
+        {
+          "id": "17Z2-0",
+          "name": "109 · R2 · Mobile Expectations · Dark ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 6690.997,
+          "worldY": -2972
+        },
+        {
+          "id": "2131-0",
+          "name": "PRODUCT REFERENCES · Mobile call and source states · 中文",
+          "childCount": 4,
+          "width": 1800,
+          "height": 2101,
+          "worldX": 18935,
+          "worldY": -15400
+        },
+        {
+          "id": "181U-0",
+          "name": "110 · R2 · Mobile Valuation Lab · Light ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": -5669,
+          "worldY": 2820.001
+        },
+        {
+          "id": "185T-0",
+          "name": "111 · R2 · Mobile Valuation Lab · Dark ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": -5198.999,
+          "worldY": 2820.001
+        },
+        {
+          "id": "16Z7-0",
+          "name": "103 · R2 · 320 · Results + Analysis · Light ZH",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 22915.002,
+          "worldY": -13163
+        },
+        {
+          "id": "16Z8-0",
+          "name": "104 · R2 · 320 · Research + Evidence · Light ZH",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": -6789.001,
+          "worldY": -10892.001
+        },
+        {
+          "id": "175F-0",
+          "name": "105 · R2 · 320 · Results + Analysis · Dark ZH",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 22915.002,
+          "worldY": -10907.999
+        },
+        {
+          "id": "1787-0",
+          "name": "106 · R2 · 320 · Research + Evidence · Dark ZH",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": -6789.001,
+          "worldY": -8404.001
+        },
+        {
+          "id": "18CG-0",
+          "name": "113 · R2 · Mobile Company Change Ledger · Light ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 3428.998,
+          "worldY": -1179.001
+        }
+      ]
+    },
+    {
+      "pageId": "p-L-1",
+      "pageName": "Company R2 · C01 Source, Lineage + Evidence States",
+      "nodeCount": 3308,
+      "artboardCount": 14,
+      "artboards": [
+        {
+          "id": "KY3-1",
+          "name": "17 · R2 STATE · Desktop C01 Evidence · Dark ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 5581,
+          "worldY": -9372
+        },
+        {
+          "id": "N87-1",
+          "name": "22 · R2 STATE · Desktop C01 Sources · Dark ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 13181,
+          "worldY": -9372
+        },
+        {
+          "id": "NEF-1",
+          "name": "23 · R2 STATE · Desktop C01 Lineage · Dark ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 14701.001,
+          "worldY": -9372
+        },
+        {
+          "id": "PZZ-0",
+          "name": "38 · R2 STATE · Desktop C01 Source Access Restricted · Dark ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 16221.002,
+          "worldY": -8151.999
+        },
+        {
+          "id": "Q6K-0",
+          "name": "39 · R2 STATE · Desktop C01 Revision History Unavailable · Dark ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 17740.997,
+          "worldY": -8151.999
+        },
+        {
+          "id": "LTD-1",
+          "name": "19 · R2 STATE · Desktop C01 Evidence · Light ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 8621.002,
+          "worldY": -9372
+        },
+        {
+          "id": "MAS-1",
+          "name": "20 · R2 STATE · Desktop C01 Sources · Light ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 10140.997,
+          "worldY": -9372
+        },
+        {
+          "id": "P9W-0",
+          "name": "28 · R2 STATE · Desktop C01 Source Access Restricted · Light ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 16221.002,
+          "worldY": -9372
+        },
+        {
+          "id": "MH0-1",
+          "name": "21 · R2 STATE · Desktop C01 Lineage · Light ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 11660.999,
+          "worldY": -9372
+        },
+        {
+          "id": "TBM-0",
+          "name": "41 · R2 STATE · Desktop C01 Context Changed · Dark ZH",
+          "childCount": 11,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 19260.999,
+          "worldY": -8151.999
+        },
+        {
+          "id": "T4X-0",
+          "name": "40 · R2 STATE · Desktop C01 Context Changed · Light ZH",
+          "childCount": 11,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 19260.999,
+          "worldY": -9372
+        },
+        {
+          "id": "PGG-0",
+          "name": "29 · R2 STATE · Desktop C01 Revision History Unavailable · Light ZH",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 17740.997,
+          "worldY": -9372
+        },
+        {
+          "id": "NOA-1",
+          "name": "24 · BUILDER · C01 Evidence Drawer + Invalidation Contract",
+          "childCount": 5,
+          "width": 1440,
+          "height": 1980,
+          "worldX": -3098.999,
+          "worldY": -11872
+        },
+        {
+          "id": "U2C-0",
+          "name": "42 · C01 · Review + Recalculation Outcomes",
+          "childCount": 3,
+          "width": 1760,
+          "height": null,
+          "worldX": 2565.002,
+          "worldY": -11997
+        }
+      ]
+    },
+    {
+      "pageId": "p-K-1",
+      "pageName": "Company R2 · Tablet Brief + Evidence Variants",
+      "nodeCount": 1763,
+      "artboardCount": 10,
+      "artboards": [
+        {
+          "id": "9JY-0",
+          "name": "30 · R2 · Tablet Brief · Light EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "13ZO-0",
+          "name": "84 · R2 · Tablet Results + Analysis · Light EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 0,
+          "worldY": 5400
+        },
+        {
+          "id": "144G-0",
+          "name": "85 · R2 · Tablet Research + Relationships · Light EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 848,
+          "worldY": 5400
+        },
+        {
+          "id": "9OQ-0",
+          "name": "31 · R2 · Tablet Evidence · Light EN",
+          "childCount": 5,
+          "width": 768,
+          "height": 1024,
+          "worldX": 0,
+          "worldY": 3440
+        },
+        {
+          "id": "9UJ-0",
+          "name": "APP UI · Tablet Brief · 768px content flow",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 848,
+          "worldY": 0
+        },
+        {
+          "id": "9ZO-0",
+          "name": "APP UI · Tablet Evidence · 768 × 1024",
+          "childCount": 5,
+          "width": 768,
+          "height": 1024,
+          "worldX": 848,
+          "worldY": 3440
+        },
+        {
+          "id": "A5T-0",
+          "name": "APP UI · 中文平板简报 · 768px",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 1696,
+          "worldY": 0
+        },
+        {
+          "id": "AAX-0",
+          "name": "APP UI · 中文平板证据 · 768 × 1024",
+          "childCount": 5,
+          "width": 768,
+          "height": 1024,
+          "worldX": 1696,
+          "worldY": 3440
+        },
+        {
+          "id": "AH0-0",
+          "name": "APP UI · 中文平板简报 · Dark · 768px",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 2544,
+          "worldY": 0
+        },
+        {
+          "id": "AM4-0",
+          "name": "APP UI · 中文平板证据 · Dark · 768 × 1024",
+          "childCount": 5,
+          "width": 768,
+          "height": 1024,
+          "worldX": 2544,
+          "worldY": 3440
+        }
+      ]
+    },
+    {
+      "pageId": "p-J-1",
+      "pageName": "Company R2 · Mobile + Narrow-Screen Variants",
+      "nodeCount": 3835,
+      "artboardCount": 34,
+      "artboards": [
+        {
+          "id": "8RC-0",
+          "name": "20 · COMPANY · Mobile Brief · R2",
+          "childCount": 7,
+          "width": 390,
+          "height": 1400,
+          "worldX": -6139.001,
+          "worldY": -2971.985
+        },
+        {
+          "id": "VK9-0",
+          "name": "45 · R2 · Mobile Results + Outlook · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -6139.001,
+          "worldY": -1492.001
+        },
+        {
+          "id": "10XZ-0",
+          "name": "56 · R2 · Mobile Peer Comparison · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 13934.998,
+          "worldY": -15400
+        },
+        {
+          "id": "108O-0",
+          "name": "54 · R2 · Mobile Connected Drivers · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 11945.001,
+          "worldY": -15400
+        },
+        {
+          "id": "WRM-0",
+          "name": "52 · R2 · Mobile Event Research · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 11475,
+          "worldY": -15400
+        },
+        {
+          "id": "1540-0",
+          "name": "90 · R2 · Mobile Peer Comparison · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 13934.998,
+          "worldY": -12769
+        },
+        {
+          "id": "150E-0",
+          "name": "89 · R2 · Mobile Connected Drivers · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 11945.001,
+          "worldY": -12537
+        },
+        {
+          "id": "14XK-0",
+          "name": "88 · R2 · Mobile Event Research · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -7259,
+          "worldY": -10892.001
+        },
+        {
+          "id": "12DM-0",
+          "name": "68 · R2 · Mobile Call + Q&A · Transcript Unavailable · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 20454.999,
+          "worldY": -15400
+        },
+        {
+          "id": "12SI-0",
+          "name": "70 · R2 · Mobile Sources + Coverage · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 22445.001,
+          "worldY": -15400
+        },
+        {
+          "id": "WON-0",
+          "name": "51 · R2 · Mobile Margin Reconciliation · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 11004.999,
+          "worldY": -15400
+        },
+        {
+          "id": "WJ9-0",
+          "name": "50 · R2 · Mobile Revenue Drivers · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -6139.001,
+          "worldY": 614.001
+        },
+        {
+          "id": "VP4-0",
+          "name": "46 · R2 · Mobile Cash Reconciliation · Light EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -5669,
+          "worldY": -1492.001
+        },
+        {
+          "id": "14KG-0",
+          "name": "84 · R2 · Mobile Results + Outlook · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -1578.998,
+          "worldY": -11872
+        },
+        {
+          "id": "14TR-0",
+          "name": "87 · R2 · Mobile Margin Reconciliation · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -1109.003,
+          "worldY": -11872
+        },
+        {
+          "id": "14QF-0",
+          "name": "86 · R2 · Mobile Revenue Drivers · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -6139.001,
+          "worldY": 2820.001
+        },
+        {
+          "id": "14NA-0",
+          "name": "85 · R2 · Mobile Cash Reconciliation · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -5198.999,
+          "worldY": -1492.001
+        },
+        {
+          "id": "8U5-0",
+          "name": "21 · COMPANY · Mobile Evidence Sheet · R2",
+          "childCount": 3,
+          "width": 390,
+          "height": 900,
+          "worldX": -5669,
+          "worldY": -2971.985
+        },
+        {
+          "id": "1193-0",
+          "name": "57 · R2 · 320 · Results + Analysis · Light EN",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 15925,
+          "worldY": -15400
+        },
+        {
+          "id": "11BV-0",
+          "name": "58 · R2 · 320 · Research + Relationships · Light EN",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 16325,
+          "worldY": -15400
+        },
+        {
+          "id": "11L5-0",
+          "name": "61 · R2 · 320 · 200% Text · Results + Analysis",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 17125,
+          "worldY": -15400
+        },
+        {
+          "id": "11NW-0",
+          "name": "62 · R2 · 320 · 200% Text · Research + Relationships",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 16325,
+          "worldY": -12697
+        },
+        {
+          "id": "11F5-0",
+          "name": "59 · R2 · 320 · Results + Analysis · Dark EN",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 15925,
+          "worldY": -13331
+        },
+        {
+          "id": "11HW-0",
+          "name": "60 · R2 · 320 · Research + Relationships · Dark EN",
+          "childCount": 4,
+          "width": 320,
+          "height": null,
+          "worldX": 16725,
+          "worldY": -15400
+        },
+        {
+          "id": "12XV-0",
+          "name": "71 · R2 · Mobile Expectations · Light EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 22915.002,
+          "worldY": -15400
+        },
+        {
+          "id": "130P-0",
+          "name": "73 · R2 · Mobile Valuation Lab · Light EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 20925,
+          "worldY": -13435.001
+        },
+        {
+          "id": "137H-0",
+          "name": "75 · R2 · Mobile Sources + Coverage · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 22445.001,
+          "worldY": -13163
+        },
+        {
+          "id": "134P-0",
+          "name": "74 · R2 · Mobile Expectations · Dark EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 21395.001,
+          "worldY": -13435.001
+        },
+        {
+          "id": "13B4-0",
+          "name": "76 · R2 · Mobile Valuation Lab · Dark EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 21865.002,
+          "worldY": -13435.001
+        },
+        {
+          "id": "13F3-0",
+          "name": "77 · R2 · Mobile Research Watch · Activation + Recovery",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 7965.002,
+          "worldY": -13131
+        },
+        {
+          "id": "13HS-0",
+          "name": "78 · R2 · Mobile Call + Q&A · Transcript Unavailable · Dark EN",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 8434.998,
+          "worldY": -13131
+        },
+        {
+          "id": "13KA-0",
+          "name": "79 · R2 · Mobile Research Watch · Activation + Recovery · Dark EN",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 8904.999,
+          "worldY": -13131
+        },
+        {
+          "id": "17G6-0",
+          "name": "103 · R2 · Mobile Company Change Ledger · Light EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 7581,
+          "worldY": -6072
+        },
+        {
+          "id": "17Q2-0",
+          "name": "105 · R2 · Mobile Company Change Ledger · Dark EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 7581,
+          "worldY": -3153
+        }
+      ]
+    },
+    {
+      "pageId": "p-I-1",
+      "pageName": "Terminal · Intelligence Workspace · 2026-10",
+      "nodeCount": 2483,
+      "artboardCount": 15,
+      "artboards": [
+        {
+          "id": "19BB-1",
+          "name": "00 · REFERENCE · Previous intelligence design (preserved)",
+          "childCount": 2,
+          "width": 1600,
+          "height": 1000,
+          "worldX": 0,
+          "worldY": 3850
+        },
+        {
+          "id": "19IC-1",
+          "name": "01 · R3 · Terminal-native · Desktop Summary",
+          "childCount": 2,
+          "width": 1600,
+          "height": 1000,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "19WI-1",
+          "name": "02 · R3 · Terminal-native · Oracle Detail",
+          "childCount": 2,
+          "width": 1600,
+          "height": 1000,
+          "worldX": 1680,
+          "worldY": 0
+        },
+        {
+          "id": "19PG-1",
+          "name": "03 · R3 · Terminal-native · Research Detail",
+          "childCount": 2,
+          "width": 1600,
+          "height": 1000,
+          "worldX": 0,
+          "worldY": 1300
+        },
+        {
+          "id": "1A3O-1",
+          "name": "04 · R3 · Terminal-native · Activity",
+          "childCount": 2,
+          "width": 1600,
+          "height": 1000,
+          "worldX": 1680,
+          "worldY": 1300
+        },
+        {
+          "id": "1AAY-1",
+          "name": "05 · R3 · Terminal-native · Compact Focus",
+          "childCount": 2,
+          "width": 1144,
+          "height": 900,
+          "worldX": 3360,
+          "worldY": 0
+        },
+        {
+          "id": "1AEB-1",
+          "name": "06 · R3 · Terminal-native · Mobile Summary",
+          "childCount": 5,
+          "width": 390,
+          "height": 844,
+          "worldX": 0,
+          "worldY": 2600
+        },
+        {
+          "id": "1AH7-1",
+          "name": "07 · R3 · Terminal-native · Mobile Oracle",
+          "childCount": 5,
+          "width": 390,
+          "height": 844,
+          "worldX": 470,
+          "worldY": 2600
+        },
+        {
+          "id": "1AKB-1",
+          "name": "08 · R3 · Terminal-native · Mobile Research",
+          "childCount": 5,
+          "width": 390,
+          "height": 844,
+          "worldX": 940,
+          "worldY": 2600
+        },
+        {
+          "id": "1AN7-1",
+          "name": "09 · R3 · Terminal-native · Mobile Activity",
+          "childCount": 5,
+          "width": 390,
+          "height": 844,
+          "worldX": 1410,
+          "worldY": 2600
+        },
+        {
+          "id": "1AQG-0",
+          "name": "10 · R3 · Terminal × Intelligence · Design Language",
+          "childCount": 3,
+          "width": 1440,
+          "height": 900,
+          "worldX": 1680,
+          "worldY": 3850
+        },
+        {
+          "id": "1MX1-0",
+          "name": "R4 · Stock Intelligence · AMZN · Summary, Oracle, Research & Activity",
+          "childCount": 1,
+          "width": 1776,
+          "height": 808,
+          "worldX": 4584,
+          "worldY": 0
+        },
+        {
+          "id": "1NT3-0",
+          "name": "R5 · Intelligence Command Deck · Desktop · Noir EN",
+          "childCount": 2,
+          "width": 1600,
+          "height": 980,
+          "worldX": 6440,
+          "worldY": 0
+        },
+        {
+          "id": "1NXH-0",
+          "name": "R5 · Intelligence Mobile · Noir EN · Summary & Freshness",
+          "childCount": 10,
+          "width": 390,
+          "height": 844,
+          "worldX": 8120,
+          "worldY": 0
+        },
+        {
+          "id": "1SNP-0",
+          "name": "R6 · Evidence Desk · Summary + Explorer · EN",
+          "childCount": 2,
+          "width": 1040,
+          "height": 900,
+          "worldX": 8590,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-H-0",
+      "pageName": "13 · Options · 3D Research Lab",
+      "nodeCount": 1049,
+      "artboardCount": 7,
+      "artboards": [
+        {
+          "id": "18G0-0",
+          "name": "3D01 · Chain Observatory · Desktop · Synthetic design",
+          "childCount": 4,
+          "width": 1440,
+          "height": 1100,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "18OH-0",
+          "name": "3D02 · Volatility Terrain · Synthetic study",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1000,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "18TJ-0",
+          "name": "3D03 · Replay and Change · Synthetic study",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1100,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "18XX-0",
+          "name": "3D04 · Flow and Package Investigation · Synthetic study",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1060,
+          "worldX": 0,
+          "worldY": 1400
+        },
+        {
+          "id": "192N-0",
+          "name": "3D05 · Scenario Lab · Entry-cost robustness · Synthetic study",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1060,
+          "worldX": 1520,
+          "worldY": 1400
+        },
+        {
+          "id": "196F-0",
+          "name": "3D06 · Mobile · Exact slice and contract sheet · Synthetic study",
+          "childCount": 7,
+          "width": 390,
+          "height": 844,
+          "worldX": 0,
+          "worldY": 2800
+        },
+        {
+          "id": "199N-0",
+          "name": "3D07 · Sources, Models and Unavailable States · Tablet light",
+          "childCount": 2,
+          "width": 820,
+          "height": 1180,
+          "worldX": 470,
+          "worldY": 2800
+        }
+      ]
+    },
+    {
+      "pageId": "p-G-0",
+      "pageName": "12 · SOURCE ONLY · Terminal Live Baselines",
+      "nodeCount": 1658,
+      "artboardCount": 3,
+      "artboards": [
+        {
+          "id": "20L9-0",
+          "name": "SOURCE ONLY · 03 · Terminal · Chart workspace template",
+          "childCount": 15,
+          "width": 1440,
+          "height": 1400,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "ZG7-0",
+          "name": "SOURCE ONLY · 09 · Terminal Options · Exposure → Levels",
+          "childCount": 1,
+          "width": null,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "ZMW-0",
+          "name": "SOURCE ONLY · Terminal Options · Gamma · Design fixture",
+          "childCount": 2,
+          "width": null,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-F-0",
+      "pageName": "11 · Company · Earnings + Dossiers · North Star Study",
+      "nodeCount": 698,
+      "artboardCount": 5,
+      "artboards": [
+        {
+          "id": "YE5-0",
+          "name": "00 · FLOW MAP · Earnings + Dossiers Journey",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "YEK-0",
+          "name": "10 · DESKTOP · Earnings Command Center",
+          "childCount": 2,
+          "width": null,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1600
+        },
+        {
+          "id": "YKI-0",
+          "name": "11 · DESKTOP · Company Event Workspace",
+          "childCount": 2,
+          "width": null,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 1600
+        },
+        {
+          "id": "YQ6-0",
+          "name": "12 · DESKTOP · Dossier Directory",
+          "childCount": 2,
+          "width": null,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 1600
+        },
+        {
+          "id": "YUD-0",
+          "name": "13 · DESKTOP · Company Dossier",
+          "childCount": 2,
+          "width": null,
+          "height": null,
+          "worldX": 4560,
+          "worldY": 1600
+        }
+      ]
+    },
+    {
+      "pageId": "p-E-0",
+      "pageName": "10 · Retained Shared Shell · Stocks + Setups",
+      "nodeCount": 942,
+      "artboardCount": 8,
+      "artboards": [
+        {
+          "id": "XOA-0",
+          "name": "09 · DESKTOP · Stocks + Setups · Base",
+          "childCount": 2,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 1000
+        },
+        {
+          "id": "XW1-0",
+          "name": "09A · R16 STATE of 09 · Desktop · Watchlist Dialog",
+          "childCount": 3,
+          "width": 1440,
+          "height": 900,
+          "worldX": 1520,
+          "worldY": 1000
+        },
+        {
+          "id": "Y41-0",
+          "name": "37 · R12 · PARTIAL · Desktop · Setup Review",
+          "childCount": 2,
+          "width": null,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 1000
+        },
+        {
+          "id": "Y7Y-0",
+          "name": "38 · R12 · MOBILE · Setup at a Glance",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 3450
+        },
+        {
+          "id": "Y9Y-0",
+          "name": "40 · R16 · MOBILE · Watchlist Choice",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 3450
+        },
+        {
+          "id": "YBQ-0",
+          "name": "41 · R16 STATE of 40 · Mobile · Result Uncertain",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 940,
+          "worldY": 3450
+        },
+        {
+          "id": "YCX-0",
+          "name": "43 · R16 · MOBILE · Watchlist Long List",
+          "childCount": 5,
+          "width": 390,
+          "height": 844,
+          "worldX": 1410,
+          "worldY": 3450
+        },
+        {
+          "id": "YY4-0",
+          "name": "00 · START HERE · Retained Stocks + Setups References",
+          "childCount": 3,
+          "width": 1440,
+          "height": 760,
+          "worldX": 0,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-D-0",
+      "pageName": "09 · Options · Volatility Lab",
+      "nodeCount": 573,
+      "artboardCount": 9,
+      "artboards": [
+        {
+          "id": "UM6-0",
+          "name": "V01 · Volatility · Expiry-led investigation · R1",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "URH-0",
+          "name": "V02 · Volatility · Mobile selected expiry · R1",
+          "childCount": 3,
+          "width": 390,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "UT6-0",
+          "name": "V03 · Volatility · Source, missing and refresh states · R1",
+          "childCount": 2,
+          "width": 1240,
+          "height": 840,
+          "worldX": 1990,
+          "worldY": 0
+        },
+        {
+          "id": "XFO-0",
+          "name": "V05 · Expiry picker · Mobile EN",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 0,
+          "worldY": 1500
+        },
+        {
+          "id": "XHI-0",
+          "name": "V05 · Expiry picker · Mobile ZH",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 470,
+          "worldY": 1500
+        },
+        {
+          "id": "XJA-0",
+          "name": "V06 · Selected-expiry source · Mobile EN",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 940,
+          "worldY": 1500
+        },
+        {
+          "id": "XKM-0",
+          "name": "V06 · Selected-expiry source · Mobile ZH",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 1410,
+          "worldY": 1500
+        },
+        {
+          "id": "XLX-0",
+          "name": "V07 · Missing selected expiry · Mobile EN",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 1880,
+          "worldY": 1500
+        },
+        {
+          "id": "XMP-0",
+          "name": "V07 · Missing selected expiry · Mobile ZH",
+          "childCount": 3,
+          "width": 390,
+          "height": 844,
+          "worldX": 2350,
+          "worldY": 1500
+        }
+      ]
+    },
+    {
+      "pageId": "p-C-0",
+      "pageName": "ARCHIVE · Company Intelligence · Superseded",
+      "nodeCount": 577,
+      "artboardCount": 9,
+      "artboards": [
+        {
+          "id": "OYS-0",
+          "name": "ARCHIVED · Duplicate dark C01 calculation state · replaced by KY3-1",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 5581,
+          "worldY": -8152
+        },
+        {
+          "id": "12Q0-0",
+          "name": "SUPERSEDED · Duplicate of 12DM-0 · Hidden · Do Not Build",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "UM3-0",
+          "name": "ARCHIVE · MCP write canary · Hidden",
+          "childCount": 1,
+          "width": 360,
+          "height": 100,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "12XW-0",
+          "name": "ARCHIVE · Empty shell · Mobile Market Memory · Hidden",
+          "childCount": 0,
+          "width": 390,
+          "height": 2600,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "13TC-0",
+          "name": "SUPERSEDED · Dark ZH Call duplicate · Hidden",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "13VZ-0",
+          "name": "SUPERSEDED · Dark ZH Sources duplicate · Hidden",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "17TM-0",
+          "name": "SUPERSEDED · Empty 320 ZH Results shell · Hidden",
+          "childCount": 0,
+          "width": 320,
+          "height": 3000,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "17TN-0",
+          "name": "SUPERSEDED · Empty 320 ZH Research shell · Hidden",
+          "childCount": 0,
+          "width": 320,
+          "height": 3000,
+          "worldX": -53000,
+          "worldY": -43300
+        },
+        {
+          "id": "1AUK-1",
+          "name": "ARCHIVED · Company R2 Reference Map · Detailed IDs",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": -6179,
+          "worldY": -11872
+        }
+      ]
+    },
+    {
+      "pageId": "p-B-1",
+      "pageName": "08 · Company · Financials, Market + Ownership",
+      "nodeCount": 2407,
+      "artboardCount": 11,
+      "artboards": [
+        {
+          "id": "1AN-0",
+          "name": "30 · DESKTOP · Dark · Overview",
+          "childCount": 7,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "57U-0",
+          "name": "60 · MOBILE · Overview",
+          "childCount": 7,
+          "width": 390,
+          "height": 1000,
+          "worldX": 2500,
+          "worldY": 0
+        },
+        {
+          "id": "7L5-0",
+          "name": "31 · DESKTOP · Dark · Financials",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1056,
+          "worldX": 0,
+          "worldY": 1360
+        },
+        {
+          "id": "5FS-0",
+          "name": "61 · MOBILE · Financials",
+          "childCount": 8,
+          "width": 390,
+          "height": 1160,
+          "worldX": 2500,
+          "worldY": 1360
+        },
+        {
+          "id": "7TH-0",
+          "name": "32 · DESKTOP · Dark · Earnings",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1092,
+          "worldX": 0,
+          "worldY": 2800
+        },
+        {
+          "id": "538-0",
+          "name": "62 · MOBILE · Earnings",
+          "childCount": 9,
+          "width": 390,
+          "height": 1100,
+          "worldX": 2500,
+          "worldY": 2800
+        },
+        {
+          "id": "81Q-0",
+          "name": "33 · DESKTOP · Dark · Market",
+          "childCount": 10,
+          "width": 1440,
+          "height": 1060,
+          "worldX": 0,
+          "worldY": 4160
+        },
+        {
+          "id": "5BC-0",
+          "name": "63 · MOBILE · Market",
+          "childCount": 7,
+          "width": 390,
+          "height": 1080,
+          "worldX": 2500,
+          "worldY": 4160
+        },
+        {
+          "id": "7DH-0",
+          "name": "34 · DESKTOP · Dark · Ownership",
+          "childCount": 8,
+          "width": 1440,
+          "height": 1078,
+          "worldX": 0,
+          "worldY": 5520
+        },
+        {
+          "id": "682-0",
+          "name": "46 · TABLET · Ownership · Preferred",
+          "childCount": 8,
+          "width": 820,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 5520
+        },
+        {
+          "id": "4MG-0",
+          "name": "56 · MOBILE · Ownership · Preferred",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 2500,
+          "worldY": 5520
+        }
+      ]
+    },
+    {
+      "pageId": "p-A-1",
+      "pageName": "07 · Company · Research, Results + Sources",
+      "nodeCount": 4715,
+      "artboardCount": 15,
+      "artboards": [
+        {
+          "id": "CH-0",
+          "name": "21 · DESKTOP · Dark · Intelligence · Focus",
+          "childCount": 16,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "WZ6-0",
+          "name": "56 · STATE · Theme Context · Historical Event Boundary",
+          "childCount": 17,
+          "width": 1440,
+          "height": null,
+          "worldX": 4490,
+          "worldY": 0
+        },
+        {
+          "id": "V5B-0",
+          "name": "55 · STATE · Theme Context · Verified Receipt",
+          "childCount": 17,
+          "width": 1440,
+          "height": null,
+          "worldX": 2970,
+          "worldY": 0
+        },
+        {
+          "id": "5VX-0",
+          "name": "41 · TABLET · Dark · Brief",
+          "childCount": 8,
+          "width": 820,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 0
+        },
+        {
+          "id": "4FW-0",
+          "name": "51 · MOBILE · Dark · Brief",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 2500,
+          "worldY": 0
+        },
+        {
+          "id": "XAC-0",
+          "name": "57 · MOBILE STATE · Theme Context · Verified Receipt",
+          "childCount": 10,
+          "width": 390,
+          "height": null,
+          "worldX": 6010,
+          "worldY": 0
+        },
+        {
+          "id": "3XG-0",
+          "name": "22 · DESKTOP · Dark · Results + Outlook",
+          "childCount": 24,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1620
+        },
+        {
+          "id": "6TD-0",
+          "name": "42 · TABLET · Results + Outlook · Preferred",
+          "childCount": 8,
+          "width": 820,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 1620
+        },
+        {
+          "id": "4Z3-0",
+          "name": "52 · MOBILE · Results + Outlook · Preferred",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 2500,
+          "worldY": 1620
+        },
+        {
+          "id": "2VY-0",
+          "name": "23 · DESKTOP · Dark · Call + Q&A",
+          "childCount": 26,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 3240
+        },
+        {
+          "id": "6NJ-0",
+          "name": "43 · TABLET · Call + Q&A · Preferred",
+          "childCount": 8,
+          "width": 820,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 3240
+        },
+        {
+          "id": "4UW-0",
+          "name": "53 · MOBILE · Call + Q&A · Preferred",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 2500,
+          "worldY": 3240
+        },
+        {
+          "id": "3FK-0",
+          "name": "24 · DESKTOP · Dark · Sources + Method",
+          "childCount": 24,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4860
+        },
+        {
+          "id": "6IP-0",
+          "name": "44 · TABLET · Sources + Method · Preferred",
+          "childCount": 8,
+          "width": 820,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 4860
+        },
+        {
+          "id": "4QR-0",
+          "name": "54 · MOBILE · Sources + Method · Preferred",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 2500,
+          "worldY": 4860
+        }
+      ]
+    },
+    {
+      "pageId": "p-9-1",
+      "pageName": "06 · Company · Navigation + Interaction",
+      "nodeCount": 4641,
+      "artboardCount": 14,
+      "artboards": [
+        {
+          "id": "76W-0",
+          "name": "00 · SPEC · Navigation Architecture",
+          "childCount": 5,
+          "width": 1000,
+          "height": 560,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "79J-0",
+          "name": "01 · SPEC · Page Family + State Contract",
+          "childCount": 8,
+          "width": 1120,
+          "height": 620,
+          "worldX": 1120,
+          "worldY": 0
+        },
+        {
+          "id": "1-0",
+          "name": "20 · DESKTOP · Dark · Navigation · Preferred",
+          "childCount": 17,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 900
+        },
+        {
+          "id": "61X-0",
+          "name": "40 · TABLET · Navigation · Preferred",
+          "childCount": 8,
+          "width": 820,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 900
+        },
+        {
+          "id": "4J4-0",
+          "name": "50 · MOBILE · Navigation · Preferred",
+          "childCount": 8,
+          "width": 390,
+          "height": null,
+          "worldX": 2500,
+          "worldY": 900
+        },
+        {
+          "id": "MO-0",
+          "name": "20A · STATE of 20 · Desktop · Company Switcher Open",
+          "childCount": 34,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 2450
+        },
+        {
+          "id": "27A-0",
+          "name": "20B · STATE of 20 · Desktop · Financials Menu Open",
+          "childCount": 35,
+          "width": 1440,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 2450
+        },
+        {
+          "id": "1KN-0",
+          "name": "21A · STATE of 21 · Desktop · Dark · Evidence Open",
+          "childCount": 34,
+          "width": 1440,
+          "height": null,
+          "worldX": 3120,
+          "worldY": 2450
+        },
+        {
+          "id": "6YU-0",
+          "name": "41A · STATE of 41 · Tablet · Dark · Evidence Sheet",
+          "childCount": 10,
+          "width": 820,
+          "height": 1180,
+          "worldX": 0,
+          "worldY": 3900
+        },
+        {
+          "id": "5ML-0",
+          "name": "50A · STATE of 50 · Mobile · Page Families Open",
+          "childCount": 10,
+          "width": 390,
+          "height": 844,
+          "worldX": 940,
+          "worldY": 3900
+        },
+        {
+          "id": "5R2-0",
+          "name": "51A · STATE of 51 · Mobile · Dark · Evidence Sheet",
+          "childCount": 10,
+          "width": 390,
+          "height": 844,
+          "worldX": 1450,
+          "worldY": 3900
+        },
+        {
+          "id": "1GY-0",
+          "name": "25 · DESKTOP · Dark · Not Covered",
+          "childCount": 5,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 5400
+        },
+        {
+          "id": "6D5-0",
+          "name": "45 · TABLET · Not Covered · Preferred",
+          "childCount": 8,
+          "width": 820,
+          "height": 1180,
+          "worldX": 1560,
+          "worldY": 5400
+        },
+        {
+          "id": "5K6-0",
+          "name": "55 · MOBILE · Not Covered",
+          "childCount": 5,
+          "width": 390,
+          "height": 1000,
+          "worldX": 2500,
+          "worldY": 5400
+        }
+      ]
+    },
+    {
+      "pageId": "p-7-1",
+      "pageName": "05 · Options · Compare",
+      "nodeCount": 421,
+      "artboardCount": 4,
+      "artboards": [
+        {
+          "id": "KD8-0",
+          "name": "N10 · Compare scenarios · Desktop dark EN · R1",
+          "childCount": 7,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "KG5-0",
+          "name": "N10 · Compare scenarios · Tablet light EN · R1",
+          "childCount": 7,
+          "width": 768,
+          "height": null,
+          "worldX": 1560,
+          "worldY": 0
+        },
+        {
+          "id": "KJ2-0",
+          "name": "N10 · Compare scenarios · Phone dark EN · R1",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 2448,
+          "worldY": 0
+        },
+        {
+          "id": "KLZ-0",
+          "name": "N10 · Compare scenarios · Phone light ZH · R1",
+          "childCount": 7,
+          "width": 390,
+          "height": null,
+          "worldX": 2958,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-6-1",
+      "pageName": "04 · Options · Scenarios + Assumptions",
+      "nodeCount": 1421,
+      "artboardCount": 20,
+      "artboards": [
+        {
+          "id": "G9Q-0",
+          "name": "N07 · Scenario · 1440 · Dark · EN",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "GR3-0",
+          "name": "N07 · Scenario · 1440 · light · EN",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "GU0-0",
+          "name": "N07 · Scenario · 1440 · dark · ZH",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "GWX-0",
+          "name": "N07 · Scenario · 1440 · light · ZH",
+          "childCount": 4,
+          "width": 1440,
+          "height": null,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "GKF-0",
+          "name": "N07 · Scenario · 768 · dark · EN",
+          "childCount": 4,
+          "width": 768,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1400
+        },
+        {
+          "id": "GPF-0",
+          "name": "N07 · Scenario · 768 · light · EN",
+          "childCount": 4,
+          "width": 768,
+          "height": null,
+          "worldX": 848,
+          "worldY": 1400
+        },
+        {
+          "id": "GNR-0",
+          "name": "N07 · Scenario · 768 · dark · ZH",
+          "childCount": 4,
+          "width": 768,
+          "height": null,
+          "worldX": 1696,
+          "worldY": 1400
+        },
+        {
+          "id": "GM3-0",
+          "name": "N07 · Scenario · 768 · light · ZH",
+          "childCount": 4,
+          "width": 768,
+          "height": null,
+          "worldX": 2544,
+          "worldY": 1400
+        },
+        {
+          "id": "GEL-0",
+          "name": "N07 · Scenario · 390 · dark · EN",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 2970
+        },
+        {
+          "id": "GIH-0",
+          "name": "N07 · Scenario · 390 · light · EN",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 2970
+        },
+        {
+          "id": "GGJ-0",
+          "name": "N07 · Scenario · 390 · dark · ZH",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 2970
+        },
+        {
+          "id": "GCN-0",
+          "name": "N07 · Scenario · 390 · Light · ZH",
+          "childCount": 5,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 2970
+        },
+        {
+          "id": "GZU-0",
+          "name": "N08 · Assumptions · 390 · dark · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4720
+        },
+        {
+          "id": "H1R-0",
+          "name": "N08 · Assumptions · 390 · light · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 4720
+        },
+        {
+          "id": "H3O-0",
+          "name": "N08 · Assumptions · 390 · dark · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 4720
+        },
+        {
+          "id": "H5L-0",
+          "name": "N08 · Assumptions · 390 · light · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 4720
+        },
+        {
+          "id": "HBR-0",
+          "name": "N09 · Model requirements · 390 · dark · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 5950
+        },
+        {
+          "id": "H7I-0",
+          "name": "N09 · Model requirements · 390 · light · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 5950
+        },
+        {
+          "id": "HAC-0",
+          "name": "N09 · Model requirements · 390 · dark · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 5950
+        },
+        {
+          "id": "H8X-0",
+          "name": "N09 · Model requirements · 390 · light · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 5950
+        }
+      ]
+    },
+    {
+      "pageId": "p-5-1",
+      "pageName": "03 · Options · Review",
+      "nodeCount": 1894,
+      "artboardCount": 20,
+      "artboards": [
+        {
+          "id": "G2J-0",
+          "name": "N06 · Review · Next-session evidence and plan comparison · R1",
+          "childCount": 2,
+          "width": 1440,
+          "height": 940,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "IS9-0",
+          "name": "N06 · Review · 1440 · light · EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "IUD-0",
+          "name": "N06 · Review · 1440 · dark · ZH",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "IQ5-0",
+          "name": "N06 · Review · 1440 · light · ZH",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "K50-0",
+          "name": "N06 · Review · 768 · dark · EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1620
+        },
+        {
+          "id": "K94-0",
+          "name": "N06 · Review · 768 · light · EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 848,
+          "worldY": 1620
+        },
+        {
+          "id": "KB6-0",
+          "name": "N06 · Review · 768 · dark · ZH",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 1696,
+          "worldY": 1620
+        },
+        {
+          "id": "K72-0",
+          "name": "N06 · Review · 768 · light · ZH",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 2544,
+          "worldY": 1620
+        },
+        {
+          "id": "HSI-0",
+          "name": "N06 · Review · 390 · dark · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4040
+        },
+        {
+          "id": "HX6-0",
+          "name": "N06 · Review · 390 · light · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 4040
+        },
+        {
+          "id": "HZI-0",
+          "name": "N06 · Review · 390 · dark · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 4040
+        },
+        {
+          "id": "HUU-0",
+          "name": "N06 · Review · 390 · light · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 4040
+        },
+        {
+          "id": "L94-1",
+          "name": "N14 · Reopen saved case · Desktop dark EN",
+          "childCount": 2,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 6630
+        },
+        {
+          "id": "LFF-1",
+          "name": "N14 · Reopen saved case · Phone light ZH",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 6630
+        },
+        {
+          "id": "LLG-1",
+          "name": "N15 · Evidence to decision · Desktop dark EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 1990,
+          "worldY": 6630
+        },
+        {
+          "id": "MU2-1",
+          "name": "N15 · Evidence to decision · Phone light EN",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 3510,
+          "worldY": 6630
+        },
+        {
+          "id": "NUB-1",
+          "name": "N16 · Included prints · Desktop dark EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 9530
+        },
+        {
+          "id": "NZE-1",
+          "name": "N17 · Linked package · Desktop dark EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 9530
+        },
+        {
+          "id": "O8M-1",
+          "name": "N16A · Selected print · Phone light EN",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 9530
+        },
+        {
+          "id": "ODN-1",
+          "name": "N17A · Linked package · Phone light EN",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 3510,
+          "worldY": 9530
+        }
+      ]
+    },
+    {
+      "pageId": "p-4-1",
+      "pageName": "02 · Options · Save + Watch",
+      "nodeCount": 1244,
+      "artboardCount": 15,
+      "artboards": [
+        {
+          "id": "FYJ-0",
+          "name": "N05 · Plan · Save and watch confirmation · R1",
+          "childCount": 2,
+          "width": 1440,
+          "height": 940,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "K14-0",
+          "name": "N05 · Save watch · 1440 · light · EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "JZ6-0",
+          "name": "N05 · Save watch · 1440 · dark · ZH",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "K32-0",
+          "name": "N05 · Save watch · 1440 · light · ZH",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "IIL-0",
+          "name": "N05 · Save watch · 768 · dark · EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1660
+        },
+        {
+          "id": "IMD-0",
+          "name": "N05 · Save watch · 768 · light · EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 848,
+          "worldY": 1660
+        },
+        {
+          "id": "IO9-0",
+          "name": "N05 · Save watch · 768 · dark · ZH",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 1696,
+          "worldY": 1660
+        },
+        {
+          "id": "IKH-0",
+          "name": "N05 · Save watch · 768 · light · ZH",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 2544,
+          "worldY": 1660
+        },
+        {
+          "id": "HM0-0",
+          "name": "N05 · Save watch · 390 · dark · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4050
+        },
+        {
+          "id": "HO6-0",
+          "name": "N05 · Save watch · 390 · light · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 4050
+        },
+        {
+          "id": "HQC-0",
+          "name": "N05 · Save watch · 390 · dark · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 4050
+        },
+        {
+          "id": "HJU-0",
+          "name": "N05 · Save watch · 390 · light · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 4050
+        },
+        {
+          "id": "KWI-1",
+          "name": "N12 · Save whole case · Desktop dark EN",
+          "childCount": 2,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 6600
+        },
+        {
+          "id": "L6U-1",
+          "name": "N13 · Save verification · Three response states",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 6600
+        },
+        {
+          "id": "LCO-1",
+          "name": "N12 · Save whole case · Phone light EN",
+          "childCount": 2,
+          "width": 390,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 6600
+        }
+      ]
+    },
+    {
+      "pageId": "p-3-1",
+      "pageName": "01 · Options · Plan",
+      "nodeCount": 2443,
+      "artboardCount": 12,
+      "artboards": [
+        {
+          "id": "FS4-0",
+          "name": "N04 · Plan · Chain to defined-risk scenario · R1",
+          "childCount": 2,
+          "width": 1440,
+          "height": 940,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "I1U-0",
+          "name": "N04 · Plan · 1440 · light · EN",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "ID0-0",
+          "name": "N04 · Plan · 1440 · dark · ZH",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "I7F-0",
+          "name": "N04 · Plan · 1440 · light · ZH",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "JD2-0",
+          "name": "N04 · Plan · 768 · dark · EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 0,
+          "worldY": 1700
+        },
+        {
+          "id": "JO4-0",
+          "name": "N04 · Plan · 768 · light · EN",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 848,
+          "worldY": 1700
+        },
+        {
+          "id": "JTN-0",
+          "name": "N04 · Plan · 768 · dark · ZH",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 1696,
+          "worldY": 1700
+        },
+        {
+          "id": "JIL-0",
+          "name": "N04 · Plan · 768 · light · ZH",
+          "childCount": 3,
+          "width": 768,
+          "height": null,
+          "worldX": 2544,
+          "worldY": 1700
+        },
+        {
+          "id": "HEB-0",
+          "name": "N04 · Plan · 390 · dark · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4330
+        },
+        {
+          "id": "J20-0",
+          "name": "N04 · Plan · 390 · light · EN",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 470,
+          "worldY": 4330
+        },
+        {
+          "id": "IWH-0",
+          "name": "N04 · Plan · 390 · dark · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 940,
+          "worldY": 4330
+        },
+        {
+          "id": "J7J-0",
+          "name": "N04 · Plan · 390 · light · ZH",
+          "childCount": 4,
+          "width": 390,
+          "height": null,
+          "worldX": 1410,
+          "worldY": 4330
+        }
+      ]
+    },
+    {
+      "pageId": "p-2-0",
+      "pageName": "Terminal · Options Structure Intelligence · R1 · 2026-09-27",
+      "nodeCount": 4971,
+      "artboardCount": 24,
+      "artboards": [
+        {
+          "id": "KQ3-1",
+          "name": "00 · OPTIONS DIRECTORY · Journeys + Build References",
+          "childCount": 3,
+          "width": 1440,
+          "height": 800,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "BPN-0",
+          "name": "01 · R3 · Exposure map · Desktop · EN",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1024,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "C60-0",
+          "name": "02 · R2 · Chart + map companion · EN · Axis QA owed",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1024,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "CIL-0",
+          "name": "B01 · Release A · Chart + selection · 1440×900",
+          "childCount": 1,
+          "width": 1440,
+          "height": 900,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "F21-0",
+          "name": "11 · R5 · Exposure map · Tablet EN",
+          "childCount": 1,
+          "width": 768,
+          "height": 1024,
+          "worldX": 6080,
+          "worldY": 0
+        },
+        {
+          "id": "F9T-0",
+          "name": "N01 · Discover · Evidence-first candidates · R1",
+          "childCount": 2,
+          "width": 1440,
+          "height": 900,
+          "worldX": 0,
+          "worldY": 1400
+        },
+        {
+          "id": "FG2-0",
+          "name": "N02 · Investigate · One chart, linked evidence · R1",
+          "childCount": 2,
+          "width": 1440,
+          "height": 900,
+          "worldX": 1520,
+          "worldY": 1400
+        },
+        {
+          "id": "FKP-0",
+          "name": "N03 · Off-exchange evidence · Current and source-gated states",
+          "childCount": 2,
+          "width": 1440,
+          "height": 1100,
+          "worldX": 3040,
+          "worldY": 1400
+        },
+        {
+          "id": "F8Y-0",
+          "name": "B05 · Release A · Source-state components",
+          "childCount": 2,
+          "width": 1440,
+          "height": 900,
+          "worldX": 4560,
+          "worldY": 1400
+        },
+        {
+          "id": "EK1-0",
+          "name": "05 · R3 · Node inspector · Expiry + change",
+          "childCount": 1,
+          "width": 520,
+          "height": 1240,
+          "worldX": 0,
+          "worldY": 2850
+        },
+        {
+          "id": "EO5-0",
+          "name": "06 · R3 · Scope & display · Desktop dialog",
+          "childCount": 1,
+          "width": 520,
+          "height": 1000,
+          "worldX": 640,
+          "worldY": 2850
+        },
+        {
+          "id": "ERU-0",
+          "name": "B02 · Release A · Node + expiry evidence",
+          "childCount": 1,
+          "width": 520,
+          "height": 1240,
+          "worldX": 1280,
+          "worldY": 2850
+        },
+        {
+          "id": "EVY-0",
+          "name": "B03 · Release A · Staged scope + Cancel",
+          "childCount": 1,
+          "width": 520,
+          "height": 1040,
+          "worldX": 1920,
+          "worldY": 2850
+        },
+        {
+          "id": "EZP-0",
+          "name": "07 · R3 · Observe price level · Draft dialog",
+          "childCount": 1,
+          "width": 520,
+          "height": 1080,
+          "worldX": 2560,
+          "worldY": 2850
+        },
+        {
+          "id": "F81-0",
+          "name": "B04 · Release A · Stored history · Receipt gap",
+          "childCount": 5,
+          "width": 640,
+          "height": 900,
+          "worldX": 3200,
+          "worldY": 2850
+        },
+        {
+          "id": "CYI-0",
+          "name": "03 · R4 · Exposure map · Phone · 390×844 · EN",
+          "childCount": 1,
+          "width": 390,
+          "height": 844,
+          "worldX": 0,
+          "worldY": 4450
+        },
+        {
+          "id": "DLC-0",
+          "name": "08 · R4 · Scope / Contracts · Phone sheet · EN",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 470,
+          "worldY": 4450
+        },
+        {
+          "id": "DSQ-0",
+          "name": "09 · R4 · Scope / Display · Phone sheet · EN",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 940,
+          "worldY": 4450
+        },
+        {
+          "id": "D86-0",
+          "name": "10 · R4 · Observe / Price draft · Phone sheet · EN",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 1410,
+          "worldY": 4450
+        },
+        {
+          "id": "D3C-0",
+          "name": "12 · R5 · Exposure map · Phone ZH",
+          "childCount": 1,
+          "width": 390,
+          "height": 844,
+          "worldX": 1880,
+          "worldY": 4450
+        },
+        {
+          "id": "EAC-0",
+          "name": "13 · R5 · Scope / Contracts · Phone ZH",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 2350,
+          "worldY": 4450
+        },
+        {
+          "id": "E1J-0",
+          "name": "14 · R5 · Scope / Display · Phone ZH",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 2820,
+          "worldY": 4450
+        },
+        {
+          "id": "DER-0",
+          "name": "15 · R5 · Observe / Price draft · Phone ZH",
+          "childCount": 2,
+          "width": 390,
+          "height": 844,
+          "worldX": 3290,
+          "worldY": 4450
+        },
+        {
+          "id": "1N2L-0",
+          "name": "D08 · Options Command · Desktop Dark · Integration V1 candidate",
+          "childCount": 0,
+          "width": 1440,
+          "height": 900,
+          "worldX": 6928,
+          "worldY": 0
+        }
+      ]
+    },
+    {
+      "pageId": "p-8-1",
+      "pageName": "Market Heatmaps · Unified Workspace · 2026-09-29",
+      "nodeCount": 4746,
+      "artboardCount": 16,
+      "artboards": [
+        {
+          "id": "LMF-1",
+          "name": "01 · Market Heatmaps · Map + Shared Inspector · Desktop",
+          "childCount": 6,
+          "width": 1440,
+          "height": 1000,
+          "worldX": 0,
+          "worldY": 0
+        },
+        {
+          "id": "MO2-1",
+          "name": "02 · Heatmap Perspectives · Bubbles / Matrix / Clusters / Themes",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1260,
+          "worldX": 1520,
+          "worldY": 0
+        },
+        {
+          "id": "N2Y-1",
+          "name": "03 · Table / Mobile Inspector / Light Mode / Source States",
+          "childCount": 1,
+          "width": 1440,
+          "height": 1160,
+          "worldX": 3040,
+          "worldY": 0
+        },
+        {
+          "id": "N71-1",
+          "name": "04 · START HERE · Source Anchors / Build Contract / Delivery Checkpoint",
+          "childCount": 1,
+          "width": 1440,
+          "height": null,
+          "worldX": 4560,
+          "worldY": 0
+        },
+        {
+          "id": "NZF-1",
+          "name": "05 · R2 · Themes Explorer + Cohort Evidence",
+          "childCount": 4,
+          "width": 1440,
+          "height": 1120,
+          "worldX": 0,
+          "worldY": 1650
+        },
+        {
+          "id": "OBB-1",
+          "name": "06 · R2 · Industry × Cap Matrix · Compare + Full Cell",
+          "childCount": 4,
+          "width": 1440,
+          "height": 1080,
+          "worldX": 1520,
+          "worldY": 1650
+        },
+        {
+          "id": "OTM-1",
+          "name": "07 · R2 · Bubbles · Precise Axes + Draft Selection",
+          "childCount": 5,
+          "width": 1440,
+          "height": 1160,
+          "worldX": 3040,
+          "worldY": 1650
+        },
+        {
+          "id": "OYR-1",
+          "name": "08 · R2 · Clusters · Concentration vs Participation",
+          "childCount": 7,
+          "width": 1440,
+          "height": 1140,
+          "worldX": 0,
+          "worldY": 3150
+        },
+        {
+          "id": "PNT-0",
+          "name": "09 · R3 · Filter Preview · Match, Exclude, Unknown",
+          "childCount": 4,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 1520,
+          "worldY": 3150
+        },
+        {
+          "id": "PSN-0",
+          "name": "10 · R3 · Save View · Live Query or Fixed Cohort",
+          "childCount": 3,
+          "width": 1440,
+          "height": 1040,
+          "worldX": 3040,
+          "worldY": 3150
+        },
+        {
+          "id": "PVP-0",
+          "name": "11 · R3 · Save Outcomes · Pending, Check, Confirm, Fail",
+          "childCount": 3,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 4680
+        },
+        {
+          "id": "QD9-0",
+          "name": "12 · R4 · Complete Theme Atlas · 40 / 268",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 4680
+        },
+        {
+          "id": "RK5-0",
+          "name": "13 · R4 · Semiconductor Subtheme Heatmap + Evidence",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 4680
+        },
+        {
+          "id": "RQI-0",
+          "name": "14 · R4 · Overlap Lens · Shared Exposure + Source Audit",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 0,
+          "worldY": 7200
+        },
+        {
+          "id": "RYB-0",
+          "name": "15 · R5 · Change Lens · Matched Participation",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 1520,
+          "worldY": 7200
+        },
+        {
+          "id": "S5V-0",
+          "name": "16 · R5 · Coverage Illusion · Light",
+          "childCount": 6,
+          "width": 1440,
+          "height": null,
+          "worldX": 3040,
+          "worldY": 7200
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "active_lanes_preserved": [
+    "original2175 source/release writer",
+    "Macro10740 dependency/weight and support/AUTO composition",
+    "H5 physical consumer",
+    "worker2225 AUTO/exact/catalog/PyYAML",
+    "H4 existing native gateway and enrollment",
+    "original J finite effect reconciliation"
+  ],
+  "backend_sha256": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
+  "enrolled": false,
+  "evidence": {
+    "completed-worker-h4-backend.log": {
+      "bytes": 12557,
+      "sha256": "abf0fe5a0623613d04974730f8eedb783a1b6d04d0f07055b58d53a6dd95d091"
+    },
+    "completed-worker-h4-h4-identity-guards.log": {
+      "bytes": 69,
+      "sha256": "7ad38043afd87728778ed0cff553fdbd3832f01c24f67c0040ef860519858be5"
+    },
+    "completed-worker-h4-h4-identity-guards.xml": {
+      "bytes": 5591,
+      "sha256": "96d13f57e6377278b2794e480442328eec7354a092bcab51636d8d914c5b2f83"
+    },
+    "completed-worker-h4-package.log": {
+      "bytes": 98,
+      "sha256": "450db0856c28c07fec0edc4fe897b5d5b6975dbb1b1033a9708bbe62404e6f89"
+    }
+  },
+  "h4_component_evidence": "Existing seven-test preparation closure and dated100 gateway plus37 targeted TUI evidence retained. Current native preimage observation is separately in primary-core-preimages.json; no live installation repeated.",
+  "incoming_exact_paths": {
+    "integrations/hermes_application_fabric/RELEASE_INPUTS.md": "ffe50ac9dac4f7278c812ce12cbaced4b78f9869cf7a0fb296aaf47296cf466c",
+    "integrations/hermes_application_fabric/qualification/qualify_live_preimages.py": "9bd739402db36931e52024f2156b1d21b00783c95e6ca337d4173f87849b728f",
+    "integrations/hermes_attended_fabric/NATIVE_ENROLLMENT.md": "a312bbcdd70fc5f19500fcade254c3c1945958ebefdfaaf6f63f4cf4fdddefdf",
+    "integrations/hermes_attended_fabric/enrollment_check.py": "d0d87bd7435f5c67659df1664ef3ec06fc3cc58ccb84e09616aed0e925070473",
+    "integrations/hermes_attended_fabric/tests/native_owner_qualification.py": "4737a8f8aa3768737c6f0e860cd4d6973c855cc26d4cabf6e8b34a15bc5d57a6",
+    "integrations/hermes_omh/capacity_bridge.py": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+    "integrations/studio_direct_mcp/fabric-backend.mjs": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
+    "review_evidence/fabric_application/native-worker-source-isolation-20261107.json": "378d4402cce174f17cd26685f775eb735d9b1f69adcd799c653244c736c2ee04",
+    "review_evidence/fabric_application/shared-relay-source-qualification-20261107.json": "3629a7a963e9621aa1b190c1b946c6a3d8a1277caaa3ffac6dd129a4c984b5b3",
+    "review_evidence/hermes_h4/ACTIVATION_INPUTS.md": "6c3dfc1779c41e02e2a1c816df5133bd634429fa4524b88b17843218cd0351d6",
+    "review_evidence/hermes_h4/native-preimage-qualification-20261107.json": "eaa5796f0000713bc83e6fac6962a40b7c367cf311022bf81452334ed83bfdee",
+    "review_evidence/hermes_h4/native-preparation-tests-20261107.json": "29214d1e834b0520f2ed7a68e178b8e6187159ac10e86202fb011554d304c2b9",
+    "review_evidence/hermes_h4/native-preparation-tests-20261107.log": "0b94f650eb7c1019e26b0553f39a6342901c8360285fd0953bd982eef1a05e44",
+    "review_evidence/hermes_h4/profile-mapping-20261107.json": "6df7896d56bc9b2098914fb945e314369d360f9f87f7d2f5d1d414f796aded53",
+    "review_evidence/hermes_primary/h4-combined-evidence-join-20261107.json": "55f5ae642c3f56956e072a767661808e0b32e8e98966cea711b5aa36f00651f4",
+    "tests/test_hermes_fabric_native_identity_review.py": "6112710c2bf79bbc7ab42b66ca00c03c6880ed1e2bfe322237e6b567386f4c7b",
+    "tests/test_hermes_h4_native_preparation.py": "71c5295debc70285d061b9053fefc146cd8d0d39e4bd71aa723c7fc145a6635f"
+  },
+  "installed": false,
+  "mission_complete": false,
+  "native_component_evidence": {
+    "commit": "c07bc8544caa498a65b49f12c17b79dba13f8c40",
+    "local_native_result": "Retained zero-case import/reexec failure; current integrated native acceptance not claimed.",
+    "local_native_runner_retried": false,
+    "path": "review_evidence/fabric_application/native-worker-source-isolation-20261107.json",
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "unchanged_checker_runtime_and_backend": true,
+    "upstream_native_cases": 25
+  },
+  "newer_worker_active_source_incorporated": false,
+  "observed_at": "2026-11-07T16:01:31.392216+00:00",
+  "parents": [
+    "52cbb68c9c2aacc91ecace1687380893486ac6ab",
+    "c07bc8544caa498a65b49f12c17b79dba13f8c40"
+  ],
+  "preserved": {
+    "complete_identity_pin_union": "unchanged",
+    "h2_native_entry_sha256": "45e560ea0dae72c013f3dded5136cbe33de420805d4bdee0f8201cf2bddec5e0",
+    "h2_native_generation_members": "unchanged",
+    "h5_source_and_route_repair": "unchanged"
+  },
+  "provider_calls": false,
+  "qualification": {
+    "backend_cases": 135,
+    "commands": [
+      {
+        "command": [
+          "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "integrations/hermes_attended_fabric/tests",
+          "-p",
+          "test_*.py",
+          "-q"
+        ],
+        "elapsed_seconds": 1.146,
+        "log_sha256": "450db0856c28c07fec0edc4fe897b5d5b6975dbb1b1033a9708bbe62404e6f89",
+        "name": "package",
+        "returncode": 0
+      },
+      {
+        "command": [
+          "node",
+          "--test",
+          "integrations/studio_direct_mcp/fabric-backend.test.mjs",
+          "integrations/studio_direct_mcp/fabric-backend-capacity.test.mjs",
+          "integrations/studio_direct_mcp/fabric-diagnostics.test.mjs"
+        ],
+        "elapsed_seconds": 3.297,
+        "log_sha256": "abf0fe5a0623613d04974730f8eedb783a1b6d04d0f07055b58d53a6dd95d091",
+        "name": "backend",
+        "returncode": 0
+      },
+      {
+        "command": [
+          "/private/tmp/h6-h5-python-3kmykvgs/venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "--tb=short",
+          "--basetemp=/private/tmp/h6-completed-worker-h4-koeea1v2/pytest",
+          "--junitxml=/private/tmp/h6-completed-worker-h4-koeea1v2/h4-identity-guards.xml",
+          "tests/test_hermes_h4_native_preparation.py",
+          "tests/test_hermes_fabric_native_identity_review.py",
+          "tests/test_no_anonymous_macro_reads.py"
+        ],
+        "elapsed_seconds": 6.179,
+        "log_sha256": "7ad38043afd87728778ed0cff553fdbd3832f01c24f67c0040ef860519858be5",
+        "name": "h4-identity-guards",
+        "returncode": 0
+      }
+    ],
+    "errors": 0,
+    "failures": 0,
+    "h4_identity_guard_case_records": 36,
+    "h4_identity_guard_classes": {
+      "tests.test_hermes_fabric_native_identity_review": 2,
+      "tests.test_hermes_h4_native_preparation.NativePreflightSafetyTests": 2,
+      "tests.test_hermes_h4_native_preparation.RefusalContractTests": 5,
+      "tests.test_no_anonymous_macro_reads": 27
+    },
+    "package_cases": 68,
+    "skips": 0
+  },
+  "runtime_package_sha256": "7979dd4fbc42eead4d6e24b0fbcd1cbd73bb73fe645f63f7767b6994639e207a",
+  "schema": "mastermind.h6.completed_worker_h4_composition.v1",
+  "selected": false,
+  "source_tree_before_evidence": "e6a28f7afb91da01da3fea44c3d1bddb4ec42421",
+  "worker_started": false
+}

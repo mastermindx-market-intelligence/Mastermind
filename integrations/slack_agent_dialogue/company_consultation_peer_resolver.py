@@ -82,7 +82,9 @@ class CompanyConsultationPeerResolver:
         ]
         if not matches:
             raise ConsultationPeerRefused("UNAVAILABLE")
-        if len({peer.peer_ref for peer in matches}) > 1:
+        # A repeated public ID is not evidence of one current recipient.
+        # Reject duplicate rows instead of choosing an actor by input order.
+        if len(matches) > 1:
             raise ConsultationPeerRefused(
                 "AMBIGUOUS",
                 {"peers": [peer.public_projection() for peer in matches]},

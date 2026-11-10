@@ -1,0 +1,19 @@
+{
+  "schema": "mastermind.ci.measured_native_step_forward_placement.v1",
+  "source_run": 42545600621,
+  "source_head": "ef770a849d9c9a81558a78315c81da29dbe9803f",
+  "artifact": 13645580639,
+  "artifact_checkout": "2eab9b3c82a83430c5eed1a6d601d068a64c598f",
+  "archive_sha256": "5798baf2950a5f14eaec98bb424e47cb2fad7ae8ea1a177a057df60335c899f5",
+  "observed_native_step_seconds": 754,
+  "observed_unit_envelope_seconds": 38.937942,
+  "observed_rollout_envelope_seconds": 713.602082,
+  "observed_pre_repository_job_seconds": 1359,
+  "prior_worker": 0,
+  "target_worker": 5,
+  "matrix_jobs": 6,
+  "unchanged_step_body_sha256": "45a932b84fd3ec7b47bb50d8aceabc8bd3e56c0f88c90533549b8ce0cfc3863e",
+  "whole_run_speedup_measured": false,
+  "rationale": "Relocate the entire unchanged required native gate to an existing lighter worker; Hermes goes to4 independently. All tools/install/private diagnostics are all-shard prerequisites, scratchproof stays internal and cleaned. Every native assertion, pattern/module, body and required fanin/cap stays.",
+  "limits": "Source decision from one ordinary qualified run, partialtop128 timing facts; no whole-run causal speedup or full accounting claim, no mutablefixturecache or skippedcheck. Same source-owned execution on a different existing matrix worker."
+}
