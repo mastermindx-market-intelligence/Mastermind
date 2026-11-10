@@ -21,7 +21,7 @@ heads and the principal watched it. Those three habits end here.
 ```
 Fable meta-orchestrator   decisions, briefs, acceptance of lead reports, continuity. No merges,
   |                       no test runs, no CI reads, no fix commits.
-  +- Integrator (GLM 5.3, one bounded task per merge wave; sole writer of the build branch)
+  +- Lane leads integrate their own lane into the trunk (see CI and release rule 2)
   +- Lane leads (GLM 5.3 by default; Opus only for the single hardest lane)
        +- Workers (GLM 5.3) and leaves (deepseek-v4.1-flash, glm-5.3-flash, minimax-m3.1-flash)
 ```
@@ -51,8 +51,10 @@ Escalate one tier only after the cheaper tier failed twice on the same bounded p
 1. Lane gate: the lane's affected tests, run locally by the lane.
    Python: `env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q <files>`.
    Frontend: `npm run typecheck` and `npx vitest run <files>` in `app/mastermind_os`.
-2. Merge gate: the integrator's union of touched suites on the build branch. Push after every merge.
-   A push does not start CI on this branch.
+2. Merge gate (trunk-based, no per-lane PR): the lead fetches `origin/feat/mmos-v1-integration-t3`,
+   plain-merges it into the lane, runs the lane's affected suites on the merged result, then pushes
+   `HEAD:feat/mmos-v1-integration-t3` without force. A rejected push means someone landed first:
+   fetch, merge, retest, push again. Land small and often. A push does not start CI on this branch.
 3. GitHub CI runs once, on the release candidate head, after every lane is integrated. A flash-tier
    steward owns the run. Nobody above flash tier waits on, polls, or reads CI.
 4. Installed acceptance is built from the release candidate head and does not wait for CI or the
