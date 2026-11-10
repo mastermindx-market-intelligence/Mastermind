@@ -3592,3 +3592,151 @@ def test_d8_glm_claim_lifetime_only_masks_the_exact_reviewed_token():
     peer_findings = _scan_added_identity_diff(
         introduced_diff(peer_source), source_postimages={path: peer_source})
     assert "900" in peer_findings
+
+
+
+_HERMES_STARTUP_RECOVERY_PATH = (
+    "integrations/paperclip_hermes/native-startup-recovery.patch"
+)
+
+
+def _d8_hermes_startup_recovery_scan(
+    source, *, path=_HERMES_STARTUP_RECOVERY_PATH, postimage=True,
+):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_hermes_startup_recovery_masks_only_reviewed_detail_bound():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    # The original queue composition flags this unrelated numeric bound.
+    assert _d8_hermes_startup_recovery_scan(source) == []
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "3ecbaed255c705132f350735934b6d6b7935408a1e02e1f2b4a36b1a99c87910"
+    )
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, source) == (
+        (163, 41, 44, "int"),
+    )
+    lines = source.splitlines(keepends=True)
+    assert lines[162][41:44] == "500"
+    header = [line.rstrip() for line in lines[:163]
+              if line.startswith("diff --git ")][-1]
+    assert header == (
+        "diff --git a/hermes_cli/gateway_client.py b/hermes_cli/gateway_client.py"
+    )
+    # This unchanged native hunk context limits diagnostic text; it is not a
+    # new account, permission, timeout, routing or authentication operand.
+    assert lines[162].startswith(" ")
+    import textwrap
+
+    clause = textwrap.dedent("".join(line[1:] for line in lines[160:163]))
+    handler = ast.parse("try:\n    pass\n" + clause).body[0].handlers[0]
+    assert isinstance(handler.type, ast.Name) and handler.type.id == "DiscoveryError"
+    assert handler.name == "exc" and len(handler.body) == 1
+    statement = handler.body[0]
+    expected = ast.parse("detail = exc.bounded_detail(500)").body[0]
+    assert ast.dump(statement, include_attributes=False) == ast.dump(
+        expected, include_attributes=False,
+    )
+    literal = statement.value.args[0]
+    assert isinstance(literal, ast.Constant)
+    assert type(literal.value) is int and literal.value == 500
+    expected_lines = list(lines)
+    expected_lines[162] = lines[162][:41] + "0  " + lines[162][44:]
+    assert mask_reviewed_identity_literals(
+        _HERMES_STARTUP_RECOVERY_PATH, source,
+    ) == "".join(expected_lines)
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _HERMES_STARTUP_RECOVERY_PATH),
+    (True, "integrations/paperclip_hermes/other-startup-recovery.patch"),
+    (True, "control_plane/unreviewed-startup-recovery.patch"),
+])
+def test_d8_hermes_startup_recovery_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    assert _d8_hermes_startup_recovery_scan(
+        source, path=path, postimage=postimage,
+    ) == ["500"]
+
+
+def test_d8_hermes_startup_recovery_registry_removal_exposes_bound(monkeypatch):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _HERMES_STARTUP_RECOVERY_PATH)
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, source) == ()
+    assert mask_reviewed_identity_literals(_HERMES_STARTUP_RECOVERY_PATH, source) == source
+    assert _d8_hermes_startup_recovery_scan(source) == ["500"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("exc.bounded_detail(500)", "exc.bounded_detail(501)", "501"),
+    ("detail = exc.bounded_detail(500)",
+     "detail = exc.bounded_detail(500)\n             detail = exc.bounded_detail(500)", "500"),
+    ("exc.bounded_detail(500)", "exc.bounded_detail(peer_uid=500)", "500"),
+    ("detail = exc.bounded_detail(500)", "peer_uid = exc.bounded_detail(500)", "500"),
+    ("detail = exc.bounded_detail(500)", "detail = exc.set_uid(500)", "500"),
+    ("detail = exc.bounded_detail(500)",
+     "detail = exc.bounded_detail(500); worker_uid = 777", "777"),
+])
+def test_d8_hermes_startup_recovery_operand_and_identity_drift_is_guarded(
+    old, new, expected,
+):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, changed) == ()
+    assert mask_reviewed_identity_literals(_HERMES_STARTUP_RECOVERY_PATH, changed) == changed
+    assert expected in _d8_hermes_startup_recovery_scan(changed)
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n# unrelated source byte drift\n", "500"),
+    ("\n+peer_uid = 777\n", "777"),
+    ("\n+peer_gid = 777\n", "777"),
+    ("\n+peer_port = 777\n", "777"),
+    ('\n+account = "_mastermind_unreviewed"\n', "_mastermind_unreviewed"),
+])
+def test_d8_hermes_startup_recovery_pin_cannot_hide_source_or_identity_drift(
+    suffix, expected,
+):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, source) == ()
+    findings = _d8_hermes_startup_recovery_scan(source)
+    assert "500" in findings and expected in findings
+
+
+@pytest.mark.parametrize("changed_diff", [False, True])
+def test_d8_hermes_startup_recovery_false_postimage_is_rejected(changed_diff):
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    changed = source.replace("exc.bounded_detail(500)", "exc.bounded_detail(501)")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(
+                _HERMES_STARTUP_RECOVERY_PATH, changed if changed_diff else source,
+            ),
+            source_postimages={
+                _HERMES_STARTUP_RECOVERY_PATH: source if changed_diff else changed,
+            },
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_hermes_startup_recovery_real_committed_git_collector(
+    tmp_path, monkeypatch, identity,
+):
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    if identity:
+        source += "\n+peer_uid = 777\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _HERMES_STARTUP_RECOVERY_PATH, source, identity,
+    )

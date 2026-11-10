@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mastermind Graph Engineering"
+  short_description: "Delegate through bounded leads and workers"
+  default_prompt: "Use $mastermind-graph-engineering to organize this mission into accountable suborchestrators and workers, then integrate their evidence into the original outcome."

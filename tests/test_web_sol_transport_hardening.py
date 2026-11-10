@@ -759,3 +759,144 @@ def test_invalid_or_no_progress_action_write_remains_unavailable(
     assert bytes(writer.material) == b""
     assert writer.calls == 1
     assert receipt_reads == 0
+
+
+def test_host_rechecks_readiness_after_action_worker_consumes_reply(
+    monkeypatch,
+    short_socket_root,
+):
+    """A worker may drain the pipe after the host's first readiness snapshot."""
+    destination = native.wsi.socket_path(INSTANCE_ID, root=short_socket_root)
+    read_fd, write_fd = os.pipe()
+    chrome_in = os.fdopen(read_fd, "rb", buffering=0)
+    snapshot_taken = threading.Event()
+    first_action_released = threading.Event()
+    stale_snapshot_returned = threading.Event()
+    errors = []
+    actions = []
+    fixture_reply = {"fixture": "worker-consumed-reply"}
+    original_select = native.select.select
+    original_guarded = native._serve_guarded_client
+
+    monkeypatch.setattr(
+        native, "complete_server_handshake", lambda *_args, **_kwargs: {}
+    )
+
+    def serve_client(peer, incoming, _outgoing, **_kwargs):
+        with peer:
+            actions.append(len(actions) + 1)
+            if len(actions) == 1:
+                os.write(write_fd, native.encode_frame(fixture_reply))
+                assert snapshot_taken.wait(2), "host never observed the ready reply"
+                assert native.read_frame(
+                    incoming, deadline=native.Deadline(time.monotonic() + 1)
+                ) == fixture_reply
+            peer.sendall(b"served")
+
+    def guarded(*args, **kwargs):
+        result = original_guarded(*args, **kwargs)
+        if len(actions) == 1:
+            # The original guarded owner has released the actual action gate.
+            first_action_released.set()
+        return result
+
+    def select_with_stale_snapshot(readers, writers, exceptional, timeout=None):
+        ready = original_select(readers, writers, exceptional, timeout)
+        if (threading.current_thread() is host_thread
+                and len(readers) == 2 and chrome_in in ready[0]
+                and not snapshot_taken.is_set()):
+            snapshot_taken.set()
+            assert first_action_released.wait(2), "action did not release its gate"
+            stale_snapshot_returned.set()
+        return ready
+
+    monkeypatch.setattr(native, "_serve_client", serve_client)
+    monkeypatch.setattr(native, "_serve_guarded_client", guarded)
+    monkeypatch.setattr(native.select, "select", select_with_stale_snapshot)
+
+    def run():
+        try:
+            native.run_native_host(
+                chrome_in, io.BytesIO(),
+                caller_origin=native.ALLOWED_EXTENSION_ORIGIN,
+                expected_instance_id=INSTANCE_ID,
+                socket_root=short_socket_root,
+                owner_uid=os.getuid(),
+                action_timeout_seconds=0.1,
+                boot_nonce_factory=lambda: BOOT_NONCE,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    host_thread = threading.Thread(target=run, daemon=True)
+    host_thread.start()
+    second_reply = None
+    second_error = None
+    try:
+        until = time.monotonic() + 2
+        while not destination.exists() and not errors and time.monotonic() < until:
+            time.sleep(0.005)
+        assert destination.exists(), errors
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as first:
+            first.settimeout(2)
+            first.connect(os.fspath(destination))
+            assert first.recv(16) == b"served"
+        assert stale_snapshot_returned.wait(2), errors
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as second:
+                second.settimeout(1)
+                second.connect(os.fspath(destination))
+                second_reply = second.recv(16)
+        except OSError as exc:
+            second_error = repr(exc)
+    finally:
+        os.close(write_fd)
+        host_thread.join(2)
+        chrome_in.close()
+    assert not host_thread.is_alive(), "native host did not stop on deliberate EOF"
+    assert actions == [1, 2], (errors, second_error)
+    assert second_reply == b"served", (errors, second_error)
+    assert not errors
+    assert not destination.exists(), "native host socket leaked"
+
+
+def test_host_fails_closed_when_readiness_recheck_fails(
+    monkeypatch,
+    short_socket_root,
+):
+    destination = native.wsi.socket_path(INSTANCE_ID, root=short_socket_root)
+    read_fd, write_fd = os.pipe()
+    chrome_in = os.fdopen(read_fd, "rb", buffering=0)
+    original_select = native.select.select
+    rechecks = []
+
+    monkeypatch.setattr(
+        native, "complete_server_handshake", lambda *_args, **_kwargs: {}
+    )
+
+    def fail_recheck(readers, writers, exceptional, timeout=None):
+        if readers == [chrome_in] and timeout == 0.0:
+            rechecks.append(True)
+            raise OSError("fixture readiness recheck failure")
+        return original_select(readers, writers, exceptional, timeout)
+
+    monkeypatch.setattr(native.select, "select", fail_recheck)
+    os.write(write_fd, native.encode_frame({"fixture": "queued-input"}))
+    try:
+        with pytest.raises(native.NativeHostError) as error:
+            native.run_native_host(
+                chrome_in, io.BytesIO(),
+                caller_origin=native.ALLOWED_EXTENSION_ORIGIN,
+                expected_instance_id=INSTANCE_ID,
+                socket_root=short_socket_root,
+                owner_uid=os.getuid(),
+                action_timeout_seconds=0.1,
+                boot_nonce_factory=lambda: BOOT_NONCE,
+            )
+        assert error.value.code == "host_poll_failed"
+        assert isinstance(error.value.__cause__, OSError)
+        assert rechecks == [True]
+        assert not destination.exists(), "native host socket leaked"
+    finally:
+        os.close(write_fd)
+        chrome_in.close()

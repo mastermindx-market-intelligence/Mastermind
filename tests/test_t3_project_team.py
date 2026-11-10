@@ -280,40 +280,74 @@ def test_wrong_native_lineage_is_unavailable_not_a_successful_result():
     assert not node["original_result_available"]
 
 
+def native_team_client(calls, response=None):
+    from integrations.session_bridge.t3_native_client import T3NativeClient, Scope
+    from tests.test_t3_native_client import SCHEMAS
+
+    async def invoke(name, args):
+        calls.append((name, args))
+        if name == "orchestrator_capabilities":
+            body = {"providers": [{"providerInstanceId": "capacity_fabric", "canRunChildTask": True,
+                     "constraints": [], "models": [{"id": "logical-model"}]}]}
+        else:
+            assert name == "t3_thread_launch"
+            if response is not None:
+                return response
+            body = {"projectId": "test-project", "threadId": "thread-coo", "runId": "run-coo"}
+        return {"isError": False, "structuredContent": body}
+
+    return T3NativeClient(Scope("native-original", "test-environment", "test-project"), invoke, SCHEMAS)
+
+
 def test_incumbent_client_launches_once_with_full_scope_native_worktree_and_no_new_router():
     team = team_fixture()
-    invocations = []
-
-    def runner(invocation):
-        invocations.append(invocation)
-        return CliResult(0, json.dumps({"projectId": "test-project", "threadId": "thread-coo", "runId": "run-coo"}))
-
-    client = ProjectTeamClient(T3CliClient("/authorized/t3", runner), environment_id="test-environment")
-    root = asyncio.run(client.launch(team, project_id="test-project", request_id="launch-once"))
-    assert len(invocations) == 1
-    argv = invocations[0].argv
-    assert argv[:3] == ("/authorized/t3", "thread", "start")
-    assert argv[argv.index("--worktree") + 1] == BASE
-    assert "--provider" not in argv and "--model" not in argv
+    calls = []
+    def forbidden(invocation):
+        pytest.fail("A new COO execution used the unqualified legacy provider-default carrier")
+    client = ProjectTeamClient(T3CliClient("/authorized/t3", forbidden), environment_id="test-environment",
+                               native_client=native_team_client(calls))
+    root = asyncio.run(client.launch(team, project_id="test-project", request_id="launch-once", capacity_model="logical-model"))
+    assert [name for name, _ in calls] == ["orchestrator_capabilities", "t3_thread_launch"]
+    args = calls[-1][1]
+    assert args["workspaceStrategy"] == {"type": "worktree", "baseRef": BASE}
+    assert args["modelSelection"] == {"instanceId": "capacity_fabric", "model": "logical-model"}
     assert root.root_thread_id == root.receipt.thread_id
     assert root.team_sha256 == team.fingerprint
-    assert all(text in invocations[0].stdin for text in team.mission.done_when)
-    assert all(role.objective in invocations[0].stdin for role in team.roles)
+    assert all(text in args["message"] for text in team.mission.done_when)
+    assert all(role.objective in args["message"] for role in team.roles)
 
 
-@pytest.mark.parametrize("response", [CliResult(1, "", "secret diagnostic"), CliResult(0, "not-json"),
-                                      CliResult(0, '{"projectId":"wrong"}')])
+@pytest.mark.parametrize("response", [{"isError": True, "structuredContent": {"code": "transport_unknown"}},
+                                      "not-json", {"isError": False, "structuredContent": {"projectId": "wrong"}}])
 def test_uncertain_native_launch_is_never_retried_or_rehomed(response):
+    from integrations.session_bridge.t3_native_client import EffectUnknown
     calls = []
+    def forbidden(invocation):
+        pytest.fail("Uncertain native effects escaped to a different launch carrier")
+    client = ProjectTeamClient(T3CliClient("/authorized/t3", forbidden), environment_id="test-environment",
+                               native_client=native_team_client(calls, response))
+    with pytest.raises(EffectUnknown) as error:
+        asyncio.run(client.launch(team_fixture(), project_id="test-project", request_id="one-effect", capacity_model="logical-model"))
+    assert len(calls) == 2 and "secret" not in str(error.value)
+    assert error.value.request_id == "one-effect"
 
-    def runner(invocation):
-        calls.append(invocation)
-        return response
 
-    client = ProjectTeamClient(T3CliClient("/authorized/t3", runner), environment_id="test-environment")
-    with pytest.raises(NativeEffectUnknown) as error:
-        asyncio.run(client.launch(team_fixture(), project_id="test-project", request_id="one-effect"))
-    assert len(calls) == 1 and "secret" not in str(error.value)
+def test_team_launch_refuses_missing_capacity_native_client_without_legacy_call():
+    calls = []
+    client = ProjectTeamClient(T3CliClient("/authorized/t3", lambda invocation: calls.append(invocation)),
+                               environment_id="test-environment")
+    with pytest.raises(TeamError, match="TEAM_NATIVE_CAPACITY_CLIENT_REQUIRED"):
+        asyncio.run(client.launch(team_fixture(), project_id="test-project", request_id="r", capacity_model="logical-model"))
+    assert not calls
+
+
+def test_team_native_launch_refuses_project_drift_without_any_call():
+    calls = []
+    client = ProjectTeamClient(T3CliClient("/authorized/t3", lambda invocation: calls.append(invocation)),
+                               environment_id="test-environment", native_client=native_team_client(calls))
+    with pytest.raises(TeamError, match="TEAM_NATIVE_CAPACITY_SCOPE_DIFFERS"):
+        asyncio.run(client.launch(team_fixture(), project_id="other-project", request_id="r", capacity_model="logical-model"))
+    assert not calls
 
 
 def test_native_read_failure_stays_unavailable_and_observation_never_mutates():

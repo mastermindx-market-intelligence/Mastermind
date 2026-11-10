@@ -7,6 +7,23 @@ these pins are not learned or refreshed by the tests.
 """
 
 REVIEWED_FILES = {
+    # Immutable native startup addon: this context operand bounds diagnostic
+    # detail, not an account or routing identity. Review exactly one token;
+    # every other byte remains visible and any source drift restores the guard.
+    'integrations/paperclip_hermes/native-startup-recovery.patch': {
+        'sha256': '3ecbaed255c705132f350735934b6d6b7935408a1e02e1f2b4a36b1a99c87910',
+        'sites': ((163, 41, 44, 'int', '500'),),
+    },
+    # Exact captured GLM-helper fixture: HTTPError(code=...) response statuses.
+    # No account/principal identity is masked; any byte drift exposes all sites.
+    'ops/native_fabric/quota_continuity/tests/fixtures/glm_helper_531198.py': {
+        'sha256': '531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2',
+        'sites': (
+            (1430, 46, 49, 'int', '503'),
+            (1438, 42, 45, 'int', '401'),
+            (1519, 38, 41, 'int', '502'),
+        ),
+    },
     # POSIX stat.st_blocks is counted in 512-byte units, not account identity.
     # Exact reviewed preview source/site only; any byte drift re-exposes it.
     'ops/fleet_storage_cleanup/linux_cache_preview.py': {
@@ -24,7 +41,7 @@ REVIEWED_FILES = {
         ),
     },
     'ops/native_fabric/quota_continuity/candidate/go_shim.py': {'sha256': 'a5af142fda4911f6dbe72896dd37df3b10d24be26fcff57da61a4ad636c4c14e', 'sites': [[469, 66, 69, 'int', '502'], [1689, 32, 37, 'int', '0o700'], [2040, 140, 143, 'int', '900'], [2042, 33, 36, 'int', '900'], [2105, 22, 25, 'int', '429'], [2293, 79, 82, 'int', '500'], [2371, 34, 37, 'int', '400'], [2386, 33, 36, 'int', '500'], [2406, 34, 37, 'int', '502'], [2753, 92, 95, 'int', '400'], [2760, 99, 102, 'int', '503'], [2763, 80, 83, 'int', '409'], [2795, 110, 113, 'int', '503'], [2801, 100, 103, 'int', '409'], [2808, 101, 104, 'int', '409'], [2824, 31, 34, 'int', '409'], [2824, 51, 54, 'int', '503'], [2832, 73, 76, 'int', '409'], [2836, 99, 102, 'int', '503'], [2941, 107, 110, 'int', '503'], [2950, 102, 105, 'int', '400'], [2971, 96, 99, 'int', '429'], [2981, 103, 106, 'int', '503'], [2998, 105, 108, 'int', '503'], [3036, 27, 30, 'int', '503'], [3041, 101, 104, 'int', '502'], [3049, 91, 94, 'int', '401'], [3053, 96, 99, 'int', '400'], [3075, 476, 479, 'int', '512'], [3079, 94, 97, 'int', '400'], [3090, 101, 104, 'int', '409'], [3092, 110, 113, 'int', '503'], [3103, 101, 104, 'int', '409'], [3111, 105, 108, 'int', '409'], [3114, 101, 104, 'int', '409'], [3117, 104, 107, 'int', '400'], [3127, 105, 108, 'int', '409'], [3137, 94, 97, 'int', '400'], [3153, 109, 112, 'int', '400'], [3156, 96, 99, 'int', '400'], [3169, 96, 99, 'int', '429'], [3179, 102, 105, 'int', '503'], [3187, 106, 109, 'int', '429'], [3218, 103, 106, 'int', '503'], [3229, 272, 275, 'int', '502'], [3323, 23, 26, 'int', '400'], [3396, 35, 38, 'int', '429'], [3425, 37, 40, 'int', '404'], [3456, 27, 30, 'int', '400'], [3459, 27, 30, 'int', '400'], [3462, 27, 30, 'int', '400'], [3468, 31, 34, 'int', '400'], [3475, 31, 34, 'int', '429']]},
-    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': '5fc47d9ed40754760e5d6cffbfd00a2cf8bb74cb293387acb1fb0cd875db5878', 'sites': [[1044, 60, 65, 'int', '0o700']]},
+    'ops/native_fabric/quota_continuity/candidate/native_go_entry.py': {'sha256': 'ea856eaa36351c2b93d48aab1a0544ffd88b67040ad19750a285f30fb473e5c4', 'sites': [[1057, 60, 65, 'int', '0o700']]},
     'ops/native_fabric/quota_continuity/source/go_shim.py': {
         "sha256": '4a41548a757f763ed5210df96aff6c7148d25d9e192cd3d849e108e1e917d100',
         "sites": (
@@ -641,8 +658,10 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
 # Content identity GET registration reviewed6eb650a8; the existing control_room_action AST is exact.
-# Fixed Capacity READ composition: original reviewed block and tokens unchanged.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '78985a75fb22a41c1261a82399b44ef884b3b5ba0b0cfb6f35adc9406c815b9b', 'sites': ((927, 71, 74, 'int', '400'), (938, 71, 74, 'int', '403'), (946, 71, 74, 'int', '400'), (952, 79, 82, 'int', '400'), (961, 71, 74, 'int', '400'), (971, 71, 74, 'int', '403'), (976, 76, 79, 'int', '503'), (982, 71, 74, 'int', '403'))}
+# Paperclip mounting preserves the complete control_room_action source and AST;
+# its five configuration lines move only these same eight complete status tokens.
+# Capacity and Paperclip composition preserves the complete reviewed owner.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'd170b4ed7fe514f72736f1b4c2d1b282c09a537333d9aa53117e203d10717537', 'sites': ((932, 71, 74, 'int', '400'), (943, 71, 74, 'int', '403'), (951, 71, 74, 'int', '400'), (957, 79, 82, 'int', '400'), (966, 71, 74, 'int', '400'), (976, 71, 74, 'int', '403'), (981, 76, 79, 'int', '503'), (987, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -758,8 +777,11 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-# Primary/work-entry plus Capacity READ: original diagnostic fixture unchanged.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', 'sites': ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))}
+# Primary/work-entry composition preserves these three complete fixture calls.
+# Root re-reviewed the material auth diff; only exact existing tokens qualify.
+# The sole pub mod paperclip insertion moves the identical fixture by one line.
+# Capacity and Paperclip composition preserves the complete reviewed owner.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '2f7d4e72bc71f6ff72c104bdb8abfabff130b83ce4086a7aa9527d271065e7d4', 'sites': ((3813, 68, 71, 'int', '503'), (3818, 69, 72, 'int', '503'), (3822, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
