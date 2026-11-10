@@ -12,7 +12,12 @@ import hashlib
 import json
 import os
 import subprocess
-import yaml
+try:
+    import hermes_yaml as yaml
+except ModuleNotFoundError as exc:
+    if exc.name != "hermes_yaml":
+        raise
+    import yaml
 from pathlib import Path
 import urllib.request
 
@@ -28,7 +33,24 @@ PAPERCLIP_CLIENT_CONTEXT = {
     "PAPERCLIP_LINKED_ISSUE_IDS", "PAPERCLIP_WORKSPACE_CWD",
     "PAPERCLIP_RUNTIME_TOOLS_MCP_URL", "PAPERCLIP_RUNTIME_TOOLS_EXPIRES_AT",
 }
-MARKER = "<!-- mastermind-paperclip-fleet-readiness-v1 -->"
+MARKER = "<!-- mastermind-paperclip-fleet-readiness-v2 -->"
+# Exact role-scoped managed v1 bytes at Mastermind 7734f25d. A marker alone
+# never authorizes overwriting an operator edit or another role's document.
+PREVIOUS_MANAGED_V1_SHA256 = {
+    "engineering": "382e4dacd417918e2f492da74ab54c0dd4476a67c6a5387bade44865894deea3",
+    "marketing": "002f8e7c33a0e00c530f8151da6499f1dbdd272de8fc1cbfb43b9be5da1b7da7",
+    "chief-of-staff": "b36e0e57fe23b0aab8e210b6fbe4d5a490b8c2ffeaccdfc6a9b8124334a217cb",
+    "product": "daa4bfa3d698ae24c185c0e9050d4e35f83734e9161d707b29e1d24b740908c4",
+    "reliability": "8455f703acb259aa3ad92d028cdaa876f6e6953fb8ce9b3175b6ab66b0378383",
+    "meta-ceo-uncensored": "6ab36f656a18a3b7d6f26ee457175f132449e1a9849dea22f1d1c85de83e9037",
+    "design-lead": "7bb67f5b462508669e5459e28136d7b7f3699d98ff5dc8d210c58a6a0381ecd7",
+    "assurance": "4f73275076b75cba7beb0159f83f4e7919bc4b62feb909f34e0b718c65cbad5b",
+    "mastermind-ceo": "4b9f32b6ce8cd98cb795086f40a0803a0b4105420aff699715098c3dcb8a4220",
+    "secretary": "4aaafae8ee90bb9768488ca076b11c8e7b1999db62892069eb93227c6ca6f95b",
+    "autonomy-ceo": "bcd379d53d8efcfec02bd4b0c126ac243ae9394e93026296e2e7ba4e4a2a8399",
+    "intelligence": "85594a8b0fb09dc7cb1980303c2769a821dec3503e066d87c1a4db4a4dbfbef9",
+    "delivery": "acc79323beda200182d03f402af25afd243ec9d05ff6ce4ef45b9fd6bed953d2",
+}
 ROSTER = {
     "ec1116b7-e972-40ed-89cb-15ed4f8b04c4": ("Engineering", "engineering"),
     "99a2f7ac-d0cd-4dee-88ab-b18b86797fa3": ("Marketing", "marketing"),
@@ -111,6 +133,28 @@ unresolved effects and exact next action on that same issue. Resume from those
 references and existing Hermes session-search rather than recreating work.
 Use skill creation/update only for a reusable verified procedure under its normal
 owner; do not install arbitrary marketplace plugins merely because a task mentions one.
+
+## Learning during this run
+Paperclip invokes this bot for a finite run. Complete necessary learning writes
+during this run, before the final task return. Native automatic background review
+does not run on this path.
+
+Recall relevant existing OMH memory before adding or changing a retained fact.
+When this work establishes a lasting preference, decision, fact or verified
+lesson, use the existing `omh_remember` save operation. Keep one self-contained
+fact per record and reuse the existing record identity when updating that fact.
+Respect its admission result: `pending_review`, `refused` and `error` do not
+establish completed retention. Preserve the native record reference and verify
+retrieval when the task's acceptance requires persistence across runs.
+
+When the work establishes a reusable verified procedure, read the relevant native
+skill and use `skill_manage` through its existing owner and normal source workflow.
+Preserve its read-before-write, locking and other native controls. Before reporting
+learning as complete, check the native result and retain the record or skill
+reference in the task's evidence. Keep transient progress, raw transcripts,
+credentials and duplicate paraphrases out of durable memory. If no useful durable
+learning emerged, make no learning write. Do not add another memory backend,
+reviewer, timer or learning daemon.
 
 ## Return and recovery
 Use the Paperclip skill's supported API/client and the injected environment for
@@ -286,7 +330,7 @@ def assignment_selections(resolved, beta_enabled):
     return resolved if beta_enabled else [entry["key"] for entry in resolved]
 
 
-def configure_agent(aid, name, slug, apply):
+def configure_agent(aid, name, slug, apply, instructions_only=False):
     a = request(f"/agents/{aid}")
     if a["companyId"] != COMPANY or a["name"] != name or a["adapterType"] != "hermes_local":
         raise ValueError(f"Identity/adapter changed for {name}.")
@@ -304,7 +348,11 @@ def configure_agent(aid, name, slug, apply):
     entry = request(entry_path)
     intended = instructions(name, slug)
     # The marker identifies this integration, not consent to overwrite later edits.
-    if entry["content"] != intended and entry["content"].strip() not in GENERIC:
+    previous_managed = (
+        hashlib.sha256(entry["content"].encode("utf-8")).hexdigest()
+        == PREVIOUS_MANAGED_V1_SHA256.get(slug)
+    )
+    if entry["content"] != intended and not previous_managed and entry["content"].strip() not in GENERIC:
         raise ValueError(f"{name} has custom instructions; preserve and reconcile.")
     model_name = profile.get("model", {}).get("default")
     if not isinstance(model_name, str) or not model_name.strip():
@@ -321,7 +369,7 @@ def configure_agent(aid, name, slug, apply):
         if any(r["status"] not in {"succeeded", "failed", "cancelled", "timed_out", "skipped"} for r in runs):
             raise ValueError(f"{name} has an unsettled Paperclip run; no mutation.")
     selected = selected_skills(config, name)
-    pinned, rows = qualify_versions(selected, home, apply)
+    pinned, rows = qualify_versions(selected, home, apply and not instructions_only)
     result = {
         "agent": name, "profile": slug, "native_skills": len(native_paths),
         "instructions_ready": entry["content"] == intended, "managed_skills": rows,
@@ -341,6 +389,10 @@ def configure_agent(aid, name, slug, apply):
             raise RuntimeError(f"Instruction readback mismatch for {name}.")
         result["changes"].append("instructions")
         result["instruction_revision"] = saved["revision"]["id"]
+    if instructions_only:
+        result.update(instructions_ready=True,
+                      instruction_sha256=hashlib.sha256(intended.encode()).hexdigest())
+        return result
     sync = copy.deepcopy(config.get("paperclipSkillSync", {}))
     beta_enabled = request("/instance/settings/experimental").get("enableBetaSkills") is True
     sync["desiredSkills"] = assignment_selections(pinned, beta_enabled)
@@ -378,6 +430,8 @@ def configure_agent(aid, name, slug, apply):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--instructions-only", action="store_true",
+                        help="Only revise managed instructions; preserve adapter, skills and profile configuration")
     parser.add_argument("--agent", choices=sorted(x[0] for x in ROSTER.values()))
     args = parser.parse_args()
     health = request("/health")
@@ -389,7 +443,7 @@ def main():
     for aid, (name, slug) in ROSTER.items():
         if args.agent and name != args.agent:
             continue
-        print(json.dumps(configure_agent(aid, name, slug, args.apply)), flush=True)
+        print(json.dumps(configure_agent(aid, name, slug, args.apply, args.instructions_only)), flush=True)
 
 
 if __name__ == "__main__":
