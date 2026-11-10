@@ -18,6 +18,13 @@ import sys
 
 
 GLM_HELPER_SHA256 = "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc"
+# The observed helper retains the exact seven Go utility functions and their
+# transitive module bindings. Its inert fixture and compatibility receipt are
+# captured in this source release; the APPLICATION adapter stays separate.
+GLM_HELPER_SHA256S = frozenset({
+    GLM_HELPER_SHA256,
+    "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2",
+})
 MODULES = (
     "native_runtime_bindings", "commission_deadline", "provider_outcome",
     "quota_remote", "glm_keys", "quota_circuit", "model_tier", "pool_status",
@@ -81,8 +88,11 @@ def _existing_database(path):
 def _module_identity(name, path, expected):
     loaded = sys.modules.get(name)
     if loaded is not None:
+        cached = _LOADED_MODULES.get(name)
+        owned = (cached is not None and loaded is cached[0]
+                 and expected == cached[1])
         if (getattr(loaded, "__file__", None) != str(path)
-                or loaded is not _LOADED_MODULES.get(name)
+                or not owned
                 and not (name == "native_go_entry" and loaded is sys.modules.get(__name__))):
             raise ValueError("native Go module conflict: " + name)
         _regular(path, expected=expected)
@@ -101,7 +111,7 @@ def _load(name, path, raw, expected):
     try:
         # Execute the bytes just checked; __file__ remains the real filename.
         exec(compile(raw, str(path), "exec"), module.__dict__)
-        _LOADED_MODULES[name] = module
+        _LOADED_MODULES[name] = (module, expected)
     except BaseException:
         sys.modules.pop(name, None)
         raise
@@ -183,9 +193,12 @@ def inspect(*, verified_root, verified_metadata):
     }
     _directory(paths["go"])
     _directory(paths["helper"].parent)
-    helper_raw = _regular(paths["helper"], expected=GLM_HELPER_SHA256)
-    _module_identity("glm_shim", paths["helper"], GLM_HELPER_SHA256)
-    _load("glm_shim", paths["helper"], helper_raw, GLM_HELPER_SHA256)
+    helper_raw = _regular(paths["helper"])
+    helper_digest = hashlib.sha256(helper_raw).hexdigest()
+    if helper_digest not in GLM_HELPER_SHA256S:
+        raise ValueError("native Go source identity refused")
+    _module_identity("glm_shim", paths["helper"], helper_digest)
+    _load("glm_shim", paths["helper"], helper_raw, helper_digest)
     # The authentic historical helper adds the flat ext directory. Put the
     # verified generation first again before any incumbent lazy import.
     sys.path[:] = [str(here)] + [p for p in sys.path if p != str(here)]
