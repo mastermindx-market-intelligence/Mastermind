@@ -1,0 +1,661 @@
+{
+  "digest": "d14f2c2fa6d134a7fe35824ad96a7b88b0748b4ffc85a018bab086a950a1c62e",
+  "observations": [
+    {
+      "account": "max-1",
+      "cooldown_until": null,
+      "details": {
+        "configured_budget_basis": "gateway env ANTHROPIC_*_BUDGET \u2014 configured ceiling enforced by the managed gateway, not a provider-stated limit",
+        "scope_note": "usage observed on the managed gateway path only; consumption outside the gateway is not included and is not claimed as zero",
+        "windows": {
+          "five_hour": {
+            "configured_budget_weight": 100.0,
+            "in_window_events": 62,
+            "remaining_pct": 1.0,
+            "reset_at": "2026-11-09T09:52:24Z",
+            "used_pct": 99.0,
+            "used_weight": 99.0
+          },
+          "weekly": {
+            "configured_budget_weight": 700.0,
+            "in_window_events": 63,
+            "remaining_pct": 85.57,
+            "reset_at": "2026-11-15T11:25:55Z",
+            "used_pct": 14.43,
+            "used_weight": 101.0
+          }
+        }
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": true,
+      "provenance": {
+        "confidence": "managed_gateway_durable_ledger",
+        "expires_at": "2026-11-09T09:40:36Z",
+        "observed_at": "2026-11-09T09:25:36Z",
+        "source_kind": "local_gateway_state",
+        "source_ref": "anthropic-gateway/state/budget.sqlite3"
+      },
+      "provider": "anthropic-oauth",
+      "reason_code": null,
+      "reset_at": "2026-11-09T09:52:24Z",
+      "shared_quota_resource_ref": "anthropic-oauth:max-1",
+      "usage": 1.0,
+      "usage_unit": "percent_of_window_remaining"
+    },
+    {
+      "account": "max-2",
+      "cooldown_until": null,
+      "details": {
+        "configured_budget_basis": "gateway env ANTHROPIC_*_BUDGET \u2014 configured ceiling enforced by the managed gateway, not a provider-stated limit",
+        "scope_note": "usage observed on the managed gateway path only; consumption outside the gateway is not included and is not claimed as zero",
+        "windows": {
+          "five_hour": {
+            "configured_budget_weight": 100.0,
+            "in_window_events": 60,
+            "remaining_pct": 6.0,
+            "reset_at": "2026-11-09T09:56:20Z",
+            "used_pct": 94.0,
+            "used_weight": 94.0
+          },
+          "weekly": {
+            "configured_budget_weight": 700.0,
+            "in_window_events": 66,
+            "remaining_pct": 85.5,
+            "reset_at": "2026-11-15T10:41:16Z",
+            "used_pct": 14.5,
+            "used_weight": 101.5
+          }
+        }
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": true,
+      "provenance": {
+        "confidence": "managed_gateway_durable_ledger",
+        "expires_at": "2026-11-09T09:40:36Z",
+        "observed_at": "2026-11-09T09:25:36Z",
+        "source_kind": "local_gateway_state",
+        "source_ref": "anthropic-gateway/state/budget.sqlite3"
+      },
+      "provider": "anthropic-oauth",
+      "reason_code": null,
+      "reset_at": "2026-11-09T09:56:20Z",
+      "shared_quota_resource_ref": "anthropic-oauth:max-2",
+      "usage": 6.0,
+      "usage_unit": "percent_of_window_remaining"
+    },
+    {
+      "account": "max-3",
+      "cooldown_until": null,
+      "details": {
+        "configured_budget_basis": "gateway env ANTHROPIC_*_BUDGET \u2014 configured ceiling enforced by the managed gateway, not a provider-stated limit",
+        "scope_note": "usage observed on the managed gateway path only; consumption outside the gateway is not included and is not claimed as zero",
+        "windows": {
+          "five_hour": {
+            "configured_budget_weight": 100.0,
+            "in_window_events": 59,
+            "remaining_pct": 2.5,
+            "reset_at": "2026-11-09T09:48:07Z",
+            "used_pct": 97.5,
+            "used_weight": 97.5
+          },
+          "weekly": {
+            "configured_budget_weight": 700.0,
+            "in_window_events": 60,
+            "remaining_pct": 85.93,
+            "reset_at": "2026-11-15T10:41:17Z",
+            "used_pct": 14.07,
+            "used_weight": 98.5
+          }
+        }
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": true,
+      "provenance": {
+        "confidence": "managed_gateway_durable_ledger",
+        "expires_at": "2026-11-09T09:40:36Z",
+        "observed_at": "2026-11-09T09:25:36Z",
+        "source_kind": "local_gateway_state",
+        "source_ref": "anthropic-gateway/state/budget.sqlite3"
+      },
+      "provider": "anthropic-oauth",
+      "reason_code": null,
+      "reset_at": "2026-11-09T09:48:07Z",
+      "shared_quota_resource_ref": "anthropic-oauth:max-3",
+      "usage": 2.5,
+      "usage_unit": "percent_of_window_remaining"
+    },
+    {
+      "account": "max-4",
+      "cooldown_until": null,
+      "details": {
+        "configured_budget_basis": "gateway env ANTHROPIC_*_BUDGET \u2014 configured ceiling enforced by the managed gateway, not a provider-stated limit",
+        "scope_note": "usage observed on the managed gateway path only; consumption outside the gateway is not included and is not claimed as zero",
+        "windows": {
+          "five_hour": {
+            "configured_budget_weight": 100.0,
+            "in_window_events": 50,
+            "remaining_pct": 23.0,
+            "reset_at": "2026-11-09T09:52:23Z",
+            "used_pct": 77.0,
+            "used_weight": 77.0
+          },
+          "weekly": {
+            "configured_budget_weight": 700.0,
+            "in_window_events": 51,
+            "remaining_pct": 88.86,
+            "reset_at": "2026-11-15T10:41:17Z",
+            "used_pct": 11.14,
+            "used_weight": 78.0
+          }
+        }
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": true,
+      "provenance": {
+        "confidence": "managed_gateway_durable_ledger",
+        "expires_at": "2026-11-09T09:40:36Z",
+        "observed_at": "2026-11-09T09:25:36Z",
+        "source_kind": "local_gateway_state",
+        "source_ref": "anthropic-gateway/state/budget.sqlite3"
+      },
+      "provider": "anthropic-oauth",
+      "reason_code": null,
+      "reset_at": "2026-11-09T09:52:23Z",
+      "shared_quota_resource_ref": "anthropic-oauth:max-4",
+      "usage": 23.0,
+      "usage_unit": "percent_of_window_remaining"
+    },
+    {
+      "account": "Chris",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "token-plan.ap-southeast-1.maas.aliyuncs.com/usage",
+            "status": 404
+          },
+          {
+            "endpoint": "token-plan.ap-southeast-1.maas.aliyuncs.com/v1/models",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "bailian",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "bailian:Chris",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "Kris",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "token-plan.ap-southeast-1.maas.aliyuncs.com/usage",
+            "status": 404
+          },
+          {
+            "endpoint": "token-plan.ap-southeast-1.maas.aliyuncs.com/v1/models",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "bailian",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "bailian:Kris",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "Ryan",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "token-plan.ap-southeast-1.maas.aliyuncs.com/usage",
+            "status": 404
+          },
+          {
+            "endpoint": "token-plan.ap-southeast-1.maas.aliyuncs.com/v1/models",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "bailian",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "bailian:Ryan",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "byteplus-personal-01",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "body_note": "empty_body_no_usable_surface",
+            "endpoint": "ark.ap-southeast.bytepluses.com/api/coding/usage",
+            "status": 200
+          },
+          {
+            "body_note": "empty_body_no_usable_surface",
+            "endpoint": "ark.ap-southeast.bytepluses.com/api/v3/usage",
+            "status": 200
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "byteplus",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "byteplus:byteplus-personal-01",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "default",
+      "cooldown_until": null,
+      "details": null,
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "claude-native",
+      "reason_code": "NATIVE_OAUTH_OPAQUE",
+      "reset_at": null,
+      "shared_quota_resource_ref": "claude-native:default",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "default",
+      "cooldown_until": null,
+      "details": null,
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "codex-native",
+      "reason_code": "NATIVE_OAUTH_OPAQUE",
+      "reset_at": null,
+      "shared_quota_resource_ref": "codex-native:default",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "default",
+      "cooldown_until": null,
+      "details": null,
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "cursor",
+      "reason_code": "SUBSCRIPTION_NOT_API",
+      "reset_at": null,
+      "shared_quota_resource_ref": "cursor:default",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "<REDACTED:long-token-shaped>",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "api.experientiallabs.ai/v1/usage",
+            "status": 404
+          },
+          {
+            "endpoint": "api.experientiallabs.ai/v1/limits",
+            "status": 404
+          },
+          {
+            "endpoint": "api.experientiallabs.ai/v1/models",
+            "status": 200
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "experiential",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "experiential:<REDACTED:long-token-shaped>",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "chairman-max",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "api.z.ai/api/coding/paas/v4/usage/quota",
+            "status": 404
+          },
+          {
+            "endpoint": "api.z.ai/api/coding/paas/v4/usage",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "glm",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "glm:chairman-max",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "chairman-max-2",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "api.z.ai/api/coding/paas/v4/usage/quota",
+            "status": 404
+          },
+          {
+            "endpoint": "api.z.ai/api/coding/paas/v4/usage",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "glm",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "glm:chairman-max-2",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "chairman-max-3",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "api.z.ai/api/coding/paas/v4/usage/quota",
+            "status": 404
+          },
+          {
+            "endpoint": "api.z.ai/api/coding/paas/v4/usage",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "glm",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "glm:chairman-max-3",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "C1",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "opencode.ai/zen/go/v1/usage",
+            "status": 401
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "go",
+      "reason_code": "UNAUTHORIZED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "go:C1",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "C2",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "opencode.ai/zen/go/v1/usage",
+            "status": 401
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "go",
+      "reason_code": "UNAUTHORIZED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "go:C2",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "C3",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "opencode.ai/zen/go/v1/usage",
+            "status": 401
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "go",
+      "reason_code": "UNAUTHORIZED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "go:C3",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "default",
+      "cooldown_until": null,
+      "details": null,
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "grok",
+      "reason_code": "SUBSCRIPTION_NOT_API",
+      "reset_at": null,
+      "shared_quota_resource_ref": "grok:default",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "default",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "api.minimax.io/v1/usage",
+            "status": 404
+          },
+          {
+            "endpoint": "api.minimax.io/v1/quota",
+            "status": 404
+          },
+          {
+            "endpoint": "api.minimax.io/anthropic/v1/models",
+            "status": 200
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "minimax",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "minimax:default",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "C1",
+      "cooldown_until": null,
+      "details": {
+        "probes": [
+          {
+            "endpoint": "opencode.ai/zen/v1/usage",
+            "status": 404
+          }
+        ]
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": false,
+      "provenance": null,
+      "provider": "ocfree",
+      "reason_code": "NOT_EXPOSED",
+      "reset_at": null,
+      "shared_quota_resource_ref": "ocfree:C1",
+      "usage": null,
+      "usage_unit": null
+    },
+    {
+      "account": "opencode-go-2979ec",
+      "cooldown_until": null,
+      "details": {
+        "identity_basis": "hermes_credential_pool_id_not_fabric_seat",
+        "probes": [
+          {
+            "endpoint": "opencode.ai/zen/go/v1/usage",
+            "status": 200
+          }
+        ],
+        "windows": {
+          "monthly": {
+            "reset_at": "2026-12-08T12:03:52Z",
+            "status": "ok",
+            "used_pct": 29
+          },
+          "rolling": {
+            "reset_at": "2026-11-09T13:51:39Z",
+            "status": "ok",
+            "used_pct": 0
+          },
+          "weekly": {
+            "reset_at": "2026-11-16T00:00:00Z",
+            "status": "ok",
+            "used_pct": 53
+          }
+        }
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": true,
+      "provenance": {
+        "confidence": "documented_endpoint_live_response",
+        "endpoint_host_path": "opencode.ai/zen/go/v1/usage",
+        "expires_at": "2026-11-09T09:40:36Z",
+        "http_status": 200,
+        "observed_at": "2026-11-09T09:25:36Z",
+        "source_kind": "provider_api"
+      },
+      "provider": "go",
+      "reason_code": null,
+      "reset_at": "2026-11-09T13:51:39Z",
+      "shared_quota_resource_ref": "go:opencode-go-2979ec",
+      "usage": 100.0,
+      "usage_unit": "percent_of_window_remaining"
+    },
+    {
+      "account": "opencode-go-c687f3",
+      "cooldown_until": null,
+      "details": {
+        "identity_basis": "hermes_credential_pool_id_not_fabric_seat",
+        "probes": [
+          {
+            "endpoint": "opencode.ai/zen/go/v1/usage",
+            "status": 200
+          }
+        ],
+        "windows": {
+          "monthly": {
+            "reset_at": "2026-12-08T12:42:10Z",
+            "status": "ok",
+            "used_pct": 20
+          },
+          "rolling": {
+            "reset_at": "2026-11-09T13:51:47Z",
+            "status": "ok",
+            "used_pct": 0
+          },
+          "weekly": {
+            "reset_at": "2026-11-16T00:00:00Z",
+            "status": "ok",
+            "used_pct": 40
+          }
+        }
+      },
+      "limit": null,
+      "limit_unit": null,
+      "observed": true,
+      "provenance": {
+        "confidence": "documented_endpoint_live_response",
+        "endpoint_host_path": "opencode.ai/zen/go/v1/usage",
+        "expires_at": "2026-11-09T09:40:36Z",
+        "http_status": 200,
+        "observed_at": "2026-11-09T09:25:36Z",
+        "source_kind": "provider_api"
+      },
+      "provider": "go",
+      "reason_code": null,
+      "reset_at": "2026-11-09T13:51:47Z",
+      "shared_quota_resource_ref": "go:opencode-go-c687f3",
+      "usage": 100.0,
+      "usage_unit": "percent_of_window_remaining"
+    }
+  ],
+  "observed_at": "2026-11-09T09:25:36Z",
+  "schema": "mastermind.provider_quota_observation/v1"
+}

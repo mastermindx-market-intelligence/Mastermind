@@ -6,6 +6,12 @@ from tests.test_ceo_submit_armed_composition import _scan_added_identity_diff
 
 ROOT = Path(__file__).resolve().parents[1]
 PATH = "integrations/hermes_attended_fabric/native.py"
+# Pin moved 2026-11-10: master #2365 (`6696153d3`) expanded MANUAL_POOLS above both
+# reviewed `500` operands; the tokens are byte-identical at their new rows (same
+# registry move as tests/executive_fabric_release_identity_review.py, merge
+# MERGE_MASTER_20261109). Master independently re-pinned in #2377/#2386 to the
+# same value and sites, so the origin/master merge of 2026-11-10 required no
+# pin change; recomputed against the merged source at this merge.
 EXPECTED = ((57, 65, 68, "int"), (280, 60, 63, "int"))
 
 

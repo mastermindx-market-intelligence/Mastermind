@@ -1,0 +1,415 @@
+{
+  "report": "WO-19 live Hermes child inventory (PREPARED, NOT EXECUTED)",
+  "generated_at": "2026-11-09T02:03:56-0700",
+  "profile_home": "~/.hermes/profiles/engineering",
+  "host": "m2studio",
+  "read_only": true,
+  "config_modified": false,
+  "disposition_policy": "WO-19: current local children stay on their original owner; in-flight local processes are never imported as Fabric jobs.",
+  "owner_gateway": {
+    "gateway_pid": 75879,
+    "gateway_argv": [
+      "~/.hermes/hermes-agent/hermes_cli/main.py",
+      "gateway",
+      "run",
+      "--quiet"
+    ],
+    "gateway_home_recorded": "~/.hermes/profiles/engineering",
+    "gateway_alive": true
+  },
+  "sources": [
+    {
+      "source": "state.db:async_delegations",
+      "path": "~/.hermes/profiles/engineering/state.db",
+      "status": "ok",
+      "detail": "32 rows total, 2 not-completed, 3 task slots",
+      "entries_read": 3
+    },
+    {
+      "source": "cache/delegation/live",
+      "path": "~/.hermes/profiles/engineering/cache/delegation/live",
+      "status": "ok",
+      "detail": "77 delegation dirs, 0 unreadable manifests, 2 running task slots",
+      "entries_read": 2
+    },
+    {
+      "source": "ps:HERMES_HOME",
+      "path": "HERMES_HOME=~/.hermes/profiles/engineering",
+      "status": "ok",
+      "detail": "82 hermes-like processes scanned, 2 carry HERMES_HOME=~/.hermes/profiles/engineering; owner gateway pid=75879 listed as owner, not as a child",
+      "entries_read": 2
+    },
+    {
+      "source": "processes.json",
+      "path": "~/.hermes/profiles/engineering/processes.json",
+      "status": "ok",
+      "detail": "terminal-sessions/term_session_id-CAC0F83B-6F28-4793-9481-52A3CC8541C1 is a session pointer file, not a live child",
+      "entries_read": 0
+    },
+    {
+      "source": "worker-outboxes",
+      "path": "~/.hermes/profiles/engineering/worker-outboxes",
+      "status": "ok",
+      "detail": "26 outbox dirs, 0 live owners, 26 not live (11 queued items recorded)",
+      "entries_read": 0
+    },
+    {
+      "source": "state.db:session_turn_leases",
+      "path": "~/.hermes/profiles/engineering/state.db",
+      "status": "ok",
+      "detail": "9 leases, 3 unexpired",
+      "entries_read": 3
+    }
+  ],
+  "children": [
+    {
+      "identifier": "deleg_762e9e24#task-0",
+      "kind": "delegated subagent",
+      "root_ref": "session:local-66625398b54422e9e8370ecf0841a060e8b298b17ddff6985ccf4d5e81785845",
+      "owner": "hermes gateway pid=75879 (async delegation)",
+      "started": "2026-11-08T22:10:24-0700",
+      "state": "error",
+      "disposition": "stays on local owner until finished",
+      "source": "state.db:async_delegations",
+      "detail": "batch state=running in DB; result_json already present but row not closed; goal: Restore the engineering profile's seat to Fable on the four Claude OAuth accounts, load-balanced, with Opus-5-5 then zai/glm-5.3 as fallbacks — using Hermes-nat",
+      "pid": 75879,
+      "batch": "deleg_762e9e24"
+    },
+    {
+      "identifier": "deleg_61afa8a9#task-0",
+      "kind": "delegated subagent",
+      "root_ref": "session:local-66625398b54422e9e8370ecf0841a060e8b298b17ddff6985ccf4d5e81785845",
+      "owner": "hermes gateway pid=75879 (async delegation)",
+      "started": "2026-11-09T01:45:48-0700",
+      "state": "running",
+      "disposition": "stays on local owner until finished",
+      "source": "state.db:async_delegations+cache/delegation/live",
+      "detail": "batch state=running in DB; goal: Implement the TeamLink Hermes-side adapter as the plugin ~/.hermes/profiles/engineering/plugins/mmx-teamlink/: contracts port (stdlib), stub-backed T3 MCP clien | manifest status=running; last transcript write 2026-11-09T01:59:39-0700; goal: Implement the TeamLink Hermes-side adapter as the plugin ~/.hermes/profiles/engineering/plugins/mmx-teamlink/: contracts",
+      "pid": 75879,
+      "batch": "deleg_61afa8a9"
+    },
+    {
+      "identifier": "deleg_61afa8a9#task-1",
+      "kind": "delegated subagent",
+      "root_ref": "session:local-66625398b54422e9e8370ecf0841a060e8b298b17ddff6985ccf4d5e81785845",
+      "owner": "hermes gateway pid=75879 (async delegation)",
+      "started": "2026-11-09T01:45:48-0700",
+      "state": "running",
+      "disposition": "stays on local owner until finished",
+      "source": "state.db:async_delegations+cache/delegation/live",
+      "detail": "batch state=running in DB; goal: Revive the Executive MCP seam on 127.0.0.1:8731: find the sanctioned way the mastermind_executive_app gateway composition runs at feat/mmos-v1-integration@2f3de | manifest status=running; last transcript write 2026-11-09T02:02:45-0700; goal: Revive the Executive MCP seam on 127.0.0.1:8731: find the sanctioned way the mastermind_executive_app gateway compositio",
+      "pid": 75879,
+      "batch": "deleg_61afa8a9"
+    },
+    {
+      "identifier": "pid:59205",
+      "kind": "other",
+      "root_ref": "fallback:hermes-root:m2studio",
+      "owner": "os process ppid=75879 under the profile gateway",
+      "started": "Mon Nov 9 01:59:43",
+      "state": "running",
+      "disposition": "stays on local owner until finished",
+      "source": "ps:HERMES_HOME",
+      "detail": "[execute_code kernel] 2026 ~/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3 /var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/hermes_kernel_6gvenx6e/hermes_kernel_; no HERMES_SESSION_ID in env",
+      "pid": 59205,
+      "batch": null
+    },
+    {
+      "identifier": "pid:65921",
+      "kind": "other",
+      "root_ref": "env:HERMES_SESSION_ID=local-66625398b54422e9e8370ecf0841a060e8b298b17ddff6985ccf4d5e81785845",
+      "owner": "os process ppid=1 under the profile gateway",
+      "started": "Sun Nov 8 22:00:35",
+      "state": "running",
+      "disposition": "stays on local owner until finished",
+      "source": "ps:HERMES_HOME",
+      "detail": "2026 /opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -; session=local-66625398b54422e9e8370ecf0841a060e8b298b17ddff6985ccf4d5e81785845",
+      "pid": 65921,
+      "batch": null
+    }
+  ],
+  "not_live": {
+    "orphaned_outboxes": [
+      {
+        "outbox": "admission-worker-0f41b19c6ac04a279c4531f6aa418195",
+        "pid": 57129,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-a002ee468862c674a4f834c155c3b0f68d5c7f6fc11b82f7ab6d5e9db14665bf",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=71",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-37d0da79b76f4d57b469cefc449ed526",
+        "pid": 51913,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-ebb6925b0d3f4c8e426742fc12f614d723f3d01f4df1ec3064189e64c7e37c2e",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=297",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-46528357bbae4e01b925f77218aa7032",
+        "pid": 14571,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-eb42c82a2a1fedb0c10269981bd7bc17352638a9d53d4ef2ba5b0edba7d4d7b8",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=220",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-576051f15a9c49589984391a1ac6ffc4",
+        "pid": 67022,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-28b92212df55256bc629ee1ea56c3c8c698bd56d06bc248fb5b1350d71a3ed83",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=240",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-5d238eea298f420aba64ee218fbe4629",
+        "pid": 30293,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-630360550b9d92835cc616fddab0b7ffdf93b06c320112f9e286f5522cd868df",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=126",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-5d99b1df693443b88e9d78cd8b3711cf",
+        "pid": 7396,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-1c1bdeed9001116403322ca3c4b622357774a98090aef55922dc4e20458a9782",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=572",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-61beda5c61ab4f83a962dc3da5ee6b02",
+        "pid": 77029,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-51be890de56145c85d107f32d22eb687e4e230e3e01205e644715d50452d8554",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=67",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-6937baef10f7409e961a700cc4c8fa3e",
+        "pid": 66945,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-dbf34c9e88a80ffedbed4e5bc8ccc58f560158d71f478b14b71c5b496a0ae932",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=284",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-6be48cc3253e436397baa68db51a8222",
+        "pid": 84765,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-654481d3d791e5eada778fb134b57b2e723321043864f9b9ab6a2fe2a19a8ee3",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=111",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-7dd51aeb523341a596baebe85941e601",
+        "pid": 67039,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-2f6f7445c2a632fd136ea224fd6b27598b7dd93316b890e88acb4634fdd5fd45",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=61",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-842151c0e7ba427f942f957f9e831f8b",
+        "pid": 9282,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-84091bd01b9a58fb610655a8079775dda39e3619796a96b8be4deda67debbc1f",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=408",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-8443ad525a7342d688a98b49d84d2f2c",
+        "pid": 51932,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-294635d8ede54b9f3817125b4fc54d38d435dd20b89a7b1d513c88efde9f738a",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=65",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-9a4859f66f084385ba9746eae3fd4248",
+        "pid": 67227,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-fd6165faeb9fe1c0d7e4ec7ac645d7abdcbad3bebc08367aa7d81740ee8a3766",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=477",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-9c90c780207e46dba08b1df066c4c483",
+        "pid": 30335,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-4faf2216bfc61b2ec8d8b5a6e2ad58747f4132f7186dfda541f6c06e4c9eb182",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=125",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-af4df0ccd8c948afa287fcf5edab4a52",
+        "pid": 52129,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-911f38282cc0fa30f90b2f760a043bbe39efbab552d7061bcab106d2a3d6d962",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=92",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-b0ba763457cf432a8a332f53469c142d",
+        "pid": 34915,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-9b1147669f6556c99ff7ac2179011546de56cbad8df5972a76e1a60b5b8f1d9f",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=50",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-b88a54625ca04d1daf47a11dc2806c87",
+        "pid": 67109,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-3d8e42447da034dbc59fe132484702bbeba097ceaafdcb288a0515f097007837",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=375",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-c3d6867356754cd484a0c4f6220f7866",
+        "pid": 26990,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-65dd046c6fd7fbd5d6ff879d7e22f750caa3afd78ecab545334cbea247f8124a",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=182",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-c896629524774db6a5f3df1a579d55fc",
+        "pid": 67098,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-2e125f0c45057535fbd3e8d14aedbae6cf2ae161679a09fbdca72e53b1ca7af5",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=97",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-ce7c790d0da74da5a530331a1fd79597",
+        "pid": 60417,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-ef824177c5fd2c8b4397d4aee3188fb75f2752ae9ba86156df308412d2960899",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=54",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-d2da5d513cc04ff189ec000f1da548ee",
+        "pid": 42047,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-d518964c0b53f1ddd123ff21bd144f6a4a67298e8aea174df3de72568c2fcdf2",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=2",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-d68f64109b444e4887fba5c38c81f100",
+        "pid": 97576,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-e7b76b55002bd53a0ef634a955c8ba4f869ccb4dd38c9a8f722bbd04fd9c9673",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=425",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-d8812ee0fed5410aac867d2daed0c872",
+        "pid": 48353,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-d3f8b0a174421d43cac30e4131db53304cc529a540ba6cdc33877edf8aa6099a",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=69",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-dfe88c034fc540b3b169a46312467b51",
+        "pid": 2927,
+        "owner_alive": false,
+        "pending_items": 1,
+        "session_id": "local-4e0f2fe2301910c2d8d7f6787e23d5fbfedb9ba62417851e6c59826fab0c75ee",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=145",
+        "state": "owner dead; 1 orphaned queued item(s)"
+      },
+      {
+        "outbox": "admission-worker-e5397426234a4323bed4bc67b09acb4a",
+        "pid": 51381,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-2afdaa7470cd6d964c8dcdb5c2d4d2f3d5e9c050be03584c1728c7733ccb121e",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=1043",
+        "state": "owner dead"
+      },
+      {
+        "outbox": "admission-worker-ec93b8283c2e4ad1818ee3d8d94194c6",
+        "pid": 79675,
+        "owner_alive": false,
+        "pending_items": 0,
+        "session_id": "local-9410c0725ac61723c380c0025f78046ed6b2da1f131f2bb74e6b56ba24e3ff71",
+        "profile_matches": true,
+        "detail": "liveness=pid not alive; generation=1 next_sequence=423",
+        "state": "owner dead"
+      }
+    ],
+    "terminal_session_notes": [
+      "terminal-sessions/term_session_id-CAC0F83B-6F28-4793-9481-52A3CC8541C1 is a session pointer file, not a live child"
+    ],
+    "expired_turn_leases": 6,
+    "held_turn_leases": 3
+  },
+  "summary": {
+    "live_children": 5,
+    "by_kind": {
+      "delegated subagent": 3,
+      "other": 2
+    },
+    "by_source": {
+      "state.db:async_delegations": 3,
+      "cache/delegation/live": 2,
+      "ps:HERMES_HOME": 2
+    },
+    "unattributed": 0,
+    "sources_ok": 6,
+    "sources_degraded": []
+  }
+}

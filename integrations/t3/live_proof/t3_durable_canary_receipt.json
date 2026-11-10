@@ -1,0 +1,609 @@
+{
+  "schema": "mastermind.t3_durable_canary_receipt/v1",
+  "recorded_at": "2026-11-09T09:45:23.884905+00:00",
+  "started_at": "2026-11-09T09:21:51.232728+00:00",
+  "outcome": "DONE",
+  "blocked_gate": null,
+  "label": "MMOS durable canary",
+  "environment": {
+    "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+    "label": "m2studio",
+    "serverVersion": "0.1.7",
+    "platform": {
+      "os": "darwin",
+      "arch": "arm64",
+      "machine": "mac-studio"
+    },
+    "endpoint": "http://127.0.0.1:3773/mcp",
+    "mcp_server": {
+      "name": "T3 Code",
+      "version": "0.1.7"
+    }
+  },
+  "authenticated_namespace": {
+    "principal_projection": "sha256(oauth token)[:16] \u2014 the cached OAuth client identity",
+    "principal": "d8ba4c9bdbe463e8",
+    "qualified_namespace": "mastermind.control_plane.t3_execution_adapter/v1:d8ba4c9bdbe463e8"
+  },
+  "provider": {
+    "providerInstanceId": "capacity_fabric",
+    "model": "glm-5.3-flash",
+    "selection_rule": "cheapest ENABLED flash-tier model named by orchestrator_capabilities (exact id 'glm-5.3-flash')"
+  },
+  "providers_enabled": [
+    "capacity_fabric",
+    "fabric_claude",
+    "fabric_experiential"
+  ],
+  "providers_disabled": [
+    {
+      "id": "codex",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "claudeAgent",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "experiential",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "cursor",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "grok",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "opencode",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "opencode_opencode1",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "antigravity",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "fx",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "kiro",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "GLM2",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "muse",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    },
+    {
+      "id": "pi",
+      "constraints": [
+        "Provider instance is disabled."
+      ]
+    }
+  ],
+  "store": {
+    "path": "~/.hermes/profiles/engineering/cache/scratch/t3_durable_canary/batch/state.sqlite3",
+    "sha256": "1620a754a09a9e45fae953f17be1851b4da0e22dc3f8cbf9a6e9336e014b1cff",
+    "implementation": "SQLiteT3AdapterStateStore",
+    "note": "scratch proof store under the harness's authorized scratch root; NOT data/control_plane (the Executive file is pinned)"
+  },
+  "scenarios": {
+    "s1": {
+      "name": "crash-after-receipt cold restart",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:46d1dcd31554c0ba00e9f9490c43a02ce2f2de494f7395e2a6826c35f7f383e3",
+      "processes": {
+        "p1": {
+          "role": "s1-p1",
+          "pid": 48443,
+          "crash_point": "after_receipt_persist_before_ack",
+          "client_request_id": "482fccdf9f8ce905cbf075b4da16c9d35f822d52bec9ccd6616d527a5159ab33",
+          "request_namespace": "mastermind.control_plane.t3_execution_adapter/v1:d8ba4c9bdbe463e8",
+          "native": {
+            "thread_id": "mcp:launch:46d1dcd31554c0ba00e9f9490c43a02ce2f2de494f7395e2a6826c35f7f383e3",
+            "run_id": "run:thread:mcp%3Alaunch%3A46d1dcd31554c0ba00e9f9490c43a02ce2f2de494f7395e2a6826c35f7f383e3:ordinal:1",
+            "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+            "launch_status": "preparing"
+          },
+          "durable_state": "intent+receipt+original_ref COMMITTED",
+          "crashed_at": "2026-11-09T09:21:51.578476+00:00"
+        },
+        "p2": {
+          "role": "s1-p2",
+          "outcome": "OK",
+          "reattach": {
+            "returned_retained_ref": true,
+            "zero_native_launch_or_replay": true,
+            "counts_after_reattach": {
+              "launch": 0,
+              "replay": 0,
+              "read": 0,
+              "interrupt": 0
+            },
+            "elapsed_s": 5.03,
+            "second_start_refused": true
+          },
+          "thread_id": "mcp:launch:46d1dcd31554c0ba00e9f9490c43a02ce2f2de494f7395e2a6826c35f7f383e3",
+          "thread_matches_p1_side_file": true,
+          "status_sequence": [
+            "RUNNING",
+            "SUCCEEDED"
+          ],
+          "final_state": "SUCCEEDED",
+          "single_run_observed": true,
+          "result_excerpt": "T3-CANARY-OK durable-s1",
+          "result_nonce_present": true,
+          "result_ledgered": true,
+          "port_counts_final": {
+            "launch": 0,
+            "replay": 0,
+            "read": 3,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T09:21:56.779601+00:00",
+          "verification": {
+            "role": "s1-verify",
+            "outcome": "OK",
+            "purpose": "read-only post-run verification (zero launch/replay; assistant-item nonce scan)",
+            "thread_id": "mcp:launch:46d1dcd31554c0ba00e9f9490c43a02ce2f2de494f7395e2a6826c35f7f383e3",
+            "reattach": {
+              "returned_retained_ref": true,
+              "counts_after_reattach": {
+                "launch": 0,
+                "replay": 0,
+                "read": 0,
+                "interrupt": 0
+              },
+              "elapsed_s": 0.02
+            },
+            "native_status": "completed",
+            "runs_observed": [
+              {
+                "id": "",
+                "ordinal": 1,
+                "status": "completed"
+              }
+            ],
+            "canary_run_status": "completed",
+            "post_canary_activity": false,
+            "result_excerpt": "T3-CANARY-OK durable-s1",
+            "result_nonce_present": true,
+            "port_counts_final": {
+              "launch": 0,
+              "replay": 0,
+              "read": 2,
+              "interrupt": 0
+            },
+            "finished_at": "2026-11-09T09:44:52.878933+00:00"
+          },
+          "result_excerpt_source": "post-run verification head read (see verification record)"
+        }
+      }
+    },
+    "s2": {
+      "name": "crash-after-launch-before-receipt idempotent replay",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:20689c996166bc75f2f099ab416d65a49cd6e5ed91d4b848c8e8789108f2d536",
+      "processes": {
+        "p1": {
+          "role": "s2-p1",
+          "pid": 48821,
+          "crash_point": "after_launch_before_receipt_persist",
+          "client_request_id": "8df7f5c0a21ecb162eac5afa41ca5e73e9200e1542a436099679756fe70decec",
+          "request_namespace": "mastermind.control_plane.t3_execution_adapter/v1:d8ba4c9bdbe463e8",
+          "native": {
+            "thread_id": "mcp:launch:20689c996166bc75f2f099ab416d65a49cd6e5ed91d4b848c8e8789108f2d536",
+            "run_id": "run:thread:mcp%3Alaunch%3A20689c996166bc75f2f099ab416d65a49cd6e5ed91d4b848c8e8789108f2d536:ordinal:1",
+            "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+            "launch_status": "preparing"
+          },
+          "port_counts": {
+            "launch": 1,
+            "replay": 0,
+            "read": 0,
+            "interrupt": 0
+          },
+          "crashed_at": "2026-11-09T09:21:56.973766+00:00"
+        },
+        "p2": {
+          "role": "s2-p2",
+          "outcome": "OK",
+          "recovery": {
+            "path": "replay_launch(same clientRequestId + namespace)",
+            "counts_after_reattach": {
+              "launch": 1,
+              "replay": 1,
+              "read": 0,
+              "interrupt": 0
+            },
+            "elapsed_s": 10.05,
+            "client_request_id": "8df7f5c0a21ecb162eac5afa41ca5e73e9200e1542a436099679756fe70decec",
+            "request_namespace": "mastermind.control_plane.t3_execution_adapter/v1:d8ba4c9bdbe463e8"
+          },
+          "thread_id": "mcp:launch:20689c996166bc75f2f099ab416d65a49cd6e5ed91d4b848c8e8789108f2d536",
+          "thread_equals_p1_side_file": true,
+          "native_replays_original_thread": true,
+          "status_sequence": [
+            "RUNNING",
+            "RUNNING",
+            "SUCCEEDED"
+          ],
+          "final_state": "SUCCEEDED",
+          "single_run_observed": true,
+          "runs_last_observed": [
+            {
+              "id": "",
+              "ordinal": 1,
+              "status": "completed"
+            }
+          ],
+          "result_excerpt": "T3-CANARY-OK durable-s2",
+          "result_nonce_present": true,
+          "result_ledgered": true,
+          "port_counts_final": {
+            "launch": 1,
+            "replay": 1,
+            "read": 4,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T09:22:07.190541+00:00",
+          "verification": {
+            "role": "s2-verify",
+            "outcome": "OK",
+            "purpose": "read-only post-run verification (zero launch/replay; assistant-item nonce scan)",
+            "thread_id": "mcp:launch:20689c996166bc75f2f099ab416d65a49cd6e5ed91d4b848c8e8789108f2d536",
+            "reattach": {
+              "returned_retained_ref": true,
+              "counts_after_reattach": {
+                "launch": 0,
+                "replay": 0,
+                "read": 0,
+                "interrupt": 0
+              },
+              "elapsed_s": 0.02
+            },
+            "native_status": "failed",
+            "runs_observed": [
+              {
+                "id": "",
+                "ordinal": 3,
+                "status": "failed"
+              },
+              {
+                "id": "",
+                "ordinal": 2,
+                "status": "failed"
+              },
+              {
+                "id": "",
+                "ordinal": 1,
+                "status": "completed"
+              }
+            ],
+            "canary_run_status": "completed",
+            "post_canary_activity": true,
+            "result_excerpt": "T3-CANARY-OK durable-s2",
+            "result_nonce_present": true,
+            "port_counts_final": {
+              "launch": 0,
+              "replay": 0,
+              "read": 2,
+              "interrupt": 0
+            },
+            "finished_at": "2026-11-09T09:44:53.110449+00:00"
+          },
+          "result_excerpt_source": "post-run verification head read (see verification record)"
+        }
+      }
+    },
+    "s3": {
+      "name": "foreign authenticated namespace refused locally",
+      "outcome": "PASS",
+      "processes": {
+        "p": {
+          "role": "s3",
+          "outcome": "OK",
+          "stub_principal": "foreign-oauth-client-s3-stub",
+          "attempts": [
+            {
+              "scenario": "s1",
+              "refused": true,
+              "namespace_message": true,
+              "error_excerpt": "refused: recovery under a different authenticated namespace ('foreign-oauth-client-s3-stub') than th"
+            },
+            {
+              "scenario": "s2",
+              "refused": true,
+              "namespace_message": true,
+              "error_excerpt": "refused: recovery under a different authenticated namespace ('foreign-oauth-client-s3-stub') than th"
+            }
+          ],
+          "port_counts": {
+            "launch": 0,
+            "replay": 0,
+            "read": 0,
+            "interrupt": 0
+          },
+          "finished_at": "2026-11-09T09:45:23.734366+00:00"
+        }
+      }
+    },
+    "s4": {
+      "name": "exact-run interrupt requested-vs-settled honesty",
+      "outcome": "PASS",
+      "thread_id": "mcp:launch:547be76198377425005224c2b03c3782aea8c2dc89265d3959f4e5fbc9ca2265",
+      "processes": {
+        "p": {
+          "role": "s4",
+          "outcome": "OK",
+          "thread_id": "mcp:launch:547be76198377425005224c2b03c3782aea8c2dc89265d3959f4e5fbc9ca2265",
+          "was_live_at_interrupt": true,
+          "pre_interrupt_states": [
+            "RUNNING"
+          ],
+          "cancel": {
+            "signal_sent": true,
+            "requested_before_settle": true,
+            "settled_only_after_terminal_observation": false,
+            "settled_state": null,
+            "final_state": "CANCELLING",
+            "settle_claimed_without_terminal_observation": false
+          },
+          "status_sequence": [
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING",
+            "CANCELLING"
+          ],
+          "final_state": "CANCELLING",
+          "result_excerpt": "collect refused: run 'runs/t3-durable-canary/s4-r3' is not terminal; no final result to collect",
+          "port_counts": {
+            "launch": 1,
+            "replay": 0,
+            "read": 86,
+            "interrupt": 1
+          },
+          "finished_at": "2026-11-09T09:29:10.748343+00:00",
+          "post_run_verification": {
+            "role": "s4-verify",
+            "outcome": "OK",
+            "purpose": "read-only settle observation for the interrupted S4 thread (zero launch/replay)",
+            "thread_id": "mcp:launch:547be76198377425005224c2b03c3782aea8c2dc89265d3959f4e5fbc9ca2265",
+            "reattach": {
+              "returned_retained_ref": true,
+              "counts_after_reattach": {
+                "launch": 0,
+                "replay": 0,
+                "read": 0,
+                "interrupt": 0
+              }
+            },
+            "settle_observation": {
+              "observed_at": "2026-11-09T09:44:53.301933+00:00",
+              "exact_run_read": "ok",
+              "native_status": "interrupted",
+              "project_row": {
+                "status": "interrupted",
+                "settled": false,
+                "settled_at": null,
+                "item_count": 4
+              }
+            },
+            "port_counts_final": {
+              "launch": 0,
+              "replay": 0,
+              "read": 1,
+              "interrupt": 0
+            },
+            "finished_at": "2026-11-09T09:44:53.317460+00:00"
+          },
+          "settle_observation": {
+            "observed_at": "2026-11-09T09:44:53.301933+00:00",
+            "exact_run_read": "ok",
+            "native_status": "interrupted",
+            "project_row": {
+              "status": "interrupted",
+              "settled": false,
+              "settled_at": null,
+              "item_count": 4
+            }
+          }
+        }
+      }
+    }
+  },
+  "processes": [
+    {
+      "role": "prep",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s1-p1",
+      "returncode": 90,
+      "expected_returncode": 90,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s1-p2",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s2-p1",
+      "returncode": 91,
+      "expected_returncode": 91,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s2-p2",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s3",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s4",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "role log"
+    },
+    {
+      "role": "s1-verify",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "standalone role side file"
+    },
+    {
+      "role": "s2-verify",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "standalone role side file"
+    },
+    {
+      "role": "s4-verify",
+      "returncode": 0,
+      "expected_returncode": 0,
+      "ok": true,
+      "reconstructed_from": "standalone role side file"
+    }
+  ],
+  "threads_minted_ids": [
+    "mcp:launch:46d1dcd31554c0ba00e9f9490c43a02ce2f2de494f7395e2a6826c35f7f383e3",
+    "mcp:launch:20689c996166bc75f2f099ab416d65a49cd6e5ed91d4b848c8e8789108f2d536",
+    "mcp:launch:547be76198377425005224c2b03c3782aea8c2dc89265d3959f4e5fbc9ca2265"
+  ],
+  "threads_minted": 3,
+  "thread_budget": 3,
+  "assembled_from": "post-run verification pass (no roles spawned, nothing launched)"
+}

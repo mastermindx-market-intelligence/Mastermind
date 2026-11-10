@@ -328,6 +328,16 @@ describe("owner-authorized catalog host and view", () => {
     await waitFor(() => expect(c.statusRead).toHaveBeenCalledTimes(1));
     expect(c.statusRead).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-one", rootId: "original-root" }));
   });
+  it("offers the exact inspected attempt to the Code workbench only once a run is selected", async () => {
+    const opened: string[] = [];
+    const c = client();
+    render(<AttendedFabricWorkspace host={bindMissionHost(c.raw)} onOpenAttemptInCode={id => opened.push(id)} />);
+    expect(screen.queryByRole("button", { name: /Open this attempt in Code/ })).toBeNull();
+    await load(); select();
+    fireEvent.click(screen.getByRole("button", { name: "Use in run inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open this attempt in Code →" }));
+    expect(opened).toEqual(["run-one"]);
+  });
   it("clears copied run selectors on an authentication generation change", async () => {
     const c = client(); render(<AttendedFabricWorkspace host={bindMissionHost(c.raw)} />); await load(); select();
     fireEvent.click(screen.getByRole("button", { name: "Use in run inspector" }));

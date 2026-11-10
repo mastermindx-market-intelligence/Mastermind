@@ -20,10 +20,24 @@ struct Readiness {
     version: &'static str,
     source_revision: &'static str,
     build_identity: &'static str,
+    install_marker: &'static str,
     transport: &'static str,
     state: &'static str,
     native_client_ref: Option<String>,
 }
+
+/// One greppable line embedded in the executable so installed-bundle receipts
+/// (scripts/mmos_installed_receipt.py) can extract the build identity with
+/// provenance `embedded_marker` instead of a heuristic rodata scan. Referenced
+/// by `Readiness` so the linker always keeps the bytes in the binary; the
+/// build.rs charset assertion keeps the embedded JSON well-formed.
+const MM_RECEIPT_MARKER: &str = concat!(
+    "MM_RECEIPT:{\"source_revision\":\"",
+    env!("MM_SOURCE_REVISION"),
+    "\",\"build_identity\":\"",
+    env!("MM_BUILD_IDENTITY"),
+    "\"}"
+);
 
 fn readiness_from_client_id(client_id: Option<&str>) -> Result<Readiness, &'static str> {
     let native_client_ref = match client_id {
@@ -40,6 +54,7 @@ fn readiness_from_client_id(client_id: Option<&str>) -> Result<Readiness, &'stat
         version: env!("CARGO_PKG_VERSION"),
         source_revision: env!("MM_SOURCE_REVISION"),
         build_identity: env!("MM_BUILD_IDENTITY"),
+        install_marker: MM_RECEIPT_MARKER,
         transport: if native_client_ref.is_some() {
             "CONFIGURED"
         } else {
@@ -172,9 +187,11 @@ fn main() {
             auth::read_retained_activity,
             auth::read_resource_capacity,
             auth::read_model_configuration,
+            auth::read_capacity_fabric,
             auth::host_observation::read_host_observation,
             auth::read_fabric_catalog,
             auth::read_fabric_status,
+            auth::read_t3_attempt_fleet,
             auth::read_result,
             auth::read_mission_result,
             auth::read_result_references,

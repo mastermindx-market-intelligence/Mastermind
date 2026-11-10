@@ -2064,7 +2064,14 @@ _SELECTED_CHILD_FRAME_KEYS = frozenset({
     "capability_profile_digest",
 })
 _SELECTED_CHILD_REQUEST_KEYS = frozenset({"action", "command"})
-_SELECTED_CHILD_ACTIONS = frozenset({"selected_child_submit", "selected_child_status"})
+#: The child-request admission answer schema (WO-13).  A finite, closed
+#: projection of one admission decision — never a placement, never a
+#: retry instruction.
+CHILD_REQUEST_ADMISSION_SCHEMA = "mastermind.child_request_admission/v1"
+CHILD_REQUEST_ADMISSION_STATES = frozenset({"ADMITTED", "REPLAY", "WAIT"})
+_SELECTED_CHILD_ACTIONS = frozenset({
+    "selected_child_submit", "selected_child_status", "selected_child_admit",
+})
 _SELECTED_CHILD_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 #: The exact reviewed frozen target type. The core never imports the
 #: integration package, so the type is proven by its qualified identity and
@@ -2084,6 +2091,30 @@ def _exact_selected_child_target(value: Any) -> bool:
         and type(fields) is dict
         and set(fields) == {"work_ref", "children", "currentness_guard"}
     )
+
+
+def _child_request_admission_projection(outcome: Any) -> dict[str, Any]:
+    """Project one finite child-request admission answer (WO-13).
+
+    The projection is closed and total: every state carries the identity
+    triple's durable command id, and a WAIT always carries its precise
+    wait reason for the parent planner.  It names no worker, provider,
+    host or account — admission is not placement (OQ-9).
+    """
+
+    if outcome.state not in CHILD_REQUEST_ADMISSION_STATES:
+        raise ValueError("child request admission state is not canonical")
+    return {
+        "schema": CHILD_REQUEST_ADMISSION_SCHEMA,
+        "state": outcome.state,
+        "command_id": outcome.command_id,
+        "job_id": outcome.job_id,
+        "request_digest": outcome.request_digest,
+        "root_ref": outcome.root_ref,
+        "logical_child_key": outcome.logical_child_key,
+        "wait_reason": outcome.wait_reason,
+        "wait_detail": dict(outcome.wait_detail or {}),
+    }
 
 
 def _selected_child_frame(parsed: Any) -> dict[str, Any]:
@@ -2165,6 +2196,13 @@ class CeoIngressAppBinding:
     # The trusted host's frozen selected-child target. It defaults to unbound:
     # the Control never selects or derives a child on its own.
     selected_child_target: Any | None = None
+    # The trusted host's frozen child-request admission material (WO-13):
+    # a mapping from the host-minted admission command id to the exact
+    # ``ChildExecutionRequest.v1`` envelope the host froze for it.  The
+    # model can only name a command the host already froze; the envelope
+    # is a request, and the host still selects every placement (OQ-9).
+    # Defaults to unbound exactly like the selected-child target.
+    child_request_material: Any | None = None
 
     def __post_init__(self) -> None:
         if type(self.peer_uid) is not int or self.peer_uid < 0:
@@ -5829,17 +5867,33 @@ class ExecutiveControlService:
             from common import workspace_autonomy_read_contract as autonomy_wire
             from common import workspace_resource_capacity_contract as capacity_wire
             from common import workspace_model_configuration_contract as model_configuration_wire
+            from common import workspace_capacity_fabric_contract as capacity_fabric_wire
+            from common import workspace_t3_attempt_fleet_contract as t3_fleet_wire
             from common import workspace_host_observation_contract as host_observation_wire
             from common import workspace_byok_read_contract as byok_wire
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
-                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA,
+                    ACTIVITY_FRAME_SCHEMA, MISSION_RESULT_FRAME_SCHEMA, CCR_READ_FRAME_SCHEMA, fabric_read_wire.FRAME_SCHEMA, capacity_fabric_wire.FRAME_SCHEMA, t3_fleet_wire.FRAME_SCHEMA,
                     project_plan_wire.FRAME_SCHEMA, project_journal_wire.FRAME_SCHEMA, knowledge_wire.FRAME_SCHEMA, project_session_wire.FRAME_SCHEMA, project_direction_wire.FRAME_SCHEMA, project_archive_wire.FRAME_SCHEMA, project_archive_wire.PAGE_FRAME_SCHEMA, autonomy_wire.FRAME_SCHEMA, capacity_wire.FRAME_SCHEMA, host_observation_wire.FRAME_SCHEMA, instructions_wire.FRAME_SCHEMA, model_configuration_wire.FRAME_SCHEMA, byok_wire.FRAME_SCHEMA, knowledge_wire.DISCOVERY_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
                 operation = parsed.get("operation") if isinstance(parsed, dict) else None
-                if parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
+                if parsed.get("schema") == capacity_fabric_wire.FRAME_SCHEMA:
+                    ceiling = capacity_fabric_wire.MAX_RESPONSE_BYTES
+                    try:
+                        capacity_fabric_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == t3_fleet_wire.FRAME_SCHEMA:
+                    ceiling = t3_fleet_wire.MAX_RESPONSE_BYTES
+                    try:
+                        t3_fleet_wire.validate_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST), response_ceiling=ceiling)
+                        return
+                elif parsed.get("schema") == model_configuration_wire.FRAME_SCHEMA:
                     ceiling = model_configuration_wire.MAX_RESPONSE_BYTES
                     try:
                         model_configuration_wire.validate_frame(parsed)
@@ -6759,6 +6813,16 @@ class ExecutiveControlService:
                     or self._service_state != "READY"):
                 raise ValueError("selected-child admission is unavailable")
 
+        if action == "selected_child_admit":
+            # The child-request lane (WO-13): the host froze which
+            # ``ChildExecutionRequest.v1`` envelopes may be named; the
+            # frame names one by its frozen command.  Admission queues
+            # bounded work and selects nothing (OQ-9).
+            await self._handle_child_request_admit_frame(
+                writer, app_binding=app_binding,
+                require_current=require_current, command=command)
+            return
+
         try:
             require_current()
             child = target.child_for(command)
@@ -6876,6 +6940,115 @@ class ExecutiveControlService:
             )
             return
         await self._send_ceo_ingress_response(writer, {"ok": True, "result": result})
+
+    async def _handle_child_request_admit_frame(
+        self,
+        writer: asyncio.StreamWriter,
+        *,
+        app_binding: CeoIngressAppBinding,
+        require_current: Callable[[], None],
+        command: str,
+    ) -> None:
+        """Admit one host-frozen ``ChildExecutionRequest.v1`` (WO-13).
+
+        The frame names a command the trusted host already froze into
+        the App binding's child-request material; the envelope itself
+        never travels through the model.  Admission is idempotent on
+        ``(root, immediate_parent, logical_child_key)`` + digest inside
+        the Runtime: a replay returns the first Job handle, a digest
+        mismatch is a precise conflict, a full ready queue returns a
+        precise wait reason.  Nothing here selects a worker, provider
+        or host — the host still selects (OQ-9).
+        """
+
+        from control_plane.child_execution_contracts import ChildExecutionRequest
+        from control_plane.child_request_admission import (
+            CHILD_REQUEST_DIGEST_CONFLICT,
+        )
+
+        material = app_binding.child_request_material
+        envelope = material.get(command) if type(material) is dict else None
+        if type(envelope) is not dict:
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input", "selected-child command is not frozen")
+            return
+        try:
+            request = ChildExecutionRequest.from_dict(dict(envelope))
+        except (TypeError, ValueError):
+            await self._send_ceo_ingress_error(
+                writer, "invalid_input", "the child request envelope is invalid")
+            return
+        try:
+            require_current()
+            if (not app_binding.principal_admission_armed
+                    or self._service_state != "READY"):
+                raise ValueError("selected-child admission is unavailable")
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the selected-child target is unavailable",
+            )
+            return
+        runtime = self._require_runtime()
+        try:
+            outcome = runtime.jobs.admit_child_execution_request(request)
+        except StateConflict as exc:
+            message = str(exc)
+            if message.startswith(CHILD_REQUEST_DIGEST_CONFLICT):
+                # A conflict is precise and finite: the same logical key
+                # was admitted with a different digest.  Never a second
+                # Job, never a silent re-admission.
+                await self._send_ceo_ingress_error(
+                    writer, "conflict",
+                    "the child request conflicts with its admitted digest")
+                return
+            await self._send_ceo_ingress_error(
+                writer, "ingress_unavailable",
+                "the child request admission failed")
+            return
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "internal_error", "the child request admission failed")
+            return
+        # A post-admission currentness refusal is not a no-effect
+        # receipt: the admission may have committed.  The caller keeps
+        # the original command and reconciles by resubmitting it.
+        try:
+            require_current()
+        except Exception:
+            await self._send_ceo_ingress_error(
+                writer, "internal_error", "the child request observation failed")
+            return
+        await self._send_ceo_ingress_response(
+            writer, {"ok": True,
+                     "result": _child_request_admission_projection(outcome)})
+
+    async def admit_child_execution_request(
+        self, envelope: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Parse, admit and project one ``ChildExecutionRequest.v1``.
+
+        Service-level entry for the child-request lane (WO-13).  The
+        envelope is parsed with the shared WO-02 contract (which also
+        verifies a supplied ``request_digest`` against the payload),
+        admitted idempotently by the Runtime, and projected finitely.
+        A digest conflict surfaces as :class:`StateConflict` carrying
+        the ``CHILD_REQUEST_DIGEST_CONFLICT`` code; a full queue returns
+        a WAIT projection with the precise wait reason.  Admission
+        selects no placement (OQ-9).
+        """
+
+        from control_plane.child_execution_contracts import ChildExecutionRequest
+
+        if not isinstance(envelope, Mapping):
+            raise StateConflict("child request envelope must be a mapping")
+        try:
+            request = ChildExecutionRequest.from_dict(dict(envelope))
+        except (TypeError, ValueError) as exc:
+            raise StateConflict(
+                f"child request envelope is invalid: {exc}") from exc
+        outcome = self._require_runtime().jobs.admit_child_execution_request(request)
+        return _child_request_admission_projection(outcome)
 
     @staticmethod
     def _request(request: Any) -> tuple[str, dict[str, Any]]:

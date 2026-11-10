@@ -449,8 +449,12 @@ REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
 # are unchanged; the extra startup module names shift the last two sites by five
 # lines. Previous source SHA d7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad.
 # No new identity site is qualified; any source drift restores the ordinary guard.
-REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '936701c295116b786dc36d018357dfe0217c7cee37c4b11c2b14223c59c4a664',
- 'sites': ((120, 73, 76, 'int', '501'), (310, 78, 81, 'int', '450'), (405, 83, 86, 'int', '501'))},
+# 2026-11-09 MMOS composition pin move: commit a751d78cc (PR #2316 WO-05
+# admitted child class projection) inserts 106 lines above the three pinned
+# comparisons. The three reviewed identity operands are byte-identical and
+# shift to 226/416/511. No new identity site is qualified.
+REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '27a074b96871beb70900c0590d7dd6d99fb1bd318896596da68232ebdaf37bde',
+ 'sites': ((226, 73, 76, 'int', '501'), (416, 78, 81, 'int', '450'), (511, 83, 86, 'int', '501'))},
  'control_plane/paid_fabric_wire.py': {'sha256': '6c9c16eaa48fa7f5ac7cbd4eaa113b619a5bb1e3d65ef69ab55c6f0d839fc9c6',
  'sites': ((98, 35, 38, 'int', '501'),)},
  'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',
@@ -641,7 +645,14 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
 # Content identity GET registration reviewed6eb650a8; the existing control_room_action AST is exact.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '6eb8e085971a44eef40f68cc6192479c8ac47981cf886fdae72cb41aeb7eb8e5', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
+# 2026-11-09 MMOS composition pin move: commit 3838b8b82 (PR #2351 capacity
+# fabric OS read) adds one route constant line above the handler; the eight
+# reviewed action-refusal operands are byte-identical and shift by one line.
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route):
+# the per-attempt route adds one further route-constant line above the
+# handler; the same eight reviewed action-refusal operands are byte-identical
+# and shift by one more line.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'f7e4e50df2b8945be5dfdb8e5092f4d68dcfe738c75cf39efaa89a1ffb463e95', 'sites': ((928, 71, 74, 'int', '400'), (939, 71, 74, 'int', '403'), (947, 71, 74, 'int', '400'), (953, 79, 82, 'int', '400'), (962, 71, 74, 'int', '400'), (972, 71, 74, 'int', '403'), (977, 76, 79, 'int', '503'), (983, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -705,7 +716,15 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '3c2cac6101f754ff5f6c52aee1ebe14d2f247bf212a0317f6970732cade6fb17', 'sites': ((715, 93, 96, 'int', '403'), (717, 56, 59, 'int', '403'), (724, 46, 49, 'int', '403'), (725, 56, 59, 'int', '403'))}
+# 2026-11-09 MMOS composition pin move: commit 3838b8b82 (PR #2351 capacity
+# fabric OS read) adds the trusted capacity_fabric_source constructor guard
+# four lines above the handler; the four reviewed 403 operands are
+# byte-identical and shift by four lines.
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route):
+# the trusted t3_attempt_fleet_source constructor guard adds four further
+# lines above the handler; the same four reviewed denial operands are
+# byte-identical and shift by four more lines.
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -750,15 +769,34 @@ REVIEWED_FILES['integrations/mastermind_executive_app/project_planning_transport
 # Actual source-issued proposal PR number, never a UID or HTTP/permission grant.
 REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = {'sha256': 'ee715ecbf81efef147491f1cbbea041ba1a62688bd0906b715231156bdacc0e9', 'sites': (), 'utf8_sites': ((1, 36976, 36979, 'int', '403'),)}
 
+# 2026-11-09 MMOS composition (commit 3838b8b82, PR #2351): the two 900-second
+# freshness bounds of the Capacity Fabric projection are elapsed-time limits in
+# the alias-tainted account/owner context, never UIDs/GIDs or peers — the same
+# qualification as the incumbent quota_continuity 900 elapsed-time sites above.
+# Exact whole-file hash and whole-token spans only; any drift restores the
+# ordinary D8 guard. This pin is a source-drift qualification, not independent
+# review or release authority.
+REVIEWED_FILES['control_plane/workspace_capacity_fabric.py'] = {'sha256': 'f48347aa98d894368e7e175263427c55f79c066cb3c7dfd7f32ea4253db53892', 'sites': ((234, 66, 69, 'int', '900'), (277, 106, 109, 'int', '900'))}
+
+# 2026-11-09 MMOS composition (commit 3838b8b82, PR #2351): the 900px breakpoint
+# of the Capacity Fabric responsive layout is a CSS viewport width in the
+# alias-tainted accounts-selector line, never an identity. Exact whole-file
+# hash and whole-token span only; any drift restores the ordinary D8 guard.
+REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256': 'e75e39ac6eba0344f4a3133d3c875976d342b7db9b69e6010c6d29f0ffc8f1bf', 'sites': ((49, 19, 22, 'int', '900'),)}
+
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
 # 2026-11-07 attended source check: native Hermes composition and exact pending
 # auth-timer expiry move these unchanged three operands. Preserve whole-file and
 # exact-token qualification; this supplies no runtime or formal release approval.
 # Discovery correction plus Company priorities changes only the containing source
 # and line positions; these same three fixture HTTP statuses are not principals.
-# Primary/work-entry composition preserves these three complete fixture calls.
-# Root re-reviewed the material auth diff; only exact existing tokens qualify.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6ce90063ed44ef222e081019ad43d94e373c485f5a7ff63cb795fc99f44d56e6', 'sites': ((3782, 68, 71, 'int', '503'), (3787, 69, 72, 'int', '503'), (3791, 67, 70, 'int', '503'))}
+# Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture
+# function. Primary/work-entry composition preserves these three complete fixture
+# calls. 2026-11-09 MMOS merge pin move: master #2344 primary/work-entry source
+# and PR #2351 capacity-fabric OS read (commit 3838b8b82) both insert lines above
+# the fixture; the three reviewed 503 operands are byte-identical at their merged
+# positions (3812/3817/3821). Only exact existing tokens qualify.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', 'sites': ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -875,11 +913,14 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # exact reviewed source postimage and these complete typed numeric AST tokens
 # are exempt; any source drift exposes both to the ordinary D8 scanner again.
 # This does not confer trusted session grants or Fabric execution authority.
-# Re-pinned after the accepted manual-pool enumeration (xai, anthropic-oauth,
-# openai-codex) changed only this whole-file identity and moved the same two
-# reason-length tokens by nine lines (48->57, 271->280). Their enclosing
-# validation expressions are unchanged; no new identity site is qualified.
-# Previous source SHA 9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976.
+# Pin-move history converged at this merge (origin/master into
+# feat/mmos-v1-integration-t3, 2026-11-10). Master #2365 (commit 6696153d3,
+# accepted manual-pool enumeration xai, anthropic-oauth, openai-codex) moved
+# the same two reason-length tokens by nine lines (48->57, 271->280) with
+# unchanged enclosing validation expressions. The trunk moved this pin in its
+# 2026-11-09 merge (MERGE_MASTER_20261109); master independently re-pinned in
+# #2377/#2386. Both sides carried byte-identical pin value and sites here;
+# recomputed against the merged source at this merge — no side was picked.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),

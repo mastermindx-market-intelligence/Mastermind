@@ -428,18 +428,31 @@ def _remove_managed_hook(rows: object) -> list[dict[str, Any]]:
     return output
 
 
-def _hook_row(matcher: str, command: str, message: str) -> dict[str, Any]:
-    return {
-        "matcher": matcher,
-        "hooks": [
-            {
-                "type": "command",
-                "command": command,
-                "timeout": 10,
-                "statusMessage": message,
-            }
-        ],
+#: Pin (guard r8, C6 ledger; REVIEW3 A3 S1 recommendation (b)). Claude
+#: Code runs a PreToolUse ``command`` hook with ``onFailure: "block"`` so that
+#: a guard that TIMES OUT or exits with a code other than 0/2 BLOCKS the tool
+#: call; without the key a timed-out or crashed hook lets the call run (the
+#: fail-open S1 relied on). Observed on this host with a local fake Messages
+#: endpoint (no model, no credentials): 2.1.319 and 2.1.296 honour it
+#: (timeout and exit 1 → blocked); 2.1.287 accepts the key and ignores it (the
+#: hook still registers and its deny decisions still apply; a timeout runs the
+#: call, as before the key). Exit 2 (e.g. ``python3`` cannot open the guard
+#: file) blocks with or without it. Set to None to render the pre-r8 row.
+CLAUDE_GUARD_HOOK_ON_FAILURE: str | None = "block"
+
+
+def _hook_row(
+    matcher: str, command: str, message: str, *, on_failure: str | None = None
+) -> dict[str, Any]:
+    hook: dict[str, Any] = {
+        "type": "command",
+        "command": command,
+        "timeout": 10,
+        "statusMessage": message,
     }
+    if on_failure is not None:
+        hook["onFailure"] = on_failure
+    return {"matcher": matcher, "hooks": [hook]}
 
 
 def _render_claude_settings(raw: bytes, guard: Path) -> bytes:
@@ -458,6 +471,7 @@ def _render_claude_settings(raw: bytes, guard: Path) -> bytes:
             "Agent|Task|Bash",
             f'python3 "{guard}"',
             "Enforcing Mastermind fabric routing and asynchronous CI waits",
+            on_failure=CLAUDE_GUARD_HOOK_ON_FAILURE,
         )
     )
     hooks["PreToolUse"] = rows
@@ -808,6 +822,10 @@ def _managed_hook_count(raw: bytes, guard: Path, *, claude: bool) -> int:
                 and hook.get("command") == expected_command
                 and hook.get("timeout") == 10
                 and hook.get("async") in (None, False)
+                # r8: the Claude row must carry the pinned onFailure (a row
+                # whose failure does not block is drift); Codex rows none.
+                and hook.get("onFailure")
+                == (CLAUDE_GUARD_HOOK_ON_FAILURE if claude else None)
             )
         )
     return count

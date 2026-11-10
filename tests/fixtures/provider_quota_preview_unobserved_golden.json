@@ -1,0 +1,187 @@
+{
+  "as_of": "2026-09-16T05:25:00Z",
+  "authority": "NONE_PREVIEW_ONLY",
+  "binding_verification": "NOT_PERFORMED",
+  "broker": {
+    "cooldown_scopes_unassigned": [],
+    "generation": 0,
+    "leases_by_state": {},
+    "opened_mode": "ro",
+    "path": "/Users/chriswong/.hermes/profiles/engineering/mmos/wt-lane-fabric-quota/tests/fixtures/_golden_inputs/leases.sqlite",
+    "sha256": "9f9db6a1f6fb0bb9d9f1fb4e4501cea1fc48b2133ce8df2521b3e1a4afa57626",
+    "waiters_total": 0
+  },
+  "claim_time_revalidation_required": true,
+  "expires_at": "2026-09-16T05:40:00Z",
+  "knowledge_summary": {
+    "admission_eligible": 2,
+    "observed_vs_unknown": "3 observed / 1 unknown",
+    "quota_observed": 3,
+    "quota_unknown": 1,
+    "resources_total": 4
+  },
+  "live_admission": false,
+  "observation_digest": "faf9ffd260f86f6f0c78e1560b71e344d39d40dfd9b4b0aa8d053dc2c98d1b89",
+  "options": [
+    {
+      "eligible_in_preview": true,
+      "estimate_basis": "configured_concurrency_minus_broker_active_reserved",
+      "estimated_startable_jobs": 7,
+      "expiry_pressure_jobs_per_hour": null,
+      "model_alias": "qwen3.8-flash",
+      "option_id": "bailian:Chris",
+      "provider": "bailian",
+      "suggested_parallelism": 7
+    }
+  ],
+  "preview_id": "a632c0a3f60d8235fee2fb3887d66c44",
+  "producer": {
+    "source_config": {
+      "broker_generation": 0,
+      "broker_operation_identity_digest": "9f9db6a1f6fb0bb9d9f1fb4e4501cea1fc48b2133ce8df2521b3e1a4afa57626",
+      "broker_release_identity_digest": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
+      "capacity_capability_id": "quota_economics_preview",
+      "executive_peer_policy_digest": "950a83fbe81a65fefd125faf7642f9c79e28cc9bdd1783590ffc11239694ce63",
+      "host_ref": "host-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "provider_binary_identity_digest": "ecb51bf9241ecab6246fd57afa5c9cfcbf106d2b423589c66a2d96a17e2d21bf",
+      "schema_version": "mastermind.executive_worker_capacity_source_config/v1",
+      "worker_realm_metadata_policy_digest": "565289667cdf1abdd5135d9a20741b7c0ec74a2c603df18bcfa97cbbb2292a5f"
+    },
+    "source_config_digest": "1eea8e9c18d8f0da9f58ccf996d309c6ca8b54b7b371abbe1f2167d1d6d036b9"
+  },
+  "production_armed": false,
+  "projection": {
+    "path": "/Users/chriswong/.hermes/profiles/engineering/mmos/wt-lane-fabric-quota/tests/fixtures/_golden_inputs/owner_ext_projection.json",
+    "produced_at": "2026-09-16T14:18:20+00:00",
+    "schema": "mastermind.owner_ext_registry_projection/v1",
+    "sha256": "950a83fbe81a65fefd125faf7642f9c79e28cc9bdd1783590ffc11239694ce63"
+  },
+  "registry_revision": "14259ca4-test-revision",
+  "registry_revision_basis": "sha256(pools.yaml bytes || accounts.yaml bytes)",
+  "resources": [
+    {
+      "active_slots": 0,
+      "admission_eligibility": true,
+      "auth_route_ref": "codex exec via ext/qwen_exec.sh",
+      "configured_cap_basis": "accounts_yaml_per_account_cap",
+      "configured_concurrency_cap": 7,
+      "cooldown_source": null,
+      "cooldown_until": null,
+      "expires_at": "2026-09-16T05:40:00Z",
+      "observation_id": "313c783946d5c26b",
+      "observed_at": "2026-09-16T05:25:00Z",
+      "pool_ref": "bailian",
+      "provider_ref": "bailian",
+      "quota_knowledge": "observed",
+      "quota_observed_at": "2026-09-16T14:18:20Z",
+      "quota_source": "bailian_inline_7d_local_reconstruction",
+      "readiness_state": "ready",
+      "reason_codes": [
+        "eligible_in_preview",
+        "quota_source_local_reconstruction"
+      ],
+      "registry_revision": "14259ca4-test-revision",
+      "remaining_quota": 98.81,
+      "remaining_quota_basis": "percent_of_window_remaining",
+      "reserved_slots": 0,
+      "reset_at": "2026-09-16T19:16:00Z",
+      "shared_quota_resource_ref": "bailian:Chris",
+      "source_owner_ref": "owner_ext"
+    },
+    {
+      "active_slots": 0,
+      "admission_eligibility": false,
+      "auth_route_ref": "codex exec via ext/qwen_exec.sh",
+      "configured_cap_basis": "accounts_yaml_per_account_cap",
+      "configured_concurrency_cap": 7,
+      "cooldown_source": "registry_parked_until",
+      "cooldown_until": "2026-09-16T03:58:00Z",
+      "expires_at": "2026-09-16T05:40:00Z",
+      "observation_id": "f1bc2e45b77fcc3c",
+      "observed_at": "2026-09-16T05:25:00Z",
+      "pool_ref": "bailian",
+      "provider_ref": "bailian",
+      "quota_knowledge": "observed",
+      "quota_observed_at": "2026-09-16T14:18:20Z",
+      "quota_source": "bailian_inline_7d_local_reconstruction",
+      "readiness_state": "parked",
+      "reason_codes": [
+        "owner_parked_verdict",
+        "quota_source_local_reconstruction"
+      ],
+      "registry_revision": "14259ca4-test-revision",
+      "remaining_quota": 1.44,
+      "remaining_quota_basis": "percent_of_window_remaining",
+      "reserved_slots": 0,
+      "reset_at": "2026-09-16T03:58:00Z",
+      "shared_quota_resource_ref": "bailian:Ryan",
+      "source_owner_ref": "owner_ext"
+    },
+    {
+      "active_slots": 0,
+      "admission_eligibility": true,
+      "auth_route_ref": "grok -p",
+      "configured_cap_basis": "pools_yaml_concurrent",
+      "configured_concurrency_cap": 17,
+      "cooldown_source": null,
+      "cooldown_until": null,
+      "expires_at": "2026-09-16T05:40:00Z",
+      "observation_id": "1767e9de82be7646",
+      "observed_at": "2026-09-16T05:25:00Z",
+      "pool_ref": "grok",
+      "provider_ref": "grok",
+      "quota_knowledge": "observed",
+      "quota_observed_at": "2026-09-16T01:37:00Z",
+      "quota_source": "chairman_provider_screenshot",
+      "readiness_state": "ready",
+      "reason_codes": [
+        "eligible_in_preview"
+      ],
+      "registry_revision": "14259ca4-test-revision",
+      "remaining_quota": 53,
+      "remaining_quota_basis": "percent_of_window_remaining",
+      "reserved_slots": 0,
+      "reset_at": "2026-09-16T05:54:00Z",
+      "shared_quota_resource_ref": "grok:default",
+      "source_owner_ref": "owner_ext"
+    },
+    {
+      "active_slots": 0,
+      "admission_eligibility": false,
+      "auth_route_ref": "claude -p with MiniMax base URL via ext/sub.sh",
+      "configured_cap_basis": "accounts_yaml_per_account_cap",
+      "configured_concurrency_cap": 7,
+      "cooldown_source": null,
+      "cooldown_until": null,
+      "expires_at": "2026-09-16T05:40:00Z",
+      "observation_id": "e662975efe370d3d",
+      "observed_at": "2026-09-16T05:25:00Z",
+      "pool_ref": "minimax",
+      "provider_ref": "minimax",
+      "quota_knowledge": "unknown",
+      "quota_observed_at": null,
+      "quota_source": null,
+      "readiness_state": "ready",
+      "reason_codes": [
+        "quota_unknown_no_bounded_unknown_mode_authorized"
+      ],
+      "registry_revision": "14259ca4-test-revision",
+      "remaining_quota": null,
+      "remaining_quota_basis": null,
+      "reserved_slots": 0,
+      "reset_at": null,
+      "shared_quota_resource_ref": "minimax:default",
+      "source_owner_ref": "owner_ext"
+    }
+  ],
+  "schema": "mastermind.quota_economics_preview/v1",
+  "selected_tier": "first_lawful_suitability_tier",
+  "source_owner": {
+    "owner_ext_root": {
+      "path": "/tmp/owner/ext"
+    }
+  },
+  "source_owner_ref": "owner_ext",
+  "status": "PREVIEW_READY",
+  "suggested_option": "bailian:Chris"
+}

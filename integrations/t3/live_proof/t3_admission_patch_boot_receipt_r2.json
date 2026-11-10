@@ -1,0 +1,558 @@
+{
+  "schema": "mastermind.t3_admission_patch_boot_receipt/v1",
+  "recorded_at": "2026-11-09T16:18:52.664876+00:00",
+  "donor_pin": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+  "patch_sha256": "999a1b1e9472e47955714235f9478ac7145569d1870436f3df06b5796e771a1f",
+  "outcome": "DONE",
+  "blocked": null,
+  "knobs": {
+    "boot_command": "node src/bin.ts serve --base-dir <isolated> --no-browser",
+    "port_env": "T3CODE_PORT",
+    "host_env": "T3CODE_HOST",
+    "data_dir_env": "T3CODE_HOME / --base-dir",
+    "dev_instance_seed_env": "VITE_DEV_SERVER_URL (devReplay recorded-turn ACP instance; no paid model)",
+    "auth": "server-printed headless startup pairing credential -> /oauth/mcp/register -> /oauth/mcp/decision (pairing-code, PKCE) -> /oauth/mcp/token",
+    "admission_endpoint_env": "MASTERMIND_ADMISSION_ENDPOINT",
+    "admission_timeout_env": "MASTERMIND_ADMISSION_TIMEOUT_MS (A6 bounded consult)",
+    "admission_timeout_ms_set": 3000,
+    "ports_used": [
+      3977,
+      3978,
+      3980,
+      3981,
+      3982
+    ],
+    "real_desktop_port": 3773,
+    "real_desktop_touched": false
+  },
+  "instrumentation": {
+    "module": "apps/server/src/mastermind/A5ScratchCounts.ts (scratch tree only)",
+    "module_sha256": "12688e4b3e5d8d63c501fd67a1392d8bdbbcb15706da394b6e2456c1c2ddf793",
+    "same_module_in_both_trees": true,
+    "runtimeLayer_edits": {
+      "ProjectionStore.layer": 16,
+      "CommandOutputHub.layer": 1,
+      "Orchestrator.layer": 1,
+      "TextGeneration.layer": 1
+    },
+    "server_ts_edits": {
+      "ProjectionStoreV2.layer": 9,
+      "TextGeneration.layer": 1
+    },
+    "note": "counting wrappers use the patch's own composition rule (Layer.effect + Layer.provide, no nested Layer.build); counts emit as A5_COUNT stderr lines per boot (no node:fs \u2014 donor effect rules ban it); committed patch/MANIFEST untouched",
+    "typecheck": {
+      "gate": "zero error-level diagnostics under the donor's own script (effect-tsgo tsrs --noEmit)",
+      "trees": {
+        "patched": {
+          "exit": 0,
+          "error_level_diagnostics": 0,
+          "suggestion_level_diagnostics": 491,
+          "first_error": null
+        },
+        "base": {
+          "exit": 0,
+          "error_level_diagnostics": 0,
+          "suggestion_level_diagnostics": 271,
+          "first_error": null
+        }
+      },
+      "suggestion_baseline_note": "TS377141 schemaClassMissingBrand suggestions are pre-existing donor-wide baseline at this pin; the committed patch adds exactly 2 in MastermindAdmissionAdapter.ts (recorded, not gated)"
+    }
+  },
+  "scenarios": {
+    "A1_patched_endpoint_unset": {
+      "initialize_serverInfo": {
+        "name": "T3 Code",
+        "version": "0.1.7"
+      },
+      "environmentId": "8de21045-a700-410d-bba4-625674e27ddf",
+      "launch": {
+        "isError": false,
+        "code": null,
+        "message": null,
+        "payload": {
+          "threadId": "mcp:22ab260c-3db0-4d04-bd61-6f87d19b6cb1",
+          "link": "https://app.t3.codes/threads/8de21045-a700-410d-bba4-625674e27ddf/mcp%3A22ab260c-3db0-4d04-bd61-6f87d19b6cb1",
+          "projectId": "5b712c01-df4e-4b59-a7bb-43ce3cca473a",
+          "modelSelection": {
+            "instanceId": "devReplay",
+            "model": "showcase"
+          },
+          "runId": "run:thread:mcp%3A22ab260c-3db0-4d04-bd61-6f87d19b6cb1:ordinal:1",
+          "status": "preparing"
+        }
+      },
+      "launch_shape": {
+        "isError": false,
+        "payload_keys": [
+          "link",
+          "modelSelection",
+          "projectId",
+          "runId",
+          "status",
+          "threadId"
+        ],
+        "threadId_present": true,
+        "runId_present": true
+      },
+      "read_shape": {
+        "isError": false,
+        "payload_keys": [
+          "hasMore",
+          "items",
+          "nextPosition",
+          "recentRuns",
+          "thread"
+        ],
+        "threadId_present": false,
+        "runId_present": false
+      },
+      "read_thread_status": "preparing",
+      "send": {
+        "isError": false,
+        "code": null,
+        "message": null,
+        "payload": {
+          "threadId": "mcp:22ab260c-3db0-4d04-bd61-6f87d19b6cb1",
+          "link": "https://app.t3.codes/threads/8de21045-a700-410d-bba4-625674e27ddf/mcp%3A22ab260c-3db0-4d04-bd61-6f87d19b6cb1",
+          "messageId": "message:mcp:client%3A31a811a5-1f6b-462b-ac25-9ca4ec7a3657:thread-send:5b8ee830-8157-4bc0-a2fd-4261ba15a99e",
+          "runId": "run:thread:mcp%3A22ab260c-3db0-4d04-bd61-6f87d19b6cb1:ordinal:2",
+          "status": "queued",
+          "delivery": "queued"
+        }
+      },
+      "send_shape": {
+        "isError": false,
+        "payload_keys": [
+          "delivery",
+          "link",
+          "messageId",
+          "runId",
+          "status",
+          "threadId"
+        ],
+        "threadId_present": true,
+        "runId_present": true
+      },
+      "interrupt": {
+        "isError": false,
+        "code": null,
+        "message": null,
+        "payload": {
+          "threadId": "mcp:22ab260c-3db0-4d04-bd61-6f87d19b6cb1",
+          "runId": "run:thread:mcp%3A22ab260c-3db0-4d04-bd61-6f87d19b6cb1:ordinal:1",
+          "status": "interrupt_requested"
+        }
+      },
+      "interrupt_shape": {
+        "isError": false,
+        "payload_keys": [
+          "runId",
+          "status",
+          "threadId"
+        ],
+        "threadId_present": true,
+        "runId_present": true
+      },
+      "interrupt_is_admission_block": false,
+      "run_statuses_observed": [
+        "completed",
+        "interrupted"
+      ],
+      "singleton_counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      },
+      "matches_unpatched_shapes": true,
+      "matches_unpatched_counts": true,
+      "verdict": "PASS"
+    },
+    "A0_base_unpatched": {
+      "initialize_serverInfo": {
+        "name": "T3 Code",
+        "version": "0.1.7"
+      },
+      "environmentId": "95f4c577-116d-4e0c-b45b-d922d9ee514d",
+      "launch": {
+        "isError": false,
+        "code": null,
+        "message": null,
+        "payload": {
+          "threadId": "mcp:0c8b8813-9b0d-4cdd-8e98-90dd16407146",
+          "link": "https://app.t3.codes/threads/95f4c577-116d-4e0c-b45b-d922d9ee514d/mcp%3A0c8b8813-9b0d-4cdd-8e98-90dd16407146",
+          "projectId": "071f144f-8b34-48d1-97d2-33f50b1c84d8",
+          "modelSelection": {
+            "instanceId": "devReplay",
+            "model": "showcase"
+          },
+          "runId": "run:thread:mcp%3A0c8b8813-9b0d-4cdd-8e98-90dd16407146:ordinal:1",
+          "status": "preparing"
+        }
+      },
+      "launch_shape": {
+        "isError": false,
+        "payload_keys": [
+          "link",
+          "modelSelection",
+          "projectId",
+          "runId",
+          "status",
+          "threadId"
+        ],
+        "threadId_present": true,
+        "runId_present": true
+      },
+      "read_shape": {
+        "isError": false,
+        "payload_keys": [
+          "hasMore",
+          "items",
+          "nextPosition",
+          "recentRuns",
+          "thread"
+        ],
+        "threadId_present": false,
+        "runId_present": false
+      },
+      "read_thread_status": "preparing",
+      "send": {
+        "isError": false,
+        "code": null,
+        "message": null,
+        "payload": {
+          "threadId": "mcp:0c8b8813-9b0d-4cdd-8e98-90dd16407146",
+          "link": "https://app.t3.codes/threads/95f4c577-116d-4e0c-b45b-d922d9ee514d/mcp%3A0c8b8813-9b0d-4cdd-8e98-90dd16407146",
+          "messageId": "message:mcp:client%3A624551c1-7a05-46e2-bcf6-1bbf6d4e3ba2:thread-send:a9f7d9ec-6254-4c7a-91d4-ad7b21144c6e",
+          "runId": "run:thread:mcp%3A0c8b8813-9b0d-4cdd-8e98-90dd16407146:ordinal:2",
+          "status": "queued",
+          "delivery": "queued"
+        }
+      },
+      "send_shape": {
+        "isError": false,
+        "payload_keys": [
+          "delivery",
+          "link",
+          "messageId",
+          "runId",
+          "status",
+          "threadId"
+        ],
+        "threadId_present": true,
+        "runId_present": true
+      },
+      "interrupt": {
+        "isError": false,
+        "code": null,
+        "message": null,
+        "payload": {
+          "threadId": "mcp:0c8b8813-9b0d-4cdd-8e98-90dd16407146",
+          "runId": "run:thread:mcp%3A0c8b8813-9b0d-4cdd-8e98-90dd16407146:ordinal:1",
+          "status": "interrupt_requested"
+        }
+      },
+      "interrupt_shape": {
+        "isError": false,
+        "payload_keys": [
+          "runId",
+          "status",
+          "threadId"
+        ],
+        "threadId_present": true,
+        "runId_present": true
+      },
+      "interrupt_is_admission_block": false,
+      "run_statuses_observed": [
+        "completed",
+        "interrupted"
+      ],
+      "singleton_counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      },
+      "verdict": "PASS"
+    },
+    "B2_endpoint_refuse": {
+      "initialize_serverInfo": {
+        "name": "T3 Code",
+        "version": "0.1.7"
+      },
+      "launch": {
+        "isError": true,
+        "code": "orchestration_error",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"orchestration_error\",\"message\":\"The operation could not be completed.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "orchestration_error",
+          "message": "The operation could not be completed."
+        }
+      },
+      "launch_shape": {
+        "isError": true,
+        "payload_keys": [
+          "_tag",
+          "code",
+          "message"
+        ],
+        "threadId_present": false,
+        "runId_present": false
+      },
+      "launch_is_error": true,
+      "launch_consult_count": 1,
+      "launch_consult": {
+        "t": "2026-11-09T16:21:06.270374+00:00",
+        "path": "/v1/admit",
+        "body": {
+          "kind": "launch",
+          "phase": "launch",
+          "projectId": "327660b7-cf47-4a67-b7ca-a5a08e5b1dc2",
+          "commandId": "mcp:7c8831c0-bb0a-4b41-a901-4ea91c1edd23",
+          "creationSource": "mcp"
+        },
+        "reply": {
+          "decision": "blocked_with_reason",
+          "reason": "a5 stale lease: proof refusal"
+        }
+      },
+      "refusal_consult_reply_was_blocked": true,
+      "refusal_reply_is_generic_orchestration_error": true,
+      "refusal_threadId_absent": true,
+      "threads_total_after_refusal": 0,
+      "smuggle_launch": {
+        "isError": true,
+        "code": "orchestration_error",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"orchestration_error\",\"message\":\"The operation could not be completed.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "orchestration_error",
+          "message": "The operation could not be completed."
+        }
+      },
+      "smuggle_is_error": true,
+      "smuggle_threadId_absent": true,
+      "smuggle_consult": {
+        "t": "2026-11-09T16:21:06.291653+00:00",
+        "path": "/v1/admit",
+        "body": {
+          "kind": "launch",
+          "phase": "launch",
+          "projectId": "327660b7-cf47-4a67-b7ca-a5a08e5b1dc2",
+          "commandId": "mcp:7ad04b01-81a3-408f-9f94-32502ad16c81",
+          "creationSource": "mcp"
+        },
+        "reply": {
+          "decision": "blocked_with_reason",
+          "reason": "a5 stale lease: proof refusal"
+        }
+      },
+      "smuggle_consult_reply_was_blocked": true,
+      "smuggle_consult_saw_client_fields": false,
+      "smuggle_no_authority": true,
+      "interrupt": {
+        "isError": true,
+        "code": "thread_not_found",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"Thread mcp:00000000-a5b1-4proof-n0ad-missionblockd was not found.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "thread_not_found",
+          "message": "Thread mcp:00000000-a5b1-4proof-n0ad-missionblockd was not found."
+        }
+      },
+      "interrupt_consults_delta": 0,
+      "interrupt_is_admission_block": false,
+      "consult_count": 2,
+      "singleton_counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      },
+      "verdict": "PASS"
+    },
+    "B3_endpoint_unreachable": {
+      "initialize_serverInfo": {
+        "name": "T3 Code",
+        "version": "0.1.7"
+      },
+      "launch": {
+        "isError": true,
+        "code": "orchestration_error",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"orchestration_error\",\"message\":\"The operation could not be completed.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "orchestration_error",
+          "message": "The operation could not be completed."
+        }
+      },
+      "launch_shape": {
+        "isError": true,
+        "payload_keys": [
+          "_tag",
+          "code",
+          "message"
+        ],
+        "threadId_present": false,
+        "runId_present": false
+      },
+      "fail_closed": true,
+      "failure_reply_is_generic_orchestration_error": true,
+      "threadId_absent": true,
+      "threads_total_after_failure": 0,
+      "interrupt": {
+        "isError": true,
+        "code": "thread_not_found",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"Thread mcp:00000000-a5b3-4proof-n0ad-missionblockd was not found.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "thread_not_found",
+          "message": "Thread mcp:00000000-a5b3-4proof-n0ad-missionblockd was not found."
+        }
+      },
+      "interrupt_is_admission_block": false,
+      "singleton_counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      },
+      "verdict": "PASS"
+    },
+    "B4_endpoint_hang": {
+      "hang_window_s": 75.0,
+      "consult_bound_ms": 3000,
+      "initialize_serverInfo": {
+        "name": "T3 Code",
+        "version": "0.1.7"
+      },
+      "hang_consult_observed_while_pending": true,
+      "interrupt_while_launch_hung": {
+        "isError": true,
+        "code": "thread_not_found",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"thread_not_found\",\"message\":\"Thread mcp:00000000-a5b4-4proof-n0ad-missionblockd was not found.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "thread_not_found",
+          "message": "Thread mcp:00000000-a5b4-4proof-n0ad-missionblockd was not found."
+        }
+      },
+      "interrupt_consults_delta": 0,
+      "interrupt_is_admission_block": false,
+      "launch_elapsed_s": 3.038,
+      "launch": {
+        "isError": true,
+        "code": "orchestration_error",
+        "message": "{\"_tag\":\"OrchestratorMcpFailure\",\"code\":\"orchestration_error\",\"message\":\"The operation could not be completed.\"}",
+        "payload": {
+          "_tag": "OrchestratorMcpFailure",
+          "code": "orchestration_error",
+          "message": "The operation could not be completed."
+        }
+      },
+      "launch_outcome_at_window": "REFUSED_WITHIN_WINDOW",
+      "verdict": "PASS",
+      "refusal_threadId_absent": true,
+      "refusal_reply_is_generic_orchestration_error": true,
+      "threads_total_after_timeout": 0,
+      "singleton_counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      },
+      "interrupt_never_blocked": true
+    }
+  },
+  "events": [
+    {
+      "t": "2026-11-09T16:18:53.216808+00:00",
+      "event": "preflight.ok",
+      "pin": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+      "patch_sha": "999a1b1e9472e479"
+    },
+    {
+      "t": "2026-11-09T16:19:13.225705+00:00",
+      "event": "trees.prepared",
+      "patched": "/tmp/a6-admission-boot/patched",
+      "base": "/tmp/a6-admission-boot/base"
+    },
+    {
+      "t": "2026-11-09T16:20:12.861515+00:00",
+      "event": "install.ok"
+    },
+    {
+      "t": "2026-11-09T16:20:34.696674+00:00",
+      "event": "typecheck.ok",
+      "patched": 0,
+      "base": 0
+    },
+    {
+      "t": "2026-11-09T16:20:34.704402+00:00",
+      "event": "fake_admission.listening",
+      "url": "http://127.0.0.1:4027"
+    },
+    {
+      "t": "2026-11-09T16:20:40.774903+00:00",
+      "event": "boot.A1.ok",
+      "port": 3977
+    },
+    {
+      "t": "2026-11-09T16:20:48.616335+00:00",
+      "event": "A1.done",
+      "counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      }
+    },
+    {
+      "t": "2026-11-09T16:20:54.182401+00:00",
+      "event": "boot.A0.ok",
+      "port": 3978
+    },
+    {
+      "t": "2026-11-09T16:21:02.153583+00:00",
+      "event": "A0.done",
+      "counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      }
+    },
+    {
+      "t": "2026-11-09T16:21:07.500433+00:00",
+      "event": "B2.done",
+      "counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      }
+    },
+    {
+      "t": "2026-11-09T16:21:18.581518+00:00",
+      "event": "B3.done",
+      "counts": {
+        "TextGeneration": 1,
+        "ProjectionStore": 1,
+        "CommandOutputHub": 1,
+        "Orchestrator": 1
+      }
+    },
+    {
+      "t": "2026-11-09T16:21:28.687929+00:00",
+      "event": "B4.done",
+      "verdict": "REFUSED_WITHIN_WINDOW"
+    }
+  ],
+  "findings_summary": {
+    "hard_fail_scenarios": [],
+    "hang_case": "bounded consult (A6): the launch consult aborted at its bound (3000 ms configured) and the launch failed closed (isError, no threadId, t3_thread_list total 0); the interrupt probe DURING the pending consult answered immediately with 0 admission consults",
+    "typed_admission_cause_not_surfaced_over_mcp": "LIVE FINDING (donor behavior, not patched around): the admission fences hold (endpoint consulted -> decision honored -> no thread minted -> incumbent never ran), but the donor's t3_thread_launch error mapping whitelists only AttachmentClaimError / ThreadManagementProviderInstanceDisabledError / above-ceiling causes (apps/server/src/mcp/toolkits/project/handlers.ts -> unavailable()); the patch's ThreadLaunchError(cause: MastermindAdmission*) falls through to the generic orchestration_error 'The operation could not be completed.' \u2014 an MCP client cannot distinguish an admission refusal or fail-closed endpoint error from any other launch failure. The typed cause is proven at the service seam by the patch's own vitest suite only."
+  }
+}

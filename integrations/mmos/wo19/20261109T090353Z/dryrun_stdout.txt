@@ -1,0 +1,43 @@
+WO-19 delegation-backend dry run -- PREPARED, NOT EXECUTED (no cutover, read-only)
+profile: ~/.hermes/profiles/engineering
+
+CONFIG READBACK (verbatim, via `hermes config get`)
+  $ hermes config get delegation.backend   [exit 0]
+      mmx-router
+  $ hermes config get delegation.backends.mastermind   [exit 1]
+      (no stdout)
+      stderr: Config key not set: delegation.backends.mastermind
+  $ hermes config get mcp_servers   [exit 0]
+      mmx-executive:
+        url: http://127.0.0.1:8731/mcp/hermes-host
+        headers:
+          Authorization: Bear...2iDA
+        enabled: true
+      ekko-studio-api:
+  $ hermes delegation config --show   [exit 0]
+      Delegation mode: mmx-router (delegation.backend: mmx-router)
+        Tasks that pick no route run on the mode's default, else the parent's model; delegation.model / delegation.provider are inactive in this mode.
+
+BACKEND AVAILABILITY: unknown (ModuleNotFoundError: No module named 'ruamel')
+
+PER-ROOT PROJECTION
+  root_ref                                 kind                       current     projected   children selectable
+  ---------------------------------------------------------------------------------------------------------------
+  fallback:hermes-root:m2studio            none (unattributed)        mmx-router  mastermind  1        False
+  hermes-root:m2studio                     fallback:hermes-root       mmx-router  mastermind  0        False
+  local-66625398b54422e9e8370ecf0841a060e8 session:parent_session_id  mmx-router  mastermind  4        False
+  unattributed                             none (unattributed)        mmx-router  mastermind  0        False
+
+CUTOVER WINDOW GUARD
+  armed=False  key=operation_key = f(root_ref, immediate_parent_run_ref, logical_child_key)
+    jsonl: exists=False records=0 (JSONL export stream absent -- WO-17 correlation input not yet produced)
+    receipts: available=False (no Executive MCP server configured in this profile (mcp_servers: configured) and/or the ma)
+
+BLOCKERS TO AN ACTUAL CUTOVER
+  - mastermind backend is not selectable: a config flip today would make delegate_task fail closed (no child started), not silently route elsewhere
+  - WO-17 export stream absent: the zero-duplicate-launch guard is UNARMED until the stream exists
+
+SUMMARY roots=4 attributed=3 children_covered=5 guard_armed=False
+  delegation.backend before/after projection: 'mmx-router' / 'mmx-router' -> unchanged=True
+
+wrote integrations/mmos/wo19/20261109T090353Z/dryrun.json

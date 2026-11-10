@@ -1,0 +1,1631 @@
+diff --git a/apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts b/apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts
+new file mode 100644
+index 00000000..935ccab8
+--- /dev/null
++++ b/apps/server/src/mastermind/MastermindAdmissionAdapter.test.ts
+@@ -0,0 +1,689 @@
++import type { CommandId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
++import { describe, expect, it } from "@effect/vitest";
++import * as Cause from "effect/Cause";
++import * as Context from "effect/Context";
++import * as Effect from "effect/Effect";
++import * as Exit from "effect/Exit";
++import * as Fiber from "effect/Fiber";
++import * as Layer from "effect/Layer";
++
++import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
++import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
++import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
++import {
++  DEFAULT_ADMISSION_TIMEOUT_MS,
++  MAX_ADMISSION_TIMEOUT_MS,
++  MastermindAdmissionBlockedError,
++  MastermindAdmissionEndpointError,
++  MastermindAdmissionService,
++  MastermindAdmissionTimeoutError,
++  mastermindAdmissionCauseCode,
++  decorateOrchestrationEffectExecutor,
++  decorateThreadLaunch,
++  makeMastermindAdmissionService,
++  readMastermindAdmissionConfig,
++} from "./MastermindAdmissionAdapter.ts";
++
++// ---------------------------------------------------------------------------
++// Fixtures
++// ---------------------------------------------------------------------------
++
++const threadId = "thread-admission-test" as ThreadId;
++const runId = "run-admission-test" as RunId;
++const commandId = "command-admission-test" as CommandId;
++const projectId = "project-admission-test" as ProjectId;
++
++const jsonResponse = (body: Record<string, unknown>): Response =>
++  new Response(JSON.stringify(body), {
++    status: 200,
++    headers: { "content-type": "application/json" },
++  });
++
++/** A fetch double that records every consult and replays a decision list. */
++const recordingFetch = (decisions: Array<Record<string, unknown>>) => {
++  const consulted: Array<Record<string, unknown>> = [];
++  const fetchImpl: typeof fetch = (async (_input: unknown, init?: RequestInit) => {
++    consulted.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
++    const decision = decisions[Math.min(consulted.length - 1, decisions.length - 1)]!;
++    return jsonResponse(decision);
++  }) as typeof fetch;
++  return { fetchImpl, consulted };
++};
++
++const admittedService = () =>
++  makeMastermindAdmissionService(
++    { mode: "enforce", endpoint: "http://admission.test", rootRef: undefined, consultTimeoutMs: 10_000 },
++    { fetchImpl: recordingFetch([{ decision: "admitted", rootRef: "root-1" }]).fetchImpl },
++  );
++
++const alwaysBlockedService = () => {
++  const { fetchImpl, consulted } = recordingFetch([
++    { decision: "blocked_with_reason", reason: "stale lease: mastermind session lost" },
++  ]);
++  return {
++    service: makeMastermindAdmissionService(
++      { mode: "enforce", endpoint: "http://admission.test", rootRef: undefined, consultTimeoutMs: 10_000 },
++      { fetchImpl },
++    ),
++    consulted,
++  };
++};
++
++const threadLaunchIncumbent = (calls: string[]) =>
++  ({
++    launch: (request: ThreadLaunch.ThreadLaunchInput) =>
++      Effect.sync(() => {
++        calls.push(`launch:${request.commandId}`);
++        return { threadId, projection: {}, resumed: false } as never;
++      }),
++    checkWorktreeBase: () => Effect.void,
++    retryPreparation: () => Effect.void,
++    prepareRun: () => Effect.void,
++  }) as unknown as ThreadLaunch.ThreadLaunchService["Service"];
++
++const effect = (
++  type: "provider-turn.start" | "provider-turn.restart" | "provider-turn.interrupt" | "provider-turn.steer",
++): EffectOutbox.OrchestrationEffectV2 =>
++  ({
++    id: `effect-${type}`,
++    commandId,
++    threadId,
++    status: "pending",
++    attemptCount: 0,
++    availableAt: "1970-01-01T00:00:00.000Z",
++    leaseOwner: null,
++    createdAt: "1970-01-01T00:00:00.000Z",
++    updatedAt: "1970-01-01T00:00:00.000Z",
++    request:
++      type === "provider-turn.start"
++        ? { type, runId }
++        : type === "provider-turn.restart"
++          ? {
++              type,
++              runId,
++              providerSessionId: "s",
++              providerThreadId: "pt",
++              providerTurnId: "pu",
++              interruptedAttemptId: "a",
++            }
++          : type === "provider-turn.steer"
++            ? { type, providerSessionId: "s", providerThreadId: "pt", providerTurnId: "pu", messageId: "m" }
++            : { type, providerSessionId: "s", providerThreadId: "pt", providerTurnId: "pu" },
++  }) as EffectOutbox.OrchestrationEffectV2;
++
++const executorIncumbent = (calls: string[]) =>
++  ({
++    execute: (e: EffectOutbox.OrchestrationEffectV2) =>
++      Effect.sync(() => {
++        calls.push(e.request.type);
++      }),
++  }) as unknown as EffectWorker.OrchestrationEffectExecutorV2Shape;
++
++// ---------------------------------------------------------------------------
++// 1. Disabled mode is a pure passthrough
++// ---------------------------------------------------------------------------
++
++describe("MastermindAdmissionAdapter disabled mode", () => {
++  it.effect("unset endpoint configures disabled mode", () =>
++    Effect.gen(function* () {
++      const config = readMastermindAdmissionConfig({});
++      expect(config.mode).toBe("disabled");
++      expect(config.endpoint).toBeUndefined();
++      expect(readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_ENDPOINT: " " }).mode).toBe(
++        "disabled",
++      );
++      expect(
++        readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_ENDPOINT: "http://x" }).mode,
++      ).toBe("enforce");
++    }),
++  );
++
++  it.effect("admitLaunch never consults any endpoint and passes through", () =>
++    Effect.gen(function* () {
++      let consulted = 0;
++      const service = makeMastermindAdmissionService(
++        readMastermindAdmissionConfig({}),
++        {
++          fetchImpl: (async () => {
++            consulted += 1;
++            throw new Error("must not be consulted in disabled mode");
++          }) as typeof fetch,
++        },
++      );
++      const decision = yield* service.admitLaunch({ projectId, commandId, creationSource: "test" });
++      expect(decision).toEqual({ type: "passthrough" });
++      expect(consulted).toBe(0);
++      expect(yield* service.revalidateExecution({ threadId, runId, phase: "launch" })).toEqual({
++        type: "passthrough",
++      });
++    }),
++  );
++
++  it.effect("decorators return the incumbent service instance unchanged", () =>
++    Effect.gen(function* () {
++      const incumbent = threadLaunchIncumbent([]);
++      const executor = executorIncumbent([]);
++      const admission = Layer.succeed(
++        MastermindAdmissionService,
++        makeMastermindAdmissionService(readMastermindAdmissionConfig({})),
++      );
++      const decoratedLaunch = yield* Layer.build(
++        decorateThreadLaunch(Layer.succeed(ThreadLaunch.ThreadLaunchService, incumbent)).pipe(
++          Layer.provideMerge(admission),
++        ),
++      );
++      // Bit-for-bit passthrough: with admission disabled the decorator hands
++      // back the incumbent service object itself.
++      expect(Context.get(decoratedLaunch, ThreadLaunch.ThreadLaunchService)).toBe(incumbent);
++      const decoratedExecutor = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(EffectWorker.OrchestrationEffectExecutorV2, executor as never),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      expect(Context.get(decoratedExecutor, EffectWorker.OrchestrationEffectExecutorV2)).toBe(
++        executor,
++      );
++    }),
++  );
++});
++
++// ---------------------------------------------------------------------------
++// 1b. Composition: a decorated incumbent and the undecorated graph share
++//     every dependency, built EXACTLY ONCE (no nested Layer.build fork).
++// ---------------------------------------------------------------------------
++
++describe("MastermindAdmissionAdapter composition", () => {
++  // A shared singleton dependency standing in for ProjectionStore /
++  // CommandOutputHub / Orchestrator / TextGeneration in runtimeLayer.ts.
++  class SharedStore extends Context.Service<SharedStore, { readonly instance: number }>()(
++    "t3/mastermind/MastermindAdmissionAdapter.test/SharedStore",
++  ) {}
++  // An undecorated sibling service that consumes the same shared store.
++  class Sibling extends Context.Service<Sibling, { readonly store: number }>()(
++    "t3/mastermind/MastermindAdmissionAdapter.test/Sibling",
++  ) {}
++
++  const graph = (
++    mode: "disabled" | "enforce",
++    order: "decorated-first" | "undecorated-first",
++  ) => {
++    const counts = { sharedStore: 0, incumbent: 0 };
++    const sharedStoreLayer = Layer.effect(
++      SharedStore,
++      Effect.sync(() => {
++        counts.sharedStore += 1;
++        return { instance: counts.sharedStore };
++      }),
++    );
++    const incumbent = threadLaunchIncumbent([]);
++    const incumbentLayer = Layer.effect(
++      ThreadLaunch.ThreadLaunchService,
++      Effect.gen(function* () {
++        yield* SharedStore;
++        counts.incumbent += 1;
++        return incumbent;
++      }),
++    ).pipe(Layer.provide(sharedStoreLayer));
++    const siblingLayer = Layer.effect(
++      Sibling,
++      Effect.gen(function* () {
++        const store = yield* SharedStore;
++        return { store: store.instance };
++      }),
++    ).pipe(Layer.provide(sharedStoreLayer));
++    const admission = Layer.succeed(
++      MastermindAdmissionService,
++      mode === "disabled"
++        ? makeMastermindAdmissionService(readMastermindAdmissionConfig({}))
++        : admittedService(),
++    );
++    const decorated = decorateThreadLaunch(incumbentLayer).pipe(Layer.provide(admission));
++    const merged =
++      order === "decorated-first"
++        ? Layer.mergeAll(decorated, siblingLayer)
++        : Layer.mergeAll(siblingLayer, decorated);
++    return { counts, incumbent, merged };
++  };
++
++  for (const mode of ["disabled", "enforce"] as const) {
++    for (const order of ["decorated-first", "undecorated-first"] as const) {
++      it.effect(`shared dependency is built exactly once (${mode}, ${order})`, () =>
++        Effect.gen(function* () {
++          const { counts, incumbent, merged } = graph(mode, order);
++          const services = yield* Layer.build(merged);
++          // One shared singleton for the whole graph; the decorated incumbent
++          // and the undecorated sibling see the SAME instance.
++          expect(counts.sharedStore).toBe(1);
++          expect(counts.incumbent).toBe(1);
++          expect(Context.get(services, Sibling).store).toBe(1);
++          const launch = Context.get(services, ThreadLaunch.ThreadLaunchService);
++          if (mode === "disabled") {
++            // Pure passthrough at composition level, not just per instance.
++            expect(launch).toBe(incumbent);
++          } else {
++            expect(launch).not.toBe(incumbent);
++          }
++        }),
++      );
++    }
++  }
++});
++
++// ---------------------------------------------------------------------------
++// 2. A blocked launch surfaces the typed cause
++// ---------------------------------------------------------------------------
++
++describe("MastermindAdmissionAdapter blocked launch", () => {
++  it.effect("launch fails with ThreadLaunchError carrying the blocked cause", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      const { service, consulted } = alwaysBlockedService();
++      const admission = Layer.succeed(MastermindAdmissionService, service);
++      const decorated = yield* Layer.build(
++        decorateThreadLaunch(
++          Layer.succeed(ThreadLaunch.ThreadLaunchService, threadLaunchIncumbent(calls)),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const launch = Context.get(decorated, ThreadLaunch.ThreadLaunchService).launch;
++      const exit = yield* Effect.exit(
++        launch({
++          commandId,
++          projectId,
++          title: "t",
++          generateTitle: false,
++        } as never as ThreadLaunch.ThreadLaunchInput),
++      );
++      expect(Exit.isFailure(exit)).toBe(true);
++      if (Exit.isFailure(exit)) {
++        const failure = Cause.squash(exit.cause);
++        expect(failure).toBeInstanceOf(ThreadLaunch.ThreadLaunchError);
++        const cause = (failure as unknown as { cause: unknown }).cause;
++        expect(cause).toBeInstanceOf(MastermindAdmissionBlockedError);
++        expect((cause as MastermindAdmissionBlockedError).reason).toContain("stale lease");
++        expect((cause as MastermindAdmissionBlockedError).phase).toBe("launch");
++      }
++      // Blocked BEFORE any preparation effect: the incumbent never launched.
++      expect(calls).toEqual([]);
++      expect(consulted.length).toBe(1);
++    }),
++  );
++
++  it.effect("an admitted launch proceeds and binds the thread in the ledger", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      const admission = Layer.succeed(MastermindAdmissionService, admittedService());
++      const service = Context.get(
++        yield* Layer.build(admission),
++        MastermindAdmissionService,
++      );
++      const decorated = yield* Layer.build(
++        decorateThreadLaunch(
++          Layer.succeed(ThreadLaunch.ThreadLaunchService, threadLaunchIncumbent(calls)),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const result = yield* Context.get(decorated, ThreadLaunch.ThreadLaunchService).launch({
++        commandId,
++        projectId,
++        title: "t",
++      } as never as ThreadLaunch.ThreadLaunchInput);
++      expect((result as { threadId: ThreadId }).threadId).toBe(threadId);
++      expect(calls).toEqual([`launch:${commandId}`]);
++      const snapshot = yield* service.ledgerSnapshot;
++      expect(snapshot.at(-1)?.threadId).toBe(threadId);
++      expect(snapshot.at(-1)?.rootRef).toBe("root-1");
++    }),
++  );
++});
++
++// ---------------------------------------------------------------------------
++// 3. Stale lease blocks start/restart but NEVER interrupt (cancel)
++// ---------------------------------------------------------------------------
++
++describe("MastermindAdmissionAdapter stale-lease fence", () => {
++  const staleLeaseExecutor = () => {
++    const calls: string[] = [];
++    const { service, consulted } = alwaysBlockedService();
++    const admission = Layer.succeed(MastermindAdmissionService, service);
++    return { calls, consulted, admission };
++  };
++
++  it.effect("provider-turn.start is blocked with the typed admission cause", () =>
++    Effect.gen(function* () {
++      const { calls, consulted, admission } = staleLeaseExecutor();
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const exit = yield* Effect.exit(
++        Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2).execute(
++          effect("provider-turn.start"),
++        ),
++      );
++      expect(Exit.isFailure(exit)).toBe(true);
++      if (Exit.isFailure(exit)) {
++        const failure = Cause.squash(exit.cause);
++        expect(failure).toBeInstanceOf(EffectWorker.OrchestrationEffectExecutionError);
++        const cause = (failure as unknown as { cause: unknown }).cause;
++        expect(cause).toBeInstanceOf(MastermindAdmissionBlockedError);
++        expect((cause as MastermindAdmissionBlockedError).reason).toContain("stale lease");
++      }
++      expect(calls).toEqual([]);
++      expect(consulted.length).toBe(1);
++    }),
++  );
++
++  it.effect("provider-turn.restart is blocked before the upstream interrupt runs", () =>
++    Effect.gen(function* () {
++      const { calls, admission } = staleLeaseExecutor();
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const exit = yield* Effect.exit(
++        Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2).execute(
++          effect("provider-turn.restart"),
++        ),
++      );
++      expect(Exit.isFailure(exit)).toBe(true);
++      // The whole compound restart effect failed: the original turn was never
++      // interrupted by a stale-lease holder.
++      expect(calls).toEqual([]);
++    }),
++  );
++
++  it.effect("interrupt is never decorated: proceeds while the lease is stale", () =>
++    Effect.gen(function* () {
++      const { calls, consulted, admission } = staleLeaseExecutor();
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      yield* Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2).execute(
++        effect("provider-turn.interrupt"),
++      );
++      expect(calls).toEqual(["provider-turn.interrupt"]);
++      // Admission was never even consulted for an interrupt.
++      expect(consulted.length).toBe(0);
++    }),
++  );
++
++  it.effect("steer records the stale lease but still proceeds", () =>
++    Effect.gen(function* () {
++      const { calls, consulted, admission } = staleLeaseExecutor();
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      yield* Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2).execute(
++        effect("provider-turn.steer"),
++      );
++      expect(calls).toEqual(["provider-turn.steer"]);
++      expect(consulted.length).toBe(1);
++    }),
++  );
++});
++
++// ---------------------------------------------------------------------------
++// 4. Bounded consult (A6): a hung endpoint can never hang the launch funnel
++// ---------------------------------------------------------------------------
++
++/** A fetch double that accepts the consult, records it, and then never answers
++ * until the request's own AbortSignal fires — A5's live hang, in-process. */
++const hungRecordingFetch = () => {
++  const consulted: Array<Record<string, unknown>> = [];
++  const fetchImpl: typeof fetch = (async (_input: unknown, init?: RequestInit) => {
++    const signal = init?.signal as AbortSignal | null | undefined;
++    consulted.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
++    await new Promise<never>((_resolve, reject) => {
++      const abort = () =>
++        reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
++      if (signal?.aborted) {
++        abort();
++        return;
++      }
++      signal?.addEventListener("abort", abort, { once: true });
++    });
++  }) as unknown as typeof fetch;
++  return { fetchImpl, consulted };
++};
++
++const hungAdmission = (consultTimeoutMs: number) => {
++  const { fetchImpl, consulted } = hungRecordingFetch();
++  return {
++    consulted,
++    admission: Layer.succeed(
++      MastermindAdmissionService,
++      makeMastermindAdmissionService(
++        { mode: "enforce", endpoint: "http://admission.test", rootRef: undefined, consultTimeoutMs },
++        { fetchImpl },
++      ),
++    ),
++  };
++};
++
++describe("MastermindAdmissionAdapter bounded consult", () => {
++  it.effect("consult bound: 10s default, env override honored, hard ceiling clamped", () =>
++    Effect.gen(function* () {
++      expect(readMastermindAdmissionConfig({}).consultTimeoutMs).toBe(DEFAULT_ADMISSION_TIMEOUT_MS);
++      expect(
++        readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_TIMEOUT_MS: "2500" })
++          .consultTimeoutMs,
++      ).toBe(2500);
++      // a misconfigured larger value must not reintroduce the unbounded hang
++      expect(
++        readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_TIMEOUT_MS: "999999" })
++          .consultTimeoutMs,
++      ).toBe(MAX_ADMISSION_TIMEOUT_MS);
++      expect(
++        readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_TIMEOUT_MS: "0" }).consultTimeoutMs,
++      ).toBe(1);
++      expect(
++        readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_TIMEOUT_MS: "abc" })
++          .consultTimeoutMs,
++      ).toBe(DEFAULT_ADMISSION_TIMEOUT_MS);
++      // the knob alone never flips enforcement on
++      expect(readMastermindAdmissionConfig({ MASTERMIND_ADMISSION_TIMEOUT_MS: "2500" }).mode).toBe(
++        "disabled",
++      );
++    }),
++  );
++
++  it.effect("typed cause codes distinguish refused / timeout / unreachable", () =>
++    Effect.gen(function* () {
++      expect(
++        mastermindAdmissionCauseCode(
++          new MastermindAdmissionBlockedError({ phase: "launch", reason: "r" }),
++        ),
++      ).toBe("admission_refused");
++      expect(
++        mastermindAdmissionCauseCode(
++          new MastermindAdmissionTimeoutError({
++            endpoint: "http://admission.test",
++            phase: "launch",
++            timeoutMs: 25,
++          }),
++        ),
++      ).toBe("admission_timeout");
++      expect(
++        mastermindAdmissionCauseCode(
++          new MastermindAdmissionEndpointError({ endpoint: "http://admission.test", phase: "launch" }),
++        ),
++      ).toBe("admission_unreachable");
++      expect(mastermindAdmissionCauseCode(new Error("unrelated"))).toBeUndefined();
++    }),
++  );
++
++  it.effect("a launch consult that exceeds its bound fails closed with the typed timeout cause", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      const { consulted, admission } = hungAdmission(25);
++      const decorated = yield* Layer.build(
++        decorateThreadLaunch(
++          Layer.succeed(ThreadLaunch.ThreadLaunchService, threadLaunchIncumbent(calls)),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const exit = yield* Effect.exit(
++        Context.get(decorated, ThreadLaunch.ThreadLaunchService).launch({
++          commandId,
++          projectId,
++          title: "t",
++        } as never as ThreadLaunch.ThreadLaunchInput),
++      );
++      expect(Exit.isFailure(exit)).toBe(true);
++      if (Exit.isFailure(exit)) {
++        const failure = Cause.squash(exit.cause);
++        expect(failure).toBeInstanceOf(ThreadLaunch.ThreadLaunchError);
++        const cause = (failure as unknown as { cause: unknown }).cause;
++        // the typed cause distinguishes the bound firing from unreachable
++        expect(cause).toBeInstanceOf(MastermindAdmissionTimeoutError);
++        expect((cause as MastermindAdmissionTimeoutError).phase).toBe("launch");
++        expect((cause as MastermindAdmissionTimeoutError).timeoutMs).toBe(25);
++        expect((cause as MastermindAdmissionTimeoutError).message).toContain("timed out");
++      }
++      // FAIL-CLOSED: the consult was aborted at the bound, the incumbent launch
++      // NEVER ran, and no thread was minted by this funnel.
++      expect(calls).toEqual([]);
++      expect(consulted.length).toBe(1);
++    }),
++  );
++
++  it.effect("a revalidate consult (provider-turn.start) exceeding its bound fails the effect closed", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      const { consulted, admission } = hungAdmission(25);
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const exit = yield* Effect.exit(
++        Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2).execute(
++          effect("provider-turn.start"),
++        ),
++      );
++      expect(Exit.isFailure(exit)).toBe(true);
++      if (Exit.isFailure(exit)) {
++        const failure = Cause.squash(exit.cause);
++        expect(failure).toBeInstanceOf(EffectWorker.OrchestrationEffectExecutionError);
++        const cause = (failure as unknown as { cause: unknown }).cause;
++        expect(cause).toBeInstanceOf(MastermindAdmissionTimeoutError);
++        expect((cause as MastermindAdmissionTimeoutError).phase).toBe("provider_turn_start");
++      }
++      expect(calls).toEqual([]);
++      expect(consulted.length).toBe(1);
++    }),
++  );
++
++  it.effect("interrupt during a hung consult is never gated", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      // a long bound: the consult is still PENDING when the interrupt probe runs
++      const { consulted, admission } = hungAdmission(MAX_ADMISSION_TIMEOUT_MS);
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const executor = Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2);
++      const start = yield* executor.execute(effect("provider-turn.start")).pipe(
++        Effect.forkChild,
++      );
++      // let the forked consult begin (its path to the fetch is synchronous;
++      // yieldNow hands control to the forked fiber)
++      yield* Effect.yieldNow;
++      yield* Effect.yieldNow;
++      expect(consulted.length).toBe(1); // the start consult is hanging
++      expect(calls).toEqual([]); // start has not executed anything
++      // interrupt flows through the SAME decorated executor WHILE the consult
++      // hangs: answered immediately, no consult of its own, never blocked.
++      yield* executor.execute(effect("provider-turn.interrupt"));
++      expect(calls).toEqual(["provider-turn.interrupt"]);
++      expect(consulted.length).toBe(1);
++      // abandon the hung consult (the fiber exits; the abandoned promise is
++      // never awaited)
++      yield* Fiber.interrupt(start);
++    }),
++  );
++
++  it.effect("a malformed endpoint reply fails closed as admission_unreachable (defect distinguishes)", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      const malformedFetch: typeof fetch = (async (_input: unknown, _init?: RequestInit) =>
++        jsonResponse({ unexpected: "shape" })) as typeof fetch;
++      const admission = Layer.succeed(
++        MastermindAdmissionService,
++        makeMastermindAdmissionService(
++          { mode: "enforce", endpoint: "http://admission.test", rootRef: undefined, consultTimeoutMs: 5_000 },
++          { fetchImpl: malformedFetch },
++        ),
++      );
++      const decorated = yield* Layer.build(
++        decorateThreadLaunch(
++          Layer.succeed(ThreadLaunch.ThreadLaunchService, threadLaunchIncumbent(calls)),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      const exit = yield* Effect.exit(
++        Context.get(decorated, ThreadLaunch.ThreadLaunchService).launch({
++          commandId,
++          projectId,
++          title: "t",
++        } as never as ThreadLaunch.ThreadLaunchInput),
++      );
++      expect(Exit.isFailure(exit)).toBe(true);
++      if (Exit.isFailure(exit)) {
++        const failure = Cause.squash(exit.cause);
++        expect(failure).toBeInstanceOf(ThreadLaunch.ThreadLaunchError);
++        const cause = (failure as unknown as { cause: unknown }).cause;
++        // malformed reply: the endpoint-error family (NOT the timeout class);
++        // the defect field carries "malformed admission payload"
++        expect(mastermindAdmissionCauseCode(cause)).toBe("admission_unreachable");
++        expect((cause as MastermindAdmissionEndpointError).message).toContain("endpoint call failed");
++      }
++      expect(calls).toEqual([]);
++    }),
++  );
++
++  it.effect("a steer consult exceeding its bound is recorded but steer still proceeds", () =>
++    Effect.gen(function* () {
++      const calls: string[] = [];
++      const { consulted, admission } = hungAdmission(25);
++      const decorated = yield* Layer.build(
++        decorateOrchestrationEffectExecutor(
++          Layer.succeed(
++            EffectWorker.OrchestrationEffectExecutorV2,
++            executorIncumbent(calls) as never,
++          ),
++        ).pipe(Layer.provideMerge(admission)),
++      );
++      yield* Context.get(decorated, EffectWorker.OrchestrationEffectExecutorV2).execute(
++        effect("provider-turn.steer"),
++      );
++      // steer consults carry the same bound (it fired — no hang), and steer is
++      // still never blocked: delivery into the existing turn proceeded.
++      expect(calls).toEqual(["provider-turn.steer"]);
++      expect(consulted.length).toBe(1);
++    }),
++  );
++});
+diff --git a/apps/server/src/mastermind/MastermindAdmissionAdapter.ts b/apps/server/src/mastermind/MastermindAdmissionAdapter.ts
+new file mode 100644
+index 00000000..8f1aeb7e
+--- /dev/null
++++ b/apps/server/src/mastermind/MastermindAdmissionAdapter.ts
+@@ -0,0 +1,810 @@
++/**
++ * Mastermind pinned admission patch - donor: github.com/pingdotgg/t3code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
++ *
++ * MastermindAdmissionAdapter adapts T3 Code's own Effect-TS Context.Service /
++ * Layer system into an admission gate for Mastermind. That system is the ONLY
++ * supported extension mechanism upstream exposes (apps/server/src has no
++ * plugin/middleware/extension registry), so every seam below is a decorator
++ * Layer around an incumbent `export const layer` — the incumbent layers and all
++ * upstream service logic are left untouched.
++ *
++ * Inert by default: with MASTERMIND_ADMISSION_ENDPOINT unset (the upstream
++ * default), `mode` is "disabled" and every decorator returns the incumbent
++ * service unchanged, so upstream behavior is bit-for-bit identical without
++ * Mastermind. Authority cannot be minted by prompt text, request fields, or any
++ * process environment variable other than the operator-configured root ref:
++ * MASTERMIND_ADMISSION_ROOT_REF. Manual UI launches are admitted as ordinary
++ * interactive roots within the existing grant — there is no per-prompt
++ * admission ceremony.
++ *
++ * Decorator seams (composed in `orchestration-v2/runtimeLayer.ts`):
++ *   a. ThreadLaunchService (launch): decide admission BEFORE the first
++ *      preparation effect of the single funnel for all thread creation, then
++ *      bind the admitted root/binding onto the launched thread.
++ *   b. ThreadManagementService (dispatch): propagate the existing root/binding
++ *      through messages, delegation, and prepared-run release/retry. Propagate
++ *      only — dispatch is never re-decided here.
++ *   c. OrchestrationEffectExecutorV2 (execute): revalidate the current
++ *      attempt/placement/fence immediately before provider-turn start, steer,
++ *      and restart effects. A stale lease blocks NEW EXECUTION ONLY (start and
++ *      restart-into-replacement); interrupt/cancel effects are never
++ *      decorated, so a stale lease can never interrupt or cancel work. Steer
++ *      revalidation records but never blocks (steer delivers into an existing
++ *      turn). Upstream restart lifecycle is preserved: when admitted, restart
++ *      still interrupts the original turn before starting the replacement.
++ *   d. ProviderTurnStartService (start) + ProviderSessionManagerV2 (open):
++ *      revalidate placement + fence immediately before the native
++ *      process/session binding — defense in depth for every caller of these
++ *      services, which also spawn the ACP agent process at open.
++ *   e. ThreadTitleRegenerationService (execute): accounted helper-route record
++ *      for the app-owned helper-model call (title generation). Accounting
++ *      only — no upstream behavior change. ThreadPullRequestService performs
++ *      no helper-model calls at this pin, so nothing is accounted there.
++ *   f. Native child spawns are covered by (b) + (c): every delegate/child
++ *      command flows through dispatch and provider-turn effects. Orchestrator.ts
++ *      is deliberately NOT patched.
++ *
++ * Wire protocol (consulted only when MASTERMIND_ADMISSION_ENDPOINT is set):
++ *   POST {endpoint}/v1/admit  {"kind":"launch"|"revalidate", ...}
++ *   -> {"decision":"admitted","rootRef"?,"admissionId"?,"grantedAt"?}
++ *      {"decision":"blocked_with_reason","reason":"..."}
++ *      {"decision":"passthrough"}
++ * Every consult is bounded (AbortSignal.timeout, default 10 s, env
++ * MASTERMIND_ADMISSION_TIMEOUT_MS, hard ceiling 60 s). An unreachable
++ * endpoint, malformed payload, or consult that exceeds its bound fails closed
++ * (blocks), which — by the stale-lease rule — can only block new execution,
++ * never interrupts. A timed-out consult carries the typed cause
++ * MastermindAdmissionTimeoutError, so `admission_timeout` is distinguishable
++ * from `admission_unreachable` / `admission_refused`
++ * (see mastermindAdmissionCauseCode).
++ */
++import type { CommandId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
++import * as Context from "effect/Context";
++import * as Effect from "effect/Effect";
++import * as Layer from "effect/Layer";
++import * as Option from "effect/Option";
++import * as Predicate from "effect/Predicate";
++import * as Schema from "effect/Schema";
++
++import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
++import * as ProviderSessionManager from "../orchestration-v2/ProviderSessionManager.ts";
++import * as ProviderTurnStartService from "../orchestration-v2/ProviderTurnStartService.ts";
++import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
++import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
++import * as ThreadTitleRegenerationService from "../orchestration-v2/ThreadTitleRegenerationService.ts";
++
++// ---------------------------------------------------------------------------
++// Configuration (env-driven; unset = disabled = pure passthrough)
++// ---------------------------------------------------------------------------
++
++export const MASTERMIND_ADMISSION_ENDPOINT_ENV = "MASTERMIND_ADMISSION_ENDPOINT";
++export const MASTERMIND_ADMISSION_ROOT_REF_ENV = "MASTERMIND_ADMISSION_ROOT_REF";
++export const MASTERMIND_ADMISSION_TIMEOUT_MS_ENV = "MASTERMIND_ADMISSION_TIMEOUT_MS";
++
++/**
++ * Default consult bound: 10 s. The admission endpoint is an operator-run gate
++ * on the interactive launch path; a healthy consult is a sub-second local
++ * call, and a launch must not wait longer than a long beat on a degraded gate
++ * before failing closed (A5 live finding #1: an unbounded consult hung
++ * `t3_thread_launch` indefinitely).
++ */
++export const DEFAULT_ADMISSION_TIMEOUT_MS = 10_000;
++/** Hard ceiling: a larger configured value is clamped, so no configuration can
++ * reintroduce the unbounded hang. */
++export const MAX_ADMISSION_TIMEOUT_MS = 60_000;
++/** Floor: the bound must stay a real positive duration. */
++export const MIN_ADMISSION_TIMEOUT_MS = 1;
++
++export interface MastermindAdmissionConfig {
++  /** "disabled" = pure passthrough (upstream default); "enforce" consults the endpoint. */
++  readonly mode: "disabled" | "enforce";
++  readonly endpoint: string | undefined;
++  readonly rootRef: string | undefined;
++  /** Client-side bound (ms) for EVERY admission consult (launch, revalidate, steer). */
++  readonly consultTimeoutMs: number;
++}
++
++const readConsultTimeoutMs = (raw: string | undefined): number => {
++  const trimmed = raw?.trim();
++  if (trimmed === undefined || trimmed === "") return DEFAULT_ADMISSION_TIMEOUT_MS;
++  const parsed = Number.parseInt(trimmed, 10);
++  if (Number.isNaN(parsed)) return DEFAULT_ADMISSION_TIMEOUT_MS;
++  return Math.min(Math.max(parsed, MIN_ADMISSION_TIMEOUT_MS), MAX_ADMISSION_TIMEOUT_MS);
++};
++
++export const readMastermindAdmissionConfig = (
++  env: Record<string, string | undefined> = process.env,
++): MastermindAdmissionConfig => {
++  const endpoint = env[MASTERMIND_ADMISSION_ENDPOINT_ENV]?.trim();
++  const rootRef = env[MASTERMIND_ADMISSION_ROOT_REF_ENV]?.trim();
++  return {
++    mode: endpoint === undefined || endpoint === "" ? "disabled" : "enforce",
++    endpoint: endpoint === undefined || endpoint === "" ? undefined : endpoint,
++    rootRef: rootRef === undefined || rootRef === "" ? undefined : rootRef,
++    consultTimeoutMs: readConsultTimeoutMs(env[MASTERMIND_ADMISSION_TIMEOUT_MS_ENV]),
++  };
++};
++
++// ---------------------------------------------------------------------------
++// Admission decision record
++// ---------------------------------------------------------------------------
++
++export type MastermindAdmissionPhase =
++  | "launch"
++  | "provider_turn_start"
++  | "provider_turn_restart"
++  | "provider_turn_steer"
++  | "provider_session_open";
++
++export interface MastermindAdmissionBinding {
++  readonly rootRef: string | undefined;
++  readonly admissionId: string | undefined;
++  readonly grantedAt: string | undefined;
++}
++
++/** admitted | blocked_with_reason | passthrough */
++export type MastermindAdmissionDecision =
++  | {
++      readonly type: "admitted";
++      readonly rootRef: string | undefined;
++      readonly binding: MastermindAdmissionBinding | undefined;
++    }
++  | { readonly type: "blocked_with_reason"; readonly reason: string }
++  | { readonly type: "passthrough" };
++
++/** One propagated binding per thread, bounded to keep runtime memory flat. */
++export const MAX_LEDGER_ENTRIES = 1024;
++
++export interface MastermindAdmissionLedgerEntry {
++  readonly threadId: ThreadId;
++  readonly commandId: CommandId;
++  readonly creationSource: string;
++  readonly rootRef: string | undefined;
++  readonly binding: MastermindAdmissionBinding | undefined;
++  readonly propagatedCommands: number;
++  readonly helperCalls: number;
++}
++
++// ---------------------------------------------------------------------------
++// Errors
++// ---------------------------------------------------------------------------
++
++export class MastermindAdmissionBlockedError extends Schema.TaggedError<MastermindAdmissionBlockedError>()(
++  "MastermindAdmissionBlockedError",
++  {
++    phase: Schema.String,
++    reason: Schema.String,
++  },
++) {
++  override get message(): string {
++    return `Mastermind admission blocked ${this.phase}: ${this.reason}`;
++  }
++}
++
++export class MastermindAdmissionEndpointError extends Schema.TaggedError<MastermindAdmissionEndpointError>()(
++  "MastermindAdmissionEndpointError",
++  {
++    endpoint: Schema.String,
++    phase: Schema.String,
++    cause: Schema.optional(Schema.Defect()),
++  },
++) {
++  override get message(): string {
++    return `Mastermind admission endpoint call failed during ${this.phase} (endpoint: ${this.endpoint}).`;
++  }
++}
++
++/** A consult exceeded its bound (AbortSignal.timeout fired) — fail closed, but
++ * distinguishable from an unreachable/malformed endpoint. */
++export class MastermindAdmissionTimeoutError extends Schema.TaggedError<MastermindAdmissionTimeoutError>()(
++  "MastermindAdmissionTimeoutError",
++  {
++    endpoint: Schema.String,
++    phase: Schema.String,
++    timeoutMs: Schema.Number,
++  },
++) {
++  override get message(): string {
++    return `Mastermind admission consult timed out after ${this.timeoutMs}ms during ${this.phase} (endpoint: ${this.endpoint}).`;
++  }
++}
++
++/**
++ * Stable machine-readable cause codes for admission failures — the labels an
++ * upstream MCP surface should emit (A5 finding #2): the endpoint DECIDED
++ * `admission_refused`; the consult exceeded its bound `admission_timeout`; the
++ * endpoint could not be reached or replied malformed `admission_unreachable`
++ * (the EndpointError's defect distinguishes unreachable vs malformed). All
++ * three fail closed (block new execution only); interrupts are never gated.
++ */
++export type MastermindAdmissionCauseCode =
++  | "admission_refused"
++  | "admission_timeout"
++  | "admission_unreachable";
++
++export const mastermindAdmissionCauseCode = (
++  error: unknown,
++): MastermindAdmissionCauseCode | undefined => {
++  // _tag dispatch — the donor's own idiom for TaggedError discrimination
++  // (e.g. mcp/toolkits/project/handlers.ts); never instanceof with Schema types.
++  if (!Predicate.hasProperty(error, "_tag")) return undefined;
++  const tag = (error as { readonly _tag: unknown })._tag;
++  if (tag === "MastermindAdmissionBlockedError") return "admission_refused";
++  if (tag === "MastermindAdmissionTimeoutError") return "admission_timeout";
++  if (tag === "MastermindAdmissionEndpointError") return "admission_unreachable";
++  return undefined;
++};
++
++/** A consult fails with an endpoint error (unreachable/malformed) or a timeout;
++ * both fail closed for new execution, never for interrupts. */
++export type MastermindAdmissionConsultError =
++  | MastermindAdmissionEndpointError
++  | MastermindAdmissionTimeoutError;
++
++const admissionBlocked = (
++  reason: string,
++  phase: MastermindAdmissionPhase,
++): MastermindAdmissionBlockedError => new MastermindAdmissionBlockedError({ phase, reason });
++
++/**
++ * AbortSignal.timeout rejects fetch with a DOMException named "TimeoutError"
++ * (and any abort with "AbortError"). The adapter never aborts a consult any
++ * other way, so either name means the bound fired.
++ */
++const isConsultAbort = (cause: unknown): boolean => {
++  if (!Predicate.hasProperty(cause, "name")) return false;
++  const name = (cause as { readonly name: unknown }).name;
++  return name === "TimeoutError" || name === "AbortError";
++};
++
++// ---------------------------------------------------------------------------
++// MastermindAdmissionService
++// ---------------------------------------------------------------------------
++
++export interface MastermindAdmissionServiceShape {
++  readonly config: MastermindAdmissionConfig;
++  /** Admission decision for the single thread-launch funnel. */
++  readonly admitLaunch: (input: {
++    readonly projectId: ProjectId;
++    readonly commandId: CommandId;
++    readonly creationSource: string;
++  }) => Effect.Effect<MastermindAdmissionDecision, MastermindAdmissionConsultError>;
++  /** Revalidate the current attempt/placement/fence immediately before an effect. */
++  readonly revalidateExecution: (input: {
++    readonly threadId: ThreadId;
++    readonly runId: RunId | undefined;
++    readonly phase: MastermindAdmissionPhase;
++  }) => Effect.Effect<MastermindAdmissionDecision, MastermindAdmissionConsultError>;
++  /** Bind an admitted launch's root/ref binding onto its created thread (ledger only). */
++  readonly bindThread: (input: {
++    readonly threadId: ThreadId;
++    readonly commandId: CommandId;
++    readonly creationSource: string;
++    readonly decision: Extract<MastermindAdmissionDecision, { readonly type: "admitted" }>;
++  }) => Effect.Effect<void>;
++  /** Propagate an existing binding through a dispatched command. Never blocks, never re-decides. */
++  readonly recordPropagation: (input: {
++    readonly threadId: ThreadId | undefined;
++    readonly runId: RunId | undefined;
++    readonly commandType: string;
++  }) => Effect.Effect<void>;
++  /** Account one app-owned helper-model call against the admission ledger (accounting only). */
++  readonly recordHelperRoute: (input: {
++    readonly threadId: ThreadId;
++    readonly route: "title_regeneration" | "pull_request";
++    readonly detail: string | undefined;
++  }) => Effect.Effect<void>;
++  readonly ledgerSnapshot: Effect.Effect<ReadonlyArray<MastermindAdmissionLedgerEntry>>;
++}
++
++export class MastermindAdmissionService extends Context.Service<
++  MastermindAdmissionService,
++  MastermindAdmissionServiceShape
++>()("t3/mastermind/MastermindAdmissionAdapter/MastermindAdmissionService") {}
++
++export interface MastermindAdmissionServiceOptions {
++  /** Overridable for tests. */
++  readonly fetchImpl?: typeof fetch | undefined;
++}
++
++export const makeMastermindAdmissionService = (
++  config: MastermindAdmissionConfig,
++  options: MastermindAdmissionServiceOptions = {},
++): MastermindAdmissionServiceShape => {
++  const ledger = new Map<ThreadId, MastermindAdmissionLedgerEntry>();
++  const doFetch = options.fetchImpl ?? fetch;
++  const enforced = config.mode === "enforce" && config.endpoint !== undefined;
++
++  const ledgerLookup = (
++    threadId: ThreadId,
++  ): Effect.Effect<MastermindAdmissionLedgerEntry | undefined> =>
++    Effect.sync(() => ledger.get(threadId));
++
++  const consultEndpoint = (
++    body: Record<string, unknown>,
++  ): Effect.Effect<MastermindAdmissionDecision, MastermindAdmissionConsultError> => {
++    const endpoint = config.endpoint;
++    const phase = typeof body["phase"] === "string" ? body["phase"] : "launch";
++    if (!enforced || endpoint === undefined) {
++      return Effect.succeed({ type: "passthrough" });
++    }
++    // Serialized in plain code before entering the Effect: the request body
++    // is a static snapshot at consult time, so no throwing JSON call ever
++    // runs inside Effect code.
++    const requestBody = JSON.stringify(body);
++    return Effect.tryPromise({
++      try: async () => {
++        const response = await doFetch(`${endpoint}/v1/admit`, {
++          method: "POST",
++          headers: { "content-type": "application/json" },
++          body: requestBody,
++          // The bound (A5 live finding #1): an unbounded consult hung the
++          // launch funnel indefinitely. AbortSignal.timeout aborts the request
++          // at config.consultTimeoutMs; the abort rejection is mapped to the
++          // typed timeout cause below and fails closed like an unreachable
++          // endpoint — never gating interrupts.
++          signal: AbortSignal.timeout(config.consultTimeoutMs),
++        });
++        if (!response.ok) {
++          throw new Error(`admission endpoint returned HTTP ${response.status}`);
++        }
++        return (await response.json()) as unknown;
++      },
++      catch: (cause) =>
++        isConsultAbort(cause)
++          ? new MastermindAdmissionTimeoutError({
++              endpoint,
++              phase,
++              timeoutMs: config.consultTimeoutMs,
++            })
++          : new MastermindAdmissionEndpointError({ endpoint, phase, cause }),
++    }).pipe(
++      Effect.flatMap((payload) =>
++        Effect.fromOption(parseAdmissionPayload(payload), () =>
++          new MastermindAdmissionEndpointError({
++            endpoint,
++            phase,
++            cause: "malformed admission payload",
++          }),
++        ),
++      ),
++    );
++  };
++
++  const admitLaunch: MastermindAdmissionServiceShape["admitLaunch"] = (input) =>
++    consultEndpoint({
++      kind: "launch",
++      phase: "launch",
++      projectId: input.projectId,
++      commandId: input.commandId,
++      creationSource: input.creationSource,
++      // Authority comes only from the operator-configured root ref. Prompt text,
++      // request fields, and environment variables other than the configured root
++      // ref are never consulted for it.
++      ...(config.rootRef === undefined ? {} : { rootRef: config.rootRef }),
++    });
++
++  const revalidateExecution: MastermindAdmissionServiceShape["revalidateExecution"] = (input) =>
++    Effect.flatMap(ledgerLookup(input.threadId), (entry) =>
++      consultEndpoint({
++        kind: "revalidate",
++        phase: input.phase,
++        threadId: input.threadId,
++        ...(input.runId === undefined ? {} : { runId: input.runId }),
++        ...(entry === undefined ? {} : { hasLocalBinding: true }),
++        ...(entry?.binding === undefined ? {} : { binding: entry.binding }),
++        rootRef: entry?.rootRef ?? entry?.binding?.rootRef ?? config.rootRef,
++      }),
++    );
++
++  const bindThread: MastermindAdmissionServiceShape["bindThread"] = (input) =>
++    Effect.sync(() => {
++      if (!enforced) return;
++      // Keep the ledger bounded: evict the oldest entry beyond the cap.
++      while (ledger.size >= MAX_LEDGER_ENTRIES) {
++        const oldest = ledger.keys().next();
++        if (oldest.done === true) break;
++        ledger.delete(oldest.value);
++      }
++      ledger.set(input.threadId, {
++        threadId: input.threadId,
++        commandId: input.commandId,
++        creationSource: input.creationSource,
++        rootRef: input.decision.rootRef ?? config.rootRef,
++        binding: input.decision.binding,
++        propagatedCommands: 0,
++        helperCalls: 0,
++      });
++    });
++
++  const recordPropagation: MastermindAdmissionServiceShape["recordPropagation"] = (input) =>
++    Effect.sync(() => {
++      if (!enforced || input.threadId === undefined) return;
++      const entry = ledger.get(input.threadId);
++      if (entry === undefined) {
++        // No admitted binding exists for this thread: nothing to propagate and
++        // nothing may be minted here (propagate, never re-decide).
++        return;
++      }
++      ledger.set(input.threadId, { ...entry, propagatedCommands: entry.propagatedCommands + 1 });
++    });
++
++  const recordHelperRoute: MastermindAdmissionServiceShape["recordHelperRoute"] = (input) =>
++    Effect.sync(() => {
++      if (!enforced) return;
++      const entry = ledger.get(input.threadId);
++      if (entry === undefined) return;
++      ledger.set(input.threadId, { ...entry, helperCalls: entry.helperCalls + 1 });
++    });
++
++  const ledgerSnapshot: MastermindAdmissionServiceShape["ledgerSnapshot"] = Effect.sync(() =>
++    Array.from(ledger.values()),
++  );
++
++  return {
++    config,
++    admitLaunch,
++    revalidateExecution,
++    bindThread,
++    recordPropagation,
++    recordHelperRoute,
++    ledgerSnapshot,
++  };
++};
++
++const parseAdmissionPayload = (payload: unknown): Option.Option<MastermindAdmissionDecision> => {
++  if (!Predicate.hasProperty(payload, "decision")) return Option.none();
++  const record = payload as Record<string, unknown>;
++  const reason = typeof record["reason"] === "string" ? record["reason"] : undefined;
++  if (record["decision"] === "passthrough") {
++    return Option.some({ type: "passthrough" });
++  }
++  if (record["decision"] === "blocked_with_reason") {
++    return Option.some({
++      type: "blocked_with_reason",
++      reason: reason ?? "admission endpoint rejected the request without a reason",
++    });
++  }
++  if (record["decision"] === "admitted") {
++    const rootRef = typeof record["rootRef"] === "string" ? record["rootRef"] : undefined;
++    const admissionId =
++      typeof record["admissionId"] === "string" ? record["admissionId"] : undefined;
++    const grantedAt = typeof record["grantedAt"] === "string" ? record["grantedAt"] : undefined;
++    const binding: MastermindAdmissionBinding | undefined =
++      rootRef === undefined && admissionId === undefined && grantedAt === undefined
++        ? undefined
++        : { rootRef, admissionId, grantedAt };
++    return Option.some({ type: "admitted", rootRef, binding });
++  }
++  return Option.none();
++};
++
++export const layerFromConfig = (
++  config: MastermindAdmissionConfig,
++  options: MastermindAdmissionServiceOptions = {},
++): Layer.Layer<MastermindAdmissionService> =>
++  Layer.effect(
++    MastermindAdmissionService,
++    Effect.sync(() => MastermindAdmissionService.of(makeMastermindAdmissionService(config, options))),
++  );
++
++/** Reads MASTERMIND_ADMISSION_* env at layer build time; unset endpoint = passthrough. */
++export const layer: Layer.Layer<MastermindAdmissionService> = layerFromConfig(
++  readMastermindAdmissionConfig(),
++);
++
++// ---------------------------------------------------------------------------
++// Decorator layers (wrap incumbent layers; incumbent exports stay intact)
++// ---------------------------------------------------------------------------
++
++/**
++ * Wraps an incumbent service layer. When admission is disabled the incumbent
++ * service is returned untouched (zero behavior change); otherwise `wrap` gets
++ * the incumbent service plus the admission service.
++ *
++ * Composition rule (built exactly once): the decorator NEVER runs
++ * `Layer.build` itself. `Layer.build` inside a layer's effect forks the
++ * current memo map (effect 4.1.2 `CurrentMemoMap.forkOrCreate`), so any
++ * dependency first allocated inside that fork is NOT written back to the
++ * outer graph — the outer graph would then build shared singletons
++ * (ProjectionStore, CommandOutputHub, Orchestrator, TextGeneration, ...) a
++ * second time, BEFORE the `mode === "disabled"` check could pass anything
++ * through. Instead the decorator layer simply requires the incumbent service
++ * tag from its context and the incumbent layer is wired in with
++ * `Layer.provide`, which builds it through the SAME memo map as the rest of
++ * the graph — so the incumbent and every dependency it shares with the
++ * undecorated graph is built exactly once, exactly as upstream would.
++ */
++const decorateServiceLayer = <I, S, E, RIn>(
++  tag: Context.Key<I, S>,
++  incumbent: Layer.Layer<I, E, RIn>,
++  wrap: (inner: S, admission: MastermindAdmissionService["Service"]) => S,
++): Layer.Layer<I, E, RIn | MastermindAdmissionService> =>
++  Layer.effect(
++    tag,
++    Effect.gen(function* () {
++      const admission = yield* MastermindAdmissionService;
++      // The incumbent service instance, provided by the outer graph below.
++      const inner = yield* tag;
++      if (admission.config.mode === "disabled") {
++        return inner;
++      }
++      return wrap(inner, admission);
++    }),
++  ).pipe(Layer.provide(incumbent));
++
++// a. ThreadLaunchService: admit BEFORE the first preparation effect, bind the
++// root/binding onto the launched thread. Manual UI launches pass through the
++// same single gate as every other creation source — no per-prompt ceremony.
++export const decorateThreadLaunch = <E, RIn>(
++  incumbent: Layer.Layer<ThreadLaunch.ThreadLaunchService, E, RIn>,
++): Layer.Layer<ThreadLaunch.ThreadLaunchService, E, RIn | MastermindAdmissionService> =>
++  decorateServiceLayer(
++    ThreadLaunch.ThreadLaunchService,
++    incumbent,
++    (inner, admission): ThreadLaunch.ThreadLaunchService["Service"] => ({
++      ...inner,
++      launch: (request) =>
++        admission
++          .admitLaunch({
++            projectId: request.projectId,
++            commandId: request.commandId,
++            creationSource: request.creationSource,
++          })
++          .pipe(
++            Effect.filterOrFail(
++              (decision: MastermindAdmissionDecision) =>
++                decision.type !== "blocked_with_reason",
++              // Only reachable for blocked decisions (the predicate guarantees
++              // it); the fallback string keeps the mapper total for the
++              // unnarrowed union type.
++              (decision) =>
++                admissionBlocked(
++                  decision.type === "blocked_with_reason"
++                    ? decision.reason
++                    : "launch blocked by admission",
++                  "launch",
++                ),
++            ),
++            // Surfaced through the launch funnel's own typed error; the cause
++            // carries the real admission reason. No upstream logic changed.
++            Effect.mapError(
++              (cause) =>
++                new ThreadLaunch.ThreadLaunchError({
++                  operation: "resolve-project",
++                  commandId: request.commandId,
++                  projectId: request.projectId,
++                  cause,
++                }),
++            ),
++            Effect.flatMap((decision) => {
++              const launched = inner.launch(request);
++              return decision.type === "admitted"
++                ? launched.pipe(
++                    Effect.tap((result) =>
++                      admission.bindThread({
++                        threadId: result.threadId,
++                        commandId: request.commandId,
++                        creationSource: request.creationSource,
++                        decision,
++                      }),
++                    ),
++                  )
++                : launched;
++            }),
++          ),
++      // Retries of an admitted launch carry the existing binding onward;
++      // propagation only — no re-decision.
++      retryPreparation: (input) =>
++        admission
++          .recordPropagation({
++            threadId: input.threadId,
++            runId: input.runId,
++            commandType: "thread_launch.retry_preparation",
++          })
++          .pipe(Effect.andThen(() => inner.retryPreparation(input))),
++    }),
++  );
++
++// b. ThreadManagementService.dispatch: carry the root/binding through messages,
++// delegation, and prepared-run release/retry. Propagate, do not re-decide.
++export const decorateThreadManagementDispatch = <E, RIn>(
++  incumbent: Layer.Layer<ThreadManagement.ThreadManagementService, E, RIn>,
++): Layer.Layer<ThreadManagement.ThreadManagementService, E, RIn | MastermindAdmissionService> =>
++  decorateServiceLayer(
++    ThreadManagement.ThreadManagementService,
++    incumbent,
++    (inner, admission): ThreadManagement.ThreadManagementService["Service"] => ({
++      ...inner,
++      dispatch: (command) =>
++        admission
++          .recordPropagation({
++            threadId: "threadId" in command ? command.threadId : undefined,
++            runId: "runId" in command ? command.runId : undefined,
++            commandType: command.type,
++          })
++          .pipe(Effect.andThen(() => inner.dispatch(command))),
++    }),
++  );
++
++// c. OrchestrationEffectExecutorV2: revalidate immediately before provider-turn
++// start/steer/restart. Stale lease blocks new execution only; steer records but
++// never blocks; interrupts/cancels are untouched.
++export const decorateOrchestrationEffectExecutor = <E, RIn>(
++  incumbent: Layer.Layer<EffectWorker.OrchestrationEffectExecutorV2, E, RIn>,
++): Layer.Layer<EffectWorker.OrchestrationEffectExecutorV2, E, RIn | MastermindAdmissionService> =>
++  decorateServiceLayer(
++    EffectWorker.OrchestrationEffectExecutorV2,
++    incumbent,
++    (inner, admission): EffectWorker.OrchestrationEffectExecutorV2Shape => ({
++      ...inner,
++      execute: (effect, options) => {
++        switch (effect.request.type) {
++          case "provider-turn.start":
++          case "provider-turn.restart": {
++            // restart is revalidated BEFORE the upstream interrupt runs, so a
++            // block fails the whole compound effect and leaves the original
++            // turn untouched; when admitted, upstream's interrupt-then-start
++            // replacement lifecycle is unchanged.
++            const runId = effect.request.runId;
++            const phase =
++              effect.request.type === "provider-turn.start"
++                ? ("provider_turn_start" as const)
++                : ("provider_turn_restart" as const);
++            return admission
++              .revalidateExecution({ threadId: effect.threadId, runId, phase })
++              .pipe(
++                Effect.flatMap((decision) =>
++                  decision.type === "blocked_with_reason"
++                    ? // Fail with the RAW blocked error; mapError below wraps
++                      // it exactly once into the executor's typed error.
++                      Effect.fail(admissionBlocked(decision.reason, phase))
++                    : Effect.void,
++                ),
++                Effect.mapError(
++                  (cause) =>
++                    new EffectWorker.OrchestrationEffectExecutionError({
++                      effectId: effect.id,
++                      effectType: effect.request.type,
++                      cause,
++                    }),
++                ),
++                Effect.andThen(() => inner.execute(effect, options)),
++              );
++          }
++          case "provider-turn.steer":
++            // Steer delivers into an existing turn: record revalidation
++            // outcomes, never block, never interrupt. The consult carries the
++            // same bound as every consult (a hung endpoint cannot stall steer
++            // either); a timed-out steer consult is swallowed by Effect.ignore
++            // below — steer proceeds.
++            return admission
++              .revalidateExecution({
++                threadId: effect.threadId,
++                runId: undefined,
++                phase: "provider_turn_steer",
++              })
++              .pipe(
++                Effect.flatMap((decision) =>
++                  decision.type === "blocked_with_reason"
++                    ? Effect.logWarning(
++                        "Mastermind admission: stale lease recorded for steer; steer is not new execution and proceeds",
++                        { effectId: effect.id, threadId: effect.threadId, reason: decision.reason },
++                      )
++                    : Effect.void,
++                ),
++                Effect.ignore,
++                Effect.andThen(() => inner.execute(effect, options)),
++              );
++          default:
++            return inner.execute(effect, options);
++        }
++      },
++    }),
++  );
++
++// d. ProviderTurnStartService: revalidate placement + fence immediately before
++// the native turn binding. Covers every caller, including the restart path.
++const turnStartAdmissionFailure = (runId: RunId, cause: unknown) =>
++  new ProviderTurnStartService.ProviderTurnStartError({ runId, cause });
++
++export const decorateProviderTurnStartService = <E, RIn>(
++  incumbent: Layer.Layer<ProviderTurnStartService.ProviderTurnStartServiceV2, E, RIn>,
++): Layer.Layer<
++  ProviderTurnStartService.ProviderTurnStartServiceV2,
++  E,
++  RIn | MastermindAdmissionService
++> =>
++  decorateServiceLayer(
++    ProviderTurnStartService.ProviderTurnStartServiceV2,
++    incumbent,
++    (
++      inner,
++      admission,
++    ): ProviderTurnStartService.ProviderTurnStartServiceV2Shape => ({
++      ...inner,
++      start: (input) =>
++        admission
++          .revalidateExecution({
++            threadId: input.threadId,
++            runId: input.runId,
++            phase: "provider_turn_start",
++          })
++          .pipe(
++            Effect.flatMap((decision) =>
++              decision.type === "blocked_with_reason"
++                ? // RAW blocked error; mapError wraps once below.
++                  Effect.fail(admissionBlocked(decision.reason, "provider_turn_start"))
++                : Effect.void,
++            ),
++            Effect.mapError((cause) => turnStartAdmissionFailure(input.runId, cause)),
++            Effect.andThen(() => inner.start(input)),
++          ),
++    }),
++  );
++
++// d. ProviderSessionManager: revalidate placement + fence immediately before
++// the native process/session binding (process spawn for ACP agents).
++export const decorateProviderSessionManager = <E, RIn>(
++  incumbent: Layer.Layer<ProviderSessionManager.ProviderSessionManagerV2, E, RIn>,
++): Layer.Layer<ProviderSessionManager.ProviderSessionManagerV2, E, RIn | MastermindAdmissionService> =>
++  decorateServiceLayer(
++    ProviderSessionManager.ProviderSessionManagerV2,
++    incumbent,
++    (inner, admission): ProviderSessionManager.ProviderSessionManagerV2Shape => ({
++      ...inner,
++      open: (input) =>
++        admission
++          .revalidateExecution({
++            threadId: input.threadId,
++            runId: undefined,
++            phase: "provider_session_open",
++          })
++          .pipe(
++            Effect.flatMap((decision) =>
++              decision.type === "blocked_with_reason"
++                ? // RAW blocked error; mapError wraps once below.
++                  Effect.fail(admissionBlocked(decision.reason, "provider_session_open"))
++                : Effect.void,
++            ),
++            Effect.mapError(
++              (cause) =>
++                new ProviderSessionManager.ProviderSessionOpenError({
++                  instanceId: input.modelSelection.instanceId,
++                  providerSessionId: input.providerSessionId,
++                  cause,
++                }),
++            ),
++            Effect.andThen(() => inner.open(input)),
++          ),
++    }),
++  );
++
++// e. Helper-model accounting: wrap the app-owned helper-model call surface with
++// a bounded accounted helper-route record. Accounting only — no upstream
++// behavior change; title regeneration proceeds even if accounting is skipped.
++export const decorateThreadTitleRegenerationService = <E, RIn>(
++  incumbent: Layer.Layer<ThreadTitleRegenerationService.ThreadTitleRegenerationService, E, RIn>,
++): Layer.Layer<
++  ThreadTitleRegenerationService.ThreadTitleRegenerationService,
++  E,
++  RIn | MastermindAdmissionService
++> =>
++  decorateServiceLayer(
++    ThreadTitleRegenerationService.ThreadTitleRegenerationService,
++    incumbent,
++    (
++      inner,
++      admission,
++    ): ThreadTitleRegenerationService.ThreadTitleRegenerationService["Service"] => ({
++      ...inner,
++      execute: (input) =>
++        admission
++          .recordHelperRoute({
++            threadId: input.threadId,
++            route: "title_regeneration",
++            detail: input.requestId,
++          })
++          .pipe(Effect.andThen(() => inner.execute(input))),
++    }),
++  );
+diff --git a/apps/server/src/orchestration-v2/runtimeLayer.ts b/apps/server/src/orchestration-v2/runtimeLayer.ts
+index ba1dadad..ff3246b1 100644
+--- a/apps/server/src/orchestration-v2/runtimeLayer.ts
++++ b/apps/server/src/orchestration-v2/runtimeLayer.ts
+@@ -53,6 +53,9 @@ import * as RuntimePolicy from "./RuntimePolicy.ts";
+ import * as RuntimeRequestService from "./RuntimeRequestService.ts";
+ import * as ThreadManagementService from "./ThreadManagementService.ts";
+ import * as ThreadLaunchService from "./ThreadLaunchService.ts";
++// Mastermind pinned admission patch - donor: github.com/pingdotgg/t3code @0770446869d247a8b28c27d7ed93f47f8ff0c1e4
++// Decorator layers only; unset MASTERMIND_ADMISSION_ENDPOINT keeps pure passthrough.
++import * as MastermindAdmission from "../mastermind/MastermindAdmissionAdapter.ts";
+ import * as ThreadForkService from "./ThreadForkService.ts";
+ import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
+ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
+@@ -131,7 +134,7 @@ const layerCommandOutputHubProvided = CommandOutputHub.layer.pipe(
+   Layer.provide(Layer.merge(layerEventSink, ProjectionStore.layer)),
+ );
+ 
+-const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
++const layerProviderSessionManagerIncumbent = ProviderSessionManager.layer.pipe(
+   Layer.provide(
+     Layer.mergeAll(
+       layerCommandOutputHubProvided,
+@@ -143,6 +146,9 @@ const layerProviderSessionManagerProvided = ProviderSessionManager.layer.pipe(
+     ),
+   ),
+ );
++const layerProviderSessionManagerProvided = MastermindAdmission.decorateProviderSessionManager(
++  layerProviderSessionManagerIncumbent,
++).pipe(Layer.provide(MastermindAdmission.layer));
+ 
+ const layerProviderAuthServiceProvided = ProviderAuthService.layer.pipe(
+   Layer.provide(Layer.merge(ProjectionStore.layer, layerProviderSessionManagerProvided)),
+@@ -162,7 +168,7 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
+   ),
+ );
+ 
+-const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pipe(
++const layerProviderTurnStartServiceIncumbent = ProviderTurnStartService.layer.pipe(
+   Layer.provide(
+     Layer.mergeAll(
+       layerContextHandoffServiceProvided,
+@@ -176,6 +182,10 @@ const layerProviderTurnStartServiceProvided = ProviderTurnStartService.layer.pip
+     ),
+   ),
+ );
++const layerProviderTurnStartServiceProvided =
++  MastermindAdmission.decorateProviderTurnStartService(
++    layerProviderTurnStartServiceIncumbent,
++  ).pipe(Layer.provide(MastermindAdmission.layer));
+ 
+ const layerProviderTurnControlServiceProvided = ProviderTurnControlService.layer.pipe(
+   Layer.provide(Layer.merge(ProjectionStore.layer, layerProviderSessionManagerProvided)),
+@@ -248,7 +258,7 @@ const layerAgentSessionImporterProvided = AgentSessionImporter.layer.pipe(
+   ),
+ );
+ 
+-const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImporter.pipe(
++const layerThreadManagementIncumbent = ThreadManagementService.layerWithLegacyImporter.pipe(
+   Layer.provide(
+     Layer.mergeAll(
+       layerOrchestratorProvided,
+@@ -258,6 +268,9 @@ const layerThreadManagementProvided = ThreadManagementService.layerWithLegacyImp
+     ),
+   ),
+ );
++const layerThreadManagementProvided = MastermindAdmission.decorateThreadManagementDispatch(
++  layerThreadManagementIncumbent,
++).pipe(Layer.provide(MastermindAdmission.layer));
+ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe(
+   Layer.provide(layerProjectService),
+   // Whether a thread came from a linked environment, which skips setup.
+@@ -266,7 +279,7 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
+ const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
+   Layer.provide(layerProjectService),
+ );
+-const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
++const layerThreadLaunchIncumbent = ThreadLaunchService.layer.pipe(
+   Layer.provide(
+     Layer.mergeAll(
+       layerProjectService,
+@@ -278,6 +291,9 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
+     ),
+   ),
+ );
++const layerThreadLaunchProvided = MastermindAdmission.decorateThreadLaunch(
++  layerThreadLaunchIncumbent,
++).pipe(Layer.provide(MastermindAdmission.layer));
+ const layerSecretRequestsProvided = SecretRequests.layer.pipe(
+   Layer.provide(layerThreadManagementProvided),
+ );
+@@ -310,12 +326,16 @@ const layerProviderContinuationWorkerProvided = ProviderContinuationService.laye
+     ),
+   ),
+ );
+-const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.layer.pipe(
++const layerThreadTitleRegenerationIncumbent = ThreadTitleRegenerationService.layer.pipe(
+   Layer.provide(
+     Layer.mergeAll(layerThreadManagementProvided, ProjectStore.layer, TextGeneration.layer),
+   ),
+ );
+-const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
++const layerThreadTitleRegenerationProvided =
++  MastermindAdmission.decorateThreadTitleRegenerationService(
++    layerThreadTitleRegenerationIncumbent,
++  ).pipe(Layer.provide(MastermindAdmission.layer));
++const layerEffectExecutorIncumbent = EffectWorker.layerExecutor.pipe(
+   Layer.provide(
+     Layer.mergeAll(
+       layerRunFinalizationServiceProvided,
+@@ -329,6 +349,9 @@ const layerEffectExecutorProvided = EffectWorker.layerExecutor.pipe(
+     ),
+   ),
+ );
++const layerEffectExecutorProvided = MastermindAdmission.decorateOrchestrationEffectExecutor(
++  layerEffectExecutorIncumbent,
++).pipe(Layer.provide(MastermindAdmission.layer));
+ const layerEffectWorkerProvided = EffectWorker.layer.pipe(
+   Layer.provide(Layer.merge(layerStores, layerEffectExecutorProvided)),
+ );

@@ -1,0 +1,33 @@
+WO-19 live Hermes child inventory -- PREPARED, NOT EXECUTED (read-only)
+profile : ~/.hermes/profiles/engineering
+host    : m2studio   generated: 2026-11-09T02:03:56-0700
+owner   : gateway pid=75879 alive=True recorded_home=~/.hermes/profiles/engineering
+
+SOURCES
+  [ok        ] state.db:async_delegations       entries=3   32 rows total, 2 not-completed, 3 task slots
+  [ok        ] cache/delegation/live            entries=2   77 delegation dirs, 0 unreadable manifests, 2 running task slots
+  [ok        ] ps:HERMES_HOME                   entries=2   82 hermes-like processes scanned, 2 carry HERMES_HOME=~/.hermes/profiles/engineer
+  [ok        ] processes.json                   entries=0   terminal-sessions/term_session_id-CAC0F83B-6F28-4793-9481-52A3CC8541C1 is a session pointer file
+  [ok        ] worker-outboxes                  entries=0   26 outbox dirs, 0 live owners, 26 not live (11 queued items recorded)
+  [ok        ] state.db:session_turn_leases     entries=3   9 leases, 3 unexpired
+
+LIVE CHILDREN
+  identifier                         kind                state     root_ref                               started
+  ---------------------------------------------------------------------------------------------------------------
+  deleg_762e9e24#task-0              delegated subagent  error     session:local-66625398b54422e9e8370ecf 2026-11-08T22:10:24-0700
+  deleg_61afa8a9#task-0              delegated subagent  running   session:local-66625398b54422e9e8370ecf 2026-11-09T01:45:48-0700
+  deleg_61afa8a9#task-1              delegated subagent  running   session:local-66625398b54422e9e8370ecf 2026-11-09T01:45:48-0700
+  pid:59205                          other               running   fallback:hermes-root:m2studio          Mon Nov 9 01:59:43
+  pid:65921                          other               running   env:HERMES_SESSION_ID=local-66625398b5 Sun Nov 8 22:00:35
+
+NOT LIVE (recorded, excluded from the live count)
+  orphaned outbox journals : 26
+  expired turn leases      : 6
+  held turn leases         : 3
+
+SUMMARY live_children=5 unattributed=0
+  by_kind  : {'delegated subagent': 3, 'other': 2}
+  by_source: {'state.db:async_delegations': 3, 'cache/delegation/live': 2, 'ps:HERMES_HOME': 2}
+  disposition: every live child -> 'stays on local owner until finished'
+
+wrote integrations/mmos/wo19/20261109T090353Z/inventory.json

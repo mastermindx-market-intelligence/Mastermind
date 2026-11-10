@@ -311,7 +311,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  authorized_policies: Any = None,
                                  reference_cursor_key: bytes | None = None,
                                  hermes_session: Any | None = None,
-                                 web_census_handler: Callable | None = None):
+                                 web_census_handler: Callable | None = None,
+                                 t3_target_projector: Callable[[Any], Any] | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
@@ -319,7 +320,14 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     The trusted Runtime host may supply its already-validated OAuth AppPolicies
     pair; absent that pairing, a new READ-only policy cannot claim an original
     SEND principal's answer. No private caller selects this pairing.
+
+    ``t3_target_projector`` is the optional trusted T3 environment owner. It is
+    called with the neutral principal only and must return the already-projected
+    ``t3`` target entries; without it the ``t3`` kind answers an empty list
+    instead of becoming unsupported.
     """
+    if t3_target_projector is not None and not callable(t3_target_projector):
+        raise TypeError("t3_target_projector must be callable when supplied")
     from .runtime_owner import (RuntimeFabricTargetProjector, RuntimeCodexTargetProjector,
                                 RuntimeExecutiveReplyBindingResolver)
     from .dialogue_reply import AgentDialogueContinueWriter
@@ -366,6 +374,12 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         from control_plane.native_continuation import HERMES_KINDS
         if kind in HERMES_KINDS:
             return await returns.hermes_targets(principal, kind=kind)
+        if kind == "t3":
+            # T3 environments are owner-projected only when that owner is
+            # composed; an uncomposed kind is empty, never "unsupported".
+            if t3_target_projector is None:
+                return []
+            return await _maybe(t3_target_projector(principal))
         # The omitted kind preserves the existing legacy inventory. Native
         # Secretary discovery requires the caller's explicit closed selection.
         values = await _maybe(reader(kind))

@@ -1,0 +1,51 @@
+{
+  "acceptance_states": [
+    "not_accepted"
+  ],
+  "check_conclusions": [
+    "success",
+    "failure",
+    "skipped",
+    "unknown"
+  ],
+  "checks_states": [
+    "green",
+    "failed",
+    "unknown"
+  ],
+  "delivery_receipt_schema": "mastermind.execution_return_delivery/v1",
+  "delivery_states": [
+    "delivered",
+    "unknown",
+    "refused"
+  ],
+  "error_codes": [
+    "INPUT_INVALID",
+    "ORIGINAL_BINDING_MISSING",
+    "SEAL_MISSING",
+    "NAMESPACE_MISMATCH",
+    "GITHUB_EVIDENCE_INVALID"
+  ],
+  "installation_states": [
+    "none_claimed",
+    "claimed_unproven"
+  ],
+  "merge_states": [
+    "merged",
+    "not_merged",
+    "unknown"
+  ],
+  "record_schema": "mastermind.execution_return/v1",
+  "refusal_code_pattern": "[A-Za-z][A-Za-z0-9_]{0,63}",
+  "schema": "mastermind.execution_return_v1_vocabulary_fixture/1",
+  "stages": [
+    "result_only",
+    "branch_pushed",
+    "pr_open",
+    "checks_green",
+    "checks_failed",
+    "merged",
+    "installed_unknown"
+  ],
+  "submission_id_pattern": "execret-[0-9a-f]{32}"
+}

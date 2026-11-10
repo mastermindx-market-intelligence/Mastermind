@@ -1900,7 +1900,16 @@ def _service_from_config(
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
     byok_roles_reader: Callable[..., Any] | None = None,
+    capacity_fabric_source: Any | None = None,
 ) -> ExecutiveControlService:
+    # Only the installed owner may inject this existing pure observation
+    # source. Validate before adopting listeners; never select it from JSON,
+    # a browser request, environment, or a guessed host path.
+    if capacity_fabric_source is not None:
+        from control_plane.workspace_capacity_fabric import ExistingCapacityFabricSource
+        if (type(capacity_fabric_source) is not ExistingCapacityFabricSource
+                or "workspace_acquisition" not in raw):
+            raise ServiceError("capacity source requires exact installed Workspace composition")
     if "workspace_acquisition" in raw:
         # Closed unix/launchd stanza only. validate_workspace_control_room
         # refuses the legacy TCP port stanza and accepts no port or
@@ -2288,6 +2297,17 @@ def _service_from_config(
             from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
             paid_adapter=CanonicalPaidFabricWorkerAdapter(runtime,paid_worker_binding_source)
             owners={config.worker_id:primary}
+            # t3-native route: per-worker owners over the reviewed composed
+            # adapter, ONLY when the host is enrolled (a typed T3_NOT_ENROLLED
+            # result composes no owner and leaves this path unchanged).
+            from control_plane.t3_native_composition import compose_t3_native_owners_for_service
+            owners.update(compose_t3_native_owners_for_service(
+                primary, runtime,
+                runs_root=raw['worker_runs_root'],
+                isolation_roots=(raw['proof_workspace_root'], raw['worker_runs_root']),
+                receipts_root=raw['receipts_root'],
+                worker_user=raw['worker_user'],
+                worker_uid=raw['worker_uid'], worker_gid=raw['worker_gid']))
             for physical in paid_worker_binding_source.bindings:
                 owners[physical.worker_id]=ExecutiveSupervisor(runtime,paid_adapter,
                     runs_root=raw['worker_runs_root'],
@@ -2305,6 +2325,20 @@ def _service_from_config(
             recovery_controller['owners']=mixed.owners
             return mixed
         if fabric_worker_binding_source is None:
+            from control_plane.t3_native_composition import compose_t3_native_owners_for_service
+            t3_owners = compose_t3_native_owners_for_service(
+                primary, runtime,
+                runs_root=raw['worker_runs_root'],
+                isolation_roots=(raw['proof_workspace_root'], raw['worker_runs_root']),
+                receipts_root=raw['receipts_root'],
+                worker_user=raw['worker_user'],
+                worker_uid=raw['worker_uid'], worker_gid=raw['worker_gid'])
+            if t3_owners:
+                from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+                mixed = MixedExecutionOwnerSupervisor(
+                    primary, {config.worker_id: primary, **t3_owners})
+                recovery_controller['owners'] = mixed.owners
+                return mixed
             return primary
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
         from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
@@ -2312,6 +2346,14 @@ def _service_from_config(
             request_client_factory=fabric_worker_binding_source.client_for,
             attended_probe_source=fabric_attended_probe_source)
         owners = {config.worker_id: primary}
+        from control_plane.t3_native_composition import compose_t3_native_owners_for_service
+        owners.update(compose_t3_native_owners_for_service(
+            primary, runtime,
+            runs_root=raw['worker_runs_root'],
+            isolation_roots=(raw['proof_workspace_root'], raw['worker_runs_root']),
+            receipts_root=raw['receipts_root'],
+            worker_user=raw['worker_user'],
+            worker_uid=raw['worker_uid'], worker_gid=raw['worker_gid']))
         for physical in fabric_worker_binding_source.bindings:
             if physical.worker_id in owners:
                 continue  # Principal conflicts were refused before clients.
@@ -2633,6 +2675,7 @@ def _service_from_config(
                 # No control.json/browser selection or local M2 fallback. Until a
                 # trusted remote host observer is supplied this remains unbound.
                 byok_roles_reader=byok_roles_reader,
+                capacity_fabric_source=capacity_fabric_source,
                 project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 instruction_admission_permissions=instruction_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,

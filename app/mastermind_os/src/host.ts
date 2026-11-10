@@ -21,6 +21,8 @@ import {instructionHostMethods,instructionPublicRequest,type InstructionRawMetho
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeModelConfiguration, type ModelConfigurationRead } from "./resources/model-configuration";
+import { decodeCapacityFabric, type CapacityFabricRead } from "./resources/capacity-fabric";
+import { decodeT3AttemptFleet, validT3AttemptId, type T3AttemptFleetRead } from "./resources/t3-attempt-fleet-contract";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
 import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
@@ -132,6 +134,8 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readModelConfiguration?(request: { signal: AbortSignal }): Promise<unknown>;
+  readCapacityFabric?(request: { signal: AbortSignal }): Promise<unknown>;
+  readT3AttemptFleet?(request: { attemptId: string; signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -228,6 +232,8 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readModelConfiguration?: (request: { signal: AbortSignal }) => Promise<ModelConfigurationRead>;
+  readCapacityFabric?: (request: { signal: AbortSignal }) => Promise<CapacityFabricRead>;
+  readT3AttemptFleet?: (request: { attemptId: string; signal: AbortSignal }) => Promise<T3AttemptFleetRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -711,6 +717,39 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readCapacityFabric && client.invalidationGeneration ? {
+      async readCapacityFabric({ signal }: { signal: AbortSignal }) {
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readCapacityFabric!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source)
+            || source !== client.invalidationGeneration?.() || reader !== client.readCapacityFabric)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("CAPACITY_FABRIC_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { signal });
+        verify();
+        return decodeCapacityFabric(raw);
+      },
+    } : {}),
+    ...(client.readT3AttemptFleet && client.invalidationGeneration ? {
+      async readT3AttemptFleet({ attemptId, signal }: { attemptId: string; signal: AbortSignal }) {
+        if (!validT3AttemptId(attemptId)) throw new Error("T3_ATTEMPT_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readT3AttemptFleet!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source)
+            || source !== client.invalidationGeneration?.() || reader !== client.readT3AttemptFleet)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("T3_ATTEMPT_FLEET_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { attemptId, signal });
+        verify();
+        return decodeT3AttemptFleet(raw);
       },
     } : {}),
     ...(client.readModelConfiguration && client.invalidationGeneration ? {
@@ -1206,6 +1245,8 @@ export async function createNativeClient(
       | "read_retained_activity"
       | "read_resource_capacity"
       | "read_model_configuration"
+      | "read_capacity_fabric"
+      | "read_t3_attempt_fleet"
       | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
@@ -1472,6 +1513,14 @@ export async function createNativeClient(
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
     readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
+    readCapacityFabric: ({ signal }) => read("read_capacity_fabric", signal),
+    readT3AttemptFleet: ({ attemptId, signal }) => {
+      // Same wire attempt-id grammar (run ids contain `/`) as the composed host
+      // and the shared contract; refuse before any native command is issued.
+      if (!validT3AttemptId(attemptId))
+        return Promise.reject(new Error("T3_ATTEMPT_SELECTION_INVALID"));
+      return read("read_t3_attempt_fleet", signal, { selection: { attempt_id: attemptId } });
+    },
     readHostObservation: request => {
       const selection=hostObservationPublicSelection(request);
       return selection ? read("read_host_observation",request.signal,{selection})
