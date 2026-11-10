@@ -74,10 +74,11 @@ def _seed_parents(connection, events):
             " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (job_id, job_id, "fixture objective", "fixture", "QUEUED", "CONTROL",
              "{}", "[]", _HASH64, _NOW_MS, _NOW_MS, _NOW_MS))
+    # Job-scope rows (JOB_CREATED) carry no attempt id; filter BEFORE sorting —
+    # a (None, str) tuple is not orderable.
     for attempt_id, job_id in sorted(
-            {(e.get("attempt_id"), e.get("job_id")) for e in events} - {(None, None)}):
-        if attempt_id is None:
-            continue
+            {(e.get("attempt_id"), e.get("job_id")) for e in events
+             if e.get("attempt_id") is not None}):
         connection.execute(
             "INSERT INTO attempts(attempt_id, job_id, attempt_number, worker_id,"
             " quota_class, status, fence_generation, authority_policy_hash,"
@@ -307,8 +308,11 @@ def test_default_source_composes_the_read_only_installed_store(tmp_path, monkeyp
     assert type(source) is ExistingExecutionReturnSource
     assert source.store.create is False and source.store.existing_writable is False
     from control_plane.executive_runtime import StateConflict
+    # transaction() is a @contextmanager: the fail-closed refusal raises on
+    # ENTRY, not on the call that builds the manager.
     with pytest.raises(StateConflict):
-        source.store.transaction()
+        with source.store.transaction():
+            pass
     # And the composed default source reads real rows.
     assert source.read(ATTEMPT)["availability"] == "AVAILABLE"
 
