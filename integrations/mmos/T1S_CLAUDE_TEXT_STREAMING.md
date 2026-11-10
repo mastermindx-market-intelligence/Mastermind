@@ -10,17 +10,17 @@ details and test commands in `upstream_patches/MANIFEST.md`, T1s section).
 The Claude driver (`claudeAgent`) used to emit answer text once per completed content
 block. Now it mirrors what the Codex adapter already did: `text_delta` stream frames
 update ONE live assistant item per API message id (`assistant-text:<message.id>`),
-coalesced at 50 ms. When the SDK's `assistant` snapshot for that message id arrives,
-it completes the same item with the snapshot's authoritative text — no second item, no
-re-emit. The SDK snapshots each completed block, so one message id settles repeatedly
-with cumulative content (e.g. `[text, tool_use, text]` → three snapshots): every
-snapshot re-settles the SAME item when the authoritative text grew, and a later text
-block re-opens the item seeded with the settled prefix, so live text never regresses.
-If the turn ends without a snapshot (interrupt), the accumulated partial text settles
-as one completed item at turn finalize. Streamed text reserves its ordinal at the
-first delta, so text keeps its place before same-snapshot tool items (the incumbent
-emitted tool items first). Sub-agent (parented) frames and synthetic notices are
-excluded, and replayed history never streams.
+coalesced at 50 ms, and the SDK `assistant` snapshot completes that same item with its
+authoritative text — no second item, no re-emit. The SDK snapshots each completed
+block, so one message id settles repeatedly with cumulative content (e.g.
+`[text, tool_use, text]` → three snapshots): every snapshot re-settles the SAME item
+when the authoritative text grew, and a later text block re-opens the item seeded
+with the settled prefix, so live text never regresses. If the turn ends without a
+snapshot (interrupt), the partial text settles as one completed item at turn
+finalize. Streamed text reserves its ordinal at the first delta, so it keeps its
+place before same-snapshot tool items (the incumbent emitted tool items first).
+Sub-agent (parented) frames and synthetic notices are excluded; replayed history
+never streams.
 
 Adversarial review note (kimi-k3.1-pro via Fabric; hypothesis confirmed here): on the
 unpatched pin, those cumulative per-block snapshots re-emit text once per snapshot —
