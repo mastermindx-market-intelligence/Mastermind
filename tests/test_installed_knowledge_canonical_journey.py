@@ -33,12 +33,13 @@ from ops.executive_os.capacity_source_contract import PYTHON_BINARY
 pytestmark=pytest.mark.skipif(not Path(PYTHON_BINARY).is_file(),reason='native CF1 qualification runtime unavailable')
 
 
-def configured(o, identity, tmp_path, monkeypatch):
+def configured(o, identity, tmp_path, monkeypatch, *, python_executable=None):
     # Separate immutable CODE clone from the configured service publisher.
     code = tmp_path/'configured-code'
     git(tmp_path, 'clone', str(o['env'].origin), str(code))
     o['env'].clone, writer = code, o['env'].clone
-    collector, _ = install_actual_compiler(o, tmp_path, monkeypatch)
+    collector, _ = install_actual_compiler(o, tmp_path, monkeypatch,
+        python_executable=python_executable)
     o['env'].clone = writer
     git_owner = identity[0]
     git_owner.binding = PublisherBinding(worktree=str(writer), expected_origin=str(o['env'].origin),

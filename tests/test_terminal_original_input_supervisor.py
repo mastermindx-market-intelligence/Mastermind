@@ -29,10 +29,22 @@ def prepare(owner, **changes):
 
 
 def empty_owner(tmp_path, *, runs_root=None):
+    # Nested fixture roots must meet the real custody owner's private-parent contract.
+    # Existing parents are not chmod-repaired; unsafe ones still fail closed.
+    tmp_path.mkdir(mode=0o700, parents=True, exist_ok=True)
     runtime = Runtime.at(tmp_path / "runtime")
     adapter = FakeAdapter(FakeInspector())
     owner = ExecutiveSupervisor(runtime, adapter, runs_root=runs_root or tmp_path / "runs")
     return runtime, owner, adapter
+
+
+def test_new_nested_fixture_owner_root_is_private_before_preparation(tmp_path):
+    root = tmp_path / "nested-custody"
+    runtime, owner, adapter = empty_owner(root)
+    assert root.stat().st_mode & 0o777 == 0o700
+    assert prepare(owner) is not None
+    assert runtime.jobs.list_jobs() == [] and runtime.store.list_events() == []
+    assert adapter.spec is None
 
 
 def test_prepare_reconciles_same_private_artifact_without_job_or_worker(tmp_path):

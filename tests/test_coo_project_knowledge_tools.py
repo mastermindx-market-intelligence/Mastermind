@@ -1,7 +1,9 @@
 """Signed v5 tools -> incumbent Workspace -> actual compiler/Events/temp Git.
 
 The private App/Control carrier is explicitly in process. Credential/PR and
-host seal seams are the existing inert fixtures. Current DATA and compilation
+host seal seams are the existing inert fixtures. The explicit fixture interpreter
+is the current test Python; native CF1 installation qualification stays in its
+existing native suites. Current DATA and compilation
 use the actual issued collector/child; no service, socket or live account runs.
 """
 import asyncio
@@ -9,6 +11,7 @@ import copy
 import dataclasses
 import hashlib
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -33,6 +36,7 @@ from integrations.mastermind_workspace_app.contract import principal_frame, work
 from integrations.mastermind_workspace_app.project_authoring_grant import legacy_workspace_document
 from integrations.mastermind_workspace_app.installed_source_operations import InstalledWorkspaceSourceOperations
 from tests import test_executive_coo_app as app_tests
+from tests import test_knowledge_installed_source_join as installed_fixture
 from tests.test_project_discovery_correction import correction_owner
 from tests.test_installed_knowledge_canonical_journey import configured
 from tests.test_installed_source_git_identity import identity
@@ -73,7 +77,13 @@ def signed_knowledge(correction_owner, identity, rsa_key, tmp_path, monkeypatch)
     selected["project_preference_set"] = {"work_ref": "WS:ALPHA", "permission_digest": "4" * 64}
     selected["project_canonical_data_read"] = "6" * 64
     o["who"] = who
-    collector, git_owner = configured(o, identity, tmp_path, monkeypatch)
+    # Prove this suite does not depend on a Mac-only installed CF1 runtime.
+    # The real issued collector and physical child still execute; no read/result is mocked.
+    missing_native = tmp_path / "unavailable-native-cf1-python"
+    assert not missing_native.exists()
+    monkeypatch.setattr(installed_fixture, "PYTHON_BINARY", missing_native)
+    collector, git_owner = configured(o, identity, tmp_path, monkeypatch,
+        python_executable=Path(sys.executable))
     factory = InstalledWorkspaceSourceOperations(collector=collector, policy=policy,
         load_bindings=lambda: o["bindings"], git_identity=git_owner, runtime_guard=lambda rt: rt is o["runtime"])
     factory._permissions._now = now
@@ -147,6 +157,13 @@ def land(s, status):
     git(root, "merge", "--no-ff", "--no-edit", "FETCH_HEAD")
     git(root, "push", "origin", "main")
     return rev_parse(root, "HEAD")
+
+
+def test_signed_fixture_uses_selected_python_and_private_custody(signed_knowledge):
+    s = signed_knowledge
+    assert s["collector"]._python == Path(sys.executable).absolute()
+    assert not Path(installed_fixture.PYTHON_BINARY).exists()
+    assert s["o"]["private"].supervisor.runs_root.parent.stat().st_mode & 0o777 == 0o700
 
 
 def test_v5_profile_is_disabled_and_historical_catalogues_keep_their_digests(tmp_path):

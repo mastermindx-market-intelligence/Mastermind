@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 pytestmark=pytest.mark.skipif(not Path(PYTHON_BINARY).is_file(),reason='native CF1 qualification runtime unavailable')
 
 
-def install_actual_compiler(o, tmp_path, monkeypatch):
+def install_actual_compiler(o, tmp_path, monkeypatch, *, python_executable=None):
     # Undo only the upstream adapter fixture's explicit facade seam. The
     # nominal installed issuer below and its physical child remain unmocked.
     monkeypatch.setattr(InstalledProjectKnowledgeCompiler, '_read', _REAL_READ)
@@ -33,7 +33,8 @@ def install_actual_compiler(o, tmp_path, monkeypatch):
     source.mkdir(); (source / 'README.md').write_text('Synthetic installation source identity\n')
     git(source, 'init', '-q'); git(source, 'add', '.'); git(source, 'commit', '-m', 'Source identity')
     collector = InstalledBootPacketCollector(source_root=source, macro_root=o['env'].clone,
-        code_root=ROOT, python_executable=Path(PYTHON_BINARY), expected_source_sha=rev_parse(source, 'HEAD'))
+        code_root=ROOT, python_executable=Path(PYTHON_BINARY if python_executable is None else python_executable),
+        expected_source_sha=rev_parse(source, 'HEAD'))
     compiler = collector.project_knowledge_recipe_reader(macro_root=o['env'].clone)
     o['service']._adapter = ProjectKnowledgeRecipeAdapter(compiler)
     return collector, compiler
