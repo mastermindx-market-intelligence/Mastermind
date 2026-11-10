@@ -43,8 +43,7 @@ patch). The patch collapses both to 1 item; two "attack" tests in the suite pin 
   text still appears at completion (2 text changes per turn, same as stock). With
   blank lines between numbers, the same patched server shows live growth
   (85→267→478→485 chars across one turn; `stream_diag` evidence). Demonstrated at
-  source level: counting style → `ready:""`; blank-line style → text released;
-  list style → text released.
+  source level: counting style → `ready:""`; blank-line and list styles → released.
 - So: the patch makes the adapter stream; the filter decides what the Chairman
   watches. Most prose answers (paragraphs, lists, code) cross boundaries and will
   now stream; tight single-token lines will not.
@@ -52,9 +51,9 @@ patch). The patch collapses both to 1 item; two "attack" tests in the suite pin 
 ## Cost
 
 - Events per turn: adapter emits a coalesced (50 ms) running update per streamed
-  item, plus one completed burst per message. Delivered client events are bounded
-  downstream by the filter's 400 ms rate limit; running `node.updated` frames are
-  dropped by the filter (as for Codex).
+  item, plus one completed settle per content block. Delivered client events are
+  bounded downstream by the filter's 400 ms rate limit; running `node.updated`
+  frames are dropped by the filter (as for Codex).
 - Store growth: none in item count — one item per API message id, same as the
   incumbent's per-message item; only live `turn_item.updated` projection events
   increase.
@@ -65,15 +64,14 @@ patch). The patch collapses both to 1 item; two "attack" tests in the suite pin 
   Boundary-free answers still appear only at completion; a filter change is a
   separate decision for the principal.
 - Thinking deltas, tool streaming, other adapters: unchanged. Only `claudeAgent`.
-- Desktop/e2e suites not run; unit suites for the adapter + affected orchestration
-  files are green (351/351 + 107/107 + 99/99, logs in evidence).
-- Live proof used a dev server on port ≥3790 with the built web client; the pinned
-  ≥8-changes PASS rule fails for the counting prompt for the filter reason above
-  (honest FAIL, mechanism demonstrated).
+- Desktop/e2e suites not run; adapter + affected unit suites are green (353/353 +
+  107/107 + 65/65, logs in evidence). Live proof used a dev server on port ≥3790
+  with the built web client; the pinned ≥8-changes PASS rule fails for the counting
+  prompt for the filter reason above (honest FAIL, mechanism demonstrated).
 
 ## Carrying into a T3 bundle
 
-Same mechanism as the admission patch: this file is a pinned upstream patch under
+Same mechanism as the admission patch: a pinned upstream patch under
 `integrations/t3/upstream_patches/` recorded in `MANIFEST.md`; the bundle builder
 applies it (with `mastermind_admission_0770446.patch`, disjoint files) to the donor
 pin at build time. The lane ships the patch + tests + this note; performing the
@@ -82,5 +80,5 @@ bundle carry is the principal's step, not this lane's.
 ## Evidence
 
 `~/.mastermind/mmos_evidence/t1s-20261110/` — red/green + suite logs, before/after
-stream JSON, diag, tool-between-text and interrupted-turn proofs with reload
-comparisons.
+stream JSON, diag, adversarial-review result, tool-between-text and interrupted-turn
+proofs with reload comparisons.
