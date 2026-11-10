@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
 
 SKILLS = ("mastermind-computer-use", "mastermind-browser-use")
@@ -22,7 +23,9 @@ SCHEMA = "mastermind.t3_computer_use_install.v1"
 
 
 class SetupError(RuntimeError):
-    pass
+    def __init__(self, message: str, state: str = "REFUSED"):
+        super().__init__(message)
+        self.state = state
 
 
 def digest(data: bytes) -> str:
@@ -85,6 +88,51 @@ def public_operation(op: dict) -> dict:
     return {key: value for key, value in op.items() if key != "content"}
 
 
+def normalized_server(server):
+    result = dict(server) if isinstance(server, dict) else server
+    if isinstance(result, dict) and result.get("env") == {}:
+        result.pop("env")
+    return result
+
+
+def server_state(server) -> dict:
+    if server is None:
+        return {"kind": "absent"}
+    return {"kind": "mcp_entry", "sha256": digest(json.dumps(
+        normalized_server(server), sort_keys=True, separators=(",", ":")).encode())}
+
+
+def operation_state(op: dict) -> dict:
+    if op.get("method") != "claude_mcp":
+        return current(Path(op["path"]))
+    servers = load_json(Path(op["path"])).get("mcpServers", {})
+    if not isinstance(servers, dict):
+        raise SetupError(f"Invalid MCP map: {op['path']}")
+    return server_state(servers.get(op["server_name"]))
+
+
+def run_mcp_command(op: dict, remove: bool = False):
+    """Delegate configuration mutation to its owner; never replace .claude.json.
+
+    Scope and config home are explicit. The CLI preserves unrelated SDK writes.
+    This is not a cross-owner CAS for concurrent edits to the same MCP entry.
+    A failed/interrupted command is reconciled at that entry, never replayed here.
+    """
+    cli = Path(op["cli"])
+    if file_digest(cli) != op["cli_sha256"]:
+        raise SetupError("Claude configuration CLI changed")
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(Path(op["path"]).parent))
+    args = [str(cli), "mcp", "remove" if remove else "add-json", "--scope", "user", op["server_name"]]
+    if not remove:
+        args.append(json.dumps(op["server"], separators=(",", ":")))
+    result = subprocess.run(args, env=env, cwd=Path(op["path"]).parent,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
+    if result.returncode:
+        # Config diagnostics can contain private values; expose a digest, not their text.
+        raise SetupError(f"Claude MCP configuration command failed ({result.returncode}); "
+                         f"diagnostic sha256={digest(result.stderr)}; reconcile {op['path']}")
+
+
 def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -> dict:
     t3_home = t3_home.resolve()
     user_home = (user_home or Path.home()).resolve()
@@ -115,6 +163,10 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
     browser = t3_home / "mcp/mmx-browser/server.js"
     runtime = browser.with_name("runtime.json")
     node = user_home / ".local/share/mastermind-runtime/node/bin/node"
+    claude = (user_home / ".local/bin/claude").resolve()
+    if not claude.is_file() or not os.access(claude, os.X_OK):
+        raise SetupError("Existing Claude configuration CLI is unavailable")
+    claude_sha256 = file_digest(claude)
     if digest(read_regular(quiet)) != QUIET_SHA256:
         raise SetupError("Existing quiet adapter differs from the qualified revision")
     if not peekaboo.is_file() or not os.access(peekaboo, os.X_OK) or file_digest(peekaboo) != PEEKABOO_SHA256:
@@ -133,6 +185,7 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
     dependencies = [{"path": str(settings_path), "sha256": digest(settings_raw)},
                     {"path": str(quiet), "sha256": QUIET_SHA256},
                     {"path": str(peekaboo), "sha256": PEEKABOO_SHA256},
+                    {"path": str(claude), "sha256": claude_sha256},
                     {"path": str(browser), "sha256": digest(read_regular(browser))},
                     {"path": str(runtime), "sha256": digest(read_regular(runtime))}]
 
@@ -164,22 +217,17 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None) -
         servers = config.setdefault("mcpServers", {})
         if not isinstance(servers, dict):
             raise SetupError(f"Invalid MCP map in {name}")
-        changed = False
+        dependencies.append({"path": str(config_path), "sha256": digest(config_raw)})
         for server_name, desired in expected.items():
             old = servers.get(server_name)
-            comparable = dict(old) if isinstance(old, dict) else old
-            if isinstance(comparable, dict) and comparable.get("env") == {}:
-                comparable.pop("env")  # existing Claude configs commonly persist an empty env
+            comparable = normalized_server(old)
             if old is not None and comparable != desired:
                 raise SetupError(f"Conflicting {server_name} server in {name}; preserved")
             if old is None:
-                servers[server_name] = desired
-                changed = True
-        if changed:
-            file_change(config_path, (json.dumps(config, ensure_ascii=False, indent=2) + "\n").encode(),
-                        {"kind": "file", "sha256": digest(config_raw)})
-        else:
-            dependencies.append({"path": str(config_path), "sha256": digest(config_raw)})
+                operations.append({"method": "claude_mcp", "path": str(config_path),
+                                   "server_name": server_name, "server": desired,
+                                   "cli": str(claude), "cli_sha256": claude_sha256,
+                                   "before": {"kind": "absent"}, "after": server_state(desired)})
         for skill in SKILLS:
             target = t3_home / "skills" / skill
             link = provider_home / "skills" / skill
@@ -209,7 +257,10 @@ def atomic_file(path: Path, data: bytes, expected: dict, mode: int = 0o600):
             os.fsync(stream.fileno())
         if current(path) != expected:
             raise SetupError(f"Preimage changed; preserved: {path}")
-        os.replace(temporary, path)
+        if expected["kind"] == "absent":
+            os.link(temporary, path)  # exclusive creation protects a concurrent new owner
+        else:
+            os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -224,7 +275,7 @@ def apply_plan(plan: dict, expected_plan_sha256: str) -> dict:
     for op in plan["operations"]:
         if not Path(op["path"]).parent.resolve().is_relative_to(Path(plan["t3_home"])):
             raise SetupError(f"Target parent changed: {op['path']}")
-        if current(Path(op["path"])) != op["before"]:
+        if operation_state(op) != op["before"]:
             raise SetupError(f"Preimage changed: {op['path']}")
     if not plan["operations"]:
         return {"schema": SCHEMA, "state": "ALREADY_INSTALLED", "providers": plan["providers"]}
@@ -243,33 +294,51 @@ def apply_plan(plan: dict, expected_plan_sha256: str) -> dict:
         for index, op in enumerate(plan["operations"]):
             path = Path(op["path"])
             entry = dict(public_operation(op), state="PREPARED")
-            if op["before"]["kind"] == "file":
+            if op["before"]["kind"] == "file" or op.get("method") == "claude_mcp":
                 backup = backup_dir / f"{index:02d}.before"
                 before = read_regular(path)
-                if digest(before) != op["before"]["sha256"]:
+                if operation_state(op) != op["before"]:
                     raise SetupError(f"Preimage changed before backup: {path}")
                 atomic_file(backup, before, {"kind": "absent"})
                 entry["backup"] = str(backup)
+                entry["backup_sha256"] = digest(before)
             receipt["operations"].append(entry)
             save()  # an interrupted write remains reconcilable at its original target
-            if op["after"]["kind"] == "symlink":
+            if operation_state(op) != op["before"]:
+                raise SetupError(f"Preimage changed before mutation: {path}")
+            if op.get("method") == "claude_mcp":
+                run_mcp_command(op)
+            elif op["after"]["kind"] == "symlink":
                 path.parent.mkdir(parents=True, exist_ok=True)
                 os.symlink(op["after"]["target"], path)  # exclusive creation, never replace
             else:
                 atomic_file(path, op["content"].encode(), op["before"])
-            if current(path) != op["after"]:
+            if operation_state(op) != op["after"]:
                 raise SetupError(f"Postimage verification failed: {path}")
             entry["state"] = "VERIFIED"
             save()
         receipt["state"] = "INSTALLED_NOT_CONSUMER_PROVEN"
         save()
-    except Exception:
+    except Exception as error:
         receipt["state"] = "PARTIAL_RECONCILE_ORIGINAL_TARGETS"
+        receipt["failure"] = {"type": type(error).__name__, "reason": str(error) if isinstance(error, SetupError) else "Inspect original target and prepared entry"}
         save()
-        raise SetupError(f"Apply stopped; reconcile exact targets using {receipt_path}") from None
+        raise SetupError(f"Apply stopped; reconcile exact targets using {receipt_path}", receipt["state"]) from None
     return {"schema": SCHEMA, "state": receipt["state"], "receipt": str(receipt_path),
             "receipt_sha256": digest(read_regular(receipt_path)), "providers": plan["providers"],
             "changed_paths": [op["path"] for op in receipt["operations"]]}
+
+
+def restore_operation(op: dict):
+    path = Path(op["path"])
+    if operation_state(op) != op["after"]:
+        raise SetupError(f"Concurrent update preserved: {path}")
+    if op.get("method") == "claude_mcp":
+        run_mcp_command(op, remove=True)
+    elif op["before"]["kind"] == "file":
+        atomic_file(path, read_regular(Path(op["backup"])), op["after"])
+    else:
+        path.unlink()
 
 
 def rollback(receipt_path: Path, expected_sha256: str) -> dict:
@@ -277,29 +346,51 @@ def rollback(receipt_path: Path, expected_sha256: str) -> dict:
     if digest(raw) != expected_sha256:
         raise SetupError("Receipt changed; refusing rollback")
     receipt = load_json(receipt_path)
-    if receipt.get("schema") != SCHEMA or receipt.get("state") != "INSTALLED_NOT_CONSUMER_PROVEN":
-        raise SetupError("Only a verified completed installation can be rolled back automatically")
+    allowed = {"INSTALLED_NOT_CONSUMER_PROVEN", "ROLLING_BACK", "ROLLBACK_PARTIAL_RECONCILE", "ROLLED_BACK"}
+    if receipt.get("schema") != SCHEMA or receipt.get("state") not in allowed:
+        raise SetupError("Only a completed installation or its interrupted rollback can be restored")
+    resuming = receipt["state"] != "INSTALLED_NOT_CONSUMER_PROVEN"
     root = Path(receipt["t3_home"]).resolve()
     if not receipt_path.resolve().is_relative_to(root / "backups/computer-use"):
         raise SetupError("Receipt is outside the installation backup owner")
     for op in receipt["operations"]:
         path = Path(op["path"])
-        if not path.parent.resolve().is_relative_to(root) or current(path) != op["after"]:
+        observed = operation_state(op)
+        already_restored = (resuming and op.get("rollback_state") in {"PREPARED", "VERIFIED"}
+                            and observed == op["before"])
+        if not path.parent.resolve().is_relative_to(root) or (not already_restored and observed != op["after"]):
             raise SetupError(f"Later change preserved; rollback stopped: {path}")
         if op["before"]["kind"] == "file":
             backup = Path(op["backup"])
             if backup.parent.resolve() != receipt_path.parent.resolve() or digest(read_regular(backup)) != op["before"]["sha256"]:
                 raise SetupError("Backup mismatch; refusing rollback")
-    for op in reversed(receipt["operations"]):
-        path = Path(op["path"])
-        if current(path) != op["after"]:
-            raise SetupError(f"Concurrent update preserved: {path}")
-        if op["before"]["kind"] == "file":
-            atomic_file(path, read_regular(Path(op["backup"])), op["after"])
-        else:
-            path.unlink()
-    receipt["state"] = "ROLLED_BACK"
-    atomic_file(receipt_path, (json.dumps(receipt, indent=2) + "\n").encode(), {"kind": "file", "sha256": expected_sha256})
+    def save():
+        atomic_file(receipt_path, (json.dumps(receipt, indent=2) + "\n").encode(), current(receipt_path))
+    receipt["state"] = "ROLLING_BACK"
+    save()
+    try:
+        for op in reversed(receipt["operations"]):
+            observed = operation_state(op)
+            if observed == op["before"] and op.get("rollback_state") in {"PREPARED", "VERIFIED"}:
+                op["rollback_state"] = "VERIFIED"
+                save()
+                continue
+            if observed != op["after"]:
+                raise SetupError(f"Concurrent update preserved: {op['path']}")
+            op["rollback_state"] = "PREPARED"
+            save()
+            restore_operation(op)
+            if operation_state(op) != op["before"]:
+                raise SetupError(f"Rollback readback failed: {op['path']}")
+            op["rollback_state"] = "VERIFIED"
+            save()
+        receipt["state"] = "ROLLED_BACK"
+        save()
+    except Exception as error:
+        receipt["state"] = "ROLLBACK_PARTIAL_RECONCILE"
+        receipt["failure"] = {"type": type(error).__name__, "reason": str(error) if isinstance(error, SetupError) else "Inspect original target and prepared entry"}
+        save()
+        raise SetupError(f"Rollback interrupted; read original targets and fresh receipt at {receipt_path}", receipt["state"]) from None
     return {"schema": SCHEMA, "state": "ROLLED_BACK", "receipt": str(receipt_path)}
 
 
@@ -329,7 +420,7 @@ def main():
         print(json.dumps(result, indent=2))
         return 0
     except (SetupError, OSError, ValueError) as error:
-        print(json.dumps({"schema": SCHEMA, "state": "REFUSED", "reason": str(error)}))
+        print(json.dumps({"schema": SCHEMA, "state": getattr(error, "state", "REFUSED"), "reason": str(error)}))
         return 1
 
 

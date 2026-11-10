@@ -34,4 +34,11 @@ No implementation files overlap the existing held fleet-app-use / DSH computer-u
 
 ## Continuity
 
-Initial state: P1 in progress. Plan is durable on this operation branch; Agent OS linkage is not yet updated (`PLAN_NOT_ORG_LINKED`). No runtime Job, automatic wake or release is implied. Next action: inspect the existing quiet adapter and both T3 provider homes, then qualify the existing MCP tools before designing any changes.
+P1/P2 are source-qualified in PR #2401. Both enabled provider homes reuse the existing 44-action Mastermind browser adapter; the existing quiet Peekaboo MCP negotiates protocol 2025-03-26 and advertises 14 restricted tools. Actual 4.9.8 sender reports Screen Recording, Accessibility and Event Synthesizing granted. These are discovery/permission receipts, not native action or T3 consumer acceptance.
+
+Fifteen focused installer tests pass, including concurrent SDK cache writes at the mutation boundary and interrupted rollback without replay. MCP edits now go through the installed Claude 2.1.319 configuration CLI, never whole-file provider replacement. A separate host fixture verified explicit configuration-home targeting, add/remove readback, preservation of newer cache fields, and unchanged default configuration. The first live preview required compatibility with the existing empty env map; source was corrected before any installation.
+
+Browser census: M2/mastermindx reports control, screenshot, download and advanced CDP enabled; mini1/mastermindx is connected with advanced CDP but browser-owned control/screenshot/download disabled; ubuntu4 is offline. No browser grant was changed. The exact M2 task fixture is prepared for native background input proof. P3/P4 remain pending protected source delivery and a fresh T3 consumer session; running T3 threads have not been restarted. No runtime Job, automatic wake or independent reviewer execution is implied. Agent OS linkage remains `PLAN_NOT_ORG_LINKED`.
+
+Next action: finish exact-window/browser fixture proof, consume protected PR/merge evidence, install the accepted source using a fresh preview, then qualify both enabled providers through actual new T3 sessions. Preserve original targets and receipt journals on any uncertain effect.
+

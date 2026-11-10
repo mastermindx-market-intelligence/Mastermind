@@ -47,6 +47,26 @@ class SetupTests(unittest.TestCase):
         node.parent.mkdir(parents=True)
         node.write_text("#!/bin/sh\n")
         node.chmod(0o700)
+        cli = self.home / ".local/bin/claude"
+        cli.parent.mkdir(parents=True)
+        cli.write_text('''#!/usr/bin/env python3
+import json, os, pathlib, sys
+path = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / ".claude.json"
+data = json.loads(path.read_text())
+servers = data.setdefault("mcpServers", {})
+assert sys.argv[1] == "mcp" and sys.argv[3:5] == ["--scope", "user"]
+name = sys.argv[5]
+if sys.argv[2] == "add-json":
+    if name in servers:
+        sys.exit(3)
+    servers[name] = json.loads(sys.argv[6])
+elif sys.argv[2] == "remove":
+    del servers[name]
+else:
+    sys.exit(4)
+path.write_text(json.dumps(data, indent=2) + "\\n")
+''')
+        cli.chmod(0o700)
         self.patches = [patch.object(setup, "QUIET_SHA256", setup.digest(quiet.read_bytes())),
                         patch.object(setup, "PEEKABOO_SHA256", setup.digest(binary.read_bytes()))]
         for p in self.patches:
@@ -125,7 +145,7 @@ class SetupTests(unittest.TestCase):
         result = setup.apply_plan(plan, plan["plan_sha256"])
         setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
         for home in self.homes:
-            self.assertEqual((home / ".claude.json").read_bytes(), self.originals[home])
+            self.assertEqual(json.loads((home / ".claude.json").read_text()), json.loads(self.originals[home]))
         for home in self.homes[:2]:
             for skill in setup.SKILLS:
                 self.assertFalse((home / "skills" / skill).is_symlink())
@@ -137,9 +157,65 @@ class SetupTests(unittest.TestCase):
         newer = json.loads(p.read_text())
         newer["new-cache"] = "keep"
         self.write_json(p, newer)
+        setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
+        self.assertEqual(json.loads(p.read_text())["new-cache"], "keep")
+
+    def test_owner_api_preserves_writer_between_precheck_and_mutation(self):
+        plan = self.plan()
+        real_command = setup.run_mcp_command
+        def writer_then_owner(op, remove=False):
+            p = Path(op["path"])
+            data = json.loads(p.read_text())
+            data["concurrent-sdk-cache"] = "preserved"
+            self.write_json(p, data)
+            return real_command(op, remove)
+        with patch.object(setup, "run_mcp_command", side_effect=writer_then_owner):
+            result = setup.apply_plan(plan, plan["plan_sha256"])
+            setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
+        for home in self.homes[:2]:
+            self.assertEqual(json.loads((home / ".claude.json").read_text())["concurrent-sdk-cache"], "preserved")
+
+    def test_rollback_preserves_changed_mcp_entry(self):
+        plan = self.plan()
+        result = setup.apply_plan(plan, plan["plan_sha256"])
+        p = self.homes[0] / ".claude.json"
+        data = json.loads(p.read_text())
+        data["mcpServers"]["peekaboo"] = {"command": "new-owner"}
+        self.write_json(p, data)
         with self.assertRaisesRegex(setup.SetupError, "Later change preserved"):
             setup.rollback(Path(result["receipt"]), result["receipt_sha256"])
-        self.assertEqual(json.loads(p.read_text())["new-cache"], "keep")
+        self.assertEqual(json.loads(p.read_text())["mcpServers"]["peekaboo"], {"command": "new-owner"})
+
+    def test_interrupted_rollback_reconciles_completed_effect_without_replay(self):
+        plan = self.plan()
+        result = setup.apply_plan(plan, plan["plan_sha256"])
+        receipt_path = Path(result["receipt"])
+        real_restore = setup.restore_operation
+        first_path = None
+        def interrupted(op):
+            nonlocal first_path
+            first_path = op["path"]
+            real_restore(op)
+            raise KeyboardInterrupt("after effect, before readback")
+        with patch.object(setup, "restore_operation", side_effect=interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                setup.rollback(receipt_path, result["receipt_sha256"])
+        receipt = json.loads(receipt_path.read_text())
+        self.assertEqual(receipt["state"], "ROLLING_BACK")
+        self.assertEqual(receipt["operations"][-1]["rollback_state"], "PREPARED")
+        with patch.object(setup, "restore_operation", wraps=real_restore) as restore:
+            setup.rollback(receipt_path, setup.digest(receipt_path.read_bytes()))
+            self.assertNotIn(first_path, [call.args[0]["path"] for call in restore.call_args_list])
+        self.assertEqual(json.loads(receipt_path.read_text())["state"], "ROLLED_BACK")
+
+    def test_failed_owner_command_is_not_replayed_or_replaced_with_file_write(self):
+        plan = self.plan()
+        with patch.object(setup, "run_mcp_command", side_effect=setup.SetupError("owner refused")) as command:
+            with self.assertRaisesRegex(setup.SetupError, "reconcile exact targets"):
+                setup.apply_plan(plan, plan["plan_sha256"])
+            self.assertEqual(command.call_count, 1)
+        for home in self.homes:
+            self.assertEqual((home / ".claude.json").read_bytes(), self.originals[home])
 
     def test_binary_integrity_and_duplicate_json_keys(self):
         self.binary.write_bytes(b"changed binary")

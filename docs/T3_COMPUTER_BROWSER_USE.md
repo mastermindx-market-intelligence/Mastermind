@@ -16,7 +16,7 @@ The helper discovers **enabled** Claude Agent SDK provider instances from `~/.t3
 
 The qualified desktop artifact is the existing signed Peekaboo **4.9.8** CLI behind the existing Cursor quiet adapter; SHA-256 pins are in the helper. The default PATH CLI may still be **4.2.2**, and the GUI app may report another version. None is substituted for the pinned MCP route. The browser adapter validates its own installed source closure and runtime descriptor on dispatch.
 
-The installer changes no credentials, provider models, enabled flags, OS grants, browser permissions, active threads or services. It is not a full filesystem security sandbox; real OS/provider permissions and target ownership remain controlling. Config writes use bounded preimage checks and immediate postimage readback, not a claim of transactional coordination with unrelated SDK writers. A partial installation retains prepared/verified entries at its original targets for reconciliation.
+The installer changes no credentials, provider models, enabled flags, OS grants, browser permissions, active threads or services. It is not a full filesystem security sandbox; real OS/provider permissions and target ownership remain controlling. MCP configuration changes use the existing Claude CLI's `mcp add-json --scope user`, with the exact provider `CLAUDE_CONFIG_DIR`; the installer never replaces `.claude.json`. This preserves unrelated provider cache/settings writes through the configuration owner's mutation API. It does not claim cross-owner compare-and-swap for concurrent edits to the same MCP entry. Skill files use preimage checks and immediate postimage readback. A partial installation retains prepared/verified entries at its original targets for reconciliation.
 
 Configuration is loaded by **fresh agent sessions**. Use a new bounded T3 canary to prove consumption. Preserve running threads; T3's existing Restart agent session action is available for an idle thread that should reload its setup.
 
@@ -34,7 +34,7 @@ Browser page-local input and supported native background actions can avoid takin
 
 ## Qualification
 
-The retained setup tests cover preservation of unrelated/private config, both enabled provider homes, idempotence, artifact integrity, unsupported drivers, conflicting MCP owners, changed preview/dependencies, later config writers, path escape, exact rollback and partial-effect receipts.
+The retained setup tests cover preservation of unrelated/private config, both enabled provider homes, idempotence, artifact integrity, unsupported drivers, conflicting MCP owners, changed preview/dependencies, SDK writers at the mutation boundary, failed owner commands without fallback, path escape, interrupted rollback and partial-effect receipts.
 
 Live acceptance must separately establish:
 
@@ -48,7 +48,7 @@ The read-only MCP qualification uses protocol `2025-03-26`; an older `2024-11-05
 
 ## Rollback
 
-Each applied change saves owner-only preimages and a hash-only receipt under T3's existing backups directory. Restore only the exact installation postimages:
+Each applied change saves owner-only preimages and a receipt containing paths, hashes and the public server definitions under T3's existing backups directory. Rollback uses the existing Claude CLI to remove only the exact installed MCP entries, preserving unrelated later SDK configuration updates. Skill files and links must still match their installation postimages:
 
 ```bash
 python3 scripts/t3_computer_use_setup.py rollback \
@@ -56,7 +56,7 @@ python3 scripts/t3_computer_use_setup.py rollback \
   --expected-receipt-sha256 <returned-receipt-digest>
 ```
 
-A later provider/config update blocks automatic rollback to protect the newer writer. Inspect and reconcile the owned MCP/skill delta instead of overwriting the full config with an old backup. A partial install is never replayed as a new operation without reconciling its original targets.
+A changed MCP entry or skill blocks automatic rollback to protect its newer writer. Rollback journals `PREPARED` and `VERIFIED` for each entry; an interruption leaves `ROLLING_BACK` or `ROLLBACK_PARTIAL_RECONCILE`. Read those original targets and the current receipt, then resume with its freshly computed SHA-256. Already-restored preimages are verified without repeating the mutation. The installer never restores a whole provider configuration from an old backup. A partial install is never replayed as a new operation without reconciling its original targets.
 
 ## Upstream references
 
