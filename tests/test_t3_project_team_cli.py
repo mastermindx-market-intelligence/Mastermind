@@ -40,7 +40,7 @@ def test_check_brief_and_portable_graph_are_read_only(definition, capsys, monkey
 
 def test_launch_request_preserves_scope_and_native_namespace_without_dispatch(definition, capsys):
     args = ["launch-request", str(definition), "--project-id", "native-project", "--request-id", "prepare-one",
-            "--environment-id", "native-environment"]
+            "--environment-id", "native-environment", "--capacity-model", "logical-model"]
     assert main(args) == 0
     first = json.loads(capsys.readouterr().out)
     assert first["tool"] == "t3_thread_launch"
@@ -50,7 +50,9 @@ def test_launch_request_preserves_scope_and_native_namespace_without_dispatch(de
     assert payload["projectId"] == "native-project"
     assert "environmentId" not in payload
     assert first["expected_environment_id"] == "native-environment"
-    assert "modelSelection" not in payload and "runtimeMode" not in payload
+    assert payload["modelSelection"] == {"instanceId": "capacity_fabric", "model": "logical-model"}
+    assert "runtimeMode" not in payload
+    assert first["capacity_catalog_validation"] == "REQUIRED_AT_NATIVE_DISPATCH"
     assert "fresh CLI/OAuth client" in first["recovery"]
     assert main(args) == 0
     assert json.loads(capsys.readouterr().out) == first
@@ -75,7 +77,7 @@ def test_native_project_actions_quote_paths_and_never_autorun_or_dispatch(defini
     launcher = "/qualified path/team;not-shell"
     malicious_path = "project ' $(touch should-not-exist).json"
     actions = project_actions(definition=malicious_path, launcher=launcher,
-                              project_id="p", request_id="r", environment_id="e")
+                              project_id="p", request_id="r", environment_id="e", capacity_model="logical-model")
     assert len(actions["scripts"]) == 3
     for action in actions["scripts"]:
         argv = shlex.split(action["command"])
@@ -83,7 +85,7 @@ def test_native_project_actions_quote_paths_and_never_autorun_or_dispatch(defini
         assert not action["runOnWorktreeCreate"] and not action["runOnSettle"]
         assert argv[1] in {"check", "graph", "launch-request"}
     assert main(["actions", str(definition), "--launcher", launcher, "--project-id", "p",
-                 "--request-id", "r", "--environment-id", "e"]) == 0
+                 "--request-id", "r", "--environment-id", "e", "--capacity-model", "logical-model"]) == 0
     assert json.loads(capsys.readouterr().out)["scripts"][-1]["name"] == "Prepare COO launch request"
 
 
@@ -111,7 +113,7 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     assert manifest["source_status"] == "qualification_only" and manifest["source_revision"] is None
     assert archive_bytes(root)[0] == payload
     with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert len(archive.namelist()) == 9
+        assert len(archive.namelist()) == 10
         assert all(not name.startswith("/") and ".." not in name for name in archive.namelist())
     app = tmp_path / "team.pyz"
     app.write_bytes(payload)
@@ -152,3 +154,27 @@ def test_exact_package_revision_is_verified_inside_public_builder_and_uses_captu
         archive_bytes(tmp_path, source_revision=revision)
     with pytest.raises(ValueError, match="Exact source commit required"):
         archive_bytes(tmp_path, source_revision="main")
+
+
+def test_prepared_coo_launch_never_inherits_a_provider_default(definition, capsys):
+    args = ["launch-request", str(definition), "--project-id", "p", "--request-id", "r", "--environment-id", "e"]
+    with pytest.raises(SystemExit) as missing:
+        main(args)
+    assert missing.value.code == 2
+    capsys.readouterr()
+    assert main([*args, "--capacity-model", "logical-1"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert main([*args, "--capacity-model", "logical-2"]) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert first["arguments"]["clientRequestId"] != second["arguments"]["clientRequestId"]
+    assert first["team_sha256"] == second["team_sha256"]
+    assert first["arguments"]["modelSelection"]["instanceId"] == "capacity_fabric"
+    assert second["arguments"]["modelSelection"]["instanceId"] == "capacity_fabric"
+    assert first["effect_state"] == second["effect_state"] == "NOT_DISPATCHED"
+
+
+@pytest.mark.parametrize("model", ["", " ", "line\nbreak", "other; echo unsafe"])
+def test_invalid_capacity_model_cannot_be_prepared(definition, capsys, model):
+    assert main(["launch-request", str(definition), "--project-id", "p", "--request-id", "r",
+                 "--environment-id", "e", "--capacity-model", model]) == 2
+    assert json.loads(capsys.readouterr().out)["effect_state"] == "NOT_DISPATCHED"

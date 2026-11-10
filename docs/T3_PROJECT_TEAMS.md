@@ -137,6 +137,7 @@ python3 -m integrations.session_bridge.t3_project_team_cli launch-request \
   path/to/source-owned-team.json \
   --project-id EXACT_NATIVE_PROJECT \
   --environment-id EXACT_NATIVE_ENVIRONMENT \
+  --capacity-model EXACT_LOGICAL_CAPACITY_MODEL \
   --request-id original-project-operation
 ```
 
@@ -191,6 +192,7 @@ python3 -m integrations.session_bridge.t3_project_team_cli actions \
   path/to/source-owned-team.json \
   --launcher /absolute/path/mastermind-t3-team.pyz \
   --project-id EXACT_NATIVE_PROJECT --environment-id EXACT_NATIVE_ENVIRONMENT \
+  --capacity-model EXACT_LOGICAL_CAPACITY_MODEL \
   --request-id original-project-operation
 ```
 
@@ -235,3 +237,21 @@ team completed a project, that company routing is armed, or that installed T3
 0.1.7 has the exact inspected source. Those require original native receipts and
 the incumbent runtime/source owner. Never promote a parsed action or prepared
 request into START, successful execution or acceptance.
+
+
+### Capacity-only Agent Bus composition
+
+`launch-request` and `actions` require `--capacity-model` from the existing live
+Capacity Fabric catalog. They emit the explicit `capacity_fabric` model selection;
+preparation is still `NOT_DISPATCHED`, not provider readiness or an admission grant.
+Changing the logical model changes the prepared request fingerprint; it never
+permits replay of an uncertain earlier effect. Native permissions and Capacity
+availability must be checked by the actual dispatch owner.
+
+`ProjectTeamClient.launch(..., capacity_model=...)` now requires an injected
+`T3NativeClient` through its `native_client=` constructor argument, with the exact
+same observed environment and project. It reuses that client's Capacity catalog,
+worktree launch, original run identity and uncertain-effect fencing. The retained
+`T3CliClient` is used for original read projections only; a missing native client
+cannot fall back to `thread start` or a default provider. The standalone read-only
+team package includes the native client module but still dispatches nothing.

@@ -262,3 +262,42 @@ retains the atomic-boundary judgment and direct integration under
 `PRINCIPAL_JUDGMENT` / `LOWER_TOTAL_OVERHEAD`; no substitute native labor child is
 started. Existing original workers are not resumed or duplicated. All live
 activation, actual platform permission and release controls remain binding.
+
+
+### v4 qualified integration result
+
+The resumed source implementation is now in `integrations/t3_agent_bus/README.md`.
+The original two completed native candidates were recovered and hardened, not
+re-spawned. The injected native CLI transport successfully read the actual local
+T3 environment, a two-thread project page and the original lifecycle thread.
+Actual discovery returned 13 tools; the live server does not advertise the new
+strict lifecycle tool. Capabilities therefore report it unavailable.
+
+AB1-AB5 source work is qualified: exact-environment native CLI, bounded catalog
+and result transport, strict per-thread event revision checks both under the
+existing lock and inside the existing command-commit transaction, literal
+Capacity-only model selection, confirmed native tombstone deletion, and native
+COO launch composition without a provider-default fallback. The 13-path MIT
+native overlay reproduces from its exact upstream base with every postimage
+verified; it is not a server installation.
+
+Evidence: `docs/evidence/t3-agent-bus-v4-verification.json` and
+`docs/evidence/t3-agent-bus-v4-native-read.json`. Python: 317 tests and 180 subtests.
+Native: 198 tests across CLI, MCP, runtime, contract and context-budget suites;
+server and contracts typechecks pass. Principal self-review only, not an
+independent technical review or a GitHub APPROVED review.
+
+AB6-AB8 remain open, not downgraded: the runtime owner must reconcile the active
+T3 source/release target before a non-disruptive native installation, prove loaded
+bytes/rollback and use newly owned disposable targets for the live lifecycle.
+The native status read in this continuation confirmed Connect disabled, LAN
+disabled and no background service installed. Direct connected ChatGPT use still
+requires the original native endpoint and actual OAuth consent; no alternative
+auth owner or unsolicited wake is claimed. Long-horizon parent acceptance still
+requires consuming a real delegated result, not these source-test receipts.
+
+PR #2394's team compiler is now protected-merged and its source composition is
+extended here; #2338 remains the active native runtime/admission/deployment
+candidate. #2375, #2401 and #2367 remain disjoint live source writers. No live
+thread, provider configuration, app install, server or existing source worktree
+was modified for this qualification.

@@ -1,0 +1,101 @@
+{
+  "base_archive_paths": [
+    "LICENSE",
+    "apps/server/src/cli/thread.test.ts",
+    "apps/server/src/cli/thread.ts",
+    "apps/server/src/mcp/AcpMcpStdioBridge.test.ts",
+    "apps/server/src/mcp/AcpMcpStdioBridge.ts",
+    "apps/server/src/mcp/toolkits/thread/handlers.ts",
+    "apps/server/src/mcp/toolkits/thread/tools.ts",
+    "apps/server/src/orchestration-v2/EventSink.ts",
+    "apps/server/src/orchestration-v2/Orchestrator.ts",
+    "apps/server/src/orchestration-v2/runtimeLayer.test.ts",
+    "apps/server/src/provider/agentContextBudget.json",
+    "packages/contracts/src/orchestrationV2.ts"
+  ],
+  "base_archive_sha256": "6fb06ab0ab42dedd887b7c62f6c02631542a227976763378246c1673d0419d3e",
+  "files": [
+    {
+      "after_sha256": "417dc05d9283067465ba3a070ed4cee2a92fb724e68506e7fed20a0011e3ab0a",
+      "before_sha256": null,
+      "path": "apps/server/src/cli/thread.native.test.ts"
+    },
+    {
+      "after_sha256": "cc05c83547dc8ee95d426e062f183b9f508f8fb4694df8f194d0a6fff385e008",
+      "before_sha256": "5df7afaa68fdc915e4aecfdf9602533b13683c73fa103495127233842ece9960",
+      "path": "apps/server/src/cli/thread.test.ts"
+    },
+    {
+      "after_sha256": "22f758d470499e1ebdb8525296fcea428050c76ba03d76efc090bd6f9be9d7ab",
+      "before_sha256": "277ab059b83c2fa953b0af4a0aea30df45009bbb8dbafcaae3decbcf15b1fd9e",
+      "path": "apps/server/src/cli/thread.ts"
+    },
+    {
+      "after_sha256": "5e1008cf6e6fb3355f06e0fcda053f7fcc5e195a7e53dc310e2452799cd79533",
+      "before_sha256": "9bc5fe4140068d8c45edb36ce055239ed039029950d85f8d2246bc33d37afc0a",
+      "path": "apps/server/src/mcp/AcpMcpStdioBridge.test.ts"
+    },
+    {
+      "after_sha256": "c5eada8eb8495a48feb5c1077392dde5a5a8aba0a92967e3780324cd632e04c2",
+      "before_sha256": "776c25e62971fd1360c5f6ed7db89c3ab4e73fd14d6c8334456dc418169223d8",
+      "path": "apps/server/src/mcp/AcpMcpStdioBridge.ts"
+    },
+    {
+      "after_sha256": "5264f689409b443624a6380327b5501a47e8695af10a0d7da85b5cee3948f876",
+      "before_sha256": null,
+      "path": "apps/server/src/mcp/toolkits/thread/handlers.test.ts"
+    },
+    {
+      "after_sha256": "18ff6594a47f2c20b936143fe004c6001ddef49b014a734bb5cff740203ef8f9",
+      "before_sha256": "5d59fa9fdac547c69870e19f23bb02e0799203ac5bc3e60b3efcd4131e76bcb3",
+      "path": "apps/server/src/mcp/toolkits/thread/handlers.ts"
+    },
+    {
+      "after_sha256": "e115e61408ae3a8e6fcac9a04cf00e5a97c081641a7a890fec833433ea1ba9b1",
+      "before_sha256": "2197e8ededd75df3fd94d57e993f3fe405203418774cddf10738fbf5c31b2a05",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts"
+    },
+    {
+      "after_sha256": "fed9ab2369481f68b2ecfa7434211203a93e5cf4300c64a7c72b8b54118339d3",
+      "before_sha256": "12e8d75d1f731f9d157a17138fa3003100a5cfff1d05898eda70c04a430fff3b",
+      "path": "apps/server/src/orchestration-v2/EventSink.ts"
+    },
+    {
+      "after_sha256": "4a6e804f6fb7cde0079913a103462f1f1b1a0b56eccef563c92e36a460a9a8c5",
+      "before_sha256": "882a66700f8eac3e46b99a41a64f6fa448215a9c67f171748259d323ce58d626",
+      "path": "apps/server/src/orchestration-v2/Orchestrator.ts"
+    },
+    {
+      "after_sha256": "0bb0944f6a300d95dc6edf1f34e9cd2ff17dfadda50cfff5d1667dff5363ee5e",
+      "before_sha256": "a9fd802c5a33f83eedb988d85d704aaadaebd12da36059c2d5552707fda3a377",
+      "path": "apps/server/src/orchestration-v2/runtimeLayer.test.ts"
+    },
+    {
+      "after_sha256": "3fbdad5abf22e04da53df7cf0d2b905e9d8d850d044af9db8260f4851686b399",
+      "before_sha256": "138adf0bd7311f6071a4ef17bf6b2f7c5b220400ad3594e3988509f2b4e7c1e9",
+      "path": "apps/server/src/provider/agentContextBudget.json"
+    },
+    {
+      "after_sha256": "d624de3c2ac89ecb8627d972bbf84feeb32d9ce5837ee3aadff21b56fdb308d3",
+      "before_sha256": "55479fd5af733e0af6afad7f60d3d8de9f4e6916822e404e28f11deccd3d5ee0",
+      "path": "packages/contracts/src/orchestrationV2.ts"
+    }
+  ],
+  "license_sha256": "935d8f2af0c703f9c39517ee57cc4930b19d02d533be930b63f0e82f93614b43",
+  "original_candidates": {
+    "cli": {
+      "sha256": "6ce1853635819631d35353c5e6c2f4596931d3d57493d396d82e5b50901ccb0c",
+      "thread_id": "mcp:5b3b360e-1842-4b27-b510-e38b9546941b"
+    },
+    "lifecycle": {
+      "sha256": "bce7a0c281f4dc90d207f189260ca6efc3f10fdb6199d170a58298773f881c9f",
+      "thread_id": "mcp:f7fefa69-16ce-4d02-a95d-8a8ea0f7ca93"
+    }
+  },
+  "output_kind": "affected-source-files-only; not a standalone server or runtime installation",
+  "patch_sha256": "60357937f08597de7229b84258c33430a190a35bfb244c2546837732bf5d2a0f",
+  "runtime_effects": "none; existing runtime owner must reconcile loaded source, apply and validate the release separately",
+  "schema": "mastermind.t3-agent-bus-native-overlay.v1",
+  "upstream_repository": "pingdotgg/t3code",
+  "upstream_revision": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4"
+}
