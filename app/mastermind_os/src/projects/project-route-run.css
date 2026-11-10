@@ -1,0 +1,239 @@
+/* TD06/TD07 journey steps (route review + run outcome) on the project
+   delivery surface. Noir tokens from the shared shell only — no new design
+   system. Unknown/disabled states keep --noir-text-secondary contrast (the
+   Paper AT17/22 low-contrast defect is not replicated); readiness rows have
+   no green branch at all. Chips reuse the team surface's .mm-chip classes. */
+
+/* Panel mount points. */
+.mm-delivery-route-review,
+.mm-delivery-run {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Shared card shell for both steps. */
+.mm-route-review,
+.mm-run-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--noir-panel);
+  border: 1px solid var(--noir-selected);
+  border-radius: 14px;
+  padding: 20px;
+}
+.mm-route-review-head,
+.mm-run-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mm-route-review-head h4,
+.mm-run-head h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  flex: 1 1 auto;
+}
+
+/* TD06 route review. */
+.mm-route-review-intro {
+  margin: 0;
+  color: var(--noir-text-secondary);
+  font-size: 14px;
+}
+.mm-route-review-missing {
+  margin: 0;
+  color: var(--noir-text-primary);
+  font-size: 15px;
+}
+.mm-route-review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.mm-route-review-col,
+.mm-run-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mm-route-review-col > h5,
+.mm-run-col > h5 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--noir-champagne);
+}
+.mm-route-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+.mm-route-card h6 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--noir-text-tertiary);
+}
+.mm-route-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.mm-route-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mm-route-facts dt {
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.mm-route-facts dd {
+  margin: 0;
+  color: var(--noir-text-primary);
+  font-size: 13px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+/* Honest absence keeps readable secondary contrast — never a low-contrast
+   fill, and readiness rows never render green. */
+.mm-route-facts dd[data-projected="false"],
+.mm-route-facts dd[data-readiness="unknown"] {
+  color: var(--noir-text-secondary);
+}
+.mm-route-facts dd small {
+  display: block;
+  color: var(--noir-text-tertiary);
+  font-size: 11px;
+}
+.mm-route-card-note {
+  margin: 0;
+  color: var(--noir-text-tertiary);
+  font-size: 12px;
+}
+.mm-route-view-routing,
+.mm-route-back,
+.mm-run-open-code {
+  align-self: flex-start;
+  background: none;
+  border: 0;
+  color: var(--noir-champagne);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+}
+.mm-route-review-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--noir-selected);
+  padding-top: 16px;
+}
+.mm-route-review-footer h5 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.mm-route-review-footer .muted {
+  margin: 0;
+  font-size: 13px;
+}
+.mm-route-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+/* Disabled submit keeps readable secondary contrast (AT17/22 not replicated). */
+.mm-route-submit {
+  border-radius: 9px;
+  border: 1px solid var(--noir-selected);
+  padding: 11px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  background: var(--noir-raised);
+  color: var(--noir-text-secondary);
+  cursor: not-allowed;
+}
+.mm-route-submit-reason {
+  margin: 0;
+  color: var(--noir-text-tertiary);
+  font-size: 13px;
+}
+
+/* TD07 run outcome. */
+.mm-run-breadcrumb {
+  margin: 0;
+  color: var(--noir-text-tertiary);
+  font-size: 12px;
+}
+.mm-run-status {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0;
+}
+.mm-run-status-body {
+  margin: 0;
+  color: var(--noir-text-primary);
+  font-size: 15px;
+}
+.mm-run-receipt-note {
+  margin: 0;
+  color: var(--noir-text-secondary);
+  font-size: 13px;
+}
+.mm-run-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.mm-run-trail {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+}
+.mm-run-trail li {
+  display: grid;
+  gap: 2px;
+}
+.mm-run-trail-title {
+  color: var(--noir-text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+.mm-run-trail-detail {
+  color: var(--noir-text-secondary);
+  font-size: 13px;
+}
+.mm-run-trail-time {
+  color: var(--noir-text-tertiary);
+  font-size: 12px;
+}
+.mm-run-artifacts {
+  margin: 0;
+  padding-left: 16px;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--noir-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Responsive: two-column steps stack under 800px (same breakpoint as the
+   team surface). */
+@media (max-width: 800px) {
+  .mm-route-review-grid,
+  .mm-run-grid {
+    grid-template-columns: 1fr;
+  }
+}
