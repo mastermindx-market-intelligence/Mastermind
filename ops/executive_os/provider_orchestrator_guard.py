@@ -40,6 +40,19 @@ There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
 shown through this provider hook; it does not claim to fence arbitrary processes.
+
+Documented limits (r13, REVIEW9 re-check #9):
+
+- ``env -S`` decodes its own escapes (backslash-backslash→backslash,
+  backslash-n→newline) and can feed a nested interpreter a line
+  continuation the raw bytes never show; construct-free, literally unnamed
+  ``env -S`` bodies are therefore allowed unjudged (the same
+  arbitrary-process class as printf-computed names; a NAMED ``env -S``
+  form is refused R6_PREFIX_FORM).
+- honest shapes with an escaped quote immediately before a newline inside a
+  multi-line double-quoted argument (e.g. ``gh pr create --body "Fixes \\"x\\"⏎⏎More"``)
+  are over-refused as assembled continuations; remedy is ``--body-file`` /
+  ``-F FILE``.
 """
 from __future__ import annotations
 
