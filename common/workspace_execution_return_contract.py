@@ -18,12 +18,20 @@ envelope so ONE authenticated GET can carry every honest state::
       "availability": "AVAILABLE" | "UNAVAILABLE",
       "reason": null | "<TOKEN>",
       "attempt_id": "<run id>",
+      "job_id": "JOB-<n>" | null,
       "delivery": <receipt mapping verbatim> | null,
       "stage": "<stage token>" | null,
       "refusal_detail": "<text>" | null,
       "original_requester": <v1.2 block> | null,
       "read_at_utc": "<ISO-8601 UTC>"
     }
+
+``job_id`` is the attempt's owning Executive job id, taken verbatim from the
+persisted event row's ``job_id`` column (the seam writes ``job.job_id`` on
+every receipt row) — read-only provenance, never invented.  The result
+reference a Paperclip tab needs is the receipt's own ``transport_ref`` field
+inside ``delivery`` (the deliverable locator the deliverer recorded); the
+document never fabricates one when the receipt carries none.
 
 ``AVAILABLE`` always carries ``null`` reason and the receipt verbatim;
 ``UNAVAILABLE`` always carries a closed reason token and null facts — an
@@ -46,6 +54,10 @@ MAX_RESPONSE_BYTES = 16_384
 #: byte the fleet contract's grammar (and the projection's ``ATTEMPT_ID_RE``):
 #: it admits run ids, never paths, dot-dots or control characters.
 ATTEMPT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:%=-]{0,159}\Z")
+
+#: Executive job ids (``JOB-<n>``) — byte-for-byte the installed grammar
+#: (``common/executive_workspace_contract.py`` ``_JOB_ID_RE_V2``).
+JOB_ID = re.compile(r"JOB-[0-9]{1,9}\Z")
 
 #: The delivery receipt wire schema (owner:
 #: ``control_plane.execution_return_projection`` — mirrored, not re-invented).
@@ -79,8 +91,8 @@ REQUESTER_KEYS = frozenset({
 })
 
 DOCUMENT_KEYS = frozenset({
-    "schema", "availability", "reason", "attempt_id", "delivery", "stage",
-    "refusal_detail", "original_requester", "read_at_utc",
+    "schema", "availability", "reason", "attempt_id", "job_id", "delivery",
+    "stage", "refusal_detail", "original_requester", "read_at_utc",
 })
 
 _REASON_TOKEN = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
@@ -95,6 +107,13 @@ def attempt_id(value) -> str:
     """Validate one attempt id (run id grammar) or raise ``ValueError``."""
     if type(value) is not str or ATTEMPT_ID.fullmatch(value) is None:
         raise ValueError("attempt_id_invalid")
+    return value
+
+
+def job_id(value) -> str:
+    """Validate one Executive job id (``JOB-<n>``) or raise ``ValueError``."""
+    if type(value) is not str or JOB_ID.fullmatch(value) is None:
+        raise ValueError("job_id_invalid")
     return value
 
 
@@ -195,6 +214,7 @@ def unavailable(attempt_id_value: str, reason: str, read_at_utc: str) -> dict:
         "availability": "UNAVAILABLE",
         "reason": reason,
         "attempt_id": attempt_id_value,
+        "job_id": None,
         "delivery": None,
         "stage": None,
         "refusal_detail": None,
@@ -203,14 +223,20 @@ def unavailable(attempt_id_value: str, reason: str, read_at_utc: str) -> dict:
     }
 
 
-def available(attempt_id_value: str, *, delivery, stage, refusal_detail,
-              original_requester, read_at_utc: str) -> dict:
-    """The available receipt document, validated closed before it is served."""
+def available(attempt_id_value: str, *, job_id_value=None, delivery, stage,
+              refusal_detail, original_requester, read_at_utc: str) -> dict:
+    """The available receipt document, validated closed before it is served.
+
+    ``job_id_value`` is the owning Executive job id from the persisted event
+    row; ``None`` when the row's column is not a valid job id — an honest
+    absence, never a reason to poison the receipt projection.
+    """
     document = {
         "schema": READ_SCHEMA,
         "availability": "AVAILABLE",
         "reason": None,
         "attempt_id": attempt_id(attempt_id_value),
+        "job_id": None if job_id_value is None else job_id(job_id_value),
         "delivery": validate_delivery(delivery),
         "stage": stage,
         "refusal_detail": refusal_detail,
@@ -230,8 +256,11 @@ def validate_document(document):
     _read_at(document["read_at_utc"])
     if document["availability"] not in AVAILABILITIES:
         raise ValueError("document_invalid")
+    if document["job_id"] is not None:
+        job_id(document["job_id"])
     if document["availability"] == "UNAVAILABLE":
         if (document["reason"] not in REASONS
+                or document["job_id"] is not None
                 or document["delivery"] is not None
                 or document["stage"] is not None
                 or document["refusal_detail"] is not None

@@ -159,10 +159,19 @@ class ExistingExecutionReturnSource:
                                    or len(detail) > 512):
             return wire.unavailable(
                 attempt_id_value, "RECEIPT_PAYLOAD_MALFORMED", read_at)
-        requester = self._original_requester(getattr(event, "job_id", None))
+        # The owning job id comes from the persisted event row itself (the
+        # seam writes ``job.job_id`` there); a row whose column is not a
+        # valid job id degrades to ``null`` job_id — never a poisoned read.
+        row_job_id = getattr(event, "job_id", None)
+        try:
+            row_job_id = wire.job_id(row_job_id) if type(row_job_id) is str else None
+        except ValueError:
+            row_job_id = None
+        requester = self._original_requester(row_job_id)
         try:
             return wire.available(
                 attempt_id_value,
+                job_id_value=row_job_id,
                 delivery=payload.get("delivery"),
                 stage=stage,
                 refusal_detail=detail,
