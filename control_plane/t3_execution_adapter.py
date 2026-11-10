@@ -414,8 +414,9 @@ class T3LaunchSpecNotDurableError(T3ExecutionAdapterError):
 #: Closed ``model_selection_basis`` vocabulary on the launch envelope
 #: (Model Router → T3 modelSelection mapping, DONE_WHEN row 2):
 #:   CLAIMED_ROUTE   derived from the CLAIMED ExecutionBinding's route
-#:                   fields (model_ref as the model; provider_instance_ref,
-#:                   falling back to provider_ref, as the T3 instance id);
+#:                   fields (model_ref as the model; provider_instance_ref
+#:                   as the T3 instance id, else the port's host-configured
+#:                   providerInstanceId — never the Executive provider_ref);
 #:   SPEC_FALLBACK   no claimed route model was available (a binding with no
 #:                   model_ref, or a pre-durability reconstruction with no
 #:                   binding at all); the launch spec's model field was used
@@ -2286,8 +2287,9 @@ class T3ExecutionAdapter:
         the envelope's ``model_selection`` is derived FROM THE CLAIM — the
         T3 modelSelection object ``{"instanceId": …, "model": …}`` (the
         port parses a JSON selection verbatim) with the instance id taken
-        from the binding's ``provider_instance_ref`` falling back to
-        ``provider_ref`` — and a ``spec.model`` that disagrees with the
+        from the binding's ``provider_instance_ref`` only (else the port's
+        host-configured ``providerInstanceId``; never the Executive
+        ``provider_ref`` alias) — and a ``spec.model`` that disagrees with the
         claimed route model is refused typed BEFORE any intent is persisted
         or anything sent (:class:`T3ModelRouteDriftError`).  A binding with
         no route model keeps the previous behaviour (the spec's model
@@ -2297,10 +2299,14 @@ class T3ExecutionAdapter:
         route_instance = ""
         if binding is not None:
             route_model = str(getattr(binding, "model_ref", "") or "").strip()
+            # Only the binding's T3 provider-instance ref names a T3
+            # instance.  ``provider_ref`` is the Executive capacity
+            # provider alias (e.g. ``t3``/``codex``) — a different
+            # namespace — so it is never used as a T3 instanceId; an
+            # absent instance ref is filled by the port's host-configured
+            # ``providerInstanceId`` or refused there before any send.
             route_instance = str(
                 getattr(binding, "provider_instance_ref", "") or ""
-            ).strip() or str(
-                getattr(binding, "provider_ref", "") or ""
             ).strip()
         if route_model:
             spec_model = str(spec.model or "").strip()
@@ -3644,6 +3650,14 @@ class T3McpToolPort:
         self._call_tool = call_tool
         self._upstream_namespace = namespace
         self._launch_arguments = dict(launch_arguments or {})
+        #: Host-configured T3 provider instance that serves claimed-route
+        #: models whose binding names no instance (never sent top-level).
+        instance = self._launch_arguments.pop("providerInstanceId", "")
+        if instance is not None and not isinstance(instance, str):
+            raise T3PortRefusalError(
+                "launch_arguments.providerInstanceId must be a string"
+            )
+        self._provider_instance_id = str(instance or "").strip()
         if "environmentId" in self._launch_arguments:
             # Re-audit #3 R4: the donor's linked-environment forwarding
             # (PeerMcpClient) renews sessions on 404 and remaps 401 to
@@ -3750,11 +3764,24 @@ class T3McpToolPort:
             selection = envelope.model_selection.strip()
             if selection.startswith("{"):
                 try:
-                    arguments["modelSelection"] = json.loads(selection)
+                    parsed = json.loads(selection)
                 except ValueError as exc:
                     raise T3PortRefusalError(
                         "envelope modelSelection is not valid JSON (nothing was sent)"
                     ) from exc
+                if not isinstance(parsed, dict):
+                    raise T3PortRefusalError(
+                        "envelope modelSelection must be a JSON object (nothing was sent)"
+                    )
+                if not str(parsed.get("instanceId") or "").strip():
+                    if not self._provider_instance_id:
+                        raise T3PortRefusalError(
+                            "envelope modelSelection names no T3 instanceId and "
+                            "no providerInstanceId is configured for this host "
+                            "(nothing was sent)"
+                        )
+                    parsed = {**parsed, "instanceId": self._provider_instance_id}
+                arguments["modelSelection"] = parsed
             else:
                 arguments["modelSelection"] = {"instanceId": selection}
         self.calls.append({"op": op, "clientRequestId": key})

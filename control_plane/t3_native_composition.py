@@ -94,7 +94,12 @@ T3_LAUNCH_ARGUMENTS_FILE_ENV = "MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE"
 #: (``environmentId`` is refused explicitly — the port already refuses
 #: linked-environment forwarding, and the composition refuses it with a
 #: visible reason BEFORE any port exists).
-T3_LAUNCH_ARGUMENT_ALLOWED_KEYS = frozenset({"projectId", "workspaceStrategy"})
+#: ``providerInstanceId`` names the T3 provider instance that serves the
+#: claimed route's model (the port fills it into modelSelection; it is never
+#: sent as a top-level launch argument).
+T3_LAUNCH_ARGUMENT_ALLOWED_KEYS = frozenset(
+    {"projectId", "workspaceStrategy", "providerInstanceId"}
+)
 
 #: Local default MCP endpoint (host:port form for the projection carrier).
 T3_MCP_DEFAULT_ENDPOINT = "127.0.0.1:3773"
@@ -291,6 +296,14 @@ def _read_launch_arguments(path: Path) -> dict[str, Any]:
             "string"
         )
     workspace = payload.get("workspaceStrategy")
+    instance = payload.get("providerInstanceId")
+    if "providerInstanceId" in payload and (
+        not isinstance(instance, str) or not instance.strip()
+    ):
+        raise T3NativeCompositionError(
+            f"t3 launch arguments file {path}: providerInstanceId must be a "
+            "non-empty string"
+        )
     if "workspaceStrategy" in payload and not isinstance(workspace, dict):
         raise T3NativeCompositionError(
             f"t3 launch arguments file {path}: workspaceStrategy must be a "

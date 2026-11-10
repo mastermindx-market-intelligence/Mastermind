@@ -1141,3 +1141,36 @@ def test_bridge_reattach_refuses_entry_from_a_running_event_loop(tmp_path):
         with pytest.raises(T3NativeCompositionError) as caught:
             asyncio.run(on_loop())
     assert "running event loop" in str(caught.value)
+
+
+def test_launch_arguments_provider_instance_is_admitted_and_kept_off_the_wire(tmp_path):
+    # Lead review L1: the host names the T3 provider instance serving the
+    # claimed model; the port holds it for modelSelection, never top-level.
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    path = _write_launch_arguments(
+        tmp_path, {"projectId": "p-1", "providerInstanceId": "capacity_fabric"})
+    composition = compose_t3_native_adapter(
+        runtime, inspector=FakeInspector(), token_file=token_file,
+        launch_arguments_file=path,
+        transport_factory=lambda url, token: RecordingTransport(url, token),
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_COMPOSED
+    port = composition.adapter._port
+    assert port._launch_arguments == {"projectId": "p-1"}
+    assert port._provider_instance_id == "capacity_fabric"
+
+
+def test_launch_arguments_blank_provider_instance_is_refused(tmp_path):
+    runtime, token_file = _enrolled_runtime(tmp_path)
+    path = _write_launch_arguments(
+        tmp_path, {"projectId": "p-1", "providerInstanceId": " "})
+    composition = compose_t3_native_adapter(
+        runtime, inspector=FakeInspector(), token_file=token_file,
+        launch_arguments_file=path,
+        state_store=SQLiteT3AdapterStateStore(tmp_path / "state.sqlite3"),
+        environ={},
+    )
+    assert composition.status == COMPOSITION_ENROLLMENT_BROKEN
+    assert "providerInstanceId" in composition.reason

@@ -362,14 +362,28 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
         # worker's quota-class capacity), the envelope's model_selection is
         # derived FROM THE CLAIM as the T3 modelSelection object (the port
         # parses a JSON selection verbatim) — the instance id from the
-        # binding's provider_instance_ref falling back to provider_ref.
-        binding = _binding(model_ref="glm-5.3", provider_ref="t3")
+        # binding's provider_instance_ref ONLY.  provider_ref is the
+        # Executive capacity alias (another namespace) and is never used.
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3",
+                           provider_instance_ref="capacity_fabric")
         adapter, port, _ = _t3_adapter(binding=binding)
         await adapter.start(_launch_spec(model="glm-5.3"))
         envelope = port.launch_calls[0]
         self.assertEqual(
-            envelope.model_selection, '{"instanceId":"t3","model":"glm-5.3"}'
+            envelope.model_selection,
+            '{"instanceId":"capacity_fabric","model":"glm-5.3"}',
         )
+        self.assertEqual(envelope.model_selection_basis, "CLAIMED_ROUTE")
+
+    async def test_executive_provider_alias_is_never_a_t3_instance(self) -> None:
+        # Lead review L1: provider_ref ("t3") is the Executive capacity
+        # provider alias, not a T3 provider instance; with no
+        # provider_instance_ref the envelope carries the model only.
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3")
+        adapter, port, _ = _t3_adapter(binding=binding)
+        await adapter.start(_launch_spec(model="glm-5.3"))
+        envelope = port.launch_calls[0]
+        self.assertEqual(envelope.model_selection, '{"model":"glm-5.3"}')
         self.assertEqual(envelope.model_selection_basis, "CLAIMED_ROUTE")
 
     async def test_spec_model_drift_from_claimed_route_refused_before_send(
@@ -1014,7 +1028,8 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
         # t3_thread_launch modelSelection object (the donor shape pinned in
         # tests/test_t3_native_client.py) riding the launch arguments.
         transport = FakeMcpTransport()
-        binding = _binding(model_ref="glm-5.3", provider_ref="capacity_fabric")
+        binding = _binding(model_ref="glm-5.3", provider_ref="codex",
+                           provider_instance_ref="capacity_fabric")
         adapter, port = _live_adapter(transport, binding=binding)
         await adapter.start(_launch_spec(model="glm-5.3"))
         self.assertEqual(len(transport.calls), 1)
@@ -1024,6 +1039,38 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
             arguments["modelSelection"],
             {"instanceId": "capacity_fabric", "model": "glm-5.3"},
         )
+
+    async def test_host_configured_instance_fills_a_claimed_model(self) -> None:
+        # The claim names the model; the host's launch arguments name the T3
+        # provider instance (providerInstanceId, never sent top-level).
+        transport = FakeMcpTransport()
+        port = _t3m.T3McpToolPort.from_access_token(
+            transport, _session_token(),
+            launch_arguments={"scratch": True,
+                              "providerInstanceId": "capacity_fabric"},
+        )
+        adapter = T3ExecutionAdapter(
+            port, lambda spec: _binding(model_ref="glm-5.3", provider_ref="t3"),
+            FakeInspector(), clock=_clock,
+        )
+        await adapter.start(_launch_spec(model="glm-5.3"))
+        _, arguments = transport.calls[0]
+        self.assertNotIn("providerInstanceId", arguments)
+        self.assertEqual(
+            arguments["modelSelection"],
+            {"instanceId": "capacity_fabric", "model": "glm-5.3"},
+        )
+
+    async def test_claimed_model_without_any_instance_refused_before_send(
+        self,
+    ) -> None:
+        transport = FakeMcpTransport()
+        binding = _binding(model_ref="glm-5.3", provider_ref="t3")
+        adapter, port = _live_adapter(transport, binding=binding)
+        with self.assertRaises(T3ExecutionAdapterError):
+            await adapter.start(_launch_spec(model="glm-5.3"))
+        self.assertEqual(
+            [c for c in transport.calls if c[0] == "t3_thread_launch"], [])
 
     # --- #4: lost replies are unknown outcomes, never clean refusals --------
 
