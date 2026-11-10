@@ -85,9 +85,11 @@ def _steps(index: int) -> list[dict]:
 
 
 def _jobs() -> dict:
-    names = [f"pytest shard {index}" for index in range(6)] + ["test", "PR test scope", "PR fast checks"]
+    names = [f"pytest shard {index}" for index in range(6)] + [
+        "test", "PR test scope", "Pin and identity guards", "PR fast checks",
+    ]
     return {
-        "total_count": 9,
+        "total_count": 10,
         "jobs": [
             {
                 "id": 117196531521 + index,
@@ -104,7 +106,10 @@ def _jobs() -> dict:
                     [] if name == "PR fast checks" else
                     [{"name": "Classify integrated source diff using protected base code",
                       "status": "completed", "conclusion": "success"}]
-                    if name == "PR test scope" else _steps(index)
+                    if name == "PR test scope" else
+                    [{"name": "Run pinned source-identity guard suite",
+                      "status": "completed", "conclusion": "success"}]
+                    if name == "Pin and identity guards" else _steps(index)
                 ),
                 "check_run_url": f"https://api.github.com{_PREFIX}/check-runs/{117196531521 + index}",
             }
@@ -148,7 +153,7 @@ def _read(subject: dict, touched: list[str] | None = None):
     return fetch
 
 
-def test_exact_same_sha_successful_merge_group_reuses_complete_nine_jobs():
+def test_exact_same_sha_successful_merge_group_reuses_complete_ten_jobs():
     touched: list[str] = []
     assert proof.find_reusable_run(_env(), read_json=_read(_subject(), touched)) == _RUN_ID
     assert len(touched) == 5
@@ -380,12 +385,16 @@ _REQUIRED_STEPS = [
     (index, name)
     for index in range(7)
     for name in [step["name"] for step in _steps(index)]
+] + [
+    # Auxiliary jobs whose single mandatory step is pinned inline in _jobs().
+    (7, "Classify integrated source diff using protected base code"),
+    (8, "Run pinned source-identity guard suite"),
 ]
 
 
 @pytest.mark.parametrize(("index", "name"), _REQUIRED_STEPS)
 @pytest.mark.parametrize("mode", ["missing", "skipped", "duplicate"])
-def test_all_seven_jobs_require_unique_successful_mandatory_steps(index, name, mode):
+def test_all_jobs_require_unique_successful_mandatory_steps(index, name, mode):
     subject = _subject()
     steps = subject["jobs"]["jobs"][index]["steps"]
     selected = next(step for step in steps if step["name"] == name)
@@ -398,24 +407,24 @@ def test_all_seven_jobs_require_unique_successful_mandatory_steps(index, name, m
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
-@pytest.mark.parametrize("index", range(7))
-def test_each_of_six_shards_and_required_gate_is_mandatory(index):
+@pytest.mark.parametrize("index", range(10))
+def test_each_job_is_mandatory_even_when_the_reported_count_matches(index):
     subject = _subject()
     subject["jobs"]["jobs"].pop(index)
-    subject["jobs"]["total_count"] = 6
+    subject["jobs"]["total_count"] = 9
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
 @pytest.mark.parametrize("case", ["old-three-shard-proof", "incomplete-page", "noninteger-count"])
-def test_nine_job_proof_refuses_legacy_or_incomplete_job_shape(case):
+def test_ten_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     subject = _subject()
     if case == "old-three-shard-proof":
         subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:3] + subject["jobs"]["jobs"][6:]
         subject["jobs"]["total_count"] = len(subject["jobs"]["jobs"])
     elif case == "incomplete-page":
-        subject["jobs"]["total_count"] = 10
+        subject["jobs"]["total_count"] = 11
     else:
-        subject["jobs"]["total_count"] = 9.0
+        subject["jobs"]["total_count"] = 10.0
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 

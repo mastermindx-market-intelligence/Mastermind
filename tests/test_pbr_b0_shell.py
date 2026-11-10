@@ -45,6 +45,7 @@ VIEW_MAP = {
     "brainlog": "decision",
     "runs": "operations",
     "rejected": "opportunities",
+    "portfolio-scenario-lab": "opportunities",
     "shadow-books": "opportunities",
     "xsec": "opportunities",
     "engine-bt": "operations",
@@ -562,8 +563,8 @@ def test_s9_view_mapping_on_section_wrappers():
         assert m, (panel_id, tag)
         assert m.group(1) == views, (panel_id, m.group(1))
     # every mapped wrapper is on the dashboard, and nothing inside the research/desk/self views is
-    assert dashboard.count("data-mm-views=") == 19
-    assert HTML.count("data-mm-views=") == 19
+    assert dashboard.count("data-mm-views=") == len(VIEW_MAP)
+    assert HTML.count("data-mm-views=") == len(VIEW_MAP)
 
 
 def test_s9_view_filter_rules_and_tab_labels():

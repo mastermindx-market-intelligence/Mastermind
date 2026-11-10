@@ -651,7 +651,9 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # original eight complete literal tokens; new GET registration is reviewed separately.
 # Composed READ source: original eight whole action tokens and action AST unchanged.
 # Content identity GET registration reviewed6eb650a8; the existing control_room_action AST is exact.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '6eb8e085971a44eef40f68cc6192479c8ac47981cf886fdae72cb41aeb7eb8e5', 'sites': ((926, 71, 74, 'int', '400'), (937, 71, 74, 'int', '403'), (945, 71, 74, 'int', '400'), (951, 79, 82, 'int', '400'), (960, 71, 74, 'int', '400'), (970, 71, 74, 'int', '403'), (975, 76, 79, 'int', '503'), (981, 71, 74, 'int', '403'))}
+# Paperclip mounting preserves the complete control_room_action source and AST;
+# its five configuration lines move only these same eight complete status tokens.
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'a4f813c91b3b23d93cced25b1dc8f6468493b0b9002239511b9845fcebbc0e97', 'sites': ((931, 71, 74, 'int', '400'), (942, 71, 74, 'int', '403'), (950, 71, 74, 'int', '400'), (956, 79, 82, 'int', '400'), (965, 71, 74, 'int', '400'), (975, 71, 74, 'int', '403'), (980, 76, 79, 'int', '503'), (986, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -768,7 +770,8 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # and line positions; these same three fixture HTTP statuses are not principals.
 # Primary/work-entry composition preserves these three complete fixture calls.
 # Root re-reviewed the material auth diff; only exact existing tokens qualify.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '8fda1fa0401d89f31cce67f10e325ee21183a267ea046c71b0805b9827fe0933', 'sites': ((3874, 68, 71, 'int', '503'), (3879, 69, 72, 'int', '503'), (3883, 67, 70, 'int', '503'))}
+# The accepted Paperclip module insertion moves these same tokens by one line.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ff9b7c6cf80ea253e99e712dd02dcedbd0f26daed79a59e07f330b8c6d8bf806', 'sites': ((3875, 68, 71, 'int', '503'), (3880, 69, 72, 'int', '503'), (3884, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
