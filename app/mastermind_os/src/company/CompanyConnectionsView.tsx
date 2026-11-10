@@ -40,7 +40,7 @@ export function CompanyConnectionsView({ snapshot, locale, onSelect, onOpenProje
   return <section className="company-section" aria-label={t("Team connections", "团队关系")}>
     <div className="company-section-heading">
       <h2>{t("Team connections", "团队关系")}</h2>
-      <button type="button" onClick={() => onSelect({ view: "people" })}>{t("Find a teammate", "查找团队成员")} →</button>
+      <button type="button" onClick={() => onSelect({ view: "people" })}>{t("Find a teammate", "查找团队成员")} <span aria-hidden="true">→</span></button>
     </div>
     <p>{t("See who owns the work and how projects connect.", "查看工作负责人以及项目之间的关系。")}</p>
     {graph.state === "WITHHELD" ? <p role="status">{t("These relationships need checking. Source records remain available.", "这些关系需要核对。来源记录仍可查看。")}</p>
