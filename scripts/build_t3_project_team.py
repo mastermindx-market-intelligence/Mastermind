@@ -16,12 +16,27 @@ FILES = (
     "integrations/session_bridge/t3_mission_brief.py",
     "integrations/session_bridge/t3_web_client.py",
     "integrations/session_bridge/t3_project_team.py",
+    "integrations/session_bridge/t3_project_team_inventory.py",
     "integrations/session_bridge/t3_project_team_cli.py",
 )
 
 
 def archive_bytes(source_root: Path, *, source_revision: str | None = None) -> tuple[bytes, dict]:
     contents = {path: (source_root / path).read_bytes() for path in FILES}
+    if source_revision is not None:
+        if type(source_revision) is not str or re.fullmatch(r"[0-9a-f]{40}", source_revision) is None:
+            raise ValueError("Exact source commit required")
+        head = subprocess.check_output(
+            ["git", "-C", str(source_root), "rev-parse", "HEAD"], timeout=10).decode().strip()
+        if head != source_revision:
+            raise ValueError("Source HEAD changed")
+        for path, captured in contents.items():
+            committed = subprocess.check_output(
+                ["git", "-C", str(source_root), "show", source_revision + ":" + path], timeout=10)
+            if committed != captured:
+                raise ValueError("Package source differs from the committed revision")
+        # Build exactly the captured and verified bytes, not a second filesystem
+        # read that could race with an edit after source qualification.
     manifest = {"schema": "mastermind.t3_project_team_package.v1", "source_revision": source_revision,
                 "source_status": "exact_committed_bytes" if source_revision else "qualification_only",
                 "files": {path: hashlib.sha256(raw).hexdigest() for path, raw in contents.items()},
@@ -50,16 +65,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parents[1]
     try:
-        if re.fullmatch(r"[0-9a-f]{40}", args.expected_head) is None:
-            raise ValueError("Exact source commit required")
-        head = subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], timeout=10).decode().strip()
-        if head != args.expected_head:
-            raise ValueError("Source HEAD changed")
-        for path in FILES:
-            committed = subprocess.check_output(["git", "-C", str(root), "show", head + ":" + path], timeout=10)
-            if committed != (root / path).read_bytes():
-                raise ValueError("Package source differs from the committed revision")
-        payload, manifest = archive_bytes(root, source_revision=head)
+        payload, manifest = archive_bytes(root, source_revision=args.expected_head)
         # Exclusive creation: a package build cannot replace another installed generation.
         with args.output.open("xb") as stream:
             stream.write(payload)

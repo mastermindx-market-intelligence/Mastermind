@@ -21,7 +21,8 @@ from .t3_project_team import (
     DependencyEvidence, MAX_DOCUMENT_BYTES, RoleBinding, TeamError, _native_id,
     _require, _shape, _text, parse_team, prepare_delegation, project_graph,
 )
-from .t3_web_client import ThreadReceipt
+from .t3_web_client import NativeUnavailable, ThreadReceipt
+from .t3_project_team_inventory import inventory_from_document
 
 MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
 
@@ -42,7 +43,7 @@ def _read(path: str, limit: int) -> bytes:
 
 def _load_snapshot(path: str | None) -> dict[str, Any]:
     if path is None:
-        return {"bindings": (), "observations": {}, "evidence": (), "uncertain_role_ids": ()}
+        return {"bindings": (), "observations": {}, "evidence": (), "uncertain_role_ids": (), "native_inventory": None}
 
     def unique(pairs):
         out = {}
@@ -55,7 +56,7 @@ def _load_snapshot(path: str | None) -> dict[str, Any]:
         raise TeamError("TEAM_NONFINITE_JSON")
 
     value = json.loads(_read(path, MAX_SNAPSHOT_BYTES), object_pairs_hook=unique, parse_constant=constant)
-    _shape(value, {"bindings", "observations", "dependency_evidence", "uncertain_role_ids"})
+    _shape(value, {"bindings", "observations", "dependency_evidence", "uncertain_role_ids"}, {"native_inventory"})
     _require(type(value["bindings"]) is list and type(value["dependency_evidence"]) is list
              and type(value["uncertain_role_ids"]) is list and type(value["observations"]) is dict,
              "TEAM_SNAPSHOT_SHAPE_INVALID")
@@ -71,7 +72,9 @@ def _load_snapshot(path: str | None) -> dict[str, Any]:
         _shape(raw, {"role_id", "accepted_by_role_id", "team_sha256", "source_ref"})
         evidence.append(DependencyEvidence(**raw))
     return {"bindings": tuple(bindings), "observations": value["observations"],
-            "evidence": tuple(evidence), "uncertain_role_ids": tuple(value["uncertain_role_ids"])}
+            "evidence": tuple(evidence), "uncertain_role_ids": tuple(value["uncertain_role_ids"]),
+            "native_inventory": inventory_from_document(value["native_inventory"])
+            if value.get("native_inventory") is not None else None}
 
 
 def _emit(value: Any) -> None:
@@ -82,13 +85,15 @@ def launch_request(team, *, project_id: str, request_id: str, environment_id: st
                    definition_ref: str | None = None) -> dict[str, Any]:
     """Native tool payload only. No OAuth, provider selection, launch or retries."""
     brief = team.root_handoff(project_id=project_id, request_id=request_id, definition_ref=definition_ref)
-    arguments = {"environmentId": _native_id(environment_id), "projectId": project_id,
+    _native_id(environment_id)
+    arguments = {"projectId": project_id,
                  "title": "Project COO: " + request_id[:48], "message": brief.render(),
                  "workspaceStrategy": {"type": "worktree", "baseRef": team.mission.base_sha,
                                        "branch": "web/" + request_id, "startFromOrigin": False},
                  "clientRequestId": "team-" + hashlib.sha256(
                      (request_id + ":" + brief.fingerprint).encode()).hexdigest()[:48]}
     return {"tool": "t3_thread_launch", "arguments": arguments,
+            "expected_environment_id": environment_id,
             "team_sha256": team.fingerprint, "brief_sha256": brief.fingerprint,
             "effect_state": "NOT_DISPATCHED", "execution_authorized": False,
             "recovery": "Retain original caller namespace and native receipt. Lost replies require original-effect reconciliation; never replay via a fresh CLI/OAuth client."}
@@ -176,7 +181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     except TeamError as error:
         _emit({"error": str(error), "effect_state": "NOT_DISPATCHED"})
-    except (ValueError, TypeError, KeyError, OSError, RecursionError, UnicodeError):
+    except (ValueError, TypeError, KeyError, OSError, RecursionError, UnicodeError, NativeUnavailable):
         _emit({"error": "TEAM_INPUT_OR_NATIVE_CONTRACT_INVALID", "effect_state": "NOT_DISPATCHED"})
     return 2
 

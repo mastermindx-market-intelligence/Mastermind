@@ -42,6 +42,18 @@
       "passed": true
     },
     {
+      "name": "native_child_inventory_request_schema",
+      "passed": true
+    },
+    {
+      "name": "native_child_inventory_rejects_bad_cursor",
+      "passed": true
+    },
+    {
+      "name": "native_child_inventory_rejects_oversize_page",
+      "passed": true
+    },
+    {
       "name": "native_launch_request_id_schema",
       "passed": true
     },

@@ -72,14 +72,16 @@ Likewise, the active MMOS integration program owns company admission, T3 executi
 adapters and runtime deployment; no files on that program's active paths are
 replaced here.
 
-An exported observation bundle has four fields:
+An exported observation bundle contains retained bindings, exact native reads,
+source evidence and the normalized native inventory:
 
 ```json
 {
   "bindings": [],
   "observations": {},
   "dependency_evidence": [],
-  "uncertain_role_ids": []
+  "uncertain_role_ids": [],
+  "native_inventory": null
 }
 ```
 
@@ -88,6 +90,22 @@ current native `thread show` results keyed by role ID. Dependency evidence must
 name the immediate parent reviewer, current team fingerprint and immutable source
 reference. The compiler checks consistency, not the reviewer's authentication.
 Missing, stale, mismatched or uncertain evidence remains unqualified.
+
+The ordinary `t3 thread list` command filters out subagents at the inspected
+native revision. `read_native_inventory` instead calls the existing native MCP
+`t3_thread_list` with `includeSubagents: true`, bounded pagination and no status
+filter. It requires an injected, already-authorized native reader; it adds no
+connection or authentication flow. Complete current inventory is required before
+preparing a delegation. Hidden/unbound children, pagination drift, missing native
+threads, mismatched runs, stale reads and uncertain effects remain unreconciled.
+The 120-second freshness check is not authentication or an atomic snapshot.
+
+The graph separately reports `all_defined_results_available` and
+`all_native_results_available`. The latter additionally requires the fresh
+native child inventory to match the known bindings. Neither implies acceptance.
+Native thread reads retain the native owner's delivery semantics, including its
+possible acknowledgement of a child result; this compiler adds no acknowledgement
+store or delivery owner.
 
 Resume by reading the original bindings and native runs. Do not launch another
 COO because a browser or CLI reply was lost. A stopped/restarted caller retains
@@ -123,7 +141,10 @@ python3 -m integrations.session_bridge.t3_project_team_cli launch-request \
 ```
 
 This emits `t3_thread_launch` arguments, an exact source/worktree base and a stable
-request identity. It reports `NOT_DISPATCHED`. Execute only through the existing
+request identity. `expected_environment_id` is caller-side binding metadata, not
+a native forwarding parameter: native `environmentId` selects a linked remote
+environment, so it is deliberately omitted for this environment-local adapter.
+It reports `NOT_DISPATCHED`. Execute only through the existing
 authorized native tool/adapter, retaining that caller namespace and its original
 receipt. No profile, default model, credential or thread is changed by preparing
 this request.
@@ -143,7 +164,8 @@ python3 -m integrations.session_bridge.t3_project_team_cli delegate \
 
 It requires the exact active parent run, known native observations, completed
 source-evidence dependencies, no applicable uncertain effect, and room beneath
-the requested snapshot ceiling. It emits a native `delegate_task` request and
+the requested snapshot ceiling, including conservative headroom for unbound
+uncertain effects. It emits a native `delegate_task` request and
 retains the intended immediate parent. The function does not reserve capacity or
 call a model; native atomic admission remains the final gate.
 
@@ -201,7 +223,8 @@ existing integration program; this initial binding contract is environment-local
 
 Focused tests exercise the real incumbent Python client with controlled native
 responses, negative graph cases, exact-parent binding, uncertain-effect behavior,
-workspace claims, progressive disclosure, CLI quoting and fresh-process packaging.
+workspace claims, hidden-child inventory, stale/partial reads, case/Unicode path
+aliases, progressive disclosure, CLI quoting and fresh-process packaging.
 `scripts/qualify_t3_project_team.mjs` additionally loads the **actual pinned T3**
 project-file parser and native delegation/workspace/prompt schemas. It does not
 replace them with a handwritten approximation.

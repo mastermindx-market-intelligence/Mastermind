@@ -10,10 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 from .t3_mission_brief import MissionBrief, Phase
+from .t3_project_team_inventory import NativeInventory
 from .t3_web_client import HandoffBrief, NativeUnavailable, T3CliClient, ThreadReceipt
 
 SCHEMA = "mastermind.t3_project_team.v1"
@@ -84,7 +86,14 @@ def _within(path: str, envelope: tuple[str, ...]) -> bool:
     return any(path == allowed or path.startswith(allowed + "/") for allowed in envelope)
 
 
+def _path_identity(value: str) -> str:
+    return unicodedata.normalize("NFC", value).casefold()
+
+
 def _overlap(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+    # Conservative across shared Mac/Linux checkouts; never use this folding to
+    # widen an allowed scope, only to detect potential writer collisions.
+    left, right = tuple(map(_path_identity, left)), tuple(map(_path_identity, right))
     return any(_within(path, right) for path in left) or any(_within(path, left) for path in right)
 
 
@@ -314,7 +323,9 @@ _TEAM_INSTRUCTIONS = (
     "Use each role's requested native isolation, never a custom worktree allocator. "
     "Shared-checkout writers need disjoint scopes; a director must not edit a live "
     "shared child's scope. Worktree children start from committed parent source; "
-    "uncommitted edits are not copied. Read actual workspace evidence before parallel "
+    "uncommitted edits are not copied. Integrate accepted dependency branches into "
+    "the parent and commit those inputs before a dependent worktree starts. "
+    "Read actual workspace evidence before parallel "
     "writing and reconcile branches/PRs through the existing source owner. "
     "Record actual child IDs and original effects in the existing shared notes/source plan. "
     "Dependencies require parent-reviewed source evidence, not a child saying done. "
@@ -467,13 +478,13 @@ def workspace_evidence(team: ProjectTeam, bindings: Mapping[str, RoleBinding],
             if role.parent_id is None:
                 state = "root_path_observed"
             elif paths.get(role.parent_id) is not None:
-                same = path == paths[role.parent_id]
+                same = _path_identity(path) == _path_identity(paths[role.parent_id])
                 if role.isolation == "worktree":
                     state = "distinct_path_observed" if not same else "contradicted"
                 else:
                     state = "shared_path_observed" if same else "contradicted"
             for other, other_path in paths.items():
-                if (other != key and other_path == path
+                if (other != key and other_path is not None and _path_identity(other_path) == _path_identity(path)
                         and team.workspace_group(other) != team.workspace_group(key)):
                     state = "contradicted"
         result[key] = {"state": state, "native_worktree_path": path,
@@ -482,11 +493,49 @@ def workspace_evidence(team: ProjectTeam, bindings: Mapping[str, RoleBinding],
     return result
 
 
+
+def inventory_coverage(team: ProjectTeam, bindings: Mapping[str, RoleBinding],
+                       observations: Mapping[str, Any], inventory: NativeInventory | None) -> dict[str, Any]:
+    result = {"qualified": False, "state": "not_observed", "unknown_native_thread_ids": [],
+              "missing_native_thread_ids": [], "scope": "environment_local_project_threads",
+              "atomic_snapshot": False}
+    if inventory is None or not bindings:
+        return result
+    if type(inventory) is not NativeInventory:
+        return {**result, "state": "unqualified_inventory"}
+    root = bindings[team.root.role_id]
+    if inventory.environment_id != root.environment_id or inventory.project_id != root.receipt.project_id:
+        return {**result, "state": "scope_mismatch"}
+    if not inventory.is_fresh():
+        return {**result, "state": "stale_inventory"}
+    try:
+        actual = inventory.descendants(root.receipt.thread_id)
+    except NativeUnavailable:
+        return {**result, "state": "root_missing"}
+    expected = {item.receipt.thread_id for item in bindings.values()}
+    result.update(unknown_native_thread_ids=sorted(actual - expected),
+                  missing_native_thread_ids=sorted(expected - actual), observed_at=inventory.observed_at)
+    if actual != expected:
+        return {**result, "state": "unreconciled_native_children"}
+    native = {item.thread_id: item for item in inventory.threads}
+    for key, binding in bindings.items():
+        item = native[binding.receipt.thread_id]
+        observed = _observation(binding, observations.get(key))
+        if (item.parent_thread_id != binding.parent_thread_id
+                or item.relationship_to_parent != ("subagent" if binding.parent_thread_id else None)
+                or item.latest_run_id != binding.receipt.run_id or observed is None
+                or observed.get("latestRunId") != item.latest_run_id
+                or observed.get("status") != item.status):
+            return {**result, "state": "inventory_observation_drift"}
+    return {**result, "qualified": True, "state": "observed_children_reconciled"}
+
+
 def prepare_delegation(team: ProjectTeam, *, parent_role_id: str, child_role_id: str,
                        bindings: tuple[RoleBinding, ...], observations: Mapping[str, Any],
                        evidence: tuple[DependencyEvidence, ...] = (),
                        uncertain_role_ids: tuple[str, ...] = (),
-                       definition_ref: str | None = None) -> DelegationOffer:
+                       definition_ref: str | None = None,
+                       native_inventory: NativeInventory | None = None) -> DelegationOffer:
     """Plan one offer against a snapshot; native atomic admission still decides.
 
     Multiple concurrent callers do not reserve capacity here. Only the incumbent
@@ -516,11 +565,16 @@ def prepare_delegation(team: ProjectTeam, *, parent_role_id: str, child_role_id:
              and type(current.get("pendingRequestCount")) is int
              and current["pendingRequestCount"] == 0,
              "TEAM_EXACT_ACTIVE_PARENT_REQUIRED")
+    _require(native_inventory is not None, "TEAM_NATIVE_CHILD_INVENTORY_REQUIRED")
+    coverage = inventory_coverage(team, by_binding, observations, native_inventory)
+    _require(coverage["qualified"], "TEAM_NATIVE_CHILD_INVENTORY_UNQUALIFIED")
     if any(role.isolation == "worktree" for role in team.roles):
         workspace = workspace_evidence(team, by_binding, observations)
         _require(all(value["qualified"] for value in workspace.values()),
                  "TEAM_NATIVE_WORKSPACE_UNQUALIFIED")
-    live_count = 0
+    # Unbound original effects still consume conservative planning headroom.
+    # This is not a reservation; the native owner remains the atomic authority.
+    live_count = len(unknown - by_binding.keys())
     for item in bindings:
         observed = _observation(item, observations.get(item.role_id))
         _require(observed is not None, "TEAM_NATIVE_CAPACITY_UNKNOWN")
@@ -609,7 +663,8 @@ def bind_delegation(team: ProjectTeam, offer: DelegationOffer, result: Any,
 
 def project_graph(team: ProjectTeam, *, bindings: tuple[RoleBinding, ...] = (),
                   observations: Mapping[str, Any] | None = None,
-                  uncertain_role_ids: tuple[str, ...] = ()) -> dict[str, Any]:
+                  uncertain_role_ids: tuple[str, ...] = (),
+                  native_inventory: NativeInventory | None = None) -> dict[str, Any]:
     """Portable native-evidence projection. It never marks work accepted."""
     by_binding = validate_bindings(team, bindings)
     observations = {} if observations is None else observations
@@ -652,6 +707,7 @@ def project_graph(team: ProjectTeam, *, bindings: tuple[RoleBinding, ...] = (),
         node = nodes[role.role_id]
         node["subtree_results_available"] = node["original_result_available"] and all(
             nodes[child.role_id]["subtree_results_available"] for child in team.children(role.role_id))
+    coverage = inventory_coverage(team, by_binding, observations, native_inventory)
     return {"schema": GRAPH_SCHEMA, "mission_id": team.mission.mission_id,
             "team_sha256": team.fingerprint, "source_ref": team.mission.source_ref,
             "objective": team.mission.objective, "done_when": list(team.mission.done_when),
@@ -660,7 +716,9 @@ def project_graph(team: ProjectTeam, *, bindings: tuple[RoleBinding, ...] = (),
                       for role in team.roles if role.parent_id is not None]
                      + [{"kind": "depends_on", "from": role.role_id, "to": dep}
                         for role in team.roles for dep in role.depends_on],
-            "all_native_results_available": nodes[team.root.role_id]["subtree_results_available"],
+            "all_defined_results_available": nodes[team.root.role_id]["subtree_results_available"],
+            "all_native_results_available": nodes[team.root.role_id]["subtree_results_available"] and coverage["qualified"],
+            "native_inventory_coverage": coverage,
             "acceptance": "not_evaluated", "execution_authorized": False,
             "evidence_trust": "caller_supplied_native_snapshots_not_authenticated_here"}
 
@@ -680,7 +738,8 @@ class ProjectTeamClient:
                            None, None, receipt, team.fingerprint)
 
     async def observe(self, team: ProjectTeam, bindings: tuple[RoleBinding, ...], *,
-                      uncertain_role_ids: tuple[str, ...] = ()) -> dict[str, Any]:
+                      uncertain_role_ids: tuple[str, ...] = (),
+                      native_inventory: NativeInventory | None = None) -> dict[str, Any]:
         validate_bindings(team, bindings)
         _require(all(item.environment_id == self.environment_id for item in bindings),
                  "TEAM_CLIENT_ENVIRONMENT_DIFFERS")
@@ -692,7 +751,7 @@ class ProjectTeamClient:
                 # An unavailable child is never an empty successful result.
                 observations[binding.role_id] = None
         return project_graph(team, bindings=bindings, observations=observations,
-                             uncertain_role_ids=uncertain_role_ids)
+                             uncertain_role_ids=uncertain_role_ids, native_inventory=native_inventory)
 
 
 def _shape(value: Any, required: set[str], optional: set[str] = frozenset()) -> dict:

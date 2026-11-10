@@ -3,10 +3,12 @@ import asyncio
 import copy
 import json
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 
 from integrations.session_bridge.t3_mission_brief import MissionBrief, Phase
+from integrations.session_bridge.t3_project_team_inventory import InventoryThread, NativeInventory
 from integrations.session_bridge.t3_project_team import (
     DependencyEvidence, ProjectTeam, ProjectTeamClient, RoleBinding, TeamError,
     TeamRole, bind_delegation, parse_team, prepare_delegation, project_graph,
@@ -62,6 +64,21 @@ def snapshot(item, status="running", *, run=None, pending=0):
             "messages": [{"role": "assistant", "runId": current, "text": "Original result"}]}
 
 
+
+def inventory_fixture(team, bindings, observations=None):
+    observations = observations if observations is not None else {item.role_id: snapshot(item) for item in bindings}
+    rows = []
+    for item in bindings:
+        observed = observations.get(item.role_id)
+        thread = observed.get("thread", {}) if type(observed) is dict else {}
+        rows.append(InventoryThread(item.receipt.thread_id, item.parent_thread_id,
+                    "subagent" if item.parent_thread_id else None,
+                    thread.get("status", "running"), thread.get("latestRunId", item.receipt.run_id)))
+    root = next(item for item in bindings if item.role_id == team.root.role_id)
+    return NativeInventory(root.environment_id, root.receipt.project_id, tuple(rows),
+                           datetime.now(timezone.utc).isoformat())
+
+
 def changed_role(team, role_id, **updates):
     return replace(team, roles=tuple(replace(role, **updates) if role.role_id == role_id else role
                                      for role in team.roles))
@@ -71,7 +88,7 @@ def offer_fixture():
     team = team_fixture()
     root = binding(team, "coo")
     offer = prepare_delegation(team, parent_role_id="coo", child_role_id="product", bindings=(root,),
-                               observations={"coo": snapshot(root)})
+                               observations={"coo": snapshot(root)}, native_inventory=inventory_fixture(team, (root,), {"coo": snapshot(root)}))
     return team, root, offer
 
 
@@ -153,7 +170,7 @@ def test_delegation_uses_native_tool_contract_and_original_root_without_provider
         assert child.objective in args["task"]
     assert "not an admission" in args["task"]
     assert prepare_delegation(team, parent_role_id="coo", child_role_id="product", bindings=(root,),
-                              observations={"coo": snapshot(root)}).fingerprint == offer.fingerprint
+                              observations={"coo": snapshot(root)}, native_inventory=inventory_fixture(team, (root,), {"coo": snapshot(root)})).fingerprint == offer.fingerprint
 
 
 @pytest.mark.parametrize("change,error", [
@@ -170,7 +187,7 @@ def test_delegation_uses_native_tool_contract_and_original_root_without_provider
 def test_delegation_never_replays_or_bypasses_parent_or_dependency_gate(change, error):
     team, root, _ = offer_fixture()
     kwargs = dict(parent_role_id="coo", child_role_id="product", bindings=(root,),
-                  observations={"coo": snapshot(root)})
+                  observations={"coo": snapshot(root)}, native_inventory=inventory_fixture(team, (root,)))
     kwargs.update(change(team, root))
     with pytest.raises(TeamError, match=error):
         prepare_delegation(team, **kwargs)
@@ -181,12 +198,12 @@ def test_capacity_unknown_and_requested_ceiling_hold_offer_without_creating_rese
     root = binding(team, "coo")
     with pytest.raises(TeamError, match="TEAM_REQUESTED_AGENT_CEILING_REACHED"):
         prepare_delegation(team, parent_role_id="coo", child_role_id="product", bindings=(root,),
-                           observations={"coo": snapshot(root)})
+                           observations={"coo": snapshot(root)}, native_inventory=inventory_fixture(team, (root,), {"coo": snapshot(root)}))
     team = team_fixture()
     root, prod = binding(team, "coo"), binding(team, "product")
-    with pytest.raises(TeamError, match="TEAM_NATIVE_CAPACITY_UNKNOWN"):
+    with pytest.raises(TeamError, match="TEAM_NATIVE_CHILD_INVENTORY_UNQUALIFIED"):
         prepare_delegation(team, parent_role_id="product", child_role_id="ui", bindings=(root, prod),
-                           observations={"product": snapshot(prod)})
+                           observations={"product": snapshot(prod)}, native_inventory=inventory_fixture(team, (root, prod), {"product": snapshot(prod)}))
 
 
 def test_dependency_evidence_requires_parent_review_matching_revision_and_complete_subtree():
@@ -202,7 +219,7 @@ def test_dependency_evidence_requires_parent_review_matching_revision_and_comple
         validate_dependency_evidence(team, (replace(evidence[0], team_sha256="c" * 64),))
     root = binding(team, "coo")
     offer = prepare_delegation(team, parent_role_id="coo", child_role_id="quality", bindings=(root,),
-                               observations={"coo": snapshot(root)}, evidence=evidence)
+                               observations={"coo": snapshot(root)}, evidence=evidence, native_inventory=inventory_fixture(team, (root,), {"coo": snapshot(root)}))
     assert offer.role_id == "quality"
 
 
@@ -238,19 +255,19 @@ def test_root_completion_never_hides_missing_running_or_unknown_children_or_clai
     team = team_fixture()
     bindings = tuple(binding(team, role.role_id) for role in team.roles)
     observations = {item.role_id: snapshot(item, "completed") for item in bindings}
-    graph = project_graph(team, bindings=bindings, observations=observations)
+    graph = project_graph(team, bindings=bindings, observations=observations, native_inventory=inventory_fixture(team, bindings, observations))
     assert graph["all_native_results_available"] is True
     assert graph["acceptance"] == "not_evaluated" and graph["execution_authorized"] is False
     assert all(node["acceptance"] == "not_evaluated" for node in graph["nodes"])
     for bad in (None, snapshot(bindings[2], "running"), snapshot(bindings[2], "completed", pending=1),
                 snapshot(bindings[2], "completed", run="newer-run")):
         observations["ui"] = bad
-        assert project_graph(team, bindings=bindings, observations=observations)["all_native_results_available"] is False
+        assert project_graph(team, bindings=bindings, observations=observations, native_inventory=inventory_fixture(team, bindings, observations))["all_native_results_available"] is False
     observations["ui"] = snapshot(bindings[2], "completed")
     assert not project_graph(team, bindings=bindings, observations=observations,
-                             uncertain_role_ids=("ui",))["all_native_results_available"]
+                             uncertain_role_ids=("ui",), native_inventory=inventory_fixture(team, bindings, observations))["all_native_results_available"]
     assert not project_graph(team, bindings=(bindings[0],),
-                             observations={"coo": observations["coo"]})["all_native_results_available"]
+                             observations={"coo": observations["coo"]}, native_inventory=inventory_fixture(team, (bindings[0],), {"coo": observations["coo"]}))["all_native_results_available"]
 
 
 def test_wrong_native_lineage_is_unavailable_not_a_successful_result():
@@ -258,7 +275,7 @@ def test_wrong_native_lineage_is_unavailable_not_a_successful_result():
     root = binding(team, "coo")
     observed = snapshot(root, "completed")
     observed["thread"]["parentThreadId"] = "different-parent"
-    node = project_graph(team, bindings=(root,), observations={"coo": observed})["nodes"][0]
+    node = project_graph(team, bindings=(root,), observations={"coo": observed}, native_inventory=inventory_fixture(team, (root,), {"coo": observed}))["nodes"][0]
     assert node["native_state"] == "observation_unavailable"
     assert not node["original_result_available"]
 
@@ -344,16 +361,16 @@ def test_native_worktree_offer_and_followup_require_observed_workspace_partition
     observations = {"coo": snapshot(root), "product": snapshot(director)}
     observations["coo"]["thread"]["worktreePath"] = "/native/root"
     offer = prepare_delegation(team, parent_role_id="coo", child_role_id="product", bindings=(root,),
-                               observations={"coo": observations["coo"]})
+                               observations={"coo": observations["coo"]}, native_inventory=inventory_fixture(team, (root,), {"coo": observations["coo"]}))
     assert offer.native_arguments()["isolation"] == "worktree"
     for path in (None, "/native/root"):
         observations["product"]["thread"]["worktreePath"] = path
         with pytest.raises(TeamError, match="TEAM_NATIVE_WORKSPACE_UNQUALIFIED"):
             prepare_delegation(team, parent_role_id="product", child_role_id="ui", bindings=(root, director),
-                               observations=observations)
+                               observations=observations, native_inventory=inventory_fixture(team, (root, director), observations))
     observations["product"]["thread"]["worktreePath"] = "/native/product"
     leaf = prepare_delegation(team, parent_role_id="product", child_role_id="ui", bindings=(root, director),
-                              observations=observations)
+                              observations=observations, native_inventory=inventory_fixture(team, (root, director), observations))
     assert leaf.native_arguments()["isolation"] == "shared"
 
 
@@ -361,15 +378,15 @@ def test_claimed_worktree_isolation_is_not_accepted_as_actual_workspace_evidence
     team = isolated_team()
     bindings = tuple(binding(team, role.role_id) for role in team.roles)
     observations = {item.role_id: snapshot(item, "completed") for item in bindings}
-    graph = project_graph(team, bindings=bindings, observations=observations)
+    graph = project_graph(team, bindings=bindings, observations=observations, native_inventory=inventory_fixture(team, bindings, observations))
     assert not graph["all_native_results_available"]
     for item in bindings:
         observations[item.role_id]["thread"]["worktreePath"] = "/native/" + team.workspace_group(item.role_id)
-    graph = project_graph(team, bindings=bindings, observations=observations)
+    graph = project_graph(team, bindings=bindings, observations=observations, native_inventory=inventory_fixture(team, bindings, observations))
     assert graph["all_native_results_available"]
     assert graph["nodes"][1]["workspace_evidence"]["state"] == "distinct_path_observed"
     observations["quality"]["thread"]["worktreePath"] = "/native/product"
-    graph = project_graph(team, bindings=bindings, observations=observations)
+    graph = project_graph(team, bindings=bindings, observations=observations, native_inventory=inventory_fixture(team, bindings, observations))
     assert not graph["all_native_results_available"]
     assert graph["nodes"][4]["workspace_evidence"]["state"] == "contradicted"
 

@@ -51,6 +51,9 @@ async function main() {
     ['native_delegate_rejects_unknown_role', !accepts(mcp.OrchestratorMcpDelegateTaskInput, { ...input.delegation, role: 'privileged-ceo' })],
     ['native_launch_workspace_schema', accepts(orchestration.OrchestrationV2ThreadLaunchWorkspaceStrategy, input.launch.arguments.workspaceStrategy)],
     ['native_launch_rejects_shadow_workspace', !accepts(orchestration.OrchestrationV2ThreadLaunchWorkspaceStrategy, { type: 'shadow-workspace' })],
+    ['native_child_inventory_request_schema', accepts(mcp.OrchestratorMcpThreadListInput, input.inventory)],
+    ['native_child_inventory_rejects_bad_cursor', !accepts(mcp.OrchestratorMcpThreadListInput, { ...input.inventory, cursor: -1 })],
+    ['native_child_inventory_rejects_oversize_page', !accepts(mcp.OrchestratorMcpThreadListInput, { ...input.inventory, limit: 101 })],
     ['native_launch_request_id_schema', accepts(mcp.OrchestratorMcpClientRequestId, input.launch.arguments.clientRequestId)],
     ['native_message_fits_prompt_contract', accepts(mcp.OrchestratorMcpDelegateTaskInput.fields.task, input.launch.arguments.message)],
   ];

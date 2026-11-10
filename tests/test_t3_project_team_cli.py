@@ -11,7 +11,7 @@ import pytest
 
 from integrations.session_bridge.t3_project_team_cli import main, project_actions
 from scripts.build_t3_project_team import archive_bytes
-from tests.test_t3_project_team import binding, snapshot, team_fixture
+from tests.test_t3_project_team import binding, inventory_fixture, snapshot, team_fixture
 
 
 @pytest.fixture
@@ -48,7 +48,8 @@ def test_launch_request_preserves_scope_and_native_namespace_without_dispatch(de
     payload = first["arguments"]
     assert payload["workspaceStrategy"]["type"] == "worktree"
     assert payload["projectId"] == "native-project"
-    assert payload["environmentId"] == "native-environment"
+    assert "environmentId" not in payload
+    assert first["expected_environment_id"] == "native-environment"
     assert "modelSelection" not in payload and "runtimeMode" not in payload
     assert "fresh CLI/OAuth client" in first["recovery"]
     assert main(args) == 0
@@ -60,7 +61,8 @@ def test_delegate_command_uses_existing_owner_snapshot_and_retains_native_parent
     root = binding(team, "coo")
     path = tmp_path / "existing-owner-export.json"
     path.write_text(json.dumps({"bindings": [root.document()], "observations": {"coo": snapshot(root)},
-                                "dependency_evidence": [], "uncertain_role_ids": []}))
+                                "dependency_evidence": [], "uncertain_role_ids": [],
+                                "native_inventory": inventory_fixture(team, (root,)).document()}))
     assert main(["delegate", str(definition), "--snapshot", str(path),
                  "--parent-role", "coo", "--child-role", "product"]) == 0
     request = json.loads(capsys.readouterr().out)
@@ -109,7 +111,7 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     assert manifest["source_status"] == "qualification_only" and manifest["source_revision"] is None
     assert archive_bytes(root)[0] == payload
     with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert len(archive.namelist()) == 8
+        assert len(archive.namelist()) == 9
         assert all(not name.startswith("/") and ".." not in name for name in archive.namelist())
     app = tmp_path / "team.pyz"
     app.write_bytes(payload)
@@ -117,3 +119,36 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     result = subprocess.run([sys.executable, "-I", str(app), "check", str(definition)],
                             cwd=tmp_path, capture_output=True, text=True, timeout=20, check=True)
     assert json.loads(result.stdout)["team_sha256"] == team_fixture().fingerprint
+
+
+def test_exact_package_revision_is_verified_inside_public_builder_and_uses_captured_bytes(tmp_path, monkeypatch):
+    from scripts.build_t3_project_team import FILES
+    revision = "a" * 40
+    captured = {}
+    for path in FILES:
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        captured[path] = ("# committed fixture " + path + "\n").encode()
+        target.write_bytes(captured[path])
+    calls = []
+
+    def git_read(argv, **kwargs):
+        calls.append(argv)
+        if argv[-2:] == ["rev-parse", "HEAD"]:
+            # Simulate an edit after capture: the archive must retain only the
+            # exact captured bytes which subsequently match committed source.
+            (tmp_path / FILES[0]).write_bytes(b"# later unrelated write\n")
+            return (revision + "\n").encode()
+        assert argv[-2] == "show" and argv[-1].startswith(revision + ":")
+        return captured[argv[-1].split(":", 1)[1]]
+
+    monkeypatch.setattr(subprocess, "check_output", git_read)
+    payload, manifest = archive_bytes(tmp_path, source_revision=revision)
+    assert len(calls) == len(FILES) + 1
+    assert manifest["source_status"] == "exact_committed_bytes"
+    with zipfile.ZipFile(BytesIO(payload)) as archive:
+        assert archive.read(FILES[0]) == captured[FILES[0]]
+    with pytest.raises(ValueError, match="differs from the committed revision"):
+        archive_bytes(tmp_path, source_revision=revision)
+    with pytest.raises(ValueError, match="Exact source commit required"):
+        archive_bytes(tmp_path, source_revision="main")

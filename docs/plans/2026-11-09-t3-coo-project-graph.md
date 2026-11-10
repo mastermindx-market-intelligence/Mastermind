@@ -50,7 +50,8 @@ connection permits it. Source tests alone do not prove live model completion.
 | G5 | G3, G4 | Native graph projection for future OS consumption; missing/stale/failed/unknown evidence stays explicit and never becomes acceptance. |
 | G6 | G2, G3, G4, G5 | Focused tests, existing-client regressions, source review/release, installed/native qualification and remaining acceptance recorded. |
 
-Allowed new source paths: `integrations/session_bridge/t3_project_team.py`,
+Owned source paths (including the bounded incumbent-client JSON repair): `integrations/session_bridge/t3_web_client.py`, `tests/test_t3_web_client.py`,
+`integrations/session_bridge/t3_project_team.py`,
 `integrations/session_bridge/t3_project_team_cli.py`,
 `integrations/session_bridge/t3_project_team_inventory.py`,
 `tests/test_t3_project_team.py`, `tests/test_t3_project_team_cli.py`,
@@ -58,7 +59,8 @@ Allowed new source paths: `integrations/session_bridge/t3_project_team.py`,
 `docs/plans/2026-11-09-t3-coo-project-graph.md`,
 `docs/T3_PROJECT_TEAMS.md`, `examples/t3_project_teams/`,
 `scripts/build_t3_project_team.py`, `scripts/qualify_t3_project_team.mjs`,
-`docs/evidence/2026-11-09-t3-project-team-native-contracts.json`.
+`docs/evidence/2026-11-09-t3-project-team-native-contracts.json`,
+`docs/evidence/2026-11-09-t3-project-team-local-read.json`.
 No edits to the adjacent live writer's files.
 
 ## Execution and proof boundaries
@@ -81,25 +83,55 @@ source-backed dependency evidence; existing-client launch composition; read-only
 CLI; importable native project actions; deterministic standalone packaging and a
 nine-role MMOS planning template. The example is explicitly not dispatch authority.
 
-Qualification so far: 110 focused tests and 85 subtests pass, including incumbent
-client regressions and a fresh-process package consumer. Ten actual pinned native
-parser/schema positive and negative checks pass; their report is retained under
-`docs/evidence/2026-11-09-t3-project-team-native-contracts.json`. This is contract
-consumption, not live model execution or active-project installation.
+Qualification: 138 focused tests and 85 subtests pass, including incumbent
+client regressions, malformed/paged/hidden-child inventory and fresh-process
+packaging. Thirteen actual pinned native parser/schema positive and negative
+checks pass. Their report is retained under
+`docs/evidence/2026-11-09-t3-project-team-native-contracts.json`. This proves
+contract consumption, not live model execution or active-project installation.
 
-G5 review found a real remaining gap: native `t3 thread list` hardcodes
-`includeSubagents: false`. A known-binding-only graph cannot certify that no other
-native children exist. Next implement bounded, explicit native MCP child inventory
-and make incomplete/unavailable inventory prevent full-native-result claims and
-new delegation offers. Also check case/Unicode path aliases on shared Mac checkouts.
-Do not release the current candidate before those negative cases are qualified.
+G5 is implemented: explicit native MCP child inventory with subagents included,
+bounded complete pagination, recent timestamp, namespace/ancestry/run agreement,
+unknown child detection and separate defined-result/native-result rollups.
+Incomplete inventory blocks new prepared delegations. Shared Mac path collisions
+are checked with conservative case/Unicode equivalence without widening scope.
+Source qualification issues found during review are repaired and covered by
+regressions. The package now verifies the exact captured source bytes itself,
+preventing a post-verification reread from including a different generation.
+
+G6 next: final source/CI qualification, protected release, exact committed package
+consumer, then the real native local canary if the current authorized route can
+bind the actual project, runtime and budget. No active-model or UI claim yet.
 
 Current connection discovery: no T3-specific connected plugin was returned;
 Executive V3's target kinds are fabric_attempt/codex/claude and the actual current
 `session_targets` read returned an empty list. Browser exposes read-only tabs.
-Generic Studio host commands are not a nested-agent handoff interface. These facts
-limit live canary execution from this caller; they do not block source, packaging,
-native contract qualification or an existing-owner handoff through lawful transport.
+Generic Studio host commands are not a nested-agent handoff interface. A later
+independent discovery found the already-connected Remote Desktop Commander native
+host path: device `3f5ce987-e3eb-40a3-af9f-4b0ae54919cc`, readback `m2studio`.
+Its existing installed T3 CLI is readable. A read-only native project lookup did
+not match the canonical Mastermind checkout and reported migration-history/build
+drift for migration 80. No launch was attempted and no permission denial occurred.
+A source-linked original native proof identified project
+`9de77193-e68a-49fe-adee-f85406f04772`; a current native read then succeeded (26
+root threads). The initial JSON parse failed because a migration warning preceded
+the payload. The actual supported `--log-level error` suppresses this warning;
+the incumbent client now requests that flag without stripping ambiguous output.
+Recent relevant roots report `capacity_fabric` / GLM; that is not new budget or
+model-readiness proof. No app restart/update or credential extraction was used.
+
+The existing completed native operation `web-t3-cli-adapter-20261109-a1` already
+produced a bounded, native-auth-preserving CLI catalog/read adapter at source
+0770446. Its original root is `mcp:5b3b360e-1842-4b27-b510-e38b9546941b`, latest run
+ordinal 4 completed with no pending work; its uncommitted five-file artifact is
+not this session's writer target. Reuse its lawful read capability after inspecting
+its exact artifact rather than creating a second native bridge. Qualification
+or source evidence does not silently install that adapter or admit a new model run.
+
+The actual incumbent client also consumed 26 current native root threads from
+the installed local CLI, using its supported error-only logging flag. The
+source-byte-linked local read receipt is retained in docs/evidence. This is a real
+read consumer, not a full child inventory or model execution.
 
 No native threads, provider calls, application restarts, profile edits or new
 credentials have been created. No uncertain modifying effects. Continue G5 and
