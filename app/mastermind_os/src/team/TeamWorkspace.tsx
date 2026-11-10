@@ -1,6 +1,10 @@
 import { useRef, useState, type ReactNode } from "react";
+import type { MissionHost } from "../host";
 import type { TeamBot, TeamRosterRead } from "./team-roster";
 import { DelegatedTaskCard } from "./DelegatedTaskCard";
+import { NewBotPanel } from "./NewBotPanel";
+import { NewGroupPanel } from "./NewGroupPanel";
+import { BotSettingsPanel } from "./BotSettingsPanel";
 import type { DelegatedTask } from "./delegated-task";
 import "./team.css";
 
@@ -125,6 +129,10 @@ const STRINGS = {
     rosterInvalidNote:
       "The roster source returned data this surface could not verify. Nothing is shown from it.",
     rosterReadLabel: "Native roster read",
+    toolbarLabel: "Team actions",
+    newGroup: "New group",
+    newBot: "＋ New bot",
+    botSettings: "Bot settings",
     conversationHeading: "Conversation",
     conversationSectionNote:
       "The existing persistent conversation surface. This view never creates a second transport.",
@@ -190,6 +198,10 @@ const STRINGS = {
     rosterInvalidNote:
       "名册来源返回的数据无法通过验证，因此不显示其中任何内容。",
     rosterReadLabel: "原生名册读取",
+    toolbarLabel: "团队操作",
+    newGroup: "新群组",
+    newBot: "＋ 新机器人",
+    botSettings: "机器人设置",
     conversationHeading: "对话",
     conversationSectionNote:
       "既有的持久对话界面。此视图绝不创建第二个传输通道。",
@@ -249,6 +261,7 @@ export function TeamWorkspace({
   conversationPanel,
   gateway,
   delegatedTask,
+  host,
   onOpenConversations,
   onOpenCode,
   onCheckConnection,
@@ -260,6 +273,10 @@ export function TeamWorkspace({
   conversationPanel?: ReactNode;
   gateway?: { state: string | null; code: string | null };
   delegatedTask?: DelegatedTask | null;
+  /** Host carrying the model-configuration read for bot settings (HC09).
+   *  Falls back to the existing window host facade, the CodeWorkspace way;
+   *  absent → BotSettingsPanel renders its honest unavailable state. */
+  host?: MissionHost;
   onOpenConversations?: () => void;
   onOpenCode?: () => void;
   onCheckConnection?: () => void;
@@ -268,7 +285,15 @@ export function TeamWorkspace({
 }) {
   const t = STRINGS[locale];
   const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+  const [surface, setSurface] = useState<
+    "new-bot" | "new-group" | "bot-settings" | null
+  >(null);
   const rosterButtons = useRef<(HTMLButtonElement | null)[]>([]);
+  const resolvedHost =
+    host ??
+    (typeof window !== "undefined"
+      ? window.MastermindMissionHost
+      : undefined);
 
   if (roster.kind === "UNAVAILABLE") {
     return (
@@ -402,6 +427,15 @@ export function TeamWorkspace({
               {previewAuthority ? (
                 <span className="mm-chip mm-chip-preview">{t.previewChip}</span>
               ) : null}
+              <div className="mm-team-bot-head-actions">
+                <button
+                  type="button"
+                  className="mm-toolbar-button"
+                  onClick={() => setSurface("bot-settings")}
+                >
+                  {t.botSettings}
+                </button>
+              </div>
             </header>
             <dl className="mm-team-bot-facts">
               <div>
@@ -508,6 +542,14 @@ export function TeamWorkspace({
             )}
           </div>
         </div>
+        {surface === "bot-settings" && selected ? (
+          <BotSettingsPanel
+            locale={locale}
+            bot={selected}
+            host={resolvedHost}
+            onClose={() => setSurface(null)}
+          />
+        ) : null}
       </section>
     );
   }
@@ -518,6 +560,22 @@ export function TeamWorkspace({
         {t.heading}
       </h1>
       <p className="muted">{t.headingSummary}</p>
+      <div className="mm-team-toolbar" role="toolbar" aria-label={t.toolbarLabel}>
+        <button
+          type="button"
+          className="mm-toolbar-button"
+          onClick={() => setSurface("new-group")}
+        >
+          {t.newGroup}
+        </button>
+        <button
+          type="button"
+          className="mm-primary mm-toolbar-primary"
+          onClick={() => setSurface("new-bot")}
+        >
+          {t.newBot}
+        </button>
+      </div>
       <table className="mm-roster" aria-label={t.rosterLabel}>
         <thead>
           <tr>
@@ -588,6 +646,22 @@ export function TeamWorkspace({
           ))}
         </tbody>
       </table>
+      {surface === "new-bot" ? (
+        <NewBotPanel
+          locale={locale}
+          roster={roster}
+          gatewayState={gatewayState}
+          onClose={() => setSurface(null)}
+        />
+      ) : null}
+      {surface === "new-group" ? (
+        <NewGroupPanel
+          locale={locale}
+          roster={roster}
+          gatewayState={gatewayState}
+          onClose={() => setSurface(null)}
+        />
+      ) : null}
     </section>
   );
 }
