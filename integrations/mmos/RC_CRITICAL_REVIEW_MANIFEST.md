@@ -156,3 +156,20 @@ byte-slicing is ASCII-safe because the grammar check precedes the `sk-` scan.
 auth 3 (2 in-window, 1 carried) · permissions 4 (3 in-window, 1 carried) · exactly-once 6
 (5 in-window, 1 carried shape) · release automation 2 · identity pins 2 — **17 CRITICAL
 rows total**; window `e6479f848..8d4e24d12`, 60 commits.
+
+## 6. Post-window deltas (lane L6 landings after `8d4e24d12`, added by the lane lead)
+
+- **IDENTITY PINS — NewGroupPanel registry pin** (`169bc08ae`, landed on trunk via lane
+  merge at `58540296a`): `tests/executive_fabric_release_identity_review.py` gains one
+  `REVIEWED_FILES` entry masking exactly the reviewed 600-char textarea bound in
+  `app/mastermind_os/src/team/NewGroupPanel.tsx` (whole-file sha256
+  `b84219e6…`, single span `(187, 25, 28)`). Reviewer question: is a D8-masked UI input
+  bound with whole-file hash + single-span qualification an acceptable pin, and does any
+  caller path let a masked span hide a real identity literal? Lead-verified: hash matches
+  the file byte-for-byte; any byte drift drops the pin (`drift drops pin: True`);
+  unregistered paths and second literals still flag; D8 suite 321/321 green. The grok-4.7
+  cross-check return was REJECTED as evidence (missing transcript, fabricated file
+  excerpt) — this row stands on the lead's own reproductions.
+- Non-CRITICAL post-window landings (master merge `fe4265176` via `376c66d38`, NM-06 TS
+  mirror `a392b8a7f`, install ledger `f9ae7aa6f`, this manifest): no auth/permission/
+  exactly-once/release-automation/identity-pin surface beyond the row above.
