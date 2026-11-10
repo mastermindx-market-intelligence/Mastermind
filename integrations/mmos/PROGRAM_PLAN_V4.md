@@ -156,3 +156,32 @@ Consequences:
   (`integrations/t3/upstream_patches/`), proven on the dev server. Putting it into the T3
   bundle the Chairman runs is a separate act and is not done by a lane.
 - It is not a reason to fork the web client and not a reason to change provider.
+
+## 9. Amendment, 2026-11-10 14:50 UTC: teammate binding and wake path decided
+
+Two investigators (`kimi-k3.1-pro`, `deepseek-v4.1-flash`) read the installed Paperclip
+build, the T3 source at the pin and the TeamLink diff independently. Memos:
+`~/.mastermind/mmos_evidence/t2-binding-20261110/{kimi,deepseek}/MEMO.md`. They agree on
+the binding and the persona. They differed on the wake; the principal settled it on the
+code both cited.
+
+- **Binding.** No new registry. The Paperclip agent row is the teammate. The T3 side is one
+  key in the existing `agents.metadata`: provider instance, primary thread, a revision.
+  The charter is the agent's existing instructions bundle. Paperclip's agent update has no
+  expected-revision check, so binding writes are read, compare, write, read back. That is
+  not atomic and is recorded as such.
+- **Persona.** One T3 provider instance per teammate, each with its own home directory and
+  a charter file passed as a launch argument, which T3 re-reads at every turn including
+  resumed ones. The Capacity Fabric instance uses the Claude driver, so this applies to
+  it. Text is guidance; tool limits are launch arguments, home settings and the tool set.
+- **Wake.** TeamLink does not wake a T3 thread on behalf of a Paperclip agent; it wakes an
+  agent through that agent's own adapter. So the agent needs an adapter that reaches T3.
+  The smallest is Paperclip's `process` adapter running a small wake carrier: it holds the
+  per-run Paperclip token, checks out the issue, sends one message to the teammate's
+  primary thread, waits, posts the answer on the issue and exits. The token never enters
+  the thread.
+- **TeamLink (PR #2419)** is open, unmerged and held by its owner. Lane T2 does not depend
+  on it. It stays the intended channel for issue-to-task-thread delegation once merged.
+  Decision 6 is read accordingly.
+- Open, owned by T2: which stock T3 surface the carrier uses to send to a thread and learn
+  the turn finished.
