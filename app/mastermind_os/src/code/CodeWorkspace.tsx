@@ -4,11 +4,20 @@ import {
   type T3ProjectionRead,
   type T3ThreadProjection,
 } from "./t3-thread-projection";
+import type { ActivitySelection } from "../planning/retained-activity";
+import type {
+  ExecutionReturnDeliveryReceipt,
+  ExecutionReturnRecord,
+} from "../hermes-native/execution-return-contract";
+import { CodeWorkbench } from "./CodeWorkbench";
 import "./code.css";
 
-/** TD04 — Code surface. Deep-links to the exact native T3 thread using the
- *  documented scheme; never embeds an editor or terminal, and never launches,
- *  steers or interrupts a thread from here. */
+/** TD04/HC07 — Code surface. Without an attempt id this stays the projected
+ *  thread list with documented deep links. With a valid attempt id it becomes
+ *  the per-attempt workbench (CodeWorkbench): attempt facts from the Fleet
+ *  read, work panels from a typed execution_return/v1 record, a retained
+ *  activity trail and a return footer. Either way it never embeds an editor
+ *  or terminal, and never launches, steers or interrupts a thread. */
 const STRINGS = {
   en: {
     heading: "T3 Code",
@@ -85,11 +94,26 @@ export function CodeWorkspace({
   locale = "en",
   projection,
   host,
+  attemptId = null,
+  executionReturn = null,
+  deliveryReceipt = null,
+  activitySelection = null,
 }: {
   locale?: "en" | "zh-CN";
   /** Pre-read projection (tests); omitted → read from the host facade. */
   projection?: T3ProjectionRead;
   host?: unknown;
+  /** Attempt id from the run/fleet context; when set (and grammar-valid) the
+   *  per-attempt workbench reads the attempt facts once through
+   *  host.readT3AttemptFleet. Default null = the projected thread list. */
+  attemptId?: string | null;
+  /** Parsed mastermind.execution_return/v1 record for the attempt; null =
+   *  no return projected yet (honest states downstream). */
+  executionReturn?: ExecutionReturnRecord | null;
+  /** Optional parsed delivery receipt for the same return. */
+  deliveryReceipt?: ExecutionReturnDeliveryReceipt | null;
+  /** Selection ids for the retained-activity read; absent → honest note. */
+  activitySelection?: ActivitySelection | null;
 }) {
   const t = STRINGS[locale];
   const read =
@@ -101,6 +125,20 @@ export function CodeWorkspace({
               .MastermindMissionHost
           : undefined),
     );
+
+  if (attemptId != null) {
+    return (
+      <CodeWorkbench
+        locale={locale}
+        host={host}
+        attemptId={attemptId}
+        projection={read}
+        executionReturn={executionReturn}
+        deliveryReceipt={deliveryReceipt}
+        activitySelection={activitySelection}
+      />
+    );
+  }
 
   if (read.kind !== "AVAILABLE") {
     return (
