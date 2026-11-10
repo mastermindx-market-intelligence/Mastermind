@@ -38,6 +38,7 @@ from control_plane.operator_harness_wire import (
 
 
 MATERIALIZATION_RECEIPT_SCHEMA = "mastermind.operator_materialization_receipt/v1"
+MATERIALIZATION_RECEIPT_SCHEMA_V2 = "mastermind.operator_materialization_receipt/v2"
 MATERIALIZATION_STATUS_SCHEMA = "mastermind.operator_materialization_status/v1"
 MAX_MATERIALIZATION_RECEIPT_BYTES = 262_144
 
@@ -63,6 +64,9 @@ _RECEIPT_FIELDS = frozenset(
         "receipt_digest",
     }
 )
+_PLANNER_RECEIPT_FIELDS = _RECEIPT_FIELDS | {
+    "planner_producer", "observed_planner_contract",
+}
 _PROCESS_FIELDS = frozenset(
     {"pid", "pgid", "process_start_identity", "boot_id"}
 )
@@ -148,9 +152,17 @@ class OperatorMaterializationReceipt:
     provider_home_identity: dict[str, Any]
     created_at: str
     receipt_digest: str
+    planner_producer: dict[str, Any] | None = None
+    observed_planner_contract: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return dataclasses.asdict(self)
+        value = dataclasses.asdict(self)
+        if self.schema == MATERIALIZATION_RECEIPT_SCHEMA:
+            # Historical receipt bytes/digests are immutable. Omission is not
+            # an implicit planner selection, and must not become JSON nulls.
+            value.pop("planner_producer")
+            value.pop("observed_planner_contract")
+        return value
 
 
 @dataclasses.dataclass(frozen=True)
@@ -240,6 +252,50 @@ def requested_profile_digest(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json_bytes(dict(value))).hexdigest()
 
 
+def planner_producer_selection(
+    value: object, *, job_id: str | None = None, attempt_id: str | None = None,
+) -> dict[str, Any]:
+    """Decode transported Runtime selection; shape/digest grants no authority.
+
+    The claim-aware Control owner supplies the retained creation binding. The
+    ordinary job_id/attempt_id wrapper also joins the existing authenticated
+    remote envelope's recursive retarget checks. This function does not read,
+    create or admit a Job, grant, Worker or provider session.
+    """
+    from control_plane.claude_operator_helper_protocol import native_plan_contract_for_version
+
+    selected = _closed_mapping(value, "planner producer selection", frozenset({
+        "job_id", "attempt_id", "planner_producer_binding",
+        "planner_producer_binding_digest",
+    }))
+    selected_job = _identifier(selected["job_id"], "planner Job")
+    selected_attempt = _identifier(selected["attempt_id"], "planner Attempt")
+    binding = _closed_mapping(selected["planner_producer_binding"], "planner producer binding", frozenset({
+        "schema_version", "root_job_id", "coordinator_job_id", "planner_job_id",
+        "plan_schema_version", "native_result_contract", "execution_binding_digest",
+    }))
+    if binding["schema_version"] != "mastermind.planner_producer_binding/v1":
+        raise OperatorMaterializationReceiptError("planner producer binding schema is unsupported")
+    for key in ("root_job_id", "coordinator_job_id", "planner_job_id"):
+        _identifier(binding[key], key)
+    _digest(binding["execution_binding_digest"], "planner execution binding")
+    try:
+        contract = native_plan_contract_for_version(binding["plan_schema_version"])
+    except (TypeError, ValueError) as exc:
+        raise OperatorMaterializationReceiptError("planner native contract is unsupported") from exc
+    if (binding["native_result_contract"] != contract
+            or binding["planner_job_id"] != selected_job
+            or (job_id is not None and selected_job != job_id)
+            or (attempt_id is not None and selected_attempt != attempt_id)
+            or (binding["coordinator_job_id"] != binding["root_job_id"]
+                and binding["plan_schema_version"] != "mastermind.execution_plan/v5")
+            or _digest(selected["planner_producer_binding_digest"], "planner producer binding")
+            != hashlib.sha256(canonical_json_bytes(binding)).hexdigest()):
+        raise OperatorMaterializationReceiptError("planner producer binding identity or digest differs")
+    # Canonical reconstruction detaches all nested mutable caller values.
+    return json.loads(canonical_json_bytes(selected))
+
+
 def materialization_receipt_path(
     run_root: str | Path, operation_command_id: str
 ) -> Path:
@@ -325,12 +381,24 @@ def build_operator_materialization_receipt(
     process_credentials: Mapping[str, Any],
     provider_home_identity: Mapping[str, Any],
     created_at: str,
-    schema: str = MATERIALIZATION_RECEIPT_SCHEMA,
+    schema: str | None = None,
+    planner_producer: Mapping[str, Any] | None = None,
+    observed_planner_contract: Mapping[str, Any] | None = None,
 ) -> OperatorMaterializationReceipt:
-    if schema != MATERIALIZATION_RECEIPT_SCHEMA:
+    versioned = planner_producer is not None or observed_planner_contract is not None
+    expected_schema = (MATERIALIZATION_RECEIPT_SCHEMA_V2 if versioned
+                       else MATERIALIZATION_RECEIPT_SCHEMA)
+    if schema is None:
+        schema = expected_schema
+    if schema != expected_schema:
         raise OperatorMaterializationReceiptError(
             "materialization receipt schema is unsupported"
         )
+    custody = None
+    if versioned:
+        custody = planner_producer_selection(planner_producer, attempt_id=attempt_id)
+        if observed_planner_contract != custody["planner_producer_binding"]["native_result_contract"]:
+            raise OperatorMaterializationReceiptError("initialized planner contract differs from selected producer")
     validate_materialization_request(
         operation_command_id=operation_command_id,
         operation_kind=operation_kind,
@@ -375,6 +443,9 @@ def build_operator_materialization_receipt(
         "provider_home_identity": home,
         "created_at": timestamp,
     }
+    if custody is not None:
+        unsigned.update(planner_producer=custody,
+                        observed_planner_contract=dict(observed_planner_contract))
     digest = hashlib.sha256(canonical_json_bytes(unsigned)).hexdigest()
     receipt = OperatorMaterializationReceipt(**unsigned, receipt_digest=digest)
     if len(canonical_json_bytes(receipt.to_dict())) > MAX_MATERIALIZATION_RECEIPT_BYTES:
@@ -418,7 +489,10 @@ def load_operator_materialization_receipt(
         raise OperatorMaterializationReceiptError(
             "materialization receipt is not strict UTF-8 JSON"
         ) from exc
-    if not isinstance(value, dict) or set(value) != _RECEIPT_FIELDS:
+    expected_fields = (_PLANNER_RECEIPT_FIELDS if isinstance(value, dict)
+                       and value.get("schema") == MATERIALIZATION_RECEIPT_SCHEMA_V2
+                       else _RECEIPT_FIELDS)
+    if not isinstance(value, dict) or set(value) != expected_fields:
         raise OperatorMaterializationReceiptError(
             "materialization receipt fields do not match the closed schema"
         )

@@ -397,6 +397,7 @@ class _Generation:
     process: ProcessIdentityObservation
     session_id: str
     observed: ObservedHarnessAttestation
+    initialized_plan_contract: dict[str, str] | None = None
     turns: dict[str, TurnRef] = field(default_factory=dict)
     candidates: dict[str, Mapping[str, Any]] = field(default_factory=dict)
     writer_state: ProviderWriterState = ProviderWriterState.HELD
@@ -551,7 +552,8 @@ class ClaudeOperatorAdapter:
                 policy.sandbox_state, policy.approval_state, policy.network_state, policy.effective_config_digest,
                 AuthRealmFact(self.worker_id, "claude", "native-subscription", account.get("subscriptionType"),
                               identity_confidence=AuthIdentityConfidence.SLOT_ONLY), self._workspace_identity(), ObservedTriState.FALSE)
-            state = _Generation(epoch, generation, requested, client, process, session_id, observed)
+            state = _Generation(epoch, generation, requested, client, process, session_id, observed,
+                                initialized_plan_contract=dict(handshake["result_contract"]))
             self._generations[generation.process_generation_id] = state
             return SessionStartObservation(session_id, process, initialization_notes=("zero-model native registration",))
         except Exception:
@@ -560,6 +562,19 @@ class ClaudeOperatorAdapter:
 
     def observed_attestation(self, generation: ProcessGenerationRef) -> ObservedHarnessAttestation:
         return self._state(generation).observed
+
+    def observed_planner_contract(self, generation: ProcessGenerationRef) -> dict[str, str]:
+        """The actual verified initialization observation of this generation.
+
+        Never synthesize this from the constructor's requested plan_contract.
+        The policy observer checked the native handshake before _Generation
+        became available; a failed initialization exposes no observation.
+        """
+        observed = self._state(generation).initialized_plan_contract
+        if observed is None:
+            raise ClaudeOperatorError(AdapterFailureClass.VALIDATION_FAILURE,
+                                      "native planner initialization is unavailable")
+        return dict(observed)
 
     def observe_process_credentials(self, generation: ProcessGenerationRef) -> OSProcessCredentialObservation:
         """Observe credentials between two checks of the exact owned process."""

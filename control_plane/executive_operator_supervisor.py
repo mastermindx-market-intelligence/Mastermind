@@ -89,7 +89,7 @@ from control_plane.operator_harness_wire import (
     requested_execution_profile,
 )
 from control_plane.remote_codex_operator_adapter import RemoteCodexOperatorAdapter
-from control_plane.executive_worker_broker import RemoteBrokerError
+from control_plane.executive_worker_broker import RemoteBrokerError, WorkerBrokerError
 from control_plane.worker_browser_b1 import BrowserReviewReceipt
 
 
@@ -187,11 +187,19 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(str(exc)) from exc
         return PLAN_SCHEMA_V1 if binding is None else binding["plan_schema_version"]
 
-    def _require_adapter_contract(self, job: Job, adapter: OperatorHarnessAdapter) -> None:
+    def _require_adapter_contract(self, job: Job, adapter: OperatorHarnessAdapter,
+                                  *, initialized_generation=None) -> None:
         try:
             binding = self.runtime.jobs.get_planner_producer_binding(job.job_id)
         except StateConflict as exc:
             raise ExecutiveOperatorSupervisorError(str(exc)) from exc
+        from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+        if isinstance(adapter, RemoteOperatorHarnessAdapter):
+            try:
+                adapter.require_planner_producer(binding, generation=initialized_generation)
+            except (TypeError, ValueError, WorkerBrokerError) as exc:
+                raise ExecutiveOperatorSupervisorError("remote planner producer custody differs") from exc
+            return
         declared = getattr(adapter, "plan_contract", None)
         # A historical V1 transport remains historical. Schema support alone
         # must not promote that transport into a versioned native producer.
@@ -1288,7 +1296,7 @@ class ExecutiveOperatorSupervisor:
             )
             # Initialization has its own native-contract and served-model
             # attestation. Validate before continuation preparation or useful work.
-            self._require_adapter_contract(job, adapter)
+            self._require_adapter_contract(job, adapter, initialized_generation=session.generation)
             if continuation is not None:
                 prompt_by_turn["pending"] = continuation.prepare(session)
 
@@ -1829,6 +1837,11 @@ class ExecutiveOperatorSupervisor:
                 observation.process_liveness is ProcessLiveness.ALIVE
                 and observation.provider_writer_state is ProviderWriterState.HELD
             ):
+                from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+                if isinstance(adapter, RemoteOperatorHarnessAdapter):
+                    adapter.qualify_existing_planner_generation(
+                        requested=session.launch.requested, epoch=session.epoch,
+                        generation=session.generation)
                 if existing_turn is None:
                     if self.foreground_only:
                         return ReconcileReceipt(attempt_id=attempt_id, job_id=lease.attempt.job_id,

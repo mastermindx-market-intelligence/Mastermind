@@ -114,6 +114,9 @@ from control_plane.operator_materialization_receipt import (
     OperatorMaterializationReceipt,
     OperatorMaterializationReceiptError,
     build_operator_materialization_receipt,
+    canonical_json_bytes as materialization_bytes,
+    load_operator_materialization_receipt,
+    planner_producer_selection,
     persist_operator_materialization_receipt,
     read_operator_materialization_receipt,
     requested_profile_digest,
@@ -980,6 +983,7 @@ class _BrokerOperatorRun:
     generation: ProcessGenerationRef
     provider_session_id: str
     materialization_receipt: OperatorMaterializationReceipt | None = None
+    planner_producer: dict[str, Any] | None = None
     resource: OperatorAttemptResource | None = None
     prompts: dict[str, str] = dataclasses.field(default_factory=dict)
     # Transient begin-turn marks for the retained plain-input digest
@@ -1957,7 +1961,7 @@ class ExecutiveWorkerBroker:
                 )
 
     def _operator_factory(
-        self, requested: RequestedExecutionProfile
+        self, requested: RequestedExecutionProfile, planner_producer=None,
     ) -> tuple[OperatorAdapter, dict[str, str], Path]:
         self._require_current_autonomy()
         if not self.operator_harness_armed or self.operator_adapter_factory is None:
@@ -1982,12 +1986,38 @@ class ExecutiveWorkerBroker:
                 ) from exc
 
         try:
-            adapter = self.operator_adapter_factory(workspace, load_turn, requested)
+            options = {}
+            if planner_producer is not None:
+                selected = planner_producer_selection(planner_producer)
+                if (requested.provider != "claude"
+                        or requested.harness_kind != "claude-agent-sdk"):
+                    raise BrokerProtocolError("native planner producer is not qualified for this harness")
+                options["planner_producer"] = selected
+            adapter = self.operator_adapter_factory(workspace, load_turn, requested, **options)
+            if planner_producer is not None and (
+                getattr(adapter, "plan_contract", None)
+                != selected["planner_producer_binding"]["native_result_contract"]["name"]
+                or not callable(getattr(adapter, "observed_planner_contract", None))
+            ):
+                raise BrokerProtocolError("native planner producer observation is not composed")
         except Exception as exc:
             raise BrokerStateError(
                 f"operator adapter construction failed: {type(exc).__name__}"
             ) from exc
         return adapter, prompts, workspace
+
+    async def _observe_planner_contract(self, adapter, generation, planner_producer):
+        """Read native initialization evidence, never a configured assertion."""
+        if planner_producer is None:
+            return None
+        selected = planner_producer_selection(planner_producer)
+        observer = getattr(adapter, "observed_planner_contract", None)
+        if not callable(observer):
+            raise BrokerStateError("native planner initialization observation is unavailable")
+        observed = await self._operator_call("planner initialization", observer, generation)
+        if observed != selected["planner_producer_binding"]["native_result_contract"]:
+            raise BrokerStateError("native initialized planner contract differs from selection")
+        return dict(observed)
 
     @staticmethod
     async def _operator_call(phase: str, function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -2004,11 +2034,13 @@ class ExecutiveWorkerBroker:
 
     async def _ohf_validate(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_current_autonomy()
-        if set(payload) != {"requested"}:
+        if set(payload) not in ({"requested"}, {"requested", "planner_producer"}):
             raise BrokerProtocolError("ohf-validate payload fields are invalid")
         try:
             requested = wire_requested_execution_profile(payload["requested"])
-        except OperatorHarnessWireError as exc:
+            producer = (planner_producer_selection(payload["planner_producer"])
+                        if "planner_producer" in payload else None)
+        except (OperatorHarnessWireError, OperatorMaterializationReceiptError) as exc:
             raise BrokerProtocolError(str(exc)) from exc
         async with self._state_lock:
             if (
@@ -2021,7 +2053,7 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError("the worker broker already has active work")
             self._starting = True
         try:
-            adapter, _prompts, _workspace = self._operator_factory(requested)
+            adapter, _prompts, _workspace = self._operator_factory(requested, producer)
             validation = await self._operator_call(
                 "profile validation", adapter.validate_requested_profile, requested
             )
@@ -2056,10 +2088,13 @@ class ExecutiveWorkerBroker:
         SessionEpochRef,
         ProcessGenerationRef,
         ProviderSessionHandoff | None,
+        dict[str, Any] | None,
     ]:
         expected = {"operation_id", "requested", "epoch", "generation"}
         if resume:
             expected.add("provider_session")
+        if "planner_producer" in payload:
+            expected.add("planner_producer")
         if set(payload) != expected:
             raise BrokerProtocolError("OHF session payload fields are invalid")
         try:
@@ -2067,12 +2102,15 @@ class ExecutiveWorkerBroker:
             requested = wire_requested_execution_profile(payload["requested"])
             epoch = wire_session_epoch_ref(payload["epoch"])
             generation = wire_process_generation_ref(payload["generation"])
+            producer = (planner_producer_selection(payload["planner_producer"],
+                                                   attempt_id=epoch.attempt_id)
+                        if "planner_producer" in payload else None)
             handoff = (
                 wire_provider_session_handoff(payload["provider_session"])
                 if resume
                 else None
             )
-        except OperatorHarnessWireError as exc:
+        except (OperatorHarnessWireError, OperatorMaterializationReceiptError) as exc:
             raise BrokerProtocolError(str(exc)) from exc
         if (
             epoch.attempt_id == ""
@@ -2101,7 +2139,7 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError(
                 "OHF materialization identity is invalid"
             ) from exc
-        return operation, requested, epoch, generation, handoff
+        return operation, requested, epoch, generation, handoff, producer
 
     @staticmethod
     def _receipt_matches_request(
@@ -2112,6 +2150,7 @@ class ExecutiveWorkerBroker:
         epoch: SessionEpochRef,
         generation: ProcessGenerationRef,
         handoff: ProviderSessionHandoff | None,
+        planner_producer: dict[str, Any] | None = None,
     ) -> bool:
         try:
             observed = wire_observed_harness_attestation(
@@ -2130,6 +2169,7 @@ class ExecutiveWorkerBroker:
             and receipt.generation_number == generation.generation_number
             and receipt.requested_profile_digest
             == requested_profile_digest(operator_to_wire(requested))
+            and receipt.planner_producer == planner_producer
             and compare_launch(requested, observed).decision is LaunchDecision.ALLOW
             and (
                 handoff is None
@@ -2159,7 +2199,7 @@ class ExecutiveWorkerBroker:
         self, payload: dict[str, Any]
     ) -> dict[str, Any]:
         resume = "provider_session" in payload
-        operation, requested, epoch, generation, handoff = (
+        operation, requested, epoch, generation, handoff, producer = (
             self._materialization_request(payload, resume=resume)
         )
         # Status is one atomic classification over the durable receipt and the
@@ -2199,6 +2239,7 @@ class ExecutiveWorkerBroker:
                 epoch=epoch,
                 generation=generation,
                 handoff=handoff,
+                planner_producer=producer,
             ):
                 status = "CONFLICT"
             elif state is None:
@@ -2228,7 +2269,7 @@ class ExecutiveWorkerBroker:
         self, payload: dict[str, Any], *, resume: bool
     ) -> dict[str, Any]:
         self._require_current_autonomy()
-        operation, requested, epoch, generation, handoff = (
+        operation, requested, epoch, generation, handoff, producer = (
             self._materialization_request(payload, resume=resume)
         )
         try:
@@ -2250,6 +2291,7 @@ class ExecutiveWorkerBroker:
                 epoch=epoch,
                 generation=generation,
                 handoff=handoff,
+                planner_producer=producer,
             ):
                 raise BrokerStateError(
                     "operator materialization receipt conflicts with the request"
@@ -2292,7 +2334,7 @@ class ExecutiveWorkerBroker:
         state: _BrokerOperatorRun | None = None
         provider_dispatch_committed = False
         try:
-            adapter, prompts, workspace = self._operator_factory(requested)
+            adapter, prompts, workspace = self._operator_factory(requested, producer)
             if self.operator_resource_factory is not None:
                 try:
                     resource = self.operator_resource_factory(
@@ -2353,6 +2395,7 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(
                     "operator resume returned a different provider session identity"
                 )
+            initialized_contract = await self._observe_planner_contract(adapter, generation, producer)
             observed = await self._operator_call(
                 "attestation", adapter.observed_attestation, generation
             )
@@ -2392,6 +2435,8 @@ class ExecutiveWorkerBroker:
                         "provider_home_identity"
                     ],
                     created_at=_utc_now(),
+                    planner_producer=producer,
+                    observed_planner_contract=initialized_contract,
                 )
                 receipt = await asyncio.to_thread(
                     persist_operator_materialization_receipt,
@@ -2415,6 +2460,7 @@ class ExecutiveWorkerBroker:
                 generation=generation,
                 provider_session_id=provider_session_id,
                 materialization_receipt=receipt,
+                planner_producer=producer,
                 resource=resource,
                 prompts=prompts,
             )
@@ -2517,6 +2563,16 @@ class ExecutiveWorkerBroker:
                 raise BrokerProtocolError(
                     "operator turn or launch decision is outside the active generation"
                 )
+            receipt = state.materialization_receipt
+            if (receipt.planner_producer if receipt is not None else None) != state.planner_producer:
+                raise BrokerStateError("native planner custody differs from materialization")
+            if state.planner_producer is not None:
+                # Reuse the digest-covered receipt; mutation or a changed native
+                # observation cannot authorize a useful turn after initialization.
+                checked = load_operator_materialization_receipt(materialization_bytes(receipt.to_dict()))
+                observed = await self._observe_planner_contract(state.adapter, generation, state.planner_producer)
+                if observed != checked.observed_planner_contract:
+                    raise BrokerStateError("native planner initialization changed")
             state.prompts[turn.turn_id] = prompt
             try:
                 observation = await self._operator_call(

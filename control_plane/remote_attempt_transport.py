@@ -672,6 +672,8 @@ def build_claimed_remote_operator_factory(
                 loader: Callable[..., str], *, recovery: bool) -> "RemoteOperatorHarnessAdapter":
         from control_plane.operator_harness_wire import to_wire
         from control_plane.remote_operator_harness_adapter import RemoteOperatorHarnessAdapter
+        from control_plane.operator_materialization_receipt import planner_producer_selection
+        from control_plane.executive_orchestration_result import canonical_digest
 
         if (not isinstance(attempt, Attempt)
                 or not isinstance(requested, RequestedExecutionProfile)
@@ -695,6 +697,20 @@ def build_claimed_remote_operator_factory(
             # A sealed/previously attempted operator must enter recovery. Never
             # mint a fresh-start-capable client to disguise a lost start reply.
             raise RemoteAttemptTransportError("CLAIM_NOT_LAUNCHABLE")
+        # Sealed-result/cancellation recovery contains the original session; it
+        # does not re-admit a producer or depend on its present configuration.
+        containment = recovery and (
+            current.status is AttemptStatus.CANCEL_REQUESTED
+            or runtime.events.get_event_by_command_id(
+                f"orchestration-result-seal:{current.attempt_id}") is not None
+        )
+        retained_producer = (runtime.jobs.get_planner_producer_binding(job.job_id)
+                             if job.orchestration_role == "plan" and not containment else None)
+        producer = (planner_producer_selection({
+            "job_id": job.job_id, "attempt_id": current.attempt_id,
+            "planner_producer_binding": retained_producer,
+            "planner_producer_binding_digest": canonical_digest(retained_producer),
+        }) if retained_producer is not None else None)
         try:
             binding = binding_source(join.capacity_join.host_ref, current.worker_id)
         except Exception:
@@ -725,6 +741,19 @@ def build_claimed_remote_operator_factory(
                     source_attempt.execution_principal_snapshot_digest)
         if operator_signature(before) != operator_signature(after):
             raise RemoteAttemptTransportError("STATE_MOVED")
+        def require_retained_producer():
+            if retained_producer is not None:
+                try:
+                    observed = runtime.jobs.get_planner_producer_binding(job.job_id)
+                except Exception:
+                    raise RemoteAttemptTransportError("STATE_MOVED") from None
+                if observed != retained_producer:
+                    raise RemoteAttemptTransportError("STATE_MOVED")
+        require_retained_producer()
+        if producer is not None and (binding.provider, binding.harness_kind) != (
+            "claude", "claude-agent-sdk"
+        ):
+            raise RemoteAttemptTransportError("HOST_BINDING_MISMATCH")
         operations = {
             "ohf-identity", "ohf-materialization-status", "ohf-begin-turn",
             "ohf-collect-turn", "ohf-interrupt", "ohf-stop", "ohf-cancel",
@@ -743,6 +772,10 @@ def build_claimed_remote_operator_factory(
                                                allowed_operations=operations)
 
             class RuntimeGenerationBoundAdapter(RemoteOperatorHarnessAdapter):
+                def validate_requested_profile(self, requested):
+                    require_retained_producer()
+                    return super().validate_requested_profile(requested)
+
                 @staticmethod
                 def _payload_identity(epoch, generation):
                     return {
@@ -752,6 +785,7 @@ def build_claimed_remote_operator_factory(
 
                 @staticmethod
                 def _assert_generation(epoch, generation):
+                    require_retained_producer()
                     if (epoch.attempt_id != current.attempt_id
                             or epoch.worker_id != current.worker_id
                             or generation.session_epoch_id != epoch.session_epoch_id
@@ -814,7 +848,8 @@ def build_claimed_remote_operator_factory(
                     )
 
             adapter = RuntimeGenerationBoundAdapter(
-                client, turn_input_loader=loader, capabilities=binding.capabilities
+                client, turn_input_loader=loader, capabilities=binding.capabilities,
+                planner_producer=producer,
             )
             if recovery:
                 with runtime.store.read() as connection:

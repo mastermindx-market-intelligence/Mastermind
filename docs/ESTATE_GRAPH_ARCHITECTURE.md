@@ -82,7 +82,7 @@ Use the incumbent Executive CooCycle:
 
 This frees the principal from leaf execution without making hierarchy unlimited. Plans should choose economically useful fan-out within actual capacity. Additional management layers need an integration outcome; a hierarchy drawn only to occupy workers adds overhead.
 
-Remote producer custody is being added to the existing validate/start/materialization-status chain. Legacy omission retains the v1 wire shape. Explicit producer selection requires a closed, digest-covered receipt based on actual initialized native evidence; a proxy attribute is insufficient. Lost initialization is reconciled on the original operation, without a second initialization or useful turn.
+Remote producer custody is implemented in the existing validate/start/materialization-status chain. Its source patch passed 350 unique focused cases; the composed tree passed 534 cases including the source-identity guards. Legacy omission retains the v1 wire shape. Explicit producer selection requires a closed, digest-covered receipt based on actual initialized native evidence; a proxy attribute is insufficient. Lost initialization is reconciled on the original operation, without a second initialization or useful turn.
 
 The current Claude planner profile is disabled. This work does not enable it. Enabled Codex profiles need turn-scoped schema custody because Codex accepts outputSchema on turn/start but does not attest to a planner schema at startup. The existing TX-5 intent, acknowledgement and result-seal owners are the appropriate composition; source feasibility is not installed admission.
 
@@ -123,6 +123,7 @@ The Chrome visual check was blocked by another extension UI. The temporary previ
 | Awaited native return seam | 77 affected cases, including actual supervisor caller and original native prewrite framing |
 | Company host compatibility | 164 incumbent leadership/Secretary cases, seven skips; 49 additional project continuity cases |
 | Installed company read | Actual native records, matching Python/TypeScript projections, no native writes |
+| Remote initialized planner custody | 350 unique focused cases; 534 composed owner/source-identity cases; no profile activation |
 | Long-horizon source composition | 490 combined cases and 90 subtests pass after exact CLI assertion and unchanged-AST source-pin reconciliation |
 
 Counts describe individual qualification runs and must not be summed into a unique estate-wide total. Fixtures, installed read-only APIs, native model execution, production acceptance and browser design review are different proof layers.

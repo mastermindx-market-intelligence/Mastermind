@@ -1,0 +1,127 @@
+{
+  "schema": "mastermind.estate_graph_composition_qualification.v1",
+  "source_parent": "70911488b1d00e6ce376cbf19906615e0cc8c866",
+  "candidate_code_tree": "e2ed3c7ff136d0b7ece284f52c39c909e9203917",
+  "governing_source": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+  "qualification_scope": "COMPOSED_SOURCE_OWNERS_AND_DISPOSABLE_NATIVE_FIXTURES",
+  "checks": [
+    {
+      "scope": "company_team_workspace",
+      "summary": "28 frontend tests and complete TypeScript/Vite production build passed; 150 affected Workspace/Paperclip/Hermes tests passed",
+      "source_commit": "18b6edc91076fad97589b20d19c9f76fb363246f"
+    },
+    {
+      "scope": "long_horizon_original_return_company",
+      "summary": "490 passed, 90 subtests passed in 25.42s",
+      "source_tree": "fdd0b36f85548769857345e6bf934332d24ee5c8",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -o addopts= -q -p anyio.pytest_plugin --tb=short tests/test_t3_project_context.py tests/test_t3_web_client.py tests/test_t3_web_client_terminal_proof.py tests/test_long_horizon_guidance.py tests/test_project_task_context.py tests/test_agentos_session_start.py tests/test_hermes_fabric_native_identity_review.py tests/test_executive_reviewed_site_identity_tokens.py tests/test_execution_return_prewrite.py tests/test_session_bridge_native_return.py tests/test_execution_return_projection.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_hermes_company_context.py"
+    },
+    {
+      "scope": "remote_planner_custody_composition",
+      "summary": "534 passed in 72.29s; includes 350 unique custody/owner cases plus existing source-identity checks",
+      "source_tree": "e2ed3c7ff136d0b7ece284f52c39c909e9203917",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -o addopts= -q -p anyio.pytest_plugin --tb=short tests/test_remote_planner_producer_custody.py tests/test_operator_materialization_receipt.py tests/test_planner_producer_binding.py tests/test_remote_operator_endpoint.py tests/test_claude_operator_adapter.py tests/test_native_claude_worker_factory.py tests/test_executive_operator_broker.py tests/test_claimed_operator_control_composition.py tests/test_executive_operator_supervisor.py tests/test_remote_attempt_transport.py tests/test_executive_reviewed_site_identity_tokens.py"
+    }
+  ],
+  "original_custody_patch": {
+    "base_commit": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
+    "sha256": "db3882054263a709239443e8ae8d3928c6be81a72ff316ecd76318c72aecfc79",
+    "files": [
+      {
+        "path": "control_plane/operator_materialization_receipt.py",
+        "base_blob": "2c6664eb5f1be7a88218ac9131dc74689c7a0c7b",
+        "post_blob": "d28e1b3d18d46845922bed6d7c56ee2d7ca9d2b5",
+        "post_sha256": "5d06b6c93703f32efd39bd06b4127418b3fd96f03f8dc71af243f8fe1ef56177",
+        "bytes": 48480
+      },
+      {
+        "path": "control_plane/claude_operator_adapter.py",
+        "base_blob": "cf95b7943ed0ba1dcf99bfa2346bfbd84084ed59",
+        "post_blob": "2c932a444a6f317f5cd46f02f5bc812d85e1bdf7",
+        "post_sha256": "947204a697fa7acb370a8996cd762a8dd925734ca196b9bd1e8a29e5bf5498a9",
+        "bytes": 43672
+      },
+      {
+        "path": "scripts/executive_os_phase1c_worker.py",
+        "base_blob": "b0fc50c1ddb5b9b92728d995b688cbd448c71f38",
+        "post_blob": "e2e85eb58fc2f765a75f76e422579755aeedc0cf",
+        "post_sha256": "16df503cc598592a75c367295fcd3cd745b122fb7039847450e7f3436244ed0a",
+        "bytes": 48829
+      },
+      {
+        "path": "control_plane/executive_worker_broker.py",
+        "base_blob": "9820be2eadbf09d152c340135c14786f38308721",
+        "post_blob": "3a7773f20df2d2a4763ec6861a0d0728673d2e25",
+        "post_sha256": "7be5ac0d40ddff601968931ed417ade19c81ddb2f23bea656e042752cd2a8967",
+        "bytes": 246459
+      },
+      {
+        "path": "control_plane/remote_operator_harness_adapter.py",
+        "base_blob": "af70cb8d1e55dce208c22e311cbb1faee26e6907",
+        "post_blob": "fdf0e2bf8efb1b247be313bd1f42a643bce2bb1a",
+        "post_sha256": "9f43e594700f37cbd970f345b4d0f165d4f277a0f2d7f77e4a00b2056cdf6e0a",
+        "bytes": 35255
+      },
+      {
+        "path": "control_plane/executive_operator_supervisor.py",
+        "base_blob": "2b543d5955e984af528918451447fa33a5b037f8",
+        "post_blob": "6891dca53af80124caaf610ab94617fcaa231fc5",
+        "post_sha256": "b458555a33ee093035cf54fa9f1ca3dd009344fd97e748fba6b72ae063fa5653",
+        "bytes": 94939
+      },
+      {
+        "path": "control_plane/remote_attempt_transport.py",
+        "base_blob": "4a0dce66de1daa80e3f78f8f425c28a64a1cdecf",
+        "post_blob": "feda9fcbd26fa73da091c611e38bddebbbbf49bc",
+        "post_sha256": "4d0df88357a1fe0f136b738e88e3b2e9e2e8baed7ce4326269f0ed12c8665d59",
+        "bytes": 55086
+      },
+      {
+        "path": "scripts/executive_os_phase1c.py",
+        "base_blob": "ee4daf6310d6eca17fbcceaa9f2aba6dd87fd11d",
+        "post_blob": "855ed0c05a9815f7f2a9335a0b1bd2e47c4cbd3c",
+        "post_sha256": "a4a4acdc5a46896dec3d563666ea5525a2927fa45f572914fab9ed9d582eb327",
+        "bytes": 180546
+      },
+      {
+        "path": "tests/test_remote_planner_producer_custody.py",
+        "base_blob": null,
+        "post_blob": "c46a87b1285d1b59033f44e49ed3e11dfa3d04f7",
+        "post_sha256": "02c34541305207b328ab12f2748eae9d480b50a510d227aa61edff6b5952195f",
+        "bytes": 34459
+      }
+    ]
+  },
+  "integration_repairs": [
+    "Long-horizon T3 fixture assertions include the incumbent --log-level error suffix; original thread/run assertions are preserved.",
+    "Workspace source guard retains exactly eight refusal tokens; the full control_room_action AST is unchanged from 7ff2a1ac and all eight sites move by five lines.",
+    "Two long-horizon source-identity merge conflicts were history comments; exact source digest and sites agree."
+  ],
+  "installed_company_read": {
+    "observed_at": "2026-11-10T07:22:22.132145Z",
+    "donor": "d69631b01b9c658f80bf8bed389863dce82643e1",
+    "people": 13,
+    "projects": 2,
+    "goals": 0,
+    "issues": 3,
+    "relationships": {
+      "reports_to": 12,
+      "issue_project": 3,
+      "issue_assignee": 2
+    },
+    "outside_visible_window": 1,
+    "state": "PARTIAL",
+    "python_typescript_projection_equal": true,
+    "native_writes": 0,
+    "scope": "NATIVE_READ_ONLY_PROJECTION_NOT_INSTALLED_WORKSPACE"
+  },
+  "boundaries": [
+    "Claude planner admission remains disabled; fixtures do not enable production policy.",
+    "Codex turn-scoped producer custody is a subsequent source phase.",
+    "Native T3 artifact/validation/workspace and complete-result contracts remain separately qualified.",
+    "Original return delivery is not parent consumption or acceptance.",
+    "Chrome visual automation blocked by another extension UI; temporary preview stopped.",
+    "No installed model run, runtime activation, credentials, heartbeats or grant changes."
+  ],
+  "counts_note": "Qualification runs overlap. Do not sum these as unique estate-wide cases."
+}

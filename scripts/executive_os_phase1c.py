@@ -1937,9 +1937,9 @@ def _service_from_config(
         PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
     )
     # Legacy omission stays legacy: only an explicit version opts this Control
-    # host into a native planner producer, and that needs an explicitly supplied
-    # trusted claim-bound adapter. The remote transport has not qualified native
-    # contract custody.
+    # host into a native planner producer. Both paths require a trusted claimed
+    # owner; the remote path carries the retained producer through worker-side
+    # initialization and its existing immutable materialization receipt.
     if plan_schema_version is not None and (
         type(plan_schema_version) is not str
         or plan_schema_version not in {
@@ -1949,7 +1949,7 @@ def _service_from_config(
         raise ServiceError("trusted planner plan schema is unsupported")
     if plan_schema_version is not None and (
         claimed_operator_adapter_factory is None
-        or remote_operator_binding_source is not None
+        and remote_operator_binding_source is None
     ):
         raise ServiceError("versioned producer needs a trusted claim-bound adapter")
     _validate_fabric_bridge_config(raw)
