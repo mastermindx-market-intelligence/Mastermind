@@ -63,11 +63,11 @@ def _expected_refusal_output(label, digest):
 
 
 def _spawn(
-    script, fd_arg, expected_sha256, label, pass_fd=None, *, root_path=None,
+    script, fd_arg, expected_sha256, label, pass_fd=None, *, root_path,
     root_device=None, root_inode=None,
 ):
     root_fd = os.open(
-        root_path or os.getcwd(), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+        root_path, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
     )
     root_stat = os.fstat(root_fd)
     pass_fds = (root_fd,) if pass_fd is None else (pass_fd, root_fd)
@@ -118,11 +118,15 @@ def _invoke(
     script, fd_arg, expected_sha256, label, *, pass_fd=None,
     barrier=b"\x01", require_blocked=False, **spawn_options,
 ):
-    proc = _spawn(
-        script, fd_arg, expected_sha256, label,
-        pass_fd=pass_fd, **spawn_options,
-    )
-    return _finish(proc, barrier=barrier, require_blocked=require_blocked)
+    # Keep the selected private root alive until the child has exited and been reaped.
+    # Explicit root identity inputs remain available to the adversarial cases.
+    with tempfile.TemporaryDirectory(prefix="workbench-recipe-root-") as fixture_root:
+        spawn_options.setdefault("root_path", fixture_root)
+        proc = _spawn(
+            script, fd_arg, expected_sha256, label,
+            pass_fd=pass_fd, **spawn_options,
+        )
+        return _finish(proc, barrier=barrier, require_blocked=require_blocked)
 
 
 def _invoke_raw_args(script, args):
@@ -222,7 +226,7 @@ def test_recipe_enters_selected_descriptor_cwd_and_rejects_wrong_root_identity(t
     """A harmless launch cwd cannot substitute for the host-selected root fd."""
     path = _make_file(b"hello world")
     selected_root = tmp_path / "selected-root"
-    selected_root.mkdir()
+    selected_root.mkdir(mode=0o700)
     try:
         with open(path, "rb") as input_file:
             result = _invoke(
@@ -456,5 +460,40 @@ def test_refusal_recipe_valid_file_emits_exact_deliberate_refusal():
             b"validation-refused\n", 7,
         )
         assert _read_file(path) == before
+    finally:
+        os.unlink(path)
+
+@pytest.mark.parametrize("script,expected,diagnostic,returncode", [
+    (CANARY_CHECKSUM, _expected_checksum_output, b"checksum-ok\n", 0),
+    (CANARY_REFUSE, _expected_refusal_output, VALIDATION_REFUSAL, 7),
+])
+def test_private_root_preserves_recipe_contract_in_writable_checkout(
+    tmp_path, monkeypatch, script, expected, diagnostic, returncode,
+):
+    """A shared checkout is not an approved root; an explicit unsafe root still refuses."""
+    checkout = tmp_path / "shared-checkout"
+    checkout.mkdir(mode=0o700)
+    checkout.chmod(0o770)
+    monkeypatch.chdir(checkout)
+    path = _make_file(b"hello world")
+    try:
+        with open(path, "rb") as input_file:
+            result = _invoke(
+                script, input_file.fileno(), HELLO_SHA256, "fixture.bin",
+                pass_fd=input_file.fileno(), require_blocked=True,
+            )
+        assert result == (
+            expected("fixture.bin", HELLO_SHA256), diagnostic, returncode,
+        )
+        with open(path, "rb") as input_file:
+            result = _invoke(
+                script, input_file.fileno(), HELLO_SHA256, "fixture.bin",
+                pass_fd=input_file.fileno(), root_path=checkout,
+                require_blocked=True,
+            )
+        _assert_fixed_refusal(
+            result,
+            CHECKSUM_REFUSAL if script == CANARY_CHECKSUM else VALIDATION_REFUSAL,
+        )
     finally:
         os.unlink(path)
