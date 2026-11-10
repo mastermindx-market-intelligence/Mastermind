@@ -23,6 +23,12 @@ Laws:
   * Unknown GitHub evidence stays honestly unknown (stage never claims
     beyond the proof); an absent original-requester binding or a failed
     projection is an honest REFUSED receipt, never a silent drop.
+  * Delivery routing is PLUGGABLE (plan V3 §8a): origins are typed
+    OriginRefs routed through the ResultDeliveryRegistry; the incumbent
+    install (a bare Hermes deliverer) registers it for HERMES_ORIGIN_KIND
+    and every origin keeps riding it — EXACTLY today's behavior.  A kind
+    with no transport is a typed ORIGIN_KIND_UNKNOWN refusal, never a
+    silent default or drop.
   * ``Runtime`` is not modified to import this module: the composing
     supervisor INSTALLS the seam (a deployment act); an uninstalled seam
     (the default) changes nothing anywhere.
@@ -38,11 +44,19 @@ from control_plane.execution_return_projection import (
     project_execution_return,
 )
 from control_plane.executive_orchestration_principal import digest as orchestration_digest
-# The deliverer is INJECTED by the composing service (an
-# ``integrations.session_bridge.hermes_native_return.HermesExecutionReturnDeliverer``
-# in production); control_plane never imports the integrations package
-# (tests/test_hermes_selected_child_ingress.py pins that law). Duck type:
-# ``async deliver(record) -> receipt mapping``.
+from control_plane.result_delivery import (
+    HERMES_ORIGIN_KIND,
+    HermesResultDeliveryTransport,
+    OriginRef,
+    ResultDeliveryRegistry,
+    UnknownOriginKindError,
+)
+# Delivery routing is PLUGGABLE (plan V3 §8a): the composing service
+# injects either the incumbent Hermes deliverer (duck type ``async
+# deliver(record) -> receipt mapping``, wrapped for HERMES_ORIGIN_KIND) or
+# a ``ResultDeliveryRegistry`` carrying transports for other origin kinds.
+# control_plane still never imports the integrations package
+# (tests/test_hermes_selected_child_ingress.py pins that law).
 
 #: Event type of the durable delivery receipt (an events row, not a table).
 EXECUTION_RETURN_DELIVERY_EVENT = "EXECUTION_RETURN_DELIVERY"
@@ -95,15 +109,22 @@ class ExecutionReturnWiring:
         self,
         *,
         store: Any,
-        deliverer: Any,
+        deliverer: Any = None,
         github: GitHubEvidenceSource | None = None,
         t3_adapter: Any = None,
         t3_run_resolver: Callable[[str], str | None] | None = None,
+        registry: ResultDeliveryRegistry | None = None,
     ) -> None:
-        if not callable(getattr(deliverer, "deliver", None)):
+        if deliverer is not None and not callable(getattr(deliverer, "deliver", None)):
             raise TypeError("deliverer must expose an async deliver(record) method")
         self._store = store
-        self._deliverer = deliverer
+        self._registry = registry if registry is not None else ResultDeliveryRegistry()
+        if deliverer is not None:
+            # Today's install shape: the injected Hermes deliverer becomes
+            # the transport registered for the Hermes origin kind — the
+            # registry lives at the seam install site, never mid-delivery.
+            self._registry.register(
+                HERMES_ORIGIN_KIND, HermesResultDeliveryTransport(deliverer))
         self._github = github
         self._t3_adapter = t3_adapter
         self._t3_run_resolver = t3_run_resolver or (lambda attempt_id: attempt_id)
@@ -306,12 +327,23 @@ class ExecutionReturnWiring:
                 "no attested launch namespace persisted for this attempt")
             return None
         child_request = provenance.get("child_request") if isinstance(provenance, dict) else {}
-        idempotency_key = (
-            child_request.get("command_id") if isinstance(child_request, dict) else None)
-        if not isinstance(idempotency_key, str) or not idempotency_key:
+        # L1B3-4 fix: prefer the binding's per-attempt ``operation_key`` (the
+        # execution idempotency the claim stamped for THIS attempt) over the
+        # admission ``command_id`` — a job-level id invariant across
+        # attempts, so two attempts of one job would collide on one key.
+        idempotency_key = None
+        for candidate in (
+            binding.get("operation_key"),
+            child_request.get("command_id") if isinstance(child_request, dict) else None,
+        ):
+            if isinstance(candidate, str) and candidate:
+                idempotency_key = candidate
+                break
+        if not idempotency_key:
             self._record_refusal(
                 store, job, attempt_id, "ORIGINAL_BINDING_MISSING",
-                "admission provenance lost the child-request command id")
+                "no binding operation_key and admission provenance lost the "
+                "child-request command id")
             return None
         # G3: attempt.root_id is the COMPANY ROOT of the original request —
         # the projector's contract (see the committed sample record's
@@ -389,8 +421,29 @@ class ExecutionReturnWiring:
             self._record_refusal(
                 store, job, attempt_id, exc.code, str(exc)[:200])
             return None
+        # Pluggable routing (plan V3 §8a): a carrier kind with a registered
+        # transport claims its own delivery route; every other origin rides
+        # the default Hermes return path — EXACTLY today's single-deliverer
+        # behavior.  The registry itself never silently defaults: a kind
+        # with no transport refuses below.
+        carrier_kind = requester_block.get("carrier_kind")
+        origin_kind = (
+            carrier_kind
+            if isinstance(carrier_kind, str) and carrier_kind
+            and self._registry.has(carrier_kind)
+            else HERMES_ORIGIN_KIND)
+        origin = OriginRef(
+            kind=origin_kind,
+            ids={key: value for key, value in requester_block.items()
+                 if type(value) is str})
         try:
-            receipt = self._await_delivery(record)
+            transport = self._registry.lookup(origin_kind)
+        except UnknownOriginKindError as exc:
+            self._record_refusal(
+                store, job, attempt_id, "ORIGIN_KIND_UNKNOWN", str(exc)[:200])
+            return None
+        try:
+            receipt = self._await_delivery(transport, origin, record)
         except _AsyncContextUnavailable:
             self._record_refusal(
                 store, job, attempt_id, "ASYNC_CONTEXT_UNAVAILABLE",
@@ -404,7 +457,9 @@ class ExecutionReturnWiring:
         self._record_receipt(store, job, attempt_id, receipt, stage=record["stage"])
         return receipt
 
-    def _await_delivery(self, record: Any) -> dict[str, Any]:
+    def _await_delivery(
+        self, transport: Any, origin: OriginRef, record: Any,
+    ) -> dict[str, Any]:
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
@@ -413,7 +468,7 @@ class ExecutionReturnWiring:
             # Never block a live event loop with asyncio.run; reconciliation
             # of this refusal is the Executive runtime's concern (gap 5).
             raise _AsyncContextUnavailable()
-        return asyncio.run(self._deliverer.deliver(record))
+        return asyncio.run(transport.deliver(origin, record))
 
 
 class _AsyncContextUnavailable(Exception):
@@ -423,21 +478,25 @@ class _AsyncContextUnavailable(Exception):
 def install_execution_return_seam(
     runtime: Any,
     *,
-    deliverer: Any,
+    deliverer: Any = None,
     github: GitHubEvidenceSource | None = None,
     t3_adapter: Any = None,
     t3_run_resolver: Callable[[str], str | None] | None = None,
+    registry: ResultDeliveryRegistry | None = None,
 ) -> ExecutionReturnWiring:
     """Install the post-terminal return seam on one Runtime instance.
 
     A deployment act by the composing supervisor.  ``Runtime`` is a frozen
     dataclass, so the seam is attached with ``object.__setattr__`` on the
     single instance; nothing global changes and an uninstalled runtime
-    behaves exactly as before.
+    behaves exactly as before.  A bare ``deliverer`` (today's shape)
+    registers it as the transport for HERMES_ORIGIN_KIND; a pluggable
+    install may pass ``registry`` with transports for other origin kinds.
     """
     wiring = ExecutionReturnWiring(
         store=runtime.store, deliverer=deliverer, github=github,
-        t3_adapter=t3_adapter, t3_run_resolver=t3_run_resolver)
+        t3_adapter=t3_adapter, t3_run_resolver=t3_run_resolver,
+        registry=registry)
     # The terminal seal is owned by the runtime's AttemptRegistry (_terminal);
     # the seam is attached there.  An uninstalled registry keeps its None
     # default and behaves exactly as before.

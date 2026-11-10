@@ -82,6 +82,12 @@ uncommitted in dead checkouts.
   dropped it with nothing on disk. The third start named steps of at most 100 lines per tool
   call with a commit and a push after each, and had a file pushed in three minutes. Writer
   briefs now say this from the start: skeleton first, pushed inside ten minutes, then pieces.
+- A dropped stream can also replay a turn instead of killing the thread. Two drivers repeated one
+  command for 35 minutes (one read the same file 17 times; one stacked three background test
+  jobs on one log). The signs are identical assistant messages and a branch with no new commit.
+  The parent's check is the commit time on origin, not the thread's item count. Briefs say: run
+  tests in the foreground, check whether a command's output already exists before running it,
+  and after a failed Edit read `git diff --stat` before trying again.
 - Every `delegate_task` carries a unique `clientRequestId`. One writer per output: before any
   dispatch that follows an errored turn, list same-title children first.
 - Work is pushed to the lane branch on origin after every slice that passes its check, and at
@@ -111,6 +117,15 @@ the marker.
   as local branches and merged directly.
 - `grok-4.7` does not drive lanes or write diffs. It keeps one output type: an attack, where
   each finding is a command the parent runs.
+- A turn that ends while its own background jobs still run is reported to the parent as
+  completed. A driver for lane L6 returned "waiting on two runs" as its final result. The
+  parent reads the last message, not the status, and continues the same thread with the
+  remaining items named.
+- The shared store was marked shallow a second time at 13:15 UTC by an attack child that
+  fetched one branch with a depth. Every checkout then saw a lane branch with no history.
+  The marker is safe to remove only after checking that each boundary commit's parents are
+  present. Attack briefs carry the shared-store rule word for word and name the commit to
+  read; an attacker has no reason to fetch.
 
 ## Model routing by output type
 
@@ -146,7 +161,8 @@ on depth. `gemini-4-argon` is not dispatched (Chairman ruling, 2026-11-10). Neve
 | `claude-opus-5-5` | 26 | not recorded | not recorded | 0 | 985 min; 674 on one loop |
 | `glm-5.3` | 21 + wave 2 | not recorded | not recorded | 0 known | one wrong outage verdict (probe of a path the edge drops) |
 | `grok-4.7` | 2 + wave 2 + 2 drivers | 0 | 3 | 3 | two statement-type tasks; one lane driver (L6r) that invented commits, tests and evidence. Second driver (L8r) cancelled at 6 minutes with no work. Attacks only from wave 3. |
-| `kimi-k3.1-pro` | 2 drivers running (L6s, L8s) | pending | pending | pending | first use as a driver |
+| `kimi-k3.1-pro` | 2 drivers (L6s, L8s) | 0 so far | 0 | 0 | Real commits and real evidence from both. L6s landed one item on trunk in 20 minutes, then ended a turn with jobs still running. L8s replayed turns for two hours before a steer. |
+| `glm-5.3` wave 3 | 3 drivers (L9r, L4r, L1r) | 1 (L1r closed on trunk, 135 tests) | 0 | 0 | Dies on any generation longer than about 15 minutes; works in pushed steps of 80 to 100 lines. Rate-limited (429) through the day. |
 | `gemini-4-argon` | withdrawn | n/a | n/a | n/a | **Not used from 2026-11-10 (Chairman ruling): flaky and inconsistently priced.** Dispatches also died mid-run on a provider function-call error. |
 | `deepseek-v4.1-flash` | wave 2 (4 running) | pending | pending | pending | no evidence yet in this program |
 

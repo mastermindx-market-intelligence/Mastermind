@@ -158,6 +158,24 @@ def test_forwarding_requires_the_exact_frozen_target(rsa_key):
     assert body["error"]["message"] == "EXECUTIVE_CHILD_REQUEST_TARGET_NOT_BOUND"
 
 
+def test_forwarding_refuses_a_work_ref_the_target_is_not_frozen_on(rsa_key):
+    """L1B3-1: authority proved for work A must not admit into an App
+    frozen on work B.  The refusal is a pre-send preflight — no frame
+    leaves the App, so no admission can exist on any carrier."""
+    settings, _current, token = ingress._app_settings(rsa_key, ingress._target())
+
+    async def send(path, frame):
+        raise AssertionError("no frame may be sent for a work-ref mismatch")
+
+    app = create_coo_app(settings, audit_sink=ingress.app_fixture.Sink())
+    app._client.send_frame = send
+    body = _forward(app, token, {"work_ref": "WS:EXECUTIVE-OTHER",
+                                 "command": _command()})
+    assert body["ok"] is False, body
+    assert body["error"]["kind"] == "refused", body
+    assert body["error"]["message"] == "EXECUTIVE_CHILD_REQUEST_WORK_REF_MISMATCH"
+
+
 def test_forwarding_frame_carries_only_app_authority(rsa_key):
     """The private frame is built from the App's own providers only."""
     from integrations.mastermind_executive_app.gateway import CeoIngressResponse
