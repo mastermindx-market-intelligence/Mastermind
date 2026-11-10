@@ -3,3 +3,32 @@ version = 1
 # Hosted CI runs every tests/**/test_*.py module unless it is named here.
 # Zero exclusions is the preferred state. A new test is included automatically.
 # Exact files only: no globs, directories, or wildcards.
+
+# CI Lightning F2: the source-identity/exact-pin guard family moved from the
+# six canonical shards into the early "Pin and identity guards" job so pin
+# breaks fail the PR in minutes instead of at full merge-group proof depth.
+# The assertions are byte-identical; only placement changes. Two further
+# family members (tests/test_executive_reviewed_site_identity_tokens.py and
+# tests/test_executive_fabric_release_identity_review.py) are protected
+# executive modules that cannot be excluded; the early job runs them as well
+# while the shards retain them.
+
+[[exclude]]
+path = "tests/test_ceo_submit_armed_composition.py"
+reason = "D8 template topology and protected-default source guard; ran in shard 4 and broke master on 2026-11-06 before this move"
+replacement_gate = "CI job 'Pin and identity guards' runs the exact module via scripts/ci_pin_guards.py on every pull_request and merge_group"
+
+[[exclude]]
+path = "tests/test_hermes_fabric_native_identity_review.py"
+reason = "Exact-source identity review with reason-limit token scan; broke master on 2026-11-09 (shard 4) before this move"
+replacement_gate = "CI job 'Pin and identity guards' runs the exact module via scripts/ci_pin_guards.py on every pull_request and merge_group"
+
+[[exclude]]
+path = "tests/test_overnight.py"
+reason = "Overnight tape tool wiring identity (fixture-free mock-based unit); broke master on 2026-11-08 (shard 5) before this move"
+replacement_gate = "CI job 'Pin and identity guards' runs the exact module via scripts/ci_pin_guards.py on every pull_request and merge_group"
+
+[[exclude]]
+path = "tests/test_workspace_fabric_review_pins.py"
+reason = "Exact catalog-status identity pin scan over reviewed control-plane source; same identity-guard family"
+replacement_gate = "CI job 'Pin and identity guards' runs the exact module via scripts/ci_pin_guards.py on every pull_request and merge_group"

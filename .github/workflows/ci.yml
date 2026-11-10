@@ -141,6 +141,38 @@ jobs:
           npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
           npm --prefix app/mastermind_os run typecheck
 
+  # CI Lightning F2: the source-identity/exact-pin guard family runs early
+  # and alone on every PR and merge-group head, instead of deep inside the
+  # six full-proof shards. These modules hash/tokenize/parse the checked-out
+  # source and need no fixtures, so a churned pin fails the PR in minutes.
+  # The canonical shards exclude exactly these modules
+  # (ci/pytest_exclusions.toml) and the fail-closed "test" fan-in below
+  # refuses any non-success result. Assertions are byte-identical.
+  pin_guards:
+    name: Pin and identity guards
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Full history: the D8/armed-composition guards diff against
+      # origin/master exactly as they did inside the shards.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: |-
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run pinned source-identity guard suite
+        run: python -m scripts.ci_pin_guards
+
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules
   # or the repository's one protected status context named "test".
@@ -603,7 +635,7 @@ jobs:
   # exact integrated fast/smoke check; a missing or failed check stays red.
   test:
     name: test
-    needs: [pr_scope, pr_fast, pytest_shards]
+    needs: [pr_scope, pr_fast, pin_guards, pytest_shards]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -621,12 +653,17 @@ jobs:
           PR_SCOPE_STATUS: ${{ needs.pr_scope.result }}
           PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
+          GUARDS_STATUS: ${{ needs.pin_guards.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
         run: |
           set -euo pipefail
           if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then
             if [ "$PR_SCOPE_STATUS" != success ]; then
               echo "trusted source risk qualification unavailable"
+              exit 1
+            fi
+            if [ "$GUARDS_STATUS" != success ]; then
+              echo "pinned source-identity guards must pass"
               exit 1
             fi
             case "$PR_SCOPE_MODE" in
@@ -649,8 +686,11 @@ jobs:
             esac
           else
             # Protected pushes and deliberate manual CI always run all shards.
+            # The guard family already ran at the group head; on a push it
+            # must report skipped, never a silently missing context.
             if [ "$SHARDS_STATUS" != success ] ||
-               [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ]; then
+               [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||
+               [ "$GUARDS_STATUS" != skipped ]; then
               echo "integration/release CI must pass the full matrix"
               exit 1
             fi
