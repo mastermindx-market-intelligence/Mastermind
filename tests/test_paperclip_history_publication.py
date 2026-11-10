@@ -90,5 +90,155 @@ class PublicationContracts(unittest.TestCase):
                 p.verify_profile(root, profile)
 
 
+class CompletionContracts(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.receipts = self.root / "publication"
+        self.receipts.mkdir()
+        self.issue = {"id": "archive", "companyId": h.COMPANY, "visibility": "private",
+                      "status": "backlog", "reviewAttention": {"state": "none"}}
+        self.attachments = [{"id": "bundle", "sha256": h.digest(b"redacted records")}]
+        self.documents = [{"key": "history-product-01", "body": "Verified snapshot"}]
+        self.wakes = 0
+        self.interactions = []
+        self.live_runs = []
+        self.patch_count = 0
+        self.lost_response = False
+        self.keep_backlog = False
+        self.wake_after_patch = False
+        self.publication = {"issueId": "archive", "attachments": 1,
+                            "documents": [{"key": self.documents[0]["key"],
+                                           "body_sha256": h.digest(self.documents[0]["body"].encode())}]}
+        h.save_json(self.receipts / "verified-publication.json", self.publication)
+        h.save_json(self.receipts / "hermes-product-001.zip.verified.json", self.attachments[0])
+
+    def api(self, path, method="GET", body=None):
+        if method == "PATCH":
+            self.assertEqual((path, body), ("/issues/archive", {"status": "done"}))
+            self.patch_count += 1
+            if not self.keep_backlog:
+                self.issue.update(status="done", completedAt="completed")
+            if self.wake_after_patch:
+                self.wakes = 1
+            if self.lost_response:
+                raise TimeoutError("response lost after commit")
+            return dict(self.issue)
+        self.assertEqual(method, "GET")
+        if path == "/health":
+            return {"status": "ok", "version": p.PAPERCLIP_VERSION, "deploymentMode": "local_trusted"}
+        if path == "/issues/archive":
+            return dict(self.issue)
+        if path.endswith("/attachments"):
+            return self.attachments
+        if path.endswith("/documents"):
+            return self.documents
+        if path.endswith("/diagnostics/wakes"):
+            return {"wakeRequestCount": self.wakes, "truncated": False}
+        if path.endswith("/interactions"):
+            return self.interactions
+        if path.endswith("/live-runs"):
+            return self.live_runs
+        self.fail("Unexpected API route: " + path)
+
+    def complete(self):
+        with patch.object(p, "api", side_effect=self.api):
+            return p.complete_archive(self.root)
+
+    def test_verified_archive_closes_once_and_remains_read_only_on_reentry(self):
+        self.assertEqual(self.complete()["status"], "done")
+        self.assertEqual(self.patch_count, 1)
+        self.assertEqual(self.complete()["status"], "done")
+        self.assertEqual(self.patch_count, 1)
+        saved = json.loads((self.receipts / "completion.verified.json").read_text())
+        self.assertEqual((saved["wakeRequestCount"], saved["attachments"], saved["documents"]), (0, 1, 1))
+
+    def test_incomplete_history_or_supplement_never_writes(self):
+        (self.receipts / "verified-publication.json").unlink()
+        with self.assertRaisesRegex(RuntimeError, "History publication"):
+            self.complete()
+        h.save_json(self.receipts / "verified-publication.json", self.publication)
+        (self.root / "asset-supplement").mkdir()
+        with self.assertRaisesRegex(RuntimeError, "Asset publication"):
+            self.complete()
+        self.assertEqual(self.patch_count, 0)
+
+    def test_changed_attachment_or_document_is_not_complete(self):
+        self.attachments[0]["sha256"] = "changed"
+        with self.assertRaisesRegex(RuntimeError, "attachment index"):
+            self.complete()
+        self.attachments[0]["sha256"] = h.digest(b"redacted records")
+        self.documents[0]["body"] = "edited"
+        with self.assertRaisesRegex(RuntimeError, "document content"):
+            self.complete()
+        self.assertEqual(self.patch_count, 0)
+
+    def test_supplement_uses_same_issue_and_verified_native_objects(self):
+        folder = self.root / "asset-supplement/publication"
+        folder.mkdir(parents=True)
+        asset = {"id": "asset", "sha256": h.digest(b"asset")}
+        document = {"key": "assets-product-01", "body": "File manifest"}
+        saved = {"issueId": "other", "attachments": [asset],
+                 "documents": [{"key": document["key"], "body_sha256": h.digest(document["body"].encode())}]}
+        h.save_json(folder / "verified-publication.json", saved)
+        with self.assertRaisesRegex(RuntimeError, "different archive"):
+            self.complete()
+        (folder / "verified-publication.json").unlink()
+        saved["issueId"] = "archive"
+        h.save_json(folder / "verified-publication.json", saved)
+        self.attachments.append(asset)
+        self.documents.append(document)
+        result = self.complete()
+        self.assertEqual((result["attachments"], result["documents"]), (2, 2))
+
+    def test_changed_workflow_ownership_relations_and_interactions_refuse_completion(self):
+        base = dict(self.issue)
+        overrides = [{"assigneeAgentId": "agent"}, {"assigneeUserId": "user"},
+                     {"visibility": "open"}, {"executionRunId": "run"}, {"checkoutRunId": "run"},
+                     {"status": "in_progress"}, {"parentId": "parent"}, {"blocks": ["dependent"]},
+                     {"blockedBy": ["blocker"]}, {"scheduledRetry": {"id": "retry"}},
+                     {"reviewAttention": {"state": "pending"}}]
+        for override in overrides:
+            with self.subTest(override=override):
+                self.issue = dict(base, **override)
+                with self.assertRaises(RuntimeError):
+                    self.complete()
+        self.issue = base
+        for field in ("interactions", "live_runs"):
+            setattr(self, field, [{"id": "active"}])
+            with self.assertRaisesRegex(RuntimeError, "interactions or live runs"):
+                self.complete()
+            setattr(self, field, [])
+        self.assertEqual(self.patch_count, 0)
+
+    def test_lost_response_reconciles_original_done_issue_without_replaying_patch(self):
+        self.lost_response = True
+        with self.assertRaises(TimeoutError):
+            self.complete()
+        self.assertTrue((self.receipts / "completion.pending.json").exists())
+        self.assertFalse((self.receipts / "completion.verified.json").exists())
+        self.assertEqual(self.complete()["status"], "done")
+        self.assertEqual(self.patch_count, 1)
+
+    def test_unresolved_pending_update_is_not_replayed(self):
+        h.save_json(self.receipts / "completion.pending.json", {"issueId": "archive", "status": "done"})
+        with self.assertRaisesRegex(RuntimeError, "Unreconciled archive completion"):
+            self.complete()
+        self.assertEqual(self.patch_count, 0)
+
+    def test_failed_status_or_wake_readback_never_claims_completion(self):
+        self.keep_backlog = True
+        with self.assertRaisesRegex(RuntimeError, "did not persist"):
+            self.complete()
+        self.assertFalse((self.receipts / "completion.verified.json").exists())
+        (self.receipts / "completion.pending.json").unlink()
+        self.keep_backlog = False
+        self.wake_after_patch = True
+        with self.assertRaisesRegex(RuntimeError, "wake history"):
+            self.complete()
+        self.assertFalse((self.receipts / "completion.verified.json").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

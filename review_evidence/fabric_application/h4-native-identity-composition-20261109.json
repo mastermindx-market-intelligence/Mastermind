@@ -1,0 +1,93 @@
+{
+  "schema": "mastermind.h4_native_identity_composition_evidence.v1",
+  "recorded_at": "2026-11-09T11:11:20.719261+00:00",
+  "pull_request": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2368",
+  "hosted_failure": {
+    "run_id": 42599117991,
+    "job_id": 129102044094,
+    "head": "b7cc6ae2a81d0cbbb66077596b2b72eddc0fcb7a",
+    "tested_merge_commit": "9f018f251dd792e7f2e6f3af8a2963c9313e38d6",
+    "tested_tree": "ef3a6acccf73d3af31eb9709ed4eb3656445ab0f",
+    "failure_count": 2,
+    "cause": "Protected manual-pool enum addition moved the unchanged reason-limit tokens and invalidated their full-source review commitment."
+  },
+  "requalification": {
+    "receipt_sha256": "8488005354fc4a4babf46ffeff2a1e18922fad293d4ff583132bd8b06665a0a7",
+    "data": {
+      "schema": "h4.native_identity_review_requalification.v1",
+      "recorded_at": "2026-11-09T11:10:17.928717+00:00",
+      "head_before": "b7cc6ae2a81d0cbbb66077596b2b72eddc0fcb7a",
+      "protected_base": "494d095813dad415938800fa0e4d2719497738fa",
+      "protected_enum_commit": "6696153d323e3ab712884fa60cdf7bda6dbe5ce6",
+      "composed_tree_before_repair": "ef3a6acccf73d3af31eb9709ed4eb3656445ab0f",
+      "matches_hosted_merge": "9f018f251dd792e7f2e6f3af8a2963c9313e38d6",
+      "source_path": "integrations/hermes_attended_fabric/native.py",
+      "source_sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
+      "entire_ast_unchanged_except_manual_pools": true,
+      "reviewed_spans": [
+        [
+          57,
+          65,
+          68,
+          "int",
+          "500"
+        ],
+        [
+          280,
+          60,
+          63,
+          "int",
+          "500"
+        ]
+      ],
+      "modified_files": {
+        "tests/executive_fabric_release_identity_review.py": "f88d7ec9fb196f1a37f7e314c6b0eeff8d6634fece03d98a7b5e7b4bf6957136",
+        "tests/test_hermes_fabric_native_identity_review.py": "bde79bbf523ac2e9f2d870edd97af814f81ebe03165808b92b169f14dbd026ee"
+      },
+      "generic_identity_scanner_modified": false,
+      "historical_evidence_modified": false
+    }
+  },
+  "composition": {
+    "receipt_sha256": "5a0ef636a06f90b594d9d1ede8706170272fa719ff8b804a0f483d70e9969885",
+    "head_before": "b7cc6ae2a81d0cbbb66077596b2b72eddc0fcb7a",
+    "protected_base": "494d095813dad415938800fa0e4d2719497738fa",
+    "composed_tree_matches_hosted_failure": true,
+    "prior_completed_merge_bookkeeping_reconciled": true,
+    "production_source_changes_beyond_protected_base": false
+  },
+  "focused_qualification": {
+    "cases": 4,
+    "receipt_sha256": "66229f9d3c17880d502e8c82454f1e17016b199501211f0b665e9f34af419f11",
+    "data": {
+      "schema": "h4.native_identity_focused_qualification.v1",
+      "started_at": "2026-11-09T11:10:35.412373+00:00",
+      "targets": [
+        "tests/test_hermes_fabric_native_identity_review.py",
+        "tests/test_executive_reviewed_site_identity_tokens.py::test_reviewed_python_site_is_whole_token_or_exact_reviewed_docstring[integrations/hermes_attended_fabric/native.py]",
+        "tests/test_executive_reviewed_site_identity_tokens.py::test_masking_a_reviewed_python_file_keeps_it_tokenizable[integrations/hermes_attended_fabric/native.py]"
+      ],
+      "source_sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
+      "returncode": 0,
+      "completed_at": "2026-11-09T11:10:40.327270+00:00",
+      "log_sha256": "c4b808d34f4db00b333696dec1f3a43a2887d8bfe0cb7af07a3cb98ff43a7830",
+      "xml_sha256": "a4b90384e59f2d3eb6d0149cba0efe6a7b9fea0ea0d21b37afdc1b5ebd79450f"
+    }
+  },
+  "protections_retained": [
+    "whole-source SHA binding",
+    "complete typed integer token matching",
+    "source drift rejection",
+    "schema limit mutation rejection",
+    "runtime limit mutation rejection",
+    "new identity token rejection",
+    "generic scanner and token validator unchanged"
+  ],
+  "release": {
+    "original_auto_request_preserved": true,
+    "new_auto_request_performed": false,
+    "hosted_successor_qualification_required": true,
+    "production_selection_performed": false,
+    "acceptance_claimed": false
+  }
+}
