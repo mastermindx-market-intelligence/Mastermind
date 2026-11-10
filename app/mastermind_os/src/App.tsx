@@ -149,6 +149,7 @@ import { SessionEstate } from "./session-estate/SessionEstate";
 import { ResourcesSystemsPanel } from "./resources/ResourcesSystemsPanel";
 import { ResourceCapacityRead } from "./resources/ResourceCapacityRead";
 import { ModelConfigurationRead } from "./resources/ModelConfigurationRead";
+import { CapacityFabricRead } from "./resources/CapacityFabricRead";
 import { selectedCurrentCapacityAttempt } from "./resource-capacity-selection";
 import { SupervisionLedger } from "./supervision/SupervisionLedger";
 import { SupervisionTrace } from "./supervision/SupervisionTrace";
@@ -5847,14 +5848,19 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <p className="muted">{locale === "zh-CN" ? "所选项目" : "Selected project"} · {currentProjectCards[0].title || projectWorkRef}</p>
         <button type="button" onClick={() => {if (!resourcesOwnerCurrent()) return;setProjectTab("Conversation");setActive("Projects");}}>{locale === "zh-CN" ? "返回项目" : "Back to project"}</button>
       </div> : null}
-      <div ref={resourcesView}><ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale} headingLevel={1}
+      <div ref={resourcesView}>
+      <h1 tabIndex={-1}>{locale === "zh-CN" ? "资源与系统" : "Resources & systems"}</h1>
+      <CapacityFabricRead key={`capacity:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
+      <details className="reason-details" open={Boolean(projectWorkRef && resourcesOwnerCurrent())}><summary>{locale === "zh-CN" ? "系统与工作量证据" : "Systems & workload evidence"}</summary>
+      <ResourcesSystemsPanel controlRoom={currentControlRoom} work={workState} locale={locale} headingLevel={2}
         onOpenWork={root => {if (!resourcesCanOpenWork(root) || !selection) return;
           pendingResourcesFocus.current={kind:"work",root:selection.rootJobId,auth:authRevision,host:resourcesHost,epoch:resourcesHost?.invalidationGeneration?.()};
           setResourcesWorkOrigin({auth:authRevision,workRef:selection.workRef,rootJobId:selection.rootJobId});
           setProjectTab("Work");setActive("Projects");}}
         canOpenWork={resourcesCanOpenWork}
-        onReviewSources={() => setActive("Sources")}/></div>
-      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/>
+        onReviewSources={() => setActive("Sources")}/></details></div>
+      <details className="reason-details"><summary>{locale === "zh-CN" ? "模型与路由配置" : "Models & routing configuration"}</summary>
+      <ModelConfigurationRead key={`models:${authRevision}`} host={window.MastermindMissionHost} locale={locale}/></details>
       <details className="reason-details"><summary>{locale === "zh-CN" ? "原始容量凭据与运行记录" : "Original capacity receipts and run records"}</summary>
       <ResourceCapacityRead host={retainedResultHost} locale={locale}
         selection={selectedCurrentCapacityAttempt(office.projection, selection,
