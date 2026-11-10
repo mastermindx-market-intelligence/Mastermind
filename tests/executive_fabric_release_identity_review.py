@@ -727,7 +727,7 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # lines above the handler; the same four reviewed denial operands are
 # byte-identical and shift by four more lines.
 # Estate composition self-check: unchanged existing guarded statements; no new exemptions.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '19e893ccdae506b958f13690acd62c98aab45f5b1d4025ab6fdb6a476e2f24f7', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.

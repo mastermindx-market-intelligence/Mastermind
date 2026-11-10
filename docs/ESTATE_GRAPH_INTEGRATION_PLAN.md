@@ -46,8 +46,8 @@ Preserve Mastermind Draft #1910 at `805a5a77a992b89fd06b9e52a474aa29efaf11e1`, i
 The census and chosen ownership model are recorded in [ESTATE_GRAPH_ARCHITECTURE.md](ESTATE_GRAPH_ARCHITECTURE.md). Three existing graphs are composed: Paperclip business relationships, Agent OS/GitHub project knowledge, and Executive/native execution lineage. No new control plane is introduced.
 
 Published source:
-- Primary candidate [#2424](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2424) builds on `b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2`, preserving the protected pin, #2338, company/shared Team composition, long-horizon context, awaited original return and remote initialized-planner custody.
-- #2415 `67e776064b4dc465b81e494c9d3ec70a1eb3e75c`: immutable Teamlink identity, actual native prewrite reservation and awaited post-seal return.
+- Primary candidate [#2424](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2424) builds on `995ef2e812149ee3aab51472146ddee52888128f`, preserving the protected pin, #2338, company/shared Team composition, long-horizon context, awaited original return and remote initialized-planner custody.
+- #2415 `3283669eefec8e0e5cf68b2fb11e11139fbefe8d`: immutable Teamlink identity, actual native prewrite reservation, awaited post-seal return, full original native observation and explicit governed-execution refusal.
 - #2421 `24c086c6d6933d3298b982051f055ef41b9a4220`: bounded company graph, independently recomputed frontend, optional bounded Hermes host context and actual native read-only projection.
 - #2375 `336062e39625b4231553fd725af01931fa5df87c` is composed in this change with its existing T3/Hermes long-horizon parser and hooks; 490 combined cases and 90 subtests pass.
 
@@ -59,12 +59,16 @@ Qualified in this candidate:
 - Legacy placement helper guards: WAIT admits no placement, request/spec splicing refuses, and explicit route/policy/quota/branch drift cannot reconcile as the original command. This helper is not promoted into a second production lifecycle.
 - Four existing source-identity entries were reconciled by unchanged function/test evidence with zero new exemptions. The Rust diagnostic pin was already stale in the earlier composed base; the protected diagnostic test bytes remain identical.
 
+- Nested Hermes selected-child capture and terminal-return closure retain original root, actual immediate coordinator, admitted plan and canonical seal. Both real Unix-service depths now complete and reconcile the original command in the owned M2 source checkout; 68 affected service/reducer cases pass. Missing/spliced coordinator evidence and changed reservations refuse; historical sealed work/review remains readable after repair.
+- The real Company workspace build now passes the shared closed14 release manifest. All prior asset profiles remain valid; 757 asset/static/publication cases pass, including complete 9/11/12/13-to-14 inert publication transitions. This repairs the exact hosted frontend packaging failure after 7,414 frontend cases passed.
+- Native observation/recovery and the explicit governed-execution refusal are composed. The full mixed supervisor run passed 431 tests and 112 subtests; 50 availability and claim-release cases passed. No profile or installed runtime was activated.
+
 Current source work:
-- Nested Hermes selected-child capture/qualification retains the original root and actual immediate coordinator, using current admitted plans and existing claim-time checks. Complete the actual service and interruption/refusal qualification in the owned M2 checkout.
-- Governed native T3 launch/acceptance lacks an owner-enforced scope and descendant-quiescence contract. Preserve original observation/recovery; integrate the qualified fail-closed correction and use the incumbent selected-child/Control/workspace/WorkerBroker path for admitted leaves.
+- Complete nested current-target discovery through the existing list, resolve and observation owners, preserving shared snapshot budgets and actual currentness.
+- Governed native T3 launch/acceptance still needs owner-enforced scope and descendant settlement. Use the incumbent selected-child/Control/workspace/WorkerBroker path for admitted leaves.
 - Authoritative requester/consumption: current COO API principal and actual native T3 thread are distinct identities. Bind the real admitted requester in the existing transaction; keep explicit requester consumption separate from delivery, native-parent consumption and product acceptance. Arbitrary Paperclip teammates cannot be mapped to the selected Secretary/Meta family by caller strings.
-- Trace the native fork's server-owned invocation context before implementing a T3 origin producer. Both observed fork identities are pull-only; no source push or identity switch is authorized by that observation.
-- Persist the source frontier into the existing Macro Agent OS dated handoff without rewriting historical waves or displacing the armed skill-rollout carrier.
+- Repair the native fork's typed experimental-tool binding using official protocol evidence, then join only actual server-owned turn/thread/call context to a trusted existing Control origin enrollment. T3 already requests experimentalApi, while its stable generated schema omits dynamicTools. Both observed fork identities are pull-only; no source push or identity switch is authorized by that observation.
+- Macro #10946 at `9888c0598238276e9e16bbc42e513c87da6347ac` retains a validated owner/requester knowledge pointer and the original parent plan. At a real session boundary, persist the latest exact frontier into the existing dated handoff without rewriting historical waves or displacing the armed skill-rollout carrier.
 
 Stable task assessment: EG0 census and EG1 owner/identity contract have concrete source evidence; EG2/EG6 have qualified company/context/UI slices. EG3 hierarchy, EG4 actual return/consumption, EG5 live continuity, EG7 integrated installed proof and EG8 rollout remain in progress. None of these editorial assessments admits Jobs or marks the parent mission accepted.
 

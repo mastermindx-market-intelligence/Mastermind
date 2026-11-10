@@ -1,4 +1,4 @@
-"""Exact licensed12 and historical client output through the closed asset owners.
+"""Exact Company14, licensed12 and historical output through closed asset owners.
 
 All files, manifests and HTTP applications here are disposable test fixtures.
 No installed path, public edge, service configuration or provider is touched.
@@ -23,6 +23,7 @@ CLIENT = NOIR + ["assets/SourceMarkdown-rich.js", "assets/SourceMarkdown-rich.cs
     "third-party/deepseek-client-dependency-NOTICES.txt", "third-party/deepseek-harness-LICENSE.txt"]
 LICENSED = NOIR + CLIENT[-2:]
 PRIVATE = LICENSED + ["assets/private-entry-image.jpg"]
+COMPANY = PRIVATE + ["assets/CompanyWorkspace-team.js", "assets/CompanyWorkspace-team.css"]
 
 
 def make_dist(root: Path, names=CLIENT):
@@ -35,8 +36,8 @@ def make_dist(root: Path, names=CLIENT):
     return dist
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT])
-def test_five_exact_supported_layouts_and_mime_sets(names):
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT, COMPANY])
+def test_six_exact_supported_layouts_and_mime_sets(names):
     mimes = os_asset_mimes(names)
     assert set(mimes) == set(names)
     assert mimes["index.html"] == "text/html; charset=utf-8"
@@ -45,6 +46,10 @@ def test_five_exact_supported_layouts_and_mime_sets(names):
     if names == PRIVATE:
         assert mimes["assets/private-entry-image.jpg"] == "image/jpeg"
         assert mimes["third-party/deepseek-harness-LICENSE.txt"] == "text/plain; charset=utf-8"
+    if names == COMPANY:
+        assert mimes["assets/CompanyWorkspace-team.js"] == "text/javascript; charset=utf-8"
+        assert mimes["assets/CompanyWorkspace-team.css"] == "text/css; charset=utf-8"
+        assert mimes["assets/private-entry-image.jpg"] == "image/jpeg"
     if names == CLIENT:
         assert mimes["assets/SourceMarkdown-rich.js"] == "text/javascript; charset=utf-8"
         assert mimes["assets/SourceMarkdown-rich.css"] == "text/css; charset=utf-8"
@@ -87,7 +92,7 @@ def test_partial_extra_duplicate_or_malformed_layout_refuses(names):
         os_asset_mimes(names)
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT])
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, PRIVATE, CLIENT, COMPANY])
 def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     dist = make_dist(tmp_path, names)
     manifest = build_os_asset_manifest(tmp_path)
@@ -142,7 +147,7 @@ def test_real_manifest_retains_closed_topology_reference_and_byte_fences(tmp_pat
         build_os_asset_manifest(tmp_path)
 
 
-@pytest.mark.parametrize("names", [CLIENT, PRIVATE])
+@pytest.mark.parametrize("names", [CLIENT, PRIVATE, COMPANY])
 def test_captured_release_snapshot_uses_the_same_closed_owner(tmp_path, names):
     from ops.executive_os.os_release_assets import _capture_dist
     dist = make_dist(tmp_path, names)
@@ -154,7 +159,7 @@ def test_captured_release_snapshot_uses_the_same_closed_owner(tmp_path, names):
         "assets", "licenses", "licenses/fonts", "third-party"}
 
 
-@pytest.mark.parametrize("names", [CLIENT, PRIVATE])
+@pytest.mark.parametrize("names", [CLIENT, PRIVATE, COMPANY])
 def test_static_http_owner_serves_new_bytes_without_expanding_dynamic_routes(tmp_path, names):
     import httpx
     from integrations.executive_mcp.server import OsStaticApp
@@ -232,6 +237,61 @@ def test_private_jpeg_mime_cannot_be_relabelled(tmp_path):
     manifest = build_os_asset_manifest(tmp_path)
     target = next(row for row in manifest["files"] if row["path"] == PRIVATE[-1])
     target["mime"] = "text/javascript; charset=utf-8"
+    with pytest.raises(ValueError):
+        asset_routes(manifest)
+    assets = {("/os/" if row["path"] == "index.html" else "/os/" + row["path"]):
+              ((dist / row["path"]).read_bytes(), row["mime"]) for row in manifest["files"]}
+    with pytest.raises(ValueError):
+        OsStaticApp(assets)
+
+
+@pytest.mark.parametrize("removed", COMPANY)
+def test_company_profile_requires_every_member(removed):
+    with pytest.raises(ValueError, match="fixed OS asset set required"):
+        os_asset_mimes([name for name in COMPANY if name != removed])
+
+
+@pytest.mark.parametrize("replacement", [
+    "assets/OtherWorkspace-team.js",
+    "assets/CompanyWorkspace-team.js.map",
+    "assets/CompanyWorkspace-team.js?x=1",
+    "assets/CompanyWorkspace-team.js#fragment",
+    "assets/../CompanyWorkspace-team.js",
+    "assets/CompanyWorkspace-team%2ejs",
+    "assets/CompanyWorkspace-.js",
+    "assets/CompanyWorkspace-team.js/extra",
+    "/assets/CompanyWorkspace-team.js",
+    None,
+])
+def test_same_count_company_splices_refuse(replacement):
+    altered = list(COMPANY)
+    altered[-2] = replacement
+    with pytest.raises(ValueError, match="fixed OS asset set required"):
+        os_asset_mimes(altered)
+
+
+@pytest.mark.parametrize("names", [
+    COMPANY + [COMPANY[-1]],
+    COMPANY + ["assets/CompanyWorkspace-second.js"],
+    COMPANY + ["assets/SourceMarkdown-rich.js"],
+    PRIVATE + [COMPANY[-2]],
+    LICENSED + COMPANY[-2:],
+    CLIENT + [PRIVATE[-1]],
+])
+def test_company_partial_duplicate_extra_and_rich_hybrids_refuse(names):
+    with pytest.raises(ValueError, match="fixed OS asset set required"):
+        os_asset_mimes(names)
+
+
+@pytest.mark.parametrize("name,wrong_mime", [
+    ("assets/CompanyWorkspace-team.js", "text/css; charset=utf-8"),
+    ("assets/CompanyWorkspace-team.css", "text/javascript; charset=utf-8"),
+])
+def test_company_chunk_mime_cannot_be_relabelled(tmp_path, name, wrong_mime):
+    from integrations.executive_mcp.server import OsStaticApp
+    dist = make_dist(tmp_path, COMPANY)
+    manifest = build_os_asset_manifest(tmp_path)
+    next(row for row in manifest["files"] if row["path"] == name)["mime"] = wrong_mime
     with pytest.raises(ValueError):
         asset_routes(manifest)
     assets = {("/os/" if row["path"] == "index.html" else "/os/" + row["path"]):

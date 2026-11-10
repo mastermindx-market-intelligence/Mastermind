@@ -2,7 +2,7 @@
 
 Status: source implementation contract for the Chairman's current estate integration commission. This document does not grant runtime admission, activate profiles, release held carriers, or claim installed end-to-end acceptance.
 
-Operation: `estate-graph-integration-20261109-c4`. Organizational continuity: `WS:ORCHESTRATOR-PROJECT-CONTINUITY`. Governing Mastermind source: `c065e56b4cb7c4487e51249795ca6ebf010e6ffa`. Census and qualification through 2026-11-10 08:12 UTC; observations below retain their actual observation scope rather than implying continuous monitoring.
+Operation: `estate-graph-integration-20261109-c4`. Organizational continuity: `WS:ORCHESTRATOR-PROJECT-CONTINUITY`. Governing Mastermind source: `c065e56b4cb7c4487e51249795ca6ebf010e6ffa`. Census and qualification through 2026-11-10 09:40 UTC; observations below retain their actual observation scope rather than implying continuous monitoring.
 
 ## 1. Architectural decision
 
@@ -55,7 +55,7 @@ Every cross-surface view must retain the native key and the owner that supplied 
 
 The legacy `admit_child_execution_request` path in the #2338 candidate creates a separate queued root and records root_ref/immediate_parent_run_ref as provenance. Its caller-supplied scope digest and budget reference do not resolve an inherited grant. Its queued-count limit is not lifetime ancestor accounting. Preserve its legacy meaning and do not present it as recursive admitted hierarchy.
 
-The selected Hermes child path currently qualifies direct children of the root. Extending it to nested coordinators requires one exact admitted coordinator plan, a separately retained original root and validation of the immediate parent and expected child. Deleting its root-parent check would remove the only proof without replacing it.
+The selected Hermes child path now qualifies the actual admitted immediate coordinator while retaining the original mission root. One bounded read derives that coordinator from the first selected Job, then requires every selected child to share its root, admitted plan Attempt/digest and current revision. Root-direct command bytes remain unchanged. Nested work and repair use the existing reservation, hierarchy and claim-time owners, including the full root-plus-16-descendant boundary; no caller-supplied coordinator or second admission route is introduced.
 
 ## 4. Discovery and useful context
 
@@ -94,13 +94,17 @@ The native return owner reserves the frozen original return in the existing Runt
 
 The real supervisor now awaits that owner after terminal seal and durable readback. A synchronous hook inside an active event loop sends nothing, schedules nothing and persists no false refusal. This is not a detached background continuation.
 
+Actual nested service qualification found that a canonically completed child was still reported UNVERIFIED because the shared terminal reducer assumed a direct-root child. The repaired canonical completion snapshot captures and validates the immediate coordinator on its same Runtime connection, and the pure reducer consumes that retained identity. Both supported nested service depths now return COMPLETED with the original root, Job, Attempt, command and sealed result. Historical work and rejecting-review revisions remain readable after real repair; reporting that completion does not accept the obsolete revision.
+
 The original-return reader is now composed through the existing bounded Runtime observation, authenticated Workspace/A1 route, web/native host adapters and both retained-result consumers. The exact current work/root/Job/Attempt/result-digest selection precedes the read. Only the three deterministic original return events are read under the same row, byte, statement and VM budgets; no native binding is exposed. Physical-close, source/currentness, permission and host-generation checks precede release. The actual frontend passed 334 tests and its production build; the native Rust owner compiled and its two focused return tests passed. A read neither sends nor consumes nor accepts a return.
 
 Production installation still needs a valid current original target. The enrolled Secretary/Meta session source is not an arbitrary Paperclip teammate directory. Caller-provided teammate, project or conversation strings cannot authorize that join. The selected-child ingress authenticates its COO API principal, but currently does not authenticate an originating T3 project/thread/run. An outgoing T3 MCP client session identifies the API client, not the originating development thread. The native requester producer and explicit API-principal consumption therefore remain distinct source work, with no generic Secretary shortcut.
 
-T3 already has a production wrapper for provider-only process identity, native presence and reattachment. Those are reused. Exact fork-source review found that the current launch defaults do not enforce a Job read-only scope or prove descendant quiescence. A READ/RESEARCH label and valid text result cannot attest to that custody. Native observation/readback is useful, but governed native launch/acceptance must remain unavailable until the actual owner enforces scope and settlement. Coding leaves should use the existing selected-child → Control service → admitted workspace → mixed WorkerBroker path, while retaining T3 as their interactive origin.
+T3 already has a production wrapper for provider-only process identity, native presence and reattachment. Those are reused. Exact fork-source review found that the current launch defaults do not enforce a Job read-only scope or prove descendant quiescence. A READ/RESEARCH label and valid text result cannot attest to that custody. Native observation/readback is useful, and the composed owner now explicitly exposes governed execution as unavailable until the actual owner enforces scope and settlement. The actual boundary refuses fresh launch, finish and direct native terminalization before I/O or acceptance, including READ/RESEARCH. A refused fresh start fails the original Job/Attempt, releases its worker quota and leaves no active or unsettled run. Original observation, cancellation reconciliation and cold recovery remain usable. Full text is retained with exact thread/run/item/project and cursor/revision evidence; no shell exit or writer-revocation receipt is fabricated. Coding leaves should use the existing selected-child → Control service → admitted workspace → mixed WorkerBroker path, while retaining T3 as their interactive origin.
 
 The legacy child-request composition helper is not promoted into a second dispatch lifecycle: its separate admission Job does not automatically settle when its placement Job finishes. Its concrete guard defects are repaired: WAIT creates no placement or ready handle; a spliced request refuses before admission; a changed route/registry/quota/policy/cap/explicit branch cannot silently reuse an original command. The 27 helper/E2E cases are included in the 549-case composed run. Native full-result, workspace, artifact and validation evidence must still come from their actual owners. Never synthesize PID, shell exit code, successful validation or a missing envelope from thread completion.
+
+The exact owner/API census is in [T3_NATIVE_REQUESTER_BOUNDARY.md](T3_NATIVE_REQUESTER_BOUNDARY.md). Official Codex source at `086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a` declares `thread/start.dynamicTools` as experimental; the stable generated schema omits experimental fields. The inspected T3 fork at `924ad5d194287441f825b8f2f6054e9539808534` already initializes with `experimentalApi: true`. Therefore the missing typed field is a binding/generation gap, not evidence that the runtime cannot advertise a tool. Source work must use the actual provider callback's native turn/thread/call context and an existing explicitly enrolled Control connection. Ordinary metadata and an API principal do not prove native origin. Source support, trusted enrollment and installed callback qualification remain separate.
 
 Recovery must retain one original operation, owner and target. A new chat, reconnect or coordinator restart does not erase an unknown write, create a new root, reset budgets or replay a refused effect.
 
@@ -115,6 +119,8 @@ The existing Team route now has three explicit views:
 One App branch owns this shell. Each consumer opens on first selection and retains its state/drafts across tab changes. Inactive panels are hidden and inert; keyboard arrows/Home/End are supported, and authentication-generation changes reset the scoped consumers. Code navigation and exact T3 attempt IDs remain intact.
 
 A selected runtime profile is not silently mapped to a generic Meta-CEO conversation. Company-source failure does not block independent runtime or conversation views. Existing theme tokens and 44-pixel controls are reused; no parallel palette is introduced.
+
+Hosted qualification passed all 7,414 frontend cases (12 incumbent skips), then exposed a release-layout gap: the real app archive adds CompanyWorkspace JS/CSS chunks to the existing private-entry profile. The shared closed asset owner now admits exactly that complete 14-file profile, preserving all prior profiles and refusing partial pairs, other feature chunks, source maps and changed MIME. A fresh exact-source app archive builds with the same files and passes the real manifest builder; 757 asset, static-route, capture and two-phase publication cases pass. The source repair includes explicit traversable permissions in the incumbent publication fixture, matching its existing release-custody requirement.
 
 The Chrome visual check was blocked by another extension UI. The temporary preview server was stopped. Component/route/build proof is available; no screenshot or visual acceptance is claimed.
 
@@ -131,12 +137,18 @@ The Chrome visual check was blocked by another extension UI. The temporary previ
 | Original-return consumer | 334 frontend cases, complete TypeScript/Vite build and two native Rust tests; passive authenticated read only |
 | Codex turn custody and legacy helper guards | 522 isolated Codex cases; 549 composed Codex/placement cases; no native activation |
 | Long-horizon source composition | 490 combined cases and 90 subtests pass after exact CLI assertion and unchanged-AST source-pin reconciliation |
+| Native T3 observation and governed-execution refusal | 431 composed tests and 112 subtests pass; 50 follow-up availability/quota-release cases pass |
+| Nested selected-child and terminal return | 191 isolated capture/qualification cases pass with five incumbent root-ownership skips; 137 isolated reducer/bounded-read cases pass; 68 actual M2 service/reducer cases pass including both nested depths |
+| Nested source-identity reconciliation | 477 affected identity cases pass; four existing Workspace token sites retain the same guarded function AST |
+| Company release package | Exact-source archive builds and real closed14 manifest passes; 757 release/static/publication cases pass |
 
 Counts describe individual qualification runs and must not be summed into a unique estate-wide total. Fixtures, installed read-only APIs, native model execution, production acceptance and browser design review are different proof layers.
 
 Source carriers are [#2415](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2415) for Teamlink/original return and [#2421](https://github.com/mastermindx-market-intelligence/Mastermind/pull/2421) for company connections/context. The primary composition is `sol/estate-graph-integration-20261109-c4`, preserving source ancestry from the existing #2338 and #2395 carriers. The long-horizon donor is [#2375 at 336062e3](https://github.com/mastermindx-market-intelligence/Mastermind/tree/336062e39625b4231553fd725af01931fa5df87c).
 
 Draft #2338 remains its original integration/release carrier. #2403 at `52e9d07a4652623f26b0f7625765368c3c151f38` is Ready/open with its credential/hygiene source qualified but unapplied. Its earlier CodeQL alert hold was resolved by its authorized owner; do not repeat that old blocker. Protected CI/merge, fresh installed-source custody and safe native cutover remain. #2404 source-pin repair and the original MAS-2 retry belong to their existing operations. The dirty/live Hermes checkout is protected.
+
+The organizational knowledge pointer is [Macro #10946](https://github.com/mastermindx-market-intelligence/macro/pull/10946), source `9888c0598238276e9e16bbc42e513c87da6347ac`. Its exact discovery passed the canonical Agent OS validator with zero errors/warnings and was read back. It links the owner/requester distinctions and original parent plan; it does not replace a dated execution handoff or change the armed graph-skill carrier #10920.
 
 Draft #1910 and its refused Fabric review remain closed to replay. The prior Paperclip company-skill import 403 is not retried through another route. No source integration releases those effects.
 

@@ -78,10 +78,10 @@ SELECTED_CHILD_SOURCE_KEYS = frozenset({
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
-def selected_child_command_id(root_job_id, job_id, attempt_ordinal):
+def selected_child_command_id(parent_job_id, job_id, attempt_ordinal):
     """The incumbent deterministic coo-cycle dispatch command for one child."""
 
-    return f"coo-cycle:{root_job_id}:dispatch:{job_id}:attempt:{attempt_ordinal}"
+    return f"coo-cycle:{parent_job_id}:dispatch:{job_id}:attempt:{attempt_ordinal}"
 
 
 def selected_child_material(work_ref, children):
@@ -140,15 +140,16 @@ def validate_selected_child_target(raw):
     if type(children) is not list or not 1 <= len(children) <= MAX_SELECTED_CHILDREN:
         _refuse()
     commands = set()
+    coordinators = set()
     for child in children:
         if type(child) is not dict or set(child) != SELECTED_CHILD_KEYS:
             _refuse()
         if child["root_job_id"] != raw["root_job_id"]:
             _refuse()
-        if child["parent_job_id"] != child["root_job_id"]:
+        if (not _check_job_id(child["parent_job_id"]) or not _check_job_id(child["job_id"])
+                or child["job_id"] in {child["parent_job_id"], child["root_job_id"]}):
             _refuse()
-        if not _check_job_id(child["job_id"]):
-            _refuse()
+        coordinators.add(child["parent_job_id"])
         for key in ("plan_attempt_id", "plan_digest", "plan_step_id"):
             if type(child[key]) is not str or not 0 < len(child[key]) <= 128:
                 _refuse()
@@ -163,11 +164,13 @@ def validate_selected_child_target(raw):
         command = child["command_id"]
         if (type(command) is not str
                 or command != selected_child_command_id(
-                    child["root_job_id"], child["job_id"], child["attempt_ordinal"])):
+                    child["parent_job_id"], child["job_id"], child["attempt_ordinal"])):
             _refuse()
         if command in commands:
             _refuse()
         commands.add(command)
+    if len(coordinators) != 1:
+        _refuse()
     material = selected_child_material(raw["work_ref"], children)
     digest = raw["material_digest"]
     if type(digest) is not str or _HEX64.fullmatch(digest) is None:

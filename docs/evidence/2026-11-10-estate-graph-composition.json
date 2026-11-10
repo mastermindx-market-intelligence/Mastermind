@@ -1,7 +1,7 @@
 {
   "schema": "mastermind.estate_graph_composition_qualification.v1",
-  "source_parent": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
-  "candidate_code_tree": "568bfc20eaebf700708e04b4ddbe2f17ce5eb795",
+  "source_parent": "995ef2e812149ee3aab51472146ddee52888128f",
+  "candidate_code_tree": "2d11e02564c2862478525946d1e69c604cd61448",
   "governing_source": "c065e56b4cb7c4487e51249795ca6ebf010e6ffa",
   "qualification_scope": "COMPOSED_SOURCE_OWNERS_AND_DISPOSABLE_NATIVE_FIXTURES",
   "checks": [
@@ -49,6 +49,80 @@
       "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q --tb=short --junitxml=/tmp/estate-consumer-composed-20261110-c4.xml tests/test_workspace_execution_return_read.py tests/test_workspace_execution_return_http.py tests/test_workspace_result_service.py tests/test_session_bridge_native_return.py tests/test_execution_return_projection.py tests/test_execution_return_prewrite.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_hermes_fabric_native_identity_review.py tests/test_executive_fabric_release_identity_review.py",
       "junit_suite_seconds": 129.724,
       "process_seconds": 136.57
+    },
+    {
+      "scope": "native_observation_and_governed_refusal",
+      "source_tree": "a4b0ea1fa294d2909e573710e8dfb0682009bfcc",
+      "summary": "431 tests and 112 subtests passed; JUnit has 543 entries, zero failures/errors/skips.",
+      "junit_sha256": "47fba447daedf96a75ef5d8b83983e5bd5babeee3398515f02a30dbf48f75e16",
+      "junit_seconds": 93.766,
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=5 tests/test_t3_native_execution_fence.py tests/test_t3_native_terminal_supervisor.py tests/test_t3_native_composition.py tests/test_t3_execution_adapter.py tests/test_t3_adapter_durability.py tests/test_t3_native_client.py tests/test_execution_return_prewrite.py tests/test_mmos_admission_to_t3_native_e2e.py tests/test_executive_supervisor.py",
+      "scope_note": "Only source-pin test metadata changed during this run; native test inputs retained."
+    },
+    {
+      "scope": "native_governed_availability_and_claim_release",
+      "source_tree": "067c9df0775ad5e1604cb617b33b251749bf4270",
+      "summary": "50 passed, zero failures/errors/skips. Refused start releases original worker quota and retains no active/unsettled run.",
+      "junit_sha256": "c7daa3001bca21cf157fdd31f8a715e6ff045bb39002364c768cb37ac53f3351",
+      "junit_seconds": 13.363
+    },
+    {
+      "scope": "nested_selected_child_and_terminal_return",
+      "source_tree": "4bd5ebc2590976cb519c3dd6a8a37dbf841d4462",
+      "summary": "68 passed, zero failures/errors/skips, including both actual M2 Unix-service depths and canonical terminal reducers.",
+      "command": "cd '/Volumes/Mastermind/agent-workspaces/web/estate-graph-composition-20261109-c4' && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=/tmp/estate-graph-qa-python-20261110-c4:.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=3 --junitxml=/tmp/estate-nested-terminal-repair-20261110-c4.xml tests/test_hermes_nested_selected_child.py tests/test_executive_terminal_return.py tests/test_executive_terminal_return_capsule_v2.py",
+      "junit_sha256": "89dfc6b9fe887a064448d9e2e71409673db763bc9a1e7c8a38c916563c989bef",
+      "junit_seconds": 32.938,
+      "process_seconds": 35.63,
+      "qualification_environment": "Repository-declared mcp==1.28.1 installed into a task-private /tmp Python target; no global Python or installed runtime change."
+    },
+    {
+      "scope": "nested_source_identity",
+      "source_tree": "b9b1bb081228a4260952876bf6dd4b3bdb6b48fc",
+      "summary": "477 passed, zero failures/errors/skips; existing Workspace guard AST and all four token sites retained.",
+      "junit_seconds": 42.445
+    },
+    {
+      "scope": "company_release_asset_profile",
+      "source_tree": "2d11e02564c2862478525946d1e69c604cd61448",
+      "summary": "757 passed, zero failures/errors/skips, including manifest/capture/immutable HTTP/publication and old9/11/12/13 to closed14 transitions.",
+      "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=/tmp/estate-graph-qa-python-20261110-c4:.:tests python3 -m pytest -q -p anyio.pytest_plugin --tb=short --maxfail=3 --junitxml=/tmp/estate-company-assets-20261110-c4.xml tests/test_os_private_entry_release_profile.py tests/test_deepseek_os_asset_layout.py tests/test_os_public_edge_publication.py tests/test_executive_workspace_mount.py tests/test_os_public_edge.py tests/test_os_public_edge_transition.py tests/test_source_operation_public_edge.py",
+      "junit_sha256": "d94e3d96b9678abd4fc7a229595c6348246329512e6dce0066029277c093a707",
+      "junit_seconds": 161.779,
+      "process_seconds": 167.83
+    },
+    {
+      "scope": "exact_app_archive_release_manifest",
+      "app_source_commit": "995ef2e812149ee3aab51472146ddee52888128f",
+      "owner_source_tree": "2a2bc186a030949576d4587aa2a68ddaa02cd9bb",
+      "summary": "Fresh git archive of app/mastermind_os, locked npm ci --ignore-scripts, production build and real build_os_asset_manifest accepted exactly14 files; no production publication.",
+      "receipt_sha256": "11d0bea611d80374279e04c7d9aa218ea23012a66f8fbc7a39b1d044a84a0fd7",
+      "company_assets": [
+        {
+          "path": "assets/CompanyWorkspace-CaSsy2gR.css",
+          "bytes": 7215,
+          "sha256": "416e0f333761ce0dfdcfb417e2eb8b3e693287bbef5beae112cb9f40a3f9d434"
+        },
+        {
+          "path": "assets/CompanyWorkspace-HjWVDRhs.js",
+          "bytes": 44743,
+          "sha256": "29aa08d529168bbdb2f9c1b022c730bfb3d8421cc42b8a7ca592b7eb33f22cbe"
+        }
+      ]
+    },
+    {
+      "scope": "hosted_frontend_original_failure",
+      "pr": 2424,
+      "head": "995ef2e812149ee3aab51472146ddee52888128f",
+      "merge_commit": "dd7680c0f27fb5509b8f04b2c3034816edca40a7",
+      "run_id": 42787466409,
+      "job_id": 129732196403,
+      "summary": "Typecheck and all456 frontend files passed:7414 tests passed,12 skipped. Exact app-only release archive build succeeded, then closed asset manifest refused Company chunks. Later browser and artifact steps did not run.",
+      "first_failure": "ValueError: fixed OS asset set required",
+      "failed_step": "Build exact app-only release archive",
+      "runner": "Ubuntu24.04.5, Node22.23.3, npm10.9.9",
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42787466409/job/129732196403",
+      "repaired_by": "Existing closed asset owner, exact Company14 profile; no required check or release gate relaxed."
     }
   ],
   "original_custody_patch": {
@@ -124,7 +198,11 @@
     "Long-horizon T3 fixture assertions include the incumbent --log-level error suffix; original thread/run assertions are preserved.",
     "Workspace source guard retains exactly eight refusal tokens; the full control_room_action AST is unchanged from 7ff2a1ac and all eight sites move by five lines.",
     "Two long-horizon source-identity merge conflicts were history comments; exact source digest and sites agree.",
-    "Consumer composition initially failed five source-identity assertions: three stale file hashes and two moved token locations. Four affected records, including Codex, were self-checked with identical Python function ASTs and protected Rust diagnostic-test bytes; exactly sixteen existing tokens retained, zero new exemptions. Rust's prior complete-file hash was already stale at b8dbc93."
+    "Consumer composition initially failed five source-identity assertions: three stale file hashes and two moved token locations. Four affected records, including Codex, were self-checked with identical Python function ASTs and protected Rust diagnostic-test bytes; exactly sixteen existing tokens retained, zero new exemptions. Rust's prior complete-file hash was already stale at b8dbc93.",
+    "Actual nested Unix-service claims completed but terminal status returned UNVERIFIED at both depths. Canonical same-connection coordinator evidence and the existing nested identity projection repair the shared reducer; no seal, receipt or acceptance gate relaxed.",
+    "Nested Workspace complete-file pin updated to5039a1809a3844ff406b898447a75a2ded2c38a7a1273f0bba2ea0a4a346b4fa; _handle_project_instructions_frame AST and exactly four403 token sites remain unchanged from995.",
+    "Hosted exact archive found the Company's two lazy chunks absent from the closed asset topology. Added exactly the complete Company14 profile through the shared owner; no wildcard, caller MIME or new HTTP branch.",
+    "Existing old9/11/13-to12 publication fixture lacked the root directory's real dual-service traversal permission. It now uses the same explicit0755 fixture setup as the incumbent rich-client transition test; production custody checks unchanged."
   ],
   "installed_company_read": {
     "observed_at": "2026-11-10T07:22:22.132145Z",
@@ -207,6 +285,48 @@
       "patch_sha256": "aac15534009ecad85c03f99ef60b1929c4a5d0e73f132f4006d168180dc5407e",
       "files": 2,
       "isolated_tests": 27
+    },
+    "native_observation": {
+      "commit": "3283669eefec8e0e5cf68b2fb11e11139fbefe8d",
+      "base": "67e776064b4dc465b81e494c9d3ec70a1eb3e75c",
+      "patch_sha256": "557f7ba87f31f9d3e440696fd05377a1dcafc5486d2a7e2404277b774276bff3",
+      "files": 9
+    },
+    "native_availability": {
+      "base": "3283669eefec8e0e5cf68b2fb11e11139fbefe8d",
+      "patch_sha256": "7678d014c73fe0050d9e7eabaaa09b756a25d579b15120e12d146a45b6024f65",
+      "files": 3
+    },
+    "nested_selected_child": {
+      "base": "b8dbc93fff5f1e5c4fd68f01cc5005682e05bed2",
+      "patch_sha256": "98332af44ca10fc7a3b8a85a3e78df2c2f4324fdaa666a497d6f602020d82693",
+      "files": 8,
+      "isolated_passed": 191,
+      "incumbent_root_ownership_skips": 5,
+      "actual_service_state": "Qualified after separate terminal repair"
+    },
+    "nested_terminal_repair": {
+      "base": "995ef2e812149ee3aab51472146ddee52888128f plus frozen nested selected-child patch",
+      "patch_sha256": "a9deeecef2ed65418cf93b144056cb3fc8f12644b48f3d3cea998852ff24ed74",
+      "files": 3,
+      "isolated_passed": 137
     }
+  },
+  "source_merge_parent": "3283669eefec8e0e5cf68b2fb11e11139fbefe8d",
+  "organizational_knowledge": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "pr": 10946,
+    "commit": "9888c0598238276e9e16bbc42e513c87da6347ac",
+    "path": "agentos/discoveries/DSC-ESTATE-GRAPH-OWNER-AND-REQUESTER-CUSTODY.md",
+    "validation": "Canonical Agent OS validator:1 record,0errors,0warnings; exact readback.",
+    "sha256": "dee92a12667be8bfffad891e162267da44e8886fca09cbddabaf002d3573e074",
+    "prior_armed_carrier": 10920
+  },
+  "native_origin_design": {
+    "path": "docs/T3_NATIVE_REQUESTER_BOUNDARY.md",
+    "sha256": "5e99d7330d06e8f6ac5a94f6560967b81676ef595254fef28be4943b3694cab6",
+    "native_pin": "924ad5d194287441f825b8f2f6054e9539808534",
+    "official_codex_pin": "086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a",
+    "scope": "Official experimental dynamicTools support and actual T3 source initialization are proven; installed callback and Control native origin enrollment remain unqualified."
   }
 }

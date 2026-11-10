@@ -14,6 +14,7 @@ from typing import Any
 
 from control_plane.executive_delegation_identity import (
     ExecutiveDelegationIdentityError,
+    derive_coordinator_child_delegation_identity,
     derive_delegation_identity,
 )
 from control_plane.executive_runtime import (
@@ -67,7 +68,7 @@ class TerminalReviewFinding:
 
 @dataclasses.dataclass(frozen=True)
 class TerminalReturnCandidate:
-    """The complete, bounded pure projection of one terminal direct child."""
+    """The complete, bounded pure projection of one terminal orchestration Job."""
 
     job_id: str
     attempt_id: str
@@ -211,7 +212,13 @@ def reduce_terminal_return(
     if terminal is None or job.status is not terminal[0]:
         _refuse("NOT_APPLICABLE")
     try:
-        identity = derive_delegation_identity(job)
+        if job.parent_job_id not in {None, job.root_job_id}:
+            identity = derive_coordinator_child_delegation_identity(
+                job, material.coordinator_job)
+        else:
+            if material.coordinator_job is not None:
+                _refuse("IDENTITY_REFUSED")
+            identity = derive_delegation_identity(job)
     except ExecutiveDelegationIdentityError:
         _refuse("IDENTITY_REFUSED")
 

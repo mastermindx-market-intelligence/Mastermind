@@ -41,7 +41,7 @@ sudo '<qualified Executive Python>' -I -S -B \
 ```
 
 The resulting artifact contains only `app/mastermind_os/dist` and
-`build-receipt.json`. The incumbent asset validator enforces its closed three/nine/thirteen-file
+`build-receipt.json`. The incumbent asset validator enforces its closed 3/9/11/12/13/14-file
 layout, MIME set, `/os/` index references, hashes and budgets. The receipt binds
 the source commit/tree, lockfile/build configuration/helper hashes, public build
 input, non-root builder/tool metadata and asset manifest. Root-sealed paths,
@@ -177,8 +177,9 @@ adds no new policy approval gate.
 ## Rich client artifact profile
 
 The previous protected 11-file profile (Noir nine plus the two exact third-party
-notices) remains fully supported. Exact admitted profiles are 3, 9, 11, 12 and 13;
-only 12 adds the private-entry JPEG, only 13 adds the two SourceMarkdown lazy chunks, and publication index sizes
+notices) remains fully supported. Exact admitted profiles are 3, 9, 11, 12, 13 and 14;
+12 and 14 require the private-entry JPEG, only 13 adds the two SourceMarkdown
+lazy chunks, and only 14 adds the two CompanyWorkspace lazy chunks. Publication index sizes
 include one additional manifest entry each. Neither notices nor chunks are
 optional within their respective profiles.
 
@@ -203,7 +204,7 @@ still use the existing accepted release owner and all of its custody gates.
 ### Staged public-edge publication compatibility
 
 The original publisher's staged file index contains the manifest *plus* each admitted
-asset, so the five closed asset profiles have 4, 10, 12, 13 and 14 index entries.
+asset, so the six closed asset profiles have 4, 10, 12, 13, 14 and 15 index entries.
 `ops/executive_os/os_public_edge_publication.py` obtains the allowed index
 cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
 closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*
@@ -245,3 +246,27 @@ sealed ownership, ACL/link/special-file checks, import/compare rules and release
 holds remain binding. A disposable successful build is source evidence; actual
 production preparation still requires the exact qualified protected packaging
 generation and its supported explicit public inputs.
+
+
+## Company workspace artifact profile
+
+The closed14 profile extends the complete licensed private-entry12 profile with
+exactly one `assets/CompanyWorkspace-<hash>.js` and one
+`assets/CompanyWorkspace-<hash>.css`. Both chunks are required. Their hashes are
+independent. The index still directly names only its main JS and CSS; the existing
+lazy import loads the Company workspace. Removing both Company chunks yields
+the incumbent private-entry12 profile; partial pairs, other feature names,
+source maps, duplicate chunks, mismatched MIME types and the rich13/private-entry
+hybrid remain refused.
+
+The shared name/MIME and cardinality owner applies to the actual compiled
+manifest, captured release, immutable static HTTP application and original
+two-phase public-edge publication. Fourteen manifest files produce fifteen
+staged index entries, including the manifest itself. Inert publication cases
+cover old9/11/12/13 to new14 through PREPARED, CUTOVER_READY and FINAL with the
+same two configuration writes and removal of old-only asset routes.
+
+This source correction retains byte/hash, exact HTML-reference, directory,
+link, ACL, sealed custody, currentness and release gates. Its real compiled
+bundle check is packageability evidence; it neither publishes nor activates a
+production release.

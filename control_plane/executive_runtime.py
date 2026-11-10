@@ -2213,6 +2213,9 @@ class ValidatedRoleCompletion:
     role_result_digest: str
     execution_mode: str
     dialogue_source: ExecutiveDialogueSource | None
+    # Present only for a nested leaf whose original-root ancestry and admitted
+    # coordinator reservation were revalidated in this same Runtime snapshot.
+    coordinator_job: Job | None = None
 
 
 # The capability stays inside the trusted control-service composition. It is
@@ -11006,6 +11009,28 @@ def _validated_role_completion_snapshot(
         connection,
         root_job_id=job.root_job_id,
     )
+    coordinator_job = None
+    if (job.orchestration_role in {"work", "review", "repair"}
+            and job.parent_job_id not in {None, job.root_job_id}):
+        coordinator_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job.parent_job_id,),
+        ).fetchone()
+        root_row = connection.execute(
+            "SELECT * FROM jobs WHERE job_id=?", (job.root_job_id,),
+        ).fetchone()
+        admission, plan = _selected_child_coordinator_plan(
+            connection, root_row, coordinator_row)
+        revisions = _current_orchestration_tree_material_for_dispatch(
+            connection, coordinator_row, admission, plan)
+        if (job.depth != int(coordinator_row["depth"]) + 1
+                or job.plan_attempt_id != admission["plan_attempt_id"]
+                or job.plan_digest != admission["plan_digest"]
+                or not any(item["plan_step_id"] == job.plan_step_id for item in revisions)):
+            raise StateConflict("terminal completion lost its coordinator reservation")
+        # A sealed historical revision remains a completion of that exact
+        # Job/Attempt. Current-step acceptance is a separate canonical owner;
+        # reporting this terminal fact must not promote it to that acceptance.
+        coordinator_job = _job_from_row(coordinator_row)
     return ValidatedRoleCompletion(
         job=job,
         attempt=attempt,
@@ -11018,6 +11043,7 @@ def _validated_role_completion_snapshot(
             or AttemptExecutionMode.SEALED_WORKER.value
         ),
         dialogue_source=dialogue_source,
+        coordinator_job=coordinator_job,
     )
 
 
@@ -28119,8 +28145,9 @@ class BoundedAdmittedPlanSnapshot:
 class BoundedSelectedChildCapture:
     """One bounded selection that freezes a host's chosen children.
 
-    It carries the SAME canonical admitted plan the plan reader returns,
-    plus the exact frozen coordinates of the chosen children: their
+    It carries the chosen immediate coordinator's canonical admitted plan,
+    while retaining the original root and its metadata, plus the exact
+    frozen coordinates of the chosen children: their
     ExecutiveChildSelection fields and the initial intended Attempt
     ordinal. The ordinal is read ONCE here; it is never recomputed from a
     later ``attempt_count`` and no replacement child is ever selected.
@@ -28804,6 +28831,44 @@ def _read_product_acceptance_subject_bounded(
         vm_guard.deactivate()
 
 
+def _selected_child_coordinator_plan(
+    connection: Any, root_row: sqlite3.Row, coordinator: sqlite3.Row,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The actual coordinator's admission, with original-root ancestry retained.
+
+    Both the passive bounded capture and trusted-host qualification reuse this
+    canonical read. It opens no store and grants no dispatch authority. Nested
+    ancestry and each parent's current admitted reservation use the incumbent
+    hierarchy and plan validators on the caller's one connection/loader.
+    """
+    if (root_row is None or root_row["root_job_id"] != root_row["job_id"]
+            or root_row["parent_job_id"] is not None or root_row["depth"] != 0
+            or root_row["orchestration_role"] != "aggregation"):
+        raise StateConflict("selected child original root is not strict")
+    _decode_orchestration_job_fields(root_row)
+    if (coordinator is None or coordinator["root_job_id"] != root_row["job_id"]
+            or coordinator["orchestration_role"] != "aggregation"):
+        raise StateConflict("selected child coordinator is outside the original root")
+    _decode_orchestration_job_fields(coordinator)
+    if coordinator["job_id"] != root_row["job_id"]:
+        from control_plane.executive_coo_hierarchy import ancestors
+        jobs, _grants = _hierarchy_material(connection, coordinator)
+        chain = list(reversed(ancestors(jobs, str(coordinator["job_id"]))))
+        if chain[0]["job_id"] != root_row["job_id"]:
+            raise StateConflict("selected child coordinator lost its original root")
+        for parent, child in zip(chain, chain[1:]):
+            admission, plan = _validated_plan_admission(connection, parent)
+            current = _current_orchestration_tree_material_for_dispatch(
+                connection, parent, admission, plan)
+            step = next((item for item in current
+                         if item["plan_step_id"] == child["plan_step_id"]), None)
+            if (step is None or step["current_job_id"] != child["job_id"]
+                    or child["plan_attempt_id"] != admission["plan_attempt_id"]
+                    or child["plan_digest"] != admission["plan_digest"]):
+                raise StateConflict("selected child coordinator reservation is not current")
+    return _validated_plan_admission(connection, coordinator)
+
+
 def _read_admitted_plan_bounded(
     acquisition: BoundedRuntimeAcquisition,
     vm_guard: _RuntimeReadProgressGuard,
@@ -28830,11 +28895,30 @@ def _read_admitted_plan_bounded(
             "SELECT * FROM jobs WHERE job_id=?", (root_token,)
         ).fetchone()
         root_metadata = _bounded_strict_root_metadata(loader, root_row, root_token)
+        coordinator = root_row
+        chosen = child_job_ids
+        if child_job_ids is not None:
+            if type(child_job_ids) is not tuple or not 1 <= len(child_job_ids) <= 16:
+                raise StateConflict("selected child capture set is not bounded")
+            chosen = _bounded_acquisition_identifiers(child_job_ids, name="child")
+            first = loader.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (chosen[0],)
+            ).fetchone()
+            if (first is None or first["root_job_id"] != root_token
+                    or first["parent_job_id"] is None
+                    or first["job_id"] == first["parent_job_id"]):
+                raise StateConflict("selected child is outside the chosen root")
+            if first["parent_job_id"] != root_token:
+                coordinator = loader.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (first["parent_job_id"],)
+                ).fetchone()
+            if coordinator is None:
+                raise StateConflict("selected child coordinator is unavailable")
         admissions = loader.execute(
             "SELECT event_id FROM events "
             "WHERE event_type='COO_PLAN_ADMITTED' AND job_id=? "
             "ORDER BY event_id LIMIT 2",
-            (root_token,),
+            (coordinator["job_id"],),
         ).fetchall()
         if not admissions:
             raise RuntimePlanAdmissionNotEstablished()
@@ -28842,7 +28926,10 @@ def _read_admitted_plan_bounded(
             raise RuntimePlanAdmissionConflict()
         # Preserve canonical branch selection, uniqueness and all seal/grant/
         # policy checks. Active failure never falls back to completed history.
-        admission, plan = _validated_plan_admission(loader, root_row)
+        admission, plan = (
+            _validated_plan_admission(loader, root_row) if child_job_ids is None
+            else _selected_child_coordinator_plan(loader, root_row, coordinator)
+        )
         snapshot = BoundedAdmittedPlanSnapshot(
             root_job_id=root_token,
             root_metadata=root_metadata,
@@ -28852,7 +28939,7 @@ def _read_admitted_plan_bounded(
         if child_job_ids is None:
             return snapshot
         children = _capture_selected_children(
-            loader, root_row, admission, plan, root_token, child_job_ids)
+            loader, coordinator, admission, plan, root_token, chosen)
         return BoundedSelectedChildCapture(plan=snapshot, children=children)
     except sqlite3.OperationalError as exc:
         if vm_guard.tripped:
@@ -28864,7 +28951,7 @@ def _read_admitted_plan_bounded(
 
 def _capture_selected_children(
     loader: _BoundedRoleResultLoader,
-    root_row: sqlite3.Row,
+    coordinator: sqlite3.Row,
     admission: dict[str, Any],
     plan_body: dict[str, Any],
     root_token: str,
@@ -28882,7 +28969,7 @@ def _capture_selected_children(
         raise StateConflict("selected child capture set is not bounded")
     chosen = _bounded_acquisition_identifiers(child_job_ids, name="child")
     current = _current_orchestration_tree_material_for_dispatch(
-        loader, root_row, admission, plan_body)
+        loader, coordinator, admission, plan_body)
     by_step = {str(item["plan_step_id"]): item for item in current}
     captured: list[dict[str, Any]] = []
     for job_token in chosen:
@@ -28891,9 +28978,11 @@ def _capture_selected_children(
         ).fetchone()
         if row is None:
             raise StateConflict("selected child is not an admitted Job")
-        if (row["root_job_id"] != root_token or row["parent_job_id"] != root_token
-                or int(row["depth"]) != 1):
-            raise StateConflict("selected child is outside the chosen root")
+        if (row["root_job_id"] != root_token
+                or row["parent_job_id"] != coordinator["job_id"]
+                or int(row["depth"]) != int(coordinator["depth"]) + 1):
+            raise StateConflict("selected child is outside the chosen coordinator")
+        _decode_orchestration_job_fields(row)
         if row["orchestration_role"] not in {"work", "repair"}:
             raise StateConflict("selected child role is unsupported")
         if (row["plan_attempt_id"] != admission["plan_attempt_id"]
@@ -28920,10 +29009,10 @@ def _capture_selected_children(
                 raise StateConflict("selected child current Attempt is unverified")
         captured.append({
             "command_id": (
-                f"coo-cycle:{root_token}:dispatch:{job_token}:attempt:{ordinal}"),
+                f"coo-cycle:{coordinator['job_id']}:dispatch:{job_token}:attempt:{ordinal}"),
             "attempt_ordinal": ordinal,
             "root_job_id": root_token,
-            "parent_job_id": root_token,
+            "parent_job_id": str(coordinator["job_id"]),
             "job_id": job_token,
             "plan_attempt_id": admission["plan_attempt_id"],
             "plan_digest": admission["plan_digest"],

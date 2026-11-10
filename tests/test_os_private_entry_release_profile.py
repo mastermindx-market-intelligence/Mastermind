@@ -67,7 +67,7 @@ def _fixture_source(tmp_path: Path, names: tuple[str, ...]) -> Path:
 
 @pytest.mark.parametrize("names", [PROFILE3, PROFILE9, PROFILE11, PROFILE12, PROFILE13])
 def test_existing_closed_asset_layouts_remain_qualified(names):
-    assert OS_ASSET_PROFILE_FILE_COUNTS == (3, 9, 11, 12, 13)
+    assert OS_ASSET_PROFILE_FILE_COUNTS == (3, 9, 11, 12, 13, 14)
     mimes = os_asset_mimes(names)
     assert len(mimes) == len(names)
     assert set(mimes) == set(names)

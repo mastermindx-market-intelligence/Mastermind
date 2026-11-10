@@ -4,20 +4,26 @@ Status: **source composition implemented; no installed native registration**.
 
 ## Implemented owner binding
 
-`ExecutiveChildQualification` reads one existing, host-selected direct work or
-repair child from the incumbent Executive Runtime. It opens one
-`RuntimeStore.read()` context and uses that connection for the raw root/child
-rows, admitted plan, current revision and current Attempt. Installed physical
+`ExecutiveChildQualification` reads one existing, host-selected work or repair
+child from the incumbent Executive Runtime. Its immediate parent may be the
+original root or an admitted aggregation coordinator at depth 1 or 2. The
+original mission root remains unchanged. It opens one `RuntimeStore.read()`
+context and uses that connection for the raw root/coordinator/child rows,
+admitted plan, current revision and current Attempt. Installed physical
 read-binding validation must succeed on context exit before an observation is
 returned.
 
 The binding reuses:
 
-- `_validated_plan_admission` for the original admitted plan and reservation.
+- `_selected_child_coordinator_plan` and `_validated_plan_admission` for the
+  immediate coordinator's actual admitted plan and the current ancestor
+  reservations. Nested ancestry uses the existing bounded hierarchy owner.
 - `_current_orchestration_tree_material_for_dispatch` for current persisted
   work/repair lineage and reserved slots.
 - `_job_from_row`, `_attempt_from_row` and
-  `derive_delegation_identity` for canonical decoding and identity.
+  `derive_delegation_identity` or `derive_coordinator_child_delegation_identity`
+  for canonical decoding and identity. The legacy work-parent identity helper
+  keeps its separate existing contract.
 
 Raw root, parent and depth are checked before legacy decoding can normalize a
 missing root. A frozen `ExecutiveChildSelection` pins the root, parent, Job,
@@ -79,9 +85,9 @@ name it:
 
 | Input | Source | Meaning |
 |---|---|---|
-| `root_job_id` | host selection | strict-v2 aggregation root |
-| `parent_job_id` | host selection | equal to the root; nested children are unsupported |
-| `job_id` | host selection | the one direct work or repair child |
+| `root_job_id` | host selection | original strict-v2 aggregation root |
+| `parent_job_id` | actual selected child's Runtime row | immediate admitted coordinator; the root for a direct child |
+| `job_id` | host selection | one current work or repair child at depth 1, 2 or 3 |
 | `plan_attempt_id` | host selection | the admitted plan Attempt |
 | `plan_digest` | host selection | the admitted plan digest |
 | `plan_step_id` | host selection | the admitted plan step |
@@ -93,11 +99,30 @@ name it:
 coordinates:
 
 ```
-coo-cycle:{root_job_id}:dispatch:{job_id}:attempt:{attempt_ordinal}
+coo-cycle:{parent_job_id}:dispatch:{job_id}:attempt:{attempt_ordinal}
 ```
 
 The ordinal is frozen with the selection, so the command is derived once and
-is never recomputed from a later `attempt_count`.
+is never recomputed from a later `attempt_count`. Direct children have equal
+root and parent IDs, so their command bytes remain unchanged.
+
+The private host capture still accepts only the original root and chosen child
+IDs. It derives the immediate coordinator from the first actual selected Job
+inside the same bounded Runtime observation. Every chosen child must share that
+coordinator, original root and admitted plan Attempt/digest and must be its
+current work or repair revision. No caller-provided coordinator selector is
+introduced. The snapshot's root and root metadata remain the original mission;
+its admitted plan belongs to the actual immediate coordinator.
+
+All ancestor, plan and selected-child reads share the existing row, raw-byte,
+statement and VM limits. The normal admitted-plan read remains unchanged.
+Workspace brackets both existing policy versions before capture and rechecks
+only the selected admission's version and source afterward; unavailability of
+the unrelated version does not grant anything or block a valid legacy capture.
+Canonical ancestor validation still requires its own policy evidence: the
+original planner retains v1 transport proof even for a v2 reservation.
+The closed publication retains every hash and source field and permits exactly
+one coordinator and plan. Its source block is provenance, not a grant.
 
 ### Composition and installation
 
@@ -169,8 +194,9 @@ entries. A new claim is an effect: it applies the incumbent readiness fences
 (`_closing`, `coo_autonomy_armed`, `_require_current_autonomy`, `READY`
 service state), the host-authority fence `_require_coo_worker_composed`, and
 `_require_bound_coo_job` for the bound-root and admitted-plan membership
-check. The selection shape — a direct work or repair child of the frozen
-root — is a fact about the persisted Job and is checked before any of them.
+check. The selection shape — a current work or repair child of its actual
+immediate coordinator under the frozen original root — is a fact about the
+persisted Job and is checked before any of them.
 Resolving a command that already owns a durable Attempt is a pure read of
 Runtime truth, so it stays answerable even when this service can no longer
 act.
@@ -330,6 +356,7 @@ Dialogue source, current writer or matching Wake acknowledgment.
 ```sh
 PYTHONPATH=.:tests python3 -m pytest -q tests/test_hermes_executive_qualification.py
 PYTHONPATH=.:tests python3 -m pytest -q tests/test_hermes_selected_child_dispatch.py
+PYTHONPATH=.:tests python3 -m pytest -q tests/test_hermes_nested_selected_child.py
 python3 -m unittest discover -s integrations/hermes_delegate/tests -v
 ```
 
@@ -348,3 +375,14 @@ The repaired selected-child regressions also cover concurrent ambiguous starts,
 post-scheduling timeout without cancellation, original identity after malformed
 returns, failed uncertainty-marker persistence, mismatched bound claims, and real
 installed-principal revocation between claim insertion and COMMIT.
+
+The nested suite includes depth-2 and depth-3 capture through the real
+Workspace/CooHost owners, the fixed installed target reader, canonical Runtime
+qualification and claim, original-command replay and terminal completion. Its
+full deepest-root case captures all 11 leaves of a 17-Job tree within the
+unchanged shared budgets. The
+service cases separately exercise the actual selected dispatch/status/return
+owner. Negatives cover mixed coordinators, foreign roots, stale plan/Attempt
+coordinates, root-scoped command substitution, rehashed foreign publication,
+source/policy changes and permission revocation. These are disposable source
+qualifications; they do not enroll or activate a live Hermes profile.

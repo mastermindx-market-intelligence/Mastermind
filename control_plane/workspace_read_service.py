@@ -1550,20 +1550,22 @@ class WorkspaceReadService:
             raise ValueError("selection_not_found") from None
         if not _qualified(before, selection):
             raise ValueError("source_unavailable")
-        try:
-            policy_before = CooCyclePolicy.load()
-        except CooCyclePolicyError:
-            raise ValueError("source_unavailable") from None
+        def policy_identity(version):
+            try:
+                policy = CooCyclePolicy.load(version=version)
+                return policy.policy_sha256, policy.source_sha256
+            except Exception:
+                return None
+        # The selected coordinator's admitted version is known only after
+        # the one Runtime read. An unrelated unavailable policy is no grant
+        # and must not block the selected version's unchanged source bracket.
+        policies_before = {version: policy_identity(version) for version in (1, 2)}
         bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
         with bounded.observe_bounded_read() as observation:
             capture = observation.read_selected_child_target_bounded(
                 root_job_id, child_job_ids=chosen)
         # The receipt exists only after the physical close of the observation.
         receipt = observation.receipt
-        try:
-            policy_after = CooCyclePolicy.load()
-        except CooCyclePolicyError:
-            raise ValueError("source_unavailable") from None
         try:
             after = self.cache.snapshot()
         except Exception:
@@ -1588,8 +1590,6 @@ class WorkspaceReadService:
                 or plan.root_job_id != root_job_id
                 or plan.root_metadata.work_ref not in (None, work_ref)
                 or type(admission) is not dict
-                or policy_before.policy_sha256 != policy_after.policy_sha256
-                or policy_before.source_sha256 != policy_after.source_sha256
                 or receipt.state not in {"SAME", "UNKNOWN"}):
             raise ValueError("source_unavailable")
         try:
@@ -1599,7 +1599,9 @@ class WorkspaceReadService:
             admitted = CooCyclePolicy.for_digest(admission.get("policy_sha"))
         except CooCyclePolicyError:
             raise ValueError("source_unavailable") from None
-        if admitted.policy_sha256 != admission.get("policy_sha"):
+        if (admitted.policy_sha256 != admission.get("policy_sha")
+                or policies_before.get(admitted.schema_version)
+                != (admitted.policy_sha256, admitted.source_sha256)):
             raise ValueError("source_unavailable")
         return {
             "work_ref": work_ref,

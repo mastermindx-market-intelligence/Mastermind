@@ -23,7 +23,9 @@ from common.executive_workspace_contract import canonical, _check_work_ref
 from control_plane import executive_runtime as owner
 from control_plane.coo_principal_host import CooHostProvider, FACT_PRINCIPAL_KEYS
 from control_plane.coo_principal_envelope import PrincipalAdmissionContext
-from control_plane.executive_delegation_identity import derive_delegation_identity
+from control_plane.executive_delegation_identity import (
+    derive_delegation_identity, derive_coordinator_child_delegation_identity,
+)
 from integrations.hermes_delegate.schema import (
     SHA_RE, SELECTED_CHILD_FRAME_KEYS, SELECTED_CHILD_FRAME_SCHEMA,
     SubmissionError, parse_selected_child,
@@ -152,8 +154,6 @@ class ExecutiveChildQualification:
         selected = self.selection
         if not _valid_selection(selected):
             return _response("REFUSED", "EXECUTIVE_SELECTION_INVALID")
-        if selected.parent_job_id != selected.root_job_id:
-            return _response("REFUSED", "EXECUTIVE_CHILD_DEPTH_UNSUPPORTED")
         try:
             with self.runtime.store.read() as connection:
                 root = connection.execute(
@@ -164,6 +164,9 @@ class ExecutiveChildQualification:
                 ).fetchone()
                 if root is None or child is None:
                     return _response("REFUSED", "EXECUTIVE_CHILD_NOT_FOUND")
+                coordinator = (root if selected.parent_job_id == selected.root_job_id
+                    else connection.execute("SELECT * FROM jobs WHERE job_id=?",
+                                            (selected.parent_job_id,)).fetchone())
                 # Check raw identity before the decoder's legacy root fallback.
                 if (
                     root["job_id"] != selected.root_job_id
@@ -176,7 +179,9 @@ class ExecutiveChildQualification:
                 if (
                     child["root_job_id"] != selected.root_job_id
                     or child["parent_job_id"] != selected.parent_job_id
-                    or child["depth"] != 1
+                    or coordinator is None
+                    or coordinator["root_job_id"] != selected.root_job_id
+                    or child["depth"] != coordinator["depth"] + 1
                 ):
                     return _response("REFUSED", "EXECUTIVE_CHILD_SCOPE_MISMATCH")
                 if child["orchestration_role"] not in {"work", "repair"}:
@@ -184,7 +189,11 @@ class ExecutiveChildQualification:
 
                 derive_delegation_identity(owner._job_from_row(root))
                 job = owner._job_from_row(child)
-                identity = derive_delegation_identity(job)
+                identity = (
+                    derive_delegation_identity(job) if coordinator["job_id"] == root["job_id"]
+                    else derive_coordinator_child_delegation_identity(
+                        job, owner._job_from_row(coordinator))
+                )
                 if (
                     job.plan_attempt_id != selected.plan_attempt_id
                     or job.plan_digest != selected.plan_digest
@@ -193,9 +202,9 @@ class ExecutiveChildQualification:
                 ):
                     return _response("REFUSED", "EXECUTIVE_PLAN_SELECTION_CHANGED")
 
-                admission, plan = owner._validated_plan_admission(connection, root)
+                admission, plan = owner._selected_child_coordinator_plan(connection, root, coordinator)
                 current = owner._current_orchestration_tree_material_for_dispatch(
-                    connection, root, admission, plan
+                    connection, coordinator, admission, plan
                 )
                 step = next(
                     (item for item in current
@@ -274,7 +283,7 @@ class ExecutiveSelectedChild:
         """The incumbent deterministic coo-cycle dispatch command."""
 
         return (
-            f"coo-cycle:{self.selection.root_job_id}:dispatch:"
+            f"coo-cycle:{self.selection.parent_job_id}:dispatch:"
             f"{self.selection.job_id}:attempt:{self.attempt_ordinal}"
         )
 
@@ -327,6 +336,7 @@ class ExecutiveSelectedChildTarget:
             raise ValueError("selected child target children are invalid")
         commands: set[str] = set()
         roots: set[str] = set()
+        plans: set[tuple[str, str, str]] = set()
         for child in self.children:
             if type(child) is not ExecutiveSelectedChild or not _selected_child_valid(child):
                 raise ValueError("selected child target child is invalid")
@@ -334,8 +344,12 @@ class ExecutiveSelectedChildTarget:
                 raise ValueError("selected child target commands are not unique")
             commands.add(child.command_id)
             roots.add(child.selection.root_job_id)
+            plans.add((child.selection.parent_job_id, child.selection.plan_attempt_id,
+                       child.selection.plan_digest))
         if len(roots) != 1:
             raise ValueError("selected child target spans more than one root scope")
+        if len(plans) != 1:
+            raise ValueError("selected child target spans more than one coordinator plan")
         guard = self.currentness_guard
         if (not callable(guard)
                 or inspect.iscoroutinefunction(guard)

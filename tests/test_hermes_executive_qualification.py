@@ -125,8 +125,8 @@ def test_host_observes_real_admission_without_creating_or_dispatching(tmp_path):
 
 
 @pytest.mark.parametrize(("patch", "reason"), [
-    ({"root_job_id": "JOB-999"}, "EXECUTIVE_CHILD_DEPTH_UNSUPPORTED"),
-    ({"parent_job_id": "JOB-999"}, "EXECUTIVE_CHILD_DEPTH_UNSUPPORTED"),
+    ({"root_job_id": "JOB-999"}, "EXECUTIVE_CHILD_NOT_FOUND"),
+    ({"parent_job_id": "JOB-999"}, "EXECUTIVE_CHILD_SCOPE_MISMATCH"),
     ({"job_id": "JOB-999"}, "EXECUTIVE_CHILD_NOT_FOUND"),
     ({"plan_attempt_id": "attempt-wrong"}, "EXECUTIVE_PLAN_SELECTION_CHANGED"),
     ({"plan_digest": "0" * 64}, "EXECUTIVE_PLAN_SELECTION_CHANGED"),

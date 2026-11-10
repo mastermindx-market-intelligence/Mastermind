@@ -734,7 +734,7 @@ def test_closed_json_refusals(raw):
 
 
 
-def _expand_noir_dist(app, *, rich=False, notices=False, private_entry=False):
+def _expand_noir_dist(app, *, rich=False, notices=False, private_entry=False, company=False):
     """Only exact already-approved static asset names in the local release fixture."""
     dist = app / "dist"
     fixed = {
@@ -749,6 +749,11 @@ def _expand_noir_dist(app, *, rich=False, notices=False, private_entry=False):
         fixed.update({
             "assets/SourceMarkdown-fixture.js": b"export const proof=true;",
             "assets/SourceMarkdown-fixture.css": b".source-markdown{color:inherit}",
+        })
+    if company:
+        fixed.update({
+            "assets/CompanyWorkspace-fixture.js": b"export const team=true;",
+            "assets/CompanyWorkspace-fixture.css": b".company-workspace{color:inherit}",
         })
     if private_entry:
         fixed["assets/private-entry-fixture.jpg"] = b"fixture private entry JPEG"
@@ -819,12 +824,15 @@ def test_original_publication_9_or_11_to_13_closes_the_entire_two_phase_path(inp
     assert "/os/assets/index-oldnoir.js" not in paths
 
 
-@pytest.mark.parametrize("old_count", [9, 11, 13])
-def test_original_publication_9_11_13_to_12_closes_entire_two_phase_path(inputs, monkeypatch, tmp_path, old_count):
-    """Real licensed12 must survive private stage loading and both publication phases."""
+@pytest.mark.parametrize("old_count", [9, 11, 12, 13])
+@pytest.mark.parametrize("company", [False, True])
+def test_original_publication_to_12_or_14_closes_entire_two_phase_path(inputs, monkeypatch, tmp_path, old_count, company):
+    """Actual closed profiles survive private stage loading and both publication phases."""
     old = tmp_path / ("old-"+str(old_count))
     make_dist(old / "app/mastermind_os", "oldnoir")
-    _expand_noir_dist(old / "app/mastermind_os", notices=old_count >= 11, rich=old_count == 13)
+    old.chmod(0o755)  # Preserve the real dual-service traversal requirement.
+    _expand_noir_dist(old / "app/mastermind_os", notices=old_count >= 11,
+                      rich=old_count == 13, private_entry=old_count == 12)
     old_manifest = entry.build_os_asset_manifest(old)
     assert len(old_manifest["files"]) == old_count
     (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(old_manifest))
@@ -834,7 +842,7 @@ def test_original_publication_9_11_13_to_12_closes_entire_two_phase_path(inputs,
 
     def build_private(app, **kw):
         tools = make_dist(app, "private")
-        _expand_noir_dist(app, private_entry=True)
+        _expand_noir_dist(app, private_entry=True, company=company)
         return tools
 
     monkeypatch.setattr(assets, "_build", build_private)
@@ -846,14 +854,14 @@ def test_original_publication_9_11_13_to_12_closes_entire_two_phase_path(inputs,
     qualified = assets.qualify(new_bundle, expected_sha=inputs["new_sha"],
                                tree_sha=inputs["new_tree"], source_repo=inputs["source_repo"])
     new_manifest = entry.build_os_asset_manifest(new_bundle)
-    assert len(new_manifest["files"]) == 12
+    assert len(new_manifest["files"]) == (14 if company else 12)
     configured = {**inputs, "old_root": old, "live_config": live,
                   "new_bundle": new_bundle, "new_digest": qualified.digest,
                   "out": tmp_path / "stage-private"}
     receipt = m.stage_host(**configured)
     descriptor = m.decode((configured["out"] / m.DESCRIPTOR).read_bytes())
     assert len(descriptor["indexes"]["old"]) == old_count + 1
-    assert len(descriptor["indexes"]["new"]) == 13
+    assert len(descriptor["indexes"]["new"]) == (15 if company else 13)
     relay = InertRelay(configured)
     monkeypatch.setattr(m, "_http", relay.http)
     monkeypatch.setattr(m, "_listener", lambda port, pid: m.require(
@@ -872,6 +880,8 @@ def test_original_publication_9_11_13_to_12_closes_entire_two_phase_path(inputs,
     assert "/os/assets/SourceMarkdown-fixture.js" not in paths
     assert "/os/assets/SourceMarkdown-fixture.css" not in paths
     assert "/os/assets/private-entry-fixture.jpg" in paths
+    assert ("/os/assets/CompanyWorkspace-fixture.js" in paths) is company
+    assert ("/os/assets/CompanyWorkspace-fixture.css" in paths) is company
     assert "/os/third-party/deepseek-client-dependency-NOTICES.txt" in paths
     assert "/os/third-party/deepseek-harness-LICENSE.txt" in paths
     assert "/os/assets/index-oldnoir.js" not in paths

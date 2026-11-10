@@ -50,6 +50,7 @@ owners do not already hold.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -57,7 +58,7 @@ import socket
 import threading
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, replace as dataclass_replace
+from dataclasses import asdict, dataclass, field, replace as dataclass_replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -67,9 +68,11 @@ from control_plane.t3_execution_adapter import (
     T3NamespaceAttestationError,
     T3McpToolPort,
     T3McpTransportError,
+    T3TerminalEvidence,
     SQLiteT3AdapterStateStore,
     default_t3_adapter_state_path,
 )
+from control_plane.worker_execution_contract import CollectionReceipt, WorkerRunStatus
 
 #: Environment variable naming the FILE that holds the MCP access token.
 #: The token itself is never an environment variable value (it would land in
@@ -94,10 +97,31 @@ COMPOSITION_NOT_ENROLLED = "T3_NOT_ENROLLED"
 #: file): a capability gap that must be VISIBLE, never a crash of the host
 #: service and never a silent ``{}``.
 COMPOSITION_ENROLLMENT_BROKEN = "T3_ENROLLMENT_BROKEN"
+GOVERNED_NATIVE_UNAVAILABLE_REASON = (
+    "native execution scope and descendant quiescence are not owner-qualified")
 
 
 class T3NativeCompositionError(Exception):
     """Typed, fail-closed composition refusal (never a bare OSError here)."""
+
+
+def require_governed_native_execution() -> None:
+    """Native modes do not attest Executive scope or descendant quiescence.
+
+    Keep original observation/recovery available. An actual owner contract
+    must replace this refusal; a caller flag, READ declaration, successful
+    answer or thread-wide wait is not that authority.
+    """
+    raise T3NativeCompositionError(GOVERNED_NATIVE_UNAVAILABLE_REASON)
+
+
+@dataclass(frozen=True)
+class T3NativeCollectionReceipt(CollectionReceipt):
+    """Qualified original native termination plus its complete raw answer."""
+
+    native_terminal: T3TerminalEvidence
+    native_text: str | None
+    native_text_sha256: str | None
 
 
 #: Module logger: the only surfacing seam for a broken enrollment that keeps
@@ -466,7 +490,9 @@ class T3NativeComposition:
     """Typed composition result — composed, typed-not-enrolled (no token
     file configured; a normal state) or typed-enrollment-broken (a token
     file is configured but cannot be read or attested; a visible fault in
-    that lane alone).  Never a bare exception."""
+    that lane alone). ``composed`` means the original adapter is available
+    for observation/recovery; it does not admit new governed execution.
+    Never a bare exception."""
 
     status: str
     store_placement: T3AdapterStorePlacement
@@ -474,6 +500,10 @@ class T3NativeComposition:
     adapter: T3ExecutionAdapter | None = None
     upstream_namespace: str | None = None
     reason: str = ""
+    # Disclosure of the existing production fence, not an overridable grant.
+    governed_execution_available: bool = field(init=False, default=False)
+    governed_execution_reason: str = field(
+        init=False, default=GOVERNED_NATIVE_UNAVAILABLE_REASON)
 
     @property
     def composed(self) -> bool:
@@ -505,6 +535,7 @@ def compose_t3_native_adapter(
     store_placement: T3AdapterStorePlacement | None = None,
     port_factory: Callable[[str], Any] | None = None,
     transport_factory: Callable[[str, str], Any] | None = None,
+    launch_arguments: Mapping[str, Any] | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> T3NativeComposition:
     """Compose the reviewed t3-native adapter over real production inputs.
@@ -551,7 +582,9 @@ def compose_t3_native_adapter(
             )
             # COMPOSITION PRECONDITION (re-check M2): attestation and transport
             # are built from the SAME token, right here, with nothing between.
-            port = T3McpToolPort.from_access_token(transport.call_tool, token)
+            port = T3McpToolPort.from_access_token(
+                transport.call_tool, token, launch_arguments=launch_arguments,
+                require_bound_workspace=True)
     except T3NamespaceAttestationError as exc:
         # A configured token that cannot attest an MCP-client session is a
         # BROKEN enrollment, not an unenrolled host and not a service crash
@@ -651,8 +684,9 @@ class SupervisorBoundaryT3Adapter:
     #: projection claims exactly the reviewed adapter's identity.
     adapter_id = T3_NATIVE_ADAPTER_ID
 
-    def __init__(self, inner: T3ExecutionAdapter) -> None:
+    def __init__(self, inner: T3ExecutionAdapter, *, runtime: Any = None) -> None:
         self._inner = inner
+        self._runtime = runtime
 
     # --- the twin projection (pure, reversible) ---------------------------
 
@@ -684,6 +718,7 @@ class SupervisorBoundaryT3Adapter:
     # --- adapter surface (supervisor entry points) ------------------------
 
     async def start(self, spec: Any) -> Any:
+        require_governed_native_execution()
         return self._twin(await self._inner.start(spec))
 
     def launch_attestation(self, process_ref: Any) -> dict[str, Any]:
@@ -750,8 +785,56 @@ class SupervisorBoundaryT3Adapter:
     async def status(self, ref: Any) -> Any:
         return await self._inner.status(self._retained(ref))
 
+    async def wait_status(self, ref: Any, *, timeout_ms: int) -> WorkerRunStatus:
+        return await self._inner.wait_status(self._retained(ref), timeout_ms=timeout_ms)
+
     async def collect_result(self, ref: Any) -> Any:
-        return await self._inner.collect_result(self._retained(ref))
+        raw = await self._inner.collect_result(self._retained(ref))
+        proof = self._inner.qualify_terminal_collection(raw)
+        if self._runtime is None:
+            raise T3NativeCompositionError("native collection has no original Runtime owner")
+        job = self._runtime.jobs.get_job(proof.job_id)
+        if job is None or job.current_attempt_id != proof.attempt_id:
+            raise T3NativeCompositionError("native collection differs from the current Job")
+        require_native_result_scope(job)
+        text = None
+        output = None
+        if raw.result.status is WorkerRunStatus.SUCCEEDED:
+            value = raw.result.structured_output
+            if (not isinstance(value, Mapping) or type(value.get("text")) is not str
+                    or value.get("text_truncated") is not False):
+                raise T3NativeCompositionError("native final answer is incomplete")
+            text = value["text"]
+            if not text.strip() or len(text.encode("utf-8")) > 32_768:
+                raise T3NativeCompositionError("native final answer is empty or exceeds its byte bound")
+
+            def unique(pairs):
+                result = {}
+                for key, item in pairs:
+                    if key in result:
+                        raise ValueError("duplicate result key")
+                    result[key] = item
+                return result
+
+            try:
+                output = json.loads(text, object_pairs_hook=unique,
+                                    parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+                from control_plane.codex_worker import validate_json_schema
+                from control_plane.executive_supervisor import worker_result_schema
+                validate_json_schema(output, worker_result_schema(
+                    job_id=proof.job_id, run_id=proof.attempt_id, worker_id=proof.worker_id))
+            except Exception as exc:
+                raise T3NativeCompositionError("native final answer does not satisfy the admitted result schema") from exc
+            if output["validations"] or output["artifacts"]:
+                raise T3NativeCompositionError(
+                    "native artifact or validation claims require the admitted workspace owner")
+        result = dataclass_replace(raw.result, structured_output=output)
+        return T3NativeCollectionReceipt(
+            process_ref=ref, result=result, stdout_sha256=raw.stdout_sha256,
+            stderr_sha256=raw.stderr_sha256, result_sha256=raw.result_sha256,
+            native_terminal=proof, native_text=text,
+            native_text_sha256=(None if text is None else hashlib.sha256(text.encode("utf-8")).hexdigest()),
+        )
 
     async def cancel(self, ref: Any, reason: str) -> Any:
         return await self._inner.cancel(self._retained(ref), reason)
@@ -760,13 +843,86 @@ class SupervisorBoundaryT3Adapter:
         return await self._inner.interrupt_run(self._retained(ref), reason)
 
     async def run_validation_argv(self, spec: Any, argv: Any, **kwargs: Any) -> Any:
-        return await self._inner.run_validation_argv(spec, argv, **kwargs)
+        raise T3NativeCompositionError(
+            "native validation execution requires the admitted workspace owner")
 
     def __getattr__(self, name: str) -> Any:
         # Read-only delegation to the reviewed adapter (inspector, durable
         # accessors, anything the supervisor feature-detects).  Attributes
         # the inner adapter does not expose stay absent here too.
         return getattr(self._inner, name)
+
+
+def is_t3_supervisor_adapter(adapter: Any, runtime: Any) -> bool:
+    """Only the incumbent composition can select native terminal semantics."""
+    if type(adapter) is not SupervisorBoundaryT3Adapter:
+        return False
+    if adapter._runtime is not runtime:
+        raise T3NativeCompositionError("native supervisor differs from its original Runtime")
+    from control_plane.worker_adapter import bind_reviewed_adapter
+    bind_reviewed_adapter(adapter._inner, T3_NATIVE_ADAPTER_ID)
+    return True
+
+
+def require_native_result_scope(job: Any) -> None:
+    """Preserve obligations the present native MCP contract cannot prove."""
+    if (job.orchestration_role is not None or job.allowed_write_paths
+            or job.validation_commands or "WRITE_BRANCH" in job.requested_authorities
+            or job.constraints.get("base_sha")):
+        raise T3NativeCompositionError(
+            "native workspace artifact, expected-HEAD, validation or sealed-role evidence is unavailable")
+
+
+def qualify_native_collection(supervisor: Any, active: Any,
+                              receipt: CollectionReceipt) -> T3TerminalEvidence:
+    if not is_t3_supervisor_adapter(supervisor.adapter, supervisor.runtime):
+        raise T3NativeCompositionError("native terminal qualification requires its original composition")
+    if type(receipt) is not T3NativeCollectionReceipt:
+        raise T3NativeCompositionError("native terminal collection lost its typed evidence")
+    retained = supervisor.adapter._retained(active.process_ref)
+    if receipt.process_ref != active.process_ref:
+        raise T3NativeCompositionError("native collection changed the original supervisor reference")
+    raw = dataclass_replace(receipt, process_ref=retained)
+    proof = supervisor.adapter._inner.qualify_terminal_collection(raw)
+    if (receipt.native_terminal != proof or active.launch_spec.run_id != proof.attempt_id
+            or active.lease.attempt.job_id != proof.job_id
+            or active.lease.attempt.worker_id != proof.worker_id):
+        raise T3NativeCompositionError("native terminal proof differs from the active assignment")
+    from control_plane.worker_execution_contract import worker_launch_spec_sha256
+    if worker_launch_spec_sha256(active.launch_spec) != proof.launch_spec_sha256:
+        raise T3NativeCompositionError("native terminal launch spec changed")
+    if receipt.native_text_sha256 != (
+            None if receipt.native_text is None else
+            hashlib.sha256(receipt.native_text.encode("utf-8")).hexdigest()):
+        raise T3NativeCompositionError("native terminal text digest changed")
+    from control_plane.executive_supervisor import _collection_to_dict
+    if receipt.native_text is not None and json.loads(receipt.native_text) != _collection_to_dict(receipt)["result"]["structured_output"]:
+        raise T3NativeCompositionError("native parsed result differs from its retained original text")
+    require_native_result_scope(supervisor._job(proof.job_id))
+    return proof
+
+
+def retain_native_control_result(supervisor: Any, active: Any,
+                                 receipt: CollectionReceipt, collection_path: Path) -> Path:
+    """Retain Control's result; do not claim a native writer was revoked."""
+    proof = qualify_native_collection(supervisor, active, receipt)
+    collection = supervisor._read_private_receipt(collection_path, name="native collection")
+    from control_plane.executive_supervisor import _collection_to_dict, _write_or_verify_private_json
+    if collection != _collection_to_dict(receipt):
+        raise T3NativeCompositionError("retained native collection differs from the original receipt")
+    path = supervisor._terminal_assignment_receipt_path(proof.attempt_id)
+    payload = {
+        "schema_version": "mastermind.executive_t3_control_retention/v1",
+        "job_id": proof.job_id, "attempt_id": proof.attempt_id,
+        "native_terminal": asdict(proof),
+        "collection_sha256": hashlib.sha256(json.dumps(
+            collection, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False).encode("utf-8")).hexdigest(),
+        "control_result_retained": True,
+        "native_workspace_revocation": None,
+    }
+    _write_or_verify_private_json(path, payload, name="native Control result retention")
+    return path
 
 
 def compose_t3_native_supervisor(
@@ -797,7 +953,7 @@ def compose_t3_native_supervisor(
     runtime = primary.runtime
     return ExecutiveSupervisor(
         runtime,
-        SupervisorBoundaryT3Adapter(composition.adapter),
+        SupervisorBoundaryT3Adapter(composition.adapter, runtime=runtime),
         runs_root=runs_root,
         isolation_roots=isolation_roots,
         receipts_root=receipts_root,
@@ -899,6 +1055,11 @@ def compose_t3_native_owners_for_service(
                 composition.reason,
             )
         return {}
+    _log.warning(
+        "t3-native owner is available for original observation/recovery only; "
+        "new governed execution is unavailable: %s",
+        composition.governed_execution_reason,
+    )
     return compose_t3_native_supervisor_owners(
         primary,
         composition,
