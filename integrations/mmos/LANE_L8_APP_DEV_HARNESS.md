@@ -17,9 +17,8 @@ moves to the Rust socket half, the launcher, and logging. The principal's seams 
 | A | `app/mastermind_os/tools/mmos_dev.py` — `up --fixture` / `down` / `status`, fake-proc tests | diff+test: `deepseek-v4.1-flash` | 1 |
 | D0 | Rust dev-log module + redaction (bearer-absence test) | diff+test: `deepseek-v4.1-flash` | 1 |
 | B | Unix-socket control channel, Rust half: feature gate, eval→agent-control bridge, IPC return, release-exclusion test | writer-attacker: writer + `grok-4.7` attacks (reproducing command per finding) | 2 (after R1) |
-| C | Verb adapter: snapshot / click / type / wait-for / logs / shot → existing agent-control tools | diff+test | 2 |
+| C | Page-side harness (C+E merged): verb dispatcher `window.MastermindHarnessVerb` (snapshot / click / type / select / check / wait-for / invoke), in-page JSONL log (same record kinds as D0), fixture failure-injection (programs_read), proof-loop tests. Serving the proof pages is in A; the DOM-driving doc is in F. | diff+test: `deepseek-v4.1-flash` | 1 (page side is not gated by R1 — only the Rust eval-return path is) |
 | D1 | Wire dev_log into real request/auth/native-failure paths (dev build only) | diff+test | 2 |
-| E | Browser path: serve existing browser-proof pages, document DOM driving | diff+test | 2 |
 | F | Runbook `integrations/mmos/APP_DEV_HARNESS.md` + `skills/mmos-app-dev/SKILL.md` | written last, from what actually works | 3 |
 | G | Cold-agent acceptance: fresh `deepseek-v4.1-flash`, runbook path only, fixture mode | fresh child, evidence under `l8-20261110/cold-agent/` | 3 |
 
@@ -42,6 +41,11 @@ moves to the Rust socket half, the launcher, and logging. The principal's seams 
   the same pages as its frontendDist once slice B lands. No second fixture system.
 - `up` without `--fixture` (real dev Executive) returns a typed `NOT_IMPLEMENTED_YET` until lane L4
   lands its local operator contract; nothing in this lane waits on L4.
+- Page-side verbs mount alongside `MastermindAppControl` in `install.ts`, inert until called: in-page
+  code is reachable only by code already running in the page, which already holds `MastermindAppControl`;
+  the gated remote surface is the Rust socket, not the in-page dispatcher. In native dev mode the socket
+  serves `logs`/`shot` Rust-side (dev_log file / WKWebView snapshot) before any eval; in browser fixture
+  mode `logs` returns the in-page JSONL buffer.
 - Desktop law (from the brief and L4's ledger): one GUI-driving child at a time; dev app launched
   in background (`open -g` or equivalent); no global clicks/keystrokes; captures of the dev app's
   own webview only, never the screen; no image to a vision model unless it is that webview render;
