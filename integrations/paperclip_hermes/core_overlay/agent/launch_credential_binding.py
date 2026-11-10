@@ -420,7 +420,7 @@ def guard_tool_call(function):
     @wraps(function)
     def guarded(*args, **kwargs):
         if _BOUND.get() is None:
-            return redact(function(*args, **kwargs))
+            return function(*args, **kwargs)
         parameters = signature.bind_partial(*args, **kwargs).arguments
         try:
             with tool_dispatch_scope(parameters.get('session_id'), parameters['function_name'],
@@ -443,20 +443,16 @@ def redact_tool_result(function):
 def snapshot_exclusion_names():
     """Names remain available after retirement; terminal exclusions accumulate monotonically."""
     bound = _BOUND.get()
-    names = set(bound.lease.public['credential_fingerprints']) if bound is not None else set()
-    auxiliary = _AUXILIARY_REDACTIONS.get()
-    return names | (set(auxiliary.names) if auxiliary is not None else set())
+    return set(bound.lease.public['credential_fingerprints']) if bound is not None else set()
 
 
 def redact(value):
     """Mandatory exact-value scrubbing before canonical history, independent of display flags."""
     bound = _BOUND.get()
-    auxiliary = _AUXILIARY_REDACTIONS.get()
-    secrets = (bound.redactions if bound is not None else ()) + (auxiliary.values if auxiliary is not None else ())
-    if not secrets:
+    if bound is None:
         return value
     if isinstance(value, str):
-        for secret in secrets:
+        for secret in bound.redactions:
             value = value.replace(secret, '[REDACTED_LAUNCH_CREDENTIAL]')
         return value
     if isinstance(value, dict):
@@ -483,7 +479,7 @@ def sanitize_log_record(record):
         record.msg, record.args = 'websocket_frame_diagnostic_withheld', ()
         record.exc_info, record.exc_text, record.stack_info = None, None, None
         return record
-    if _BOUND.get() is None and _AUXILIARY_REDACTIONS.get() is None:
+    if _BOUND.get() is None:
         return record
     import traceback
     try:
@@ -508,41 +504,3 @@ def sanitize_log_record(record):
         record.__dict__.update(vars(safe))
         record.session_tag, record.hermes_home = '', ''
     return record
-
-
-@dataclass(frozen=True, repr=False)
-class _AuxiliaryRedactions:
-    """Scrubbing material only; no lease, admission, claim or credential getter."""
-    values: tuple = field(repr=False)
-    names: frozenset = field(repr=False)
-
-
-_AUXILIARY_REDACTIONS = ContextVar('finite_launch_auxiliary_redactions', default=None)
-
-
-def credential_free_auxiliary_review(function):
-    """Enter the native review worker without inheriting foreground bearer authority.
-
-    Native context propagation still owns profile, runtime credentials, cancellation
-    and usage attribution. Keep exact-value scrubbing after the parent lease retires;
-    never renew, claim, retire or otherwise mutate the parent admission here.
-    """
-    @wraps(function)
-    def guarded(*args, **kwargs):
-        bound, auxiliary = _BOUND.get(), _AUXILIARY_REDACTIONS.get()
-        if bound is None and auxiliary is None:
-            return function(*args, **kwargs)
-        values = (auxiliary.values if auxiliary is not None else ())
-        names = (auxiliary.names if auxiliary is not None else frozenset())
-        if bound is not None:
-            values = tuple(dict.fromkeys((*values, *bound.redactions)))
-            names = names | frozenset(bound.lease.public['credential_fingerprints'])
-        redact_token = _AUXILIARY_REDACTIONS.set(_AuxiliaryRedactions(values, names))
-        bound_token, tool_token = _BOUND.set(None), _TOOL_BOUND.set(None)
-        try:
-            return redact(function(*redact(args), **redact(kwargs)))
-        finally:
-            _TOOL_BOUND.reset(tool_token)
-            _BOUND.reset(bound_token)
-            _AUXILIARY_REDACTIONS.reset(redact_token)
-    return guarded

@@ -1,6 +1,6 @@
 # Paperclip finite credentials for Hermes
 
-Status: credential and native learning source qualified; live activation held.
+Status: finite credential source qualified; live activation and learning proof held.
 The existing CodeQL alert disposition, baseline source-check and safe-cutover
 holds remain in force. No live gateway capability is claimed.
 The fleet baseline is delivered in Mastermind PR #2399, merge
@@ -69,17 +69,38 @@ terminal backends, background terminal jobs, delegated/forked sessions, kanban,
 safe mode and user-config bypass are refused for credential-bearing execution.
 This does not disable those features for ordinary unbound Hermes sessions.
 
-## Privacy and profile isolation
+## Memory, skills and learning
 
-Native background review keeps its existing thread, cancellation, profile,
-provider and usage owners. Its worker now enters an explicit credential-free
-scope: foreground bearer/tool authority is removed, while exact-value redaction
-and credential-name snapshot exclusions remain available after foreground lease
-retirement. It neither claims nor renews the parent lease. Copied review inputs,
-cached/ephemeral prompts and tool schemas are scrubbed without modifying their
-parent objects; clean prompt/cache parity is preserved. This supports native
-memory/skill review, not delegated Paperclip credential execution. Effective
-review configuration and OMH preservation do not yet prove a live learned lesson.
+Keep the existing Hermes profiles, OMH provider and native skills. Paperclip's
+installed adapter invokes `hermes chat -q`; the gateway admits this as finite
+execution. Native `load_background_review_settings()` intentionally disables
+automatic background review for that path, irrespective of the profile's
+configured `enabled` value. That lifetime policy is preserved. Explicit auxiliary
+review under a finite credential binding is outside this release's supported
+execution contract; native interactive review remains a separate path.
+
+The installed OMH provider inherits a no-op `sync_turn` hook. Its memory-write
+hook journals provenance and consolidation metadata; it does not turn a built-in
+file-memory write into an admitted OMH recall record. The migration therefore
+uses the existing foreground `omh_remember` save/recall and `skill_manage` paths.
+Managed v2 role instructions require useful durable learning before task return,
+respect native admission states, preserve skill ownership and make no write when
+there is no useful retained fact or procedure. No new learning daemon or memory
+backend is introduced.
+
+The instruction upgrade admits only exact role-scoped v1 SHA-256 preimages,
+current v2 text or the original generic templates. Custom edits and another
+role's document remain protected. Native content-hash CAS and exact readback
+remain required. The existing installer's `--instructions-only` mode leaves
+adapter configuration, skill assignments, native links and profile settings alone.
+
+Acceptance requires a justified OMH save and verified reusable skill update in
+one authorized finite run, followed by native retrieval/discovery in a fresh run
+of the same profile. Both task returns must use the authenticated Paperclip path.
+Configuration, installed instructions and isolated worker tests do not prove this
+cross-run outcome.
+
+## Privacy and profile isolation
 
 The plugin manifest contains metadata only. Private values are not placed in
 prompts, ordinary `client_env`, profile YAML or `.env`, plugin-host environments,
@@ -130,18 +151,18 @@ contracts were regenerated from their canonical owner during qualification.
 | Existing manifest and plugin-host/provider-auth compatibility | 48 passed |
 | Existing gateway CLI compatibility | 14 passed |
 | Generated gateway contract and profile-history checks | 4 passed |
-| Native review compatibility and new auxiliary boundary | 95 passed |
-| Total distinct native qualification on the composed source | 223 passed |
+| Total distinct native credential/compatibility qualification | 128 passed |
 | Mastermind manifest/edge contract and readiness fixtures | 16 passed |
 | Exact HTTPS-token and frozen metadata guard regressions | 26 passed |
 
-The current 223 distinct native cases use 66 unchanged compatibility checks plus
-157 credential, gateway, tool and review cases run on the composed learning
-candidate. The latter includes seven adversarial auxiliary cases with the real
-native constructor, worker and file-tool dispatcher; only model generation is
-stubbed. Live/retired parent leases, copied tool scope, cancellation, provider and
-profile continuity, secret-bearing tool schemas, cache parity and logging are
-covered. No network, paid inference or live memory write was used.
+The credential binding and overlay builder are restored byte-for-byte to the
+qualified `7734f25d` predecessor, including its six origin regressions. Its native
+runner established 128 credential and compatibility passes. The later `c99446e7`
+auxiliary-worker addition was withdrawn after tracing the actual finite adapter
+path. Its v10 hashes, 157 isolated passes and logs remain historical investigation
+evidence; they do not qualify an included automatic learning feature or prove
+OMH retention. No network, paid inference or live memory write was used in those
+isolated checks.
 
 The exact-origin repair and its six cases from head `7734f25d` are preserved.
 Six new cases establish omitted/default-port equivalence and refusal when either
@@ -209,5 +230,7 @@ Retry the reconciled original MAS-2 once against the changed capability. Require
 acceptance remains authenticated same-issue return, a permitted runtime-tool
 call, actual Capacity Fabric route/accounting evidence, OMH marker write/read,
 second-run/profile isolation and representative leadership skill materialization.
+Foreground OMH and skill learning also requires later fresh-run retrieval under
+the same profile, with successful native admission/mutation references.
 An adapter exit code, model answer, source merge or successful static test does
 not establish those outcomes.

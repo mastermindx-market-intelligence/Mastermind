@@ -1,6 +1,6 @@
 {
   "operation": "paperclip-fleet-readiness-20261109",
-  "status": "SOURCE_QUALIFIED_LIVE_ACCEPTANCE_HELD",
+  "status": "HISTORICAL_WITHDRAWN_CANDIDATE",
   "procedure_pin": "fe42651763a8c71e71dece27a2d5b7dd02aa913d",
   "composed_on_mastermind_head": "7734f25d1258bc98ba24cff56df918db897df6ae",
   "installed_hermes_head": "ba4ddf9945a213ede9dda016602a86591ed634f9",
@@ -80,5 +80,14 @@
     "wake_requests": 0,
     "publication_receipt_sha256": "250fd8355085b6c228da3d65e192891eb5698c5c052fee605143a6af0953ac08",
     "media_supplement": "PENDING"
+  },
+  "disposition": {
+    "candidate_commit": "c99446e7b9decdeb86e9329a682a34df4be8a943",
+    "auxiliary_runtime_change": "withdrawn; native finite Paperclip execution suppresses automatic background review",
+    "qualification_scope": "Direct native review-worker invocation with generation stubbed; no live model or memory calls",
+    "automatic_review_reachability_proven": false,
+    "omh_retention_or_later_run_retrieval_proven": false,
+    "replacement": "existing foreground OMH save/recall and native skill_manage during the finite run; live acceptance remains open",
+    "current_credential_runtime": "exact bytes from qualified predecessor7734f25d, preserving the port-zero repair"
   }
 }

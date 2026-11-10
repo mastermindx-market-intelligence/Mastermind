@@ -58,7 +58,7 @@ facts. The original model/tool/memory/task-return proof has not succeeded.
 | P4 — consumer proof | Original task reconciled; credential capability qualifying | Workspace setting approved/applied. Real model and tools reached; credentials absent. Canary cancelled natively. Tested private finite credential candidate awaits safe activation and actual consumer proof |
 | P5 — source delivery | Baseline merged; credential follow-up in owned source | PR #2399 merged through native controls; exact helper installed. Candidate source, tests, composition/evidence and updated operating guidance are being published through the same controls |
 | P6 — historical conversations | Private archive published and read back | PR #2406 merged; MAS-3 contains all 3,368 sessions and 153,543 stored messages from 14 profile snapshots, 1,131 attachments and 19 index documents; zero wakes. Referenced asset supplement remains open |
-| P7 — memory and learning | Existing OMH/profiles preserved; compatibility source qualified | Effective background review is enabled in all 14 homes. Native review retains redaction without inheriting retired foreground authority. Real learned-lesson/later-run proof remains open |
+| P7 — memory and learning | Existing OMH/profiles preserved; foreground learning instructions prepared | Native finite execution suppresses automatic background review despite configured enabled values. Use existing OMH save/recall and native skill_manage during the task. Actual learned-lesson/skill and fresh-run retrieval proof remain open |
 | P8 — operating cutover | Held at existing release and live-work boundaries | Original MAS-2 only; authenticated issue return, runtime MCP, Fabric accounting, OMH marker, second profile and leadership skills still owed |
 
 A baseline source merge must not mark P4 or the parent mission accepted.
@@ -246,21 +246,37 @@ UTC with no target or captured-source drift; it remains unapplied.
 
 ## Source qualification and DO_NOT_REDO
 
-### Continued learning qualification
+### Learning scope correction
 
-The learning repair composes onto head `7734f25d`, preserving the explicit
-port-zero fix, its six native cases, the frozen predecessor evidence and both
-existing exact-token review entries. The 157 affected credential/review cases
-pass through the native isolated runner; 66 prior unchanged compatibility cases
-remain valid. All 26 HTTPS/metadata guard cases pass. Four unrelated donor-source
-checks could not run in the minimal local fixture because their files were not
-materialized; they are not reported as source failures or passing evidence.
+The installed Paperclip adapter always launches `chat -q`, which establishes a
+finite gateway admission. Hermes deliberately disables its automatic background
+reviewer in that context. OMH's inherited `sync_turn` is a no-op, and its
+memory-write hook records metadata rather than importing a built-in file-memory
+entry. Configured review settings and isolated worker tests therefore cannot
+establish automatic Paperclip learning.
 
-The new 26-runtime-file patch passes `git apply --check` without installation.
-Native source checking again passes 12 of 14 checks; footguns and Ruff match the
-predecessor failure sections exactly after temporary-path normalization. Health
-reports zero blocking/advisory findings. The first archive-only check lacked Git
-metadata and is superseded by the same candidate in an isolated Git/index context.
+The auxiliary-worker addition at `c99446e7` is withdrawn. Restore the binding and
+builder exactly to `7734f25d`, preserving the explicit port-zero repair, all six
+origin cases, both exact-token review entries and the qualified 25-file runtime
+patch. The 128 predecessor credential/compatibility passes remain applicable to
+those exact runtime bytes. The later v10 source hashes, 157 isolated passes,
+26-file patch and logs remain historical evidence with a corrected disposition;
+they are not current automatic-learning or live-retention proof.
+
+Managed v2 instructions require a bounded foreground learning check. Use the
+existing OMH save/recall admission and native skill_manage owner only for useful
+durable facts or verified reusable procedures. Pending review is not completed
+retention. No new backend, reviewer, timer or learning daemon is introduced.
+The existing readiness helper supports an instructions-only rollout with exact
+role-scoped v1 hash acceptance, current-text idempotence, custom-content refusal,
+native baseHash CAS and exact readback. Skill, adapter and profile writes are
+excluded from that narrow mode.
+
+Acceptance requires successful native persistence and skill-mutation references
+in one useful finite Paperclip run, then retrieval/discovery in a fresh run under
+the same profile and authenticated returns to the original issue. None of this
+live proof is claimed yet. Native source checking remains 12 of 14 overall,
+with the disclosed baseline footgun/Ruff failures still unwaived.
 
 CodeQL alerts 272/273 remain an explicit disposition hold. Automatic approval
 review rejected their dismissal; no alternate tool/account or source workaround
@@ -268,10 +284,17 @@ is authorized by this continuation. Draft/disabled auto-merge remain held until
 the actual release controls are satisfied. This source work is independent of
 that denied action and does not claim to clear it.
 
-Exact learning evidence is recorded in
+Historical auxiliary investigation evidence and its disposition are recorded in
 [learning qualification](../../../ops/paperclip_fleet/evidence/2026-11-10-learning-qualification.json).
 The accepted history publication receipt is linked from PR #2406 comment
 6760043164. Do not re-export, re-upload or replay accepted history.
+The referenced-file supplement is merged at `c065e56b` and published on the same
+private MAS-3 issue: 18 ZIP attachments, 16 documents and 1,126 distinct captured
+files. Its verified receipt hash is
+`0ccf88e712850ebb73467570dc1a117bfb1bc7654e0d38f2b4865528ae45fbf4`.
+Missing/unsafe references remain explicit; no byte recovery is invented. The
+original archive plus supplement has caused zero execution wakes. A final
+live-history delta belongs to the later runtime cutover, not a repeated export.
 
 - Ten focused tests pass, including foreign-link preservation, immutable inventory
   integrity, cross-company refusal, no secret passthrough, disabled beta pins,
