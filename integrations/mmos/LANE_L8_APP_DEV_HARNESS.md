@@ -89,6 +89,31 @@ R1a load-bearing facts (verified): tauri lock **2.11.6**; `eval_with_callback` a
   vitest only from here.
 - S1 attack pass (glm-5.3, `integrations/mmos/L8_SHELL_MODE_ATTACK.md`): **PASS**, no
   spec defeat; two LOW findings (capability test misses config-inline capabilities; no
-  post-load navigation re-validation + doc overclaim). Fixes: exotic-spelling gate test,
-  inline-capability config test, doc softening. Navigation re-validation is deferred to
-  the dev-bundle slice, which logs navigation events.
+  post-load navigation re-validation + doc overclaim). Fixes landed `aca17ad1e`:
+  exotic-spelling gate test, inline-capability config test, doc softening. Navigation
+  re-validation dropped with the V4 re-scope (window is loopback-only at startup; remote
+  origins keep no IPC regardless).
+
+## V4 lane closure (2026-11-10, principal steer)
+
+Plan V4 (`PROGRAM_PLAN_V4.md`): the locked loopback-only window is kept as the
+Mastermind window; its content becomes a T3 client, then Paperclip Work pages. L8 closes.
+
+- Origin is a **setting**: `MM_SHELL_URL`, read once at startup (`shell_mode.rs:78-94`);
+  proven by `accepts_loopback_http_urls`, `refuses_everything_but_loopback_http`,
+  `gate_handles_exotic_loopback_spellings`, `no_capability_grants_remote_origins`,
+  `merged_config_declares_no_inline_remote_capability` (8/8 green at every merge).
+- **Landed on trunk** `07a6108f5` (also lane head): shell mode + attack fixes, merged
+  over V4 plan commit and L9's closure. Post-merge: cargo 6+299+14 green, typecheck
+  rc=0, identity pytest 18 passed.
+- **Load proof** (dev bundle `Mastermind OS Dev.app`, debug, built from lane HEAD):
+  served own page on 127.0.0.1:5319, launched with `MM_SHELL_URL`; evidence in
+  `~/.mastermind/mmos_evidence/l8s-20261110/` — `shell-proof-accessibility.txt` (page
+  heading + `L8S-PROOF-5319` marker in the AX tree), `shell-proof-window.png` (peekaboo
+  `see`, receipt bound to dev pid 99337, window_id 94436), `l8s-shell-proof-launch.log`
+  (empty stderr = no refusal). Dev app and proof server torn down after capture.
+- Docs: `skills/mmos-app-dev/SKILL.md` (≤60 lines), `integrations/mmos/L8_INSTALL_RUNBOOK.md`.
+- **Dropped by V4**: load proof against 127.0.0.1:3100, second attack round, `mmos_dev.py`
+  `up --url`/`logs` extension, dev-log event wiring (window-created/navigation), S2 page
+  verbs. Unset/refused behavior already covered by unit tests; the proof launch wrote no
+  app.log because no refusal occurred.

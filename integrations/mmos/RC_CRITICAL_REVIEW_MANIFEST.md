@@ -197,7 +197,7 @@ lane branch, not on trunk yet.
 
 | Status | Files | Question |
 |---|---|---|
-| *expected* (no `MM_SHELL_URL` token exists in `app/mastermind_os/src-tauri` at `2ee546d71`) | `MM_SHELL_URL` gate inside `app/mastermind_os/src-tauri` | Can any shell-mode URL other than the one fixed gate value open a window, and is the refusal fail-closed on unset/malformed values? |
+| TRUNK (L8 landed; `MM_SHELL_URL` parsed once at startup in the named file) | `app/mastermind_os/src-tauri/src/shell_mode.rs` | Can any shell-mode URL other than the one fixed gate value open a window, and is the refusal fail-closed on unset/malformed values? |
 
 ### (d) Lane L6 read producers (this lane)
 
