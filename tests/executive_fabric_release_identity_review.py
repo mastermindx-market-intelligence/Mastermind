@@ -970,13 +970,17 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 
 # Material protected320 context composition: only line locations/file digest
 # move for the same six accepted Memory HTTP-status operands; no new mask.
-REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '5522cf9369fc4c04e585bd24a32e22fc4690c82f4048c65ed52dbe2467a4ae99',
- 'sites': [(245, 75, 78, 'int', '400'),
-           (255, 93, 96, 'int', '503'),
-           (636, 37, 40, 'int', '400'),
-           (657, 54, 57, 'int', '503'),
-           (677, 54, 57, 'int', '503'),
-           (687, 56, 59, 'int', '503')]}
+# 2026-11-10 L6 trunk hygiene: WO-12 (2c54c99f6) inserted the WO-13 child-request
+# admission validator above these sites; the six operands are unchanged (the two
+# 503s at output_too_large/source_unavailable remain deliberately unmasked, as at
+# the previous pin). Digest+line move only, per this entry's own precedent.
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': 'c12ccd29efc4f47b51b3adb05f77c17fd9a2cb9657b83852345939d53a7a5575',
+ 'sites': [(288, 75, 78, 'int', '400'),
+           (298, 93, 96, 'int', '503'),
+           (815, 37, 40, 'int', '400'),
+           (836, 54, 57, 'int', '503'),
+           (856, 54, 57, 'int', '503'),
+           (866, 56, 59, 'int', '503')]}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.
