@@ -68,9 +68,9 @@ These are **owner acts on the live host**, not part of the scripted sequence abo
   and `MASTERMIND_T3_LAUNCH_ARGUMENTS_FILE` to the Control
   `com.mastermind.executive.control.plist` environment (both names verified in
   `control_plane/t3_native_composition.py:84,91`).
-- Register the `t3-native` route/worker row in the control DB
-  (`/var/db/mastermind-executive/control/db`), per memo §5(b) — the worker
-  provider home follows the installed `workers/codex-01/provider-home` pattern
+- Register the **`t3-native-01`** worker in the control DB
+  (`/var/db/mastermind-executive/control/db`), per memo §5(b) — its provider
+  home follows the installed `workers/codex-01/provider-home` pattern
   (install.sh `PROVIDER_HOME`). Separately, R5 landed the approved staged
   `t3` route row in `config/executive_worker_routes.json` with `enabled=false`;
   enabling that row is this owner step, after R6.
