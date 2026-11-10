@@ -88,7 +88,6 @@ import {
 export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
   signInPrimary?(): Promise<unknown>;
   readWorkAuthorization?(): Promise<unknown>;
-  signInForWork?(): Promise<unknown>;
   readAuthorizationContinuation?(request: {signal: AbortSignal}): Promise<unknown>;
   continueAuthorization?(): Promise<unknown>;
   /** Explicit fixed local metadata read; never refreshes an authorization owner. */
@@ -1150,7 +1149,6 @@ export async function createNativeClient(
   let continuationPending = false;
   let primarySignInPending = false;
   let primarySignInUncertain = false;
-  let workSignInPending = false, workSignInUncertain = false;
   const update = (raw: unknown) => {
     current = authState(raw);
     invalidateReads();
@@ -1279,15 +1277,6 @@ export async function createNativeClient(
       };
     },
     async readWorkAuthorization() { return invoke("read_work_authorization"); },
-    async signInForWork() {
-      if (workSignInPending || workSignInUncertain) throw new Error("WORK_AUTHORIZATION_PENDING");
-      workSignInPending = true;
-      executive.invalidate(); invalidateReads();
-      const ticket = ++control, started = epoch;
-      try { const result = await invoke("sign_in_for_work"); if (ticket === control && started === epoch) update(result); }
-      catch (error) { workSignInUncertain = true; throw error; }
-      finally { workSignInPending = false; }
-    },
     async signInPrimary() {
       if (primarySignInPending || primarySignInUncertain) throw new Error("PRIMARY_AUTH_PENDING");
       primarySignInPending = true;

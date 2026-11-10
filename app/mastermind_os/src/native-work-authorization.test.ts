@@ -1,17 +1,54 @@
-import {expect,it,vi} from 'vitest';
-import {decodeWorkAuthorization,bindNativeWorkAuthorization} from './native-work-authorization';
+import {expect, it, vi} from 'vitest';
+import {bindNativeWorkAuthorization, decodeWorkAuthorization} from './native-work-authorization';
 import type {RawClient} from './host';
-const eligible={schema:'mastermind.native_work_authorization.v1',state:'ELIGIBLE',reason:'WORK_NOT_ESTABLISHED',generation:3};
-it('accepts only the three closed native observation variants',()=>{
- for(const [state,reason] of [['ELIGIBLE','WORK_NOT_ESTABLISHED'],['INELIGIBLE','NOT_ELIGIBLE'],['ADMIN_ACTION_REQUIRED','AUTHORIZATION_REFUSED']])expect(Object.isFrozen(decodeWorkAuthorization({...eligible,state,reason}))).toBe(true);
+import fixture from './fixtures/native-work-authorization-source.json';
+
+it('admits only the two read-only status tuples', () => {
+  for (const value of [fixture.active, fixture.refused]) {
+    expect(decodeWorkAuthorization(value)).toEqual(value);
+    expect(Object.isFrozen(decodeWorkAuthorization(value))).toBe(true);
+  }
 });
-it('refuses extra/accessor/prototype/mixed tuple/unsafe-generation metadata',()=>{
- const getter=Object.defineProperty({...eligible},'generation',{get(){throw Error('PRIVATE_GETTER');}});
- for(const value of [{...eligible,token:'no'},{...eligible,state:'ADMIN_ACTION_REQUIRED'},{...eligible,generation:NaN},{...eligible,generation:2**53},{...eligible,generation:-1},getter,Object.create(eligible),null])expect(()=>decodeWorkAuthorization(value)).toThrow();
+
+it('rejects earlier ELIGIBLE metadata, unsafe generations and open shapes', () => {
+  const available = fixture.active;
+  const getter = Object.defineProperty({...available}, 'generation', {get() { throw Error('PRIVATE_GETTER'); }});
+  for (const value of [fixture.initial, {...available, token:'no'}, {...available, state:'ADMIN_ACTION_REQUIRED'},
+    {...available, generation:NaN}, {...available, generation:2**53}, {...available, generation:-1},
+    getter, Object.create(available), null]) {
+    expect(() => decodeWorkAuthorization(value)).toThrow('WORK_AUTHORIZATION_UNAVAILABLE');
+  }
 });
-function setup(){let epoch=1,hostEpoch=2;const raw={getState:()=>({status:'signed_in',reason:null,acquisition:true,content:true}),invalidationGeneration:()=>epoch,readWorkAuthorization:vi.fn(async()=>eligible),signInForWork:vi.fn(async()=>{})} as unknown as RawClient;const owner=bindNativeWorkAuthorization(raw,()=>hostEpoch)!;return {raw,owner,hostEpoch:()=>hostEpoch,bumpRaw:()=>{epoch++;},bumpHost:()=>{hostEpoch++;}};}
-it('requires a qualified current read before one fixed command',async()=>{const x=setup();await expect(x.owner.signIn()).rejects.toThrow();await x.owner.read({signal:new AbortController().signal});await x.owner.signIn();expect(x.raw.signInForWork).toHaveBeenCalledWith();await expect(x.owner.signIn()).rejects.toThrow();expect(x.raw.signInForWork).toHaveBeenCalledTimes(1);});
-it.each(['raw','host'] as const)('withholds late %s-generation read and command',async kind=>{const x=setup();let finish!:(v:unknown)=>void;x.raw.readWorkAuthorization=()=>new Promise(r=>{finish=r;});const owner=bindNativeWorkAuthorization(x.raw,x.hostEpoch)!;const pending=owner.read({signal:new AbortController().signal});if(kind==='raw')x.bumpRaw();else x.bumpHost();finish(eligible);await expect(pending).rejects.toThrow();await expect(owner.signIn()).rejects.toThrow();});
-it('does not dispatch held refusal and retains ambiguous handoff',async()=>{const x=setup();x.raw.readWorkAuthorization=async()=>({...eligible,state:'ADMIN_ACTION_REQUIRED',reason:'AUTHORIZATION_REFUSED'});const owner=bindNativeWorkAuthorization(x.raw,()=>1)!;await owner.read({signal:new AbortController().signal});await expect(owner.signIn()).rejects.toThrow();expect(x.raw.signInForWork).not.toHaveBeenCalled();
- const y=setup();y.raw.signInForWork=vi.fn(async()=>{throw Error('LOST');});const held=bindNativeWorkAuthorization(y.raw,()=>1)!;await held.read({signal:new AbortController().signal});await expect(held.signIn()).rejects.toThrow();await expect(held.read({signal:new AbortController().signal})).rejects.toThrow();expect(y.raw.signInForWork).toHaveBeenCalledTimes(1);
+
+function setup() {
+  let rawEpoch = 1;
+  let hostEpoch = 2;
+  let finish!: (value: unknown) => void;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const raw = {
+    getState: () => ({status:'signed_in', reason:null, acquisition:true, content:true}),
+    invalidationGeneration: () => rawEpoch,
+    readWorkAuthorization: vi.fn(() => pending),
+  } as unknown as RawClient;
+  const owner = bindNativeWorkAuthorization(raw, () => hostEpoch)!;
+  return {raw, owner, finish, bumpRaw: () => {rawEpoch++;}, bumpHost: () => {hostEpoch++;}};
+}
+
+it('exposes only the incumbent read operation', async () => {
+  const {owner, finish} = setup();
+  expect(Object.keys(owner)).toEqual(['read']);
+  const result = owner.read({signal:new AbortController().signal});
+  finish(fixture.refused);
+  await expect(result).resolves.toEqual(fixture.refused);
+});
+
+it.each(['raw', 'host', 'abort'] as const)('rejects late metadata after %s withdrawal', async kind => {
+  const {owner, finish, bumpRaw, bumpHost} = setup();
+  const controller = new AbortController();
+  const result = owner.read({signal:controller.signal});
+  if (kind === 'raw') bumpRaw();
+  if (kind === 'host') bumpHost();
+  if (kind === 'abort') controller.abort();
+  finish(fixture.refused);
+  await expect(result).rejects.toThrow('WORK_AUTHORIZATION_UNAVAILABLE');
 });
