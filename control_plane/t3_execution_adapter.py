@@ -371,6 +371,17 @@ class T3BindingJoinDriftError(T3ExecutionAdapterError):
     """A v1.1 binding's t3 idempotency join drifted from the launch (C-P1)."""
 
 
+class T3ModelRouteDriftError(T3ExecutionAdapterError):
+    """The launch spec's model disagrees with the CLAIMED route's model.
+
+    Model Router → T3 modelSelection mapping (DONE_WHEN row 2): the
+    envelope's model selection is derived from the CLAIMED ExecutionBinding's
+    route fields, and a ``spec.model`` that names a DIFFERENT model is
+    refused BEFORE the launch-intent claim — nothing persisted, nothing
+    sent, never a launch under a model the claim never authorized.
+    """
+
+
 class T3ResultLedgerConflictError(T3ExecutionAdapterError):
     """The write-once result ledger already holds a DIFFERENT reference."""
 
@@ -400,13 +411,33 @@ class T3LaunchSpecNotDurableError(T3ExecutionAdapterError):
     code = "T3_SPEC_NOT_DURABLE"
 
 
+#: Closed ``model_selection_basis`` vocabulary on the launch envelope
+#: (Model Router → T3 modelSelection mapping, DONE_WHEN row 2):
+#:   CLAIMED_ROUTE   derived from the CLAIMED ExecutionBinding's route
+#:                   fields (model_ref as the model; provider_instance_ref,
+#:                   falling back to provider_ref, as the T3 instance id);
+#:   SPEC_FALLBACK   no claimed route model was available (a binding with no
+#:                   model_ref, or a pre-durability reconstruction with no
+#:                   binding at all); the launch spec's model field was used
+#:                   verbatim — the harness-fixed state the L1 admitted
+#:                   canary disclosed, now recorded on the envelope itself.
+T3_MODEL_BASIS_CLAIMED_ROUTE = "CLAIMED_ROUTE"
+T3_MODEL_BASIS_SPEC_FALLBACK = "SPEC_FALLBACK"
+T3_MODEL_SELECTION_BASES = (
+    T3_MODEL_BASIS_CLAIMED_ROUTE,
+    T3_MODEL_BASIS_SPEC_FALLBACK,
+)
+
+
 @dataclasses.dataclass(frozen=True)
 class T3ThreadLaunchEnvelope:
     """Secret-free t3_thread_launch envelope (donor param census, adapted).
 
     ``workspace_ref`` is the source ref only; mapping it onto the donor's
     workspaceStrategy (worktree/existing_worktree/root) is the port's
-    runtime policy, never the adapter's.
+    runtime policy, never the adapter's.  ``model_selection_basis`` names
+    which owner produced ``model_selection`` (closed vocabulary above); it
+    is empty on legacy rows written before the field existed.
     """
 
     schema: str = T3_LAUNCH_ENVELOPE_SCHEMA
@@ -418,6 +449,7 @@ class T3ThreadLaunchEnvelope:
     message: str = ""
     workspace_ref: str = ""
     model_selection: str = ""
+    model_selection_basis: str = T3_MODEL_BASIS_SPEC_FALLBACK
     created_at: str = ""
 
 
@@ -2041,7 +2073,12 @@ class T3ExecutionAdapter:
         client_request_id = derive_t3_client_request_id(binding)
         self._verify_binding_join(binding, client_request_id, principal)
         namespace = t3_request_namespace(principal)
-        envelope = self._launch_envelope(spec, client_request_id, namespace)
+        # G2: the envelope's model selection follows the CLAIMED binding's
+        # route; a spec.model that disagrees is refused HERE — before the
+        # intent claim below, so nothing is persisted and nothing is sent.
+        envelope = self._launch_envelope(
+            spec, client_request_id, namespace, binding=binding
+        )
         intent = T3LaunchIntent(
             run_id=spec.run_id,
             client_request_id=client_request_id,
@@ -2240,7 +2277,52 @@ class T3ExecutionAdapter:
         spec: WorkerLaunchSpec,
         client_request_id: str,
         request_namespace: str = T3_REQUEST_NAMESPACE,
+        binding: ExecutionBinding | None = None,
     ) -> T3ThreadLaunchEnvelope:
+        """Build the launch envelope; the model selection follows the CLAIM.
+
+        Model Router → T3 modelSelection mapping (DONE_WHEN row 2): when the
+        claimed ``ExecutionBinding`` carries a route model (``model_ref``),
+        the envelope's ``model_selection`` is derived FROM THE CLAIM — the
+        T3 modelSelection object ``{"instanceId": …, "model": …}`` (the
+        port parses a JSON selection verbatim) with the instance id taken
+        from the binding's ``provider_instance_ref`` falling back to
+        ``provider_ref`` — and a ``spec.model`` that disagrees with the
+        claimed route model is refused typed BEFORE any intent is persisted
+        or anything sent (:class:`T3ModelRouteDriftError`).  A binding with
+        no route model keeps the previous behaviour (the spec's model
+        field) with the basis recorded honestly as ``SPEC_FALLBACK``.
+        """
+        route_model = ""
+        route_instance = ""
+        if binding is not None:
+            route_model = str(getattr(binding, "model_ref", "") or "").strip()
+            route_instance = str(
+                getattr(binding, "provider_instance_ref", "") or ""
+            ).strip() or str(
+                getattr(binding, "provider_ref", "") or ""
+            ).strip()
+        if route_model:
+            spec_model = str(spec.model or "").strip()
+            if spec_model and spec_model != route_model:
+                raise T3ModelRouteDriftError(
+                    "refused: the launch spec's model "
+                    f"{spec_model!r} disagrees with the claimed route's model "
+                    f"{route_model!r} (binding model_ref); the t3 "
+                    "modelSelection is derived from the CLAIM, never from a "
+                    "spec that names a model the claim did not authorize "
+                    "(nothing was sent, no intent persisted)"
+                )
+            selection: dict[str, str] = {"model": route_model}
+            if route_instance:
+                selection["instanceId"] = route_instance
+            model_selection = json.dumps(
+                selection, sort_keys=True, separators=(",", ":")
+            )
+            basis = T3_MODEL_BASIS_CLAIMED_ROUTE
+        else:
+            model_selection = spec.model
+            basis = T3_MODEL_BASIS_SPEC_FALLBACK
         return T3ThreadLaunchEnvelope(
             request_namespace=request_namespace,
             client_request_id=client_request_id,
@@ -2249,7 +2331,8 @@ class T3ExecutionAdapter:
             title=f"mastermind {spec.job_id}/{spec.run_id}",
             message=spec.prompt,
             workspace_ref=str(spec.workspace_path),
-            model_selection=spec.model,
+            model_selection=model_selection,
+            model_selection_basis=basis,
             created_at=self._now_iso(),
         )
 
