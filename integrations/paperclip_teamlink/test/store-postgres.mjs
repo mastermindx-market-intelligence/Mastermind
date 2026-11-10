@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
@@ -24,9 +24,9 @@ const tables = await import(pathToFileURL(join(modules, '@paperclipai/db/dist/in
 const namespace = guard.derivePluginDatabaseNamespace(manifest.id, manifest.database.namespaceSlug);
 assert.equal(namespace, 'plugin_mastermind_teamlink_ddd6e53475');
 const directory = await mkdtemp('/tmp/tl-pg-');
-const data = join(directory, 'data'), socket = join(directory, 'socket');
+const data = join(directory, 'data');
 const port = 65431; // Private Unix socket directory; no TCP listener is opened.
-let server, ended, sql, orm, serverClosed = false, stderr = '', statements = 0;
+let socket, server, ended, sql, orm, serverClosed = false, stderr = '', statements = 0;
 const checks = [];
 const connect = () => postgres({ host: socket, port, database: 'postgres', username: 'teamlink_test',
   max: 4, connect_timeout: 2, idle_timeout: 2, onnotice() {} });
@@ -53,7 +53,7 @@ const operation = (name, issue = 'issue', company = 'company') => ({ companyId: 
   bindingId: 'binding', direction: 'paperclip_to_t3', nativeRun: null });
 
 try {
-  await mkdir(socket, { mode: 0o700 });
+  socket = await mkdtemp(join(directory, 'socket-'));
   await execute(join(binaries, 'initdb'), ['-D', data, '-A', 'trust', '-U', 'teamlink_test', '--no-locale', '-E', 'UTF8'],
     { timeout: 20000, maxBuffer: 32768 });
   server = spawn(join(binaries, 'postgres'), ['-D', data, '-h', '', '-k', socket, '-p', String(port),
