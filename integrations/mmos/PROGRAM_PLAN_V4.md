@@ -105,8 +105,8 @@ Carries over, unchanged in value:
 | T1s live answer text | Claude-driver threads stream answer text the way Codex-driver threads already do | accepted 2026-11-10 at trunk `1bc6b7574` (patch sha256 `661566e1…5400`, 355 tests in the principal's run; see section 11) |
 | T6 team server | An always-on headless T3 server owned by Mastermind, separate from the Chairman's T3 Code app, that the window and the teammates use | **accepted and installed 2026-11-10** at trunk `54da298e1`. See section 12 |
 | T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
-| T3 Team view | Teammate list and work cards. **No fork first:** the stock T3 client already shows a roster when each teammate is one pinned, titled thread in a "Team" project | investigation (T3i) accepted 2026-11-10 at trunk `c7dd3ef4d`; see section 13 and `T3_TEAM_VIEW_OPTIONS.md`. A fork is built only for what lane T7 shows the stock client cannot do |
-| T7 team roster | Two real teammates (Assurance, Design Lead) set up on the team server as pinned threads, checked in a headless browser, with the eight open questions answered | started 2026-11-10 19:05 UTC. See section 13 |
+| T3 Team view | Teammate list and work cards. **No fork first:** the stock T3 client already shows a roster when each teammate is one pinned, titled thread in a "Team" project | investigation (T3i) accepted 2026-11-10 at trunk `c7dd3ef4d`; see section 13 and `T3_TEAM_VIEW_OPTIONS.md`. **Closed with no fork 2026-11-10** (T7 verdict: fork needed for nothing; section 14) |
+| T7 team roster | Two real teammates (Assurance, Design Lead) set up on the team server as pinned threads, checked in a headless browser, with the eight open questions answered | **accepted 2026-11-10** at trunk `e1b338021` (39 tests in the principal's run; see `T7_TEAM_ROSTER.md` and section 14) |
 | T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
 | T4b governed coding job | DONE_WHEN 10: a task that needs code becomes one governed coding job through the socket door and the L1 engine | after T45 |
 | L9 module platform | Land what exists (dev instance script, module, template), runbook, close | closing |
@@ -404,3 +404,41 @@ line of section 12 ("personas are added when the first installed agent is moved"
 
 **Fork decision is deferred to evidence.** If T7 returns "nothing", lane T3 closes with no
 fork. If it returns a list, the fork is scoped to that list and nothing else.
+
+## 14. Amendment, 2026-11-10 19:55 UTC: T7 accepted, two teammates are on the team server
+
+**What is there now** (checked by the principal on the running server, not from the report)
+
+| Item | Value |
+| --- | --- |
+| Project | "Team", workspace `~/.mastermind/t3-team/team-project` |
+| Assurance | provider instance `assurance`, pinned thread "Assurance — quality & security", home `~/.mastermind/t3-team/teammates/assurance` |
+| Design Lead | provider instance `design-lead`, pinned thread "Design Lead — product design", home `~/.mastermind/t3-team/teammates/design-lead` |
+| Charters | persona prose copied from each agent's existing Hermes `SOUL.md`; nothing else was copied |
+| Memory | each teammate's own `CLAUDE.md`; a fact told to each came back after a server restart and is on disk |
+| Tool limit | read and search anywhere, write only inside its own home, no shell. Both refused a write to `/tmp` |
+| Thread addresses | `~/.mastermind/t3-team/run/team_urls.json` (0600, no credential) |
+| Tool | `tools/mmos_team_server/team_roster.py apply|status <spec>`; a third teammate is a spec block, one `apply` and one pin |
+
+**Lane T3 closes with no fork.** In a headless browser at 1280 by 800 the two pinned rows
+read as a roster: name, status word, time, coloured badge with the teammate's initials. Live
+text showed eight separate states on the real server. The sidebar is open by default on a
+thread address. The carrier's marker wraps cleanly.
+
+**What is not right yet, and what happens about it**
+
+| Finding | Action |
+| --- | --- |
+| The role is cut off: "Assurance — quality & secu…" at the default sidebar width. The title box holds about 24 characters | Shorten role lines to fit when the next teammates are added. Needs a thread rename, which like pinning exists only in the web client |
+| Pinning has no server command. It was done through the headless browser | Accepted. The paired browser profile for this is kept at `~/.mastermind/t3-team/run/browser-profile` (0700). It holds a session cookie, so it is a credential: the principal moved it there out of the evidence directory |
+| The "Done" mark cleared for one teammate on opening and stayed for the other across two opens | Not chased. It follows a visit rule in the client that a headless open may not trigger. To be looked at in the real window |
+| A pairing link from `run/access.txt` stops working about two minutes after the server starts | The window is paired with a freshly made code, not the start-up file. Lane T1w's note covers how |
+| The page is still T3 Code to look at: its name, a project panel offering "Open in Cursor" and "Initialize Git", a composer hint about files and commands | Not a roster problem and not fixed by this lane. It is the first real reason a small fork might be wanted later, and it is a product call for after the first milestone |
+| Teammates have no shell | Deliberate for now. Work that needs to run code goes through the governed coding job (lane T4b), not through a teammate's own shell |
+
+**Settings reload.** The server reads `settings.json` again while running, so a teammate can
+be added without a restart. This answers the open item from T45's brief.
+
+**What T7 did not do.** It wrote nothing to Paperclip. The installed Assurance and Design
+Lead agents still run on Hermes. Binding each installed agent to the thread above is the
+cut-over, one agent at a time, after T45 returns with the carrier.
