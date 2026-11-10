@@ -36,4 +36,18 @@ runs with the fewest acts; the hops that need a NEVER-line act are isolated so o
 
 ## 3. Results
 
-(appended as rungs complete)
+### R8 source gap found and closed in source (2026-11-09)
+
+The Hermes `mmx-mastermind` transport (`plugins/mmx-mastermind/transport.py:74,423-439`, read-only)
+admits through the Executive host tool `child_request_admit {work_ref, command}`. No installed
+release and no origin branch implemented it: the producer
+(`integrations/executive_mcp/hermes_host.py`, `coo.py` +181, `hermes_delegate/executive.py` +60,
+`scripts/dev_hermes_child_request_mcp.py`, 18 tests) existed only as the unpushed local commit
+`4915d0f4` in the Hermes lane worktree, which its ledger (`~/.hermes/.../mmos/LANE_HERMES.md`
+"push/PR belongs to the integrator") handed to the integrator. L1 extracted it read-only
+(`git format-patch`, that worktree untouched) and landed it with authorship kept
+(`git am -3`, applies cleanly to the trunk) as lane commit `2c54c99f6`. CRITICAL surface
+(trusted-host admission tool): listed under OPEN for the release-candidate review.
+Live owner acts for R8 (Hermes seat, exact commands): `/tmp/l1_owner_acts_20261109.md` §A —
+copied into §4 below. Enabling the plugin alone is NOT enough: the installed Executive MCP
+(:8443, `dd45d111`) mounts neither `child_request_admit` nor `/mcp/coo`, so R8 also waits on R6.
