@@ -549,6 +549,9 @@ def test_ask_block_creates_child_and_blocks_parent():
     assert pc.child_rows[parent_id][0]["title"] == "Count lines in t45_alpha.txt"
     blocks = [c for c in pc.calls if c[0] == "block"]
     assert len(blocks) == 1 and blocks[0][2] == (child_id,)
+    # the unblock owner is the acting agent itself — this build 403s an
+    # agent naming another agent as unblock owner
+    assert blocks[0][3] == "ag-1"
     # the asking reply is the parent comment; no confirmation, not in_review
     kinds = [c[0] for c in pc.calls]
     assert "comment" in kinds and "interaction" not in kinds
@@ -565,7 +568,7 @@ def test_ask_replay_creates_no_second_child():
     child_ident = pc.child_rows["is-1"][0]["identifier"]
     pc2 = FakePaperclip(issues={"is-1": {"identifier": "MMO-1",
                                          "status": "blocked",
-                                         "unblockDescriptor": {"owner": {"agentId": "ag-atlas"},
+                                         "unblockDescriptor": {"owner": {"agentId": "ag-1"},
                                                                "action": f"Atlas-TEST completes {child_ident}: x"},
                                          "title": "Summarize file X",
                                          "description": "Write a three-line summary."}})

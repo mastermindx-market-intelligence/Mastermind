@@ -468,6 +468,7 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     if not company_id:
         log("no PAPERCLIP_COMPANY_ID; cannot create the child issue")
         return False
+    me = pc.me()
     child = None
     for row in pc.children(issue["id"]):
         if ask_op in (row.get("description") or ""):
@@ -477,7 +478,7 @@ def handle_ask(pc, issue, reply, ask, op, roster):
         child = pc.create_issue(company_id, {
             "title": ask["title"],
             "description": (f"{ask['description']}\n\n"
-                            f"Asked by {pc.me().get('name', 'a teammate')} on "
+                            f"Asked by {me.get('name', 'a teammate')} on "
                             f"{issue.get('identifier')} [{ask_op}]"),
             "assigneeAgentId": agent_id,
             "parentId": issue["id"],
@@ -491,8 +492,12 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     descriptor = fresh.get("unblockDescriptor") or {}
     if (fresh.get("status") != "blocked"
             or child.get("identifier") not in (descriptor.get("action") or "")):
+        # This build refuses an agent naming ANOTHER agent as unblock owner
+        # (403 "Agents may only name themselves as an unblock owner", live
+        # 2026-11-10): the asker owns its own unblock; the action text still
+        # names the teammate whose work it waits for.
         pc.block_issue(
-            issue["id"], [child["id"]], agent_id,
+            issue["id"], [child["id"]], me.get("id"),
             f"{ask['assignee']} completes {child.get('identifier')}: "
             f"{ask['title']}")
     if not comment_already_present(pc, issue["id"], reply):
