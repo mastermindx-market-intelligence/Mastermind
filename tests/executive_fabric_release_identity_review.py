@@ -466,8 +466,11 @@ REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
 # are unchanged; the extra startup module names shift the last two sites by five
 # lines. Previous source SHA d7fcc70d413c5445ee38c21dc1e19b584da12e2afb3eab02fcd39e9241f469ad.
 # No new identity site is qualified; any source drift restores the ordinary guard.
-REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '936701c295116b786dc36d018357dfe0217c7cee37c4b11c2b14223c59c4a664',
- 'sites': ((120, 73, 76, 'int', '501'), (310, 78, 81, 'int', '450'), (405, 83, 86, 'int', '501'))},
+# WO05 adds admitted-class validation before the original startup helpers.
+# The three typed identity operands and their complete authorization owners are
+# unchanged; qualify only this exact complete source and their moved coordinates.
+REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '27a074b96871beb70900c0590d7dd6d99fb1bd318896596da68232ebdaf37bde',
+ 'sites': ((226, 73, 76, 'int', '501'), (416, 78, 81, 'int', '450'), (511, 83, 86, 'int', '501'))},
  'control_plane/paid_fabric_wire.py': {'sha256': '6c9c16eaa48fa7f5ac7cbd4eaa113b619a5bb1e3d65ef69ab55c6f0d839fc9c6',
  'sites': ((98, 35, 38, 'int', '501'),)},
  'control_plane/paid_model_execution_principal.py': {'sha256': 'a20a4115599d93cb8a9c5397a84a58624f9cd24bb5ee00e219add653f832e79c',

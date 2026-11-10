@@ -26,9 +26,9 @@ FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 STATUS_SITES = ((6002, 66, 69, 'int'), (6015, 74, 77, 'int'), (6017, 75, 78, 'int'))
 
 BACKEND_SITES = (
-    (120, 73, 76, "int"),
-    (310, 78, 81, "int"),
-    (405, 83, 86, "int"),
+    (226, 73, 76, "int"),
+    (416, 78, 81, "int"),
+    (511, 83, 86, "int"),
 )
 
 def _assert_catalog_refused(source):
