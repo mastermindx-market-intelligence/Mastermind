@@ -146,5 +146,12 @@ Chairman's T3 app (3773/3774) and Hermes: never read for state, never written.
   text; the canary-shape file is what it is asked to produce in dev.
 - The canary minted its OAuth client against the real T3 server (3773). This
   lane does NOT: the worker OAuth client is minted against the DEV server
-  (3800) under V4's boundary, reusing the same pairing helper pointed at the
-  dev base URL.
+  (3790–3810 range) under V4's boundary, reusing the same pairing helper
+  pointed at the dev base URL. One honest incident during bring-up, recorded:
+  the helper's `t3 auth pairing create` CLI leg selects its server by
+  `T3CODE_HOME`/`T3CODE_PORT`, not by the helper's BASE url; the first smoke
+  run minted one 15-minute pairing code on the live T3 app (3773) before the
+  register/decision legs were refused at the dev base. The code was left to
+  expire unused — no client registered, no decision, no token. The door now
+  sets the dev `T3CODE_HOME`/`T3CODE_PORT` before any pairing, so the whole
+  mint is dev-side.

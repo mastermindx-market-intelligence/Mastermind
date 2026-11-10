@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -52,6 +53,165 @@ class NeedsHuman(Exception):
 
 OUTPUT_BLOCK = "paperclip-output"
 ASK_BLOCK = "paperclip-ask"
+CODING_JOB_BLOCK = "paperclip-coding-job"
+CODING_JOB_DEFAULT_KEY = "coding-job-1"
+
+
+def parse_coding_job_block(reply):
+    """The LAST ```paperclip-coding-job fenced block in a reply, if any.
+
+        ```paperclip-coding-job
+        key: coding-job-1
+        ```
+
+    -> {"key"} or None. The block names WHICH job of this task it is (the
+    task's title+description is the brief); a block without a key means the
+    default. Malformed -> None (plain answer; a trigger can never fail the
+    run). A key quoted back as an example (`<...>`) is not a trigger."""
+    lines = (reply or "").splitlines()
+    start = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") and CODING_JOB_BLOCK in stripped:
+            start = idx
+    if start is None:
+        return None
+    key, closed = None, False
+    for line in lines[start + 1:]:
+        if line.strip().startswith("```"):
+            closed = True
+            break
+        if key is None and line.strip().startswith("key:"):
+            key = line.split(":", 1)[1].strip()
+            continue
+        return None  # any other content makes it malformed, not a trigger
+    if not closed:
+        return None
+    key = key or CODING_JOB_DEFAULT_KEY
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", key):
+        return None  # job keys stay safe identifiers
+    if key.startswith("<") and key.endswith(">"):
+        return None  # the how-to example quoted back, not a real trigger
+    return {"key": key}
+
+
+def coding_job_command(issue_id, key=CODING_JOB_DEFAULT_KEY):
+    """The frozen coding-job command for one task+key — a six-line stdlib
+    mirror of the engine's ``admission_command_id`` over the idempotency
+    triple (roots/paperclip-<id>, parents/paperclip-<id>, key). Pinned
+    byte-identical by tests/test_mmos_teammate_coding_job.py; the carrier
+    names a COMMAND only and never carries the envelope."""
+    material = "\x1f".join((
+        f"roots/paperclip-{issue_id}",
+        f"parents/paperclip-{issue_id}",
+        str(key),
+    ))
+    return "child-request:" + hashlib.sha256(
+        material.encode("utf-8")).hexdigest()
+
+
+class DoorClient:
+    """The coding-job door on the Executive local-operator socket (L4). The
+    socket itself is the admission (kernel peer uid); no token, no headers."""
+
+    def __init__(self, socket_path, timeout=60.0):
+        self._path = str(socket_path)
+        self._timeout = timeout
+
+    def _request(self, method, path, body=None):
+        payload = json.dumps(body).encode() if body is not None else b""
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(self._timeout)
+        conn.connect(self._path)
+        try:
+            head = (f"{method} {path} HTTP/1.0\r\nHost: door\r\n"
+                    f"Content-Length: {len(payload)}\r\n"
+                    "Content-Type: application/json\r\n\r\n").encode("ascii")
+            conn.sendall(head + payload)
+            chunks = []
+            while True:
+                data = conn.recv(65536)
+                if not data:
+                    break
+                chunks.append(data)
+        finally:
+            conn.close()
+        raw = b"".join(chunks)
+        status_line, _, resp = raw.partition(b"\r\n\r\n")
+        status = int(status_line.split(b" ", 2)[1]) if b" " in status_line else 0
+        try:
+            return status, json.loads(resp or b"{}")
+        except ValueError:
+            return status, {}
+
+
+def handle_coding_job(pc, issue, reply, block, opts):
+    """The third block: this task needs code, so ONE governed coding job.
+
+    Called AFTER the reply is delivered as the task's comment. The carrier
+    computes the frozen command locally, makes exactly ONE admit call through
+    the door socket, and maps the answer honestly onto the task: an honest
+    admission/replay comment (the job id is the identity the result will
+    carry home), or ONE blocker comment with the exact reason (WAIT detail,
+    refusal code, unreachable door). Idempotent across runs by comment
+    marker; the door itself is idempotent by command. Never raises — a
+    blocked job must not fail the delivered answer."""
+    socket_path = (opts.get("coding_job_door") or "").strip()
+    if not socket_path:
+        log("coding-job block present but no coding_job_door in config; "
+            "nothing to do")
+        return
+    command = coding_job_command(issue["id"], block["key"])
+    marker = f"coding-job-command: {command}"
+    try:
+        rows = pc.comments(issue["id"])
+    except CarrierError:
+        rows = []
+    if isinstance(rows, dict):
+        rows = rows.get("comments") or rows.get("rows") or []
+    if any(marker in (row.get("body") or "") for row in rows):
+        log(f"coding job for {issue.get('identifier')} already surfaced "
+            f"({block['key']}); no second call")
+        return
+    door = DoorClient(socket_path)
+    try:
+        status, body = door._request(
+            "POST", "/paperclip/coding-job/admit", {"command": command})
+    except OSError as exc:
+        pc.add_comment(issue["id"], (
+            f"[t2-carrier] coding job blocked — DOOR_UNREACHABLE\n\n"
+            f"The Executive door socket is not answering ({exc}); the task's "
+            f"governed coding job could not be requested.\n\n{marker}"))
+        log(f"coding-job door unreachable for {issue.get('identifier')}")
+        return
+    result = body.get("result") if isinstance(body, dict) else None
+    state = (result or {}).get("state") if isinstance(result, dict) else None
+    if status == 200 and state in ("ADMITTED", "REPLAY"):
+        job_id = (result or {}).get("job_id")
+        pc.add_comment(issue["id"], (
+            f"coding job {block['key']} {state} — job `{job_id}`\n\n"
+            "The Executive admitted this task's governed coding job; its "
+            "verified result (with branch evidence) returns to this task "
+            "when the attempt seals.\n\n"
+            f"{marker}"))
+        log(f"coding job for {issue.get('identifier')} {state} as {job_id}")
+        return
+    if status == 200 and state == "WAIT":
+        reason = (result or {}).get("wait_reason") or "queue full"
+        detail = (result or {}).get("wait_detail") or {}
+        pc.add_comment(issue["id"], (
+            f"[t2-carrier] coding job blocked — WAIT ({reason})\n\n"
+            f"The Executive ready queue has no capacity for this task's "
+            f"coding job right now{': ' + json.dumps(detail) if detail else ''}."
+            f"\n\n{marker}"))
+        log(f"coding job for {issue.get('identifier')} WAIT: {reason}")
+        return
+    error = (body.get("error") or {}) if isinstance(body, dict) else {}
+    code = error.get("code") or f"HTTP_{status or 'EMPTY'}"
+    message = error.get("message") or "the Executive refused the coding job"
+    pc.add_comment(issue["id"], (
+        f"[t2-carrier] coding job blocked — {code}\n\n{message}\n\n{marker}"))
+    log(f"coding job for {issue.get('identifier')} refused: {code}")
 
 
 def parse_ask_block(reply):
@@ -189,11 +349,12 @@ def ask_help(roster, my_agent_id):
 
 
 def build_message(identifier: str, title: str, body: str, op: str,
-                  link: str = None, asking: str = None) -> str:
+                  link: str = None, asking: str = None, job_help: str = None):
     body = (body or "").strip()
     where = (f"Issue page (the board accepts or declines the answer there): "
              f"{link}\n\n") if link else ""
     how_to_ask = f"\n\n{asking}" if asking else ""
+    how_to_job = f"\n\n{job_help}" if job_help else ""
     return (
         f"[{op}]\n\n"
         f"You were woken for Paperclip issue {identifier}: {title}\n\n"
@@ -202,6 +363,26 @@ def build_message(identifier: str, title: str, body: str, op: str,
         "Do the task described above. Your reply to this message is posted as "
         "the issue comment and completes the issue."
         f"{how_to_ask}"
+        f"{how_to_job}"
+    )
+
+
+def coding_job_help(door_socket):
+    """The third-block instruction, only when a door is configured. The
+    example uses a placeholder key, so a teammate quoting the instruction
+    back verbatim is ignored by the parser's example guard."""
+    if not door_socket:
+        return None
+    return (
+        "If this task needs CODE you cannot finish in this reply, end your "
+        "reply with a fenced block:\n"
+        "```paperclip-coding-job\n"
+        "key: <only for a second, different job; default coding-job-1>\n"
+        "```\n"
+        "The task itself (title + description) is the job's brief. The block "
+        "requests ONE governed coding job: the Executive admits it, a worker "
+        "runs it, and its verified result (branch evidence included) returns "
+        "to this task as a comment. Do not put the brief in the block."
     )
 
 
@@ -882,7 +1063,8 @@ def run_carrier(pc, t3_factory, opts):
                 # An asked teammate answers; it does not pass the ask on.
                 asking=None if ask_child_op(issue.get("description") or "")
                 else ask_help(opts.get("roster"),
-                              os.environ.get("PAPERCLIP_AGENT_ID")))
+                              os.environ.get("PAPERCLIP_AGENT_ID")),
+                job_help=coding_job_help(opts.get("coding_job_door")))
             log(f"sending {op} to thread {thread_id}")
             result = t3.send(message)
             reply = result.get("reply") or ""
@@ -900,6 +1082,9 @@ def run_carrier(pc, t3_factory, opts):
             return 0
         deliver(pc, issue, reply, op, crash_after,
                 ask_child=bool(ask_child_op(issue.get("description") or "")))
+        job = parse_coding_job_block(reply)
+        if job:
+            handle_coding_job(pc, issue, reply, job, opts)
         return 0
     except NeedsHuman:
         try:
