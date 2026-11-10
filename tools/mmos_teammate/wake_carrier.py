@@ -31,6 +31,7 @@ See T2_TEAMMATE_BINDING_AND_DISPATCH.md.
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -138,6 +139,17 @@ def op_id(issue_id: str, content: str) -> str:
     return f"pc-{issue_id}-{digest}"
 
 
+# A child issue created by a teammate's ```paperclip-ask block carries its
+# parent's ask op marker in its description: "Asked by X on MMO-17 [pc-…-ask]".
+ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9-]+-ask)\]")
+
+
+def ask_child_op(text: str):
+    """The ask op marker embedded in an issue description, if any."""
+    match = ASK_CHILD_MARKER_RE.search(text or "")
+    return match.group(1) if match else None
+
+
 def build_message(identifier: str, title: str, body: str, op: str) -> str:
     body = (body or "").strip()
     return (
@@ -164,9 +176,15 @@ def choose_issue(rows, my_run_id=None):
     either no active run or an active run that IS this run. An issue whose
     active run is this very run (the assignment wake binds it before the
     carrier starts) is this run's to do; an issue held by another live run is
-    not. Oldest update first."""
+    not. A BLOCKED issue is eligible only when its dependencies are explicitly
+    ready — that is the issue_blockers_resolved return wake (every blocker
+    done); a blocked issue still waiting on a blocker is not. Oldest first."""
     def eligible(row):
-        if row.get("status") not in ("todo", "in_progress"):
+        status = row.get("status")
+        if status == "blocked":
+            if row.get("dependencyReady") is not True:
+                return False
+        elif status not in ("todo", "in_progress"):
             return False
         if not row.get("dependencyReady", True):
             return False
@@ -262,12 +280,16 @@ class PaperclipClient:
     def issue(self, issue_id):
         return self._request("GET", f"/api/issues/{issue_id}")
 
-    def checkout(self, issue_id, agent_id):
+    def checkout(self, issue_id, agent_id, allow_blocked=False):
         # todo: human-created, untouched. in_progress: the assignment
-        # automation already moved it; activeRun-null means unowned.
+        # automation already moved it; activeRun-null means unowned. blocked:
+        # only for the return wake, after every blocker reached done.
+        expected = ["todo", "in_progress"]
+        if allow_blocked:
+            expected.append("blocked")
         return self._request(
             "POST", f"/api/issues/{issue_id}/checkout",
-            {"agentId": agent_id, "expectedStatuses": ["todo", "in_progress"]},
+            {"agentId": agent_id, "expectedStatuses": expected},
         )
 
     def comments(self, issue_id):
@@ -415,24 +437,33 @@ def release_issue(pc, issue_id, note):
         log(f"release of issue {issue_id} also failed: {exc}")
 
 
-def deliver(pc, issue, reply, op, crash_after=None):
+def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
     """Deliver the thread's answer onto the issue, idempotently ACROSS RUNS:
     comment (skip if the exact text is already posted), a pending
     request_confirmation addressed to the board (skip if this op's key already
     exists — a re-POST from another run is a 409 in this build, not a dedupe),
     then status -> in_review. A crash between steps is repaired by the next
-    run without duplicating anything."""
+    run without duplicating anything.
+
+    An ask CHILD (created by another teammate's ```paperclip-ask) completes
+    with done instead: its consumer is the asking teammate, whose
+    issue_blockers_resolved wake fires only when every blocker reaches done —
+    a pending board confirmation would strand the asker."""
     if crash_after == "pre-comment":
         log(f"CRASH_SWITCH pre-comment (run {pc.run_id}); no comment will be posted")
         os._exit(97)
     if not comment_already_present(pc, issue["id"], reply):
         pc.add_comment(issue["id"], reply)
-    if not confirmation_already_present(pc, issue["id"], op):
-        pc.request_confirmation(
-            issue["id"], f"{op}-confirm",
-            "The teammate answered in its T3 thread and the answer is posted as a "
-            "comment. Confirm it completes this issue (accept) or send it back "
-            "(reject with a reason).")
+    if ask_child:
+        final = "done"
+    else:
+        if not confirmation_already_present(pc, issue["id"], op):
+            pc.request_confirmation(
+                issue["id"], f"{op}-confirm",
+                "The teammate answered in its T3 thread and the answer is posted as a "
+                "comment. Confirm it completes this issue (accept) or send it back "
+                "(reject with a reason).")
+        final = "in_review"
     doc = parse_output_block(reply)
     if doc:
         existing = pc.issue_document(issue["id"], doc["key"])
@@ -444,9 +475,70 @@ def deliver(pc, issue, reply, op, crash_after=None):
                                   doc["title"], doc["body"])
             log(f"output document {doc['key']} written on "
                 f"{issue.get('identifier')}")
-    pc.set_status(issue["id"], "in_review")
+    pc.set_status(issue["id"], final)
     log(f"posted reply as comment on {issue.get('identifier')}; "
-        "request_confirmation pending; status -> in_review")
+        f"status -> {final}")
+
+
+def last_result_comment(pc, issue_id):
+    """The teammate's answer on a child issue: the last comment that is not a
+    carrier release note. Falls back to a pointer when there is none."""
+    try:
+        rows = pc.comments(issue_id)
+    except CarrierError:
+        rows = []
+    if isinstance(rows, dict):
+        rows = rows.get("comments") or rows.get("rows") or []
+    for row in reversed(rows):
+        body = (row.get("body") or "").strip()
+        if body and not body.startswith("[t2-carrier]"):
+            return body
+    return "(no answer comment on the child issue)"
+
+
+def handle_return(pc, t3, issue, ask_op, opts):
+    """The issue_blockers_resolved return edge: this teammate's ask came back.
+
+    The blocked parent was woken because every blocker (the ask child) reached
+    done. Send ONE message with the child's result and link into the asker's
+    primary thread — the return op is derived from the ask op, so the marker
+    rule makes the send exactly-once across runs — and deliver the asker's
+    final answer on the parent like any task."""
+    child = None
+    for row in pc.children(issue["id"]):
+        if ask_child_op(row.get("description") or "") == ask_op \
+                and row.get("status") == "done":
+            child = row
+            break
+    if child is None:
+        log(f"return wake on {issue.get('identifier')} but no done child for "
+            f"{ask_op}; leaving the issue for a person")
+        return 0
+    result_text = last_result_comment(pc, child["id"])
+    ret_op = f"{ask_op}-ret"
+    state, existing = scan_marker(t3.messages()[1], ret_op)
+    if state is None:
+        message = (
+            f"[{ret_op}]\n\n"
+            f"The teammate you asked finished. Their child issue "
+            f"{child.get('identifier')} '{child.get('title')}' is done.\n\n"
+            f"Their answer:\n\n{result_text}\n\n"
+            "Use it to finish your original task: your reply to this message "
+            "is posted as the issue comment and completes the issue."
+        )
+        log(f"sending {ret_op} to the asker's thread")
+        result = t3.send(message)
+        reply = result.get("reply") or ""
+    elif state == "pending":
+        log(f"{ret_op} already in the thread and still pending; waiting, no resend")
+        reply = wait_for_reply(t3, ret_op, opts)
+    else:
+        log(f"{ret_op} already answered in the thread; reconciling, no resend")
+        reply = existing
+    if not reply.strip():
+        raise CarrierError("thread reply was empty")
+    deliver(pc, issue, reply, ret_op)
+    return 0
 
 
 def handle_ask(pc, issue, reply, ask, op, roster):
@@ -526,7 +618,8 @@ def run_carrier(pc, t3_factory, opts):
         full = pc.issue(row["id"])
         mine = active_run_id(row) == pc.run_id
         try:
-            pc.checkout(row["id"], me["id"])
+            pc.checkout(row["id"], me["id"],
+                        allow_blocked=(row.get("status") == "blocked"))
         except CarrierError as exc:
             if mine and "HTTP 409" in str(exc):
                 # The assignment wake bound this issue to THIS run before the
@@ -546,6 +639,19 @@ def run_carrier(pc, t3_factory, opts):
         f"activeRun={active_run_id(row) or 'none'}")
 
     try:
+        if issue.get("status") == "blocked":
+            # The issue_blockers_resolved wake: every blocker reached done.
+            ask_op = None
+            for row in pc.children(issue["id"]):
+                marker = ask_child_op(row.get("description") or "")
+                if marker:
+                    ask_op = marker
+                    break
+            if ask_op:
+                return handle_return(pc, t3, issue, ask_op, opts)
+            log(f"blocked issue {issue.get('identifier')} has no ask child; "
+                "leaving it for a person")
+            return 0
         content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
         op = op_id(issue["id"], content)
         state, existing = scan_marker(t3.messages()[1], op)
@@ -567,7 +673,8 @@ def run_carrier(pc, t3_factory, opts):
         if ask and handle_ask(pc, issue, reply, ask, op,
                               opts.get("roster") or {}):
             return 0
-        deliver(pc, issue, reply, op, crash_after)
+        deliver(pc, issue, reply, op, crash_after,
+                ask_child=bool(ask_child_op(issue.get("description") or "")))
         return 0
     except NeedsHuman:
         try:

@@ -48,18 +48,21 @@ class FakePaperclip:
         return [{"id": iid, "identifier": row.get("identifier", iid),
                  "status": row["status"], "updatedAt": row.get("updatedAt", ""),
                  "activeRun": row.get("activeRun"),
-                 "dependencyReady": True}
+                 "dependencyReady": row.get("dependencyReady", True)}
                 for iid, row in self.issues.items()]
 
     def issue(self, issue_id):
         return dict(self.issues[issue_id], id=issue_id)
 
-    def checkout(self, issue_id, agent_id):
+    def checkout(self, issue_id, agent_id, allow_blocked=False):
         self._guard("checkout")
-        self.calls.append(("checkout", issue_id, agent_id))
+        self.calls.append(("checkout", issue_id, agent_id, allow_blocked))
         row = self.issues[issue_id]
-        assert row["status"] in ("todo", "in_progress"), "expectedStatuses would refuse"
-        row["status"] = "in_progress"
+        allowed = ("todo", "in_progress", "blocked") if allow_blocked \
+            else ("todo", "in_progress")
+        assert row["status"] in allowed, "expectedStatuses would refuse"
+        if row["status"] != "blocked":
+            row["status"] = "in_progress"
 
     def comments(self, issue_id):
         return self.comment_rows.get(issue_id, [])
@@ -329,13 +332,13 @@ def test_assignment_wake_run_does_the_work_on_own_active_run():
     checkout_calls = []
     original_checkout = pc.checkout
 
-    def checkout_409_once(issue_id, agent_id):
+    def checkout_409_once(issue_id, agent_id, allow_blocked=False):
         checkout_calls.append(issue_id)
         if len(checkout_calls) == 1:
             raise wc.CarrierError(
                 "POST /api/issues/is-1/checkout -> HTTP 409 "
                 '{"error":"issue already checked out"}')
-        return original_checkout(issue_id, agent_id)
+        return original_checkout(issue_id, agent_id, allow_blocked)
     pc.checkout = checkout_409_once
     t3 = FakeT3(replies=["ASSIGNMENT-WAKE-OK"])
     assert run(pc, t3) == 0
@@ -603,3 +606,99 @@ def test_malformed_ask_block_is_plain_reply_never_error():
         assert run_with_roster(pc, t3, roster) == 0
         assert [c for c in pc.calls if c[0] == "create_issue"] == []
         assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_choose_issue_blocked_ready_vs_waiting():
+    rows = [
+        {"id": "b1", "identifier": "MMO-B", "status": "blocked",
+         "dependencyReady": True, "updatedAt": "2026-11-10T10:00:00Z"},
+        {"id": "b2", "identifier": "MMO-C", "status": "blocked",
+         "dependencyReady": False, "updatedAt": "2026-11-10T09:00:00Z"},
+        {"id": "b3", "identifier": "MMO-D", "status": "blocked",
+         "updatedAt": "2026-11-10T08:00:00Z"},
+    ]
+    picked = [r["id"] for r in wc.choose_issue(rows, my_run_id="run-9")]
+    # ready-blocked is eligible (the blockers_resolved return wake); a
+    # blocked issue without an explicit ready flag or still waiting is not
+    assert picked == ["b1"]
+
+
+def blocked_parent_with_done_child():
+    ask_op = "pc-is1-abc123def0-ask"
+    issues = {"is-1": {"identifier": "MMO-1", "status": "blocked",
+                       "dependencyReady": True,
+                       "title": "Report the line count",
+                       "description": "Ask an engineer for the count.",
+                       "unblockDescriptor": {"owner": {"agentId": "ag-1"},
+                                             "action": "Atlas completes MMO-2"}}}
+    child = {"id": "ch-1", "identifier": "MMO-2", "parentId": "is-1",
+             "assigneeAgentId": "ag-atlas", "title": "Count lines",
+             "status": "done",
+             "description": f"Asked by Mira on MMO-1 [{ask_op}]"}
+    return issues, ask_op, child
+
+
+def test_return_wake_sends_result_and_finishes_parent():
+    issues, ask_op, child = blocked_parent_with_done_child()
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    t3 = FakeT3(replies=["FINAL: the file has 12 lines"])
+    assert run_with_roster(pc, t3, {}) == 0
+    # exactly one send, carrying the child result and the return marker
+    assert len(t3.sends) == 1
+    assert f"[{ask_op}-ret]" in t3.sends[0]
+    assert "12 lines" in t3.sends[0] and "MMO-2" in t3.sends[0]
+    # checkout was allowed for a blocked issue and the parent finished like
+    # any task: reply comment, board confirmation, in_review
+    checkouts = [c for c in pc.calls if c[0] == "checkout"]
+    assert checkouts and checkouts[0][3] is True
+    kinds = [c[0] for c in pc.calls]
+    assert "comment" in kinds and "interaction" in kinds
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_return_replay_never_resends_or_duplicates():
+    issues, ask_op, child = blocked_parent_with_done_child()
+    ret_op = f"{ask_op}-ret"
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["is-1"] = [{"body": "FINAL: the file has 12 lines"}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{ret_op}] the ask came back"),
+                          ("assistant", "r1", "FINAL: the file has 12 lines")],
+                replies=["SHOULD NOT SEND"])
+    pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
+                            "status": "pending",
+                            "idempotencyKey": f"{ret_op}-confirm"}]
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []  # marker rule: reconcile, never resend
+    assert [c for c in pc.calls if c[0] == "comment"] == []  # already posted
+    assert [c for c in pc.calls if c[0] == "interaction"] == []  # exists
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_blocked_issue_without_ask_child_is_left_alone():
+    issues = {"is-1": {"identifier": "MMO-1", "status": "blocked",
+                       "dependencyReady": True, "title": "Wait on infra",
+                       "description": "Waiting on a deploy"}}
+    pc = FakePaperclip(issues=issues)
+    t3 = FakeT3()
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_ask_child_delivers_done_without_board_confirmation():
+    # Atlas's inbox: the child created by Mira's ask (marker in description)
+    ask_op = "pc-is1-abc123def0-ask"
+    pc = FakePaperclip(issues={"is-1": {
+        "identifier": "MMO-2", "status": "in_progress",
+        "title": "Count lines", "assigneeAgentId": "ag-1",
+        "description": f"Run wc -l.\n\nAsked by Mira on MMO-1 [{ask_op}]"}})
+    t3 = FakeT3(replies=["The file has 12 lines"])
+    assert run_with_roster(pc, t3, {}) == 0
+    kinds = [c[0] for c in pc.calls]
+    # no board confirmation: the asker consumes the answer; the issue goes to
+    # done so the asker's issue_blockers_resolved wake can fire
+    assert "comment" in kinds and "interaction" not in kinds
+    assert pc.issues["is-1"]["status"] == "done"
