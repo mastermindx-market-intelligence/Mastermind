@@ -195,15 +195,17 @@ with expiry, exact profile/run/admission binding and mandatory redaction.
 First support is local/in-process only; managed/remote/background/delegated
 credential execution refuses. No credential extension is installed yet.
 
-The actual installed-source composition preserves 85 changed/new source files.
+Qualification captured 85 existing changed/new source files. The adopted
+composition changes three through the credential extension and eight through the
+hygiene repair, while preserving the remaining 74 byte-for-byte.
 Qualification passes 128 native tests (62 focused credential tests plus
 66 existing plugin, CLI and contract checks). Both generated contract preimages
 were reproduced exactly from their unmodified canonical inputs, then regenerated
 with the extension. Six Paperclip edge-contract checks and ten readiness fixtures
-also pass. The overall native source check remains failed: 3 footgun findings and
-13 Ruff findings reproduce identically on the installed baseline. The other 12
-checks pass, including health with zero blocking/advisory findings. No baseline
-finding has been suppressed or unrelated source fixed.
+also pass. The original v8 source check was 12/14: three footgun and thirteen
+Ruff findings reproduced on the installed baseline. The later existing eight-file
+hygiene repair is adopted below; its exact composed tree passes all 14 checks.
+The original failing result remains historical evidence rather than a waiver.
 
 The producer contract is checked against the installed adapter: 48-hour API JWT,
 optional one-hour runtime token with independent expiry, UUID issuer identity,
@@ -275,8 +277,9 @@ excluded from that narrow mode.
 Acceptance requires successful native persistence and skill-mutation references
 in one useful finite Paperclip run, then retrieval/discovery in a fresh run under
 the same profile and authenticated returns to the original issue. None of this
-live proof is claimed yet. Native source checking remains 12 of 14 overall,
-with the disclosed baseline footgun/Ruff failures still unwaived.
+live proof is claimed yet. The adopted v11 native source composition resolves the
+baseline findings with all 14 checks passing; protected source delivery and live
+cutover remain separate requirements.
 
 The Chairman subsequently approved the exact CodeQL fixture-alert dispositions.
 Alerts [272](https://github.com/mastermindx-market-intelligence/Mastermind/security/code-scanning/272)
@@ -288,7 +291,7 @@ were reconciled open before the corrected requests succeeded. Receipt SHA256:
 0d76c0b13e50a22de1d41276b74b0d802c4f8645f42ab7124da6b7d7a5910b67.
 The exact c994 CodeQL gate then became green without a rerun. This settles only
 those two alerts; required checks on each new head, the retained shared CI repair
-#2404, native source checking and safe runtime activation remain separate.
+#2404, exact native source composition and safe runtime activation remain separate.
 
 Historical auxiliary investigation evidence and its disposition are recorded in
 [learning qualification](../../../ops/paperclip_fleet/evidence/2026-11-10-learning-qualification.json).
@@ -325,8 +328,8 @@ live-history delta belongs to the later runtime cutover, not a repeated export.
 
 1. Publish the qualified owned credential candidate, quiet-default
    reproducibility and exact composition evidence through normal protected
-   source delivery. Preserve the disclosed baseline check failures and actual
-   hosted CI/release holds; source publication is not runtime activation.
+   source delivery. Use the qualified v11 composition and its exact preimages;
+   preserve actual hosted CI/release holds. Source publication is not runtime activation.
 2. Re-read current native gateway identity, active work and source custody.
    Preserve all live units. Engage native maintenance controls only when the
    finite application is ready and current work can finish without interruption.
@@ -343,3 +346,28 @@ live-history delta belongs to the later runtime cutover, not a repeated export.
 
 No new daemon, lifecycle queue, background watcher or completed end-to-end fleet
 acceptance is claimed.
+
+## Native hygiene adoption — 2026-11-10
+
+The original carrier's completed `7f1d-v11` preparation is adopted without
+reimplementing or repeating its accepted tests. The preparation, test and check
+receipts are terminal; the recorded preparation process is absent. Fresh source
+CAS binds this adoption to the existing Paperclip publication operation.
+
+The eight-file patch is SHA256
+`fe2f3f9d5a5dc8c6360b5c2facdc622f39c6cf61aaca880bf50fdaa29d5145d3`.
+Qualified tree `08ffdd48f5e0ed105fb628b137485073e8939b05` has all 14 native
+checks passing and 91 affected tests passing. Those 91 include 62 credential
+cases already counted in the original 128; they are not an additional distinct total.
+The original 25 credential postimages are byte-identical. The composed install
+contains 33 source files, and its three additional credential fixtures remain
+qualification-only. Native source remains unapplied.
+
+See [the adopted evidence](../../../ops/paperclip_fleet/evidence/2026-11-10-native-hygiene-qualification.json)
+for complete preimages, postimages, composition and evidence hashes.
+
+The merged #2411 foreground instruction upgrade was installed through its
+protected instructions-only owner across all thirteen profiles, with exact
+revision readback and unchanged adapter/runtime configuration, at 06:59:10 UTC.
+Receipt SHA256 `c9f5559b5080ab24e4f9472468b8e088de13f9d1facdc17f281af13ccb0ea087`.
+Actual admitted memory/skill learning and later retrieval remain owed.

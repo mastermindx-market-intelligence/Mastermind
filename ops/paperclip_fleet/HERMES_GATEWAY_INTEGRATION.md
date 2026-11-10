@@ -89,13 +89,21 @@ is historical evidence, not a different install target or proof of automatic
 Paperclip learning. Foreground OMH save/recall and native skill_manage remain the
 existing learning owners.
 
-Native `scripts/check` remains failed on 3 footgun and 13 Ruff findings that
-reproduce identically on the installed baseline. The other 12 checks pass;
-health has zero blocking/advisory findings. This does not waive a release hold
-or authorize changing another owner's source. Exact hashes, generated-input
-reproduction, earlier compatibility results and baseline-only macOS fixture
-failures are in the
-[qualification record](evidence/2026-11-10-credential-qualification.json).
+The historical v8 source check was 12/14, with three footgun and thirteen Ruff
+findings reproduced on its installed baseline. The existing eight-file hygiene
+repair is now adopted into the exact credential composition: all 14 native checks
+pass on qualified tree `08ffdd48f5e0ed105fb628b137485073e8939b05`, with zero blocking
+or advisory health findings. The affected native run has 91 passes, including
+62 already counted credential cases. No checker rule or release hold is waived.
+
+The original 25 credential postimages remain unchanged. The composed installation
+has 33 files, including four existing test files; the separate three credential
+qualification fixtures are not installation targets. Its eight hygiene preimages,
+postimages, patch identity and preserved-source accounting are recorded in
+[native hygiene qualification](evidence/2026-11-10-native-hygiene-qualification.json).
+The [original qualification](evidence/2026-11-10-credential-qualification.json)
+retains the historical baseline failures. The new composition is still unapplied;
+current writer custody, safe cutover and protected source delivery remain required.
 
 ## Installed-source composition and release
 

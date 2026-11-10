@@ -1,0 +1,189 @@
+diff --git a/agent/steer_text.py b/agent/steer_text.py
+index e348f11026..0f9d5171c3 100644
+--- a/agent/steer_text.py
++++ b/agent/steer_text.py
+@@ -43,12 +43,12 @@ class SteerText(str):
+     #: Absolute paths of the images the user attached to this steer, in the order they staged them.
+     images: tuple[str, ...] = ()
+ 
+-    def __new__(cls, text: str = "", images: Sequence[str] | Iterable[str] | None = None) -> "SteerText":
++    def __new__(cls, text: str = "", images: Sequence[str] | Iterable[str] | None = None) -> SteerText:
+         instance = super().__new__(cls, text)
+         instance.images = _clean_images(images)
+         return instance
+ 
+-    def with_images(self, images: Sequence[str] | Iterable[str] | None) -> "SteerText":
++    def with_images(self, images: Sequence[str] | Iterable[str] | None) -> SteerText:
+         """This text with ``images`` added to the ones it already carries."""
+         return SteerText(str(self), _clean_images(tuple(self.images) + _clean_images(images)))
+ 
+@@ -58,7 +58,7 @@ def steer_images(text: object) -> tuple[str, ...]:
+     return getattr(text, "images", ()) if isinstance(text, str) else ()
+ 
+ 
+-def join_steer_text(texts: Iterable[str]) -> "SteerText | str":
++def join_steer_text(texts: Iterable[str]) -> SteerText | str:
+     """Newline-join buffered steers without losing their attachments.
+ 
+     Returns the plain ``str`` join when nothing carries an image, so a text-only buffer stays
+diff --git a/cron/scheduler.py b/cron/scheduler.py
+index 277cd592ca..3a83cca46f 100644
+--- a/cron/scheduler.py
++++ b/cron/scheduler.py
+@@ -4127,8 +4127,8 @@ def _acquire_tick_lock(lock_file):
+         # EMFILE/ENFILE from fd exhaustion — must NOT be swallowed as "another instance holds the lock":
+         # that previously made the scheduler appear healthy (tick returned 0, heartbeat recorded success)
+         # while no job ever ran again (#87644).
+-        lock_fd = os.fdopen(os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o644), "r+",
+-                            encoding="utf-8")
++        lock_os_fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o644)
++        lock_fd = os.fdopen(lock_os_fd, "r+", encoding="utf-8")
+         if fcntl:
+             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+         elif msvcrt:
+diff --git a/cron/scheduler_tick.py b/cron/scheduler_tick.py
+index 64dc4d3a5a..17edf3cad4 100644
+--- a/cron/scheduler_tick.py
++++ b/cron/scheduler_tick.py
+@@ -51,7 +51,7 @@ def _tick_lock_holder_pid_alive(pid):
+     if os.name != "posix" or pid is None or pid <= 0:
+         return None
+     try:
+-        os.kill(pid, 0)
++        os.kill(pid, 0)  # windows-footgun: ok - POSIX-only after the guard above
+     except ProcessLookupError:
+         return False
+     except PermissionError:
+@@ -64,7 +64,7 @@ def _tick_lock_holder_pid_alive(pid):
+ def _read_tick_lock_stamp(lock_file):
+     """(pid, acquired_at) from the holder stamp; (None, None) when absent or unparseable."""
+     try:
+-        text = lock_file.read_text(encoding="utf-8", errors="replace")[:64]
++        text = lock_file.read_text(encoding="utf-8-sig", errors="replace")[:64]
+     except OSError:
+         return None, None
+     parts = text.split()
+diff --git a/hermes_cli/config.py b/hermes_cli/config.py
+index 1ffdc95099..6e12b8f7d2 100644
+--- a/hermes_cli/config.py
++++ b/hermes_cli/config.py
+@@ -2240,7 +2240,7 @@ def load_config_observational() -> dict[str, Any]:
+     from hermes_cli.config_backend import observational_file_backend
+     # The ordinary expander tolerates an unavailable secret-scope module. An
+     # admission observation must not substitute ambient values for that failure.
+-    from agent.secret_scope import current_secret_scope, get_secret  # noqa: F401
++    from agent.secret_scope import current_secret_scope, get_secret
+ 
+     with observational_file_backend() as backend:
+         config_path = get_config_path()
+diff --git a/tests/cron/test_tick_lock_staleness.py b/tests/cron/test_tick_lock_staleness.py
+index fd4dbe7003..a3ce6149f4 100644
+--- a/tests/cron/test_tick_lock_staleness.py
++++ b/tests/cron/test_tick_lock_staleness.py
+@@ -66,7 +66,7 @@ class TestDeadHolderCannotBlock:
+         """Kernel proof for the 19:51Z report: the leftover file of a crashed holder does NOT
+         block the next acquire — flock dies with the holder, so a dead ticker was never the
+         blocker; the guard exists for holders wedged while alive."""
+-        lock_dir, lock_file = tick_paths
++        _, lock_file = tick_paths
+         holder = _hold_lock(lock_file)
+         try:
+             dead_pid = st._read_tick_lock_stamp(lock_file)[0]
+@@ -85,7 +85,7 @@ class TestDeadHolderCannotBlock:
+ 
+ class TestStalenessDetection:
+     def test_dead_pid_stamp_is_stale_even_when_fresh(self, tick_paths):
+-        lock_dir, lock_file = tick_paths
++        _, lock_file = tick_paths
+         dead = _dead_pid()
+         lock_file.write_text(f"{dead} {time.time():.6f}", encoding="utf-8")
+         stale, reason = st._stale_tick_lock(lock_file)
+@@ -96,6 +96,13 @@ class TestStalenessDetection:
+         lock_file.write_text(f"{os.getpid()} {time.time():.6f}", encoding="utf-8")
+         assert st._stale_tick_lock(lock_file) == (False, "live holder")
+ 
++    def test_bom_stamp_preserves_fresh_live_holder_identity(self, tick_paths):
++        _, lock_file = tick_paths
++        acquired_at = int(time.time())
++        lock_file.write_text(f"\ufeff{os.getpid()} {acquired_at}", encoding="utf-8")
++        assert st._read_tick_lock_stamp(lock_file) == (os.getpid(), float(acquired_at))
++        assert st._stale_tick_lock(lock_file) == (False, "live holder")
++
+     def test_future_stamp_is_never_stale(self, tick_paths):
+         _, lock_file = tick_paths
+         lock_file.write_text(f"{os.getpid()} {time.time() + 3600:.6f}", encoding="utf-8")
+@@ -128,7 +135,7 @@ class TestReclaim:
+         """The 19:51Z shape: a holder wedged mid-tick holds the flock while alive; every tick
+         silently skipped. The guard reclaims after the staleness bound and logs a WARNING
+         naming the stale holder, so ticks resume without a manual lock clear."""
+-        lock_dir, lock_file = tick_paths
++        _, lock_file = tick_paths
+         monkeypatch.setenv("HERMES_CRON_TICK_LOCK_STALE_SECONDS", "0.2")
+         holder = _hold_lock(lock_file)
+         try:
+@@ -149,7 +156,7 @@ class TestReclaim:
+                 holder.wait()
+ 
+     def test_fresh_live_holder_is_never_reclaimed(self, tick_paths, caplog):
+-        lock_dir, lock_file = tick_paths
++        _, lock_file = tick_paths
+         holder = _hold_lock(lock_file)
+         try:
+             with caplog.at_level(logging.WARNING, logger="cron.scheduler"):
+@@ -182,7 +189,7 @@ class TestReclaim:
+     def test_reclaim_race_keeps_exactly_one_named_holder(self, tick_paths):
+         """N threads stampede a wedged holder's lock: at most one reclaimer may own the named
+         inode afterwards, and future acquires must still serialize against exactly that one."""
+-        lock_dir, lock_file = tick_paths
++        _, lock_file = tick_paths
+         holder = _hold_lock(lock_file)
+         threads_fds, errors = [], []
+         try:
+@@ -218,7 +225,7 @@ class TestReclaim:
+ 
+ class TestConcurrentTickersExactlyOneRuns:
+     def test_exactly_one_holder_among_concurrent_tickers(self, tick_paths):
+-        lock_dir, lock_file = tick_paths
++        _, lock_file = tick_paths
+         held = sched._acquire_tick_lock(lock_file)
+         try:
+             assert held is not None
+diff --git a/tests/gateway/test_drain_marker_status.py b/tests/gateway/test_drain_marker_status.py
+index 2cf4bfa379..229e1fcf3d 100644
+--- a/tests/gateway/test_drain_marker_status.py
++++ b/tests/gateway/test_drain_marker_status.py
+@@ -17,7 +17,7 @@ from pathlib import Path
+ 
+ import pytest
+ 
+-import gateway.drain_control as drain_control
++from gateway import drain_control
+ from gateway.drain_control import (
+     DRAIN_REQUEST_MAX_AGE_SECONDS,
+     drain_marker_status,
+diff --git a/tests/test_fallback_family_first.py b/tests/test_fallback_family_first.py
+index 1d3d7d6742..e10fc6a942 100644
+--- a/tests/test_fallback_family_first.py
++++ b/tests/test_fallback_family_first.py
+@@ -106,7 +106,7 @@ def test_integration_glm_request_fails_over_to_glm_rail():
+ 
+ 
+ def test_integration_deepseek_request_fails_over_to_deepseek_rail():
+-    (provider, model), agent = _run_first_activation("deepseek-v4-1-flash-261017")
++    (provider, model), _agent = _run_first_activation("deepseek-v4-1-flash-261017")
+     assert _model_family_token(model) == "deepseek", (provider, model)
+     assert (provider, model) == ("byteplus-coding", "deepseek-v4-1-flash-261017")
+ 
+diff --git a/tests/tools/test_browser_real_profile.py b/tests/tools/test_browser_real_profile.py
+index 9ec9621dcd..7acbb4c1ee 100644
+--- a/tests/tools/test_browser_real_profile.py
++++ b/tests/tools/test_browser_real_profile.py
+@@ -1150,7 +1150,7 @@ class TestWindowsLockedProfileCopy:
+         src = str(tmp_path / "Login Data")
+         con = sqlite3.connect(src)
+         con.execute("create table logins(origin_url, username_value)")
+-        con.executemany("insert into logins values(?,?)", (("https://a.example", "u%d" % i) for i in range(5)))
++        con.executemany("insert into logins values(?,?)", (("https://a.example", f"u{i}") for i in range(5)))
+         con.commit(); con.close()
+         self._break_online_backup(monkeypatch, bc)
+         dst = str(tmp_path / "out" / "Login Data")

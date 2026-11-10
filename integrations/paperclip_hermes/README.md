@@ -1,9 +1,10 @@
 # Paperclip finite credentials for Hermes
 
-Status: finite credential source qualified; live activation and learning proof held.
-The specifically approved CodeQL fixture alerts 272/273 are dismissed and read
-back as used in tests. Baseline source-check, shared CI repair and safe-cutover
-holds remain in force. No live gateway capability is claimed.
+Status: credential and native source checks qualified; protected delivery, live
+activation and learning proof remain open. The specifically approved CodeQL
+fixture alerts 272/273 are dismissed and read back as used in tests. The adopted
+hygiene composition passes all 14 native checks. Shared CI and safe-cutover holds
+remain in force. No live gateway capability is claimed.
 The fleet baseline is delivered in Mastermind PR #2399, merge
 `dee7a38a1e184e38cdcdd75889223d5b0ec27414`. This follow-up addresses the
 credential gap observed in the original Product task, MAS-2. The task reached
@@ -183,19 +184,33 @@ skips. Its three `test_session_client_env.py` failures reproduced on the untouch
 base in the same macOS qualification environment. An introduced finite-wrapper
 typo was corrected and the actual finite-executor test now passes. An archive
 version fixture was made explicit; this did not change Hermes version policy.
-The actual installed-source qualification preserves 85 other changed/new source
-files. Its existing generated contracts were first reproduced exactly from the
+Qualification captured 85 existing changed/new source files. The adopted
+composition changes three through the credential extension and eight through the
+hygiene repair, while preserving the remaining 74 byte-for-byte. Its existing generated contracts were first reproduced exactly from the
 unmodified canonical inputs, then regenerated with the extension. No installed
 runtime file was changed.
 
-Native `scripts/check` ran all 14 checks. Twelve pass, including health with
-zero blocking/advisory findings. Footguns (3 findings) and Ruff (13 findings)
-still fail identically on the installed baseline. This is a failing overall
-check, not a waived or green release gate; unrelated source was not altered.
-Two narrow health annotations protect fixed safe logging/metadata failures
-from leaking private exception values. See the
-[qualification evidence](../../ops/paperclip_fleet/evidence/2026-11-10-credential-qualification.json)
-for exact source hashes, commands, baseline findings and limits.
+The original v8 composition failed two of 14 native checks: three footgun and
+thirteen Ruff findings reproduced on its installed-source preimage. That result
+remains recorded in the [credential qualification](../../ops/paperclip_fleet/evidence/2026-11-10-credential-qualification.json).
+
+The adopted v11 composition includes the existing, separately qualified
+[native hygiene patch](native-baseline-hygiene.patch). It changes eight exact
+captured preimages: four production files and four existing test files. It makes
+the existing encoding and POSIX guards explicit to the checker, fixes BOM-prefixed
+tick-lock parsing with a fresh-live-holder regression, and corrects the reported
+annotation/import/unused-variable formatting. No checker rule is weakened.
+
+All 14 native checks pass on qualified tree
+`08ffdd48f5e0ed105fb628b137485073e8939b05`, including zero blocking or advisory
+health findings. The combined affected run has 91 passes; 62 are the existing
+credential cases, so this is not 91 additional cases. The original 25 credential
+postimages are unchanged. The install composition now contains 33 source files:
+29 production/generated files and four existing test files. Three qualification
+credential fixtures stay in the isolated test tree. All captured preimages,
+patch hashes and the preserved-source accounting are in the
+[native hygiene qualification](../../ops/paperclip_fleet/evidence/2026-11-10-native-hygiene-qualification.json).
+The composed patch is unapplied; live source custody and safe cutover remain required.
 
 Native test placement:
 
@@ -214,8 +229,10 @@ acceptance.
 
 Publish through the existing source controls. Compose against the actual installed
 source in an owned artifact; preserve existing dirty changes. Before application,
-verify all before-hashes and the current native gateway identity, writer custody
-and active work. The recorded 04:58:56 UTC observation has nineteen active units
+verify all 33 preimage conditions, including recorded absence for new files,
+the remaining captured source bytes, and the current native gateway identity,
+writer custody and active work. Apply the credential and
+hygiene patches as the single hash-checked composition recorded in the v11 evidence. The recorded 04:58:56 UTC observation has nineteen active units
 (nine chats, four in-process cron jobs, six managed units). All four crons are
 restart-unsafe and none is marked wedged. The earlier long-running CEO execution
 completed and delivered at 04:58:19 UTC and must not be replayed. Use the incumbent
