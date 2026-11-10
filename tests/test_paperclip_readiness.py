@@ -1,14 +1,46 @@
 """Focused safety/compatibility checks for the one-shot Paperclip installer."""
 import copy
+import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-import readiness as r
+INSTALLER = Path(__file__).resolve().parents[1] / "ops" / "paperclip_fleet" / "paperclip_readiness.py"
+SPEC = importlib.util.spec_from_file_location("paperclip_fleet_readiness", INSTALLER)
+assert SPEC is not None and SPEC.loader is not None
+r = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(r)
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_marked_operator_addition_is_preserved_before_any_write(self):
+        aid = next(iter(r.ROSTER))
+        name, slug = r.ROSTER[aid]
+        home = Path("/Users/chriswong/.hermes/profiles") / slug
+        custom = r.instructions(name, slug) + "\nOperator addition: preserve this instruction.\n"
+        agent = {"companyId": r.COMPANY, "name": name, "adapterType": "hermes_local",
+                 "status": "idle", "adapterConfig": {}, "runtimeConfig": {}}
+        responses = {
+            f"/agents/{aid}": agent,
+            f"/agents/{aid}/skills": {"entries": [
+                {"sourcePath": str(home / "skills" / "existing" / "SKILL.md"), "managed": False}]},
+            f"/agents/{aid}/instructions-bundle/file?path=AGENTS.md":
+                {"content": custom, "contentHash": "observed-custom-preimage"},
+        }
+        calls = []
+        def request(path, body=None, method="GET"):
+            calls.append((path, body, method))
+            return copy.deepcopy(responses[path])
+        profile = {"model": {"provider": "capacity-fabric", "default": "glm-5.3"},
+                   "memory": {"provider": "omh"}}
+        with patch.object(r, "request", request), patch.object(r, "profile_config", return_value=profile), patch.object(Path, "is_file", return_value=True):
+            with self.assertRaisesRegex(ValueError, "custom instructions; preserve and reconcile"):
+                r.configure_agent(aid, name, slug, apply=True)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(body is None and method == "GET" for _, body, method in calls))
+        self.assertEqual(responses[f"/agents/{aid}/instructions-bundle/file?path=AGENTS.md"]["content"], custom)
+
     def test_preserve_explicit_versions_and_existing_selections(self):
         original = {"paperclipSkillSync": {"desiredSkills": [
             {"key": r.CORE + "paperclip", "versionId": "kept"},

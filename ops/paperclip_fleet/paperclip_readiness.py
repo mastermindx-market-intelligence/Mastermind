@@ -303,7 +303,8 @@ def configure_agent(aid, name, slug, apply):
     entry_path = f"/agents/{aid}/instructions-bundle/file?path=AGENTS.md"
     entry = request(entry_path)
     intended = instructions(name, slug)
-    if entry["content"] != intended and entry["content"].strip() not in GENERIC and MARKER not in entry["content"]:
+    # The marker identifies this integration, not consent to overwrite later edits.
+    if entry["content"] != intended and entry["content"].strip() not in GENERIC:
         raise ValueError(f"{name} has custom instructions; preserve and reconcile.")
     model_name = profile.get("model", {}).get("default")
     if not isinstance(model_name, str) or not model_name.strip():

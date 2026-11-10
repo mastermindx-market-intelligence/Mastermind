@@ -59,7 +59,7 @@ owners and controls.
 
 ## One-shot installer
 
-`readiness.py` is scoped to this exact company, roster, installed version and
+`paperclip_readiness.py` is scoped to this exact company, roster, installed version and
 local-trusted access mode. It:
 
 - verifies each agent's existing Hermes profile, role file, Capacity Fabric and OMH;
@@ -76,8 +76,8 @@ Use a host Python environment with the existing PyYAML dependency available.
 Run a read-only check before any deliberately authorized application:
 
 ```bash
-python3 ops/paperclip_fleet/readiness.py
-python3 ops/paperclip_fleet/readiness.py --agent Product
+python3 ops/paperclip_fleet/paperclip_readiness.py
+python3 ops/paperclip_fleet/paperclip_readiness.py --agent Product
 ```
 
 `--apply` mutates the already-identified instance/profile configuration. It is
@@ -94,11 +94,11 @@ unnecessary.
 Focused fixture tests (no service calls or model spend):
 
 ```bash
-python3 -m unittest discover -s ops/paperclip_fleet -p test_readiness.py -v
+python3 -m unittest discover -s tests -p test_paperclip_readiness.py -v
 ```
 
-Nine tests passed during this operation. They cover native snapshot/link
-integrity, conflicting-path preservation, version/company identity, no secret
+Ten tests passed during this operation. They cover native snapshot/link
+integrity, conflicting-path and later operator-instruction preservation, version/company identity, no secret
 passthrough, feature-gate behavior and native materialization deferral.
 
 ## Native service and recovery proof
