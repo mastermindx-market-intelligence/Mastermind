@@ -57,6 +57,9 @@ class SetupTests(unittest.TestCase):
         binary.write_bytes(b"qualified binary fixture")
         binary.chmod(0o700)
         self.binary = binary
+        self.swift_compat = binary.with_name("libswiftCompatibilitySpan.dylib")
+        self.swift_compat.write_bytes(b"qualified Swift compatibility fixture")
+        self.swift_compat.chmod(0o600)
         browser = self.t3 / "mcp/mmx-browser/server.js"
         browser.parent.mkdir(parents=True)
         browser.write_bytes(LEGACY_BROWSER)
@@ -88,6 +91,7 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
         cli.chmod(0o700)
         self.patches = [patch.object(setup, "QUIET_SHA256", setup.digest(quiet.read_bytes())),
                         patch.object(setup, "PEEKABOO_SHA256", setup.digest(binary.read_bytes())),
+                        patch.object(setup, "SWIFT_COMPAT_SHA256", setup.digest(self.swift_compat.read_bytes())),
                         patch.object(setup, "BROWSER_SERVER_ORIGINAL_SHA256", setup.digest(LEGACY_BROWSER)),
                         patch.object(setup, "BROWSER_SERVER_FIXED_SHA256", setup.digest(FIXED_BROWSER))]
         for p in self.patches:
@@ -354,6 +358,7 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
         quiet = self.home / ".cursor/quiet-computer-use/quiet_mcp.py"
         cli = self.home / ".local/bin/claude"
         for target, reason in [(quiet, "quiet adapter differs"), (self.binary, "binary differs"),
+                               (self.swift_compat, "Swift compatibility companion"),
                                (cli, "configuration CLI is unavailable")]:
             with self.subTest(target=target.name):
                 raw, mode = target.read_bytes(), target.stat().st_mode & 0o777
@@ -369,6 +374,25 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
                 finally:
                     target.write_bytes(raw)
                     target.chmod(mode)
+
+    def test_native_companion_absence_and_changed_preview_preserve_configuration(self):
+        original = self.swift_compat.read_bytes()
+        for native_only in (False, True):
+            with self.subTest(native_only=native_only):
+                self.swift_compat.unlink()
+                with self.assertRaisesRegex(setup.SetupError, "Swift compatibility companion"):
+                    setup.make_plan(self.t3, SOURCE, self.home, native_only=native_only)
+                portable = setup.make_plan(self.t3, SOURCE, self.home, browser_skills_only=True)
+                self.assertEqual(portable["components"], ["browser-skills"])
+                self.swift_compat.write_bytes(original)
+                plan = setup.make_plan(self.t3, SOURCE, self.home, native_only=native_only)
+                self.swift_compat.write_bytes(b"newer companion writer")
+                with self.assertRaisesRegex(setup.SetupError, "Dependency changed"):
+                    setup.apply_plan(plan, plan["plan_sha256"])
+                for home in self.homes:
+                    self.assertEqual((home / ".claude.json").read_bytes(), self.originals[home])
+                self.assertEqual(self.browser.read_bytes(), LEGACY_BROWSER)
+                self.swift_compat.write_bytes(original)
 
     def test_native_only_cli_plan_binds_the_component_selection(self):
         output = io.StringIO()

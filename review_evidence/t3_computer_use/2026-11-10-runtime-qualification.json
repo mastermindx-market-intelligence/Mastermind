@@ -6,8 +6,9 @@
   "source_pr": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2401",
   "installer_tests": {
     "command": "python3 -m unittest discover -s tests -p test_t3_computer_use_setup.py -q",
-    "passed": 22,
-    "native_only": "Qualified native owner and computer skill can be composed with an existing remote browser; independent browser updates survive rollback"
+    "passed": 23,
+    "native_only": "Qualified native owner and computer skill can be composed with an existing remote browser; independent browser updates survive rollback",
+    "native_companion": "Both native compositions refuse missing/changed signed Swift companion; a changed companion invalidates apply; browser-only remains independent"
   },
   "protocol_repair": {
     "existing_owner": "~/.t3/mcp/mmx-browser/server.js",
@@ -57,6 +58,11 @@
       "prior_startup_timeouts_observed": true,
       "cause": "UNRESOLVED_INTERMITTENT_BACKEND_STARTUP",
       "evidence_sha256": "ed598ad46f0d0bbcc44865c69444fc77099813984647bb850f2a924ed26601d2"
+    },
+    "cohort_sha256": {
+      "quiet_mcp.py": "09924847ff1fe85c328476b719dfa459a95e92ced6013c0b73eb077d3ea7d822",
+      "peekaboo": "6e2d9f91cf95689cc061d138cb26f023b511c434f571436c1ae139d040a0f3b4",
+      "libswiftCompatibilitySpan.dylib": "a9e85f785846635c6c12658d2ace9e70af018ba999dd2dcaeec7ffc067ba986e"
     }
   },
   "t3_baseline": {
@@ -134,7 +140,15 @@
     "ubuntu3": "enabled T3 capacity_fabric; no discovered MCP or new skills",
     "reverse_transport_to_m2": "M1 existing m2-recovery SSH route proven with strict host keys and batch authentication; no credentials, aliases or provider configuration changed",
     "m1_sdk": "Existing official Python mcp 1.28.1 imports successfully under Python3.12.13",
-    "m1_native": "Existing CLI4.5 and GUI4.6 differ from qualified cohort; all three permissions observed true for local and selected daemon; qualified quiet owner absent and installation pending"
+    "m1_native": "Complete exact cohort staged, signatures verified and4.9.8 version succeeds on macOS15.6.1; canonical installation and actual SDK/backend/T3 proof pending; older daemon preserved",
+    "m1_native_dependency_recovery": {
+      "initial_failure": "Original dyld crash: required @rpath/libswiftCompatibilitySpan.dylib absent from incomplete stage",
+      "diagnosis": "Original crash and Mach-O strong dependency, no unchanged rerun",
+      "repair": "Copied exact signed existing M2 companion beside unchanged staged binary; no loader override or resigning",
+      "version_returncode": 0,
+      "version": "Peekaboo4.9.8 HEAD/70dbc4183",
+      "state": "QUALIFIED_COHORT_STAGED_NOT_INSTALLED"
+    }
   },
   "ci_dependency": {
     "prior_fixture": "a82b310ebc1a3cd67547c5a2df6ef5c5fc54bb8c",
@@ -159,5 +173,26 @@
     "Resolve browser snapshot failure and prove real workflow",
     "Fleet skill distribution and qualified existing transport",
     "Reconcile and clean up owned fixtures"
-  ]
+  ],
+  "builtin_preview_consumer": {
+    "state": "PROVEN_BOUNDED_WORKFLOW",
+    "thread_id": "mcp:517ab39a-f88d-4695-8449-020e197e708d",
+    "run_id": "run:thread:mcp%3A517ab39a-f88d-4695-8449-020e197e708d:ordinal:1",
+    "provider": "capacity_fabric",
+    "model": "deepseek-v4.1-flash",
+    "run_state": "completed",
+    "retained_items": 40,
+    "completed_tool_items": 15,
+    "succeeded_inputs": 5,
+    "fresh_snapshot_before_every_input": true,
+    "form_result": "Verified: T3 preview baseline cd16df0 | advanced | ready",
+    "iframe_result": "Frame verified",
+    "proof_request_http_status": 200,
+    "owned_preview_closed": true,
+    "post_close_preview_sessions": [],
+    "canonical_activity_sha256": "affdaca16018698d261866607d14e77ee933a33d5c10258525e7c67db2fc94dc",
+    "initial_provider_recovery_observed": true,
+    "thread_settled": false,
+    "scope": "Existing M2 T3 preview, not new native/skill/MastermindChrome acceptance"
+  }
 }

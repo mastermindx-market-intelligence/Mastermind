@@ -13,6 +13,8 @@ Discover the current tools before claiming capability. In T3, provider instances
 
 The qualified shared-Mac path is the existing quiet adapter backed by signed Peekaboo 4.9.8. It uses local execution and its own permission context. The unqualified `peekaboo` command on PATH may be older. Do not substitute it after an error or claim the GUI app's version is the CLI version.
 
+The native cohort includes the signed `libswiftCompatibilitySpan.dylib` beside the pinned executable. On macOS15, a missing companion can cause a dynamic-loader abort before the server starts even when the executable signature is valid. Classify an observed missing-library crash as an installation dependency failure, retain its original diagnostic, and repair the exact qualified cohort through its installation owner. It is not evidence of an OS input-permission denial; do not change loader search paths or signing identities to hide it.
+
 Call `permissions` once when needed. Screen Recording, Accessibility and Event Synthesizing are distinct. A successful capture does not prove clicks work. An explicit OS/tool denial is a real boundary: report the specific missing grant and actual sender. Do not alter TCC, replace signing identities, use `cliclick`, AppleScript or another carrier to replay a denied action.
 
 ## Observe, act once, verify

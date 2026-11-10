@@ -19,6 +19,7 @@ import tempfile
 SKILLS = ("mastermind-computer-use", "mastermind-browser-use")
 QUIET_SHA256 = "09924847ff1fe85c328476b719dfa459a95e92ced6013c0b73eb077d3ea7d822"
 PEEKABOO_SHA256 = "6e2d9f91cf95689cc061d138cb26f023b511c434f571436c1ae139d040a0f3b4"
+SWIFT_COMPAT_SHA256 = "a9e85f785846635c6c12658d2ace9e70af018ba999dd2dcaeec7ffc067ba986e"
 BROWSER_SERVER_ORIGINAL_SHA256 = "854c8397ea5b3547a1faa93e5af27eb071eefc64e9d4f2279695994414727faf"
 BROWSER_SERVER_FIXED_SHA256 = "325366ad6a64c6e28204727ffa36344c34a3e5bc418047e55e87467dd950fdd9"
 SCHEMA = "mastermind.t3_computer_use_install.v1"
@@ -194,6 +195,7 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
     if not browser_skills_only:
         quiet = user_home / ".cursor/quiet-computer-use/quiet_mcp.py"
         peekaboo = quiet.parent / "vendor/peekaboo-macos-arm64/peekaboo"
+        swift_compat = peekaboo.with_name("libswiftCompatibilitySpan.dylib")
         claude = (user_home / ".local/bin/claude").resolve()
         if not claude.is_file() or not os.access(claude, os.X_OK):
             raise SetupError("Existing Claude configuration CLI is unavailable")
@@ -202,12 +204,16 @@ def make_plan(t3_home: Path, source_root: Path, user_home: Path | None = None,
             raise SetupError("Existing quiet adapter differs from the qualified revision")
         if not peekaboo.is_file() or not os.access(peekaboo, os.X_OK) or file_digest(peekaboo) != PEEKABOO_SHA256:
             raise SetupError("Existing signed Peekaboo binary differs from the qualified artifact")
+        if (not swift_compat.is_file() or swift_compat.is_symlink()
+                or digest(read_regular(swift_compat)) != SWIFT_COMPAT_SHA256):
+            raise SetupError("Peekaboo Swift compatibility companion is missing or differs from the qualified artifact")
         expected = {
             "peekaboo": {"type": "stdio", "command": "/usr/bin/python3", "args": [str(quiet)]},
         }
         dependencies += [
             {"path": str(quiet), "sha256": QUIET_SHA256},
             {"path": str(peekaboo), "sha256": PEEKABOO_SHA256},
+            {"path": str(swift_compat), "sha256": SWIFT_COMPAT_SHA256},
             {"path": str(claude), "sha256": claude_sha256},
         ]
         if not native_only:
