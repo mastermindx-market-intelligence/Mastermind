@@ -20,27 +20,60 @@ Facts held at start (from brief, not re-derived):
 
 | # | Item | Owner | State |
 | --- | --- | --- | --- |
-| 1 | Dev instance script + contract test | child glm-5.3 | launched 2026-11-10 |
+| 1 | Dev instance script + contract test | child glm-5.3 (`e56972f1`) | DEAD 08:13Z fabric cooling; relaunch queued (r2) |
 | 2 | Module template + first module (`mastermind-core`) | lead + children | blocked on scout + item 1 |
 | 3 | Platform proof in dev instance | lead | blocked on item 2 |
 | 4 | Attack on item 3 | child grok-4.7 | blocked on item 3 |
-| 5 | Module map of old app (+ amendment columns) | child glm-5.3 (effort high) | running 2026-11-10, after route switch |
-| 6 | Run-failure notes (default instance, READ_ONLY) | child glm-5.3 | launched 2026-11-10 |
+| 5 | Module map of old app (+ amendment columns) | child glm-5.3 | DEAD 08:10–08:14Z (all 4 carriers); relaunch after r2 pair returns |
+| 6 | Run-failure notes (default instance, READ_ONLY) | child glm-5.3 (`10a288da`) | DEAD 08:1xZ fabric cooling; relaunch after r2 pair returns |
 | 7 | Dev skill `skills/mmos-module-dev/SKILL.md` | lead | blocked on item 3 |
 | 8 | Cold-agent test (deepseek-v4.1-flash) | lead + child | blocked on item 7 |
 | 9 | Runtime cannot do item 3 -> report at once | — | not triggered |
 
 ## Children log
 
-| Time (UTC) | Model | Slice | Branch | Result |
+| Time (UTC) | Model | Slice | Branch/attempt | Result |
 | --- | --- | --- | --- | --- |
-| launch | glm-5.3 | item 1 dev instance | t3/l9-dev-instance | pending |
-| launch | gemini-4-argon (effort high) | item 5 module map | t3/l9-module-map | DEAD: provider API 400, `thought_signature` missing in functionCall parts (Gemini-side transport/schema failure; not a task denial, not a permission refusal) |
-| ~07:00Z | gemini-4-argon (effort high) | item 5 module map, retry 1 (`0359ed93`, launched from an errored turn whose result was lost) | t3/l9-module-map | DEAD: identical provider API 400 |
-| ~07:16Z | gemini-4-argon (effort high) | item 5 module map, retry 2 (`02c856d3`) | t3/l9-module-map | DEAD: identical provider API 400 |
-| ~07:2xZ | glm-5.3 (effort high) | item 5 module map (`647e3c43`) — route switched after three identical transport failures on gemini-4-argon; that model's function-calling route is broken on capacity_fabric today. glm-5.3 is the method's co-designated model for census/statement outputs. Outage goes to the scoreboard in the next return. No partial branch was ever pushed by the dead children. | t3/l9-module-map | pending |
-| launch | glm-5.3 | item 6 run failure notes | t3/l9-run-failure-notes | pending |
-| launch | glm-5.3 | SDK scout (evidence only) | — | pending |
+| 06:2x | glm-5.3 | item 1 dev instance | `e56972f1` | DEAD 08:13Z: 503 fabric routing refused, FABRIC_ALL_ROUTES_COOLING (no branch, no evidence pushed) |
+| 06:2x | glm-5.3 | item 6 run failure notes | `10a288da` | DEAD ~08:1xZ: same 503 cooling (no branch pushed) |
+| 06:26 | glm-5.3 | SDK scout (evidence only) | `fc2ebfd4` | DEAD 08:11Z: same 503 cooling (evidence dir empty) |
+| 06:2x | gemini-4-argon (high) | item 5 module map | `6fc554e9` | DEAD: provider API 400 `thought_signature` missing in functionCall parts (Gemini-side schema failure; not a denial) |
+| 07:00 | gemini-4-argon (high) | item 5 retry 1 | `0359ed93` | DEAD: identical 400 (launched from an errored parent turn; result was lost, lead unaware) |
+| 07:16 | gemini-4-argon (high) | item 5 retry 2 | `02c856d3` | DEAD: identical 400 |
+| 07:23–07:24 | glm-5.3 (high) | item 5 — FOUR carriers stacked | `722476d1`, `b34af5d8`, `5224d040`, `647e3c43` | ALL DEAD 08:10–08:14Z: 503 fabric cooling. Furthest was `b34af5d8` (100 items), none returned, none pushed a branch. Chairman ordered one writer per output; duplicates cancelled (already dead) |
+| relaunch | glm-5.3 | SDK scout r2 (`clientRequestId: l9-scout-r2`) | — | pending |
+| relaunch | glm-5.3 | item 1 r2 (`clientRequestId: l9-item1-r2`) | — | pending |
+
+## Incident: how four duplicate item-5 children arose (for the improvement lane, per Chairman)
+
+Cause: the parent (this lead) hit a run of internal tool-result-loss errors ("Tool result
+missing due to internal error"). `delegate_task` calls landed server-side while their results
+never returned, so the lead could not know a child had started and re-issued dispatches. Three
+identical item-5 dispatches stacked within 07:23–07:24 alongside the lead's one deliberate
+relaunch. The same turn also duplicated ledger edits (5x) — every call in it fired.
+
+Contributing factor: 7 concurrent L9 children (plus a full fleet, ~20 threads) just before the
+fabric entered all-routes cooling at ~08:10Z. Width is bounded by shared resources (method V3).
+
+Fixes to propose to the improvement lane (L11):
+1. `delegate_task` should honor `clientRequestId` as an idempotency key: a replayed dispatch
+   with the same key returns the existing taskId instead of starting a second child. (This lane
+   now sends `clientRequestId` on every dispatch as a workaround.)
+2. A parent turn that reports lost tool results should trigger a `t3_thread_list` check before
+   any re-dispatch of the same slice — surface this as a standing rule in the dev skill.
+3. Fabric cooling response should be classified as a backoff signal for the WHOLE lane, not a
+   per-task failure: on `FABRIC_ALL_ROUTES_COOLING`, a lead halts new dispatches rather than
+   per-slice retrying into the same wall.
+
+## Standing rulings recorded (2026-11-10)
+
+- Chairman: `gemini-4-argon` is no longer used in this program — flaky, inconsistently priced.
+  No new dispatch to it by this lead or any descendant. Designs/memos -> `glm-5.3` (effort
+  high); attack/second opinion -> `grok-4.7`. (Consistent with the outage observed above: 3/3
+  transport failures, distinct request ids.)
+- Dispatch discipline for this lane until fabric health is proven: at most 2 concurrent
+  children; every dispatch carries a `clientRequestId`; after any errored turn, re-read
+  `t3_thread_list` before re-dispatching the same slice.
 
 ## Decisions / notes
 
@@ -49,9 +82,6 @@ Facts held at start (from brief, not re-derived):
 - Guard suites to run on new source at integration: identity/registry suites
   (`tests/test_installed_source_git_identity.py`, `tests/test_project_source_installed_registry.py`
   and neighbours) — verified by lead at merge time; fix source, never the guard.
-- gemini-4-argon is UNUSABLE today for function-calling children on capacity_fabric
-  (3/3 transport failures, distinct request ids). Do not route children to it until the
-  provider route is fixed; use glm-5.3 (statement) or grok-4.7 (attack/diff) instead.
 
 ## Plan amendment merged 2026-11-10 (trunk `c0263d2d1`)
 
