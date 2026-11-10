@@ -14,12 +14,14 @@ from __future__ import annotations
 import asyncio
 import bisect
 import functools
+import hashlib
 import hmac
 import ipaddress
 import json
 import logging
 import math
 import os
+import re
 
 import time
 import uuid
@@ -108,6 +110,56 @@ PREFLIGHT_REASONS = frozenset({
     "FABRIC_OAUTH_OWNER_UNAVAILABLE", "FABRIC_OAUTH_OWNER_REFRESH_REQUIRED",
     "FABRIC_OAUTH_OWNER_HELD", "FABRIC_OAUTH_QUOTA_UNKNOWN",
     "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED"})
+_TERMINAL_REASONS = (frozenset(_PUBLIC_REFUSAL_CODES) | PRESELECTION_REASONS
+                     | PREFLIGHT_REASONS | frozenset({
+    "FABRIC_ROUTE_CREDENTIAL", "FABRIC_ROUTE_UNAVAILABLE", "FABRIC_ROUTE_CONNECT",
+    "FABRIC_ROUTE_LOCAL_POOL_TIMEOUT", "FABRIC_UPSTREAM_EFFECT_UNKNOWN",
+    "FABRIC_OAUTH_ACCOUNT_LIMIT"}))
+_USAGE_FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                 "cache_creation_input_tokens")
+
+
+@dataclass
+class _ReceiptIdentity:
+    """Bounded correlation only; never retain/log provider-controlled ID text."""
+    sha256: str | None = None
+    state: str = "unavailable"
+
+    def observe(self, value) -> None:
+        if value is None or self.state in {"invalid", "conflicting"}:
+            return
+        if not isinstance(value, str) or not 0 < len(value) <= 256:
+            self.sha256, self.state = None, "invalid"
+            return
+        try:
+            encoded = value.encode("utf-8")
+        except UnicodeEncodeError:
+            self.sha256, self.state = None, "invalid"
+            return
+        if len(encoded) > 256:
+            self.sha256, self.state = None, "invalid"
+            return
+        digest = hashlib.sha256(encoded).hexdigest()
+        if self.sha256 is not None and self.sha256 != digest:
+            self.sha256, self.state = None, "conflicting"
+        else:
+            self.sha256, self.state = digest, "observed"
+
+
+def _reported_count(value) -> int | None:
+    # Booleans, numeric strings, floats and unreasonable/negative counts are
+    # not measurements. A reported zero is distinct from missing metadata.
+    return value if type(value) is int and 0 <= value <= 2**63 - 1 else None
+
+
+@functools.lru_cache(maxsize=1)
+def _receipt_source_sha256() -> str | None:
+    # Identifies this gateway source only, not the whole release/configuration.
+    # The caller contains I/O/logging failures so observation cannot affect work.
+    try:
+        return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def _public_reason(exc: Exception, fallback: str) -> str:
@@ -388,6 +440,11 @@ class _RequestLifecycle:
     first_content_ms: float | None = None
     headers_ms: float | None = None
     attempt_failed: bool = False
+    response_identity: _ReceiptIdentity = field(default_factory=_ReceiptIdentity)
+    upstream_identity: _ReceiptIdentity = field(default_factory=_ReceiptIdentity)
+    reported_usage: dict[str, int] = field(default_factory=dict)
+    usage_invalid_fields: set[str] = field(default_factory=set)
+    input_token_estimate: int | None = None
 
     @property
     def deadline(self) -> float:
@@ -396,6 +453,77 @@ class _RequestLifecycle:
     def content_observed(self) -> None:
         if self.first_content_ms is None:
             self.first_content_ms = (time.monotonic() - self.started) * 1000
+
+    @property
+    def translated_message_id(self) -> str:
+        # Fixed before the first event, including Responses IDs arriving late.
+        return "msg_fabric_" + self.request_id
+
+    def observe_usage(self, usage) -> None:
+        if not isinstance(usage, dict):
+            if usage is not None:
+                self.usage_invalid_fields.update(_USAGE_FIELDS)
+            return
+        fields = {name: usage.get(name) for name in (
+            _USAGE_FIELDS if self.route.wire == WIRE_ANTHROPIC else _USAGE_FIELDS[:2])}
+        if self.route.wire == WIRE_OPENAI:
+            fields = {"input_tokens": usage.get("prompt_tokens"),
+                      "output_tokens": usage.get("completion_tokens")}
+        if self.route.wire in {WIRE_OPENAI, WIRE_RESPONSES}:
+            details = usage.get("prompt_tokens_details" if self.route.wire == WIRE_OPENAI
+                                else "input_tokens_details")
+            if isinstance(details, dict):
+                fields["cache_read_input_tokens"] = details.get("cached_tokens")
+            elif details is not None:
+                self.usage_invalid_fields.add("cache_read_input_tokens")
+        for name, value in fields.items():
+            count = _reported_count(value)
+            if count is not None:
+                # These are cumulative reports, never deltas to be summed.
+                self.reported_usage[name] = count
+            elif value is not None:
+                self.usage_invalid_fields.add(name)
+
+    def observe_message(self, value, *, translated: bool = False) -> None:
+        if not isinstance(value, dict):
+            return
+        self.upstream_identity.observe(value.get("id"))
+        if not translated:
+            self.response_identity.observe(value.get("id"))
+        self.observe_usage(value.get("usage"))
+
+    def emit_terminal_receipt(self, outcome: str, reason: str) -> None:
+        # Exactly one attempt from settle(). No bodies, arbitrary metadata,
+        # headers, credentials, account rows or exception text enter this sink.
+        # In particular, a failed log handler cannot skip permit cleanup.
+        try:
+            public_reason = (reason if reason in _TERMINAL_REASONS
+                             or re.fullmatch(r"http_[3-5][0-9]{2}", reason) else None)
+            receipt = {
+                "schema": "fabric_terminal_v1", "request_id": self.request_id,
+                "settled_unix_ms": int(time.time() * 1000), "process_id": os.getpid(),
+                "gateway_source_sha256": _receipt_source_sha256(),
+                "operation": "count_tokens" if self.counting else "messages",
+                "route_id": self.route.route_id, "model": self.model, "wire": self.route.wire,
+                "outcome": outcome, "reason": public_reason,
+                "upstream_send_started": self.sent,
+                "response_id_sha256": self.response_identity.sha256,
+                "response_id_state": self.response_identity.state,
+                "upstream_response_id_sha256": self.upstream_identity.sha256,
+                "upstream_response_id_state": self.upstream_identity.state,
+                "usage": {name: self.reported_usage.get(name) for name in _USAGE_FIELDS},
+                "usage_source": "upstream_reported" if self.reported_usage else "unavailable",
+                "usage_state": ("unavailable" if not self.reported_usage else
+                                "partial" if outcome != "served" or self.usage_invalid_fields else "reported"),
+                "usage_invalid_fields": sorted(self.usage_invalid_fields),
+                "input_token_estimate": self.input_token_estimate,
+                "cost_usd": None, "cost_status": "unknown",
+                "duration_ms": round((time.monotonic() - self.started) * 1000, 3),
+            }
+            _log.info("FABRIC_TERMINAL %s", json.dumps(
+                receipt, separators=(",", ":"), sort_keys=True, allow_nan=False))
+        except Exception:
+            pass
 
     def mark_attempt_failed(self) -> None:
         if not self.attempt_failed:
@@ -425,6 +553,7 @@ class _RequestLifecycle:
             self.state.routes.record_failure(
                 route_id, reason, now=time.monotonic(), cooldown_s=self.cfg.route_cooldown_s,
                 retry_after_s=retry_after_s, generation=self.permit.generation)
+        self.emit_terminal_receipt(outcome, reason)
 
     async def close(self) -> None:
         if self.closed:
@@ -698,6 +827,10 @@ def create_app(cfg: Settings | None = None, *,
                          and value.get("type", "message") == "message")
             if not valid:
                 raise WireTranslationError("FABRIC_RESPONSE_INVALID")
+            if ctx.counting:
+                ctx.input_token_estimate = _reported_count(value.get("input_tokens"))
+            else:
+                ctx.observe_message(value)
             return reply
         if "text/event-stream" not in response.headers.get("content-type", ""):
             raise WireTranslationError("FABRIC_STREAM_CONTENT_TYPE")
@@ -710,13 +843,25 @@ def create_app(cfg: Settings | None = None, *,
                 if received > ctx.cfg.max_response_bytes:
                     raise WireTranslationError("FABRIC_RESPONSE_TOO_LARGE")
                 terminal = False
+                pending_identity = _ReceiptIdentity(
+                    ctx.response_identity.sha256, ctx.response_identity.state)
                 for event, data in decoder.feed(part):
                     value = json_event(data)
                     kind = value.get("type") or event
+                    if kind == "message_start":
+                        message = value.get("message")
+                        ctx.observe_message(message, translated=True)
+                        if isinstance(message, dict):
+                            pending_identity.observe(message.get("id"))
+                    elif kind == "message_delta":
+                        ctx.observe_usage(value.get("usage"))
                     if kind == "content_block_delta":
                         ctx.content_observed()
                     if kind == "message_stop":
                         terminal = True
+                # A later error in the same chunk prevents this entire part
+                # from being forwarded. Only commit a downstream ID now.
+                ctx.response_identity = pending_identity
                 yield part
                 if terminal:
                     return
@@ -736,15 +881,20 @@ def create_app(cfg: Settings | None = None, *,
         if payload.get("stream") is not True:
             data = await read_bounded(response, ctx.cfg.max_response_bytes)
             try:
-                reply = openai_to_anthropic(json.loads(data), model=ctx.model)
+                value = json.loads(data)
+                reply = openai_to_anthropic(value, model=ctx.model,
+                                           message_id=ctx.translated_message_id)
             except WireTranslationError:
                 raise
             except (ValueError, TypeError, AttributeError):
                 raise WireTranslationError("FABRIC_TRANSLATE_INVALID") from None
-            return JSONResponse(reply)
+            ctx.observe_message(value, translated=True)
+            outgoing = JSONResponse(reply)
+            ctx.response_identity.observe(reply["id"])
+            return outgoing
         if "text/event-stream" not in response.headers.get("content-type", ""):
             raise WireTranslationError("FABRIC_STREAM_CONTENT_TYPE")
-        translator = OpenAIStreamTranslator(model=ctx.model)
+        translator = OpenAIStreamTranslator(model=ctx.model, message_id=ctx.translated_message_id)
 
         async def stream():
             first = True
@@ -755,8 +905,11 @@ def create_app(cfg: Settings | None = None, *,
                         yield _sse(*event)
                     return
                 chunk = json_event(data)
+                ctx.observe_message(chunk, translated=True)
                 if first:
-                    yield _sse(*translator.message_start())
+                    start_event = _sse(*translator.message_start())
+                    ctx.response_identity.observe(translator.message_id)
+                    yield start_event
                     first = False
                 for event in translator.feed(chunk):
                     if event[0] == "content_block_delta":
@@ -832,7 +985,8 @@ def create_app(cfg: Settings | None = None, *,
         if "text/event-stream" not in response.headers.get("content-type", ""):
             raise WireTranslationError("FABRIC_STREAM_CONTENT_TYPE")
         wants_stream = payload.get("stream") is True
-        translator = ResponsesStreamTranslator(model=ctx.model, retain_text=not wants_stream)
+        translator = ResponsesStreamTranslator(model=ctx.model, retain_text=not wants_stream,
+                                               message_id=ctx.translated_message_id)
 
         async def translated_stream():
             first = True
@@ -843,9 +997,16 @@ def create_app(cfg: Settings | None = None, *,
                 chunk = json_event(data)
                 if first:
                     if wants_stream:
-                        yield _sse(*translator.message_start())
+                        start_event = _sse(*translator.message_start())
+                        ctx.response_identity.observe(translator.message_id)
+                        yield start_event
                     first = False
                 produced = translator.feed(chunk)
+                ctx.observe_usage(chunk.get("usage"))
+                # Event IDs and output-item IDs are not response identities.
+                if chunk.get("type") in {"response.created", "response.in_progress",
+                                         "response.completed", "response.incomplete"}:
+                    ctx.observe_message(chunk.get("response"), translated=True)
                 for event in produced:
                     if event[0] == "content_block_delta":
                         ctx.content_observed()
@@ -862,7 +1023,10 @@ def create_app(cfg: Settings | None = None, *,
         if not wants_stream:
             async for _ in translated_stream():
                 pass
-            return JSONResponse(translator.to_message())
+            reply = translator.to_message()
+            outgoing = JSONResponse(reply)
+            ctx.response_identity.observe(reply["id"])
+            return outgoing
         return StreamingResponse(translated_stream(), media_type="text/event-stream",
                                  headers={"cache-control": "no-store"})
 
@@ -874,7 +1038,7 @@ def create_app(cfg: Settings | None = None, *,
             ctx.settle("failed", f"http_{response.status_code}", circuit=True, retry_after_s=delay)
         else:
             # A caller/auth/config rejection is neither health success nor a server outage.
-            ctx.settle("refused")
+            ctx.settle("refused", f"http_{response.status_code}")
 
     async def managed_stream(ctx, iterator):
         try:
@@ -1089,7 +1253,7 @@ def create_app(cfg: Settings | None = None, *,
                         next_route, next_model, reason, evidence, next_permit = choose_route()
                     if next_route is None or next_permit is None:
                         state.exhausted += 1
-                        ctx.settle("refused")
+                        ctx.settle("refused", pre_send_refusal.reason)
                         response = _error(pre_send_refusal.reason, 503,
                                           retry_after_s=pre_send_refusal.retry_after_s)
                         break

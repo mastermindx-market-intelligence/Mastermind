@@ -4,8 +4,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import fcntl
+import hashlib
 import json
+import logging
 import socket
+import subprocess
 import sys
 import time
 import threading
@@ -65,6 +68,17 @@ def body(**extra):
                 messages=[{"role": "user", "content": "offline probe"}], **extra)
 
 
+@pytest.fixture
+def terminal_receipts(caplog):
+    caplog.set_level(logging.INFO, logger=gateway.__name__)
+
+    def read():
+        prefix = "FABRIC_TERMINAL "
+        return [json.loads(record.getMessage()[len(prefix):]) for record in caplog.records
+                if record.name == gateway.__name__ and record.getMessage().startswith(prefix)]
+    return read
+
+
 @async_test
 async def test_status_uses_the_same_clock_as_cooldown(tmp_path):
     app = create_app(config(tmp_path))
@@ -87,7 +101,7 @@ async def test_http_failure_never_counts_as_success(tmp_path, monkeypatch):
 
 
 @async_test
-async def test_openai_eof_cannot_fabricate_success(tmp_path, monkeypatch):
+async def test_openai_eof_cannot_fabricate_success(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     item = Route(route_id="a", kind="gateway", wire="openai", models=("m",),
                  base_url="https://upstream.example", gateway_token_env="OFFLINE_GATEWAY_TOKEN")
@@ -99,6 +113,9 @@ async def test_openai_eof_cannot_fabricate_success(tmp_path, monkeypatch):
     assert "message_stop" not in response.text
     assert "FABRIC_STREAM_INCOMPLETE" in response.text
     assert app.state.router_state.served == 0
+    receipt, = terminal_receipts()
+    assert receipt["outcome"] == "failed" and receipt["reason"] == "FABRIC_STREAM_INCOMPLETE"
+    assert receipt["usage_source"] == "unavailable"
 
 
 @async_test
@@ -147,7 +164,7 @@ async def direct_response(app):
 
 
 @async_test
-async def test_cancelled_iterator_closes_upstream(tmp_path, monkeypatch):
+async def test_cancelled_iterator_closes_upstream(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     stream = CloseTrackedStream()
     app = create_app(config(tmp_path), transport=httpx.MockTransport(
@@ -160,10 +177,12 @@ async def test_cancelled_iterator_closes_upstream(tmp_path, monkeypatch):
     assert app.state.router_state.served == 0
     assert app.state.router_state.in_flight == 0
     assert app.state.router_state.cancelled == 1
+    receipt, = terminal_receipts()
+    assert receipt["outcome"] == "cancelled"
 
 
 @async_test
-async def test_disconnect_before_generator_start_closes_upstream(tmp_path, monkeypatch):
+async def test_disconnect_before_generator_start_closes_upstream(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     stream = CloseTrackedStream()
     app = create_app(config(tmp_path), transport=httpx.MockTransport(
@@ -180,6 +199,8 @@ async def test_disconnect_before_generator_start_closes_upstream(tmp_path, monke
     assert app.state.router_state.served == 0
     assert app.state.router_state.in_flight == 0
     assert app.state.router_state.cancelled == 1
+    receipt, = terminal_receipts()
+    assert receipt["outcome"] == "cancelled" and receipt["response_id_sha256"] is None
 
 
 def test_half_open_admits_one_probe_and_release_is_idempotent():
@@ -311,7 +332,7 @@ async def test_global_bulkhead_refuses_before_another_upstream_send(tmp_path, mo
 
 
 @async_test
-async def test_headers_are_not_success_while_body_is_unfinished(tmp_path, monkeypatch):
+async def test_headers_are_not_success_while_body_is_unfinished(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     stream = CloseTrackedStream()
     app = create_app(config(tmp_path), transport=httpx.MockTransport(
@@ -320,14 +341,17 @@ async def test_headers_are_not_success_while_body_is_unfinished(tmp_path, monkey
         response, _, _ = await direct_response(app)
         assert app.state.router_state.served == 0
         assert app.state.router_state.in_flight == 1
+        assert terminal_receipts() == []
         await response.lifecycle.close()
         await response.lifecycle.close()
     assert app.state.router_state.in_flight == 0
     assert stream.closes == 1
+    receipt, = terminal_receipts()
+    assert receipt["outcome"] == "cancelled"
 
 
 @async_test
-async def test_anthropic_terminal_error_is_failed_and_never_replayed(tmp_path, monkeypatch):
+async def test_anthropic_terminal_error_is_failed_and_never_replayed(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     calls = []
 
@@ -343,10 +367,12 @@ async def test_anthropic_terminal_error_is_failed_and_never_replayed(tmp_path, m
     assert len(calls) == 1
     assert app.state.router_state.served == 0
     assert app.state.router_state.failed == 1
+    receipt, = terminal_receipts()
+    assert receipt["outcome"] == "failed" and receipt["reason"] == "FABRIC_UPSTREAM_STREAM_ERROR"
 
 
 @async_test
-async def test_keepalives_cannot_evade_total_deadline(tmp_path, monkeypatch):
+async def test_keepalives_cannot_evade_total_deadline(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
 
     class Heartbeats(CloseTrackedStream):
@@ -364,6 +390,8 @@ async def test_keepalives_cannot_evade_total_deadline(tmp_path, monkeypatch):
     assert "FABRIC_UPSTREAM_EFFECT_UNKNOWN" in reply.text
     assert "message_stop" not in reply.text
     assert stream.closes == 1 and app.state.router_state.in_flight == 0
+    receipt, = terminal_receipts()
+    assert receipt["outcome"] == "failed" and receipt["reason"] == "FABRIC_UPSTREAM_EFFECT_UNKNOWN"
 
 
 def test_sse_split_utf8_crlf_multiline_and_bounded_unterminated_event():
@@ -422,7 +450,7 @@ async def test_transport_failure_releases_local_permit_without_replay(tmp_path, 
 
 
 @async_test
-async def test_count_tokens_uses_an_eligible_anthropic_route(tmp_path, monkeypatch):
+async def test_count_tokens_uses_an_eligible_anthropic_route(tmp_path, monkeypatch, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     a = replace(route("a", priority=10), wire="openai")
     b = route("b", priority=20)
@@ -437,6 +465,11 @@ async def test_count_tokens_uses_an_eligible_anthropic_route(tmp_path, monkeypat
         reply = await session.post("/v1/messages/count_tokens", headers=HEADERS, json=body())
     assert reply.status_code == 200 and reply.headers["x-fabric-route"] == "b"
     assert len(seen) == 1 and seen[0].url.path.endswith("count_tokens")
+    receipt, = terminal_receipts()
+    assert receipt["operation"] == "count_tokens" and receipt["input_token_estimate"] == 4
+    assert receipt["response_id_sha256"] is None
+    assert all(value is None for value in receipt["usage"].values())
+    assert receipt["cost_usd"] is None and receipt["cost_status"] == "unknown"
 
 
 def test_tool_only_stream_starts_at_content_block_zero():
@@ -1157,7 +1190,7 @@ async def test_model_tuning_targets_public_slug_after_wire_translation(tmp_path,
 @pytest.mark.parametrize("error_type", [httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout])
 @async_test
 async def test_proven_connection_failure_preserves_global_and_group_reservations(
-        tmp_path, monkeypatch, error_type):
+        tmp_path, monkeypatch, error_type, terminal_receipts):
     monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
     a = replace(route("a", priority=1, concurrency_group="shared", group_max_in_flight=1),
                 base_url="https://a.example")
@@ -1190,6 +1223,9 @@ async def test_proven_connection_failure_preserves_global_and_group_reservations
     assert ("a" in state.routes.cooldown_until) is (error_type is not httpx.PoolTimeout)
     assert status["selection"]["last"]["previous_attempts_excluded"] == 1
     assert status["upstream_send_calls_total"] == 2
+    receipt, = terminal_receipts()
+    assert receipt["route_id"] == "b" and receipt["outcome"] == "served"
+    assert receipt["request_id"] == response.headers["x-fabric-request-id"]
 
 
 @pytest.mark.parametrize("status", [401, 402, 403, 404, 408, 409, 425, 429, 500, 502, 503, 504, 529])
@@ -1401,3 +1437,249 @@ async def test_injected_transport_cannot_claim_pre_send_failure_after_an_effect(
     assert response.status_code == 502 and len(calls) == 1
     assert response.json()["error"]["code"] == "FABRIC_UPSTREAM_EFFECT_UNKNOWN"
     assert app.state.router_state.failovers == 0 and app.state.router_state.in_flight == 0
+
+
+@async_test
+async def test_terminal_receipt_preserves_fragmented_passthrough_and_reported_usage(
+        tmp_path, monkeypatch, terminal_receipts, caplog):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    response_id = "msg_完整_identity"
+    private_text = "PRIVATE_RESPONSE_FIXTURE"
+    values = [
+        {"type": "message_start", "message": {"id": response_id, "usage": {
+            "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 4,
+            "cache_creation_input_tokens": 2}}},
+        {"type": "content_block_delta", "delta": {"type": "text_delta", "text": private_text}},
+        {"type": "message_delta", "usage": {"output_tokens": 5}},
+        {"type": "message_delta", "usage": {"output_tokens": 7, "input_tokens": None}},
+        {"type": "message_stop"},
+    ]
+    raw = b"".join(("event: " + value["type"] + "\r\ndata: " +
+                    json.dumps(value, ensure_ascii=False) + "\r\n\r\n").encode() for value in values)
+
+    class Fragmented(CloseTrackedStream):
+        async def __aiter__(self):
+            for offset in range(0, len(raw), 3):
+                yield raw[offset:offset + 3]
+
+    stream = Fragmented()
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(lambda req: httpx.Response(
+        200, stream=stream, headers={"content-type": "text/event-stream"})))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body(stream=True))
+    receipt, = terminal_receipts()
+    assert reply.content == raw and stream.closes == 1
+    assert receipt["request_id"] == reply.headers["x-fabric-request-id"]
+    digest = hashlib.sha256(response_id.encode("utf-8")).hexdigest()
+    assert receipt["response_id_sha256"] == receipt["upstream_response_id_sha256"] == digest
+    assert receipt["response_id_state"] == "observed"
+    assert receipt["usage"] == {"input_tokens": 0, "output_tokens": 7,
+                                "cache_read_input_tokens": 4, "cache_creation_input_tokens": 2}
+    assert receipt["usage_state"] == "reported" and receipt["usage_invalid_fields"] == []
+    assert receipt["outcome"] == "served" and receipt["cost_usd"] is None
+    assert response_id not in caplog.text and private_text not in caplog.text
+    assert len(receipt["gateway_source_sha256"]) == 64
+
+
+@pytest.mark.parametrize("status,usage,expected", [
+    (200, None, None), (200, {"input_tokens": 0}, 0),
+    (200, {"input_tokens": True, "output_tokens": -1}, None),
+    (200, {"input_tokens": 2**80, "output_tokens": "12"}, None),
+    (503, {"input_tokens": 90, "output_tokens": 20}, None),
+])
+@async_test
+async def test_receipt_never_credits_defaults_invalid_counts_or_error_bodies(
+        tmp_path, monkeypatch, terminal_receipts, status, usage, expected):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(lambda req: httpx.Response(
+        status, json={"id": "fixture-id", "content": [], "usage": usage})))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body())
+    receipt, = terminal_receipts()
+    assert reply.status_code == status and receipt["usage"]["input_tokens"] == expected
+    assert receipt["usage"]["output_tokens"] is None
+    assert receipt["cost_status"] == "unknown"
+    if status == 503:
+        assert receipt["response_id_sha256"] is None and receipt["outcome"] == "failed"
+        assert receipt["reason"] == "http_503"
+
+
+@pytest.mark.parametrize("wire", ["openai", "responses"])
+@pytest.mark.parametrize("streaming", [False, True])
+@async_test
+async def test_translated_receipt_joins_unique_client_id_despite_late_upstream_id(
+        tmp_path, monkeypatch, terminal_receipts, caplog, wire, streaming):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    upstream_id = "PRIVATE_UPSTREAM_RESPONSE_ID"
+    if wire == "responses":
+        oauth_store(tmp_path)
+        selected = oauth_route()
+        values = [
+            {"type": "response.output_text.delta", "item_id": "not-response-id", "delta": "fixture"},
+            {"type": "response.completed", "response": {"id": upstream_id,
+                "status": "completed", "usage": {"input_tokens": 9, "output_tokens": 3,
+                    "input_tokens_details": {"cached_tokens": 2}}}},
+        ]
+    else:
+        selected = replace(route(), wire="openai")
+        values = [
+            {"choices": [{"delta": {"content": "fixture"}, "finish_reason": "stop"}]},
+            {"id": upstream_id, "choices": [], "usage": {"prompt_tokens": 9,
+                "completion_tokens": 3, "prompt_tokens_details": {"cached_tokens": 2}}},
+        ]
+
+    def provider(req):
+        if wire == "openai" and not streaming:
+            return httpx.Response(200, json={"id": upstream_id,
+                "choices": [{"message": {"content": "fixture"}, "finish_reason": "stop"}],
+                "usage": values[-1]["usage"]})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"},
+            content=("".join("data: " + json.dumps(value) + "\n\n" for value in values)
+                     + "data: [DONE]\n\n").encode())
+
+    app = create_app(config(tmp_path, routes=(selected,)), transport=httpx.MockTransport(provider))
+    client_ids = []
+    async with client(app) as session:
+        for _ in range(2):
+            reply = await session.post("/v1/messages", headers=HEADERS, json=body(stream=streaming))
+            assert reply.status_code == 200
+            if streaming:
+                events = SSEDecoder(4096).feed(reply.content)
+                message = next(json.loads(data)["message"] for event, data in events
+                               if event == "message_start")
+            else:
+                message = reply.json()
+            client_ids.append(message["id"])
+            assert message["id"] == "msg_fabric_" + reply.headers["x-fabric-request-id"]
+    assert len(set(client_ids)) == 2
+    receipts = terminal_receipts()
+    assert len(receipts) == 2
+    for receipt, client_id in zip(receipts, client_ids):
+        assert receipt["outcome"] == "served" and receipt["wire"] == wire
+        assert receipt["response_id_sha256"] == hashlib.sha256(client_id.encode()).hexdigest()
+        assert receipt["upstream_response_id_sha256"] == hashlib.sha256(upstream_id.encode()).hexdigest()
+        assert receipt["usage"] == {"input_tokens": 9, "output_tokens": 3,
+                                    "cache_read_input_tokens": 2, "cache_creation_input_tokens": None}
+    assert upstream_id not in caplog.text
+
+
+@async_test
+async def test_receipt_marks_conflicting_ids_and_invalid_usage_without_altering_inference(
+        tmp_path, monkeypatch, terminal_receipts):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    values = [
+        {"type": "message_start", "message": {"id": "first", "usage": {"input_tokens": 2}}},
+        {"type": "message_start", "message": {"id": "second"}},
+        {"type": "message_start", "message": {"id": "first"}},
+        {"type": "message_delta", "usage": {"input_tokens": "invalid", "output_tokens": 0}},
+        {"type": "message_stop"},
+    ]
+    raw = "".join("data: " + json.dumps(value) + "\n\n" for value in values).encode()
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(lambda req: httpx.Response(
+        200, content=raw, headers={"content-type": "text/event-stream"})))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body(stream=True))
+    receipt, = terminal_receipts()
+    assert reply.content == raw and receipt["outcome"] == "served"
+    assert receipt["response_id_sha256"] is None and receipt["response_id_state"] == "conflicting"
+    assert receipt["usage"]["input_tokens"] == 2 and receipt["usage"]["output_tokens"] == 0
+    assert receipt["usage_state"] == "partial" and receipt["usage_invalid_fields"] == ["input_tokens"]
+
+
+@pytest.mark.parametrize("bad_id", ["x" * 257, "\ud800", 123])
+@async_test
+async def test_invalid_receipt_identity_cannot_break_valid_stream(
+        tmp_path, monkeypatch, terminal_receipts, bad_id):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    raw = ("data: " + json.dumps({"type": "message_start", "message": {"id": bad_id}})
+           + '\n\ndata: {"type":"message_stop"}\n\n').encode()
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(lambda req: httpx.Response(
+        200, content=raw, headers={"content-type": "text/event-stream"})))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body(stream=True))
+    receipt, = terminal_receipts()
+    assert reply.content == raw and receipt["outcome"] == "served"
+    assert receipt["response_id_sha256"] is None and receipt["response_id_state"] == "invalid"
+
+
+@async_test
+async def test_terminal_logging_failure_cannot_leak_capacity_or_repeat_settlement(tmp_path, monkeypatch):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    attempts = []
+
+    def failed_sink(*args, **kwargs):
+        attempts.append(True)
+        raise RuntimeError("synthetic private handler detail")
+
+    monkeypatch.setattr(gateway._log, "info", failed_sink)
+    stream = CloseTrackedStream()
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(lambda req: httpx.Response(
+        200, stream=stream, headers={"content-type": "text/event-stream"})))
+    async with app.router.lifespan_context(app):
+        response, _, _ = await direct_response(app)
+        await response.lifecycle.close()
+        await response.lifecycle.close()
+    assert attempts == [True] and stream.closes == 1
+    state = app.state.router_state
+    assert state.in_flight == state.routes.in_flight["a"] == 0
+    assert state.cancelled == 1 and state.served == 0
+
+
+def test_service_renders_receipt_through_existing_sink_without_broad_logging():
+    code = '''
+import json, logging, logging.config
+from ops.native_fabric.unified_router.service import logging_config
+from ops.native_fabric.unified_router.gateway import _log
+config = logging_config()
+assert "root" not in config
+logging.config.dictConfig(config)
+_log.info("FABRIC_TERMINAL %s", json.dumps({"schema": "fabric_terminal_v1", "request_id": "offline"}))
+logging.getLogger("httpx").info("PRIVATE_HTTP_FIXTURE")
+_log.debug("PRIVATE_DEBUG_FIXTURE")
+'''
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0
+    assert "FABRIC_TERMINAL " in result.stderr and '"request_id": "offline"' in result.stderr
+    assert "PRIVATE_" not in result.stderr and result.stdout == ""
+
+
+@async_test
+async def test_coalesced_start_and_error_never_claims_downstream_identity(
+        tmp_path, monkeypatch, terminal_receipts):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    raw = (b'data: {"type":"message_start","message":{"id":"upstream-only"}}\n\n'
+           b'data: {"type":"error","error":{"type":"overloaded_error"}}\n\n')
+    app = create_app(config(tmp_path), transport=httpx.MockTransport(lambda req: httpx.Response(
+        200, content=raw, headers={"content-type": "text/event-stream"})))
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=body(stream=True))
+    receipt, = terminal_receipts()
+    assert "message_start" not in reply.text and receipt["outcome"] == "failed"
+    assert receipt["response_id_sha256"] is None and receipt["response_id_state"] == "unavailable"
+    assert receipt["upstream_response_id_sha256"] == hashlib.sha256(b"upstream-only").hexdigest()
+
+
+@pytest.mark.parametrize("wire", ["openai", "responses"])
+@async_test
+async def test_pending_mcp_history_refuses_before_inference_and_releases_permit(
+        tmp_path, monkeypatch, terminal_receipts, wire):
+    monkeypatch.setenv("OFFLINE_GATEWAY_TOKEN", "test-key")
+    if wire == "responses":
+        oauth_store(tmp_path)
+        selected = oauth_route()
+    else:
+        selected = replace(route(), wire="openai")
+    calls = []
+    def provider(req):
+        calls.append(req)
+        raise AssertionError("pending server work must not dispatch")
+    app = create_app(config(tmp_path, routes=(selected,)), transport=httpx.MockTransport(provider))
+    request = body()
+    request["messages"] = [{"role": "assistant", "content": [
+        {"type": "mcp_tool_use", "id": "pending", "name": "lookup", "input": {}}]}]
+    async with client(app) as session:
+        reply = await session.post("/v1/messages", headers=HEADERS, json=request)
+    receipt, = terminal_receipts()
+    assert reply.status_code == 400 and calls == []
+    assert receipt["outcome"] == "refused" and receipt["upstream_send_started"] is False
+    assert app.state.router_state.in_flight == 0

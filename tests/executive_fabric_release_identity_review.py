@@ -1231,3 +1231,7 @@ REVIEWED_FILES['control_plane/workspace_capacity_fabric.py'] = {
     'sha256': 'f48347aa98d894368e7e175263427c55f79c066cb3c7dfd7f32ea4253db53892',
     'sites': ((234, 66, 69, 'int', '900'), (277, 106, 109, 'int', '900')),
 }
+
+# Passive Paperclip asset document pagination: exact row-count bounds only.
+# No identity, permission or runtime topology change; any source drift restores D8.
+REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}

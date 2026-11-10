@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from functools import wraps
 from pathlib import Path
@@ -880,3 +881,194 @@ def test_unknown_role_still_refused_in_translation(translate):
 def test_inline_context_never_silently_drops_unsupported_content(translate, role, content):
     with pytest.raises(WireTranslationError):
         translate(anthropic_body("m", messages=[{"role": role, "content": content}]))
+
+
+def mcp_pair(call_id="mcp-1"):
+    return (
+        {"type": "mcp_tool_use", "id": call_id, "name": "lookup", "server_name": "catalogue",
+         "input": {"query": call_id}},
+        {"type": "mcp_tool_result", "tool_use_id": call_id,
+         "content": [{"type": "text", "text": "result:" + call_id}]},
+    )
+
+
+def translated_tool_rows(translate, body):
+    result = translate(body)
+    if translate is anthropic_to_openai:
+        calls = [call for row in result["messages"] for call in row.get("tool_calls", [])]
+        outputs = [row for row in result["messages"] if row["role"] == "tool"]
+        return ([(c["id"], c["function"]["name"], json.loads(c["function"]["arguments"])) for c in calls],
+                [(r["tool_call_id"], r["content"]) for r in outputs], result)
+    calls = [row for row in result["input"] if row.get("type") == "function_call"]
+    outputs = [row for row in result["input"] if row.get("type") == "function_call_output"]
+    return ([(c["call_id"], c["name"], json.loads(c["arguments"])) for c in calls],
+            [(r["call_id"], r["output"]) for r in outputs], result)
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+@pytest.mark.parametrize("layout", ["split", "inline", "parallel", "sequential", "echoed"])
+def test_completed_mcp_history_retains_tool_provenance_and_order(translate, layout):
+    a, result_a = mcp_pair("a")
+    b, result_b = mcp_pair("b")
+    expected_ids, result_ids = ["a"], ["a"]
+    if layout == "split":
+        messages = [{"role": "assistant", "content": [a]}, {"role": "user", "content": [result_a]}]
+    elif layout == "inline":
+        messages = [{"role": "assistant", "content": [a, result_a]}]
+    elif layout == "parallel":
+        messages = [{"role": "assistant", "content": [a, b, result_b, result_a]}]
+        expected_ids, result_ids = ["a", "b"], ["b", "a"]
+    elif layout == "sequential":
+        messages = [{"role": "assistant", "content": [a, result_a,
+            {"type": "text", "text": "continuing"}, b, result_b]}]
+        expected_ids, result_ids = ["a", "b"], ["a", "b"]
+    else:
+        a["type"], result_a["type"] = "tool_use", "tool_result"
+        messages = [{"role": "assistant", "content": [a, result_a]}]
+    body = anthropic_body("m", messages=messages)
+    before = copy.deepcopy(body)
+    calls, outputs, result = translated_tool_rows(translate, body)
+    assert body == before
+    assert calls == [(call_id, "lookup", {"query": call_id}) for call_id in expected_ids]
+    assert [call_id for call_id, _ in outputs] == result_ids
+    for call_id, text in outputs:
+        assert json.loads(text) == {"server_name": "catalogue", "content": "result:" + call_id}
+    rows = result.get("messages", result.get("input"))
+    assistant_text = json.dumps([row for row in rows if row.get("role") == "assistant"
+                                 and row.get("content")])
+    assert "result:" not in assistant_text
+    if layout == "sequential":
+        assert "continuing" in assistant_text
+    sequence = [row.get("type") or row["role"] for row in rows]
+    if translate is anthropic_to_openai:
+        assert sequence == (["assistant", "tool", "assistant", "tool"] if layout == "sequential"
+                            else ["assistant", "tool", "tool"] if layout == "parallel"
+                            else ["assistant", "tool"])
+    else:
+        assert sequence == (["function_call", "function_call_output", "assistant",
+                             "function_call", "function_call_output"] if layout == "sequential"
+                            else ["function_call", "function_call", "function_call_output",
+                                  "function_call_output"] if layout == "parallel"
+                            else ["function_call", "function_call_output"])
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+@pytest.mark.parametrize("is_error", [None, False, True])
+def test_mcp_alias_empty_result_and_error_status_are_preserved(translate, is_error):
+    call, result = mcp_pair()
+    call["tool_name"] = call.pop("name")
+    call.pop("server_name")
+    result["content"] = ""
+    if is_error is not None:
+        result["is_error"] = is_error
+    body = anthropic_body("m", messages=[{"role": "assistant", "content": [call, result]}])
+    calls, outputs, _ = translated_tool_rows(translate, body)
+    assert calls[0][1] == "lookup"
+    assert outputs[0][0] == "mcp-1"
+    if is_error is None:
+        assert outputs[0][1] == ""
+    else:
+        assert json.loads(outputs[0][1]) == {"is_error": is_error, "content": ""}
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+@pytest.mark.parametrize("defect", [
+    "orphan", "pending", "duplicate-call", "duplicate-result", "missing-id", "bad-name",
+    "server-is-not-tool", "conflicting-name", "invalid-input", "unsupported-result",
+    "invalid-result", "invalid-error", "conflicting-server", "interleaved-pending",
+    "server-state", "container-state", "active-mcp-server", "active-mcp-toolset",
+])
+def test_ambiguous_or_unrepresentable_mcp_history_refuses(translate, defect):
+    a, result_a = mcp_pair("a")
+    blocks = [a, result_a]
+    body = anthropic_body("m", messages=[{"role": "assistant", "content": blocks}])
+    if defect == "orphan":
+        result_a["tool_use_id"] = "missing"
+    elif defect == "pending":
+        blocks.pop()
+    elif defect == "duplicate-call":
+        blocks.insert(1, copy.deepcopy(a))
+    elif defect == "duplicate-result":
+        blocks.append(copy.deepcopy(result_a))
+    elif defect == "missing-id":
+        a.pop("id")
+    elif defect == "bad-name":
+        a["name"] = 17
+    elif defect == "server-is-not-tool":
+        a.pop("name")
+        a["server_label"] = "server-only"
+    elif defect == "conflicting-name":
+        a["tool_name"] = "another-tool"
+    elif defect == "invalid-input":
+        a["input"] = False
+    elif defect == "unsupported-result":
+        result_a["content"] = [{"type": "text", "text": "retained"}, {"type": "image", "source": {}}]
+    elif defect == "invalid-result":
+        result_a["content"] = False
+    elif defect == "invalid-error":
+        result_a["is_error"] = "false"
+    elif defect == "conflicting-server":
+        result_a["server_name"] = "another-server"
+    elif defect == "interleaved-pending":
+        b, result_b = mcp_pair("b")
+        blocks[:] = [a, b, result_a, {"type": "text", "text": "too early"}, result_b]
+    elif defect == "server-state":
+        blocks.insert(0, {"type": "server_tool_use", "id": "pending-server", "name": "web_search", "input": {}})
+    elif defect == "container-state":
+        blocks.append({"type": "container", "id": "container-state"})
+    elif defect == "active-mcp-server":
+        body["mcp_servers"] = [{"name": "catalogue", "url": "https://synthetic.example"}]
+    else:
+        body["tools"] = [{"type": "mcp_toolset", "mcp_server_name": "catalogue"}]
+    with pytest.raises(WireTranslationError, match="FABRIC_TRANSLATE_"):
+        translate(body)
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+def test_redacted_thinking_does_not_swallow_adjacent_mcp_history(translate):
+    call, result = mcp_pair()
+    body = anthropic_body("m", messages=[{"role": "assistant", "content": [
+        {"type": "text", "text": "before"}, {"type": "redacted_thinking", "data": "OPAQUE_FIXTURE"},
+        call, result, {"type": "text", "text": "after"}]}])
+    calls, outputs, translated = translated_tool_rows(translate, body)
+    assert len(calls) == len(outputs) == 1
+    rendered = json.dumps(translated)
+    assert "before" in rendered and "after" in rendered and "OPAQUE_FIXTURE" not in rendered
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+@pytest.mark.parametrize("role,content", [
+    ("user", [{"type": "thinking", "thinking": "must not disappear"}]),
+    ("system", [{"type": "redacted_thinking", "data": "must not disappear"}]),
+    ("developer", None), ("wizard", []), ("assistant", None),
+    ("user", {"unsupported": "content"}),
+    ("developer", [{"type": "text", "text": 17}]),
+    ("user", [{"type": ["text"], "text": "bad type"}]),
+])
+def test_mcp_normalization_cannot_hide_invalid_messages(translate, role, content):
+    call, result = mcp_pair()
+    body = anthropic_body("m", messages=[{"role": role, "content": content},
+        {"role": "assistant", "content": [call, result]}])
+    with pytest.raises(WireTranslationError, match="FABRIC_TRANSLATE_"):
+        translate(body)
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+@pytest.mark.parametrize("parallel", [False, True])
+def test_mcp_text_cannot_be_reordered_before_an_unresolved_call(translate, parallel):
+    call, result = mcp_pair("a")
+    blocks = [call, {"type": "text", "text": "after call before result"}]
+    if parallel:
+        other, other_result = mcp_pair("b")
+        blocks += [other, result, other_result]
+    else:
+        blocks.append(result)
+    with pytest.raises(WireTranslationError, match="FABRIC_TRANSLATE_TOOL_IDENTITY"):
+        translate(anthropic_body("m", messages=[{"role": "assistant", "content": blocks}]))
+
+
+@pytest.mark.parametrize("translate", [anthropic_to_openai, anthropic_to_responses])
+def test_invalid_tool_collection_is_a_typed_presend_refusal(translate):
+    body = anthropic_body("m", tools=True)
+    with pytest.raises(WireTranslationError, match="FABRIC_TRANSLATE_BODY"):
+        translate(body)

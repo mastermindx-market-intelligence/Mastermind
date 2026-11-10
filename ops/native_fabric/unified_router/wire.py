@@ -36,6 +36,121 @@ def _inline_context_text(content: Any) -> str:
     return "\n".join(parts)
 
 
+def _translation_messages(body: dict) -> list[dict]:
+    """Represent completed MCP history using the existing tool-result channel.
+
+    This never executes a server tool or invents a result. Provider-side MCP
+    configuration and unfinished server state cannot be moved to another wire.
+    Ordinary histories retain their existing translation path unchanged.
+    """
+    _require(not body.get("mcp_servers"), "FABRIC_TRANSLATE_BLOCK")
+    tools = body.get("tools")
+    _require(tools is None or isinstance(tools, list), "FABRIC_TRANSLATE_BODY")
+    _require(not any(isinstance(tool, dict) and tool.get("type") == "mcp_toolset"
+                     for tool in tools or []), "FABRIC_TRANSLATE_BLOCK")
+    messages = body.get("messages", [])
+    _require(isinstance(messages, list), "FABRIC_TRANSLATE_MESSAGE")
+    special = any(isinstance(message, dict) and isinstance(message.get("content"), list)
+                  and any(isinstance(block, dict) and (
+                      block.get("type") in ("mcp_tool_use", "mcp_tool_result")
+                      or (message.get("role") == "assistant" and block.get("type") == "tool_result"))
+                      for block in message["content"]) for message in messages)
+    if not special:
+        return messages
+    output: list[dict] = []
+    pending: dict[str, dict] = {}
+    seen: set[str] = set()
+    results_started = False
+    for message in messages:
+        _require(isinstance(message, dict), "FABRIC_TRANSLATE_MESSAGE")
+        role, content = message.get("role"), message.get("content")
+        _require(role in ("user", "assistant", "system", "developer"), "FABRIC_TRANSLATE_ROLE")
+        _require(isinstance(content, (str, list)), "FABRIC_TRANSLATE_CONTENT")
+        blocks = content if isinstance(content, list) else (
+            [{"type": "text", "text": content}] if isinstance(content, str) else [])
+        if not blocks:
+            _require(not pending, "FABRIC_TRANSLATE_TOOL_IDENTITY")
+            output.append(message)
+            continue
+        pending_from_previous = bool(pending)
+        segment: list[dict] = []
+        segment_role, segment_kind = role, "content"
+
+        def flush() -> None:
+            if segment:
+                output.append(dict(message, role=segment_role, content=list(segment)))
+                segment.clear()
+
+        for block in blocks:
+            _require(isinstance(block, dict), "FABRIC_TRANSLATE_BLOCK")
+            kind = block.get("type")
+            _require(isinstance(kind, str), "FABRIC_TRANSLATE_BLOCK")
+            target_role, target_kind = role, "content"
+            normalized = block
+            if role == "assistant" and kind in {"thinking", "redacted_thinking"}:
+                # As in the ordinary path, opaque provider-specific reasoning
+                # is not forwarded to a different model provider.
+                continue
+            if kind in {"tool_use", "mcp_tool_use"}:
+                _require(role == "assistant" and not results_started
+                         and not pending_from_previous, "FABRIC_TRANSLATE_TOOL_IDENTITY")
+                call_id = block.get("id")
+                _require(isinstance(call_id, str) and bool(call_id) and call_id not in seen,
+                         "FABRIC_TRANSLATE_TOOL_IDENTITY")
+                name, alias = block.get("name"), block.get("tool_name")
+                _require(name is None or isinstance(name, str), "FABRIC_TRANSLATE_TOOL_CALL")
+                _require(alias is None or isinstance(alias, str), "FABRIC_TRANSLATE_TOOL_CALL")
+                _require(not (name and alias and name != alias), "FABRIC_TRANSLATE_TOOL_CALL")
+                name = name or alias
+                _require(isinstance(name, str) and bool(name) and isinstance(block.get("input"), dict),
+                         "FABRIC_TRANSLATE_TOOL_CALL")
+                metadata = {}
+                for field in ("server_name", "server_label"):
+                    if field in block:
+                        _require(isinstance(block[field], str) and bool(block[field]),
+                                 "FABRIC_TRANSLATE_TOOL_CALL")
+                        metadata[field] = block[field]
+                pending[call_id] = metadata
+                seen.add(call_id)
+                normalized = dict(block, type="tool_use", name=name)
+            elif kind in {"tool_result", "mcp_tool_result"}:
+                call_id = block.get("tool_use_id")
+                _require(role in {"assistant", "user"} and isinstance(call_id, str)
+                         and call_id in pending, "FABRIC_TRANSLATE_TOOL_IDENTITY")
+                # Only text is mapped here; images/documents/structured server
+                # state must not silently disappear during result conversion.
+                inner = block["content"] if "content" in block else ""
+                text = _inline_context_text(inner)
+                metadata = pending.pop(call_id)
+                for field in ("server_name", "server_label"):
+                    if field in block:
+                        _require(isinstance(block[field], str) and bool(block[field])
+                                 and (field not in metadata or metadata[field] == block[field]),
+                                 "FABRIC_TRANSLATE_TOOL_IDENTITY")
+                        metadata[field] = block[field]
+                if "is_error" in block:
+                    _require(type(block["is_error"]) is bool, "FABRIC_TRANSLATE_TOOL_CALL")
+                    metadata["is_error"] = block["is_error"]
+                if metadata:
+                    text = json.dumps(dict(metadata, content=text), separators=(",", ":"))
+                normalized = {"type": "tool_result", "tool_use_id": call_id, "content": text}
+                target_role, target_kind = "user", "results"
+                results_started = bool(pending)
+                if not pending:
+                    pending_from_previous = False
+            else:
+                # Chat requires every result in a call group before another
+                # message. Do not reorder an impossible mixed history to fit.
+                _require(not pending, "FABRIC_TRANSLATE_TOOL_IDENTITY")
+            if target_role != segment_role or target_kind != segment_kind:
+                flush()
+                segment_role, segment_kind = target_role, target_kind
+            segment.append(normalized)
+        flush()
+    _require(not pending, "FABRIC_TRANSLATE_TOOL_IDENTITY")
+    return output
+
+
 def anthropic_to_openai(body: dict) -> dict:
     """Anthropic Messages request -> OpenAI chat/completions request."""
     _require(isinstance(body, dict), "FABRIC_TRANSLATE_BODY")
@@ -48,7 +163,7 @@ def anthropic_to_openai(body: dict) -> dict:
                          if isinstance(block, dict) and block.get("type") == "text")
         if text:
             messages.append({"role": "system", "content": text})
-    for message in body.get("messages", []):
+    for message in _translation_messages(body):
         _require(isinstance(message, dict), "FABRIC_TRANSLATE_MESSAGE")
         role = message.get("role")
         content = message.get("content")
@@ -95,7 +210,7 @@ def anthropic_to_openai(body: dict) -> dict:
                                        "function": {"name": block.get("name", ""),
                                                     "arguments": json.dumps(
                                                         block.get("input") or {})}})
-                elif kind == "thinking":
+                elif kind in ("thinking", "redacted_thinking"):
                     continue
                 else:
                     raise WireTranslationError("FABRIC_TRANSLATE_BLOCK")
@@ -139,7 +254,7 @@ def anthropic_to_openai(body: dict) -> dict:
     return request
 
 
-def openai_to_anthropic(payload: dict, *, model: str) -> dict:
+def openai_to_anthropic(payload: dict, *, model: str, message_id: str | None = None) -> dict:
     """OpenAI chat/completions response -> Anthropic Messages response."""
     _require(isinstance(payload, dict) and isinstance(payload.get("choices"), list)
              and payload["choices"], "FABRIC_TRANSLATE_RESPONSE")
@@ -164,7 +279,7 @@ def openai_to_anthropic(payload: dict, *, model: str) -> dict:
     stop_reason = {"tool_calls": "tool_use", "function_call": "tool_use",
                    "length": "max_tokens"}.get(finish, "end_turn")
     usage = payload.get("usage") or {}
-    return {"id": payload.get("id") or "msg_fabric", "type": "message",
+    return {"id": message_id or payload.get("id") or "msg_fabric", "type": "message",
             "role": "assistant", "model": model, "content": content,
             "stop_reason": stop_reason, "stop_sequence": None,
             "usage": {"input_tokens": usage.get("prompt_tokens", 0),
@@ -174,8 +289,9 @@ def openai_to_anthropic(payload: dict, *, model: str) -> dict:
 class OpenAIStreamTranslator:
     """Incremental OpenAI chat chunks -> Anthropic Messages SSE events."""
 
-    def __init__(self, *, model: str):
+    def __init__(self, *, model: str, message_id: str = "msg_fabric"):
         self.model = model
+        self.message_id = message_id
         self._text_open = False
         self._tools: dict[int, dict] = {}
         self._finish: str | None = None
@@ -186,7 +302,7 @@ class OpenAIStreamTranslator:
 
     def message_start(self) -> tuple[str, str]:
         return self._events("message_start", {"type": "message_start", "message": {
-            "id": "msg_fabric", "type": "message", "role": "assistant",
+            "id": self.message_id, "type": "message", "role": "assistant",
             "model": self.model, "content": [], "stop_reason": None,
             "stop_sequence": None,
             "usage": {"input_tokens": 0, "output_tokens": 0}}})
@@ -283,7 +399,7 @@ def anthropic_to_responses(body: dict) -> dict:
                          if isinstance(block, dict) and block.get("type") == "text")
         if text:
             instructions = text
-    for message in body.get("messages", []):
+    for message in _translation_messages(body):
         _require(isinstance(message, dict), "FABRIC_TRANSLATE_MESSAGE")
         role = message.get("role")
         content = message.get("content")
@@ -335,7 +451,7 @@ def anthropic_to_responses(body: dict) -> dict:
                                   "arguments": json.dumps(
                                       block.get("input") or {},
                                       separators=(",", ":"))})
-                elif kind == "thinking":
+                elif kind in ("thinking", "redacted_thinking"):
                     continue
                 else:
                     raise WireTranslationError("FABRIC_TRANSLATE_BLOCK")
@@ -423,8 +539,9 @@ def responses_to_anthropic(payload: dict, *, model: str) -> dict:
 class ResponsesStreamTranslator:
     """Incremental Responses events -> Anthropic Messages SSE events."""
 
-    def __init__(self, *, model: str, retain_text: bool = True):
+    def __init__(self, *, model: str, retain_text: bool = True, message_id: str = "msg_fabric"):
         self.model = model
+        self.message_id = message_id
         self._text_open = False
         self._calls: dict[str, dict] = {}
         self._order: list[str] = []
@@ -454,7 +571,7 @@ class ResponsesStreamTranslator:
                             "name": tool["name"], "input": arguments})
         if not content:
             content.append({"type": "text", "text": ""})
-        return {"id": "msg_fabric", "type": "message", "role": "assistant",
+        return {"id": self.message_id, "type": "message", "role": "assistant",
                 "model": self.model, "content": content,
                 "stop_reason": self._finish or (
                     "tool_use" if self._order else "end_turn"),
@@ -467,7 +584,7 @@ class ResponsesStreamTranslator:
 
     def message_start(self) -> tuple[str, str]:
         return self._events("message_start", {"type": "message_start", "message": {
-            "id": "msg_fabric", "type": "message", "role": "assistant",
+            "id": self.message_id, "type": "message", "role": "assistant",
             "model": self.model, "content": [], "stop_reason": None,
             "stop_sequence": None,
             "usage": {"input_tokens": 0, "output_tokens": 0}}})

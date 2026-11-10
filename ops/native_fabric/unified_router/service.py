@@ -6,6 +6,7 @@ only loads the operator env file and runs Uvicorn.
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 from pathlib import Path
@@ -57,6 +58,17 @@ def load_environment(path: Path) -> dict[str, str]:
     return result
 
 
+def logging_config() -> dict:
+    """Render terminal receipts through the existing Uvicorn/launchd sink."""
+    from uvicorn.config import LOGGING_CONFIG
+
+    config = copy.deepcopy(LOGGING_CONFIG)
+    config["loggers"]["ops.native_fabric.unified_router.gateway"] = {
+        "handlers": ["default"], "level": "INFO", "propagate": False,
+    }
+    return config
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", required=True, type=Path)
@@ -85,6 +97,7 @@ def main(argv=None):
     config = uvicorn.Config(
         "ops.native_fabric.unified_router.gateway:create_app", factory=True,
         host="127.0.0.1", port=args.port, workers=1, access_log=False,
+        log_config=logging_config(),
         timeout_graceful_shutdown=25,
     )
     uvicorn.Server(config).run(sockets=[sock])

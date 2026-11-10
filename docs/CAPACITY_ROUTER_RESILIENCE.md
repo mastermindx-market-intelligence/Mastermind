@@ -442,3 +442,109 @@ does not require another blanket independent review. Reuse exact-input evidence.
 Do not recreate the parent branch, restore accidental dependencies, repin sealed
 provider commitments, overload DEAD, enable automatic learned weights from fixtures,
 multiply Uvicorn workers or infer provider quota from local counters.
+
+## Terminal receipts for consumer correlation (2026-11-10)
+
+The router emits one best-effort `FABRIC_TERMINAL` JSON record from its existing
+idempotent request settlement boundary. The record uses schema
+`fabric_terminal_v1` and the existing Uvicorn/launchd log sink. Only the router
+logger is enabled at INFO; no new service, watcher, queue, credential store or
+usage ledger is introduced. Failure to format or emit this observation cannot
+change inference, retry decisions, cancellation or permit cleanup. A missing
+receipt remains missing evidence.
+
+| Fields | Meaning and limit |
+| --- | --- |
+| `request_id`, `process_id`, `settled_unix_ms`, `duration_ms` | Router request identity, process and terminal observation timing. |
+| `gateway_source_sha256` | Cached SHA-256 of this gateway source file, or null if unreadable. It is not an attestation of the entire loaded release, dependencies or configuration. |
+| `route_id`, `model`, `wire` | Final selected configured route and resolved model after any proven pre-send fallback. No account or credential fields are collected. |
+| `operation`, `outcome`, `reason` | Messages versus count_tokens, existing served/failed/refused/cancelled outcome and a closed router reason or HTTP status. |
+| `upstream_send_started` | Possible upstream transmission; not provider admission or settlement. |
+| `response_id_sha256`, `response_id_state` | Router-produced client message ID digest; observed, unavailable, invalid or conflicting. |
+| `upstream_response_id_sha256`, `upstream_response_id_state` | Separately observed protocol response identity, with the same states. HTTP, event, item and tool-call IDs are not substituted. |
+| `usage` | Nullable input/output/cache-read/cache-creation counts reported upstream. Preserve the wire's cache inclusion semantics; do not add a fabricated total. |
+| `usage_source`, `usage_state`, `usage_invalid_fields` | Upstream-reported versus unavailable; reported/partial/unavailable state and fixed names of fields with invalid reports. Reported does not assert complete field coverage or final provider metering. |
+| `input_token_estimate` | Separate utility estimate for count_tokens, which does not become inference usage. |
+| `cost_usd`, `cost_status` | Null and unknown; no inferred billing settlement. |
+
+An identity digest is lowercase SHA-256 of the complete, unmodified UTF-8 ID,
+bounded to 1–256 encoded bytes. IDs are never trimmed, normalized, truncated or
+retained as raw receipt text. Invalid/unencodable values and conflicting IDs
+make that semantic identity unavailable for a join; conflicting/invalid states
+are sticky for the request. Translated client IDs are fixed from the router UUID
+before the first emitted event and remain distinct across requests, including
+when a Responses upstream ID arrives only in its terminal event. Direct
+Anthropic bytes and tool-call/function-call IDs remain unchanged. A coalesced
+SSE error cannot claim a downstream message ID from bytes that were not forwarded.
+
+Usage merges latest cumulative observations rather than summing them. Explicit
+integer zero is preserved; missing/null updates do not erase earlier values.
+Booleans, strings, floats, negatives and values beyond the signed 64-bit count
+range are not measurements. Invalid reports are flagged; retained earlier counts
+remain partial. Failed/cancelled requests with observed usage are also partial.
+HTTP error bodies and translated synthetic zero defaults are not usage evidence.
+
+For real consumer acceptance, locally hash the actual completed Hermes Message ID
+and require exactly one matching client-ID digest in the bounded receipt records.
+Join that record to its router request, final route and reported usage, and retain
+the native terminal task/usage evidence. Duplicate IDs, absent receipts or
+conflicting identity cannot be resolved by approximate timestamps. This proves
+consumer/router correlation; it does not prove an upstream provider's physical
+account lease, billed cost or settlement. A served model response is not proof
+that the assigned user task completed.
+
+The exact source candidate before MCP compatibility composition passed all 212
+affected offline cases on native Python 3.14.7 with the existing production
+httpx/FastAPI/Uvicorn dependencies. The existing pure-Python pytest package was
+borrowed from the user's Python 3.12 installation; no package or service was
+installed or changed. The exact-source log is SHA-256
+`a4c5989719ccaa671cba537e0e370deb65507994d672e2979b0890127a9073b5` and JUnit is
+`4336d4687eb2e01603b4609c5a4e9910a8cf52e57ac3f269458ca7b4e63f76c5`, completed 2026-11-10T07:32:34.434122+00:00.
+Earlier export qualification also passed the same 212 cases on Python 3.12.10;
+these are the same cases, not additive totals. The final combined source qualification is recorded below; required-check and
+consumer receipts remain separate.
+
+Fresh inspection also found that the serving mcpfix1 source files had changed
+under their existing directory label. Neither that label nor an on-disk hash
+proves which bytes an existing process loaded. Preserve current service/writer
+custody and reconcile legitimate MCP block compatibility before replacement.
+Raw tool-argument logging and permissive malformed-argument coercion from that
+live delta are not adopted by this terminal-receipt change. The original
+hold/drain/reconcile sequence and live consumer acceptance remain required.
+
+### Qualified MCP history composition
+
+Both translated wires now normalize completed MCP call/result history through
+existing ordinary tool-call and tool-result shapes. Exact call IDs, validated
+function names and object inputs survive. An explicit legacy tool_name is accepted
+only without a conflicting name; a server label never becomes a function name.
+Inline assistant results move to their actual tool-result channel. Server metadata
+and explicit is_error values remain in a deterministic JSON result envelope.
+Parallel results may arrive in reverse call order. Visible text after an unresolved
+call, duplicate/orphan IDs and incomplete exchanges refuse instead of being
+reordered or completed with invented data.
+
+The bounded mapping accepts text results. Unsupported rich results, active
+mcp_servers/mcp_toolset configuration, unknown server execution and container state
+refuse before translated inference. Direct Anthropic passthrough is unchanged.
+Opaque assistant thinking/redacted_thinking follows the existing cross-provider
+omission policy; the same blocks in other roles still refuse. Invalid roles,
+content and tool collections cannot disappear through normalization. All five
+response-side malformed-argument parsers retain strict JSON refusals without raw
+argument logging or a fabricated _raw_arguments input object.
+
+The protocol basis is the [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector),
+[server-tool lifecycle](https://platform.claude.com/docs/en/agents-and-tools/tool-use/server-tools)
+and [tool-result handling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+contracts. This maps completed history and does not introduce a server-tool executor.
+
+The final composition passes **295 affected offline cases** on the actual native
+Python3.14.7 router dependency set, completed 2026-11-10T07:45:12.030370+00:00.
+This includes the earlier212cases; totals are not added. Log SHA-256:
+`f3575f1759fd9040edfcbbe0c53bd95b782ac409e93174d87f0d53b6589d4e99`; JUnit:
+`d42b662e3d41b22e20f58f3daf5b83a9b6734b2c6538b62b39df83e59a9bf745`. Six changed Python files also pass whitespace checks.
+The source qualification manifest is
+`review_evidence/fabric_router/2026-11-10-paperclip-consumer-receipts.json`.
+Protected checks, fresh installed-source/controller custody, safe cutover and real
+consumer acceptance remain separate requirements. No live model call or runtime
+change was made during this qualification.

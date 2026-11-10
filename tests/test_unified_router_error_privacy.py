@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import httpx
 import pytest
 
 from ops.native_fabric.unified_router import gateway
 from ops.native_fabric.unified_router.routes import Route
-from ops.native_fabric.unified_router.wire import WireTranslationError
+from ops.native_fabric.unified_router.wire import (
+    OpenAIStreamTranslator, ResponsesStreamTranslator, WireTranslationError,
+    openai_to_anthropic, responses_to_anthropic)
 
 
 @pytest.mark.parametrize("code", [
@@ -29,9 +32,10 @@ def test_unregistered_exception_text_is_never_a_public_reason(detail):
 @pytest.mark.parametrize("phase", [
     "model-selection", "openai-request", "openai-response",
     "responses-request", "responses-response"])
-def test_each_translation_error_boundary_returns_only_registered_reason(tmp_path, monkeypatch, phase):
+def test_each_translation_error_boundary_returns_only_registered_reason(tmp_path, monkeypatch, phase, caplog):
     token = "synthetic-router-test-token-32-characters"
     secret_detail = "FABRIC_PRIVATE_FIXTURE_SECRET"
+    caplog.set_level(logging.INFO, logger=gateway.__name__)
     calls = []
     monkeypatch.setenv("SYNTHETIC_ROUTER_KEY", "synthetic-upstream-key")
 
@@ -86,3 +90,36 @@ def test_each_translation_error_boundary_returns_only_registered_reason(tmp_path
     assert len(calls) == int(phase.endswith("-response"))
     expected = ("FABRIC_INVALID_REQUEST", "FABRIC_TRANSLATE_INVALID")
     assert any(code in response.text for code in expected)
+    assert secret_detail not in caplog.text
+    assert "synthetic-access-token" not in caplog.text
+    receipts = [json.loads(record.getMessage().removeprefix("FABRIC_TERMINAL "))
+                for record in caplog.records if record.getMessage().startswith("FABRIC_TERMINAL ")]
+    assert len(receipts) == int(phase != "model-selection")
+    assert all(record["outcome"] != "served" for record in receipts)
+
+
+@pytest.mark.parametrize("seam", ["openai-response", "openai-stream", "responses-response",
+                                  "responses-message", "responses-stream"])
+def test_malformed_tool_arguments_remain_refused_without_raw_logging(seam, capsys, caplog):
+    raw = '{"PRIVATE_ARGUMENT_FIXTURE":'
+    if seam == "openai-response":
+        exercise = lambda: openai_to_anthropic({"choices": [{"message": {"tool_calls": [
+            {"id": "call", "function": {"name": "fixture", "arguments": raw}}]}}]}, model="m")
+    elif seam == "openai-stream":
+        translator = OpenAIStreamTranslator(model="m")
+        translator.feed({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call",
+            "function": {"name": "fixture", "arguments": raw}}]}, "finish_reason": "tool_calls"}]})
+        exercise = translator.finish
+    elif seam == "responses-response":
+        exercise = lambda: responses_to_anthropic({"output": [{"type": "function_call",
+            "call_id": "call", "name": "fixture", "arguments": raw}]}, model="m")
+    else:
+        translator = ResponsesStreamTranslator(model="m")
+        translator.feed({"type": "response.output_item.added", "item": {"type": "function_call",
+            "call_id": "call", "name": "fixture", "arguments": raw}})
+        translator.feed({"type": "response.completed", "response": {"status": "completed"}})
+        exercise = translator.to_message if seam == "responses-message" else translator.finish
+    with pytest.raises(WireTranslationError, match="^FABRIC_TRANSLATE_TOOL_ARGUMENTS$"):
+        exercise()
+    captured = capsys.readouterr()
+    assert "PRIVATE_ARGUMENT_FIXTURE" not in captured.err + captured.out + caplog.text
