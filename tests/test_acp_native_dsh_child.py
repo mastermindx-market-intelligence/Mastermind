@@ -240,3 +240,89 @@ def test_late_activation_after_abort_is_disposed_without_ack(launch, tmp_path):
         assert not owner._identity_matches(resources.process_ref)
 
     asyncio.run(run())
+
+
+# --- WO-16: the DSH child lane accepts the broker-issued ExecutionBinding.v1 ----
+
+from control_plane.child_execution_contracts import ExecutionBinding  # noqa: E402
+from control_plane.execution_binding_compat import (  # noqa: E402
+    BINDING_IDENTITY_MISMATCH, BINDING_REQUIRED, ExecutionBindingCompatError,
+)
+from integrations.acp_worker.adapter import AcpWorkerAdapter  # noqa: E402
+from integrations.acp_worker.turn import AcpProfile  # noqa: E402
+
+
+def _admitted_binding(spec, **changes):
+    payload = {
+        "root_run_ref": "hermes-root-1", "immediate_parent_run_ref": "hermes-run-7",
+        "logical_child_key": "dsh-child-1", "request_digest": "b" * 64,
+        "effective_complexity": "C2_COMPLEX_BOUNDED",
+        "job_ref": spec.job_id, "attempt_ref": spec.run_id,
+        "worker_id": spec.worker_id,
+    }
+    payload.update(changes)
+    return ExecutionBinding.from_dict(payload)
+
+
+def test_binding_required_dsh_lane_refuses_start_without_or_with_foreign_binding(
+        launch, tmp_path):
+    """No admitted binding, no native child: the DSH lane refuses before the
+    owner could ever hand the inherited FD to a child (the refusals run before
+    the turn/spec gate, so no SDK presence is required)."""
+    owner, spec = _build(launch, tmp_path)
+    opened = []
+
+    async def gated_open_run(row):
+        opened.append(row.run_id)
+        raise RuntimeError("fixture: admitted binding unlocked the native owner")
+
+    adapter = AcpWorkerAdapter(AcpProfile("dsh-binding", "1"), inspector=owner.inspector,
+                               open_run=gated_open_run, binding_required=True)
+
+    async def run():
+        with pytest.raises(ExecutionBindingCompatError) as err:
+            await adapter.start(spec)
+        assert err.value.code == BINDING_REQUIRED
+        assert opened == [] and owner._active is None
+        foreign = _admitted_binding(spec, attempt_ref="foreign-attempt")
+        with pytest.raises(ExecutionBindingCompatError) as err:
+            await adapter.start(spec, binding=foreign)
+        assert err.value.code == BINDING_IDENTITY_MISMATCH
+        assert opened == [] and owner._active is None
+
+    asyncio.run(run())
+
+
+def _sdk_present() -> bool:
+    try:
+        from importlib.metadata import version
+        version("agent-client-protocol")
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _sdk_present(),
+                    reason="agent-client-protocol SDK absent; no ACP qualification")
+def test_binding_required_dsh_lane_opens_the_native_owner_only_under_the_admitted_binding(
+        launch, tmp_path):
+    owner, spec = _build(launch, tmp_path)
+    opened = []
+
+    async def gated_open_run(row):
+        # The production gate: the compat check runs inside
+        # AcpWorkerAdapter.start before open_run; a recording sentinel proves
+        # the gate order, not a launch.
+        opened.append(row.run_id)
+        raise RuntimeError("fixture: admitted binding unlocked the native owner")
+
+    adapter = AcpWorkerAdapter(AcpProfile("dsh-binding", "1"), inspector=owner.inspector,
+                               open_run=gated_open_run, binding_required=True)
+
+    async def run():
+        assert opened == [] and owner._active is None
+        with pytest.raises(RuntimeError, match="admitted binding unlocked"):
+            await adapter.start(spec, binding=_admitted_binding(spec))
+        assert opened == [spec.run_id]
+
+    asyncio.run(run())

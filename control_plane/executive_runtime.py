@@ -1171,6 +1171,18 @@ def _normalise_constraints(
             result["paid_subject_review_binding"] = normalize_paid_subject_review_binding(
                 raw["paid_subject_review_binding"]
             )
+    if "child_placement" in raw:
+        # WO-14: the owner-admitted ChildExecutionRequest placement spec that
+        # claim_job (the sole placement authority) rechecks and binds.
+        from control_plane.executive_placement_authority import (
+            CHILD_PLACEMENT_KEY, normalize_child_placement_spec,
+        )
+        try:
+            result[CHILD_PLACEMENT_KEY] = normalize_child_placement_spec(
+                raw[CHILD_PLACEMENT_KEY]
+            )
+        except (TypeError, ValueError) as exc:
+            raise StateConflict(f"child placement constraint is invalid: {exc}") from exc
     return result
 
 
@@ -17917,6 +17929,10 @@ class JobRegistry:
                         attempt_id,
                     ),
                 )
+                ResourceBroker(self.store)._settle_placement_in_transaction(
+                    connection, attempt_id=str(attempt_id), timestamp=timestamp,
+                    reason="JOB_REQUEUED",
+                )
             if tx9_material is not None:
                 timestamp = _finite_fresh_effect(self.store, connection, job_id)
                 connection.execute(
@@ -18124,6 +18140,10 @@ class JobRegistry:
                     attempt_id,
                 ),
             )
+            ResourceBroker(self.store)._settle_placement_in_transaction(
+                connection, attempt_id=str(attempt_id), timestamp=timestamp,
+                reason="JOB_CANCELLED",
+            )
             connection.execute(
                 """
                 UPDATE jobs SET status='CANCELLED',cancel_requested_at_ms=?,
@@ -18303,6 +18323,129 @@ def _assert_expected_child_selection(
             refuse("admitted plan digest drifted")
 
 
+def _record_placement_deferral(store, connection, job_id: str, refusal, timestamp: int) -> None:
+    """Durable 'queued with reason' for a placement refusal (deduplicated).
+
+    The Job stays QUEUED; the claim returns None. The record lives on its own
+    aggregate so Job event-chain invariants are untouched.
+    """
+    from control_plane.executive_placement_authority import (
+        DEFERRAL_AGGREGATE, DEFERRAL_EVENT, DEFERRAL_SCHEMA, PLACEMENT_OWNER,
+    )
+    payload = {"schema": DEFERRAL_SCHEMA, "job_id": job_id, **refusal.to_dict()}
+    last = connection.execute(
+        "SELECT payload_json FROM events WHERE aggregate_type=? AND aggregate_id=? "
+        "ORDER BY sequence DESC LIMIT 1",
+        (DEFERRAL_AGGREGATE, job_id),
+    ).fetchone()
+    if last is not None and json.loads(last[0]) == payload:
+        return
+    store.append_event(
+        connection, aggregate_type=DEFERRAL_AGGREGATE, aggregate_id=job_id,
+        event_type=DEFERRAL_EVENT, actor=PLACEMENT_OWNER, payload=payload,
+        command_id=f"placement-deferral:{job_id}:{uuid4().hex}", timestamp_ms=timestamp,
+    )
+
+
+def _recheck_placement_lineage(connection, job_row, spec, authority) -> None:
+    """Root/parent/grant recheck inside the claim transaction."""
+    from control_plane.executive_placement_authority import PlacementRefusal
+    terminal = {"COMPLETED", "FAILED", "CANCELLED"}
+    root_id = str(job_row["root_job_id"])
+    root = connection.execute("SELECT status FROM jobs WHERE job_id=?", (root_id,)).fetchone()
+    if root is None:
+        raise PlacementRefusal("ROOT_UNAVAILABLE", root_id, resource_ref=root_id)
+    if root_id != str(job_row["job_id"]) and str(root["status"]) in terminal:
+        raise PlacementRefusal("ROOT_TERMINAL", root_id, resource_ref=root_id)
+    parent_id = job_row["parent_job_id"]
+    if parent_id is not None:
+        parent = connection.execute(
+            "SELECT status,root_job_id FROM jobs WHERE job_id=?", (parent_id,)
+        ).fetchone()
+        if parent is None or str(parent["root_job_id"]) != root_id:
+            raise PlacementRefusal("PARENT_UNAVAILABLE", str(parent_id), resource_ref=str(parent_id))
+        if str(parent["status"]) in terminal:
+            raise PlacementRefusal("PARENT_TERMINAL", str(parent_id), resource_ref=str(parent_id))
+    pinned = spec.get("authority_policy_hash")
+    if pinned and pinned != authority.policy_sha256:
+        raise PlacementRefusal("GRANT_MOVED", "authority policy differs from admission")
+
+
+def _placement_binding_for_attempt(connection, attempt_id: str) -> dict[str, Any] | None:
+    """The Attempt's CURRENT ExecutionBinding: the one issued at claim, or the
+    latest re-issue by adoption or expired OHF takeover, both of which rotate
+    the fence on the same Attempt."""
+    rows = connection.execute(
+        "SELECT event_type,payload_json FROM events WHERE attempt_id=? AND ("
+        "(event_type='JOB_CLAIMED' AND aggregate_type='job') OR "
+        "(event_type IN ('ATTEMPT_ADOPTED','OHF_EXPIRED_LEASE_TAKEN_OVER') "
+        "AND aggregate_type='attempt')) ORDER BY event_id",
+        (attempt_id,),
+    ).fetchall()
+    issued = [
+        (row[0], payload["execution_binding"])
+        for row, payload in ((row, json.loads(row[1])) for row in rows)
+        if isinstance(payload, dict) and "execution_binding" in payload
+    ]
+    claimed = [binding for kind, binding in issued if kind == "JOB_CLAIMED"]
+    if len(claimed) > 1:
+        raise PersistenceError("Attempt carries more than one ExecutionBinding")
+    if issued and not claimed:
+        raise PersistenceError("re-issued ExecutionBinding has no claim-time binding")
+    return issued[-1][1] if issued else None
+
+
+def _reissue_placement_binding(
+    connection, row: sqlite3.Row, *, fence_counter: int, lease_expires_at_ms: int
+) -> dict[str, Any] | None:
+    """Re-issue the binding in the SAME transaction as its fence rotation."""
+    from control_plane.child_execution_contracts import ExecutionBinding
+    from control_plane.executive_placement_authority import reissue_execution_binding
+    placed = connection.execute(
+        "SELECT json_type(constraints_json,'$.child_placement') FROM jobs WHERE job_id=?",
+        (row["job_id"],),
+    ).fetchone()
+    if placed is None or placed[0] is None:
+        return None  # legacy (non-placement) Job: no binding to re-issue
+    raw = _placement_binding_for_attempt(connection, str(row["attempt_id"]))
+    if raw is None:
+        raise StateConflict("adoption refused: placement Job Attempt has no ExecutionBinding")
+    binding = ExecutionBinding.from_dict(raw)
+    if (binding.attempt_ref != str(row["attempt_id"])
+            or binding.fence_counter != int(row["fence_generation"])):
+        raise PersistenceError("placement ExecutionBinding and Attempt fence diverged")
+    return reissue_execution_binding(
+        binding, fence_counter=fence_counter, lease_expires_at_ms=lease_expires_at_ms
+    ).to_dict()
+
+
+def _require_placement_settlement_fence(
+    connection, row: sqlite3.Row, *, fence_generation: int
+) -> dict[str, Any] | None:
+    """Settlement compares attempt AND fence against the issued binding."""
+    from control_plane.child_execution_contracts import ExecutionBinding
+    placed = connection.execute(
+        "SELECT json_type(constraints_json,'$.child_placement') FROM jobs WHERE job_id=?",
+        (row["job_id"],),
+    ).fetchone()
+    if placed is None or placed[0] is None:
+        return None  # legacy (non-placement) Job: unchanged settlement path
+    raw = _placement_binding_for_attempt(connection, str(row["attempt_id"]))
+    if raw is None:
+        raise StateConflict("settlement refused: placement Job Attempt has no ExecutionBinding")
+    binding = ExecutionBinding.from_dict(raw)
+    if (
+        binding.attempt_ref != str(row["attempt_id"])
+        or binding.job_ref != str(row["job_id"])
+        or binding.worker_id != str(row["worker_id"])
+        or type(fence_generation) is not int
+        or binding.fence_counter != fence_generation
+        or int(row["fence_generation"]) != fence_generation
+    ):
+        raise StateConflict("settlement refused: attempt/fence differs from ExecutionBinding")
+    return raw
+
+
 class AttemptRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -18350,6 +18493,7 @@ class AttemptRegistry:
         _c2_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | None = None,
         _initial_capacity_evidence: Mapping[str, Any] | None = None,
+        _placement: tuple[Mapping[str, Any], Any, Any] | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
         from control_plane.fresh_conversation_admission import require_initial_native_claim
@@ -18615,6 +18759,39 @@ class AttemptRegistry:
             claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
             claim_payload["exact_worker_target"] = exact_target.evidence()
+        if _placement is not None:
+            # WO-14: ONE broker transaction (this one) reserves host slot +
+            # root concurrency + every shared quota resource and binds the
+            # attempt/host/route/fence_counter. ExecutionBinding.v1 rides the
+            # JOB_CLAIMED payload; settlement compares attempt and fence to it.
+            from control_plane.executive_placement_authority import (
+                build_placement_request, issue_execution_binding,
+            )
+            spec, decision, _observations = _placement
+            request = build_placement_request(
+                decision, spec=spec, job_id=job_id, attempt_id=attempt_id,
+                attempt_number=attempt_number, lease_owner=owner,
+                duration_ms=duration * 1000, timestamp=timestamp,
+            )
+            commitment = ResourceBroker(self.store)._reserve_placement_in_transaction(
+                connection, request, timestamp=timestamp
+            )
+            capacity_metadata = _json_loads(capacity["metadata_json"], fallback={})
+            binding = issue_execution_binding(
+                spec=spec, decision=decision, job_id=job_id,
+                root_job_id=str(job_row["root_job_id"]), attempt_id=attempt_id,
+                attempt_number=attempt_number, worker_id=str(capacity["worker_id"]),
+                provider=str(capacity["provider"]), model=str(capacity["model"] or ""),
+                adapter_id=str(capacity_metadata.get("adapter_id") or ""),
+                fence_counter=fence,
+                lease_expires_at_ms=timestamp + duration * 1000,
+            )
+            claim_payload["execution_binding"] = binding.to_dict()
+            claim_payload["placement_commitment"] = dict(
+                commitment,
+                observations_digest=decision.observations_digest,
+                registry_revision=decision.registry_revision,
+            )
         self.store.append_event(
             connection,
             aggregate_type="job",
@@ -18641,6 +18818,179 @@ class AttemptRegistry:
             lease_token=lease_token,
         )
 
+    def _select_placement_in_transaction(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        job_row: sqlite3.Row,
+        candidates: list[sqlite3.Row],
+        spec: Mapping[str, Any],
+        observations: object,
+        authority: Any,
+        timestamp: int,
+    ) -> tuple[sqlite3.Row, Any] | None:
+        """Recheck and pick the first rank-ordered candidate that admits.
+
+        Returns ``None`` (Job stays QUEUED, reason recorded) when the lineage,
+        class, registry revision, host, account or any shared quota refuses.
+        """
+        from control_plane.executive_placement_authority import (
+            PlacementObservations, PlacementRefusal, evaluate_placement,
+            host_slot_pool, recheck_effective_class, recheck_route_descriptor,
+            root_concurrency_pool, shared_quota_pool,
+        )
+        job_id = str(job_row["job_id"])
+        root_job_id = str(job_row["root_job_id"])
+        try:
+            if type(observations) is not PlacementObservations:
+                raise PlacementRefusal(
+                    "PLACEMENT_OBSERVATIONS_UNAVAILABLE",
+                    "claim requires frozen placement observations",
+                )
+            _recheck_placement_lineage(connection, job_row, spec, authority)
+            recheck_effective_class(spec)
+        except PlacementRefusal as refusal:
+            _record_placement_deferral(self.store, connection, job_id, refusal, timestamp)
+            return None
+        broker = ResourceBroker(self.store)
+        first: PlacementRefusal | None = None
+        for row in candidates:
+            metadata = _json_loads(row["metadata_json"], fallback={})
+            worker = connection.execute(
+                "SELECT metadata_json FROM workers WHERE worker_id=?", (row["worker_id"],)
+            ).fetchone()
+            worker_metadata = (
+                _json_loads(worker["metadata_json"], fallback={}) if worker is not None else {}
+            )
+            host_id = str(metadata.get("host_id") or worker_metadata.get("host_id") or "")
+            pools = [root_concurrency_pool(root_job_id)]
+            pools += [shared_quota_pool(ref) for ref in spec["shared_quota_resource_refs"]]
+            if host_id:
+                pools.append(host_slot_pool(host_id))
+            try:
+                recheck_route_descriptor(
+                    spec, provider=str(row["provider"]), model=str(row["model"] or ""),
+                    adapter_id=str(metadata.get("adapter_id") or ""),
+                )
+                decision = evaluate_placement(
+                    spec=spec, observations=observations, host_id=host_id or None,
+                    root_job_id=root_job_id, now_ms=timestamp,
+                    pool_charges=broker._placement_pool_charges(connection, pools),
+                )
+            except PlacementRefusal as refusal:
+                first = first or refusal
+                continue
+            return row, decision
+        assert first is not None
+        _record_placement_deferral(self.store, connection, job_id, first, timestamp)
+        return None
+
+    def placement_wait_reason(self, job_id: str) -> dict[str, Any] | None:
+        """The current 'queued with reason' record of a QUEUED placement Job."""
+        from control_plane.executive_placement_authority import DEFERRAL_AGGREGATE
+        with self.store.read() as connection:
+            job = connection.execute(
+                "SELECT status FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if job is None or job["status"] != JobStatus.QUEUED.value:
+                return None
+            row = connection.execute(
+                "SELECT payload_json FROM events WHERE aggregate_type=? AND aggregate_id=? "
+                "ORDER BY sequence DESC LIMIT 1",
+                (DEFERRAL_AGGREGATE, job_id),
+            ).fetchone()
+            return json.loads(row[0]) if row is not None else None
+
+    def execution_binding(self, attempt_id: str) -> dict[str, Any] | None:
+        """The ExecutionBinding.v1 issued at this Attempt's claim, if any."""
+        with self.store.read() as connection:
+            return _placement_binding_for_attempt(connection, attempt_id)
+
+    def release_unstarted_claim(
+        self,
+        attempt_id: str,
+        *,
+        fence_generation: int,
+        lease_token: str,
+        reason: str,
+    ) -> Job:
+        """Pre-start refusal: release the ORIGINAL claim exactly once.
+
+        Only a CLAIMED (never started) placement-bound Attempt qualifies. One
+        transaction ends the Attempt, returns the Job to QUEUED, frees the
+        Worker quota custody and settles the placement commitment (host slot,
+        root concurrency, shared quota). A stale fence or token is refused.
+        """
+        from control_plane.executive_placement_authority import (
+            PLACEMENT_OWNER, RELEASE_EVENT,
+        )
+        reason = str(reason or "").strip()
+        if not reason:
+            raise StateConflict("pre-start release requires a reason")
+        timestamp = self.store.now_ms()
+        with self.store.transaction() as connection:
+            row = self._leased_row(
+                connection,
+                attempt_id=attempt_id,
+                fence_generation=fence_generation,
+                lease_token=lease_token,
+                timestamp=timestamp,
+                statuses={AttemptStatus.CLAIMED},
+            )
+            if row["pid"] is not None:
+                raise StateConflict("pre-start release refused: a process was recorded")
+            if _require_placement_settlement_fence(
+                connection, row, fence_generation=fence_generation
+            ) is None:
+                raise StateConflict("pre-start release requires a placement-bound claim")
+            job_id = str(row["job_id"])
+            role = connection.execute(
+                "SELECT orchestration_role FROM jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            if role is None or role[0] is not None:
+                # Same rule as requeue_job: orchestration retries belong to the
+                # atomic COO retry decision, never this release.
+                raise StateConflict("orchestration pre-start release requires COO retry owner")
+            error = {"error": "PRE_START_REFUSED", "reason": reason[:512]}
+            connection.execute(
+                "UPDATE attempts SET status=?,lease_token=NULL,error_json=?,finished_at_ms=?,"
+                "updated_at_ms=?,version=version+1 WHERE attempt_id=? AND status=?",
+                (AttemptStatus.FAILED.value, _json_dumps(error), timestamp, timestamp,
+                 attempt_id, AttemptStatus.CLAIMED.value),
+            )
+            updated = connection.execute(
+                "UPDATE jobs SET status='QUEUED',assigned_worker_id=NULL,assigned_quota_class=NULL,"
+                "current_attempt_id=NULL,updated_at_ms=?,version=version+1 "
+                "WHERE job_id=? AND current_attempt_id=? AND status='RUNNING'",
+                (timestamp, job_id, attempt_id),
+            )
+            if updated.rowcount != 1:
+                raise StateConflict("pre-start release lost its Job")
+            connection.execute(
+                "UPDATE worker_quota_classes SET held_attempt_id=NULL,"
+                "status=CASE WHEN status='BUSY' THEN 'AVAILABLE' ELSE status END,"
+                "updated_at_ms=?,version=version+1 "
+                "WHERE worker_id=? AND quota_class=? AND held_attempt_id=?",
+                (timestamp, row["worker_id"], row["quota_class"], attempt_id),
+            )
+            settled = ResourceBroker(self.store)._settle_placement_in_transaction(
+                connection, attempt_id=attempt_id, timestamp=timestamp,
+                reason=f"PRE_START_REFUSED:{reason[:128]}",
+            )
+            self.store.append_event(
+                connection, aggregate_type="job", aggregate_id=job_id,
+                event_type=RELEASE_EVENT, actor=PLACEMENT_OWNER, job_id=job_id,
+                attempt_id=attempt_id, worker_id=str(row["worker_id"]),
+                quota_class=str(row["quota_class"]),
+                payload={"status": JobStatus.QUEUED.value, "reason": reason[:512],
+                         "fence_generation": fence_generation,
+                         "placement_settlement": settled},
+                timestamp_ms=timestamp,
+            )
+        job = JobRegistry(self.store).get_job(job_id)
+        assert job is not None
+        return job
+
     def claim_job(
         self,
         job_id: str,
@@ -18655,6 +19005,7 @@ class AttemptRegistry:
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
         _initial_prepared: object | None = None,
         _direct_native_access: direct_native.DirectNativeExecutionAccess | None = None,
+        placement_observations: object | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -19000,12 +19351,44 @@ class AttemptRegistry:
                 if not required_capabilities.issubset(capabilities):
                     continue
                 candidates.append(row)
+            placement_spec = constraints.get("child_placement")
+            if placement_spec is None and placement_observations is not None:
+                raise StateConflict("placement observations require a child placement Job")
+            if placement_spec is not None and (
+                direct_provenance is not None or _initial_prepared is not None
+            ):
+                raise StateConflict("child placement cannot compose with direct/finite claims")
             if not candidates:
                 if _initial_prepared is not None:
                     raise StateConflict("finite initial common claim refused")
+                if placement_spec is not None:
+                    from control_plane.executive_placement_authority import PlacementRefusal
+                    _record_placement_deferral(
+                        self.store, connection, job_id,
+                        PlacementRefusal("NO_ELIGIBLE_CAPACITY", "no route-eligible Worker is AVAILABLE"),
+                        timestamp,
+                    )
                 return None
             candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
             capacity = candidates[0]
+            placement: tuple[Mapping[str, Any], Any, Any] | None = None
+            if placement_spec is not None:
+                # WO-14: the sole placement authority. Every recheck and every
+                # counter read happens here, in the claim transaction; the
+                # observations were frozen outside it (no I/O inside).
+                selected = self._select_placement_in_transaction(
+                    connection,
+                    job_row=job_row,
+                    candidates=candidates,
+                    spec=placement_spec,
+                    observations=placement_observations,
+                    authority=authority,
+                    timestamp=timestamp,
+                )
+                if selected is None:
+                    return None
+                capacity, decision = selected
+                placement = (placement_spec, decision, placement_observations)
             effective_grant: dict[str, Any] | None = None
             effective_grant_digest: str | None = None
             placement_snapshot: dict[str, Any] | None = None
@@ -19058,6 +19441,7 @@ class AttemptRegistry:
                 placement_snapshot_digest=placement_snapshot_digest,
                 exact_target=exact_target,
                 _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
+                _placement=placement,
             )
             if direct_provenance is not None:
                 _direct_native_access.check()
@@ -19513,6 +19897,9 @@ class AttemptRegistry:
             )
             if updated_attempt.rowcount != 1:
                 raise StateConflict(f"attempt {attempt_id} lost the adoption race")
+            reissued = _reissue_placement_binding(
+                connection, row, fence_counter=next_fence, lease_expires_at_ms=expiry
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",
@@ -19529,6 +19916,7 @@ class AttemptRegistry:
                     "previous_lease_owner": str(row["lease_owner"]),
                     "lease_owner": owner,
                     "lease_expires_at_ms": expiry,
+                    **({"execution_binding": reissued} if reissued is not None else {}),
                 },
                 timestamp_ms=timestamp,
             )
@@ -19696,6 +20084,12 @@ class AttemptRegistry:
             )
             if quota.rowcount != 1 or attempt.rowcount != 1:
                 raise StateConflict("expired OHF takeover lost its CAS race")
+            binding = _reissue_placement_binding(
+                connection,
+                row,
+                fence_counter=next_fence,
+                lease_expires_at_ms=expiry,
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",
@@ -19711,6 +20105,7 @@ class AttemptRegistry:
                     "fence_generation": next_fence,
                     "lease_owner": owner,
                     "lease_expires_at_ms": expiry,
+                    **({"execution_binding": binding} if binding is not None else {}),
                 },
                 timestamp_ms=timestamp,
             )
@@ -20344,6 +20739,10 @@ class AttemptRegistry:
                 statuses=_WORKER_MUTABLE_ATTEMPT_STATUSES,
             )
             self._require_ohf_shutdown_before_legacy_terminal(connection, row)
+            # WO-14: settlement compares attempt AND fence to ExecutionBinding.
+            _require_placement_settlement_fence(
+                connection, row, fence_generation=fence_generation
+            )
             job_row = connection.execute(
                 "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
             ).fetchone()
@@ -20413,6 +20812,10 @@ class AttemptRegistry:
                 WHERE worker_id=? AND quota_class=? AND held_attempt_id=?
                 """,
                 (timestamp, row["worker_id"], row["quota_class"], attempt_id),
+            )
+            ResourceBroker(self.store)._settle_placement_in_transaction(
+                connection, attempt_id=attempt_id, timestamp=timestamp,
+                reason=f"ATTEMPT_{status.value}",
             )
             event_payload: dict[str, Any] = {"status": job_status.value}
             if status is AttemptStatus.COMPLETED and _direct_native_provenance(connection,job_row) is not None:
@@ -20730,6 +21133,10 @@ class AttemptRegistry:
                 """,
                 (timestamp, row["worker_id"], row["quota_class"], attempt_id),
             )
+            ResourceBroker(self.store)._settle_placement_in_transaction(
+                connection, attempt_id=attempt_id, timestamp=timestamp,
+                reason="ATTEMPT_CANCELLED",
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="job",
@@ -20900,6 +21307,14 @@ class AttemptRegistry:
                         attempt_id,
                     ),
                 )
+                if cancel_was_requested:
+                    # Custody is released here and the Job is terminal, so no
+                    # later verb can settle (REVIEW_2314 M-2). The LOST branch
+                    # keeps custody; requeue_job settles both.
+                    ResourceBroker(self.store)._settle_placement_in_transaction(
+                        connection, attempt_id=attempt_id, timestamp=timestamp,
+                        reason="LEASE_EXPIRED",
+                    )
                 self.store.append_event(
                     connection,
                     aggregate_type="job",
@@ -24852,6 +25267,232 @@ class ResourceBroker:
                 (host_id,),
             )
         ]
+
+    # --- WO-14 placement commitments (claim_job is the sole authority) -----
+    # Host slot, root concurrency and every shared quota resource are demands
+    # of ONE physical commitment owned by this broker, persisted by the single
+    # incumbent persistence implementation inside the caller's claim
+    # transaction. These helpers never open their own transaction.
+
+    def _placement_pool_charges(self, connection, pools) -> dict[str, int]:
+        """Live same-store charges for placement pools across every host."""
+        from . import executive_physical_resources as physical
+
+        self.store._assert_owned_snapshot_connection(connection)
+        for table in ("physical_resource_commitments", "physical_resource_demands"):
+            if connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone() is None:
+                raise physical.PhysicalResourceRefusal(
+                    "RESOURCE_SCHEMA_UNAVAILABLE",
+                    "physical resource schema is not active in this Runtime",
+                )
+        pools = sorted(set(pools))
+        if not pools:
+            return {}
+        marks = ",".join("?" for _ in pools)
+        return {
+            str(row[0]): int(row[1])
+            for row in connection.execute(
+                "SELECT d.capacity_pool_id,SUM(d.remaining_charge) FROM physical_resource_demands d "
+                "JOIN physical_resource_commitments c USING(commitment_id,allocation_generation) "
+                "WHERE c.state IN ('RESERVED','EFFECT_MAY_HAVE_BEGUN','ACTIVE','RECONCILIATION_REQUIRED') "
+                f"AND d.capacity_pool_id IN ({marks}) GROUP BY d.capacity_pool_id",
+                pools,
+            )
+        }
+
+    def _reserve_placement_in_transaction(
+        self, connection, request: Mapping[str, Any], *, timestamp: int
+    ) -> dict[str, Any]:
+        """RESERVE then BEGIN one placement commitment in the claim transaction.
+
+        The placement predicate (``evaluate_placement``) has already admitted
+        the exact demands against same-transaction counters. The claim is the
+        effect authority for its Attempt, so the commitment is BEGUN in the same
+        transaction; settlement later moves it to SETTLED exactly once.
+
+        Forensic divergence (REVIEW_2314 m-4): this path does not call
+        ``mint_capacity_capture``/``evaluate_begin``. Inside one BEGIN IMMEDIATE
+        transaction that recheck would be tautological, but placement
+        commitments therefore carry no capacity-capture receipt; the JOB_CLAIMED
+        ``placement_commitment`` payload (observations digest, registry
+        revision) is their admission evidence.
+        """
+        from . import executive_physical_resources as physical
+
+        self.store._assert_owned_snapshot_connection(connection)
+        reservation = physical.validate_physical_request(dict(request))
+        fingerprint = physical.physical_request_fingerprint(reservation)
+        evaluation = {
+            "admitted": True,
+            "code": "RESERVED",
+            "fresh_begin": False,
+            "request_fingerprint": fingerprint,
+            "charges": physical._request_charges(reservation),
+        }
+        self._persist_prevalidated_physical_reservation(
+            connection, reservation, evaluation=evaluation, timestamp=timestamp
+        )
+        headers = self._physical_headers(connection, reservation)
+        if not headers or any(row is None or row["state"] != "RESERVED" for row in headers):
+            raise PersistenceError("placement reservation vanished inside its transaction")
+        reserve_event_id = int(headers[0]["decision_event_id"])
+        planned = [
+            {
+                "commitment_id": row["commitment_id"],
+                "allocation_generation": row["allocation_generation"],
+                "revision": row["revision"] + 1,
+                "phase_key": row["phase_key"],
+                "state": "EFFECT_MAY_HAVE_BEGUN",
+                "demands": self._physical_demands(connection, row),
+            }
+            for row in headers
+        ]
+        begin = dict(reservation, command_id=reservation["command_id"].rsplit(":", 1)[0] + ":begin")
+        aggregate_id = hashlib.sha256(
+            _json_dumps([reservation["host_id"], reservation["operation_key"]]).encode()
+        ).hexdigest()
+        refs = [
+            {"commitment_id": row["commitment_id"],
+             "allocation_generation": row["allocation_generation"],
+             "expected_revision": row["revision"]}
+            for row in headers
+        ]
+        command_fingerprint = hashlib.sha256(
+            _json_dumps({"action": "begin", "request": fingerprint,
+                         "commitments": refs, "evidence": None}).encode()
+        ).hexdigest()
+        event = self._physical_event(
+            connection, begin, aggregate_id, "begin", command_fingerprint,
+            {"operation_key": reservation["operation_key"],
+             "request_fingerprint": fingerprint, "commitments": planned},
+            timestamp,
+        )
+        for row, plan in zip(headers, planned):
+            cursor = connection.execute(
+                "UPDATE physical_resource_commitments SET state='EFFECT_MAY_HAVE_BEGUN',"
+                "revision=revision+1,updated_at_ms=?,begin_event_id=? "
+                "WHERE commitment_id=? AND allocation_generation=? AND revision=? AND state='RESERVED'",
+                (timestamp, event.event_id, row["commitment_id"],
+                 row["allocation_generation"], row["revision"]),
+            )
+            if cursor.rowcount != 1:
+                raise PersistenceError("placement commitment BEGIN CAS lost")
+            for demand in plan["demands"]:
+                cursor = connection.execute(
+                    "UPDATE physical_resource_demands SET observed_revision=? "
+                    "WHERE commitment_id=? AND allocation_generation=? AND dimension=? "
+                    "AND capacity_pool_id=? AND observed_revision=?",
+                    (plan["revision"], row["commitment_id"], row["allocation_generation"],
+                     demand["dimension"], demand["capacity_pool_id"], row["revision"]),
+                )
+                if cursor.rowcount != 1:
+                    raise PersistenceError("placement demand BEGIN CAS lost")
+        head = headers[0]
+        return {
+            "operation_key": reservation["operation_key"],
+            "phase_key": head["phase_key"],
+            "host_id": reservation["host_id"],
+            "commitment_id": head["commitment_id"],
+            "allocation_generation": head["allocation_generation"],
+            "request_fingerprint": fingerprint,
+            "reserve_event_id": reserve_event_id,
+            "begin_event_id": int(event.event_id),
+            "pools": sorted(d["capacity_pool_id"] for d in planned[0]["demands"]),
+        }
+
+    def _settle_placement_in_transaction(
+        self, connection, *, attempt_id: str, timestamp: int, reason: str
+    ) -> dict[str, Any] | None:
+        """Release the Attempt's placement commitment exactly once.
+
+        Idempotent: no commitment (legacy claim) or an already-terminal one is
+        a no-op. Called wherever the Worker quota custody of that Attempt is
+        released, inside the same transaction.
+
+        Trust basis (REVIEW_2314 m-2): ``terminal_effect_state: TERMINAL`` is
+        asserted without the incumbent settle's ``process_terminal`` /
+        ``descendants_terminal`` proofs. It rides the same-transaction Worker
+        quota release, whose verb (complete/fail/cancel/release/requeue/expiry)
+        is the Executive's effect authority for the Attempt; the settlement
+        ``reason`` names that verb. Weaker forensics than other physical
+        commitments until the reviewed-schema placement request kind lands.
+        """
+        from .executive_placement_authority import PLACEMENT_OWNER
+
+        self.store._assert_owned_snapshot_connection(connection)
+        if connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='physical_resource_commitments'"
+        ).fetchone() is None:
+            return None
+        rows = connection.execute(
+            "SELECT * FROM physical_resource_commitments WHERE owner_id=? AND carrier_id=?",
+            (PLACEMENT_OWNER, attempt_id),
+        ).fetchall()
+        if not rows:
+            return None
+        if len(rows) != 1:
+            raise PersistenceError("Attempt binds more than one placement commitment")
+        row = rows[0]
+        if row["state"] in {"SETTLED", "ABANDONED_NO_EFFECT"}:
+            return None
+        if row["begin_event_id"] is None or row["state"] not in {
+            "EFFECT_MAY_HAVE_BEGUN", "ACTIVE", "RECONCILIATION_REQUIRED"
+        }:
+            raise PersistenceError("placement commitment is not in a settleable state")
+        demands = [
+            dict(demand, remaining_charge=0, attributed_materialized_or_active=0, attribution={})
+            for demand in self._physical_demands(connection, row)
+        ]
+        revision = row["revision"] + 1
+        receipt = {
+            "operation_key": row["operation_key"],
+            "request_fingerprint": row["request_fingerprint"],
+            "commitments": [{
+                "commitment_id": row["commitment_id"],
+                "allocation_generation": row["allocation_generation"],
+                "revision": revision,
+                "phase_key": row["phase_key"],
+                "state": "SETTLED",
+                "demands": demands,
+            }],
+            "evidence": {"terminal_effect_state": "TERMINAL", "placement_release": reason},
+        }
+        aggregate_id = hashlib.sha256(
+            _json_dumps([row["host_id"], row["operation_key"]]).encode()
+        ).hexdigest()
+        command_fingerprint = hashlib.sha256(
+            _json_dumps({"action": "settle", "request": row["request_fingerprint"],
+                         "attempt_id": attempt_id, "reason": reason}).encode()
+        ).hexdigest()
+        event = self._physical_event(
+            connection,
+            {"owner_id": PLACEMENT_OWNER,
+             "command_id": f"physical:placement:{attempt_id}:settle"},
+            aggregate_id, "settle", command_fingerprint, receipt, timestamp,
+        )
+        cursor = connection.execute(
+            "UPDATE physical_resource_commitments SET state='SETTLED',revision=?,updated_at_ms=?,"
+            "last_observation_event_id=?,settlement_event_id=? "
+            "WHERE commitment_id=? AND allocation_generation=? AND revision=? AND state=?",
+            (revision, timestamp, event.event_id, event.event_id, row["commitment_id"],
+             row["allocation_generation"], row["revision"], row["state"]),
+        )
+        if cursor.rowcount != 1:
+            raise PersistenceError("placement commitment settlement CAS lost")
+        for demand in demands:
+            cursor = connection.execute(
+                "UPDATE physical_resource_demands SET remaining_charge=0,"
+                "attributed_materialized_or_active=0,attribution_json='{}',observed_revision=? "
+                "WHERE commitment_id=? AND allocation_generation=? AND dimension=? "
+                "AND capacity_pool_id=? AND observed_revision=?",
+                (revision, row["commitment_id"], row["allocation_generation"],
+                 demand["dimension"], demand["capacity_pool_id"], row["revision"]),
+            )
+            if cursor.rowcount != 1:
+                raise PersistenceError("placement demand settlement CAS lost")
+        return {"commitment_id": row["commitment_id"], "settlement_event_id": int(event.event_id)}
 
     def _persist_prevalidated_physical_reservation(
         self,
