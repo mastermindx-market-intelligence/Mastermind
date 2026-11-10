@@ -254,6 +254,7 @@
 }
 .mm-gateway-viewer-disconnected,
 .mm-gateway-gateway-busy,
+.mm-gateway-gateway-stopped,
 .mm-gateway-quota {
   color: var(--noir-champagne);
 }
