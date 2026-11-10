@@ -1,0 +1,22 @@
+{
+  "schema": "mastermind.source_package.v1",
+  "files": {
+    "BASE_RED.log": "3417570b5922bbc546aba0cdeb716d9c89c809e71bac6ae621b7bfc5fa9293e7",
+    "BASE_RED.xml": "f8fe74d45afa6645ea8fe46548167c91d0a975dd910f7c9e25bdf8e796240997",
+    "CANDIDATE_TESTS.xml": "ef4bc62037ce41859a65c2320511f93f35c368d9b68cf517793cdfd425cdf690",
+    "QUALIFICATION.json": "ad2ce443c1668dc4258bc59b01274317f61bf43c0efcb3234b7cb263dd2db66a",
+    "README.md": "aec1a73cedb17641112e1958838a4b72f92fdea33afa4a4ee4c05c19ac555ff9",
+    "SAME_RUN_DISPOSITION.json": "a2b88c12dd6e7f107a891691161f6f39036f23dcf0a25845081df551efd43dee",
+    "artifact_production.base.py": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+    "artifact_production.py": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "artifact_production.py.patch": "3c15adac4c458c1888730d231cb8adb63f42efe0d56f107f33a73cf91bd821b4",
+    "test_manifest_compatibility.py": "623808de772c47920df09dfb268d979ea024874ade1f04c26cb847f8c1c8aee4",
+    "test_tool_framing.py": "7995110a40cd299beab485fb694d093eada3fb433ab7b89413bbfa12028f42f1"
+  },
+  "changed_functions": [
+    "encode_packet",
+    "main"
+  ],
+  "source_scope": "artifact_production.py only; future tool/final framing",
+  "installed": false
+}

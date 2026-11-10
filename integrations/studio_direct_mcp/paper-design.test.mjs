@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
@@ -32,6 +34,15 @@ function deps(execFile) {
   };
 }
 
+// Deterministic monotonic clock for prepare budget arithmetic; tests advance
+// it inside injected dependency callbacks to model elapsed I/O without waiting.
+function frozenClock(start = 0) {
+  let now = start;
+  const clock = () => now;
+  clock.advance = (ms) => { now += ms; };
+  return clock;
+}
+
 test('paper tools expose discovery, bounded prepare, reads and one explicit content mutation', () => {
   assert.deepEqual(PAPER_DESIGN_TOOLS.map((x) => x.name), [
     'paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit',
@@ -46,6 +57,15 @@ test('paper tools expose discovery, bounded prepare, reads and one explicit cont
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.idempotentHint, false);
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.destructiveHint, true);
   assert.equal(PAPER_DESIGN_TOOLS[4].annotations.openWorldHint, true);
+  assert.match(PAPER_DESIGN_TOOLS[0].description, /DOCUMENT_UNAVAILABLE/);
+  assert.match(PAPER_DESIGN_TOOLS[0].description, /does not prove Paper Desktop or a known exact file is unavailable/);
+  assert.match(PAPER_DESIGN_TOOLS[2].description, /exact target even if default active-file inspection is unavailable/);
+  for (const tool of PAPER_DESIGN_TOOLS) assert.doesNotMatch(tool.description, /list_files/);
+  assert.match(PAPER_DESIGN_TOOLS[3].description, /same file\/page across hosts/);
+  assert.match(PAPER_DESIGN_TOOLS[4].description, /board\/artboard\/node/);
+  assert.match(PAPER_DESIGN_TOOLS[4].description, /target-scoped, not a file-wide lease/);
+  assert.doesNotMatch(PAPER_DESIGN_TOOLS[3].description, /Only one modifying session/);
+  assert.doesNotMatch(PAPER_DESIGN_TOOLS[4].description, /Only one modifying session/);
 });
 
 test('paper config is closed, absolute and digest pinned', () => {
@@ -66,6 +86,20 @@ test('inspect dispatches exact bridge status without shell or caller path', asyn
   const result = await designer.call('paper_inspect', {});
   assert.equal(result.isError, false);
   assert.equal(result.effectUnknown, false);
+  assert.equal(result.value.gateway_surface.schema, 'mastermind.paper_studio_surface.v1');
+  assert.deepEqual(result.value.gateway_surface.gateway_advertises, [
+    'paper_inspect', 'paper_catalog', 'paper_read', 'paper_prepare', 'paper_edit',
+  ]);
+  assert.equal(result.value.gateway_surface.file_transition_tool, 'paper_prepare');
+  assert.equal(result.value.gateway_surface.file_transition_requires_direct_tool, true);
+  assert.equal(result.value.gateway_surface.client_surface_drift_state, 'STUDIO_TOOL_PUBLICATION_DRIFT');
+  assert.equal(result.value.gateway_surface.client_surface_recovery, 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT');
+  assert.equal(result.value.gateway_surface.reconnect_alone_proves_refresh, false);
+  assert.equal(result.value.gateway_surface.generic_process_fallback_allowed, false);
+  assert.equal(result.value.gateway_surface.concurrency_rule, 'MULTI_WRITER_PER_FILE_TARGET_SCOPED');
+  assert.equal(result.value.gateway_surface.same_file_multi_writer_allowed, true);
+  assert.equal(result.value.gateway_surface.same_page_multi_writer_allowed, true);
+  assert.equal(result.value.gateway_surface.coordination_scope, 'BOARD_ARTBOARD_NODE');
   assert.deepEqual(calls[0][0], '/opt/paper/python');
   assert.deepEqual(calls[0][1], ['/opt/paper/bridge.py', 'status']);
   assert.equal(calls[0][2].shell, undefined);
@@ -149,6 +183,7 @@ test('prepare opens only the host-pinned app and returns read-only when write sc
     }),
     openFile: async (...args) => { opens.push(args); },
     sleep: async () => {},
+    now: () => 0,
   });
   const result = await designer.call('paper_prepare', { file_id: fileId });
   assert.equal(result.isError, false);
@@ -156,8 +191,72 @@ test('prepare opens only the host-pinned app and returns read-only when write sc
   assert.equal(result.value.write_qualified, false);
   assert.equal(result.value.already_active, false);
   assert.equal(result.value.app_open_attempted, true);
-  assert.equal(result.value.concurrency_rule, 'ONE_WRITER_PER_FILE_ACROSS_HOSTS');
-  assert.deepEqual(opens, [['/Applications/Paper.app', fileId]]);
+  assert.equal(result.value.concurrency_rule, 'MULTI_WRITER_PER_FILE_TARGET_SCOPED');
+  assert.equal(result.value.same_file_multi_writer_allowed, true);
+  assert.equal(result.value.same_page_multi_writer_allowed, true);
+  assert.equal(result.value.coordination_scope, 'BOARD_ARTBOARD_NODE');
+  assert.deepEqual(opens, [['/Applications/Paper.app', fileId, 5_000]]);
+});
+
+test('prepare permits slow Dashboard preflight but bounds every status request', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const snap = '7'.repeat(64);
+  const calls = [];
+  let opened = false;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 70_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls.push({ action: args[1], timeout: options.timeout });
+      if (args[1] === 'status' && !opened) {
+        return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE', retry_allowed: false }) };
+      }
+      if (args[1] === 'status') {
+        return { stdout: JSON.stringify({
+          state: 'CONNECTED',
+          document: { identity: { kind: 'file-id', id: fileId }, snapshot_sha256: snap },
+        }) };
+      }
+      return { stdout: JSON.stringify({ write_schema: { accepted_for_write: false } }) };
+    }),
+    openFile: async (app, id) => {
+      assert.equal(app, '/Applications/Paper.app');
+      assert.equal(id, fileId);
+      opened = true;
+    },
+    sleep: async () => {},
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.value.state, 'PAPER_READY_READ_ONLY');
+  assert.equal(result.effectUnknown, false);
+  assert.equal(result.value.app_open_attempted, true);
+  assert.equal(result.value.write_qualified, false);
+  assert.deepEqual(calls.map((c) => c.action), ['status', 'status', 'catalog']);
+  assert.ok(calls.every((c) => c.timeout > 5_000 && c.timeout <= 15_000));
+});
+
+test('prepare timeout before file-open remains definite no-effect and never falls back', async () => {
+  let opens = 0;
+  let calls = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 70_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls += 1;
+      assert.equal(args[1], 'status');
+      assert.ok(options.timeout > 5_000 && options.timeout <= 15_000);
+      const err = new Error('status preflight killed');
+      err.killed = true;
+      throw err;
+    }),
+    openFile: async () => { opens += 1; },
+    sleep: async () => {},
+  });
+  const result = await designer.call('paper_prepare', {
+    file_id: '01M2WGNCX9475G79JRKJTCM08P',
+  });
+  assert.equal(result.isError, true);
+  assert.equal(result.value.state, 'PAPER_LOCAL_TIMEOUT');
+  assert.equal(result.value.retry_allowed, false);
+  assert.equal(result.effectUnknown, false);
+  assert.equal(opens, 0);
+  assert.equal(calls, 1);
 });
 
 test('prepare refuses untrusted app identity and non-openable bridge failures before desktop effect', async () => {
@@ -244,6 +343,265 @@ test('prepare reconciles a lost open reply but fails closed when the exact targe
   assert.equal(bridgeCalls, 13);
 });
 
+test('budget consumed through app identity preflight refuses with zero desktop effect', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  let opens = 0;
+  let statusCalls = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    readFile: async () => BRIDGE,
+    lstat: async (target) => {
+      if (target === '/Applications/Paper.app') clock.advance(200);
+      return { isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false };
+    },
+    execFile: async (_python, args) => {
+      statusCalls += 1;
+      assert.equal(args[1], 'status');
+      clock.advance(900);
+      return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE', retry_allowed: false }) };
+    },
+    openFile: async () => { opens += 1; },
+    sleep: async () => {},
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.isError, true);
+  assert.equal(result.effectUnknown, false);
+  assert.equal(result.value.state, 'PAPER_PREPARE_BUDGET_EXHAUSTED');
+  assert.equal(result.value.retry_allowed, false);
+  assert.equal(result.value.app_open_attempted, false);
+  assert.equal(opens, 0);
+  assert.equal(statusCalls, 1);
+});
+
+test('open invocation receives only the positive remaining budget', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  const opens = [];
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    readFile: async () => BRIDGE,
+    lstat: async () => ({ isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false }),
+    execFile: async (_python, args) => {
+      assert.equal(args[1], 'status');
+      clock.advance(500);
+      return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE', retry_allowed: false }) };
+    },
+    openFile: async (app, id, timeoutMs) => { opens.push([app, id, timeoutMs]); },
+    sleep: async () => {},
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.deepEqual(opens, [['/Applications/Paper.app', fileId, 500]]);
+  assert.equal(result.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
+  assert.equal(result.value.app_open_attempted, true);
+});
+
+test('fractional clock produces valid native child timeouts for status and catalog', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  const calls = [];
+  const run = promisify(execFile);
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls.push([args[1], options.timeout]);
+      // Use Node's real validator and a harmless child, never Paper or open(1).
+      const value = args[1] === 'status'
+        ? { state: 'CONNECTED', document: { identity: { kind: 'file-id', id: fileId } } }
+        : { write_schema: { accepted_for_write: true } };
+      await run(process.execPath, ['--version'], { timeout: options.timeout });
+      return { stdout: JSON.stringify(value) };
+    }),
+    readFile: async () => { clock.advance(0.25); return BRIDGE; },
+    openFile: async () => assert.fail('already on the exact file'),
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.value.state, 'PAPER_READY');
+  assert.deepEqual(calls, [['status', 999], ['catalog', 999]]);
+});
+
+test('submillisecond pre-open residual refuses before any desktop effect', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  let opens = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    ...deps(async () => {
+      clock.advance(999);
+      return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE' }) };
+    }),
+    lstat: async (path) => {
+      if (path === '/Applications/Paper.app') clock.advance(0.25);
+      return { isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false };
+    },
+    openFile: async () => { opens++; clock.advance(1); },
+    sleep: async () => {},
+    now: clock,
+  });
+  const r = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(opens, 0);
+  assert.equal(r.value.state, 'PAPER_PREPARE_BUDGET_EXHAUSTED');
+  assert.equal(r.value.app_open_attempted, false);
+  assert.equal(r.effectUnknown, false);
+});
+
+test('open receives whole residual; submillisecond post-open budget never starts a poll', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  const calls = [];
+  const opens = [];
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    ...deps(async (_python, args, options) => {
+      calls.push([args[1], options.timeout]);
+      clock.advance(997.25);
+      return { stdout: JSON.stringify({ state: 'DOCUMENT_UNAVAILABLE' }) };
+    }),
+    openFile: async (_app, _id, timeout) => { opens.push(timeout); clock.advance(2); },
+    sleep: async () => {},
+    now: clock,
+  });
+  const r = await designer.call('paper_prepare', { file_id: fileId });
+  assert.deepEqual(opens, [2]);
+  assert.deepEqual(calls, [['status', 1_000]]);
+  assert.equal(r.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
+  assert.equal(r.effectUnknown, true);
+  assert.equal(r.value.retry_allowed, false);
+});
+
+test('open carry stays bounded by the existing 15s owner cap', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const clock = frozenClock(0);
+  const opens = [];
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 120_000 }), {
+    readFile: async () => BRIDGE,
+    lstat: async () => ({ isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false }),
+    execFile: async (_python, args) => {
+      assert.equal(args[1], 'status');
+      clock.advance(40_000);
+      return { stdout: JSON.stringify({ state: 'UPSTREAM_UNAVAILABLE', retry_allowed: false }) };
+    },
+    openFile: async (_app, _id, timeoutMs) => { opens.push(timeoutMs); },
+    sleep: async () => {},
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.deepEqual(opens, [15_000]);
+  assert.equal(result.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
+});
+
+test('post-open poll budget exhaustion stays unconfirmed without a second open', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const other = '01M2VWK62FA5S4VVF6G7SBPE5J';
+  const clock = frozenClock(0);
+  let opens = 0;
+  let statusCalls = 0;
+  let opened = false;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    readFile: async () => BRIDGE,
+    lstat: async () => ({ isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false }),
+    execFile: async (_python, args) => {
+      statusCalls += 1;
+      assert.equal(args[1], 'status');
+      if (!opened) clock.advance(400);
+      return { stdout: JSON.stringify({
+        state: 'CONNECTED',
+        document: { identity: { kind: 'file-id', id: other }, snapshot_sha256: '4'.repeat(64) },
+      }) };
+    },
+    openFile: async () => { opens += 1; opened = true; },
+    sleep: async () => { clock.advance(250); },
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.isError, true);
+  assert.equal(result.effectUnknown, true);
+  assert.equal(result.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
+  assert.equal(result.value.retry_allowed, false);
+  assert.equal(result.value.app_open_attempted, true);
+  assert.equal(opens, 1);
+  // Initial status plus the in-budget polls only; the loop stops at the guard
+  // once the budget is gone, so no subprocess runs after exhaustion.
+  assert.equal(statusCalls, 4);
+});
+
+test('budget consumed by post-open bridge verification launches no late subprocess', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const other = '01M2VWK62FA5S4VVF6G7SBPE5J';
+  const clock = frozenClock(0);
+  let opens = 0;
+  let statusCalls = 0;
+  let bridgeReads = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    readFile: async () => {
+      bridgeReads += 1;
+      if (bridgeReads >= 2) clock.advance(400);
+      return BRIDGE;
+    },
+    lstat: async () => ({ isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false }),
+    execFile: async (_python, args) => {
+      statusCalls += 1;
+      assert.equal(args[1], 'status');
+      clock.advance(700);
+      return { stdout: JSON.stringify({
+        state: 'CONNECTED',
+        document: { identity: { kind: 'file-id', id: other }, snapshot_sha256: '5'.repeat(64) },
+      }) };
+    },
+    openFile: async () => { opens += 1; },
+    sleep: async () => { clock.advance(250); },
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.isError, true);
+  assert.equal(result.effectUnknown, true);
+  assert.equal(result.value.state, 'PAPER_DOCUMENT_TRANSITION_UNCONFIRMED');
+  assert.equal(result.value.retry_allowed, false);
+  assert.equal(opens, 1);
+  // Only the initial status ran: the first post-open poll expired inside
+  // bridge identity verification, so no verification subprocess launched.
+  assert.equal(statusCalls, 1);
+  assert.equal(bridgeReads, 2);
+});
+
+test('catalog budget exhaustion after exact target observation stays truthful read-only', async () => {
+  const fileId = '01M2WGNCX9475G79JRKJTCM08P';
+  const snap = '6'.repeat(64);
+  const clock = frozenClock(0);
+  let bridgeReads = 0;
+  let catalogCalls = 0;
+  let opens = 0;
+  const designer = createPaperDesigner(cfg({ commandTimeoutMs: 1_000 }), {
+    readFile: async () => {
+      bridgeReads += 1;
+      if (bridgeReads >= 2) clock.advance(1_000);
+      return BRIDGE;
+    },
+    lstat: async () => ({ isFile: () => true, isDirectory: () => true, isSymbolicLink: () => false }),
+    execFile: async (_python, args) => {
+      if (args[1] === 'catalog') catalogCalls += 1;
+      return { stdout: JSON.stringify({
+        state: 'CONNECTED',
+        document: { identity: { kind: 'file-id', id: fileId }, snapshot_sha256: snap },
+      }) };
+    },
+    openFile: async () => { opens += 1; },
+    sleep: async () => {},
+    now: clock,
+  });
+  const result = await designer.call('paper_prepare', { file_id: fileId });
+  assert.equal(result.isError, false);
+  assert.equal(result.effectUnknown, false);
+  assert.equal(result.value.state, 'PAPER_READY_READ_ONLY');
+  assert.equal(result.value.snapshot_sha256, snap);
+  assert.equal(result.value.write_qualified, false);
+  assert.equal(result.value.write_schema, null);
+  assert.equal(result.value.write_reason, 'PAPER_PREPARE_BUDGET_EXHAUSTED');
+  assert.equal(result.value.already_active, true);
+  assert.equal(result.value.app_open_attempted, false);
+  // The write-qualification subprocess never launched after the budget died.
+  assert.equal(catalogCalls, 0);
+  assert.equal(opens, 0);
+});
+
 test('edit requires snapshot and operation identity before any child process', async () => {
   let calls = 0;
   const designer = createPaperDesigner(cfg(), deps(async () => {
@@ -279,6 +637,41 @@ test('edit dispatches once and preserves adapter effect unknown', async () => {
   assert.equal(result.isError, true);
   assert.equal(result.effectUnknown, true);
   assert.equal(result.value.retry_allowed, false);
+});
+
+test('observed create-file reply remains verification-required, never a failed write', async () => {
+  const receipt = {
+    state: 'RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION',
+    operation_id: 'paper-create-proof',
+    tool: 'create_file',
+    retry_allowed: false,
+    production_acceptance: false,
+    result: { content: [{ type: 'text', text: '{"fileId":"NEW"}' }] },
+  };
+  for (const responseMode of ['normal', 'parsed-subprocess-error']) {
+    let calls = 0;
+    const designer = createPaperDesigner(cfg(), deps(async () => {
+      calls += 1;
+      if (responseMode === 'parsed-subprocess-error') {
+        const error = new Error('bridge response propagated via process error');
+        error.stdout = JSON.stringify(receipt);
+        throw error;
+      }
+      return { stdout: JSON.stringify(receipt) };
+    }));
+    const result = await designer.call('paper_edit', {
+      tool: 'create_file',
+      arguments: { sourceFileId: '01M2WGNCX9475G79JRKJTCM08P', name: 'Scratch' },
+      expected_snapshot: 'a'.repeat(64),
+      operation_id: 'paper-create-proof',
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.isError, false);
+    assert.equal(result.effectUnknown, false);
+    assert.equal(result.value.state, 'RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION');
+    assert.equal(result.value.retry_allowed, false);
+    assert.equal(result.value.production_acceptance, false);
+  }
 });
 
 test('lost edit subprocess result becomes effect unknown while lost read stays definite local failure', async () => {
@@ -335,6 +728,7 @@ test('bridge hash drift refuses before process dispatch', async () => {
   });
   const result = await designer.call('paper_inspect', {});
   assert.equal(result.value.state, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+  assert.equal(result.value.gateway_surface, undefined);
   assert.equal(result.effectUnknown, false);
   assert.equal(calls, 0);
 

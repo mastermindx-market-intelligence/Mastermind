@@ -1,0 +1,20 @@
+{
+  "external_owner": "incumbent controller GLM shim, gateway and codec",
+  "files": {
+    "glm_lease_capability.py": {
+      "candidate_sha256": "ccfe3c6f4f08778d6d179d60da67f393f000b66e4997a2502a7ad180c6a571a6",
+      "preimage_sha256": "e80070971fdce507c5314e05b5be67abd0f9cd4603ae6a6b1072e666f3e0a5b7"
+    },
+    "glm_lease_gateway.py": {
+      "candidate_sha256": "2b2e47c2e9f01ba72a33603e17465c96c084e79a32c331a8d52d0f4039bfbef7",
+      "preimage_sha256": "7fd2b64925cb7d7ea83dd37e3802ddab9d004e775bb4ed04e5da04a51dc5ed00"
+    },
+    "glm_shim.py": {
+      "candidate_sha256": "d680789e7a184b7b882a57f6cc7b0337b6bebc4e27069ac8263aeffd456c5fed",
+      "preimage_sha256": "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc"
+    }
+  },
+  "installed": false,
+  "schema": "mastermind.paid_glm_external_preimages/v1",
+  "source_only": true
+}

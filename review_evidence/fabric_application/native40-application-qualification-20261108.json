@@ -1,0 +1,137 @@
+{
+  "candidate": {
+    "base_after_glm_sha256": "fd716e44b9ffba9567df2ea1120ef8f2bd52bd7cb244768078a44fe4b43db58e",
+    "base_before_glm_sha256": "4dccdb9401e27a38bba9153de5f82a23d1169aa204bac847887f6c9bc31a73be",
+    "manifest_sha256": "d1d9cd2660b5d93265d29d6a36c3c693a50861fd4c929e0c7ab94d0bd139af6a",
+    "members": 123,
+    "shared_transition_and_external_component_validated": true,
+    "source_ref": "26b80cfd2e8b295bf8fc6bf99c7defc9df1f4aff"
+  },
+  "limits": {
+    "acceptance": false,
+    "hermes_installation": false,
+    "native_publication": false,
+    "native_selection": false,
+    "protected_delivery": false,
+    "provider_turn": false,
+    "settlement": false,
+    "worker_execution": false
+  },
+  "observed_at": "2026-11-08T19:26:25.844535+00:00",
+  "observed_predecessor": {
+    "generation": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+    "manifest_sha256": "3cf95195569cd80f0b978dd48160dda30baf68f48daab4d8d6d1b1f5c35e1ac1",
+    "sequence": 40
+  },
+  "preservation": {
+    "current_compare_and_swap": true,
+    "default_composition_unchanged": true,
+    "exact_installer_review_site": [
+      1727,
+      26,
+      31,
+      "int",
+      "0o700"
+    ],
+    "frozen_manifest_and_inventory_unchanged": true,
+    "h2_remote_placement_incompatibility": true,
+    "installer_content_unchanged": true,
+    "installer_executable_mode": "100755",
+    "old_installer_mode_site_line_sha256": "c74ad29c7045d183f0b580800551ac788e92514495aefec6826531124d9636fd",
+    "original_installer_transactions": true
+  },
+  "protected_retained_sources": {
+    "ext/experiential_bridge.py": {
+      "bytes": 35017,
+      "sha256": "288471efc8b10e1471102b34096d77d725ab935cc6574e4c943909f68cb346de",
+      "source": "rollout/provider_application/maintenance_guard/experiential_bridge.py",
+      "source_blob": "170e9730614e5c39b2cdc741e67f7b5a48a94c83",
+      "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+      "source_path": "ops/native_fabric/experiential_native_bridge/experiential_bridge.py"
+    },
+    "ext/experiential_host_context.py": {
+      "bytes": 9527,
+      "sha256": "ad157e490bdd949ca19c64897db0257434c3a0a0b45c69361dd57a3db223c276",
+      "source": "rollout/provider_application/maintenance_guard/experiential_host_context.py",
+      "source_blob": "27bfc276a6314f6c6142ed12ec1be796e93a9594",
+      "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+      "source_path": "ops/native_fabric/experiential53/experiential_host_context.py"
+    },
+    "ext/experiential_plan_policy.py": {
+      "bytes": 11862,
+      "sha256": "4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8",
+      "source": "rollout/provider_application/maintenance_guard/experiential_plan_policy.py",
+      "source_blob": "75ac83a25c7808479b02688baaedbe6ac1ce3afc",
+      "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+      "source_path": "control_plane/experiential_plan_policy.py"
+    },
+    "ext/experiential_transport.py": {
+      "bytes": 58794,
+      "sha256": "499663819213645acb10e3948c29185abdbbad781660adcc47bca3c0c8786639",
+      "source": "rollout/provider_application/maintenance_guard/experiential_transport.py",
+      "source_blob": "e64ce2a88535f7474668788a11d8b76aba225aef",
+      "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+      "source_path": "ops/native_fabric/experiential53/experiential_transport.py"
+    },
+    "ext/native_plan_worker.py": {
+      "bytes": 26207,
+      "sha256": "266c6dddb43e9abb669101504d6dc62a1936acd58628dd59927451deb8cc3f28",
+      "source": "rollout/provider_application/maintenance_guard/native_plan_worker.py",
+      "source_blob": "1e39d143d28bc8c0513c7fa5998dad7c4390a6e9",
+      "source_commit": "2541a68e9240ca3fb5c1fda7b68e1df8984c973b",
+      "source_path": "ops/native_fabric/quota_continuity/candidate/native_plan_worker.py"
+    }
+  },
+  "qualification": {
+    "counts_overlap": true,
+    "initial": {
+      "errors": 0,
+      "failures": 8,
+      "log_sha256": "4e6053e32ab33534d5a0720383323ed2ba6151266ae1717c343148885f9c2164",
+      "new_maintenance_cases_passed": 51,
+      "passed": 674,
+      "receipt_sha256": "cd2313eff021127a0f720fe1c5ffba66425770823119888a7c7addc807926bcd",
+      "skipped": 0,
+      "source_unchanged": true,
+      "tests": 682
+    },
+    "repaired_families": {
+      "covers_all_eight_initial_failures": true,
+      "errors": 0,
+      "failures": 0,
+      "families": [
+        "test_repaired_base_cannot_relabel_an_extended_namespace",
+        "test_sparse_preflight_cannot_relabel_a_different_complete_parent",
+        "test_scoped_model_successor_binds_actual_dependencies_and_preserves_parent",
+        "test_scoped_model_successor_rejects_partial_foreign_or_backdated_parent",
+        "test_application_pool_forward_delta_is_reversible_and_source_exact"
+      ],
+      "log_sha256": "c6ce8518a2cc113cc5560b3731e234ed6d559e746221ae903ce01599dfe7e797",
+      "passed": 25,
+      "receipt_sha256": "b79dd31c8fe55e342fd509363c232fbbf200c727c703dace35a7b6e22d43955f",
+      "skipped": 0,
+      "source_unchanged": true,
+      "tests": 25
+    }
+  },
+  "runtime_archive": {
+    "bytes": 75634300,
+    "commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "original_builder_verified": true,
+    "sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "tree": "c2a4d629c87dec9381460560a31dffa4e2550917"
+  },
+  "schema": "mastermind.h4.native40-application-qualification.v1",
+  "source_base": "26b80cfd2e8b295bf8fc6bf99c7defc9df1f4aff",
+  "source_sha256": {
+    "ops/executive_os/install.sh": "7c1b7147bf5236c68c043f20ad1bda37872c9fe13050a70374a44e433783324b",
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "97c257630ea2eaec7b845237d9e9f3362fe78ff061c51002527b4ceb8db48195",
+    "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": "c34d4ebf700e0945058a8071b90ac6581ea603d997f8c81fd15d001ccefdb199",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "618667c362475c5bc68950705bce36c9778d6d102301a6622f5232b8dead5128",
+    "tests/executive_fabric_release_identity_review.py": "45b20a997ce32e3a9d7af0eac5ea704212c2fc89944737c1c768af96a9d2291d",
+    "tests/test_fabric_quiescence_source_cohort.py": "5fcabf22111198814c936330b802259729ef641595f89a04f9bae91f5682483e",
+    "tests/test_glm_native_application_enrollment.py": "5f722162aa60cfcb414543e3d822fd01aad448588b7ae99df9a20e9b121218d0",
+    "tests/test_network_operator_budget.py": "10f758041d35b2eec5b4828cda6b62f5788006dddf4431ccc18b53d8da808648",
+    "tests/test_paid_provider_entry_linux.py": "b73b6e4e5cca48efa2f31762e1ef1f730b67d9066c1af575a573b55ebefc2a1c"
+  }
+}

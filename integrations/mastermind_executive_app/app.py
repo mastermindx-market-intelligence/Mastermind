@@ -7,9 +7,10 @@ bearer-authenticated HTTP:
   (:data:`gateway.READ_TOOL_NAMES`) — reused verbatim through
   ``integrations.executive_mcp.adapter.ExecutiveMcpGateway``.
 * ``POST /v1/tools/submit_ceo_intent`` — the ONE modifying tool, admitted
-  ONLY through :mod:`integrations.mastermind_executive_app.admission`
-  (dedicated CeoIngress socket, never in-process, never the general
-  Executive control socket).
+  through the dedicated CeoIngress socket, never in-process or through the
+  general Executive control socket. Installed App research calls retain
+  their originating HTTP lifetime through that socket's existing Session
+  Bridge foreground owner; other calls use the admission-only adapter.
 * ``POST /v1/tools/submit_ceo_intent/reconcile`` — the ONLY legal follow-up
   to an ``effect_unknown`` outcome: a v2 status read keyed by the same
   ``request_ref``, never a resubmission.
@@ -45,6 +46,7 @@ from integrations.business_mcp_auth.contracts import (
 )
 from integrations.business_mcp_auth.jwt_verifier import JwksKeySource, JwtAuthenticator
 from integrations.business_mcp_auth.metadata import mcp_auth_error_result, protected_resource_metadata
+from integrations.executive_mcp.e1_http import strict_json_loads
 from integrations.executive_mcp.schemas import GatewayError, refuse_production_path
 from integrations.mastermind_executive_app.admission import (
     STATUS_ACCEPTED,
@@ -66,7 +68,7 @@ from integrations.mastermind_executive_app.gateway import (
     CeoIngressReadGateway,
     WebCeoCeoIngressReadGateway,
     WebCeoV2CeoIngressReadGateway,
-    make_jwt_authenticators,
+    make_jwt_authenticator_variants,
 )
 from integrations.executive_mcp.web_ceo import (
     build_web_ceo_read_gateway,
@@ -83,6 +85,7 @@ __all__ = [
     "create_web_ceo_app",
     "create_web_ceo_v2_app",
     "create_web_ceo_v3_app",
+    "create_release_control_app",
 ]
 
 _MAX_BODY_BYTES = 65536
@@ -150,6 +153,16 @@ class AppSettings:
     allow_submit_authorized_reads: bool = False
     #: Installed composition reads only through the existing CeoIngress.
     read_from_ceo_ingress: bool = False
+    #: Additional exact OAuth resource variants for the same Executive app.
+    #: Each variant must be identical to ``policies`` except for ``resource``.
+    #: The tuple is host/operator configuration; request data never reaches it.
+    additional_policies: tuple[AppPolicies, ...] = ()
+    #: Optional dedicated audience for the public Streamable HTTP ``/mcp``
+    #: entrypoint (#1656).  It differs from ``policies`` only by ``resource``
+    #: and ``resource_metadata_url`` and keeps the primary policy ids, so audit
+    #: routing is unchanged.  The inner app verifies it like any other variant;
+    #: the MCP transport alone decides which variants each outer route admits.
+    public_policies: AppPolicies | None = None
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
@@ -164,6 +177,44 @@ class AppSettings:
     read_timeout: float = 10.0
 
     def __post_init__(self) -> None:
+        if type(self.additional_policies) is not tuple or any(
+            type(item) is not AppPolicies for item in self.additional_policies
+        ):
+            raise ValueError("additional_policies must be a tuple of AppPolicies")
+        resources = {self.policies.read.resource}
+        for alternate in self.additional_policies:
+            _metadata_policy_and_path(alternate)
+            if alternate.read.resource in resources:
+                raise ValueError("Executive OAuth resources must be unique")
+            resources.add(alternate.read.resource)
+            for name in ("read", "submit"):
+                primary_policy = getattr(self.policies, name)
+                alternate_policy = getattr(alternate, name)
+                if dataclasses.replace(
+                    alternate_policy, resource=primary_policy.resource
+                ) != primary_policy:
+                    raise ValueError(
+                        "additional Executive policies may differ only by resource"
+                    )
+        if self.public_policies is not None:
+            public = self.public_policies
+            if type(public) is not AppPolicies:
+                raise ValueError("public_policies must be AppPolicies")
+            _metadata_policy_and_path(public)
+            if public.read.resource in resources:
+                raise ValueError("Executive OAuth resources must be unique")
+            for name in ("read", "submit"):
+                primary_policy = getattr(self.policies, name)
+                public_policy = getattr(public, name)
+                if dataclasses.replace(
+                    public_policy,
+                    resource=primary_policy.resource,
+                    resource_metadata_url=primary_policy.resource_metadata_url,
+                ) != primary_policy:
+                    raise ValueError(
+                        "public Executive policies may differ only by resource "
+                        "and resource metadata URL"
+                    )
         if type(self.read_only) is not bool:
             raise ValueError("read_only must be a bool")
         if type(self.allow_submit_authorized_reads) is not bool:
@@ -207,9 +258,51 @@ def _auth_header(request: Request) -> str | None:
     return values[0] if values else None
 
 
+def _authenticator_tuple(
+    value: JwtAuthenticator | tuple[JwtAuthenticator, ...],
+) -> tuple[JwtAuthenticator, ...]:
+    if isinstance(value, JwtAuthenticator):
+        return (value,)
+    if type(value) is not tuple or not value or any(
+        not isinstance(item, JwtAuthenticator) for item in value
+    ):
+        raise TypeError("authenticator set must contain JwtAuthenticator values")
+    return value
+
+
+async def _verify_exact_resource_set(
+    authenticators: JwtAuthenticator | tuple[JwtAuthenticator, ...],
+    header: object,
+    *,
+    now: int,
+) -> VerifiedPrincipal:
+    """Verify one token against a closed set of exact resource policies.
+
+    Only ``resource_refused`` advances to the next resource variant. Any
+    signature, issuer, lifetime, subject, scope, key, or internal refusal is
+    terminal because those contracts are identical across admitted variants.
+    """
+
+    values = _authenticator_tuple(authenticators)
+    last_resource_error: AuthError | None = None
+    for value in values:
+        try:
+            return await value.verify_authorization_header(header, now=now)
+        except AuthError as exc:
+            if exc.code.value != "resource_refused" or len(values) == 1:
+                raise
+            last_resource_error = exc
+    if last_resource_error is None:
+        raise RuntimeError("resource authenticator set produced no result")
+    raise last_resource_error
+
+
 async def _authenticate(
-    request: Request, authenticator: JwtAuthenticator, *, clock: Callable[[], int],
-    submit_fallback: JwtAuthenticator | None = None,
+    request: Request,
+    authenticator: JwtAuthenticator | tuple[JwtAuthenticator, ...],
+    *,
+    clock: Callable[[], int],
+    submit_fallback: JwtAuthenticator | tuple[JwtAuthenticator, ...] | None = None,
 ) -> VerifiedPrincipal | JSONResponse:
     now = clock()
     if type(now) is not int:
@@ -224,16 +317,18 @@ async def _authenticate(
             {"ok": False, "error": {"code": "authorization_malformed", "message": "authentication required"}},
             status_code=401,
         )
+    active = authenticator
     try:
         try:
-            return await authenticator.verify_authorization_header(header, now=now)
+            return await _verify_exact_resource_set(active, header, now=now)
         except AuthError as exc:
             if submit_fallback is None or exc.code.value != "scope_refused":
                 raise
-            authenticator = submit_fallback
-            return await authenticator.verify_authorization_header(header, now=now)
+            active = submit_fallback
+            return await _verify_exact_resource_set(active, header, now=now)
     except AuthError as exc:
-        challenge = mcp_auth_error_result(authenticator.policy, exc)
+        challenge_policy = _authenticator_tuple(active)[0].policy
+        challenge = mcp_auth_error_result(challenge_policy, exc)
         header_value = challenge["_meta"]["mcp/www_authenticate"][0]
         status_code = 403 if exc.code.value == "scope_refused" else 401
         return JSONResponse(
@@ -241,7 +336,6 @@ async def _authenticate(
             status_code=status_code,
             headers={"WWW-Authenticate": header_value},
         )
-
 
 async def _read_body_arguments(request: Request) -> dict[str, Any] | JSONResponse:
     body = await request.body()
@@ -253,7 +347,7 @@ async def _read_body_arguments(request: Request) -> dict[str, Any] | JSONRespons
     if not body:
         return {}
     try:
-        parsed = json.loads(body.decode("utf-8"))
+        parsed = strict_json_loads(body)
     except (UnicodeDecodeError, ValueError):
         return JSONResponse(
             {"ok": False, "error": {"code": "invalid_input", "message": "request body must be JSON"}},
@@ -354,6 +448,8 @@ def _create_profile_app(
     ingress_gateway_type: type[CeoIngressReadGateway],
     read_gateway_builder: Callable[..., Any],
     prereply_reverify: bool = False,
+    release_control_profile: bool = False,
+    foreground_session_client: Any | None = None,
 ) -> Any:
     """Build one stateless ASGI app from one compile-time selected profile.
 
@@ -369,10 +465,26 @@ def _create_profile_app(
     before-invoke verifier call, byte for byte.
     """
 
+    if release_control_profile and (settings.read_only or not settings.read_from_ceo_ingress):
+        raise ValueError("release controls require the installed authenticated ingress")
+    if foreground_session_client is not None:
+        from integrations.session_bridge.installed import InstalledSessionBridgeClient
+        if (type(foreground_session_client) is not InstalledSessionBridgeClient
+                or settings.read_only or not settings.read_from_ceo_ingress
+                or Path(foreground_session_client._socket_path) != Path(settings.ceo_ingress_socket_path)):
+            raise ValueError("foreground admission requires this installed ingress owner")
     metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
-    read_authenticator, submit_authenticator = make_jwt_authenticators(
-        settings.policies, jwks_cache=settings.jwks_cache
+    authenticator_variants = make_jwt_authenticator_variants(
+        settings.policies,
+        settings.additional_policies
+        + ((settings.public_policies,) if settings.public_policies is not None else ()),
+        primary_jwks_cache=settings.jwks_cache,
     )
+    if len(authenticator_variants) == 1:
+        read_authenticator, submit_authenticator = authenticator_variants[0]
+    else:
+        read_authenticator = tuple(pair[0] for pair in authenticator_variants)
+        submit_authenticator = tuple(pair[1] for pair in authenticator_variants)
     ceo_ingress_client = None
     if not settings.read_only:
         ceo_ingress_client = CeoIngressClient(
@@ -444,6 +556,20 @@ def _create_profile_app(
         arguments = await _read_body_arguments(request)
         if isinstance(arguments, JSONResponse):
             return arguments
+        from integrations.session_bridge.http_foreground import request_source_present
+        if (foreground_session_client is not None
+                and arguments.get("execution_profile") == "research_only"
+                and request_source_present(request.scope)):
+            from integrations.mastermind_executive_app.foreground_admission import compose_foreground_admission
+            try:
+                outcome = await compose_foreground_admission(
+                    request, principal, arguments, foreground_session_client, clock=settings.clock)
+            except AdmissionError as exc:
+                return JSONResponse(
+                    {"ok": False, "error": {"code": exc.code, "message": exc.message}},
+                    status_code=403 if exc.code == "authority_refused" else 400,
+                )
+            return _outcome_response(outcome)
         admission_request = AdmissionRequest(
             payload=arguments,
             principal=principal,
@@ -494,6 +620,44 @@ def _create_profile_app(
             )
         return _outcome_response(outcome)
 
+    async def call_release_tool(request: Request) -> JSONResponse:
+        from control_plane.executive_release_ingress import ReleaseIngressError
+        from integrations.business_mcp_auth.principal_projection import PrincipalProjectionError
+        from integrations.mastermind_executive_app.release_admission import compose_release_admission
+        principal = await _authenticate(request, submit_authenticator, clock=settings.clock)
+        if isinstance(principal, JSONResponse):
+            return principal
+        raw = await request.body()
+        if len(raw) > _MAX_BODY_BYTES:
+            return JSONResponse({"ok": False, "error": {"code": "RELEASE_FRAME_TOO_LARGE"}}, status_code=413)
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                if key in result:
+                    raise ValueError("duplicate key")
+                result[key] = value
+            return result
+        def reject_number(_):
+            raise ValueError("unsupported number")
+        try:
+            body = json.loads(raw.decode("utf-8", errors="strict"), object_pairs_hook=pairs,
+                              parse_float=reject_number, parse_constant=reject_number)
+            if type(body) is not dict or set(body) != {"arguments"}:
+                raise ValueError("invalid envelope")
+        except (ValueError, UnicodeError, RecursionError):
+            return JSONResponse({"ok": False, "error": {"code": "RELEASE_ARGUMENTS_INVALID"}}, status_code=400)
+        # The route owns the operation. A model cannot choose a principal or
+        # replace it with a projection in its tool arguments.
+        operation = request.url.path.rsplit("/", 1)[-1]
+        try:
+            result = await compose_release_admission(
+                operation=operation, arguments=body["arguments"], principal=principal,
+                client=ceo_ingress_client, socket_path=settings.ceo_ingress_socket_path,
+            )
+        except (ReleaseIngressError, PrincipalProjectionError):
+            return JSONResponse({"ok": False, "error": {"code": "RELEASE_ARGUMENTS_INVALID"}}, status_code=400)
+        return JSONResponse(result, status_code=202 if result.get("effect") == "EFFECT_UNKNOWN" else 200)
+
     async def protected_resource_document(request: Request) -> JSONResponse:
         return JSONResponse(protected_resource_metadata(metadata_policy), status_code=200)
 
@@ -506,6 +670,10 @@ def _create_profile_app(
             Route("/v1/tools/submit_ceo_intent/reconcile", reconcile_submit_tool, methods=["POST"]),
             Route("/v1/tools/submit_ceo_intent", call_submit_tool, methods=["POST"]),
         ]
+    if release_control_profile:
+        from control_plane.executive_release_ingress import OPERATIONS as RELEASE_OPERATIONS
+        routes[1:1] = [Route("/v1/tools/" + name, call_release_tool, methods=["POST"])
+                       for name in sorted(RELEASE_OPERATIONS)]
     application = Starlette(routes=routes)
     # Never implicitly rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain
@@ -557,13 +725,21 @@ def create_web_ceo_v2_app(settings: AppSettings) -> Any:
     )
 
 
-def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
-    """Installed Web-CEO v3: v2 Executive reads plus local MDM observation."""
+def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any,
+                          foreground_session_client: Any | None = None) -> Any:
+    """Installed Web-CEO v3 with direct Session Bridge + local MDM observation."""
 
     if not settings.read_from_ceo_ingress:
         raise ValueError("Web CEO v3 is installed-only")
+    from integrations.executive_mcp.web_ceo_sessions import SESSION_TOOL_NAMES
+    from integrations.executive_mcp.web_ceo_v3 import RECONCILE_TOOL_NAME
+
+    # Session Bridge tools are authenticated direct-owner calls in the outer
+    # MCP host. Never fall through to the ordinary Executive read gateway.
     read_names = tuple(
-        name for name in web_ceo_v3_tool_names() if name != "submit_ceo_intent"
+        name
+        for name in web_ceo_v3_tool_names()
+        if name not in ("submit_ceo_intent", RECONCILE_TOOL_NAME) and name not in SESSION_TOOL_NAMES
     )
     gateway = partial(WebCeoV3CeoIngressReadGateway, mdm_reader=mdm_reader)
     return _create_profile_app(
@@ -572,4 +748,21 @@ def create_web_ceo_v3_app(settings: AppSettings, *, mdm_reader: Any) -> Any:
         ingress_gateway_type=gateway,
         read_gateway_builder=build_web_ceo_v2_read_gateway,
         prereply_reverify=True,
+        foreground_session_client=foreground_session_client,
+    )
+
+
+def create_release_control_app(settings: AppSettings) -> Any:
+    """Separate installed release profile; old tool profiles remain frozen.
+
+    Route visibility does not enable owner approval or preparation. Installed
+    same-process qualification and root-owner policy remain Control's gates;
+    release commit is unconditionally disarmed in the C1 consumer.
+    """
+    read_names = tuple(name for name in web_ceo_v2_tool_names() if name != "submit_ceo_intent")
+    return _create_profile_app(
+        settings, read_tool_names=read_names,
+        ingress_gateway_type=WebCeoV2CeoIngressReadGateway,
+        read_gateway_builder=build_web_ceo_v2_read_gateway,
+        prereply_reverify=True, release_control_profile=True,
     )

@@ -1,0 +1,9 @@
+--- a/lane_runtime.py
++++ b/lane_runtime.py
+@@ -3434 +3433,0 @@
+-        observed_load = float(os.getloadavg()[0] if load1 is None else load1)
+@@ -3448,0 +3448,4 @@
++            # Waiting for admission can outlive the picker's load observation.
++            # Sample live load under the same physical lock as slot admission;
++            # the explicit load1 value remains a deterministic fixture seam.
++            observed_load = float(os.getloadavg()[0] if load1 is None else load1)

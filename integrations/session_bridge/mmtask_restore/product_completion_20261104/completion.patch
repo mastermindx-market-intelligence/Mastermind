@@ -1,0 +1,388 @@
+--- a/mmtask
++++ b/mmtask
+@@ -29 +29,3 @@
+-                                          prepare export/ handoff + WS wave patch, validate; last_export advances ONLY on
++                                          prepare export/ handoff + proposed new waves, validate; imported wave verdicts
++                                          remain with their canonical source owner, never inferred from task labels;
++                                          last_export advances ONLY on
+@@ -46 +48,7 @@
+-"""
++  rebind [SLUG] --from WS:X --to WS:Y [--related WS:R]... --reason R
++                                          --related additively associates EXISTING workstreams as related and imports
++                                          their canonical waves with the primary. Repeatable; duplicates collapse; a
++                                          repeat of the same set is a no-op; a related key never aliases the primary.
++                                          An already-bound buffer takes a same-primary additive update that changes no
++                                          task association, status, evidence or history; every refusal writes nothing
++                                          and retains existing unrelated associations."""
+@@ -58 +65,0 @@
+-WAVE_FROM_TASKS = {"accepted": "done", "superseded": "dropped"}
+@@ -115,5 +122,7 @@
+-def wave_of(db, ref):
+-    for w in db["waves"]:
+-        if ref in (w["p"], w["id"], f"{w.get('workstream')}#{w['id']}"):
+-            return w
+-    return None
++def wave_of(db, ref, workstream=None):
++    matches = [w for w in db["waves"]
++               if (workstream is None or w.get("workstream") == workstream)
++               and ref in (w["p"], w["id"], f"{w.get('workstream')}#{w['id']}")]
++    if len(matches) > 1:
++        sys.exit(f"mmtask: ambiguous wave {ref!r}; qualify its workstream as WS:KEY#wave or use its unique P#; nothing changed")
++    return matches[0] if matches else None
+@@ -122,0 +132 @@
++    """Display-only local progress; a task subset cannot establish a wave verdict."""
+@@ -127,4 +137,2 @@
+-    if sts <= {"superseded"}:
+-        return "dropped"
+-    if sts <= {"accepted", "superseded"}:
+-        return "done"
++    if sts <= CLOSED | {"done"}:
++        return None
+@@ -133,0 +142,10 @@
++
++
++def local_task_progress(db, w):
++    progress = derived_wave_status(db, w)
++    if progress:
++        return progress + " (task subset only)"
++    has_tasks = any(t.get("wave") == w["id"] and
++                    t.get("workstream", db.get("workstream")) == w.get("workstream")
++                    for t in db["tasks"])
++    return "buffer closed; wave verdict separate" if has_tasks else "-"
+@@ -191,0 +210,2 @@
++    if len(selected) > 5:
++        out.append("- More selected rows require scope checks; inspect `mmtask list --all --json` and `mmtask show ID`.")
+@@ -229,0 +250,10 @@
++    elif tasks and all(t.get("status") in closed for t in tasks):
++        out.append("- Local task buffer exhausted; recover remaining original-plan work from the existing objective, Success criteria and canonical wave/handoff. Preserve accepted work; closed tasks do not establish whole-wave completion.")
++    terminal = [w for w in waves if w.get("status") in {"done", "dropped"}
++                and any(t.get("wave") == w.get("id") and
++                        t.get("workstream", db.get("workstream")) == w.get("workstream", db.get("workstream"))
++                        and t.get("status") not in closed for t in tasks)]
++    for w in terminal[:5]:
++        out.append(f"- Canonical wave {w.get('p', '?')}={w.get('id')} remains {w['status']}; unfinished local rows need source-scope reconciliation. Task labels do not reopen accepted or dropped waves.")
++    if len(terminal) > 5:
++        out.append(f"- {len(terminal) - 5} more terminal waves have unfinished local rows; inspect `mmtask waves` and the original source.")
+@@ -230,0 +261,52 @@
++
++
++def original_context(db, directory):
++    """Literal charter context, separately labeled from the imported canonical snapshot."""
++    path = os.path.join(directory, "NORTH_STAR.md")
++    text = read(path)
++
++    def section(title):
++        rows, on = [], False
++        for line in text.splitlines():
++            if line.startswith("## "):
++                if on:
++                    break
++                on = line[3:].strip().lower().startswith(title.lower())
++            elif on:
++                rows.append(line)
++        value = "\n".join(rows).strip()
++        if not value:
++            return f"(not recorded here; recover the original source through {path} and the existing handoff)"
++        if len(value) > 6000:
++            return f"(section exceeds this compact view; read the complete {title} section in {path}; no clauses are summarized or omitted by inference)"
++        return value
++
++    ao = db.get("agentos") or {}
++    out = [f"ORIGINAL COMMISSION CONTEXT — {path}; reconcile associations against the actual source, not task counts.",
++           "Goal: " + section("Goal"), "Success criteria: " + section("Success criteria")]
++    if ao.get("objective"):
++        out.append(f"Imported canonical objective ({db.get('workstream') or 'unbound'}, macro@{(ao.get('source_sha') or '-')[:10]}, imported {ao.get('imported_at') or 'unknown'}): " + compact(ao["objective"], 1200))
++    if ao.get("next_action"):
++        out.append("Imported canonical next_action (snapshot; verify current source and association): " + compact(ao["next_action"], 1200))
++    if ao.get("latest_handoff"):
++        out.append("Existing canonical handoff: " + str(ao["latest_handoff"]))
++    out.append("Source, CI, merge, installation and actual assigned acceptance remain separate; preserve accepted work, holds and unknown effects.")
++    return out
++
++
++def continuity_frontier(db, directory):
++    """One read-only presentation for CLI, handoff export and continuation prompts."""
++    selected = next_tasks(db)
++    actions, display = [], []
++    for t in selected[:5]:
++        actions.append(f"{t['id']} ({t['status']}): {t['title']}")
++        display.append(f"{t['id']:10} {t['status']:12} [{t.get('wave')}] {t['title']}")
++        for criterion in t.get("acceptance") or []:
++            display.append(f"           accept: {criterion}")
++    if len(selected) > 5:
++        more = f"{len(selected) - 5} more selected tasks; inspect `mmtask list --all --json` and `mmtask show ID`."
++        actions.append(more)
++        display.append(more)
++    recovery = next_recovery(db, directory)
++    return {"selected": selected, "display": display, "context": original_context(db, directory),
++            "recovery": recovery, "actions": actions + recovery[1:]}
+@@ -248 +330 @@
+-    out += ["", "## Waves (Agent OS waves[] + local proposals)", "| P# | workstream | wave | AO status | derived | title | next_action |", "|---|---|---|---|---|---|---|"]
++    out += ["", "## Waves (Agent OS waves[] + local proposals)", "| P# | workstream | wave | AO status | local task progress | title | next_action |", "|---|---|---|---|---|---|---|"]
+@@ -252 +334 @@
+-                   f"{w.get('status','')} | {derived_wave_status(db, w) or '-'} | {cell(w.get('title'))} | {cell((w.get('next_action') or '')[:140])} |")
++                   f"{w.get('status','')} | {local_task_progress(db, w)} | {cell(w.get('title'))} | {cell((w.get('next_action') or '')[:140])} |")
+@@ -340,0 +423,18 @@
++    # Resolve every eligible new row before changing even in-memory task state.
++    # Explicit scope must resolve exactly; only unscoped legacy rows may fall back.
++    incoming = list(incoming)
++    planned, seen_new = {}, set(known)
++    for it in incoming:
++        iid = it.get("id")
++        if not iid or iid in seen_new or (live and not allow_live):
++            continue
++        scope = it.get("workstream")
++        if scope is not None and scope not in ws_keys(db):
++            sys.exit(f"mmtask import: task {iid} has unassociated workstream {scope!r}; nothing changed")
++        w = wave_of(db, it.get("wave") or "", scope)
++        if not w and scope is not None:
++            sys.exit(f"mmtask import: task {iid} wave {it.get('wave')!r} does not resolve in {scope}; nothing changed")
++        if not w:
++            w = wave_of(db, "codex-session-plan")
++        planned[iid] = w
++        seen_new.add(iid)
+@@ -371 +471 @@
+-            w = wave_of(db, x.get("wave") or "") or wave_of(db, "codex-session-plan")
++            w = planned[iid] or wave_of(db, "codex-session-plan", db.get("workstream"))
+@@ -469,0 +570,30 @@
++def related_requests(db, a, to, mirror):
++    """Validate every requested --related key BEFORE any write: exact WS:KEY form, never an alias of
++    the primary target, each backed by an existing Agent OS record. Duplicated input collapses in
++    first-seen order; already-associated keys pass through so the caller decides add vs no-op.
++    Any refusal exits before a chart file is touched."""
++    out, seen = [], set()
++    for r in (getattr(a, "related", None) or []):
++        if not re.fullmatch(r"WS:[A-Z0-9-]+", r or ""):
++            sys.exit(f"mmtask rebind: bad related workstream key {r!r} (expected WS:KEY); nothing changed")
++        if r in seen:
++            continue
++        seen.add(r)
++        if r == to:
++            sys.exit(f"mmtask rebind: related {r} aliases the primary target; related associations are additive and never alias the primary; nothing changed")
++        rec = os.path.join(mirror, "agentos/workstreams", f"WS-{r.split(':', 1)[1]}.md")
++        if not os.path.exists(rec):
++            sys.exit(f"mmtask rebind: related record {os.path.relpath(rec, mirror)} does not exist in the mirror; refusing to associate an invented related workstream; nothing changed")
++        out.append(r)
++    return out
++
++
++def related_add(db, rel, to):
++    """Additive related update: retain every existing unrelated association, drop a primary alias,
++    append the newly requested keys in first-seen order. Returns the keys this call adds."""
++    prior = [x for x in (db.get("related_workstreams") or []) if x != to]
++    new = [r for r in rel if r not in prior]
++    db["related_workstreams"] = prior + new
++    return new
++
++
+@@ -481,0 +612 @@
++    rel = related_requests(db, a, to, mirror)
+@@ -484,0 +616 @@
++        new_rel = related_add(db, rel, to)
+@@ -487 +619,22 @@
+-        return False, f"mmtask rebind --from null: already bound to {to}; nothing changed" + (f" (unqualified associations remain: {', '.join(left)})" if left else "")
++        if not new_rel:
++            return False, f"mmtask rebind --from null: already bound to {to}; nothing changed" + (f" (unqualified associations remain: {', '.join(left)})" if left else "")
++        # Same-primary additive related update: no task/wave association, status, evidence or history changes.
++        db.setdefault("binding_history", []).append({"at": now(), "by": session(), "from": None, "to": to, "kind": "related-add", "reason": a.reason,
++                                                     "related_added": new_rel, "related": list(db["related_workstreams"]),
++                                                     "qualified_tasks": [], "qualified_waves": [], "legacy_untouched": [],
++                                                     "task_changes": "none (additive related update)",
++                                                     "previous_records": db["agentos"].get("records"), "previous_source_sha": db["agentos"].get("source_sha")})
++        imported, _ = do_import(d, db, mirror, False)
++        sha = (db["agentos"].get("source_sha") or "-")[:10]
++        nrel = sum(r.get("waves") or 0 for r in imported if r["workstream"] in new_rel)
++        note = (f"bind-init related-add -> {to} (macro {sha}): added related [{', '.join(new_rel)}]; no task association, status, evidence or history changed; "
++                f"merged {nrel} canonical waves from the related records. Reason: {a.reason}")
++        log_line(d, "-", "decision", note)
++        dec = (f"\n### MMTASK-BIND-INIT — {now()} — Related workstreams added to {to}\n- type: process\n- by: {session()}\n"
++               f"- decision: additively associate the existing related workstreams {', '.join(new_rel)} with the already-bound primary {to} (`--from null --related`).\n"
++               f"- rationale: {a.reason}\n- alternatives considered: rebinding to a different primary (rejected: primary is unchanged); hand-editing TASKS.json (rejected: tool-only writes).\n"
++               f"- impact: related associations now {', '.join(db['related_workstreams']) or '-'}; no task association, status, evidence or history changed; "
++               f"{nrel} canonical waves merged from the related records (local waves keep their P#). Recorded in TASKS.json binding_history.\n")
++        with open(os.path.join(d, "DECISIONS.md"), "a", encoding="utf-8") as fh:
++            fh.write(dec)
++        return True, note
+@@ -504 +657 @@
+-    db["related_workstreams"] = [x for x in (db.get("related_workstreams") or []) if x != to]
++    new_rel = related_add(db, rel, to)
+@@ -506,0 +660 @@
++                                                 "related_added": new_rel, "related": list(db["related_workstreams"]),
+@@ -512 +666,3 @@
+-    note = (f"bind-init null -> {to} (macro {sha}): qualified tasks [{', '.join(qt) or '-'}] and waves [{', '.join(qw) or '-'}] to {to}; "
++    reltxt = f"; related associated [{', '.join(new_rel)}]" if new_rel else ""
++    reldec = f"; related associations now {', '.join(db['related_workstreams']) or '-'} (added: {', '.join(new_rel)})" if new_rel else ""
++    note = (f"bind-init null -> {to} (macro {sha}): qualified tasks [{', '.join(qt) or '-'}] and waves [{', '.join(qw) or '-'}] to {to}{reltxt}; "
+@@ -520 +676 @@
+-           f"legacy rows {', '.join(legacy) or '-'} unchanged; {nwaves} canonical waves merged (local waves keep their P#). Recorded in TASKS.json binding_history.\n")
++           f"legacy rows {', '.join(legacy) or '-'} unchanged{reldec}; {nwaves} canonical waves merged (local waves keep their P#). Recorded in TASKS.json binding_history.\n")
+@@ -542,0 +699 @@
++    rel = related_requests(db, a, to, mirror)
+@@ -544,7 +701,11 @@
+-    for t in db["tasks"]:
+-        if t.get("workstream", frm) == frm:
+-            t["workstream"] = to; hist(t, "rebind", f"{frm} -> {to}"); t["updated"] = t["history"][-1]["at"]; nt += 1
+-    for w in db["waves"]:
+-        if w.get("workstream") == frm:
+-            w["workstream"] = to; w.setdefault("rebound_from", frm); nw += 1
+-    db["related_workstreams"] = [x for x in (db.get("related_workstreams") or []) if x != to]
++    if not (frm == to and rel):
++        for t in db["tasks"]:
++            if t.get("workstream", frm) == frm:
++                t["workstream"] = to; hist(t, "rebind", f"{frm} -> {to}"); t["updated"] = t["history"][-1]["at"]; nt += 1
++        for w in db["waves"]:
++            if w.get("workstream") == frm:
++                w["workstream"] = to; w.setdefault("rebound_from", frm); nw += 1
++    # frm == to with --related is a same-primary additive related update: no task/wave association, status, evidence or history changes.
++    new_rel = related_add(db, rel, to)
++    if frm == to and rel and not new_rel:
++        return False, f"mmtask rebind: already bound to {to}; related already associated [{', '.join(db['related_workstreams']) or '-'}]; nothing changed"
+@@ -557,0 +719,2 @@
++                                                 "related_added": new_rel, "related": list(db["related_workstreams"]),
++                                                 "task_changes": "none (same-primary additive related update)" if (frm == to and rel) else f"{nt} tasks and {nw} waves rebound",
+@@ -562 +725,2 @@
+-    note = (f"rebind {frm} -> {to} (macro {sha}): {nt} tasks and {nw} waves rebound, all task ids/status/history/evidence preserved; "
++    reltxt = f"; related associated [{', '.join(new_rel)}]" if new_rel else ""
++    note = (f"rebind {frm} -> {to} (macro {sha}): {nt} tasks and {nw} waves rebound{reltxt}, all task ids/status/history/evidence preserved; "
+@@ -568 +732,4 @@
+-           f"- impact: {nt} tasks and {nw} waves moved to {to}; ids, statuses, history, acceptance and evidence unchanged; {nwaves} canonical waves merged (local waves keep their P#). Previous binding retained in TASKS.json binding_history.\n")
++           f"- impact: {nt} tasks and {nw} waves moved to {to}; ids, statuses, history, acceptance and evidence unchanged; "
++           f"{nwaves} canonical waves merged (local waves keep their P#). "
++           + (f"Related associations now {', '.join(db['related_workstreams'])} (added: {', '.join(new_rel)}). " if new_rel else "")
++           + "Previous binding retained in TASKS.json binding_history.\n")
+@@ -577,2 +744,2 @@
+-            "## Waves (P# = wave order; canonical status from Agent OS, derived = from local tasks)",
+-            "| P# | workstream | wave | AO status | derived | PR | depends_on | title | next_action |", "|---|---|---|---|---|---|---|---|---|"]
++            "## Waves (P# = wave order; canonical status from Agent OS; local task progress is not a wave verdict)",
++            "| P# | workstream | wave | AO status | local task progress | PR | depends_on | title | next_action |", "|---|---|---|---|---|---|---|---|---|"]
+@@ -582 +749 @@
+-                    f"{derived_wave_status(db, w) or '-'} | {c(w.get('pr'))} | {c(','.join(w.get('depends_on') or []))} | {c(w.get('title'))} | {c((w.get('next_action') or '')[:160])} |")
++                    f"{local_task_progress(db, w)} | {c(w.get('pr'))} | {c(','.join(w.get('depends_on') or []))} | {c(w.get('title'))} | {c((w.get('next_action') or '')[:160])} |")
+@@ -639,0 +807,2 @@
++    # A local task buffer need not cover a whole wave. Editorial task labels never
++    # close, drop, reopen or otherwise transition an imported canonical wave.
+@@ -644,2 +813,2 @@
+-        dv = derived_wave_status(db, w)
+-        nxt = next((t for t in next_tasks(db) if t.get("wave") == w["id"]), None)
++        nxt = next((t for t in next_tasks(db) if t.get("wave") == w["id"]
++                    and t.get("workstream", key) == w.get("workstream")), None)
+@@ -647 +816 @@
+-            new_waves.append({"id": w["id"], "title": w.get("title"), "status": dv or "todo", **({"pr": w["pr"]} if w.get("pr") else {}),
++            new_waves.append({"id": w["id"], "title": w.get("title"), "status": "todo", **({"pr": w["pr"]} if w.get("pr") else {}),
+@@ -649,4 +818,2 @@
+-        elif dv and dv != w.get("status"):
+-            wave_edits.append({"id": w["id"], "from": w.get("status"), "to": dv})
+-    nxt_all = next_tasks(db)
+-    next_actions = [f"{t['id']} ({t['status']}): {t['title']}" for t in nxt_all[:6]] or ["(no open tasks)"]
++    frontier = continuity_frontier(db, d)
++    next_actions = frontier["actions"]
+@@ -679 +846,3 @@
+-            f"canonical summary. Proposed wave edits: export/{date}/WS-{k}.waves.patch.\n")
++            f"canonical summary. Proposed new waves: export/{date}/WS-{k}.waves.patch.\n"
++            "Imported wave status is preserved; its canonical owner decides any transition against the actual wave acceptance.\n\n" +
++            "\n\n".join(frontier["context"]) + "\n")
+@@ -699 +868 @@
+-        atomic_write(patch_path, f"# Agent OS record WS-{k}.md does not exist yet: a new record must be authored\n# (agentos.py draft-ws-append / workstream.schema.yml). Proposed waves:\n" + yaml.safe_dump(new_waves or [{"id": w["id"], "title": w.get("title"), "status": derived_wave_status(db, w) or "todo"} for w in db["waves"]], sort_keys=False))
++        atomic_write(patch_path, f"# Agent OS record WS-{k}.md does not exist yet: a new record must be authored\n# (agentos.py draft-ws-append / workstream.schema.yml). Proposed waves (no task-derived verdicts):\n" + yaml.safe_dump(new_waves, sort_keys=False))
+@@ -778,0 +948,2 @@
++    p.add_argument("--related", action="append", default=[], metavar="WS:KEY",
++                   help="additively associate EXISTING related workstreams and import their canonical waves with the primary; repeatable, duplicates collapse, a repeat of the same set is a no-op, never aliases the primary")
+@@ -789 +960 @@
+-    snap_p = {w["id"]: w.get("p") for w in db["waves"]}
++    snap_p = {(w["id"], w.get("p")) for w in db["waves"]}  # every existing (wave id, P#) pair must survive the write
+@@ -881,2 +1052,2 @@
+-        wp = {w["id"]: w.get("p") for w in db["waves"]}
+-        if any(wp.get(k) != v for k, v in snap_p.items()):
++        wp = {(w["id"], w.get("p")) for w in db["waves"]}
++        if not snap_p <= wp:
+@@ -898 +1069 @@
+-        for w in db["waves"]: print(f"{w['p']:4} {w.get('workstream','')[:32]:32} {w['id'][:28]:28} AO={w.get('status')} derived={derived_wave_status(db, w)} {w.get('source')}")
++        for w in db["waves"]: print(f"{w['p']:4} {w.get('workstream','')[:32]:32} {w['id'][:28]:28} AO={w.get('status')} local tasks={local_task_progress(db, w)} {w.get('source')}")
+@@ -900,6 +1071,6 @@
+-        nx = next_tasks(db)
+-        for x in nx[:5]:
+-            print(f"{x['id']:10} {x['status']:12} [{x.get('wave')}] {x['title']}")
+-            for c in x.get("acceptance") or []: print(f"           accept: {c}")
+-        if not nx or a.explain:
+-            for line in next_recovery(db, d): print(line)
++        frontier = continuity_frontier(db, d)
++        for line in frontier["display"]: print(line)
++        if not frontier["selected"] or a.explain:
++            for line in frontier["recovery"]: print(line)
++        if a.explain:
++            for line in frontier["context"]: print(line)
+@@ -911,0 +1083 @@
++
+--- a/charterlib.py
++++ b/charterlib.py
+@@ -17 +17 @@
+-import json, os, re, sys, datetime
++import json, os, re, sys, datetime, subprocess
+@@ -119,0 +120,25 @@
++def task_frontier(directory):
++    """Use mmtask's read-only presentation, never a second readiness selector."""
++    tool = os.path.join(os.path.dirname(os.path.realpath(__file__)), "mmtask")
++    try:
++        result = subprocess.run([sys.executable, tool, "--dir", directory, "next", "--explain"],
++                                capture_output=True, text=True, timeout=10)
++        if result.returncode == 0 and result.stdout.strip():
++            return result.stdout.rstrip()
++        reason = f"selector exited {result.returncode}" if result.returncode else "selector returned no presentation"
++    except (OSError, subprocess.TimeoutExpired) as exc:
++        reason = type(exc).__name__
++    return (f"  Task selection unavailable ({reason}); no readiness or completion inferred. "
++            f"Read {directory}/TASKS.json, STATE.md, NORTH_STAR.md and the existing canonical handoff; "
++            "reconcile original scope, dependencies, holds and effects before selecting the next action. "
++            "Do not redo accepted work or retry a held effect.")
++
++
++def prompt_section(value, title, directory):
++    if not value:
++        return f"(not recorded here; recover the original {title} from {directory}/NORTH_STAR.md and its source)"
++    if len(value) > 6000:
++        return f"(read the complete {title} section in {directory}/NORTH_STAR.md; it exceeds this compact view and no clauses are inferred from a partial excerpt)"
++    return value
++
++
+@@ -139,5 +163,0 @@
+-    byid = {t["id"]: t for t in tl}
+-    ip = [t for t in tl if t["status"] == "in_progress"]
+-    okst = ("implementation_complete", "reviewed", "accepted", "superseded")
+-    kids = lambda t: any(c.get("parent") == t["id"] and c["status"] not in okst for c in tl)
+-    ready = [t for t in tl if t["status"] in ("ready", "proposed") and not kids(t) and all(byid.get(x, {}).get("status") in okst for x in t.get("depends_on") or [])]
+@@ -148,3 +168,2 @@
+-    tasks_txt = ("\n".join(f"  {t['id']} [{t['status']}] {t.get('wave') or t.get('milestone') or '-'} {t['title']}" for t in (ip + ready)[:6])
+-                 if tl else "  (NO TASK PLAN YET — create the up-front breakdown with mmtask before executing anything)")
+-    open_n = sum(1 for t in tl if t["status"] not in ("accepted", "superseded"))
++    tasks_txt = task_frontier(d)
++    open_n = sum(1 for t in tl if t["status"] not in ("accepted", "superseded", "done"))
+@@ -163 +182 @@
+-**FIRST ACTIONS: (1) load canonical context: `{aocmd}` (or `scripts/agentos.py brief` / `compile-context --workstream …` from a macro checkout, if available); (2) read TASKS.json (`~/gwcap/bin/mmtask next`) and STATE.md. If there is no task plan, or it doesn't cover the work you are about to do, create or extend it with `~/gwcap/bin/mmtask add "…" --wave <P#|wave-id>` BEFORE executing anything.** Then mark your task `mmtask start <id>`. Finish it with `mmtask done <id> --evidence "<commit/PR/test>"` (→ implementation_complete), then `review`/`accept` when that evidence exists.
++**FIRST ACTIONS: (1) load canonical context: `{aocmd}` (or `scripts/agentos.py brief` / `compile-context --workstream …` from a macro checkout, if available); (2) read TASKS.json (`~/gwcap/bin/mmtask next --explain`) and STATE.md, then compare the next phase with the original Goal and Success criteria below.** Reconcile a missing or conflicting source association before relying on it. If the existing task plan omits remaining original work, preserve accepted artifacts and add only the missing source-linked breakdown with `~/gwcap/bin/mmtask add "…" --wave <P#|wave-id>` before executing that new work. Mark your task `mmtask start <id>`. Finish it with `mmtask done <id> --evidence "<commit/PR/test>"` (→ implementation_complete), then `review`/`accept` at that task's actual evidence boundary. Local task labels do not close, drop or reopen canonical waves, and a closed task buffer does not prove the whole assignment complete.
+@@ -169,4 +188,7 @@
+-North star (summary only; NORTH_STAR.md is authoritative):
+-{ch['north_star_goal'] or '(see NORTH_STAR.md)'}
+-
+-Pinned task list (TASKS.json: {len(tl)} tasks, {open_n} open) — in progress / ready next:
++Original charter Goal (source: `{d}/NORTH_STAR.md`; retain its original commission and reconcile the imported workstream association):
++{prompt_section(ch['north_star_goal'], 'Goal', d)}
++
++Original Success criteria (task acceptance, release and whole-assignment acceptance have their stated scopes):
++{prompt_section(ch['success_criteria'], 'Success criteria', d)}
++
++Pinned task list (TASKS.json: {len(tl)} tasks, {open_n} open) — execution selection and remaining verification/recovery:
+--- a/SCHEMA.md
++++ b/SCHEMA.md
+@@ -58,2 +58,10 @@
+-- Derived wave status (export only, never written into waves[].status locally): all tasks accepted/superseded → done;
+-  all superseded → dropped; any started → in_progress; else todo. Waves without local tasks are left untouched.
++- Local task progress is a display-only summary of the buffered subset, never a canonical wave verdict. A closed
++  buffer does not establish that the wave or original product outcome is complete; superseded tasks do not drop a wave.
++  Export preserves imported canonical wave statuses, including done/dropped. New locally proposed waves export as todo.
++  The existing canonical record owner authors any actual wave transition against that wave's acceptance through the normal
++  source path. Source-only tasks/waves retain their own acceptance scope; unrelated product proof is not added.
++- `mmtask next --explain`, export next_actions and continuation prompts share the existing read-only selection/recovery
++  presentation. Implementation-complete, reviewed, blocked and unbuffered wave work remain visible with source pointers;
++  a closed/empty buffer never establishes whole-assignment completion or grants execution/retry permission.
++- Generated continuation prompts include the original Goal and Success criteria, with the imported canonical objective
++  separately labeled. Oversize sections carry an explicit complete-source pointer, not a silent partial criteria excerpt.

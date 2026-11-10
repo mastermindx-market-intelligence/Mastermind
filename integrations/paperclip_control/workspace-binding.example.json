@@ -1,0 +1,12 @@
+{
+  "schema": "mastermind.paperclip_binding.v1",
+  "origin": "http://127.0.0.1:3100",
+  "company_id": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "source_revision": "d69631b01b9c658f80bf8bed389863dce82643e1",
+  "access": [],
+  "work_owner": "legacy",
+  "wake_owner": "legacy",
+  "create_backlog_enabled": false,
+  "hermes_bindings": [],
+  "project_bindings": []
+}

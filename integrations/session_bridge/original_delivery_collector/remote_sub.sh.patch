@@ -1,0 +1,14 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -4,6 +4,11 @@
+ set -u
+ 
+ # Read/export only: enter before any reservation, lease, trap or worker launch.
++if [ "${1:-}" = "--collect-existing" ]; then
++  shift
++  exec python3 "$(cd "$(dirname "$0")" && pwd)/original_delivery_collector.py" "$@"
++fi
++
+ if [ "${1:-}" = "--read-artifacts" ]; then
+   shift
+   exec python3 "$(cd "$(dirname "$0")" && pwd)/artifact_delivery.py" "$@"

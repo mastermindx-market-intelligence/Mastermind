@@ -23,6 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from control_plane.claude_native_helper_projection import ClaudeNativeHelperProjection
 from control_plane.codex_worker import (
     CodexWorkerAdapter,
     LaunchValidationError,
@@ -68,7 +69,12 @@ _VERSION_RE = re.compile(r"(?P<version>\d+\.\d+\.\d+)\s+\(Claude Code\)")
 _MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_BINARY_BYTES = 1 << 29
 _MAX_TURNS = 64
-_MOVING_MODEL_ALIASES = frozenset({"haiku", "opus", "sonnet"})
+# These selectors can change the served model or even switch model families.
+# In particular, best can consume Fable quota and opusplan switches to Sonnet.
+# Native worker construction requires a reviewed exact model, never a selector.
+_MOVING_MODEL_ALIASES = frozenset(
+    {"best", "default", "fable", "haiku", "opus", "opusplan", "sonnet"}
+)
 _READ_TOOLS = ("Glob", "Grep", "Read")
 _WRITE_TOOLS = ("Edit", "Write")
 _TEST_TOOL = "Bash"
@@ -102,6 +108,8 @@ def _subprocess_sandbox_request() -> dict[str, Any]:
 _MAX_POLICY_GENERATION = 2**63 - 1
 _FORBIDDEN_TOOLS = (
     "Agent",
+    "AskUserQuestion",
+    "ExitPlanMode",
     "NotebookEdit",
     "Skill",
     "Task",
@@ -121,6 +129,8 @@ _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
 _DARWIN_PROCESS_STATE_FLAGS = frozenset("+<>AELNSsVWX")
+# procps ps state= is one character; Darwin state= may include flags.
+_LINUX_PROCESS_RUN_STATES = frozenset("DIRSTtWXZ")
 _LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
 _LOCAL_TASK_SETTLEMENT_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
@@ -134,7 +144,13 @@ _DENIED_PROVIDER_ENV_KEYS = frozenset(
 _RAW_AUTH_ALLOWED_KEYS = frozenset(
     {
         "loggedIn", "authMethod", "apiProvider", "subscriptionType", "apiKeySource",
+        # Known provider PII is tolerated as INPUT only so it can be discarded.
+        # It is never returned or persisted by this module. The current native
+        # 2.1.275 wire exposes organization identity under `orgId`/`orgName`
+        # alongside the older `organization`/`organizationId` aliases; both
+        # shapes are accepted and discarded, never projected.
         "email", "organization", "accountId", "organizationId",
+        "orgId", "orgName", "analyticsDisabled", "projectsDirectory", "configDirectory",
     }
 )
 _SECRET_KEY_RE = re.compile(
@@ -232,6 +248,21 @@ class ClaudeInvocation:
 
     argv: tuple[str, ...]
     environment: ClaudeLaunchEnvironment
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ClaudeNativeHelperLaunchCandidate:
+    """Production-inert exact composition of one native-helper parent launch.
+
+    This object is intentionally not accepted by :meth:`start`.  It exists so
+    installed/provider conformance can prove the merged Claude syntax before a
+    separately reviewed production binding is allowed to reach the lifecycle.
+    """
+
+    argv: tuple[str, ...]
+    environment_overrides: tuple[tuple[str, str], ...]
+    runtime_ceiling_seconds: int
+    production_armed: bool = dataclasses.field(default=False, init=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -491,6 +522,23 @@ def _validate_exact_model(exact_model: str) -> str:
     return exact_model
 
 
+def _validate_known_model_runtime(exact_model: str, version: str) -> None:
+    """Enforce documented native floors, without granting model admission.
+
+    Source: https://code.claude.com/docs/en/model-config (2026-09-27).
+    The caller must still attest the binary against its reviewed version set.
+    """
+    minimum = {
+        "claude-opus-5-5": (2, 1, 280),
+        "claude-fable-5-1": (2, 1, 257),
+    }.get(exact_model)
+    if minimum is not None and tuple(int(part) for part in version.split(".")) < minimum:
+        required = ".".join(str(part) for part in minimum)
+        raise ClaudeWorkerContractError(
+            f"{exact_model} requires Claude Code {required} or later"
+        )
+
+
 def _canonical_policy_generation(value: object) -> int:
     """Accept only a canonical bounded ``int`` policy generation; never coerce."""
 
@@ -634,6 +682,12 @@ def _tool_policy(
     spec: WorkerLaunchSpec,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     requested = _requested_capabilities(spec)
+    return _compile_tool_policy(requested, write_paths=(
+        _allowed_write_paths(spec) if "WRITE_BRANCH" in requested else ()))
+
+
+def _compile_tool_policy(requested, *, write_paths=()):
+    """Pure policy compiler; callers separately validate actual authority."""
     tools: list[str] = []
     preapproved: list[str] = []
     forbidden = list(_FORBIDDEN_TOOLS)
@@ -642,7 +696,7 @@ def _tool_policy(
         tools.extend(_READ_TOOLS)
         preapproved.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
     if "WRITE_BRANCH" in requested:
-        paths = _allowed_write_paths(spec)
+        paths = write_paths
         if not paths:
             raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
         tools.extend(_WRITE_TOOLS)
@@ -973,7 +1027,9 @@ def _run_bounded_auth_status(argv: Sequence[str], *, timeout: float, env: Mappin
 def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
-    exact_group_query = platform.system() == "Darwin"
+    observed_platform = platform.system()
+    exact_group_query = observed_platform == "Darwin"
+    linux_state_column = observed_platform == "Linux"
     argv = (
         ("/bin/ps", "-g", str(pgid), "-o", "pid=,pgid=,state=")
         if exact_group_query
@@ -1028,11 +1084,14 @@ def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
             if pid > 0 and observed_group == pgid:
                 if (
                     not state_token
-                    or state_token[0] not in _DARWIN_PROCESS_RUN_STATES
-                    or any(
-                        flag not in _DARWIN_PROCESS_STATE_FLAGS
-                        for flag in state_token[1:]
-                    )
+                    or (linux_state_column and (
+                        len(state_token) != 1 or state_token not in _LINUX_PROCESS_RUN_STATES
+                    ))
+                    or (not linux_state_column and (
+                        state_token[0] not in _DARWIN_PROCESS_RUN_STATES
+                        or any(flag not in _DARWIN_PROCESS_STATE_FLAGS
+                               for flag in state_token[1:])
+                    ))
                 ):
                     raise ValueError
                 members.append(_ProcessGroupMember(pid, state_token[0]))
@@ -1085,6 +1144,7 @@ class ClaudeCodeWorkerAdapter:
         binary = attest_claude_code_binary(
             claude_binary, allowed_versions=allowed_versions
         )
+        _validate_known_model_runtime(validated_model, binary.version)
         observation = _require_typed_observation(managed_policy_observer.observe())
         generation = _canonical_policy_generation(observation.generation)
         _validate_managed_observation(
@@ -1170,6 +1230,9 @@ class ClaudeCodeWorkerAdapter:
             "enabledMcpjsonServers": [],
             "permissions": {
                 "allow": list(preapproved),
+                # The worker is noninteractive by construction. dontAsk keeps
+                # the reviewed allowlist meaningful while converting every
+                # would-be permission prompt into a deterministic refusal.
                 "ask": [],
                 "defaultMode": "dontAsk",
                 "deny": deny,
@@ -1210,6 +1273,20 @@ class ClaudeCodeWorkerAdapter:
         if not isinstance(permissions, Mapping):
             raise ClaudeWorkerContractError(
                 "protected path file-tool deny fence drifted: mutation refuses"
+            )
+        # Autonomy is a launch invariant, not a remembered user preference.
+        # Hooks, ask rules, project MCP servers, or the bypass-disable setting
+        # could all reintroduce a human prompt or silently downgrade this worker.
+        if (
+            observed.get("disableAllHooks") is not True
+            or observed.get("enableAllProjectMcpServers") is not False
+            or observed.get("enabledMcpjsonServers") != []
+            or permissions.get("ask") != []
+            or permissions.get("defaultMode") != "dontAsk"
+            or permissions.get("disableBypassPermissionsMode") != "disable"
+        ):
+            raise ClaudeWorkerContractError(
+                "unattended permission fence drifted: mutation refuses"
             )
         allow = permissions.get("allow") or []
         if not isinstance(allow, list) or any(not isinstance(rule, str) for rule in allow):
@@ -1259,6 +1336,9 @@ class ClaudeCodeWorkerAdapter:
             "isolation_manifest_sha256": spec.isolation_manifest_sha256,
             "network_enabled": False,
             "safe_mode": True,
+            "permission_mode": "dontAsk",
+            "noninteractive": True,
+            "human_interaction_policy": "deny",
             "session_persistence": False,
             "mcp_servers": [],
             "shell_environment_policy": "include_only",
@@ -1315,6 +1395,132 @@ class ClaudeCodeWorkerAdapter:
         )
         return ClaudeInvocation(argv=argv, environment=ClaudeLaunchEnvironment())
 
+    def compile_native_helper_candidate_launch(
+        self,
+        spec: WorkerLaunchSpec,
+        projection: ClaudeNativeHelperProjection,
+    ) -> ClaudeNativeHelperLaunchCandidate:
+        """Compile, but never arm, the reviewed same-Attempt helper syntax.
+
+        V1 deliberately proves the smallest useful integration first: a
+        read-only parent and read-only helpers with no MCP grants.  Durable or
+        write-capable fan-out remains an Executive child Job.  The ordinary
+        ``compile_launch``/``start`` path is untouched, so constructing this
+        candidate cannot enable native helpers in production.
+        """
+
+        if not isinstance(projection, ClaudeNativeHelperProjection):
+            raise ClaudeWorkerContractError(
+                "typed native-helper projection is required"
+            )
+        if projection.production_armed:
+            raise ClaudeWorkerContractError(
+                "native-helper projection must remain production-inert"
+            )
+        if (
+            projection.permission_mode != "dontAsk"
+            or projection.execution_mode != "noninteractive"
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper projection does not match the worker parent mode"
+            )
+        tools, preapproved, forbidden = _tool_policy(spec)
+        if tools != tuple(sorted(_READ_TOOLS)):
+            raise ClaudeWorkerContractError(
+                "native-helper candidate requires a read-only parent"
+            )
+        if (
+            projection.source_mcp_grant_digests
+            or projection.source_mcp_tool_schema_digests
+            or any(tool.startswith("mcp__") for tool in projection.enabled_tools)
+            or any(tool.startswith("mcp__") for tool in projection.auto_approved_tools)
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper candidate v1 requires a zero-MCP projection"
+            )
+        if set(projection.enabled_tools) != set(_READ_TOOLS):
+            raise ClaudeWorkerContractError(
+                "native-helper child tools must match the read-only ceiling"
+            )
+        if not projection.external_runtime_enforcement_required:
+            raise ClaudeWorkerContractError(
+                "native-helper runtime ceiling lost external enforcement"
+            )
+
+        parent_tools = tuple(sorted(set(tools) | {"Agent"}))
+        parent_allowed = tuple(sorted(set(preapproved) | {"Agent"}))
+        parent_denied = tuple(
+            sorted(
+                (set(forbidden) - {"Agent"})
+                | set(projection.parent_denied_tools)
+            )
+        )
+        if (
+            "Agent" in parent_denied
+            or "Agent" not in parent_tools
+            or "Agent" not in parent_allowed
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper parent Agent admission is inconsistent"
+            )
+
+        settings = self.requested_settings(spec)
+        permissions = dict(settings["permissions"])
+        protected_denies = list(_protected_file_tool_denies(parent_tools))
+        permissions["allow"] = list(parent_allowed)
+        permissions["deny"] = list(parent_denied) + protected_denies
+        settings = dict(settings)
+        settings["permissions"] = permissions
+        self.validate_settings(settings)
+
+        agents_payload = projection.cli_arguments()[-1]
+        argv = (
+            self.binary.real_path,
+            "-p",
+            "--output-format",
+            "json",
+            "--safe-mode",
+            "--restricted",
+            "--no-chrome",
+            "--no-session-persistence",
+            "--max-turns",
+            str(self.max_turns),
+            "--model",
+            self.exact_model,
+            "--permission-mode",
+            "dontAsk",
+            "--tools",
+            ",".join(parent_tools),
+            "--allowedTools",
+            ",".join(parent_allowed),
+            "--disallowedTools",
+            ",".join(parent_denied),
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--disable-slash-commands",
+            "--agents",
+            agents_payload,
+            "--settings",
+            _canonical_json(settings),
+            spec.prompt,
+        )
+        environment = projection.environment()
+        if len(environment) != len(set(environment)) or any(
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or not key.startswith("CLAUDE_")
+            for key, value in environment.items()
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper environment projection is invalid"
+            )
+        return ClaudeNativeHelperLaunchCandidate(
+            argv=argv,
+            environment_overrides=tuple(sorted(environment.items())),
+            runtime_ceiling_seconds=projection.runtime_ceiling_seconds,
+        )
+
     def observe_auth_status(self, *, timeout_seconds: float = 15.0) -> ClaudeAuthObservation:
         """Observe only the documented native auth state, never its identity data."""
 
@@ -1330,6 +1536,8 @@ class ClaudeCodeWorkerAdapter:
                 "",
                 "auth",
                 "status",
+                # Explicit JSON; safe-mode diagnostics remain discard-only input.
+                "--json",
             ),
             timeout=timeout,
             env=_closed_auth_environment(),
@@ -1346,9 +1554,15 @@ class ClaudeCodeWorkerAdapter:
             or (exit_code == 0) is not logged_in
         ):
             raise ClaudeAuthStatusError("auth observation response is unsupported")
+        if "analyticsDisabled" in parsed and type(parsed["analyticsDisabled"]) is not bool:
+            raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
+        for key in ("projectsDirectory", "configDirectory"):
+            if key in parsed and not isinstance(parsed[key], str):
+                raise ClaudeAuthStatusError("auth diagnostics response is unsupported")
         for key in (
             "email", "organization", "subscriptionType", "apiKeySource",
-            "accountId", "organizationId",
+            "accountId", "organizationId", "orgId", "orgName",
+            "projectsDirectory", "configDirectory",
         ):
             if key in parsed:
                 _validate_discard_only(parsed[key])
@@ -1767,6 +1981,7 @@ class ClaudeCodeWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redacted_launch_argv(argv),
                 environment_keys=tuple(sorted(environment)),
+                isolation_manifest_sha256=spec.isolation_manifest_sha256,
                 permission_profile_sha256=self.permission_profile_digest(spec),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,
@@ -2309,6 +2524,7 @@ __all__ = [
     "ClaudeAuthObservation",
     "ClaudeCodeWorkerAdapter",
     "ClaudeInvocation",
+    "ClaudeNativeHelperLaunchCandidate",
     "ClaudeLaunchEnvironment",
     "ClaudeLaunchEnvironmentUnavailableError",
     "ClaudeWorkerContractError",

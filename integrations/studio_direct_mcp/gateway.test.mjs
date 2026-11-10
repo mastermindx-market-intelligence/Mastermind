@@ -16,11 +16,15 @@
 // Run: node --test private-studio-mcp/gateway.test.mjs
 
 import { test, after } from 'node:test';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import http from 'node:http';
 import { Readable } from 'node:stream';
@@ -466,7 +470,113 @@ test('tools/list publishes gateway-owned neutral backend metadata and privacy-mi
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     'gateway generation must be an ephemeral random UUID, not a host-derived identifier',
   );
-  assert.equal(payload.gatewayVersion, '0.1.6');
+  assert.equal(payload.gatewayVersion, '0.1.11');
+});
+
+test('configured studio_fleet_status lists and returns the bounded public projection', async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'studio-fleet-gateway-'));
+  cleanup.dirs.push(dir);
+  const launcher = resolve(dir, 'studio-direct');
+  const owner = {
+    schema: 'mastermind.studio_direct_fleet_status.v1',
+    action: 'status',
+    accountCount: 2,
+    readyCount: 1,
+    allReady: false,
+    accounts: [
+      {
+        account: 'chatgpt1',
+        action: 'status',
+        steps: [],
+        ready: true,
+        gateway: {
+          account: 'chatgpt1', label: 'gateway-chatgpt1', loaded: true,
+          pid: 11111, port: 45018, running: true,
+        },
+        tunnel: {
+          account: 'chatgpt1', label: 'tunnel-chatgpt1', loaded: true,
+          pid: 22222, running: true, healthy: true, ready: true,
+          configurationDrift: false,
+          tunnelReady: true, controlPlanePollReady: true, gatewayReady: true,
+          transportTTL: '5h', maxConcurrentRequests: 4,
+          gatewayPort: 45018, healthPort: 45019,
+          tunnelId: 'tunnel_0123456789abcdef0123456789abcdef',
+          organizationId: null,
+          managedAlias: 'studio-direct-private-chatgpt1',
+          managedAliasRunning: false,
+        },
+      },
+      {
+        account: 'chatgpt2',
+        action: 'status',
+        steps: [],
+        ready: false,
+        gateway: {
+          account: 'chatgpt2', label: 'gateway-chatgpt2', loaded: true,
+          pid: 33333, port: 45020, running: true,
+        },
+        tunnel: {
+          account: 'chatgpt2', label: 'tunnel-chatgpt2', loaded: false,
+          pid: null, running: false, healthy: false, ready: false,
+          configurationDrift: false,
+          tunnelReady: false, controlPlanePollReady: false, gatewayReady: true,
+          transportTTL: '5h', maxConcurrentRequests: 4,
+          gatewayPort: 45020, healthPort: 45021,
+          tunnelId: 'tunnel_1123456789abcdef0123456789abcdef',
+          organizationId: null,
+          managedAlias: 'studio-direct-private-chatgpt2',
+          managedAliasRunning: false,
+        },
+      },
+    ],
+  };
+  await writeFile(
+    launcher,
+    "#!/bin/sh\nprintf '%s\\n' '" + JSON.stringify(owner) + "'\n",
+  );
+  await chmod(launcher, 0o700);
+  const launcherHash = createHash('sha256').update(await readFile(launcher)).digest('hex');
+  const { gw } = await bootGateway({
+    fleetStatus: {
+      enabled: true,
+      launcherPath: launcher,
+      launcherSha256: launcherHash,
+      timeoutMs: 5000,
+    },
+  });
+  const a = newClient('tok-alice');
+  await connect(a.client, gw.url, a.transportOpts);
+  const listed = await a.client.listTools();
+  const tool = listed.tools.find((candidate) => candidate.name === 'studio_fleet_status');
+  assert.ok(tool, 'configured fleet status tool must be advertised');
+  assert.deepEqual(
+    [
+      tool.annotations.readOnlyHint,
+      tool.annotations.destructiveHint,
+      tool.annotations.idempotentHint,
+      tool.annotations.openWorldHint,
+    ],
+    [true, false, true, false],
+  );
+  const result = await a.client.callTool(
+    { name: 'studio_fleet_status', arguments: {} },
+    undefined,
+    { timeout: 5000 },
+  );
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v2');
+  assert.equal(result.structuredContent.state, 'DEGRADED');
+  assert.equal(result.structuredContent.accountCount, 2);
+  assert.equal(result.structuredContent.readyCount, 1);
+  assert.equal(result.structuredContent.accounts[0].account, 'chatgpt1');
+  assert.equal(result.structuredContent.accounts[0].state, 'READY');
+  assert.equal(result.structuredContent.accounts[1].account, 'chatgpt2');
+  assert.equal(result.structuredContent.accounts[1].state, 'DEGRADED');
+  assert.equal(Object.hasOwn(result.structuredContent, 'owner'), false);
+  const rendered = JSON.stringify(result);
+  assert.equal(rendered.includes('45018'), false);
+  assert.equal(rendered.includes('11111'), false);
+  assert.equal(rendered.includes('tunnel_0123456789abcdef0123456789abcdef'), false);
 });
 
 test('shared backend reserves one slot for catalog traffic while typed Git remains advertised', { timeout: 15_000 }, async () => {
@@ -833,4 +943,136 @@ test('backend exit after an effect taints the session without replacing its chil
   assert.match(result.content[0].text,/fresh/);
   assert.equal(gw.stats().backend.spawns,2);
   assert.equal(await readFile(markerPath,'utf8'),'DROP_ONCE\n');
+});
+
+
+test('Fabric-only runtime rejects ambient fleet inventory and unrelated tool grants before listener creation', () => {
+  // An actual M2 Fabric-only staging once advertised studio_fleet_status
+  // because the shared Studio installer forwarded host-global fleetStatus.
+  const clean = gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false});
+  assert.equal(clean.fabricOnly,true);
+  assert.equal(clean.gitPublish,null);
+  assert.equal(clean.paperDesign,null);
+  assert.equal(clean.fleetStatus,null);
+  const inventory={enabled:true,launcherPath:'/owner/launcher',launcherSha256:'a'.repeat(64),timeoutMs:5000};
+  assert.throws(() => gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false,
+    fleetStatus:inventory}),/Fabric-only/i);
+  assert.throws(() => gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false,
+    repositoryWorkspaces:{enabled:true,allowedRepositories:['mastermind']}}),/Fabric-only/i);
+  assert.throws(() => gatewayMod.resolveConfig({fabricOnly:true,gitPublish:false,paperDesign:false,
+    commissionPublication:{enabled:true,configurationDigest:'a'.repeat(64)}}),/Fabric-only/i);
+  // The separate original Studio profile retains fleet inventory features.
+  const studio=gatewayMod.resolveConfig({fleetStatus:inventory});
+  assert.equal(studio.fleetStatus.launcherPath,inventory.launcherPath);
+  assert.equal(studio.fleetStatus.launcherSha256,inventory.launcherSha256);
+});
+
+test('Fabric-only input requires an explicitly supplied boolean flag', () => {
+  for (const fabricOnly of [undefined, null, 'true', 0, 1, {}, []]) {
+    assert.throws(() => gatewayMod.resolveConfig({
+      fabricOnly, gitPublish: false, paperDesign: false,
+    }), /config\.fabricOnly must be boolean when supplied/);
+  }
+});
+
+test('Fabric-only input requires own literal-false Git and Paper flags', () => {
+  const clean = { fabricOnly: true, gitPublish: false, paperDesign: false };
+  for (const key of ['gitPublish', 'paperDesign']) {
+    const omitted = { ...clean }; delete omitted[key];
+    assert.throws(() => gatewayMod.resolveConfig(omitted),
+      /Fabric-only gateway refuses unrelated host capabilities/);
+    for (const value of [undefined, null, 0, 'false', {}, { enabled: false }, true]) {
+      assert.throws(() => gatewayMod.resolveConfig({ ...clean, [key]: value }),
+        /Fabric-only gateway refuses unrelated host capabilities/);
+    }
+  }
+  const inherited = Object.create({ gitPublish: false, paperDesign: false });
+  inherited.fabricOnly = true;
+  assert.throws(() => gatewayMod.resolveConfig(inherited),
+    /Fabric-only gateway refuses unrelated host capabilities/);
+});
+
+test('Fabric-only input refuses forbidden own keys before disabled-value normalization', () => {
+  for (const key of ['fleetStatus', 'repositoryWorkspaces', 'commissionPublication']) {
+    for (const value of [undefined, null, false, {}, { enabled: false }, 'disabled']) {
+      assert.throws(() => gatewayMod.resolveConfig({
+        fabricOnly: true, gitPublish: false, paperDesign: false, [key]: value,
+      }), /Fabric-only gateway refuses unrelated host capabilities/);
+    }
+  }
+});
+
+test('Fabric-only validation uses the same copied values as capability resolution', () => {
+  const reads = { fabricOnly: 0, gitPublish: 0, paperDesign: 0 };
+  const cfg = gatewayMod.resolveConfig({
+    get fabricOnly() { reads.fabricOnly += 1; return reads.fabricOnly === 1; },
+    get gitPublish() { reads.gitPublish += 1; return reads.gitPublish === 1 ? false : true; },
+    get paperDesign() { reads.paperDesign += 1; return reads.paperDesign === 1 ? false : true; },
+  });
+  assert.deepEqual(reads, { fabricOnly: 1, gitPublish: 1, paperDesign: 1 });
+  assert.equal(cfg.fabricOnly, true);
+  assert.equal(cfg.gitPublish, null);
+  assert.equal(cfg.paperDesign, null);
+});
+
+
+test('actual direct CLI preserves explicit Fabric-only input through auth setup', { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(resolve(tmpdir(), 'studio-fabric-direct-cli-'));
+  const configPath = resolve(dir, 'config.json');
+  const loaderPath = resolve(dir, 'fixture-auth-loader.mjs');
+  const gatewayPath = fileURLToPath(new URL('./gateway.mjs', import.meta.url));
+  const gatewayUrl = pathToFileURL(gatewayPath).href;
+
+  // The public auth owner is supplied by the embedding application. This
+  // test-only dependency refuses every protected request and reads no secret.
+  const authSource = 'export async function createAuth(options) {' +
+    'if (options.stateDir !== ' + JSON.stringify(resolve(dir, 'state')) +
+    ' || options.host !== "127.0.0.1" || options.port !== 0 || options.testMode !== true)' +
+    ' throw new Error("CLI auth options lost their validated paths");' +
+    'return {middleware(_req, res) {res.status(401).end();}};}';
+  const authUrl = 'data:text/javascript;base64,' + Buffer.from(authSource).toString('base64');
+  const loaderSource = 'export function resolve(specifier, context, nextResolve) {' +
+    'if (specifier === "./auth.mjs" && context.parentURL === ' + JSON.stringify(gatewayUrl) +
+    ') return {url:' + JSON.stringify(authUrl) + ',shortCircuit:true};' +
+    'return nextResolve(specifier, context);}';
+  await writeFile(loaderPath, loaderSource);
+  await writeFile(configPath, JSON.stringify({
+    host: '127.0.0.1', port: 0, testMode: true, cwd: '.', stateDir: 'state',
+    command: process.execPath, args: [],
+    fabricOnly: true, gitPublish: false, paperDesign: false,
+  }));
+  const bootstrap = 'import {register} from "node:module";register(' +
+    JSON.stringify(pathToFileURL(loaderPath).href) + ',import.meta.url);';
+  const child = spawn(process.execPath, [
+    '--import', 'data:text/javascript;base64,' + Buffer.from(bootstrap).toString('base64'),
+    gatewayPath, configPath,
+  ], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_OPTIONS: '' } });
+  let logs = '';
+  child.stderr.on('data', chunk => { logs += chunk.toString(); });
+  child.stdout.on('data', chunk => { logs += chunk.toString(); });
+  const exited = once(child, 'close');
+  try {
+    const deadline = Date.now() + 20000;
+    while (!/gateway: listening on http:\/\/127\.0\.0\.1:\d+\/mcp/.test(logs) &&
+           child.exitCode === null && Date.now() < deadline) {
+      await delay(25);
+    }
+    const match = logs.match(/gateway: listening on (http:\/\/127\.0\.0\.1:\d+)\/mcp/);
+    assert.ok(match, 'valid Fabric-only CLI must start; exit=' + child.exitCode + '; logs=' + logs);
+    const response = await fetch(match[1] + '/healthz', { signal: AbortSignal.timeout(3000) });
+    assert.equal(response.status, 200);
+    child.kill('SIGTERM');
+    assert.deepEqual(await exited, [0, null]);
+    assert.match(logs, /gateway_stopped/);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM');
+      await Promise.race([exited, delay(2000)]);
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+        await exited;
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

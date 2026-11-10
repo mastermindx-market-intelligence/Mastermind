@@ -1,0 +1,31 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -1210,14 +1210,26 @@
+       log "USAGE_VALIDATION_FAILED tokens_unknown=1"
+     fi
+   fi
+   CLEAN_RECEIPT=''
+-  [ "$RECEIPT_SAVED" -eq 1 ] && CLEAN_RECEIPT=" \"\$HOME/lanes/ext/lanes/${ID}.process.jsonl\""
++  HOST_RECEIPT_RETAINED=0
++  if [ "$RECEIPT_SAVED" -eq 1 ]; then
++    if [ -n "$NEW_MACRO_COMMIT" ]; then
++      # The original acceptance owner needs this exact host receipt after
++      # the transport copies it to M2. Only newly minted sparse worktrees
++      # retain the 0600 physical process-settlement receipt. Legacy runs
++      # keep the same post-delivery deletion behavior.
++      HOST_RECEIPT_RETAINED=1
++      log "HOST_PROCESS_RECEIPT_RETAINED run=$ID sparse=1 controller_copy=1"
++    else
++      CLEAN_RECEIPT=" \"\$HOME/lanes/ext/lanes/${ID}.process.jsonl\""
++    fi
++  fi
+   CLEAN_USAGE=''
+   [ "$USAGE_SAVED" -eq 1 ] && CLEAN_USAGE=" \"\$HOME/lanes/ext/lanes/${ID}.usage.json\""
+   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+       "rm -f \"\$HOME/lanes/tmp/${ID}.txt\" \"\$HOME/lanes/ext/$REMOTE_RC\" \"\$HOME/lanes/ext/$REMOTE_STDOUT\"$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- \"\$HOME/lanes/tmp/${ID}.support-src\""; then
+-    log "REMOTE_CLEANED transport=1 receipt_saved=$RECEIPT_SAVED usage_saved=$USAGE_SAVED"
++    log "REMOTE_CLEANED transport=1 receipt_saved=$RECEIPT_SAVED host_receipt_retained=$HOST_RECEIPT_RETAINED usage_saved=$USAGE_SAVED"
+   else
+     log "REMOTE_CLEANUP_FAILED; completed work remains reconciled"
+   fi
+ fi

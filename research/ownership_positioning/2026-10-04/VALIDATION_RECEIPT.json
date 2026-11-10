@@ -1,0 +1,224 @@
+{
+  "schema": "c10.research_publication_validation.v1",
+  "checked_at": "2026-10-04T08:01:26.402248+00:00",
+  "scope": "documentation, source-byte integrity, synthetic arithmetic only",
+  "production_acceptance_tests_executed": false,
+  "market_outcome_tests_executed": false,
+  "deployment_performed": false,
+  "implementation_commission_executed": false,
+  "base_sha": "521720b09be2921e996d9396b522b1c4ca62041c",
+  "branch": "sol/web-c10-ownership-hardening-20261004-astra",
+  "source_file_count": 55,
+  "external_source_entries": 34,
+  "internal_evidence_entries": 30,
+  "proposed_acceptance_case_count": 60,
+  "checks": [
+    {
+      "name": "package_files",
+      "status": "PASS",
+      "detail": [
+        "README.md",
+        "REPORT.md",
+        "AUDIT_AND_CENSUS.md",
+        "SOURCE_REGISTER.md",
+        "VALIDATION_SPEC.md",
+        "SOURCE_MANIFEST.json"
+      ]
+    },
+    {
+      "name": "required_A_to_L",
+      "status": "PASS",
+      "detail": "All 12 required sections, ordered once"
+    },
+    {
+      "name": "acceptance_case_ids",
+      "status": "PASS",
+      "detail": "T01 through T60 exactly once; specifications, NOT executed production tests"
+    },
+    {
+      "name": "hypothesis_ids",
+      "status": "PASS",
+      "detail": "H01 through H08 exactly once"
+    },
+    {
+      "name": "source_ids",
+      "status": "PASS",
+      "detail": "34 external primary entries and 30 internal entries"
+    },
+    {
+      "name": "text_integrity:README.md",
+      "status": "PASS",
+      "detail": "No stale session citations or drafting placeholders"
+    },
+    {
+      "name": "whitespace:README.md",
+      "status": "PASS",
+      "detail": "No trailing whitespace"
+    },
+    {
+      "name": "code_fences:README.md",
+      "status": "PASS",
+      "detail": "Balanced fenced blocks"
+    },
+    {
+      "name": "text_integrity:REPORT.md",
+      "status": "PASS",
+      "detail": "No stale session citations or drafting placeholders"
+    },
+    {
+      "name": "whitespace:REPORT.md",
+      "status": "PASS",
+      "detail": "No trailing whitespace"
+    },
+    {
+      "name": "code_fences:REPORT.md",
+      "status": "PASS",
+      "detail": "Balanced fenced blocks"
+    },
+    {
+      "name": "text_integrity:AUDIT_AND_CENSUS.md",
+      "status": "PASS",
+      "detail": "No stale session citations or drafting placeholders"
+    },
+    {
+      "name": "whitespace:AUDIT_AND_CENSUS.md",
+      "status": "PASS",
+      "detail": "No trailing whitespace"
+    },
+    {
+      "name": "code_fences:AUDIT_AND_CENSUS.md",
+      "status": "PASS",
+      "detail": "Balanced fenced blocks"
+    },
+    {
+      "name": "text_integrity:SOURCE_REGISTER.md",
+      "status": "PASS",
+      "detail": "No stale session citations or drafting placeholders"
+    },
+    {
+      "name": "whitespace:SOURCE_REGISTER.md",
+      "status": "PASS",
+      "detail": "No trailing whitespace"
+    },
+    {
+      "name": "code_fences:SOURCE_REGISTER.md",
+      "status": "PASS",
+      "detail": "Balanced fenced blocks"
+    },
+    {
+      "name": "text_integrity:VALIDATION_SPEC.md",
+      "status": "PASS",
+      "detail": "No stale session citations or drafting placeholders"
+    },
+    {
+      "name": "whitespace:VALIDATION_SPEC.md",
+      "status": "PASS",
+      "detail": "No trailing whitespace"
+    },
+    {
+      "name": "code_fences:VALIDATION_SPEC.md",
+      "status": "PASS",
+      "detail": "Balanced fenced blocks"
+    },
+    {
+      "name": "local_links_and_anchors",
+      "status": "PASS",
+      "detail": "60 local links validated, with generated receipt reserved"
+    },
+    {
+      "name": "source_manifest_integrity",
+      "status": "PASS",
+      "detail": "55 selected source files match retained byte lengths, SHA-256 and calculated Git blob digests"
+    },
+    {
+      "name": "X1_dependency_floor",
+      "status": "PASS",
+      "detail": "14:12 UTC latest operational dependency"
+    },
+    {
+      "name": "X2_residual",
+      "status": "PASS",
+      "detail": "Pro-rata residual 0; non-pro-rata residual 5; no causal inference"
+    },
+    {
+      "name": "X3_concentration",
+      "status": "PASS",
+      "detail": "Covered HHI 0.52 differs from issuer-basis square sum 0.13"
+    },
+    {
+      "name": "X4_trial_budget",
+      "status": "PASS",
+      "detail": "8 primary + 16 descriptive + 2 exploratory = 26"
+    },
+    {
+      "name": "X5_mode_distinction",
+      "status": "PASS",
+      "detail": "Documentation retains actual observation year; no operational backdating"
+    },
+    {
+      "name": "workspace_head_and_branch",
+      "status": "PASS",
+      "detail": {
+        "head": "521720b09be2921e996d9396b522b1c4ca62041c",
+        "branch": "sol/web-c10-ownership-hardening-20261004-astra"
+      }
+    },
+    {
+      "name": "docs_only_scope",
+      "status": "PASS",
+      "detail": [
+        "research/ownership_positioning/2026-10-04/AUDIT_AND_CENSUS.md",
+        "research/ownership_positioning/2026-10-04/README.md",
+        "research/ownership_positioning/2026-10-04/REPORT.md",
+        "research/ownership_positioning/2026-10-04/SOURCE_MANIFEST.json",
+        "research/ownership_positioning/2026-10-04/SOURCE_REGISTER.md",
+        "research/ownership_positioning/2026-10-04/VALIDATION_RECEIPT.json",
+        "research/ownership_positioning/2026-10-04/VALIDATION_SPEC.md"
+      ]
+    },
+    {
+      "name": "git_diff_check",
+      "status": "PASS",
+      "detail": "No tracked-diff whitespace errors; all new Markdown separately checked"
+    }
+  ],
+  "files": [
+    {
+      "path": "research/ownership_positioning/2026-10-04/README.md",
+      "bytes": 3922,
+      "sha256": "227fbcaa38ea2f027b763f61aca92f3f9823db69519f991ac61ddd600cbd78f8",
+      "words": 476
+    },
+    {
+      "path": "research/ownership_positioning/2026-10-04/REPORT.md",
+      "bytes": 87521,
+      "sha256": "637aacc85e0d611b7833194525975ef01a7f68b2f31e7cfea35f1838bfaefa0c",
+      "words": 11742
+    },
+    {
+      "path": "research/ownership_positioning/2026-10-04/AUDIT_AND_CENSUS.md",
+      "bytes": 12584,
+      "sha256": "c18d903e6e48901b75326d5a7fefa1341de275311cfcdebe927773da65b6d68a",
+      "words": 1708
+    },
+    {
+      "path": "research/ownership_positioning/2026-10-04/SOURCE_REGISTER.md",
+      "bytes": 25508,
+      "sha256": "24797dd631954bbd0ec0c5dfe87a28fe60cc3f325ecc49c0a509b09e692d7f65",
+      "words": 2279
+    },
+    {
+      "path": "research/ownership_positioning/2026-10-04/VALIDATION_SPEC.md",
+      "bytes": 14911,
+      "sha256": "666c86e4803c9eb22274619a1813046c9ccf1b3c06888e80900361b1f3a16be5",
+      "words": 2228
+    },
+    {
+      "path": "research/ownership_positioning/2026-10-04/SOURCE_MANIFEST.json",
+      "bytes": 28166,
+      "sha256": "2bfaaeffca6ca3ff5ac1b630734985208e597d780f21ddc0f77d703f378b954b",
+      "words": null
+    }
+  ],
+  "receipt_self_hash_excluded": true
+}

@@ -1,0 +1,10 @@
+{
+  "name": "launch_observer_selfcheck_canonical_temporary",
+  "returncode": 0,
+  "seconds": 0.647,
+  "preimage_sha256": "e18a80ee15844b46a00338b4d9a850e2373ccf85eb3a25cbc25628bea8ad7a21",
+  "postimage_sha256": "88d23848f483a8e7b25fda0dc05389efaa6c9634b3744ba8849c665f5eb800a2",
+  "log_sha256": "b61bd236dfc028ff1c9e2d8293dde6d440432371b3660431fb2c5ddb5df90762",
+  "log": "/tmp/h6-c40-focused-results/launch_observer_selfcheck_corrected.log",
+  "production_guard_changed": false
+}

@@ -11,7 +11,9 @@ const SNAPSHOT_RE = /^[0-9a-f]{64}$/;
 const PAPER_FILE_ID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const PREPARE_ATTEMPTS = 12;
 const PREPARE_POLL_MS = 250;
-const PREPARE_STATUS_TIMEOUT_MS = 5_000;
+const PREPARE_STATUS_TIMEOUT_MS = 15_000;
+const PREPARE_OPEN_TIMEOUT_MS = 15_000;
+const PREPARE_TOTAL_BUDGET_MS = 65_000;
 const PREPARE_OPENABLE_STATES = new Set(['UPSTREAM_UNAVAILABLE', 'DOCUMENT_UNAVAILABLE']);
 const MAX_ARGUMENT_BYTES = 1 << 19;
 const MAX_STDIO_BYTES = 12 * 1024 * 1024;
@@ -23,8 +25,12 @@ export const PAPER_INSPECT_TOOL = Object.freeze({
   name: 'paper_inspect',
   title: 'Inspect Paper Design',
   description:
-    'Read Paper Desktop availability and the active design identity through the guarded Mastermind adapter. ' +
-    'Start here when Paper is already on the intended file; if not, use paper_read with tool=list_files, then paper_prepare. ' +
+    'Read Paper Desktop availability and default active-design identity through the guarded Mastermind adapter. ' +
+    'DOCUMENT_UNAVAILABLE means the default active context is unavailable; it does not prove Paper Desktop or a known exact file is unavailable. ' +
+    'If an exact fileId is already known, one read-only paper_read get_basic_info(fileId) may still prove that target readable; if the fileId is unknown, stop at a typed binding gap rather than guessing or invoking blocked resource discovery. ' +
+    'The response also declares the gateway Paper surface contract. If paper_prepare is listed there but absent from the current client tool surface, ' +
+    'treat that as client publication drift and review/refresh the same Studio Direct app\'s approved action snapshot before file-transition work; a reconnect alone is not proof of refresh. ' +
+    'Do not emulate prepare through generic process or desktop commands. ' +
     'Returns a fresh snapshot guard for later edits. This tool does not modify the design.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   annotations: {
@@ -58,8 +64,9 @@ export const PAPER_READ_TOOL = Object.freeze({
   name: 'paper_read',
   title: 'Read Paper Design',
   description:
-    'Run one allowed read-only Paper operation against the active design using the guarded adapter. ' +
-    'Use tool=list_files when the target file id is unknown; then call paper_prepare before editing another file. ' +
+    'Run one allowed read-only Paper operation through the guarded adapter. ' +
+    'When an upstream read accepts fileId, it may read that exact target even if default active-file inspection is unavailable; this proves read serviceability, not write readiness. ' +
+    'The current reviewed catalog does not expose file discovery; when the target file id is unknown, obtain the exact file identity from already accepted task context or stop rather than guessing. ' +
     'Examples include node inspection, screenshots and JSX extraction. Unknown or modifying upstream tools are refused.',
   inputSchema: {
     type: 'object',
@@ -90,15 +97,16 @@ export const PAPER_PREPARE_TOOL = Object.freeze({
   title: 'Prepare Paper File',
   description:
     'Launch or focus the host-pinned Paper Desktop app on one exact Paper file id, then verify the active file and current write-schema qualification. ' +
-    'Use paper_read with tool=list_files first when the file id is unknown. This changes desktop focus but does not edit design content. ' +
-    'Only one modifying session may own a Paper file across hosts at a time.',
+    'The fileId must already be known from accepted task context or an exact-file read; resource discovery remains blocked. ' +
+    'Multiple admitted sessions may modify the same file/page across hosts; coordinate by board/artboard/node target. ' +
+    'The operation/carrier fence is target-scoped, not a file-wide lease.',
   inputSchema: {
     type: 'object',
     properties: {
       file_id: {
         type: 'string',
         pattern: '^[0-9A-HJKMNP-TV-Z]{26}$',
-        description: 'Exact Paper file id returned by list_files or paper_inspect.',
+        description: 'Exact Paper file id from accepted task context, paper_inspect, or a prior exact-file read.',
       },
     },
     required: ['file_id'],
@@ -120,7 +128,8 @@ export const PAPER_EDIT_TOOL = Object.freeze({
   description:
     'Apply one explicitly requested Paper design edit through the guarded adapter. ' +
     'Requires the exact inspected snapshot and a stable operation id. The adapter refuses standalone node-deletion tools, ' +
-    'native host export, file-open transitions and token deletion. Only one modifying session may own a Paper file across hosts at a time. ' +
+    'native host export, file-open transitions and token deletion. Multiple admitted sessions may modify the same file/page across hosts; ' +
+    'prefer disjoint board/artboard/node targets and re-read/re-plan known overlap. The operation/carrier fence is target-scoped, not a file-wide lease. ' +
     'A lost or ambiguous response is reported as EFFECT_UNKNOWN with retry_allowed=false; the gateway performs no automatic replay.',
   inputSchema: {
     type: 'object',
@@ -152,6 +161,21 @@ export const PAPER_DESIGN_TOOLS = Object.freeze([
 ]);
 
 export const PAPER_DESIGN_TOOL_NAMES = new Set(PAPER_DESIGN_TOOLS.map((tool) => tool.name));
+
+export const PAPER_DESIGN_SURFACE_CONTRACT = Object.freeze({
+  schema: 'mastermind.paper_studio_surface.v1',
+  gateway_advertises: Object.freeze(PAPER_DESIGN_TOOLS.map((tool) => tool.name)),
+  file_transition_tool: 'paper_prepare',
+  file_transition_requires_direct_tool: true,
+  client_surface_drift_state: 'STUDIO_TOOL_PUBLICATION_DRIFT',
+  client_surface_recovery: 'REVIEW_AND_REFRESH_APPROVED_APP_ACTION_SNAPSHOT',
+  reconnect_alone_proves_refresh: false,
+  generic_process_fallback_allowed: false,
+  concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+  same_file_multi_writer_allowed: true,
+  same_page_multi_writer_allowed: true,
+  coordination_scope: 'BOARD_ARTBOARD_NODE',
+});
 
 function assertExactKeys(value, allowed, label) {
   for (const key of Object.keys(value)) {
@@ -268,7 +292,12 @@ function activeSnapshot(value) {
 
 function definitelySuccessful(value) {
   const state = resultState(value);
-  return state === null || ['CONNECTED', 'OBSERVED', 'APPLIED_RESPONSE_OBSERVED'].includes(state);
+  // File creation may be observed before its returned destination is read back.
+  // This is not a dispatch error and must never invite an automatic retry.
+  return state === null || [
+    'CONNECTED', 'OBSERVED', 'APPLIED_RESPONSE_OBSERVED',
+    'RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION',
+  ].includes(state);
 }
 
 function sanitizeMcpContent(value) {
@@ -326,6 +355,13 @@ function localFailure(editing, code) {
   };
 }
 
+// Native child_process timeouts are integer milliseconds; zero disables the
+// timeout. A positive submillisecond remainder cannot pay for another call.
+function remainingTimeoutMs(deadline, now) {
+  const ms = Math.floor(deadline - now());
+  return Number.isSafeInteger(ms) && ms > 0 ? ms : 0;
+}
+
 export function createPaperDesigner(config, dependencies = {}) {
   const resolved = resolvePaperDesignConfig(config);
   if (!resolved) return null;
@@ -333,21 +369,36 @@ export function createPaperDesigner(config, dependencies = {}) {
     execFile: dependencies.execFile ?? execFileDefault,
     readFile: dependencies.readFile ?? readFile,
     lstat: dependencies.lstat ?? lstat,
-    openFile: dependencies.openFile ?? (async (appPath, fileId) => execFileDefault(
+    openFile: dependencies.openFile ?? (async (appPath, fileId, timeoutMs = PREPARE_OPEN_TIMEOUT_MS) => execFileDefault(
       '/usr/bin/open',
       ['-a', appPath, `paper://file/${fileId}`],
-      { timeout: 15_000, maxBuffer: 1 << 20, env: minimalEnv(), windowsHide: true },
+      { timeout: Math.min(PREPARE_OPEN_TIMEOUT_MS, Math.max(1, timeoutMs)), maxBuffer: 1 << 20, env: minimalEnv(), windowsHide: true },
     )),
     sleep: dependencies.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+    now: dependencies.now ?? (() => performance.now()),
   };
 
-  async function dispatch(action, args, { editing = false, timeoutMs = resolved.commandTimeoutMs } = {}) {
+  async function dispatch(action, args, { editing = false, timeoutMs = resolved.commandTimeoutMs, deadline = null } = {}) {
     try {
       await verifyBridge(resolved, deps);
     } catch {
       // Bridge identity is checked before any subprocess or Paper call begins.
       // A mismatch is a definite refusal, never an ambiguous modifying effect.
       return localFailure(false, 'PAPER_BRIDGE_IDENTITY_REFUSED');
+    }
+    // Use a monotonic clock and capture one remaining budget at the
+    // immediate pre-spawn boundary; do not grant a fresh timeout after expiry.
+    const budgetRemaining = deadline === null ? null : remainingTimeoutMs(deadline, deps.now);
+    if (budgetRemaining !== null && budgetRemaining <= 0) {
+      // The prepare budget expired while bridge identity preflight ran.
+      // No subprocess was launched, so this is a definite local no-effect;
+      // the prepare owner maps it to its exact outcome state.
+      return {
+        value: { state: 'PAPER_PREPARE_BUDGET_EXHAUSTED', retry_allowed: false },
+        isError: true,
+        effectUnknown: false,
+        budgetExhausted: true,
+      };
     }
 
     let stdout = '';
@@ -356,7 +407,11 @@ export function createPaperDesigner(config, dependencies = {}) {
         resolved.pythonPath,
         [resolved.bridgePath, ...args],
         {
-          timeout: timeoutMs,
+          // A bounded prepare never starts new subprocess work past its total
+          // budget: the per-call timeout carries only the positive remainder.
+          timeout: budgetRemaining === null
+            ? timeoutMs
+            : Math.min(timeoutMs, budgetRemaining),
           maxBuffer: MAX_STDIO_BYTES,
           env: minimalEnv(),
           windowsHide: true,
@@ -395,7 +450,17 @@ export function createPaperDesigner(config, dependencies = {}) {
   return Object.freeze({
     async call(name, input = {}) {
       if (name === PAPER_INSPECT_TOOL.name) {
-        return dispatch('status', ['status']);
+        const result = await dispatch('status', ['status']);
+        if (!result?.isError && result?.value && typeof result.value === 'object' && !Array.isArray(result.value)) {
+          return {
+            ...result,
+            value: {
+              ...result.value,
+              gateway_surface: PAPER_DESIGN_SURFACE_CONTRACT,
+            },
+          };
+        }
+        return result;
       }
       if (name === PAPER_CATALOG_TOOL.name) {
         return dispatch('catalog', ['catalog']);
@@ -427,8 +492,32 @@ export function createPaperDesigner(config, dependencies = {}) {
           return localFailure(false, 'PAPER_INVALID_ARGUMENTS');
         }
         const fileId = input.file_id;
+        // Live Paper can require about 10 seconds to report DOCUMENT_UNAVAILABLE
+        // from the Dashboard. Keep a separate overall budget so a slow endpoint
+        // never turns the bounded 12-step post-open verification into a long wait.
+        // The clock is injectable so budget arithmetic stays deterministic in tests.
+        const clock = deps.now;
+        const deadline = clock() + Math.min(resolved.commandTimeoutMs, PREPARE_TOTAL_BUDGET_MS);
+        const remaining = () => remainingTimeoutMs(deadline, clock);
         const prepareTimeoutMs = Math.min(resolved.commandTimeoutMs, PREPARE_STATUS_TIMEOUT_MS);
-        let observed = await dispatch('status', ['status'], { timeoutMs: prepareTimeoutMs });
+        // Exhaustion before any desktop transition is a definite no-effect:
+        // no open(1) ran, so no effect can be in flight and nothing is ambiguous.
+        const budgetExhaustedBeforeOpen = () => ({
+          value: {
+            state: 'PAPER_PREPARE_BUDGET_EXHAUSTED',
+            file_id: fileId,
+            retry_allowed: false,
+            app_open_attempted: false,
+          },
+          isError: true,
+          effectUnknown: false,
+        });
+        const readStatus = () => dispatch('status', ['status'], {
+          timeoutMs: prepareTimeoutMs,
+          deadline,
+        });
+        let observed = await readStatus();
+        if (observed.budgetExhausted) return budgetExhaustedBeforeOpen();
         let alreadyActive = !observed.isError && activeFileId(observed.value) === fileId;
         let openAttempted = false;
 
@@ -436,22 +525,32 @@ export function createPaperDesigner(config, dependencies = {}) {
           if (observed.isError && !PREPARE_OPENABLE_STATES.has(resultState(observed.value))) {
             return observed;
           }
+          if (remaining() <= 0) return budgetExhaustedBeforeOpen();
           try {
             await verifyPaperApp(resolved, deps);
           } catch {
             return localFailure(false, 'PAPER_APP_IDENTITY_REFUSED');
           }
+          // Re-check after the awaited identity preflight too: elapsed I/O must
+          // never leave room for a desktop transition past the total budget.
+          const remainingBeforeOpen = remaining();
+          if (remainingBeforeOpen <= 0) return budgetExhaustedBeforeOpen();
           openAttempted = true;
           try {
-            await deps.openFile(resolved.appPath, fileId);
+            // Carry precisely the already-tested positive remaining time to
+            // the pinned open(1) effect; no fresh clock read may widen it.
+            await deps.openFile(resolved.appPath, fileId, Math.min(PREPARE_OPEN_TIMEOUT_MS, remainingBeforeOpen));
           } catch {
             // The desktop transition can still have happened even when open(1) lost its reply.
             // Reconcile by observing the exact target file before deciding the outcome.
           }
-          for (let attempt = 0; attempt < PREPARE_ATTEMPTS; attempt += 1) {
-            observed = await dispatch('status', ['status'], { timeoutMs: prepareTimeoutMs });
+          for (let attempt = 0; attempt < PREPARE_ATTEMPTS && remaining() > 0; attempt += 1) {
+            observed = await readStatus();
+            if (observed.budgetExhausted) break;
             if (!observed.isError && activeFileId(observed.value) === fileId) break;
-            if (attempt + 1 < PREPARE_ATTEMPTS) await deps.sleep(PREPARE_POLL_MS);
+            if (attempt + 1 < PREPARE_ATTEMPTS && remaining() > 0) {
+              await deps.sleep(Math.min(PREPARE_POLL_MS, remaining()));
+            }
           }
         }
 
@@ -462,15 +561,26 @@ export function createPaperDesigner(config, dependencies = {}) {
               file_id: fileId,
               retry_allowed: false,
               app_open_attempted: openAttempted,
-              concurrency_rule: 'ONE_WRITER_PER_FILE_ACROSS_HOSTS',
+              concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+              same_file_multi_writer_allowed: true,
+              same_page_multi_writer_allowed: true,
+              coordination_scope: 'BOARD_ARTBOARD_NODE',
             },
             isError: true,
             effectUnknown: openAttempted,
           };
         }
 
-        const catalog = await dispatch('catalog', ['catalog'], { timeoutMs: prepareTimeoutMs });
-        const acceptedForWrite = !catalog.isError && catalog.value?.write_schema?.accepted_for_write === true;
+        const catalog = await dispatch('catalog', ['catalog'], {
+          timeoutMs: prepareTimeoutMs,
+          deadline,
+        });
+        // A catalog budget exhausted after the exact target was observed keeps
+        // the truthful read-only readiness: write qualification stays false and
+        // the reason names the exhausted budget instead of inventing permission.
+        const catalogExhausted = catalog.budgetExhausted === true;
+        const acceptedForWrite = !catalogExhausted && !catalog.isError
+          && catalog.value?.write_schema?.accepted_for_write === true;
         return {
           value: {
             state: acceptedForWrite ? 'PAPER_READY' : 'PAPER_READY_READ_ONLY',
@@ -478,11 +588,16 @@ export function createPaperDesigner(config, dependencies = {}) {
             snapshot_sha256: activeSnapshot(observed.value),
             server: observed.value?.server ?? null,
             write_qualified: acceptedForWrite,
-            write_schema: catalog.isError ? null : (catalog.value?.write_schema ?? null),
-            write_reason: catalog.isError ? (catalog.value?.state ?? 'PAPER_WRITE_QUALIFICATION_UNAVAILABLE') : null,
+            write_schema: (catalogExhausted || catalog.isError) ? null : (catalog.value?.write_schema ?? null),
+            write_reason: catalogExhausted
+              ? 'PAPER_PREPARE_BUDGET_EXHAUSTED'
+              : (catalog.isError ? (catalog.value?.state ?? 'PAPER_WRITE_QUALIFICATION_UNAVAILABLE') : null),
             already_active: alreadyActive,
             app_open_attempted: openAttempted,
-            concurrency_rule: 'ONE_WRITER_PER_FILE_ACROSS_HOSTS',
+            concurrency_rule: 'MULTI_WRITER_PER_FILE_TARGET_SCOPED',
+            same_file_multi_writer_allowed: true,
+            same_page_multi_writer_allowed: true,
+            coordination_scope: 'BOARD_ARTBOARD_NODE',
           },
           isError: false,
           effectUnknown: false,

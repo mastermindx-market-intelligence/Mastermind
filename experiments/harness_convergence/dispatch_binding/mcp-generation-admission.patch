@@ -1,0 +1,235 @@
+--- a/packages/mcp/mcp-client/src/tools.ts
++++ b/packages/mcp/mcp-client/src/tools.ts
+@@ -25 +25 @@
+-import type { JsonValue } from '@deepseek-ai/dsh-util-values'
++import { deepFreeze, type JsonValue } from '@deepseek-ai/dsh-util-values'
+@@ -26,0 +27,19 @@
++/** Full SDK-discovered schema, before public-name projection or selection. */
++type ListedMcpTool = Awaited<ReturnType<Client['listTools']>>['tools'][number]
++
++/** Trusted host admission observes a detached, deeply frozen generation. */
++export interface McpToolGeneration {
++  readonly serverName: string
++  readonly serverInfo: ReturnType<Client['getServerVersion']>
++  readonly tools: readonly ListedMcpTool[]
++}
++
++/** One raw tool identity and a repeatable, synchronous live permission check. */
++export interface McpToolAdmission {
++  readonly rawName: string
++  readonly allow: (execution: Readonly<ToolExecution>) => boolean
++}
++
++/** This callback is host code, not a model argument or serialized plugin option. */
++export type McpGenerationAdmission = (generation: McpToolGeneration) => readonly McpToolAdmission[]
++
+@@ -32,0 +52,4 @@
++  /** Trusted synchronous admission; absent preserves legacy behavior. */
++  admitGeneration?: McpGenerationAdmission
++  /** Connection-owner predicate; required only with admission. */
++  isCurrentGeneration?: () => boolean
+@@ -92 +115 @@
+- * Two phases keep the swap safe:
++ * Without host admission, two phases retain the legacy swap behavior:
+@@ -104,0 +128,5 @@
++ * With trusted admission, the prior generation is retired before discovery can
++ * suspend or fail. A frozen complete snapshot is selected by the host; each
++ * retained closure rechecks its live grant and connection before SDK dispatch.
++ * The caller serializes syncs and owns connection identity and transport effects.
++ *
+@@ -109 +137 @@
+- *   during the swap phase (only after the fetch phase succeeded).
++ *   after fetch in legacy mode, or before refresh in admitted mode.
+@@ -119,2 +147,13 @@
+-  // Phase 1: fetch and build the next generation without touching the registry.
+-  const definitions = new Map<string, ToolDefinition>()
++  const admission = opts.admitGeneration
++  const current = opts.isCurrentGeneration
++  const strict = admission !== undefined
++  const isCurrent = () => typeof current === 'function' && current() === true
++  let active = true
++  // An admitted generation loses permission before refresh can suspend or fail.
++  // The unconfigured legacy bridge retains its original fetch-then-swap behavior.
++  if (strict) {
++    for (const dispose of previous.values()) dispose()
++    if (typeof admission !== 'function' || !isCurrent()) {
++      throw new Error('MCP_GENERATION_ADMISSION_UNAVAILABLE')
++    }
++  }
+@@ -124 +163,3 @@
+-  for (const tool of response.tools) {
++  const tools = strict ? deepFreeze(structuredClone(response.tools)) : response.tools
++  const publicNames = new Set<string>()
++  for (const tool of tools) {
+@@ -126,4 +167,20 @@
+-    if (definitions.has(publicName)) {
+-      throw new Error(
+-        `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
+-      )
++    if (publicNames.has(publicName)) {
++      throw new Error(`mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`)
++    }
++    publicNames.add(publicName)
++  }
++  let grants: Map<string, McpToolAdmission['allow']> | undefined
++  if (strict) {
++    if (!isCurrent()) throw new Error('MCP_GENERATION_NOT_CURRENT')
++    const selected = admission(deepFreeze({
++      serverName: opts.serverName,
++      serverInfo: structuredClone(client.getServerVersion()),
++      tools,
++    }))
++    if (!Array.isArray(selected)) throw new Error('MCP_GENERATION_ADMISSION_INVALID')
++    grants = new Map()
++    const rawNames = new Set(tools.map(tool => tool.name))
++    for (const grant of selected) {
++      if (!grant || !rawNames.has(grant.rawName) || grants.has(grant.rawName)
++        || typeof grant.allow !== 'function') throw new Error('MCP_GENERATION_ADMISSION_INVALID')
++      grants.set(grant.rawName, grant.allow)
+@@ -130,0 +188,6 @@
++  }
++  const definitions = new Map<string, ToolDefinition>()
++  for (const tool of tools) {
++    const allow = grants?.get(tool.name)
++    if (strict && allow === undefined) continue
++    const publicName = publicToolName(opts.serverName, tool.name)
+@@ -132,5 +195,2 @@
+-      name: publicName,
+-      rawName: tool.name,
+-      description: tool.description ?? '',
+-      inputSchema: tool.inputSchema,
+-      outputSchema: tool.outputSchema,
++      name: publicName, rawName: tool.name, description: tool.description ?? '',
++      inputSchema: tool.inputSchema, outputSchema: tool.outputSchema,
+@@ -138,4 +198,10 @@
+-      call: (args, execution) => client.callTool(
+-        { name: tool.name, arguments: args },
+-        { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
+-      ),
++      call: (args, execution) => {
++        // No await between final grant/currentness checks and the SDK invocation.
++        // Recheck after the trusted guard as well: it may observe revocation.
++        if (strict && (!active || !isCurrent() || allow?.(execution) !== true
++          || !active || !isCurrent())) throw new Error('MCP_TOOL_ADMISSION_REFUSED')
++        return client.callTool(
++          { name: tool.name, arguments: args },
++          { signal: execution.signal, timeout: opts.toolCallTimeoutMs, toolDefinition: tool },
++        )
++      },
+@@ -144,3 +210,2 @@
+-
+-  // Phase 2: swap generations.
+-  for (const dispose of previous.values()) dispose()
++  if (strict && !isCurrent()) throw new Error('MCP_GENERATION_NOT_CURRENT')
++  if (!strict) for (const dispose of previous.values()) dispose()
+@@ -150 +215,8 @@
+-      disposers.set(publicName, ctx.tools.register(definition))
++      const dispose = ctx.tools.register(definition)
++      let registered = true
++      disposers.set(publicName, strict ? () => {
++        active = false
++        if (!registered) return
++        registered = false
++        dispose()
++      } : dispose)
+@@ -153,3 +225 @@
+-    // A conflict on an `mcp__<serverName>__`-qualified name means a foreign
+-    // registration occupies this server's namespace. Roll back so the model
+-    // sees either the full generation or none of it — never a partial set.
++    active = false
+--- a/packages/mcp/mcp-client/src/connection.ts
++++ b/packages/mcp/mcp-client/src/connection.ts
+@@ -25 +25 @@
+-import type { ToolBridgeOptions, ToolDisposers } from './tools.ts'
++import type { McpGenerationAdmission, ToolBridgeOptions, ToolDisposers } from './tools.ts'
+@@ -124,0 +125 @@
++ * @param admitGeneration - Optional trusted host policy, never a model/config payload.
+@@ -127 +128,2 @@
+-export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy): ConnectionHandle {
++export function startConnection(ctx: Context, config: Config, policy: ResolvedReconnectPolicy,
++  admitGeneration?: McpGenerationAdmission): ConnectionHandle {
+@@ -128,0 +131,3 @@
++  // Tool admission grants neither prompt instructions nor resource access.
++  // The initial host-admitted profile is tool-only; legacy composition is unchanged.
++  const toolOnly = admitGeneration !== undefined
+@@ -133,0 +139 @@
++    ...admitGeneration === undefined ? {} : { admitGeneration },
+@@ -172 +178,3 @@
+-      disposers = await syncTools(generation, ctx, syncOpts, disposers)
++      const currentOpts = admitGeneration === undefined ? syncOpts
++        : { ...syncOpts, isCurrentGeneration: () => isCurrent(generation) }
++      disposers = await syncTools(generation, ctx, currentOpts, disposers)
+@@ -307 +315 @@
+-      transport = createTransport(config)
++      transport = createTransport(config, toolOnly)
+@@ -365 +373 @@
+-    instructions: () => serverInstructions,
++    instructions: () => toolOnly ? '' : serverInstructions,
+@@ -367,0 +376 @@
++        if (toolOnly) throw new Error('MCP_RESOURCE_NOT_ADMITTED')
+--- a/packages/mcp/mcp-client/src/index.ts
++++ b/packages/mcp/mcp-client/src/index.ts
+@@ -21,0 +22,2 @@
++import type { McpGenerationAdmission } from './tools.ts'
++import { deepFreeze } from '@deepseek-ai/dsh-util-values'
+@@ -26,0 +29,2 @@
++export { startConnection, resolveReconnectPolicy } from './connection.ts'
++export type { McpGenerationAdmission, McpToolAdmission, McpToolGeneration } from './tools.ts'
+@@ -153,0 +158,23 @@
++/**
++ * Build a programmatic, tool-only plugin under the existing Cordis lifecycle.
++ * The host owns this closure; admission is never read from model/YAML config.
++ * This first profile forbids implicit retry and permissive startup.
++ */
++export function createAdmittedPlugin(admitGeneration: McpGenerationAdmission, signal: AbortSignal) {
++  if (typeof admitGeneration !== 'function' || !(signal instanceof AbortSignal)) {
++    throw new TypeError('Trusted admission function and owner AbortSignal required')
++  }
++  return {
++    name: 'mcp-client-admitted', inject, Config,
++    async apply(ctx: Context, config: Config): Promise<void> {
++      signal.throwIfAborted()
++      const fixedConfig = deepFreeze(structuredClone(config))
++      if (fixedConfig.failOnStartupError !== true || fixedConfig.reconnect?.enabled !== false) {
++        throw new Error('MCP_ADMITTED_STARTUP_POLICY_REFUSED')
++      }
++      await activate(ctx, fixedConfig, admitGeneration, signal)
++    },
++  }
++}
++
++/** Legacy entry point retains its original activation policy. */
+@@ -154,0 +182,14 @@
++  await activate(ctx, config)
++}
++
++async function activate(ctx: Context, config: Config,
++  admitGeneration?: McpGenerationAdmission, signal?: AbortSignal): Promise<void> {
++  signal?.throwIfAborted()
++  if (signal !== undefined) {
++    // Use the existing plugin disposal edge, whose connection effect is awaited.
++    const abort = () => { void ctx.fiber.dispose().catch(() => {}) }
++    ctx.effect(() => {
++      signal.addEventListener('abort', abort, { once: true })
++      return () => signal.removeEventListener('abort', abort)
++    }, 'mcp-client.owner-abort')
++  }
+@@ -181,2 +222,2 @@
+-  const connection = startConnection(ctx, config, reconnect)
+-  registerServerContext(ctx, config.serverName, connection)
++  const connection = startConnection(ctx, config, reconnect, admitGeneration)
++  if (admitGeneration === undefined) registerServerContext(ctx, config.serverName, connection)
+@@ -199,0 +241 @@
++  signal?.throwIfAborted()
+--- a/packages/mcp/mcp-client/src/transport.ts
++++ b/packages/mcp/mcp-client/src/transport.ts
+@@ -28,0 +29,3 @@
++ * @param explicitEnvironment - Trusted host-admitted path: explicit env plus the
++ *   SDK's fixed bootstrap allowlist only. The host must pin HOME/PATH in config.env.
++ *   Omission preserves the legacy scrubbed-ambient environment.
+@@ -31 +34 @@
+-export function createTransport(config: Config): Transport {
++export function createTransport(config: Config, explicitEnvironment = false): Transport {
+@@ -37 +40 @@
+-        env: buildChildEnv(config.env),
++        env: explicitEnvironment ? { ...config.env } : buildChildEnv(config.env),

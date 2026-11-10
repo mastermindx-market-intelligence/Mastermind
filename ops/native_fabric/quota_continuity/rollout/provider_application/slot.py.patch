@@ -1,0 +1,168 @@
+--- a/ext/slot.py
++++ b/ext/slot.py
+@@ -37,7 +37,7 @@
+     settle_owned_process_session,
+ )
+ 
+-CAPS = {"qwen": 8, "minimax": 7, "grok": None, "cursor": None, "glm": 0, "glm-frontier": 0, "go": 9, "ocfree": 3}
++CAPS = {"qwen": 8, "minimax": 7, "grok": None, "cursor": None, "glm": 0, "glm-frontier": 0, "experiential": 0, "byteplus": 0, "go": 9, "ocfree": 3}
+ HERE = os.path.dirname(os.path.abspath(__file__))
+ BROKER = os.path.join(HERE, "lease_broker.py")
+ HOSTS_JSON_PATH = os.path.join(HERE, "hosts.json")
+@@ -789,6 +789,9 @@
+ 
+ 
+ def _pool_ledger_refusal(pool, refusal):
++    if pool in {"byteplus", "experiential"}:
++        # The local controller publishes the one original-run terminal.
++        return
+     try:
+         subprocess.run(
+             [
+@@ -814,6 +817,12 @@
+ 
+ 
+ def _pool_cap(pool):
++    if pool in ("byteplus", "experiential"):
++        try:
++            from lease_broker import default_broker
++            return max(0, int(default_broker().pool_cap(pool)))
++        except Exception:
++            return 0
+     if pool in ("grok", "cursor"):
+         # No provider semaphore quota. Remote lanes already hold the Studio
+         # broker lease and a physical LaneLease; local flock uses host capacity.
+@@ -1009,6 +1018,15 @@
+ 
+ 
+ def _broker_model_for_pool(pool):
++    if pool in ("byteplus", "experiential"):
++        model = os.environ.get("POOL_SELECTED_MODEL", "")
++        if pool == "byteplus":
++            from byteplus_coding_plan import MODELS
++        else:
++            from experiential_plan_policy import PLAN_MODELS as MODELS
++        if model not in MODELS:
++            raise ValueError("PLAN_EXACT_MODEL_REQUIRED")
++        return model
+     if pool == "glm-frontier":
+         return "glm-5.3"
+     if pool == "glm":
+@@ -1303,7 +1321,7 @@
+             signal.signal(signum, previous)
+ 
+ 
+-def main(argv=None):
++def _main(argv=None, *, physical_lease=None):
+     a = sys.argv[1:] if argv is None else list(argv)
+     if len(a) < 3:
+         print(__doc__)
+@@ -1337,6 +1355,7 @@
+     try:
+         _child_runtime_limit()
+     except LaneRuntimeConfigError as exc:
++        _plan_admission_refusal(pool, "child_runtime", 78)
+         print("slot.py: admission_denied reason=%s" % str(exc), file=sys.stderr)
+         return 78
+     # The local lease heartbeat is the custody signal for an unleased worker.
+@@ -1345,12 +1364,14 @@
+     if os.environ.get("LANE_LEASED") != "1" and (
+         not math.isfinite(LEASE_TTL_S) or not 0.01 <= LEASE_TTL_S <= 15000
+     ):
++        _plan_admission_refusal(pool, "lease_ttl", 78)
+         print("slot.py: admission_denied reason=lease_ttl_invalid", file=sys.stderr)
+         return 78
+     host_refusal = _local_host_admission_refusal(pool)
+     if host_refusal:
+         print(f"slot.py: pool={pool} admission_denied reason={host_refusal}", file=sys.stderr)
+         _pool_ledger_refusal(pool, host_refusal)
++        _plan_admission_refusal(pool, "host_admission", 78)
+         return 78
+     cap = _pool_cap(pool)
+     if cap == 0:
+@@ -1368,11 +1389,13 @@
+                 file=sys.stderr,
+             )
+         _pool_ledger_refusal(pool, refusal)
++        _plan_admission_refusal(pool, "pool_capacity", 78)
+         return 78
+ 
+     # W4-K2 R24: local flock FIRST (host safety net)…
+     fh, waited = _acquire_flock(_local_semaphore_pool(pool), cap, wait)
+     if fh is None:
++        _plan_admission_refusal(pool, "local_flock", 75)
+         print("SLOT_TIMEOUT pool=%s after %ss (local flock)" % (pool, int(wait)),
+               file=sys.stderr)
+         return 75
+@@ -1399,6 +1422,9 @@
+         return outcome.returncode
+     finally:
+         try:
++            if physical_lease is not None and (outcome is None or outcome.release_safe is not True
++                                               or outcome.returncode == LEASE_LOST_RC):
++                physical_lease.hold_for_reconciliation("plan_child_cleanup_or_effect_unproven")
+             stop.set()
+             if outcome is not None and outcome.release_safe is True:
+                 current = (os.environ.get("POOL_LEASE_ID") or lease_id or "").strip()
+@@ -1410,5 +1436,61 @@
+             _release_flock(fh)
+ 
+ 
++def _plan_admission_refusal(pool, reason, rc):
++    if pool in {"byteplus", "experiential"}:
++        from native_plan_worker import record_admission_refusal
++        record_admission_refusal(pool, reason, rc)
++
++
++def main(argv=None):
++    args = sys.argv[1:] if argv is None else list(argv)
++    if not args or args[0] not in {"byteplus", "experiential"}:
++        return _main(argv)
++    from pathlib import Path
++    from lane_runtime import LaneLease, LaneAdmissionRefused, enforce_remote_first_lane_launch
++    env = dict(os.environ)
++    pool = args[0]
++    if env.get("LANE_LEASED") == "1" or env.get("POOL_LEASE_ID"):
++        print("PLAN_UNVERIFIED_OUTER_LEASE_REFUSED", file=sys.stderr)
++        return 78
++    run, root = env.get("POOL_RUN_ID", ""), env.get("POOL_ORCHESTRATOR_ID", "")
++    if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value) for value in (run, root)):
++        print("PLAN_ORIGINAL_IDENTITY_REQUIRED", file=sys.stderr)
++        return 78
++    active = Path(HERE) / "active"
++    if env.get("LANE_ACTIVE_DIR") and Path(env["LANE_ACTIVE_DIR"]).resolve() != active.resolve():
++        print("PLAN_NONCANONICAL_ACTIVE_DIRECTORY", file=sys.stderr)
++        return 78
++    refusal = _local_host_admission_refusal(pool)
++    if refusal:
++        _plan_admission_refusal(pool, "host_admission", 78)
++        print("PLAN_HOST_ADMISSION_REFUSED " + refusal, file=sys.stderr)
++        return 78
++    physical = None
++    try:
++        limits = enforce_remote_first_lane_launch(Path(HERE), env, requested_engines=(pool,))
++        if limits is None:
++            raise LaneRuntimeConfigError("plan_local_host_policy_required")
++        key = "plan-" + hashlib.sha256((root + "\n" + run + "\n" + pool).encode()).hexdigest()[:40]
++        physical = LaneLease.acquire(
++            active, key=key, label=key, max_active=limits["max_active"],
++            load_ratio_limit=limits["load_ratio_limit"],
++            source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
++            env=env, reconcile_unreleased=True)
++        return _main(argv, physical_lease=physical)
++    except LaneAdmissionRefused as exc:
++        _plan_admission_refusal(pool, "physical_admission", 75)
++        print("LANE_ADMISSION_REFUSED " + json.dumps(exc.snapshot.public_dict(), sort_keys=True), file=sys.stderr)
++        return 75
++    except LaneRuntimeConfigError as exc:
++        if physical is None:
++            _plan_admission_refusal(pool, "host_policy", 78)
++        print("PLAN_HOST_POLICY_REFUSED " + str(exc), file=sys.stderr)
++        return 78
++    finally:
++        if physical is not None:
++            physical.release()
++
++
+ if __name__ == "__main__":
+     sys.exit(main())

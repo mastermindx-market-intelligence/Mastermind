@@ -1,0 +1,33 @@
+{
+  "schema": "mastermind.source_qualification.v1",
+  "scope": "future artifact seal tool framing only",
+  "created_at": "2026-10-14T09:20:37.639625+00:00",
+  "repository_base": "92f29526388260dab8ed9a02af8ed21e5b8af8ad",
+  "installed_preimage_sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+  "candidate_sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+  "tests": {
+    "BASE_RED.xml": {
+      "tests": 10,
+      "failures": 5,
+      "errors": 0,
+      "skips": 0,
+      "sha256": "f8fe74d45afa6645ea8fe46548167c91d0a975dd910f7c9e25bdf8e796240997"
+    },
+    "CANDIDATE_TESTS.xml": {
+      "tests": 34,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "sha256": "ef4bc62037ce41859a65c2320511f93f35c368d9b68cf517793cdfd425cdf690"
+    }
+  },
+  "test_dependency_sha256": {
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "artifact_delivery.py": "2e0a03387f78bf98dba5c1fe42b7ee2ee99d99888624eea79c7f0f889683c3a6"
+  },
+  "test_command": "python -m pytest -q test_tool_framing.py test_manifest_compatibility.py --tb=short --junitxml=CANDIDATE_TESTS.xml",
+  "runtime_effects": false,
+  "installed": false,
+  "live_execution_proof": false,
+  "historical_acceptance_changed": false
+}

@@ -274,7 +274,8 @@ def test_private_ephemeral_sdk_has_zero_settings_tools_and_native_nonpersistence
     }
 
 
-def test_private_ephemeral_sdk_failure_never_falls_through_to_subprocess(monkeypatch, tmp_path):
+@pytest.mark.parametrize("sdk_available", [True, False])
+def test_private_ephemeral_sdk_failure_never_falls_through_to_subprocess(monkeypatch, tmp_path, sdk_available):
     from brain import cli_bridge as cb
     from brain import key_rotor
 
@@ -284,7 +285,7 @@ def test_private_ephemeral_sdk_failure_never_falls_through_to_subprocess(monkeyp
     async def forbidden_subprocess(*args, **kwargs):
         raise AssertionError("private evidence must never reach subprocess fallback")
 
-    monkeypatch.setattr(cb, "_SDK", True)
+    monkeypatch.setattr(cb, "_SDK", sdk_available)
     monkeypatch.setattr(cb, "cli_path", lambda: "/fake/claude")
     monkeypatch.setattr(cb, "_via_sdk", broken_sdk)
     monkeypatch.setattr(cb, "_via_subprocess", forbidden_subprocess)
@@ -312,7 +313,8 @@ def test_private_ephemeral_sdk_failure_never_falls_through_to_subprocess(monkeyp
 
     assert result["ok"] is False
     assert result["backend"] == "none"
-    assert "sdk private failure" in result["error"]
+    expected = "sdk private failure" if sdk_available else "private ephemeral reasoning requires the Agent SDK"
+    assert expected in result["error"]
 
 
 @pytest.mark.parametrize("field,value,expected", [
@@ -326,3 +328,124 @@ def test_effectful_or_overclaimed_discovery_report_is_refused(field, value, expe
     item["digest"] = _digest({key: val for key, val in item.items() if key != "digest"})
     with pytest.raises(ValueError, match=expected):
         C.draft_proposals(item)
+
+
+@pytest.fixture
+def private_ephemeral_transport(monkeypatch):
+    """Keep real dispatcher/guard/options logic; replace provider and persistence edges."""
+    from brain import cli_bridge as cb
+    from brain import key_rotor, provider_waterfall, runlog, thinking_log
+
+    seen = {"queries": [], "options": [], "fallback": [], "cooling": [],
+            "runs": [], "thinking": [], "sessions": [], "costs": []}
+
+    def options(**kwargs):
+        value = SimpleNamespace(**kwargs)
+        seen["options"].append(value)
+        return value
+
+    async def query(*, prompt, options):
+        seen["queries"].append(prompt)
+        yield SimpleNamespace(result="private advisory result", total_cost_usd=0.0,
+                              session_id="ephemeral-test-session",
+                              usage={"input_tokens": 1, "output_tokens": 1})
+
+    async def forbidden_subprocess(*args, **kwargs):
+        seen["fallback"].append(True)
+        raise AssertionError("private evidence reached a subprocess")
+
+    monkeypatch.setenv("BOT_LLM_BACKEND", "cli")
+    monkeypatch.setattr(cb, "_cfg", lambda: {
+        "backend": "cli", "roles": {"deep": "model-x"},
+        "reasoning": {"max_turns": 1},
+    })
+    monkeypatch.setattr(cb, "_SDK", True)
+    monkeypatch.setattr(cb, "_Options", options, raising=False)
+    monkeypatch.setattr(cb, "_sdk_query", query, raising=False)
+    monkeypatch.setattr(cb, "_subscription_env", lambda env_name=None: {})
+    monkeypatch.setattr(cb, "cli_path", lambda: "/fake/claude")
+    monkeypatch.setattr(cb, "_via_subprocess", forbidden_subprocess)
+    monkeypatch.setattr(cb, "_record_cli_cost",
+                        lambda *args, **kwargs: seen["costs"].append(kwargs))
+    monkeypatch.setattr(key_rotor, "candidates", lambda: [
+        {"key_id": "private-test-slot-a", "env_name": "PRIVATE_TEST_SLOT_A", "cooling": False},
+        {"key_id": "private-test-slot-b", "env_name": "PRIVATE_TEST_SLOT_B", "cooling": False},
+    ])
+    monkeypatch.setattr(key_rotor, "mark_cooling",
+                        lambda *args, **kwargs: seen["cooling"].append(args))
+    monkeypatch.setattr(key_rotor, "record_session",
+                        lambda *args, **kwargs: seen["sessions"].append((args, kwargs)))
+    monkeypatch.setattr(runlog, "start_run",
+                        lambda *args, **kwargs: seen["runs"].append((args, kwargs)))
+    monkeypatch.setattr(thinking_log, "log_turn_async",
+                        lambda *args, **kwargs: seen["thinking"].append((args, kwargs)))
+    return SimpleNamespace(bridge=cb, waterfall=provider_waterfall, seen=seen)
+
+
+def test_private_ephemeral_waterfall_keeps_slot_metadata_and_private_sdk_profile(
+    monkeypatch, tmp_path, private_ephemeral_transport,
+):
+    f = private_ephemeral_transport
+    monkeypatch.setenv("BOT_LLM_BACKEND", "waterfall")
+    monkeypatch.setattr(f.waterfall, "provider_rungs", lambda role: [{
+        "provider": "oauth", "key_id": "private-test-slot-a",
+        "env_name": "PRIVATE_TEST_SLOT_A", "cooling": False,
+    }])
+
+    result = f.bridge.reason_private_ephemeral_sync(
+        "private evidence", cwd=str(tmp_path),
+    )
+
+    assert result["ok"] is True
+    assert result["tools_used"] == []
+    assert result["key_id"] == "private-test-slot-a"
+    assert result["provider"] == "oauth"
+    assert f.seen["queries"] == ["private evidence"]
+    assert len(f.seen["options"]) == 1
+    options = f.seen["options"][0]
+    assert options.allowed_tools == options.add_dirs == options.setting_sources == []
+    assert options.mcp_servers == {}
+    assert options.max_turns == 1 and options.permission_mode == "dontAsk"
+    assert options.extra_args["no-session-persistence"] is None
+    assert f.seen["fallback"] == f.seen["cooling"] == []
+    assert f.seen["runs"] == f.seen["thinking"] == []
+    assert len(f.seen["sessions"]) == len(f.seen["costs"]) == 1
+
+
+def test_private_ephemeral_provider_veto_cannot_rotate_or_fall_back(
+    tmp_path, private_ephemeral_transport,
+):
+    f = private_ephemeral_transport
+    veto_calls = []
+
+    def revoked():
+        veto_calls.append(True)
+        raise RuntimeError("source admission revoked")
+
+    with pytest.raises(f.bridge.ProviderStartRefused, match="source admission revoked"):
+        asyncio.run(f.bridge._reason(
+            "private evidence", role="deep", allowed_tools=[], add_dirs=[],
+            max_turns=1, cwd=str(tmp_path), arm=False, resume=None,
+            mcp_servers={}, log_run=False, _private_ephemeral=True,
+            before_provider_start=revoked,
+        ))
+
+    assert veto_calls == [True]
+    assert f.seen["queries"] == f.seen["fallback"] == f.seen["cooling"] == []
+    assert f.seen["runs"] == f.seen["thinking"] == []
+    assert f.seen["sessions"] == f.seen["costs"] == []
+
+
+def test_private_ephemeral_respects_exclusive_fabric_selection(
+    monkeypatch, tmp_path, private_ephemeral_transport,
+):
+    f = private_ephemeral_transport
+    monkeypatch.setenv("BOT_LLM_BACKEND", "fabric")
+
+    result = f.bridge.reason_private_ephemeral_sync("private evidence", cwd=str(tmp_path))
+
+    assert result["ok"] is False
+    assert result["error"] == "fabric_tools_unavailable"
+    assert f.seen["options"] == f.seen["queries"] == f.seen["fallback"] == []
+    assert f.seen["runs"] == f.seen["thinking"] == []
+    assert f.seen["sessions"] == f.seen["costs"] == []
