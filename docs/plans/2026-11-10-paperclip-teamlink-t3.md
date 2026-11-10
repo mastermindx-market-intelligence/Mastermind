@@ -99,6 +99,36 @@ Next: finish installed-SDK setup qualification, deliver the qualified head throu
 
 The isolated native helper build passed all 37 focused tests. Six empty patch context lines were normalized for repository whitespace checks; reverse application verifies the stored patch against the same tested source. The relocatable runtime contains 22 dependency packages and no external worktree symlinks.
 
-Native acceptance issue `MAS-4` (`474dbaf5-ad88-42fc-88e6-8bbbbd120e0f`) is prepared as unassigned backlog. Its dedicated idle T3 root is `mcp:launch:de3dceeae2cfef0105545f884dcfe605f8d4921cb2449892f04fdc1098b30e56`, in native project `9de77193-e68a-49fe-adee-f85406f04772`. No provider run was launched by that idle creation. Activate the actual Meta-CEO only after merged-source installation and native discovery.
+Native acceptance issue `MAS-4` (`474dbaf5-ad88-42fc-88e6-8bbbbd120e0f`) was created as unassigned backlog. Its dedicated idle T3 root is `mcp:launch:de3dceeae2cfef0105545f884dcfe605f8d4921cb2449892f04fdc1098b30e56`, in native project `9de77193-e68a-49fe-adee-f85406f04772`. No provider run was launched by that idle creation. The existing Meta-CEO is now assigned only the independent native continuity-document preparation phase. Actual Teamlink exchange remains gated on merged-source installation and native discovery.
 
 The existing Hermes adapter does not inject plugin tools directly. A native company skill is therefore bundled for durable bot discovery and authenticated tool use. Install/select it through the existing Paperclip skill owner, preserving all current agent identities, adapters, roles and selected skills.
+
+## Release and consumer recovery
+
+The managed skill explicitly requires the genuine current agent key and run,
+authenticated identity readback, native document-body/revision recovery and
+inspection of `result.error`/`result.data`. HTTP success is not consumption proof.
+The installed SDK's native action scope injection is checked and removed only
+after comparison with the trusted host company; agent input remains strict.
+
+CI run `42777766561`, job `129702117089`, refused the existing initializer
+fixture's bootstrap selector at the unchanged production `pin_image` line 487.
+The test and initializer were identical in candidate and protected master.
+Read-only `namei` and `readlink` on the original configured `ubuntu1` host prove
+that `_work/_tool` is an ancestor symlink to `/opt/hostedtoolcache`.
+The fixture now canonicalizes only the existing interpreter's parent, retains
+the `python3` leaf selector, and asserts that it still resolves to the interpreter
+executing the test. The same narrow correction applies to both bootstrap sites.
+Production custody, drift, ACL, startup, hook and negative-case checks are
+unchanged. Syntax and exact diff checks pass; actual Linux qualification remains
+with the required native CI gate. No guard, workflow, skip or release hold changed.
+
+Native preparation run `e34e5717-9dff-46f3-b460-9556be7efeea` ended after two
+successful tools but no subsequent assistant reply. Its persisted original
+session proves only a skill read and authenticated issue GET; no document write,
+Teamlink invocation or T3 message was emitted. Paperclip's own retry
+`bd82d845-cc20-492b-9c13-5a0c23b282d3` was observed running and remains the owner.
+Do not duplicate it or infer a pending mutation from the adapter's finalizer text.
+
+Source-linked recovery evidence:
+https://github.com/mastermindx-market-intelligence/Mastermind/pull/2419#issuecomment-6762515027
