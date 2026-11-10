@@ -1,6 +1,6 @@
 # Native T3 transport dependency
 
-Upstream: `https://github.com/t3dotgg/t3code`, MIT license (included).
+Upstream: `https://github.com/pingdotgg/t3code`, MIT license (included).
 Pinned source: `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`.
 
 `t3-native.patch` is the completed `web-t3-cli-adapter-20261109-a1` native CLI

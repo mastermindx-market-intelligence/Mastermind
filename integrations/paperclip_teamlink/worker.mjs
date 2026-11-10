@@ -23,7 +23,10 @@ async function perform(declaration, params, actor) {
 
 const plugin = definePlugin({
   async setup(ctx) {
-    context = ctx; configuration = await ctx.config.get();
+    // The host delivers each persisted company config through configChanged
+    // after initialization, including on restart. An unscoped setup-time
+    // config.get is intentionally denied by Paperclip's company boundary.
+    context = ctx; configuration = {};
     for (const declaration of tools) {
       ctx.tools.register(declaration.name, declaration, (params, run) => perform(declaration, params, {
         kind: 'agent', companyId: run.companyId, agentId: run.agentId, runId: run.runId,

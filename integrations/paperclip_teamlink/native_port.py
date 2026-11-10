@@ -92,6 +92,7 @@ class Port:
                     'PATH': '/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin',
                     'TMPDIR': os.environ.get('TMPDIR', '/tmp'), 'T3CODE_HOME': config['t3Home']}
         self.schemas = None
+        self.dispatched = False
         self.deadline = time.monotonic() + 20
 
     def cli(self, args, data=None, timeout=25):
@@ -117,6 +118,8 @@ class Port:
             raise Unavailable('tool not allowed')
         if name == 't3_pending_request' and args.get('action') not in {'list', 'read'}:
             raise Rejected('unsupported_operation')
+        if name == 't3_thread_send':
+            self.dispatched = True
         return self.cli(['native', name], args, timeout=40 if name == 't3_thread_wait' else 25)
 
     def discover(self):
@@ -133,7 +136,8 @@ class Port:
     def client(self, project):
         if project not in self.config['projectIds']:
             raise Rejected('project_not_found')
-        scope = Scope('paperclip-mastermind-teamlink-local', self.config['environmentId'], project)
+        connection = 'paperclip-teamlink-' + digest(self.config['environmentId'] + '\n' + self.config['t3Home'])[:32]
+        scope = Scope(connection, self.config['environmentId'], project)
         return T3NativeClient(scope, self.tool, self.schemas)
 
     async def root(self, client, thread_id):
@@ -311,13 +315,15 @@ class Port:
 
 def main():
     action = None
+    port = None
     try:
         raw = sys.stdin.read(100001)
         if len(raw.encode()) > 100000:
             raise ValueError('input too large')
         request = json.loads(raw)
         action = request['action']
-        data = asyncio.run(Port(request['config']).perform(action, request))
+        port = Port(request['config'])
+        data = asyncio.run(port.perform(action, request))
         print(json.dumps({'ok': True, 'data': data}, ensure_ascii=True, allow_nan=False))
     except Rejected as exc:
         print(json.dumps({'ok': False, 'error': 'NATIVE_REFUSED', 'code': exc.code}))
@@ -326,7 +332,8 @@ def main():
     except (Conflict, Unavailable, ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
         # Before native send the client distinguishes refusal; all other send failures
         # conservatively preserve uncertainty. No raw diagnostic or token is emitted.
-        print(json.dumps({'ok': False, 'error': 'NATIVE_EFFECT_UNKNOWN' if action == 'send' else 'NATIVE_UNAVAILABLE'}))
+        error = 'NATIVE_EFFECT_UNKNOWN' if port and port.dispatched else ('NATIVE_PRECONDITION_UNAVAILABLE' if action == 'send' else 'NATIVE_UNAVAILABLE')
+        print(json.dumps({'ok': False, 'error': error}))
 
 
 if __name__ == '__main__':

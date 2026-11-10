@@ -32,7 +32,7 @@ export class Store {
   }
   async list(company, issue = null) {
     const rows = issue
-      ? await this.db.query(`SELECT revision,phase,payload,fingerprint FROM ${this.ns}.deliveries WHERE company_id=$1 AND issue_id=$2 ORDER BY updated_at DESC LIMIT 100`, [company, issue])
+      ? await this.db.query(`SELECT revision,phase,payload,fingerprint FROM ${this.ns}.deliveries WHERE company_id=$1 AND issue_id=$2 ORDER BY CASE WHEN phase IN ('consumed','returned','wake_requested','refused','expired') THEN 1 ELSE 0 END,updated_at DESC LIMIT 100`, [company, issue])
       : await this.db.query(`SELECT revision,phase,payload,fingerprint FROM ${this.ns}.deliveries WHERE company_id=$1 AND phase NOT IN ('consumed','returned','wake_requested','refused','expired') ORDER BY last_attempt_at ASC,updated_at ASC LIMIT 32`, [company]);
     return rows.map(r => ({ ...r.payload, revision: r.revision, phase: r.phase, fingerprint: r.fingerprint }));
   }

@@ -84,3 +84,14 @@ At each material phase, save exact source and proof here, read back, and continu
 the next safe phase. Preserve any actual denied/unknown effect on its original
 carrier. Earlier MAS-2 migration effects remain their own operation and are not
 replayed or replaced by this communication feature.
+
+## Implementation qualification
+
+Owned implementation is published at `6b893cf283a0ab76e99310781163d1328f9bfb78`; follow-up qualification adds the exact SDK lock, company-scoped startup replay, connection fencing and precise pre-dispatch classification. No Paperclip plugin has been installed yet and no live T3 message has been sent by this mission.
+
+Local verification: 19 Node transport scenarios and 11 Python boundary tests pass. The installed Paperclip 2026.1106.0 manifest validator accepts the plugin. A relocatable native CLI bundle independently read the live m2studio environment and recovered original native run ordinal 1 after the thread had reached ordinal 7. The original result contained 44 characters, SHA-256 `1a213f95a3e79321e7022a0803910e18f229763c86f99696b9b81f248bfe268b`. Process observation returned the native listener tree with explicit truncation. This is read-only qualification, not end-to-end acceptance.
+
+Adversarial reasoning found and corrected publication-CAS races, mutable assistant cursor loss, ambiguous reverse destinations, starvation by held receipts, and startup configuration scope. Lost comment receipts now need server-attributed native event provenance; visible markers alone do not prove plugin authorship. The accepted native CLI candidate is adopted with its original MIT license and exact patch hash. Its completed coordinator is not a live writer and its original worktree remains unchanged.
+
+Next: finish installed-SDK setup qualification, deliver the qualified head through native protected PR controls, build/install only the merged source, and prove both directions with real native bot/run/comment/consumption receipts. Preserve MAS-2 and the separate fleet/history/learning writers. No existing agent adapter, shared instruction file, T3 app, live session or server has been replaced/restarted by this work.
+

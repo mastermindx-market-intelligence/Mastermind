@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from integrations.paperclip_teamlink.native_port import Port, process_snapshot, sanitized
-from integrations.session_bridge.t3_native_client import Rejected, Scope
+from integrations.session_bridge.t3_native_client import Rejected, Scope, Thread
 
 
 CONFIG = {'nativeCliPath': '/installed/native/bin.mjs', 'nodePath': '/installed/node',
@@ -17,6 +17,64 @@ CONFIG = {'nativeCliPath': '/installed/native/bin.mjs', 'nodePath': '/installed/
 
 
 class NativePortTests(unittest.TestCase):
+    def test_binding_a_running_root_keeps_existing_mutable_content_observable(self):
+        class Client:
+            scope = Scope('connection', 'environment', 'project')
+
+            async def read(self, *_args, **_kwargs):
+                return {'thread': {'archived': False, 'activeRunId': 'active-run', 'itemCount': 900}}
+
+        port = Port(CONFIG)
+        port.discover = lambda: {}
+        port.client = lambda _: Client()
+
+        async def root(client, tid):
+            return Thread(client.scope, tid)
+
+        port.root = root
+        result = asyncio.run(port.perform('bind', {'projectId': 'project', 'threadId': 'root'}))
+        self.assertIsNone(result['watchCursor'])
+        self.assertEqual(result['initialActiveRunId'], 'active-run')
+
+    def test_streaming_item_without_marker_is_rejoined_after_completion(self):
+        class Client:
+            scope = Scope('connection', 'environment', 'project')
+
+            async def read(self, *_args, **_kwargs):
+                return {'thread': {}, 'recentRuns': [{'runId': 'run', 'status': 'running'}],
+                        'items': [{'itemId': 'item', 'runId': 'run', 'position': 41,
+                                   'sourceThreadId': 'root', 'type': 'assistant_message',
+                                   'text': 'unfinished stream', 'textTruncated': False}],
+                        'nextPosition': 41, 'hasMore': False}
+
+            async def wait(self, *_args, **_kwargs):
+                return {'status': 'completed'}
+
+            async def _call(self, *_args, **_kwargs):
+                return {'items': [{'itemId': 'item', 'runId': 'run', 'position': 41,
+                                   'sourceThreadId': 'root', 'type': 'assistant_message',
+                                   'text': '<teamlink-to-paperclip>{"bindingId":"binding","kind":"question","message":"Final question"}</teamlink-to-paperclip>',
+                                   'textTruncated': False}]}
+
+            def _qualify_read(self, *_args):
+                pass
+
+            async def read_full_item(self, _thread, item):
+                return item['text'], True
+
+        port = Port(CONFIG)
+        port.discover = lambda: {}
+        port.client = lambda _: Client()
+
+        async def root(client, tid):
+            return Thread(client.scope, tid)
+
+        port.root = root
+        result = asyncio.run(port.perform('scan', {'projectId': 'project', 'threadId': 'root', 'cursor': 40}))
+        self.assertEqual(result['messages'][0]['message'], 'Final question')
+        self.assertEqual(result['messages'][0]['bindingId'], 'binding')
+        self.assertEqual(result['cursor'], 41)
+
     def test_child_census_never_consumes_child_transcript(self):
         class Client:
             scope = Scope('connection', 'environment', 'project')

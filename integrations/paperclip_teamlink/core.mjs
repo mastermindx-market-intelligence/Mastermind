@@ -66,6 +66,7 @@ export class Teamlink {
     assert(qualified.environmentId === this.config.environmentId && qualified.projectId === params.projectId && qualified.threadId === params.threadId, 'NATIVE_SCOPE_CHANGED');
     return this.store.saveBinding(actor.companyId, params.issueId, params.expectedRevision, {
       ...qualified, companyId: actor.companyId, issueId: params.issueId,
+      connectionId: hash([this.config.environmentId, this.config.t3Home ?? null, this.config.t3Port ?? null]),
       bindingId: randomUUID(), recipientAgentId: issue.assigneeAgentId,
       createdBy: { kind: actor.kind, agentId: actor.agentId || null, userId: actor.userId || null, runId: actor.runId || null },
       createdAt: stamp(), activeOperationId: null, context: previous?.context || null,
@@ -106,7 +107,7 @@ export class Teamlink {
       }
       const expiresAt = params.expiresAt || new Date(Date.now() + 86400000).toISOString();
       assert(Date.parse(expiresAt) > Date.now() && Date.parse(expiresAt) <= Date.now() + 7 * 86400000, 'EXPIRY_OUT_OF_RANGE');
-      const target = { environmentId: b.environmentId, projectId: b.projectId, threadId: b.threadId };
+      const target = { environmentId: b.environmentId, projectId: b.projectId, threadId: b.threadId, connectionId: b.connectionId };
       const nonce = randomUUID();
       row = { ...request, direction: 'paperclip_to_t3', phase: 'created', bindingId: b.bindingId, target,
         originRunId: actor.runId || null, recipientAgentId: issue.assigneeAgentId, createdAt: stamp(), expiresAt,
@@ -161,7 +162,8 @@ export class Teamlink {
     } catch (error) {
       const current = await this.store.get(row.companyId, row.operationId);
       if (!current.nativeRun && ['send_inflight', 'send_unknown'].includes(current.phase)) {
-        row = await this.change(current, { phase: error.message === 'NATIVE_REFUSED' ? 'refused' : 'send_unknown', reason: error.message });
+        const noDispatch = ['NATIVE_PRECONDITION_UNAVAILABLE','NATIVE_CONNECTION_CHANGED'].includes(error.message);
+        row = await this.change(current, { phase: error.message === 'NATIVE_REFUSED' ? 'refused' : noDispatch ? 'outbound_published' : 'send_unknown', reason: error.message, nativeRefusalCode: error.nativeCode || null });
         if (row.phase === 'refused') await this.release(row);
       } else row = current;
       return this.public(row);
@@ -235,7 +237,8 @@ export class Teamlink {
           'Preserve the original objective and DONE_WHEN. If a response is necessary, use teamlink_send to the same binding with replyTo set to this operation and a new stable operationId. ' +
           'Do not echo messages or create a replacement COO. Transport delivery is not project acceptance.',
       });
-      row = await this.change(row, { phase: 'wake_requested', wakeReceipt: receipt, wakeRequestedAt: stamp() });
+      assert(id(receipt?.runId), 'NATIVE_WAKE_RECEIPT_MISSING');
+      row = await this.change(row, { phase: 'wake_requested', wakeReceipt: { runId: receipt.runId }, wakeRequestedAt: stamp() });
     } catch { row = await this.change(row, { phase: 'wake_unknown', reason: 'NATIVE_WAKE_EFFECT_UNKNOWN' }); }
     await this.release(row); return row;
   }
@@ -306,13 +309,13 @@ export class Teamlink {
   }
   async scan(binding, deadline = Infinity) {
     if (binding.activeOperationId) return;
-    const result = await this.native.call('scan', { projectId: binding.projectId, threadId: binding.threadId, cursor: binding.watchCursor });
+    const result = await this.native.call('scan', { environmentId: binding.environmentId, connectionId: binding.connectionId, projectId: binding.projectId, threadId: binding.threadId, cursor: binding.watchCursor });
     let nextCursor = result.cursor;
     for (const message of result.messages) {
       if (Date.now() >= deadline) { nextCursor = message.position > 0 ? message.position - 1 : null; break; }
       if (message.bindingId !== binding.bindingId) continue;
       const operationId = `t3-${hash([binding.bindingId, message.itemId]).slice(0,48)}`;
-      const target = { environmentId: binding.environmentId, projectId: binding.projectId, threadId: binding.threadId };
+      const target = { environmentId: binding.environmentId, projectId: binding.projectId, threadId: binding.threadId, connectionId: binding.connectionId };
       // An explicit block inside an already tracked request's result is that result,
       // never a second message/wake. Only untracked runs initiate reverse messages.
       if (await this.store.outgoingRun(binding.companyId, binding.bindingId, message.runId)) continue;
@@ -395,7 +398,7 @@ export class Teamlink {
     const exchanges = await this.store.list(actor.companyId, params.issueId);
     return { issue: { id: issue.id, title: issue.title, description: issue.description, status: issue.status, projectId: issue.projectId, assigneeAgentId: issue.assigneeAgentId, updatedAt: issue.updatedAt },
       binding, contextStale: Boolean(binding?.context && Date.parse(binding.context.expiresAt) <= Date.now()),
-      documents, exchanges: exchanges.map(x => this.public(x)),
+      documents, exchanges: exchanges.map(x => this.public(x)), exchangeWindow: { limit: 100, atLimit: exchanges.length === 100, unsettledFirst: true },
       authority: 'Native Paperclip issue/documents and linked source owners remain canonical. Context packets are advisory; preserve original DONE_WHEN and unresolved effects.' };
   }
   async inventory(params, actor) {
@@ -406,6 +409,6 @@ export class Teamlink {
     await this.authorize(actor, params.issueId);
     const b = await this.store.binding(actor.companyId, params.issueId);
     assert(b, 'BINDING_MISSING');
-    return this.native.call('inspect', { projectId: b.projectId, threadId: b.threadId, cursor: params.cursor });
+    return this.native.call('inspect', { environmentId: b.environmentId, connectionId: b.connectionId, projectId: b.projectId, threadId: b.threadId, cursor: params.cursor });
   }
 }
