@@ -50,10 +50,9 @@ collapses both to 1 item; two "attack" tests in the suite pin it.
 
 ## Cost
 
-- Events per turn: adapter emits a coalesced (50 ms) running update per streamed
-  item, plus one completed settle per content block. Delivered client events are
-  bounded downstream by the filter's 400 ms rate limit; running `node.updated`
-  frames are dropped by the filter (as for Codex).
+- Events per turn: a coalesced (50 ms) running update per streamed item plus one
+  completed settle per content block; delivered client events are bounded by the
+  filter's 400 ms rate limit (running `node.updated` dropped, as for Codex).
 - Store growth: none in item count — one item per API message id; only live
   `turn_item.updated` projection events increase.
 
@@ -78,5 +77,4 @@ pin at build time. Performing the carry is the principal's step, not this lane's
 ## Evidence
 
 `~/.mastermind/mmos_evidence/t1s-20261110/` — red/green + suite logs, before/after
-stream JSON, diag, adversarial-review result, tool-between-text and interrupted-turn
-proofs with reload comparisons.
+stream JSON, diag, adversarial result, tool/interrupt proofs with reload comparisons.
