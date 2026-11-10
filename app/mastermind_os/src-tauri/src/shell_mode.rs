@@ -7,7 +7,9 @@
 //!
 //! Safety notes:
 //! - Only `http://127.0.0.1` and `http://localhost` are accepted, so the window can
-//!   never be steered at a remote origin by an environment variable.
+//!   never be steered at a remote origin by the environment variable at startup.
+//!   Navigation after load is observed by the dev bundle's event log (item 3); it is
+//!   not re-gated here, and remote origins keep no IPC either way.
 //! - Refusals never carry the raw input: a URL can embed credentials in its
 //!   userinfo component, and the refusal object is fed to a log sink.
 //! - [`SHELL_PAGE_BOOTSTRAP`] is inert page-side introspection. It installs no
@@ -379,6 +381,60 @@ mod tests {
             scanned += 1;
         }
         assert!(scanned > 0, "no capability files under {}", dir.display());
+    }
+
+    /// S1 attack finding 1 fix: the capability scan must also cover capabilities
+    /// declared inline in the merged configs (`app.security.capabilities` resolves
+    /// through the same ACL as capabilities/*.json).
+    #[test]
+    fn merged_config_declares_no_inline_remote_capability() {
+        for name in ["tauri.conf.json", "tauri.conf.dev.json"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
+            let text = fs::read_to_string(&path).expect(name);
+            let value: serde_json::Value = serde_json::from_str(&text).expect(name);
+            let caps = &value["app"]["security"]["capabilities"];
+            if let Some(entries) = caps.as_array() {
+                for entry in entries {
+                    assert!(
+                        entry.get("remote").is_none(),
+                        "{name} must not declare an inline remote capability"
+                    );
+                }
+            }
+        }
+    }
+
+    /// S1 attack finding 2 fix: exotic loopback spellings and lookalikes.
+    /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 (still loopback,
+    /// so accepted); lookalike domains, userinfo tricks and IPv6 forms are refused.
+    #[test]
+    fn gate_handles_exotic_loopback_spellings() {
+        for accepted in [
+            "http://127.1",
+            "http://127.0.0.1.",
+            "http://2130706433",
+            "http://0x7f000001",
+            "http://127.000.000.001",
+        ] {
+            let parsed = parse_shell_url(accepted)
+                .unwrap_or_else(|r| panic!("{accepted} refused as {}", r.subcode()));
+            assert_eq!(parsed.host_str(), Some("127.0.0.1"), "{accepted}");
+        }
+        for refused in [
+            "http://127.0.0.1.evil.com",
+            "http://127.1.evil.com",
+            "http://0x7f000001.evil.com",
+            "http://localhost.",
+            "http://localhost.evil.com",
+            "http://LOCALHOST%2Eevil.com",
+            "http://localhost@evil.com",
+            "http://evil.com#@127.0.0.1",
+            "http://[::1]",
+            "http://[::ffff:127.0.0.1]",
+            "http://127.0.0.1\t.evil.com",
+        ] {
+            assert!(parse_shell_url(refused).is_err(), "{refused} must be refused");
+        }
     }
 
     #[test]
