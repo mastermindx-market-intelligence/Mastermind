@@ -200,3 +200,62 @@ def test_load_proxy_token_requires_fabric_token(tmp_path):
     ep.env_file.write_text("OTHER=x\n")
     with pytest.raises(ValueError):
         load_proxy_token(ep.env_file)
+
+
+@pytest.mark.parametrize("models", [
+    ("claude-fable-5.2:free",),
+    ("glm-5.3",),
+    ("future-gateway-model",),
+])
+def test_task_tools_are_explicit_for_new_and_gateway_models(tmp_path, models):
+    instance = build_provider_instance(endpoint(tmp_path), models, TOKEN,
+                                       home_root=tmp_path / "providers")
+    env = {item["name"]: item["value"] for item in instance["environment"]}
+    assert env["CLAUDE_CODE_ENABLE_TODO_TOOLS"] == "1"
+    assert "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS" not in env
+    assert "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH" not in env
+    assert "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" not in env
+
+
+@pytest.mark.parametrize("value", [None, "0", "false"])
+def test_verify_detects_missing_task_tools_and_registration_repairs_it(
+        tmp_path, monkeypatch, value):
+    home = userhome(tmp_path)
+    userdata = home / ".t3" / "userdata"
+    ep = endpoint(tmp_path)
+    ep.env_file.write_text(f"FABRIC_PROXY_TOKEN={TOKEN}\n")
+    healthy(monkeypatch)
+    common = dict(userdata=userdata, home_root=home / ".t3" / "providers",
+                  catalogues={"anthropic_oauth": CATALOG})
+    apply_registration((ep,), **common)
+    path = t3_config.settings_path(userdata)
+    settings = t3_config.read_settings(path)
+    environment = settings["providerInstances"]["fabric_claude"]["environment"]
+    environment[:] = [row for row in environment
+                      if row["name"] != "CLAUDE_CODE_ENABLE_TODO_TOOLS"]
+    if value is not None:
+        environment.append({"name": "CLAUDE_CODE_ENABLE_TODO_TOOLS", "value": value})
+    path.write_text(json.dumps(settings))
+    assert verify_registration((ep,), userdata=userdata)[0].refusal == "task_tools_not_enabled"
+    assert apply_registration((ep,), **common)[0].changed is True
+    assert verify_registration((ep,), userdata=userdata)[0].refusal is None
+    assert apply_registration((ep,), **common)[0].changed is False
+
+
+def test_task_tool_registration_preserves_existing_native_capacity(tmp_path, monkeypatch):
+    home = userhome(tmp_path)
+    userdata = home / ".t3" / "userdata"
+    ep = endpoint(tmp_path)
+    ep.env_file.write_text(f"FABRIC_PROXY_TOKEN={TOKEN}\n")
+    healthy(monkeypatch)
+    provider = home / ".t3" / "providers" / "fabric-anthropic-oauth"
+    provider.mkdir(parents=True)
+    native_settings = provider / "settings.json"
+    original = json.dumps({"env": {
+        "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "24",
+        "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "5",
+    }, "hooks": {"SessionStart": []}}) + "\n"
+    native_settings.write_text(original)
+    apply_registration((ep,), userdata=userdata, home_root=provider.parent,
+                       catalogues={"anthropic_oauth": CATALOG})
+    assert native_settings.read_text() == original

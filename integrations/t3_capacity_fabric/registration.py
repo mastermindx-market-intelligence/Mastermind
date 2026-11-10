@@ -67,6 +67,9 @@ def build_provider_instance(endpoint: FabricEndpoint, models: tuple[str, ...],
         {"name": "ANTHROPIC_AUTH_TOKEN", "value": token, "sensitive": True},
         {"name": "ANTHROPIC_SMALL_FAST_MODEL", "value": fast},
         {"name": "ANTHROPIC_DEFAULT_HAIKU_MODEL", "value": fast},
+        # Fable and gateway model ids omit task tools in recent Claude releases.
+        # Keep the existing T3 plan/progress consumer supplied with native tasks.
+        {"name": "CLAUDE_CODE_ENABLE_TODO_TOOLS", "value": "1"},
     ]
     custom_models = [{"slug": slug, "name": model_label(slug),
                       "capabilities": _effort_capabilities()} for slug in models]
@@ -199,6 +202,10 @@ def verify_registration(endpoints: tuple[FabricEndpoint, ...], *,
             continue
         if not env.get("ANTHROPIC_AUTH_TOKEN"):
             report.refusal = "auth_token_missing"
+            reports.append(report)
+            continue
+        if env.get("CLAUDE_CODE_ENABLE_TODO_TOOLS") != "1":
+            report.refusal = "task_tools_not_enabled"
             reports.append(report)
             continue
         try:

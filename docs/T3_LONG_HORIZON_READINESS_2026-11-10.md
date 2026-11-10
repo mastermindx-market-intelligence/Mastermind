@@ -1,0 +1,155 @@
+# T3 long-horizon readiness — 2026-11-10
+
+## Decision and current responsibility
+
+T3 has a substantial working native foundation, but the full Fable-led project
+journey is **PARTIAL**, not production accepted. Reuse the existing project,
+hierarchy, continuity and Teamlink implementations; the remaining job is to
+complete their admitted consumer paths and prove installation and recovery.
+
+This is a readiness assessment and bounded repair under the existing
+`WS:ORCHESTRATOR-PROJECT-CONTINUITY` programme. The parent task tree remains
+[ESTATE_GRAPH_INTEGRATION_PLAN.md at #2424](https://github.com/mastermindx-market-intelligence/Mastermind/blob/95762fc3700598a7be1a12b8c6c1995753071eed/docs/ESTATE_GRAPH_INTEGRATION_PLAN.md).
+No new project registry, queue, scheduler, agent identity or plan store is added.
+
+Current commission: assess and organize the T3 harness for Fable-led long-horizon
+projects, visible step execution, nested suborchestrators, original-parent return,
+and communication with the Chairman and the Paperclip/Hermes team. DONE_WHEN
+remains the complete installed success and interruption/recovery journey.
+
+Procedure: protected Mastermind `76cca6bf0d4f54c1c4a732726a16c70dbe8ed679`, compatible Skillpack 1.0.1.
+Bounded repair operation: `t3-visible-task-tools-20261110-c4`.
+Source contribution is based on #2367 `f6c794d228c9ffa0d9d95c508aea61d99a85d63e`;
+the original router branch, native release and active writers remain intact.
+Principal direct repair rationale: LOWER_TOTAL_OVERHEAD for one configuration
+seam and its regression proof. Separate reasoning leads assessed donor semantics,
+T3 runtime evidence and cross-estate ownership; no Fabric execution is claimed.
+
+## Confirmed and repaired task-visibility defect
+
+Actual Fable `claude-fable-5.2:free` initialization in installed T3 0.1.7,
+Claude Agent SDK 0.3.284 / CLI 2.1.319, exposed neither TaskCreate/Get/Update/List
+nor TodoWrite. Both inspected native init records omitted them. The enabled
+provider environment and provider-home settings lacked the task-tool opt-in.
+
+The installed T3 runtime already translates TaskCreate/Update/List and TodoWrite
+to plan progress. Its frontend already consumes `plan.updated` and `todo_list`.
+The missing producer was therefore tool availability, not an absent planner UI.
+
+The registration owner now emits `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` for routed
+Claude-driver models and reports `task_tools_not_enabled` when that owned setting
+is absent or disabled. Refresh can restore the setting without changing model
+selection, routing, depth, concurrency, Experimental Agent Teams or credentials.
+
+The setting was installed in the three currently enabled provider homes:
+`fabric-unified-router`, `fabric-anthropic-oauth`, `fabric-experiential`.
+Exact preimages, backups and postimage readback establish the only semantic change
+as that one environment key. Existing 24/5 native concurrency/depth settings were
+preserved; those values are not Executive admission grants. T3's live application
+settings, running sessions, router services and default model were not changed.
+This is next-session configuration; current sessions are not claimed reloaded.
+
+### Discriminating evidence
+
+- Sixteen focused registration tests pass on M2 Python 3.14.7, including new and
+  gateway model IDs, missing/disabled opt-in repair, idempotence and preservation
+  of existing provider-home capacity.
+- Five actual installed-CLI fixture cases pass. macOS sandbox-exec permits only
+  loopback networking and the HTTP fixture supplies deterministic responses.
+  There is no real model inference or paid provider call.
+- Default-search baseline omits the four Task tools; environment and settings
+  opt-ins expose all four in the native init catalogue.
+- With tool search disabled equally in a separate A/B pair, all four appear in
+  the repaired model-request tool definitions and remain absent in the baseline.
+  Default deferred tool search remains unchanged in production.
+- Configured, initialized, model-used and visually rendered are separate evidence.
+  A fresh real T3 task-progression and resume journey remains owed.
+
+Exact evidence: [2026-11-10-t3-task-tool-visibility.json](evidence/2026-11-10-t3-task-tool-visibility.json).
+Reproducible offline runtime proof: [qualify_t3_task_tools.py](../scripts/qualify_t3_task_tools.py).
+
+## Capability map and current source owners
+
+| Capability | Evidence and owner | Readiness |
+| --- | --- | --- |
+| Fable/Capacity native sessions | Actual installed Fable init; #2367 Capacity registration | Observed live native execution, scoped to those sessions |
+| Visible task steps | Existing runtime/UI; this task-tool repair and installed configuration | Tool availability repaired; fresh production use/visual proof pending |
+| COO → domain lead → worker | Merged #2394 hierarchy and #2414 real native continuation canary | Native path partially proven; broader governed acceptance separate |
+| Company-governed nested admission | #2424 existing Executive hierarchy: depth 3, at most 16 retained descendants, narrowed grants and conserved ancestor accounting | Source implemented; actual native T3 scope/settlement not qualified |
+| Original mission and scope through steering/compaction | #2375 `336062e39625b4231553fd725af01931fa5df87c` and #2424 | Source and isolated API proof; selected installed model journey pending |
+| Company/team visibility | #2395/#2421/#2424 Team and company projections | Implemented composition; real enrolled consumers pending |
+| Original return and requester ACK | #2414/#2415/#2424 | API-principal ACK is distinct from native parent consumption |
+| Paperclip/Hermes ↔ T3 communication | #2419 Teamlink plugin; #2403 credential cutover; original MAS-4 | Implemented source; live original acceptance remains unrun |
+| Strict native lifecycle controls | Merged #2416; current installed CLI still exposes old commands | Built, not installed/proven on inspected app |
+| Browser/computer tools | Merged #2401, exact host-specific proofs and constraints | Partial; do not equate installed skills with fleet permission |
+| Unattended remote T3 entry | Inspected T3 Connect/LAN off, background service absent | Not enabled; foreground sessions remain usable |
+
+These time-scoped findings do not transfer a writer, clear a release hold, revive
+an interrupted session or authorize a replay. #2427 already repairs the stale
+10-versus-11 archive assertion; do not duplicate it. #2338 remains the original
+Draft integration/release carrier.
+
+## Product architecture to complete
+
+Give a project one persistent accountable coordinator and a clear overview:
+original outcome, current step, next dependency-ready work, active domain leads,
+returned results awaiting integration, blockers and evidence. Keep two relations
+separate: the accountable-parent tree and the task-dependency graph. A dependency
+does not assign another manager.
+
+Use the existing T3 native task list for current-session progress, the existing
+GitHub/Agent OS plan for original mission and accepted scope, Executive for actual
+admitted jobs/attempts/grants/effects, and Paperclip for company/project/issue
+coordination. Teamlink carries authenticated discussion and returns. Compose these
+owners in the existing project/Team views; do not import another task database.
+
+A domain lead should receive outcome, exact input revisions, owned paths,
+constraints and acceptance; it should integrate its own children's results before
+reporting upward. Preserve actual root, immediate parent, descendant settlement and
+budget. Settings or a skill do not enlarge Runtime grants.
+
+The Chairman-facing update should answer what changed, what evidence proves it,
+what remains blocked and what happens next. Delivered, awakened, started, result
+returned, parent consumed and accepted remain distinct states. The original project
+conversation is the return destination; a late result must not attach to whichever
+session happens to be newest.
+
+## Remaining acceptance, through existing carriers
+
+1. **Task consumer:** one fresh owned T3 session creates a visible plan, advances
+   at least two steps, and resumes with matching task identity. This can proceed
+   without restarting existing sessions once the actual native launch is admitted.
+2. **Installed native lifecycle:** use #2416's original package/install path,
+   reconcile live writers and qualify real scope enforcement and descendant
+   quiescence. Keep #2424's explicit refusal until the owning implementation exists.
+3. **Help and ancestry:** finish #2424's current project-help consumer and retain
+   original native callback/MCP binding through actual App/Control admission.
+   A visible colleague or API credential is not native-origin proof.
+4. **Teamlink:** finish #2403/#2404 original installation/credential boundary,
+   then run #2419's original MAS-4 Meta→COO→return and COO-origin question,
+   with actual model consumption and the same original conversation.
+5. **Integrated recovery:** Fable coordinates two domains, one domain launches a
+   worker, parents consume and integrate results, and a controlled reconnect
+   preserves mission, pending work, exact effects and next action without replay.
+6. **Acceptance and rollout:** prove the authenticated T3/Mastermind OS user view,
+   persist evidence to the existing task tree and Agent OS handoff, then close
+   only the outcomes actually accepted.
+
+## Donor findings and adoption decision
+
+Current official Claude Code supports nested subagents by default to three
+layers, with different foreground/background return semantics in headless/SDK
+operation. Agent Teams is a separate experimental topology with resume/nesting
+limits; it should not become Mastermind's durable lifecycle owner.
+
+Current Claude task tools are model-dependent unless explicitly enabled. Built-in
+tools can be deferred by ToolSearch, so absence from the initial wire schemas is
+not absence from the initialized catalogue. The repaired opt-in supplies the
+existing T3 task consumer without a new orchestration plugin.
+
+References:
+- https://code.claude.com/docs/en/sub-agents
+- https://code.claude.com/docs/en/agent-teams
+- https://code.claude.com/docs/en/tools-reference#task-tool-availability
+- https://code.claude.com/docs/en/agent-sdk/tool-search
+- https://code.claude.com/docs/en/env-vars

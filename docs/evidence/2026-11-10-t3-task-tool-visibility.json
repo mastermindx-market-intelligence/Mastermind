@@ -1,0 +1,297 @@
+{
+  "schema": "mastermind.t3_long_horizon_readiness_evidence.v1",
+  "recorded_at": "2026-11-10T10:44:06.673272+00:00",
+  "operation": "t3-visible-task-tools-20261110-c4",
+  "procedure_pin": "76cca6bf0d4f54c1c4a732726a16c70dbe8ed679",
+  "source_parent": "f6c794d228c9ffa0d9d95c508aea61d99a85d63e",
+  "source_carrier_parent": 2367,
+  "governing_plan": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/95762fc3700598a7be1a12b8c6c1995753071eed/docs/ESTATE_GRAPH_INTEGRATION_PLAN.md",
+  "installed_app": {
+    "name": "T3 Code",
+    "version": "0.1.7",
+    "claude_agent_sdk": "0.3.284",
+    "claude_code": "2.1.319"
+  },
+  "original_observation": {
+    "native_model": "claude-fable-5.2:free",
+    "init_times_utc": [
+      "2026-11-10T10:09:03Z",
+      "2026-11-10T10:09:49Z"
+    ],
+    "missing_tools": [
+      "TaskCreate",
+      "TaskGet",
+      "TaskList",
+      "TaskUpdate",
+      "TodoWrite"
+    ],
+    "tool_counts": [
+      152,
+      178
+    ],
+    "existing_consumers": [
+      "TaskCreate/TaskUpdate/TaskList reconciliation",
+      "TodoWrite -> todo_list",
+      "plan.updated",
+      "todo_list detail",
+      "background_tasks_changed",
+      "command_lifecycle"
+    ],
+    "scope": "init metadata and installed source inspection only"
+  },
+  "unit_tests": {
+    "command": "/opt/homebrew/bin/python3 -m pytest tests/test_t3_capacity_fabric.py -q",
+    "result": "16 passed",
+    "duration_seconds": 0.34,
+    "python": "3.14.7",
+    "environment": "isolated M2 qualification tree; no production model/network call"
+  },
+  "installed_runtime_fixture": {
+    "schema": "mastermind.t3_task_tools_fixture.v1",
+    "cli": "installed Claude Code CLI",
+    "cli_version": "2.1.319 (Claude Code)",
+    "model_inference": false,
+    "process_network": "sandbox-exec loopback only",
+    "live_settings_changed": false,
+    "variants": [
+      {
+        "variant": "baseline",
+        "passed": true,
+        "exit_code": 0,
+        "messages_requests": 1,
+        "model": "claude-fable-5.2:free",
+        "tool_search": "default",
+        "init_task_tools": [],
+        "wire_task_tools": [],
+        "advertised_task_tools": [],
+        "wire_tool_names": [
+          "Agent",
+          "Bash",
+          "DeferredToolPlaceholder",
+          "Edit",
+          "ListAgents",
+          "Read",
+          "ReportFindings",
+          "ScheduleWakeup",
+          "ToolSearch",
+          "Workflow",
+          "Write"
+        ],
+        "init_tool_count": 21,
+        "wire_tool_count": 11,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "variant": "environment",
+        "passed": true,
+        "exit_code": 0,
+        "messages_requests": 1,
+        "model": "claude-fable-5.2:free",
+        "tool_search": "default",
+        "init_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "wire_task_tools": [],
+        "advertised_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "wire_tool_names": [
+          "Agent",
+          "Bash",
+          "DeferredToolPlaceholder",
+          "Edit",
+          "ListAgents",
+          "Read",
+          "ReportFindings",
+          "ScheduleWakeup",
+          "ToolSearch",
+          "Workflow",
+          "Write"
+        ],
+        "init_tool_count": 25,
+        "wire_tool_count": 11,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "variant": "settings",
+        "passed": true,
+        "exit_code": 0,
+        "messages_requests": 1,
+        "model": "claude-fable-5.2:free",
+        "tool_search": "default",
+        "init_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "wire_task_tools": [],
+        "advertised_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "wire_tool_names": [
+          "Agent",
+          "Bash",
+          "DeferredToolPlaceholder",
+          "Edit",
+          "ListAgents",
+          "Read",
+          "ReportFindings",
+          "ScheduleWakeup",
+          "ToolSearch",
+          "Workflow",
+          "Write"
+        ],
+        "init_tool_count": 25,
+        "wire_tool_count": 11,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "variant": "baseline_eager",
+        "passed": true,
+        "exit_code": 0,
+        "messages_requests": 1,
+        "model": "claude-fable-5.2:free",
+        "tool_search": "disabled_for_wire_proof",
+        "init_task_tools": [],
+        "wire_task_tools": [],
+        "advertised_task_tools": [],
+        "wire_tool_names": [
+          "Agent",
+          "Bash",
+          "CronCreate",
+          "CronDelete",
+          "CronList",
+          "Edit",
+          "EnterWorktree",
+          "ExitWorktree",
+          "ListAgents",
+          "Monitor",
+          "NotebookEdit",
+          "Read",
+          "ReportFindings",
+          "ScheduleWakeup",
+          "SendMessage",
+          "TaskStop",
+          "WebFetch",
+          "WebSearch",
+          "Workflow",
+          "Write"
+        ],
+        "init_tool_count": 20,
+        "wire_tool_count": 20,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "variant": "settings_eager",
+        "passed": true,
+        "exit_code": 0,
+        "messages_requests": 1,
+        "model": "claude-fable-5.2:free",
+        "tool_search": "disabled_for_wire_proof",
+        "init_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "wire_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "advertised_task_tools": [
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskUpdate"
+        ],
+        "wire_tool_names": [
+          "Agent",
+          "Bash",
+          "CronCreate",
+          "CronDelete",
+          "CronList",
+          "Edit",
+          "EnterWorktree",
+          "ExitWorktree",
+          "ListAgents",
+          "Monitor",
+          "NotebookEdit",
+          "Read",
+          "ReportFindings",
+          "ScheduleWakeup",
+          "SendMessage",
+          "TaskCreate",
+          "TaskGet",
+          "TaskList",
+          "TaskStop",
+          "TaskUpdate",
+          "WebFetch",
+          "WebSearch",
+          "Workflow",
+          "Write"
+        ],
+        "init_tool_count": 24,
+        "wire_tool_count": 24,
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "passed": true
+  },
+  "installed_configuration": {
+    "schema": "mastermind.t3_task_tools_install.v1",
+    "recorded_at": "2026-11-10T10:44:06.673272+00:00",
+    "setting": {
+      "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1"
+    },
+    "provider_selection_changed": false,
+    "capacity_changed": false,
+    "live_restart": false,
+    "rows": [
+      {
+        "path": "~/.t3/providers/fabric-unified-router/settings.json",
+        "before_sha256": "e3582460a33e3ff3937590a32ee6fe95e5c4a4122263337e6a40183941624d9c",
+        "after_sha256": "48692227ee00494ff4672895a2dc6e0914aba75a0b4ecb5bead05e8adae02887",
+        "backup": "~/.t3/providers/fabric-unified-router/settings.json.task-tools-before-20261110-c4",
+        "only_semantic_change": "env.CLAUDE_CODE_ENABLE_TODO_TOOLS",
+        "readback": "VERIFIED"
+      },
+      {
+        "path": "~/.t3/providers/fabric-anthropic-oauth/settings.json",
+        "before_sha256": "6a8e65ac35151049fb7242d454cb67194b0f5da4f490c2c21ccc5d45395f1bde",
+        "after_sha256": "5bc38b92fa5505da5b90b46d5cc75a07e4532b30c3024573bed19cadbf49c836",
+        "backup": "~/.t3/providers/fabric-anthropic-oauth/settings.json.task-tools-before-20261110-c4",
+        "only_semantic_change": "env.CLAUDE_CODE_ENABLE_TODO_TOOLS",
+        "readback": "VERIFIED"
+      },
+      {
+        "path": "~/.t3/providers/fabric-experiential/settings.json",
+        "before_sha256": "6a8e65ac35151049fb7242d454cb67194b0f5da4f490c2c21ccc5d45395f1bde",
+        "after_sha256": "5bc38b92fa5505da5b90b46d5cc75a07e4532b30c3024573bed19cadbf49c836",
+        "backup": "~/.t3/providers/fabric-experiential/settings.json.task-tools-before-20261110-c4",
+        "only_semantic_change": "env.CLAUDE_CODE_ENABLE_TODO_TOOLS",
+        "readback": "VERIFIED"
+      }
+    ]
+  },
+  "not_claimed": [
+    "Protected merge of this source contribution",
+    "Existing running sessions reloaded",
+    "Production Fable used tasks after repair",
+    "T3 visual acceptance",
+    "Native governed Executive T3 launch/settlement",
+    "Paperclip/Hermes bidirectional model consumption",
+    "Whole-project interruption recovery"
+  ]
+}
