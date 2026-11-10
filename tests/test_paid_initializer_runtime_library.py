@@ -15,7 +15,7 @@ pytestmark=pytest.mark.skipif(sys.platform!='linux',reason='real Linux linkFD/AC
 @contextlib.contextmanager
 def library_chain(tmp_path,monkeypatch):
     base=tmp_path/'usr/lib';config=base/'python3.12/config-3.12-x86_64-linux-gnu';runtime=base/'x86_64-linux-gnu'
-    config.mkdir(parents=True);runtime.mkdir()
+    config.mkdir(parents=True,mode=0o755);runtime.mkdir(mode=0o755)
     first=config/m._QualifiedRuntimeLibrary.NAME;second=runtime/m._RuntimeSonameLink.NAME;target=runtime/m._QualifiedRuntimeLibrary.TARGET
     first.symlink_to(m._QualifiedRuntimeLibrary.LINK_VALUE);second.symlink_to(target.name)
     target.write_bytes(b'\x7fELF'+b'inert-not-executed'*32);target.chmod(0o644)
@@ -118,3 +118,20 @@ def test_library_hash_refuses_real_byte_change_with_stable_modelled_stat(tmp_pat
                 patch.setattr(os,'fstat',stable);patch.setattr(os,'stat',stable_name)
                 with node:
                     target.write_bytes(b'x'*before.st_size);node.check()
+
+
+@pytest.mark.parametrize("creation_umask", [0o002, 0o022])
+def test_library_fixture_declares_safe_modes_before_qualification(
+    tmp_path, monkeypatch, creation_umask
+):
+    previous = os.umask(creation_umask)
+    try:
+        with library_chain(tmp_path, monkeypatch) as (a, b, first, second, target):
+            os.umask(previous)
+            assert stat.S_IMODE(os.fstat(a).st_mode) == 0o755
+            assert stat.S_IMODE(os.fstat(b).st_mode) == 0o755
+            assert stat.S_IMODE(target.stat().st_mode) == 0o644
+            with m._QualifiedRuntimeLibrary(a, b) as node:
+                node.check()
+    finally:
+        os.umask(previous)
