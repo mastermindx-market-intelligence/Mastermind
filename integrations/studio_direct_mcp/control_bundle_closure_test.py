@@ -87,6 +87,17 @@ EXPECTED_FILES = {
     "ops/native_fabric/quota_continuity/source/glm_keys.py",
     "ops/native_fabric/quota_continuity/source/go_shim.py",
     "ops/native_fabric/support_policy_status/reader.py",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/profile.json",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/remote_sub.sh.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/support_bundle.py.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/remote_sub.sh.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker_provider_memory.py",
 }
 
 LOAD = r"""
@@ -202,6 +213,43 @@ class InstalledClosureTests(unittest.TestCase):
         with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_LOCK_REQUIRED"):
             bundle.verify(control_root=self.control, launcher=self.launcher)
 
+    def _go_review_sixty_three_member_fixture(self):
+        return self._predecessor_member_fixture(bundle.GO_REVIEW_CONTROL_FILES)
+
+    def test_go_review_sixty_three_member_bundle_upgrades_only_under_original_cas(self):
+        prior = self._go_review_sixty_three_member_fixture()
+        verified = bundle.verify(control_root=self.control, launcher=self.launcher)
+        self.assertEqual(set(verified["files"]), set(bundle.GO_REVIEW_CONTROL_FILES))
+        before = self._snapshot()
+        with self.assertRaises(bundle.Refusal):
+            bundle.install(source=HERE, control_root=self.control,
+                           launcher=self.launcher)
+        self.assertEqual(self._snapshot(), before)
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CAS_MISMATCH"):
+            bundle.install(source=HERE, control_root=self.control,
+                           launcher=self.launcher, expected_bundle_digest="0" * 64)
+        self.assertEqual(self._snapshot(), before)
+        result = bundle.install(source=HERE, control_root=self.control,
+                                launcher=self.launcher,
+                                expected_bundle_digest=prior["bundleDigest"])
+        self.assertEqual(set(result["files"]), EXPECTED_FILES)
+        self.assertEqual(bundle.verify(control_root=self.control,
+                                      launcher=self.launcher)["bundleDigest"],
+                         result["bundleDigest"])
+
+    def test_go_review_sixty_three_member_verification_keeps_lock_and_cache_fences(self):
+        self._go_review_sixty_three_member_fixture()
+        cache = self.control / "__pycache__"
+        cache.mkdir(mode=0o700)
+        (cache / "private_service.fixture.pyc").write_bytes(b"not executable")
+        (cache / "private_service.fixture.pyc").chmod(0o600)
+        with self.assertRaises(bundle.Refusal):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+        shutil.rmtree(cache)
+        (self.control / ".control-bundle.lock").unlink()
+        with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_LOCK_REQUIRED"):
+            bundle.verify(control_root=self.control, launcher=self.launcher)
+
     def test_captured_ten_member_bundle_upgrades_only_under_original_cas(self):
         prior = self._captured_ten_member_fixture()
         verified = bundle.verify(control_root=self.control, launcher=self.launcher)
@@ -251,7 +299,8 @@ print("authenticated compiler snapshot")
 
     def test_actual_payload_installs_exact_closed_runtime(self):
         installed = self._install()
-        self.assertEqual(len(bundle.CONTROL_FILES), 63)
+        self.assertEqual(len(bundle.CONTROL_FILES), 74)
+        self.assertEqual(len(bundle.GO_REVIEW_CONTROL_FILES), 63)
         self.assertEqual(len(bundle.REVIEW_CONTROL_FILES), 13)
         self.assertEqual(len(bundle.CAPTURED_CONTROL_FILES), 10)
         self.assertIn("fleet_git_failure_compat.py", bundle.CONTROL_FILES)
@@ -263,7 +312,7 @@ print("authenticated compiler snapshot")
         self.assertEqual(set(installed["files"]), set(bundle.CONTROL_FILES))
         import private_service as source_service
         self.assertEqual(set(source_service.CONTROL_BUNDLE_FILES), set(bundle.CONTROL_FILES))
-        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 63)
+        self.assertEqual(len(source_service.CONTROL_BUNDLE_FILES), 74)
         verified = bundle.verify(control_root=self.control, launcher=self.launcher)
         self.assertEqual(verified["bundleDigest"], installed["bundleDigest"])
         for name, digest in installed["files"].items():
@@ -387,7 +436,8 @@ print(json.dumps({"real_native_imports":len(seen),"fixture_refusal":"invalid lau
         path = self.control / "manifest.json"
         raw = path.read_bytes()
         for names in (bundle.LEGACY_CONTROL_FILES, bundle.STATUS_CONTROL_FILES,
-                      bundle.CAPTURED_CONTROL_FILES, bundle.REVIEW_CONTROL_FILES):
+                      bundle.CAPTURED_CONTROL_FILES, bundle.REVIEW_CONTROL_FILES,
+                      bundle.GO_REVIEW_CONTROL_FILES):
             with self.subTest(members=len(names)):
                 manifest = json.loads(raw)
                 manifest["files"] = {name: manifest["files"][name] for name in names}

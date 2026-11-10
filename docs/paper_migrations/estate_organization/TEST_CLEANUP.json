@@ -1,0 +1,254 @@
+{
+  "schema": "paper.estate.cleanup.v1",
+  "physical_disposal": "BLOCKED_BY_CURRENT_CATALOG; no delete/archive/move attempted",
+  "resources": [
+    {
+      "fileId": "01M5JRN1HWF62YK527NKCY7WD5",
+      "name": "90 · Test · Page lifecycle · Empty source",
+      "original_name": "Paper E2E acceptance — file+page+order verified",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-2-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        },
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    },
+    {
+      "fileId": "01M5K0V5AGPSDXKA2K1PH1ABNE",
+      "name": "90 · Test · Row guard · Empty clone · 2026-10-22",
+      "original_name": "Paper visual row guard canary 2026-10-22 (copy)",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    },
+    {
+      "fileId": "01M5JV8SY6WP21H72WKK7GJ5R6",
+      "name": "90 · Test · Delete regression · Empty clone · 2026-10-22",
+      "original_name": "Paper reviewed deletion regression 2026-10-22 (copy)",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    },
+    {
+      "fileId": "01M5JKR6H0JNN07BA3YKQDXBNC",
+      "name": "90 · Test · Native clone fidelity · Copy B",
+      "original_name": "Young harmony (copy)",
+      "already_archived": true,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 5,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "1-1",
+              "name": "Migration fidelity specimen",
+              "childCount": 1,
+              "width": 1440,
+              "height": 900,
+              "worldX": -720,
+              "worldY": -450
+            }
+          ]
+        },
+        {
+          "pageId": "p-3-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "TECHNICAL_SPECIMEN; exclude from product entries, retain proof unless dependency review retires it"
+    },
+    {
+      "fileId": "01M5HDPF3HSZFJJAFMARVQSHZR",
+      "name": "90 · Empty · Jolly vase · Removal candidate",
+      "original_name": "Jolly vase",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    },
+    {
+      "fileId": "01M5JS8TNZKQ01SJS4D0S9VQFC",
+      "name": "90 · Test · Page lifecycle · Empty clone",
+      "original_name": "Paper E2E acceptance — file+page+order verified (copy)",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    },
+    {
+      "fileId": "01M6JA41WWACWMRRVMVX1NQP9K",
+      "name": "90 · Test · Guarded write acceptance · 2026-11-04",
+      "original_name": "Mastermind Paper v20 Scratch Acceptance 2026-11-04",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 29,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "1-0",
+              "name": "Paper v20 Write Acceptance - Responsive Design",
+              "childCount": 2,
+              "width": 960,
+              "height": 640,
+              "worldX": -480,
+              "worldY": -320
+            }
+          ]
+        }
+      ],
+      "disposition": "TECHNICAL_SPECIMEN; exclude from product entries, retain proof unless dependency review retires it"
+    },
+    {
+      "fileId": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
+      "name": "90 · Test · Native clone fidelity · Source",
+      "original_name": "Young harmony",
+      "already_archived": true,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 5,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "1-1",
+              "name": "Migration fidelity specimen",
+              "childCount": 1,
+              "width": 1440,
+              "height": 900,
+              "worldX": -720,
+              "worldY": -450
+            }
+          ]
+        },
+        {
+          "pageId": "p-3-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "TECHNICAL_SPECIMEN; exclude from product entries, retain proof unless dependency review retires it"
+    },
+    {
+      "fileId": "01M5HQ8VMMY87NVDENZAGJNYKM",
+      "name": "90 · Test · Native clone fidelity · Empty clone",
+      "original_name": "Young harmony (copy)",
+      "already_archived": true,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    },
+    {
+      "fileId": "01M5HRAG5659SFE58D3PTA7D0V",
+      "name": "90 · Test · Native clone fidelity · Copy A",
+      "original_name": "Young harmony (copy)",
+      "already_archived": true,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 5,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "1-1",
+              "name": "Migration fidelity specimen",
+              "childCount": 1,
+              "width": 1440,
+              "height": 900,
+              "worldX": -720,
+              "worldY": -450
+            }
+          ]
+        }
+      ],
+      "disposition": "TECHNICAL_SPECIMEN; exclude from product entries, retain proof unless dependency review retires it"
+    },
+    {
+      "fileId": "01M6XNXMVK65A0JRXKJHXT7ZCF",
+      "name": "90 · Test · Paper write-path · 2026-11-08",
+      "original_name": "Paper MCP write-path verification · design-lead · 2026-11-08",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 26,
+          "artboardCount": 1,
+          "artboards": [
+            {
+              "id": "1-0",
+              "name": "Write-Path Verification · v1",
+              "childCount": 3,
+              "width": 560,
+              "height": 371,
+              "worldX": -280,
+              "worldY": -260
+            }
+          ]
+        }
+      ],
+      "disposition": "TECHNICAL_SPECIMEN; exclude from product entries, retain proof unless dependency review retires it"
+    },
+    {
+      "fileId": "01M5K3WQXMD1QKXM2SBD7VABW1",
+      "name": "90 · Test · Copy-link identity · Empty clone · 2026-10-22",
+      "original_name": "Paper exact Copy link canary 2026-10-22 (copy)",
+      "already_archived": false,
+      "pages": [
+        {
+          "pageId": "p-1-0",
+          "nodeCount": 1,
+          "artboardCount": 0,
+          "artboards": []
+        }
+      ],
+      "disposition": "EMPTY_CONTENT_CONFIRMED; preserve identity/receipt dependencies until lawful disposal"
+    }
+  ]
+}
