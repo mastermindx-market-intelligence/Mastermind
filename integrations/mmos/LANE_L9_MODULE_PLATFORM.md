@@ -117,4 +117,20 @@ delta as their rework round. Changes binding L9:
 
 ## Returns to principal
 
-(none yet — first return due when items 1–3 pass)
+**2026-11-10, close under PROGRAM_PLAN_V4 (L9 → test bed).** Items 1–3 proven
+in the dev instance (`http://127.0.0.1:3190`, script
+`tools/mmos_dev/paperclip_dev.sh`); evidence under
+`~/.mastermind/mmos_evidence/l9r-20261110/`: plugin listed by API
+(`plugins_listed.json`, `restart_plugins.json`); page + sidebar + roster-truth
+widget render headlessly (`page_mastermind.*`, `page_dashboard.*`,
+`widget_roster_truth.png`); `mastermind.core:roster-report` tool executed from
+CLI with live counts (`tool_roster_report.json`); source edit visible after
+reload without restart (`reload_before.json`/`reload_after.json`,
+`moduleRevision` r2); logs on both surfaces (`logs_proof.txt`,
+`logs_api_rows.json` — ctx.logger → server log, metrics.write → plugin_logs);
+truthful state after plugin-worker kill (`worker_kill_*.json`: crash recorded,
+auto-restart, state survived) and after instance restart (`restart_*.json`).
+Module template + module README with rules verbatim landed. Adapter census for
+the next lane: `adapters_listed.json` + `tools/mmos_dev/README.md`. Dropped
+per V4 steer: module map work (already landed), cold-agent test, page/sidebar
+polish, offline launcher refusal test (not started). Lane closed.
