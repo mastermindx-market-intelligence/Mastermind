@@ -153,13 +153,44 @@ token. OAuth code stays in tree, unused in local mode.
   decision). **Retained**: corrected incident record (flash worker); desktop
   safety rules above unchanged.
 
-## Fix / land / install (local operator mode)
+## Re-scope (principal, PROGRAM_PLAN_V3 @ trunk 46621f5ad, 2026-11-10)
 
-- Executive half: writer glm-5.3, attacker grok-4.7. App half: writer glm-5.3,
-  attacker grok-4.7 (attacker differs from writer on each half). ≤2 rounds.
-- Tests: new Rust socket-module tests + existing `server.py` transport tests
-  untouched and green; app `App.projects-read-state.test.tsx` + new local-mode
-  tests, `npm run typecheck` + vitest in `app/mastermind_os`; `auth.rs` units.
+Paperclip is the product shell; the native app becomes a thin window (L8) and the
+old app screens are frozen. The client half of local operator mode
+(`app/mastermind_os` changes to `auth.rs`/`host.ts`/`App.tsx`) is DROPPED — no
+child had started it; nothing half-done is stranded on the branch. The socket
+consumer is a Paperclip module worker process running as the Chairman's user;
+L4 owes a small Python client example for that lane to copy. Lane closes after:
+Executive socket listener + gating tests + client example, activation memo,
+corrected incident record, final return.
+
+## Design-attack adjudication (lead, 2026-11-10)
+
+Grok-4.7's return said "design holds" but wrote NO artifact to disk (prose not
+counted — evidence rule). Lead review of the prose: the tunnel-bypass,
+OAuth-leakage and config-semantics areas are consistent with the contract —
+build proceeds. One claim REFUTED by command: "peercred absent on macOS, skip
+uid check" — `getpeereid(2)` works on Darwin (ctypes proof via
+`/opt/homebrew/bin/python3.12` on a socketpair: `peer uid=501 == my uid`).
+Skipping the uid check would admit any local user: REJECTED. Adopted as
+requirements: fail closed on empty `allowed_uids`, relative `socket_path` or
+malformed block (no socket created); stale socket at bind refused-if-live /
+unlinked-if-stale; socket removed on stop.
+
+## Fix / land / install (local operator mode — re-scoped)
+
+- Executive half ONLY: writer glm-5.3, attacker grok-4.7 (≤2 rounds). Files:
+  NEW `integrations/executive_mcp/local_operator.py` (+ tiny Python client
+  example), smallest hooks in `integrations/executive_mcp/server.py` and
+  `ops/executive_os/executive_mcp_entry.py`.
+- Tests: new `tests/test_executive_local_operator.py` — (1) block absent ⇒ no
+  socket; (2) peer uid not in list ⇒ refused on the socket; (3) allowed uid
+  reads an OS route over the socket, no bearer; (4) TCP request with forged
+  loopback/forwarded/made-up local-operator headers ⇒ exactly today's refusal;
+  plus malformed-config fail-closed rows. Existing transport tests untouched
+  and green.
+- Command: `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m
+  pytest -q tests/test_executive_local_operator.py
+  tests/test_mastermind_os_session_transport.py`.
 - Land: merge trunk into lane, affected suites, non-force push
-  `HEAD:feat/mmos-v1-integration-t3`. Proof build as `com.mastermind.os.dev`
-  per contract §4; NO install over the Chairman's app.
+  `HEAD:feat/mmos-v1-integration-t3`. No app build, no install.
