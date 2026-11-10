@@ -591,7 +591,11 @@
   // --- input + open/close -----------------------------------------------------
   function autoGrow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 120) + "px"; }
   input.addEventListener("input", autoGrow);
-  input.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+  input.addEventListener("keydown", function (e) {
+    // Enter may commit an IME candidate rather than submit the research question.
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
   sendBtn.onclick = function () { send(); };
 
   function open() {
