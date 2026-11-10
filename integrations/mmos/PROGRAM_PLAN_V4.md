@@ -103,10 +103,10 @@ Carries over, unchanged in value:
 | --- | --- | --- |
 | T1 shared conversation | DONE_WHEN 1 to 3, in the dev bundle against an isolated T3 server, then paired to the real one by the principal | stage 1 accepted 2026-11-10 at trunk `6a2634bb6` (stock client signs in, opens one thread by URL, queues, survives a restart, two views; see `T1_SHARED_CONVERSATION_FINDINGS.md`). Stage 2 (the window) starts when L8 has returned |
 | T1s live answer text | Answer text shown while it is written for Claude-driver threads: a pinned T3 server patch that handles text deltas the way the Codex adapter already does, proven on the dev server | started 2026-11-10. See section 8 |
-| T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | starts when L9 has landed |
+| T2 teammate binding and actor dispatch | The binding record on existing owners; DONE_WHEN 4 and 5 on a test agent in the dev Paperclip instance | accepted 2026-11-10 at trunk `da2097e4b` (two test teammates, personas and tool limits, rotation, one wake one return, attack pass with one defect found and fixed; see `T2_TEAMMATE_BINDING_AND_DISPATCH.md` and section 10) |
 | T3 Team fork | Teammate list and work cards as a thin fork of the T3 web client | starts when T1 is proven |
-| T4 work loop | DONE_WHEN 6 and 10, on TeamLink plus the engine from L1 | after T2 |
-| T5 routine and attention | DONE_WHEN 7 and 8 | after T2 |
+| T45 milestone loop | DONE_WHEN 6, 7 and 8 on the two test teammates in the dev instances: assignment alone starts the work, one task with one output that opens from the issue and from the asking conversation, one routine fired once with no window, one attention item cleared | started 2026-11-10. See section 10 |
+| T4b governed coding job | DONE_WHEN 10: a task that needs code becomes one governed coding job through the socket door and the L1 engine | after T45 |
 | L9 module platform | Land what exists (dev instance script, module, template), runbook, close | closing |
 | L8 window | Land the locked window with a configurable origin, runbook, close | closing |
 | L4 socket door | Listener, wiring, attack, close | closing |
@@ -185,3 +185,55 @@ code both cited.
   Decision 6 is read accordingly.
 - Open, owned by T2: which stock T3 surface the carrier uses to send to a thread and learn
   the turn finished.
+
+## 10. Amendment, 2026-11-10 17:10 UTC: T2 accepted, the work loop is one mechanism
+
+**Accepted (trunk `da2097e4b`, verified by the principal: refs, 18 carrier tests, evidence
+files 01 to 11, dev instances stopped).** Two test teammates exist in the dev Paperclip
+instance, each bound to its own T3 provider instance and primary thread. Their personas and
+tool limits differ and survive a server restart and a thread rotation. One wake produced one
+T3 turn and one comment equal to the thread's answer, with the issue left in review and a
+pending confirmation. An independent attack found one real defect (a second answer comment
+after a kill between comment and status); it was fixed and the fix replayed on the attack's
+end state.
+
+**Open question 7.4 is answered.** The `process` adapter wakes a small carrier
+(`tools/mmos_teammate/wake_carrier.py`). The carrier sends through the stock
+`t3 thread send <thread> - --wait --json` command, message on standard input. The command
+makes its own short-lived session from the T3 home directory, so the carrier holds no T3
+credential. No T3 patch and no T3 MCP client is needed for dispatch.
+
+**Three facts from T2 that change the next lanes.**
+
+1. Paperclip already wakes an agent when an issue is assigned to it. Today the carrier
+   ignores that wake (the issue already carries the run as its active run) and only a
+   separate keyed wake does the work. A routine or a teammate that assigns an issue sends
+   no keyed wake. So the carrier must do the work on the assignment wake itself. This is
+   the first item of the next lane.
+2. The wake's idempotency key does not stop Paperclip from starting a second process run.
+   One send and one comment are held by the carrier's marker in the thread, not by
+   Paperclip. Every later edge must use the same marker rule.
+3. The carrier's pending confirmation on the issue is an attention item with one action.
+   It is the first real content of "Needs you". No second attention store.
+
+**Decision: every Paperclip-to-conversation edge is the carrier.** Work goes out when a
+teammate (or the Chairman, or a routine) creates an issue assigned to a teammate. Work
+comes back to the asking conversation the same way: Paperclip wakes the asker's agent when
+the issue it asked for returns, and the carrier sends one message with the result and the
+link into the asker's primary thread. No watcher, no polling loop in a thread, and no
+dependency on TeamLink (PR #2419 stays held and uninstalled). If the installed Paperclip
+build has no wake for "work you asked for has returned", the lane reports that with
+evidence before building anything in its place.
+
+**Decision: one trigger owner for routines is Paperclip.** A Paperclip routine creates the
+issue; assignment wakes the teammate. T3 scheduled tasks are not armed for teammate
+routines. This answers question 7.5 the cheap way: the T3 server only has to keep serving
+with no window, which T2 already ran.
+
+**Lanes.** T4 and T5 run on the same two dev instances and the same carrier, so they are
+one lane with one writer: T45. The governed coding job (DONE_WHEN 10) becomes T4b and
+follows it; it is not part of the first milestone.
+
+**After the dev proofs, two acts stay with the principal:** pairing the Mastermind window
+to the real T3 server, and moving one installed Paperclip agent onto this path (the six
+steps in the T2 note), with its old heartbeat fenced first.
