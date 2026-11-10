@@ -970,10 +970,11 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification and early pin guards add three jobs; full-mode H1
-    # security checks and the required fan-in remain enforced by the validator.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','pytest_shards']
+    # PR qualification, early pin guards and the non-pytest qualification
+    # lane add four jobs; full-mode H1 security checks and the required fan-in
+    # remain enforced by the validator.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','qualification','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','qualification','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
