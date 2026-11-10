@@ -102,6 +102,7 @@ class FakePaperclip:
         self.calls.append(("document", issue_id, key))
 
     def children(self, issue_id):
+        # mirrors the real surface: company issues filtered by parentId
         return [dict(c) for c in self.child_rows.get(issue_id, [])]
 
     def create_issue(self, company_id, payload):
@@ -561,8 +562,11 @@ def test_ask_replay_creates_no_second_child():
     assert run_with_roster(pc, t3, roster) == 0
     # second run (crash-replay): the marker rule reconciles the same reply;
     # the existing child is reused, the parent is not double-blocked
+    child_ident = pc.child_rows["is-1"][0]["identifier"]
     pc2 = FakePaperclip(issues={"is-1": {"identifier": "MMO-1",
                                          "status": "blocked",
+                                         "unblockDescriptor": {"owner": {"agentId": "ag-atlas"},
+                                                               "action": f"Atlas-TEST completes {child_ident}: x"},
                                          "title": "Summarize file X",
                                          "description": "Write a three-line summary."}})
     pc2.child_rows = pc.child_rows

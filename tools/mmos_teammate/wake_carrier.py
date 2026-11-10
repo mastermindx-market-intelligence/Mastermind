@@ -315,9 +315,15 @@ class PaperclipClient:
              "changeSummary": f"teammate output via {OUTPUT_BLOCK} block"})
 
     def children(self, issue_id):
-        rows = self._request("GET", f"/api/issues/{issue_id}/children")
+        """Issues whose parentId is this issue. The OpenAPI lists
+        /api/issues/{id}/children but this build 404s it (verified live
+        2026-11-10); the company issue list filtered by parentId is the
+        implemented surface."""
+        company_id = os.environ.get("PAPERCLIP_COMPANY_ID", "")
+        rows = self._request(
+            "GET", f"/api/companies/{company_id}/issues?parentId={issue_id}&limit=50")
         if isinstance(rows, dict):
-            rows = rows.get("children") or rows.get("issues") or rows.get("rows") or []
+            rows = rows.get("issues") or rows.get("children") or rows.get("rows") or []
         return rows
 
     def create_issue(self, company_id, payload):
@@ -481,7 +487,10 @@ def handle_ask(pc, issue, reply, ask, op, roster):
             f"{child.get('identifier')} under {issue.get('identifier')}")
     else:
         log(f"ask {ask_op} already has child {child.get('identifier')}; reused")
-    if issue.get("status") != "blocked":
+    fresh = pc.issue(issue["id"])
+    descriptor = fresh.get("unblockDescriptor") or {}
+    if (fresh.get("status") != "blocked"
+            or child.get("identifier") not in (descriptor.get("action") or "")):
         pc.block_issue(
             issue["id"], [child["id"]], agent_id,
             f"{ask['assignee']} completes {child.get('identifier')}: "
