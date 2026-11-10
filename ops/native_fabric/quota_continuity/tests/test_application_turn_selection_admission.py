@@ -29,7 +29,8 @@ class SelectedIngressFixture(NativeApplicationHTTPFixture):
         self.policy_document["pools"]["go"]["capabilities"] = {"tools": True, "vision": False}
         self.policy_path.write_text(json.dumps(self.policy_document))
         self.ledger_path = self.directory / "ledger.jsonl"
-        pool_ledger.create_ledger_file(self.ledger_path)
+        self.ledger_path.touch(mode=0o600)
+        self.ledger_path.write_text("")
         for module, name, value in ((pick, "POOLS_YAML", str(self.policy_path)),
                                     (pool_ledger, "LEDGER_PATH", str(self.ledger_path))):
             guard = patch.object(module, name, value)
@@ -235,11 +236,13 @@ class SelectedIngressTests(SelectedIngressFixture):
                 if raw is None:
                     self.ledger_path.unlink(missing_ok=True)
                 else:
-                    pool_ledger.create_ledger_file(self.ledger_path)
+                    self.ledger_path.touch(mode=0o600)
+                    self.ledger_path.write_text("")
                     self.ledger_path.write_text(raw)
                 self.assertEqual(self.request()[0], 409)
                 self.assert_no_effect()
-        pool_ledger.create_ledger_file(self.ledger_path)
+        self.ledger_path.touch(mode=0o600)
+        self.ledger_path.write_text("")
         self.assertEqual(self.request()[0], 200)
 
     def test_purpose_removal_cannot_convert_selected_turn_to_legacy(self):

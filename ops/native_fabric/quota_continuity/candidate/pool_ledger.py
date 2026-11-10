@@ -166,26 +166,9 @@ def _validate_outcome_source(terminal: dict, outcomes: list[dict]) -> None:
                 raise ValueError("outcome changed original execution facts")
 
 
-def create_ledger_file(path) -> None:
-    """Create/truncate a ledger file that satisfies the strict owner/mode posture.
-
-    A caller that uses ``Path.write_text`` (or any umask-honouring writer) leaves
-    the file group/other-writable under the very common ``0002`` umask, which
-    ``_strict_open`` correctly refuses. Owning the creation here keeps the mode at
-    0600 no matter what umask the process inherited.
-    """
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-    finally:
-        os.close(fd)
-
-
 def _strict_open(path: str, flags: int, mode: str):
     fd = os.open(path, flags | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     try:
-        if flags & os.O_CREAT:
-            os.fchmod(fd, 0o600)
         info = os.fstat(fd)
         retained = os.lstat(path)
         if (not stat.S_ISREG(info.st_mode) or not stat.S_ISREG(retained.st_mode)

@@ -97,7 +97,8 @@ class RegisteredPoolCompositionFixture(NativeApplicationHTTPFixture, NativeAppli
         self.policy_path = self.directory / "pools.yaml"
         self.policy_path.write_text(json.dumps(_policy_document()))
         self.ledger_path = self.directory / "ledger.jsonl"
-        pool_ledger.create_ledger_file(self.ledger_path)
+        self.ledger_path.touch(mode=0o600)
+        self.ledger_path.write_text("")
         for module, name, value in ((pick, "POOLS_YAML", str(self.policy_path)),
                                     (pool_ledger, "LEDGER_PATH", str(self.ledger_path))):
             guard = patch.object(module, name, value)
