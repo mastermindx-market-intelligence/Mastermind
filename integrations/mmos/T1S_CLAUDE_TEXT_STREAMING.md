@@ -1,7 +1,7 @@
 # T1s — Claude driver live answer-text streaming (2026-11-10)
 
 Patch: `integrations/t3/upstream_patches/claude_text_delta_0770446.patch`
-(sha256 `8ca39b00add5b6813db79bf4e0c3e3a32bd670dfa883b0279496db9fc8043d56`; applies
+(sha256 `661566e19617b282ea61c0004f55e51438f034696b50ccda7c82a439f4625400`; applies
 cleanly on the bare pin `0770446` and on pin+`mastermind_admission_0770446.patch`;
 details and test commands in `upstream_patches/MANIFEST.md`, T1s section).
 
@@ -12,11 +12,21 @@ block. Now it mirrors what the Codex adapter already did: `text_delta` stream fr
 update ONE live assistant item per API message id (`assistant-text:<message.id>`),
 coalesced at 50 ms. When the SDK's `assistant` snapshot for that message id arrives,
 it completes the same item with the snapshot's authoritative text — no second item, no
-re-emit. If the turn ends without a snapshot (interrupt), the accumulated partial text
-settles as one completed item at turn finalize. Streamed text reserves its ordinal at
-the first delta, so text keeps its place before same-snapshot tool items (the incumbent
+re-emit. The SDK snapshots each completed block, so one message id settles repeatedly
+with cumulative content (e.g. `[text, tool_use, text]` → three snapshots): every
+snapshot re-settles the SAME item when the authoritative text grew, and a later text
+block re-opens the item seeded with the settled prefix, so live text never regresses.
+If the turn ends without a snapshot (interrupt), the accumulated partial text settles
+as one completed item at turn finalize. Streamed text reserves its ordinal at the
+first delta, so text keeps its place before same-snapshot tool items (the incumbent
 emitted tool items first). Sub-agent (parented) frames and synthetic notices are
 excluded, and replayed history never streams.
+
+Adversarial review note (kimi-k3.1-pro via Fabric; hypothesis confirmed here): on the
+unpatched pin, those cumulative per-block snapshots re-emit text once per snapshot —
+a `[text, tool_use]` message produces 2 text items and `[text, tool_use, text]`
+produces 3, all duplicated (pre-existing upstream behavior, not introduced by this
+patch). The patch collapses both to 1 item; two "attack" tests in the suite pin it.
 
 ## What the Chairman sees differently
 
