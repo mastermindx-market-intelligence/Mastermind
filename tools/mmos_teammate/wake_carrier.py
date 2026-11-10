@@ -64,10 +64,13 @@ def build_message(identifier: str, title: str, body: str, op: str) -> str:
 
 
 def choose_issue(rows):
-    """Assigned issues eligible for this run: todo, not already being run."""
+    """Assigned issues eligible for this run: todo or in_progress (Paperclip's
+    assignment automation moves a freshly assigned issue to in_progress before
+    the agent run starts — inbox-lite serves both), with no active run and
+    dependencies ready. Oldest update first."""
     ready = [
         r for r in rows
-        if r.get("status") == "todo" and not r.get("activeRun")
+        if r.get("status") in ("todo", "in_progress") and not r.get("activeRun")
         and r.get("dependencyReady", True)
     ]
     return sorted(ready, key=lambda r: r.get("updatedAt") or "")
@@ -151,9 +154,11 @@ class PaperclipClient:
         return self._request("GET", f"/api/issues/{issue_id}")
 
     def checkout(self, issue_id, agent_id):
+        # todo: human-created, untouched. in_progress: the assignment
+        # automation already moved it; activeRun-null means unowned.
         return self._request(
             "POST", f"/api/issues/{issue_id}/checkout",
-            {"agentId": agent_id, "expectedStatuses": ["todo"]},
+            {"agentId": agent_id, "expectedStatuses": ["todo", "in_progress"]},
         )
 
     def comments(self, issue_id):

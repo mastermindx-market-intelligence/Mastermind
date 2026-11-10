@@ -55,7 +55,7 @@ class FakePaperclip:
         self._guard("checkout")
         self.calls.append(("checkout", issue_id, agent_id))
         row = self.issues[issue_id]
-        assert row["status"] == "todo", "expectedStatuses would refuse"
+        assert row["status"] in ("todo", "in_progress"), "expectedStatuses would refuse"
         row["status"] = "in_progress"
 
     def comments(self, issue_id):
@@ -207,15 +207,30 @@ def test_binding_missing_is_fatal_before_any_checkout():
     assert pc.calls == []
 
 
-def test_choose_issue_skips_active_and_blocked():
+def test_choose_issue_skips_active_blocked_and_dependencies():
     rows = [
         {"id": "a", "status": "todo", "activeRun": {"id": "r1"}, "updatedAt": "1"},
-        {"id": "b", "status": "in_progress", "updatedAt": "2"},
+        {"id": "b", "status": "in_progress", "activeRun": {"id": "r2"}, "updatedAt": "2"},
         {"id": "c", "status": "todo", "activeRun": None,
          "dependencyReady": False, "updatedAt": "3"},
         {"id": "d", "status": "todo", "activeRun": None, "updatedAt": "4"},
+        {"id": "e", "status": "in_progress", "activeRun": None, "updatedAt": "5"},
+        {"id": "f", "status": "blocked", "activeRun": None, "updatedAt": "6"},
     ]
-    assert [r["id"] for r in wc.choose_issue(rows)] == ["d"]
+    # assignment automation may have moved e to in_progress; still eligible
+    assert [r["id"] for r in wc.choose_issue(rows)] == ["d", "e"]
+
+
+def test_assignment_moved_in_progress_issue_is_picked_up():
+    # Paperclip moves a freshly assigned issue to in_progress and wakes the
+    # agent; the carrier must still check it out and complete it.
+    issues = {"is-1": {"identifier": "MMO-1", "status": "in_progress",
+                       "title": "Summarize file X",
+                       "description": "Write a three-line summary."}}
+    pc, t3 = FakePaperclip(issues=issues), FakeT3(replies=["done"])
+    assert run(pc, t3) == 0
+    assert len(t3.sends) == 1
+    assert pc.issues["is-1"]["status"] == "in_review"
 
 
 def test_scan_marker_states():
