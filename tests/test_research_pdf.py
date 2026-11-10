@@ -198,5 +198,3 @@ class ResearchPdfPaginationTests(unittest.TestCase):
         pages, text = self.render(" ".join(values))
         self.assertGreaterEqual(pages, 2)
         self.assertEqual(re.findall(r"plain\d{4}", text), values)
-
-
