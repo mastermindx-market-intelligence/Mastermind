@@ -113,6 +113,11 @@ class LocalOperatorListener:
             if not stale:
                 raise LocalOperatorBindError(
                     "local operator socket path is owned by a live listener")
+            if not _stat.S_ISSOCK(os.lstat(path).st_mode):
+                # An attacker-planted regular file at the path is never ours
+                # to unlink; fail closed instead of replacing it.
+                raise LocalOperatorBindError(
+                    "local operator socket path exists and is not a socket")
             os.unlink(path)
         parent = path.parent
         if not parent.is_dir():
@@ -157,6 +162,24 @@ class LocalOperatorListener:
 
     _CONNECTION_TIMEOUT = 300.0
     _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
+    @staticmethod
+    def _request_allows_keep_alive(request) -> bool:
+        """RFC 7230 §6.3 persistence, read off the request headers.
+
+        h11 0.16 removed ``they_should_keep_alive``; the request headers carry
+        the same fact. ``start_next_cycle`` below is the hard gate: it raises
+        when h11 itself knows the connection cannot be reused.
+        """
+        tokens = set()
+        for name, value in request.headers:
+            if name.lower() == b"connection":
+                tokens.update(t.strip() for t in value.lower().split(b","))
+        if request.http_version == b"1.1":
+            return b"close" not in tokens
+        if request.http_version == b"1.0":
+            return b"keep-alive" in tokens
+        return False
 
     async def serve_forever(self) -> None:
         """Accept loop; each connection is admitted before any byte is read."""
@@ -217,6 +240,14 @@ class LocalOperatorListener:
                     continue
                 if isinstance(event, h11.Request) and request is None:
                     request = event
+                    # h11 0.16 exposes this as a property, not a method.
+                    if http.they_are_waiting_for_100_continue:
+                        # A client that asked must hear 100 before it will send
+                        # the body; without this the pair deadlocks until the
+                        # connection timeout closes them both.
+                        await loop.sock_sendall(
+                            sock, http.send(h11.InformationalResponse(
+                                status_code=100, headers=[])))
                     continue
                 if isinstance(event, h11.Data):
                     if len(body) + len(event.data) > self._MAX_RESPONSE_BYTES:
@@ -268,7 +299,16 @@ class LocalOperatorListener:
             elif message["type"] == "http.response.body":
                 chunks.append(message.get("body", b""))
 
-        await self._app(scope, receive, send)
+        try:
+            await self._app(scope, receive, send)
+        except Exception:
+            # Nothing is on the wire yet (start and chunks are buffered), so a
+            # crashed app still produces a clean 500, never a silent close.
+            start["message"] = {"status": 500, "headers": [
+                (b"content-type", b"application/json"),
+                (b"cache-control", b"no-store")]}
+            chunks = [b'{"ok":false,"error":{"code":"operator_app_failed",'
+                      b'"message":"local operator app failed"}}']
         if start["message"] is None:
             return False
         payload = b"".join(chunks)
@@ -282,9 +322,8 @@ class LocalOperatorListener:
         await loop.sock_sendall(sock, http.send(h11.Data(data=payload)))
         await loop.sock_sendall(sock, http.send(h11.EndOfMessage()))
         try:
-            keep = http.they_should_keep_alive()
-            http.start_next_cycle()
-            return keep
+            http.start_next_cycle()  # raises when h11 knows reuse is impossible
+            return self._request_allows_keep_alive(request)
         except Exception:
             return False
 

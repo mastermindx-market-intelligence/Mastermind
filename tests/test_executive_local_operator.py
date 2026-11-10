@@ -81,9 +81,9 @@ from integrations.executive_mcp.local_operator import (
 )
 
 
-def _config(tmp_path):
+def _config(l4root):
     return LocalOperatorConfig(
-        socket_path=tmp_path / "l4.sock",
+        socket_path=l4root / "l4.sock",
         allowed_uids=(os.getuid(),),
         operator_subject=FAKE_SUBJECT,
     )
@@ -118,46 +118,53 @@ def _run_with_listener(listener, client):
     return asyncio.run(main())
 
 
-def test_socket_created_connectable_and_removed_on_stop(tmp_path):
+@pytest.fixture
+def l4root(short_socket_root):
+    # pytest's nested tmp_path can exceed Darwin's 104-byte AF_UNIX budget;
+    # the repo's short root keeps every socket path test-owned and short.
+    return short_socket_root / "l4"
+
+
+def test_socket_created_connectable_and_removed_on_stop(l4root):
     """(7) bind creates the socket (connectable mode); stop removes it."""
-    listener = LocalOperatorListener(_config(tmp_path), RecordingApp())
+    listener = LocalOperatorListener(_config(l4root), RecordingApp())
     listener.bind()
-    path = tmp_path / "l4.sock"
+    path = l4root / "l4.sock"
     assert stat.S_ISSOCK(os.lstat(str(path)).st_mode)
     assert os.stat(path).st_mode & 0o777 in (0o660, 0o666)  # amendment (b)
     listener.stop()
     assert not os.path.lexists(path)
 
 
-def test_live_listener_at_bind_is_refused_stale_replaced(tmp_path):
+def test_live_listener_at_bind_is_refused_stale_replaced(l4root):
     """(6) a live listener keeps its socket; a stale file is replaced."""
-    incumbent = LocalOperatorListener(_config(tmp_path), RecordingApp())
+    incumbent = LocalOperatorListener(_config(l4root), RecordingApp())
     incumbent.bind()
     try:
         with pytest.raises(LocalOperatorBindError):
-            LocalOperatorListener(_config(tmp_path), RecordingApp()).bind()
+            LocalOperatorListener(_config(l4root), RecordingApp()).bind()
     finally:
         incumbent.stop()
     # Stale leftover: a bound-then-closed socket file nobody answers.
     leftover = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    leftover.bind(str(tmp_path / "l4.sock"))
+    leftover.bind(str(l4root / "l4.sock"))
     leftover.close()
-    replacement = LocalOperatorListener(_config(tmp_path), RecordingApp())
+    replacement = LocalOperatorListener(_config(l4root), RecordingApp())
     replacement.bind()  # unlinks the stale file, binds fresh
     replacement.stop()
 
 
-def test_disallowed_peer_uid_refused_before_any_request(tmp_path):
+def test_disallowed_peer_uid_refused_before_any_request(l4root):
     """(2) peer uid outside allowed_uids: connection refused, app never sees it."""
     app = RecordingApp()
     listener = LocalOperatorListener(
-        _config(tmp_path), app, peer_uid_reader=lambda conn: 424242)
+        _config(l4root), app, peer_uid_reader=lambda conn: 424242)
     listener.bind()
 
     async def client():
         loop = asyncio.get_running_loop()
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.connect(str(tmp_path / "l4.sock"))
+        conn.connect(str(l4root / "l4.sock"))
         conn.setblocking(False)  # asyncio sock_* multiplexes; never block the loop
         await loop.sock_sendall(conn, _http_request("/os/executive/context"))
         chunks = []
@@ -173,16 +180,16 @@ def test_disallowed_peer_uid_refused_before_any_request(tmp_path):
     assert app.scopes == []
 
 
-def test_real_same_uid_socket_serves_request(tmp_path):
+def test_real_same_uid_socket_serves_request(l4root):
     """(2, positive) a real same-uid connection is admitted and served."""
     app = RecordingApp()
-    listener = LocalOperatorListener(_config(tmp_path), app)  # real getpeereid
+    listener = LocalOperatorListener(_config(l4root), app)  # real getpeereid
     listener.bind()
 
     async def client():
         loop = asyncio.get_running_loop()
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.connect(str(tmp_path / "l4.sock"))
+        conn.connect(str(l4root / "l4.sock"))
         conn.setblocking(False)  # asyncio sock_* multiplexes; never block the loop
         await loop.sock_sendall(conn, _http_request("/os/executive/context"))
         chunks = []
@@ -224,34 +231,13 @@ def test_operator_authenticator_attributes_by_digest_only():
 # (3) the admitted uid reads OS + workspace routes over the socket, no bearer
 
 
-def _socket_config(tmp_path):
+def _socket_config(l4root):
     from integrations.executive_mcp.local_operator import parse_local_operator_config
     return parse_local_operator_config({
-        "socket_path": str(tmp_path / "l4.sock"),
+        "socket_path": str(l4root / "l4.sock"),
         "allowed_uids": [os.getuid()],
         "operator_subject": FAKE_SUBJECT,
     })
-
-
-def _socket_http(tmp_path, listener, method, path, body=b"{}", extra=b""):
-    async def client():
-        loop = asyncio.get_running_loop()
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        conn.connect(str(tmp_path / "l4.sock"))
-        conn.setblocking(False)
-        request = (f"{method} {path} HTTP/1.0\r\nHost: mcp.mastermind-x.com\r\n"
-                   f"Content-Length: {len(body)}\r\n{extra}"
-                   "Content-Type: application/json\r\n\r\n").encode() + body
-        await loop.sock_sendall(conn, request)
-        chunks = []
-        while True:
-            data = await loop.sock_recv(conn, 65536)
-            if not data:
-                break
-            chunks.append(data)
-        conn.close()
-        return b"".join(chunks)
-    return _run_with_listener(listener, client)
 
 
 def _response_json(raw: bytes):
@@ -259,13 +245,13 @@ def _response_json(raw: bytes):
     return head.split(b"\r\n", 1)[0], __import__("json").loads(payload)
 
 
-def test_allowed_uid_reads_os_and_workspace_routes_no_bearer(tmp_path):
+def test_allowed_uid_reads_os_and_workspace_routes_no_bearer(l4root):
     """(3) same real uid: OS context + workspace read, attributed, no bearer."""
     from types import SimpleNamespace
     from integrations.executive_mcp.local_operator import LocalOperatorAuthenticator
     from integrations.executive_mcp.server import build_local_operator_mcp_app
 
-    config = _socket_config(tmp_path)
+    config = _socket_config(l4root)
     seen = []
 
     def provider(principal):
@@ -286,7 +272,7 @@ def test_allowed_uid_reads_os_and_workspace_routes_no_bearer(tmp_path):
             ("GET", "/workspace/programs/current", b""),
         ):
             conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            conn.connect(str(tmp_path / "l4.sock"))
+            conn.connect(str(l4root / "l4.sock"))
             conn.setblocking(False)
             request = (f"{method} {path} HTTP/1.0\r\nHost: mcp.mastermind-x.com\r\n"
                        f"Content-Length: {len(body)}\r\n\r\n").encode() + body
@@ -383,3 +369,116 @@ def test_tcp_forged_headers_get_exactly_todays_refusal(rsa_key, tmp_path, short_
     assert body == {"ok": False, "error": {"code": "authentication_required",
                                            "message": "authentication required"}}
     assert (b"www-authenticate", b"Bearer") in [tuple(h) for h in start["headers"]]
+
+
+# --------------------------------------------------------------------------
+# the principal's three h11-loop concerns: 100-continue, chunked body,
+# and an app that raises mid-response
+
+
+class BodyEchoApp:
+    def __init__(self):
+        self.bodies = []
+
+    async def __call__(self, scope, receive, send):
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            body += message.get("body", b"")
+            if not message.get("more_body", False):
+                break
+        self.bodies.append(bytes(body))
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"text/plain")]})
+        await send({"type": "http.response.body", "body": b"echoed"})
+
+
+def _socket_roundtrip(l4root, listener, drive):
+    async def client():
+        loop = asyncio.get_running_loop()
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.connect(str(l4root / "l4.sock"))
+        conn.setblocking(False)
+        result = await drive(conn, loop)
+        conn.close()
+        return result
+    return _run_with_listener(listener, client)
+
+
+async def _read_until(conn, loop, needle):
+    chunks = []
+    while needle not in b"".join(chunks):
+        data = await asyncio.wait_for(loop.sock_recv(conn, 65536), 5)
+        if not data:
+            break
+        chunks.append(data)
+    return b"".join(chunks)
+
+
+def test_chunked_request_body_is_dechunked(l4root):
+    """(h11-B) chunked framing decodes; the app sees the dechunked body."""
+    app = BodyEchoApp()
+    listener = LocalOperatorListener(_config(l4root), app)
+    listener.bind()
+
+    async def drive(conn, loop):
+        request = (b"POST /os/executive/context HTTP/1.1\r\nHost: x\r\n"
+                   b"Transfer-Encoding: chunked\r\n\r\n"
+                   b"5\r\nhello\r\n3\r\nabc\r\n0\r\n\r\n")
+        await loop.sock_sendall(conn, request)
+        return await _read_until(conn, loop, b"echoed")
+
+    raw = _socket_roundtrip(l4root, listener, drive)
+    assert raw.startswith(b"HTTP/1.1 200")
+    assert app.bodies == [b"helloabc"]
+
+
+def test_expect_100_continue_gets_interim_response(l4root):
+    """(h11-A) Expect: 100-continue must not stall to the 300s timeout."""
+    app = BodyEchoApp()
+    listener = LocalOperatorListener(_config(l4root), app)
+    listener.bind()
+
+    async def drive(conn, loop):
+        head = (b"POST /os/executive/context HTTP/1.1\r\nHost: x\r\n"
+                b"Expect: 100-continue\r\nContent-Length: 5\r\n\r\n")
+        await loop.sock_sendall(conn, head)
+        interim = await asyncio.wait_for(loop.sock_recv(conn, 65536), 5)
+        # h11 emits an empty reason phrase on the interim line, like the 200.
+        assert interim.split(b"\r\n", 1)[0].startswith(b"HTTP/1.1 100")
+        await loop.sock_sendall(conn, b"hello")
+        return interim + await _read_until(conn, loop, b"echoed")
+
+    raw = _socket_roundtrip(l4root, listener, drive)
+    assert b"HTTP/1.1 100" in raw and b"echoed" in raw
+    assert app.bodies == [b"hello"]
+
+
+class CrashingApp:
+    async def __call__(self, scope, receive, send):
+        await send({"type": "http.response.start", "status": 200,
+                    "headers": [(b"content-type", b"text/plain")]})
+        await send({"type": "http.response.body", "body": b"partial"})
+        raise RuntimeError("operator app exploded")
+
+
+def test_app_raising_mid_response_gets_clean_500(l4root):
+    """(h11-C) an app crash mid-response yields a clean 500, not a hang."""
+    listener = LocalOperatorListener(_config(l4root), CrashingApp())
+    listener.bind()
+
+    async def drive(conn, loop):
+        await loop.sock_sendall(conn, _http_request("/os/executive/context"))
+        chunks = []
+        while True:
+            data = await asyncio.wait_for(loop.sock_recv(conn, 65536), 5)
+            if not data:
+                break
+            chunks.append(data)
+        return b"".join(chunks)
+
+    raw = _socket_roundtrip(l4root, listener, drive)
+    assert raw.startswith(b"HTTP/1.1 500")
+    assert b"operator_app_failed" in raw
