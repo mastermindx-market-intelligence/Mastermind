@@ -9,6 +9,7 @@ the plist tests run against a throwaway TEAM_SERVER_LAUNCHAGENTS_DIR.
 import os
 import plistlib
 import re
+import socket
 import subprocess
 import tempfile
 from pathlib import Path
@@ -19,6 +20,16 @@ REPO = Path(__file__).resolve().parent.parent
 TOOL = REPO / "tools" / "mmos_team_server" / "team_server.sh"
 RUNNER = REPO / "tools" / "mmos_team_server" / "server_runner.sh"
 SECRETISH = re.compile(r"(token|cookie|pairing|auth|secret|api[_-]?key)", re.I)
+
+
+def free_port():
+    """A port the kernel confirms free right now (tests must not collide with
+    a live dev team server on 3805)."""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
 
 
 def run_tool(*args, env_extra=None, input=None):
@@ -124,7 +135,7 @@ class TestLabelRefusals:
         # An existing plist for another label pointing at this root.
         other = Path(launchagents_dir) / "com.example.t6-first.plist"
         other.write_text(f"<string>{dev_root}/bin/server_runner.sh</string>")
-        r = install(dev_root, 3806, "com.example.t6-second", env_extra=env)
+        r = install(dev_root, free_port(), "com.example.t6-second", env_extra=env)
         assert r.returncode != 0
         assert "one label per root" in (r.stdout + r.stderr).lower()
 
@@ -133,20 +144,20 @@ class TestInstallHygiene:
     def test_missing_fabric_env_refused(self, tmp_path, launchagents_dir):
         root = tmp_path / "t6-noenv"
         root.mkdir()
-        r = install(root, 3805, "com.example.t6-noenv",
+        r = install(root, free_port(), "com.example.t6-noenv",
                     env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
         assert r.returncode != 0
         assert "fabric.env" in (r.stdout + r.stderr)
 
     def test_fabric_env_wrong_mode_refused(self, dev_root, launchagents_dir):
         (dev_root / "fabric.env").chmod(0o644)
-        r = install(dev_root, 3805, "com.example.t6-mode",
+        r = install(dev_root, free_port(), "com.example.t6-mode",
                     env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
         assert r.returncode != 0
         assert "600" in (r.stdout + r.stderr)
 
     def test_server_bin_must_exist(self, dev_root, launchagents_dir):
-        r = install(dev_root, 3805, "com.example.t6-bin",
+        r = install(dev_root, free_port(), "com.example.t6-bin",
                     "--server-bin", "/nonexistent/t3",
                     env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
         assert r.returncode != 0
