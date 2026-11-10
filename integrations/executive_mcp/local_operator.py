@@ -345,3 +345,93 @@ class LocalOperatorAuthenticator:
             subject_digest=self._subject_digest,
             client_ref=self.CLIENT_REF,
             resource=self.RESOURCE)
+
+
+class LocalOperatorApp:
+    """Socket-only ASGI app: operator attribution with no bearer, no trust.
+
+    A separate instance, never served on TCP: the gateway's TCP app object
+    and its code path are not branched on anything a request can carry.
+    Admission already happened (kernel peer uid) before any byte reaches
+    here; no header, query, path or body value can widen anything in this
+    app — the only identity source is the configured operator subject.
+    """
+
+    _OS_CONTEXT = "/os/executive/context"
+    _WS_PROGRAMS = "/workspace/programs/current"
+    _MAX_BODY_BYTES = 1 << 20
+
+    def __init__(self, authenticator, *, workspace_programs=None):
+        if not isinstance(authenticator, LocalOperatorAuthenticator):
+            raise TypeError("LocalOperatorAuthenticator required")
+        if workspace_programs is not None and not callable(workspace_programs):
+            raise TypeError("workspace_programs must be callable or absent")
+        self._auth = authenticator
+        self._workspace_programs = workspace_programs
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return
+        path, method = scope.get("path"), scope.get("method")
+        if scope.get("query_string"):
+            await self._json(send, 404, {"error": "not_found"})
+            return
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                break
+            body += message.get("body", b"")
+            if len(body) > self._MAX_BODY_BYTES or not message.get("more_body", False):
+                break
+        if path == self._OS_CONTEXT and method == "POST":
+            await self._context(send, bytes(body))
+        elif path == self._WS_PROGRAMS and method == "GET":
+            await self._programs(send, bytes(body))
+        else:
+            await self._json(send, 404, {"error": "not_found"})
+
+    async def _context(self, send, body: bytes) -> None:
+        import json as _json
+        from integrations.mastermind_executive_app.os_transport import _context_payload
+        if body.strip() and _json.loads(body or b"null") != {}:
+            await self._json(send, 400, {"ok": False, "error": {
+                "code": "invalid_input", "message": "fixed request body required"}})
+            return
+        try:
+            await self._json(send, 200, _context_payload(self._auth.principal()))
+        except Exception:
+            await self._json(send, 503, {"ok": False, "error": {
+                "code": "backend_unavailable", "message": "Executive response is unavailable"}})
+
+    async def _programs(self, send, body: bytes) -> None:
+        scope = self._auth.principal_scope()
+        if body:
+            await self._json(send, 400, {"ok": False, "error": {
+                "code": "invalid_input", "message": "request body is refused"}})
+            return
+        if self._workspace_programs is None:
+            await self._json(send, 503, {"ok": False, "error": {
+                "code": "source_unavailable",
+                "message": "workspace read is not wired on this socket"},
+                "principal_scope": scope})
+            return
+        try:
+            frame = self._workspace_programs(self._auth.principal())
+            import json as _json
+            _json.dumps(frame, allow_nan=False)
+        except Exception:
+            await self._json(send, 503, {"ok": False, "error": {
+                "code": "backend_unavailable", "message": "workspace read is unavailable"}})
+            return
+        await self._json(send, 200, dict(frame, principal_scope=scope))
+
+    async def _json(self, send, status: int, payload: dict) -> None:
+        import json as _json
+        body = _json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                           allow_nan=False).encode("utf-8")
+        await send({"type": "http.response.start", "status": status, "headers": [
+            (b"content-type", b"application/json"),
+            (b"cache-control", b"no-store"),
+            (b"content-length", str(len(body)).encode("ascii"))]})
+        await send({"type": "http.response.body", "body": body})
