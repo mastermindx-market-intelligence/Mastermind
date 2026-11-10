@@ -110,7 +110,7 @@ python scripts/rwe_env.py gate --env /path/to/venv
 The shadow workflow runs the canonical six-shard plan on six independent
 runners. One `prepare-lock` job supplies the same Linux lock bytes to
 every runner; each realizes its own environment, then runs
-`gate --env /tmp/rwe-env --shard-index N` for its index from 0 through 5.
+`gate --env "$RUNNER_TEMP/rwe-env" --shard-index N` (a per-job directory) for its index from 0 through 5.
 Each shard has a 45-minute job limit, and the final `shadow-gate` job
 requires both lock preparation and the complete shard matrix to succeed.
 A failed, cancelled, or missing shard cannot qualify the full gate.

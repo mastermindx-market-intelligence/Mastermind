@@ -62,7 +62,12 @@ jobs:
 
   shadow-shards:
     needs: [prepare-lock]
-    runs-on: ubuntu-latest
+    # GitHub-hosted image only: this job executes the repository suite. In this
+    # organization `ubuntu-latest` can also select persistent, multi-slot
+    # self-hosted runners, where the suite's single-tenant host assertions
+    # fail and fixed paths leak between jobs. No self-hosted runner carries
+    # `ubuntu-24.04`. prepare-lock and shadow-gate run no suite.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -125,8 +130,11 @@ jobs:
           path: requirements
 
       - name: Realize hash-locked environment
-        # Every runner consumes the one prepare-lock artifact above.
-        run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
+        # Every runner consumes the one prepare-lock artifact above. The
+        # environment lives in the per-job runner temp directory, which the
+        # runner empties at job start, so no earlier job's environment or
+        # receipt can be reused or uploaded as this job's evidence.
+        run: python scripts/rwe_env.py realize --dest "$RUNNER_TEMP/rwe-env"
 
       # Same owned directory and closed diagnostic schema as canonical CI.
       # The canonical shard already loads its fixed timing plugin; no plugin,
@@ -138,7 +146,7 @@ jobs:
           printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
 
       - name: Run canonical test shard inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}
+        run: python scripts/rwe_env.py gate --env "$RUNNER_TEMP/rwe-env" --shard-index ${{ matrix.index }}
 
       - name: Upload fixed test diagnostics
         if: always()
@@ -159,7 +167,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: rwe-receipt-linux-${{ matrix.index }}
-          path: /tmp/rwe-env/rwe_receipt.json
+          path: ${{ runner.temp }}/rwe-env/rwe_receipt.json
           if-no-files-found: warn
 
   shadow-gate:

@@ -160,7 +160,8 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     assert shards["needs"] == ["prepare-lock"]
     assert shards["strategy"] == {"fail-fast": False, "max-parallel": 6,
                                    "matrix": {"index": list(range(6))}}
-    assert shards["runs-on"] == "ubuntu-latest"
+    assert shards["runs-on"] == "ubuntu-24.04"
+    assert prepare["runs-on"] == final["runs-on"] == "ubuntu-latest"
     macro_checkout = next(step["with"] for step in shards["steps"]
                           if step.get("with", {}).get("repository") ==
                           "mastermindx-market-intelligence/macro")
@@ -189,13 +190,21 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     runners = [s for s in shards["steps"] if "--shard-index" in s.get("run", "")]
     assert len(runners) == 1
     assert runners[0]["run"] == (
-        "python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}"
+        'python scripts/rwe_env.py gate --env "$RUNNER_TEMP/rwe-env" --shard-index ${{ matrix.index }}'
     )
     receipts = [s for s in shards["steps"] if s.get("uses") == "actions/upload-artifact@v4"
                 and s.get("name") == "Upload receipt"]
     assert len(receipts) == 1
     assert receipts[0]["if"] == "always()"
     assert receipts[0]["with"]["name"] == "rwe-receipt-linux-${{ matrix.index }}"
+    # Per-job environment: a fixed /tmp path survives between jobs on a
+    # persistent runner, and the always() receipt upload would then publish
+    # an earlier job's receipt as this job's evidence.
+    assert receipts[0]["with"]["path"] == "${{ runner.temp }}/rwe-env/rwe_receipt.json"
+    realize = [s for s in shards["steps"] if s.get("name") == "Realize hash-locked environment"]
+    assert len(realize) == 1
+    assert realize[0]["run"] == 'python scripts/rwe_env.py realize --dest "$RUNNER_TEMP/rwe-env"'
+    assert not any("/tmp/" in str(step) for step in shards["steps"])
     assert final["needs"] == ["prepare-lock", "shadow-shards"]
     assert final["if"] == "${{ always() }}"
     assert all("continue-on-error" not in job and all("continue-on-error" not in step
