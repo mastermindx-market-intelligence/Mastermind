@@ -29,6 +29,7 @@ _JOB_CONCLUSIONS = {
     **{f"pytest shard {index}": "success" for index in range(6)},
     "test": "success",
     "PR test scope": "success",
+    "Pin and identity guards": "success",
     "PR fast checks": "skipped",
 }
 _JOB_NAMES = set(_JOB_CONCLUSIONS)
@@ -214,6 +215,8 @@ def find_reusable_run(
             {"Run repository test gate"} if name == "test"
             else {"Classify integrated source diff using protected base code"}
             if name == "PR test scope"
+            else {"Run pinned source-identity guard suite"}
+            if name == "Pin and identity guards"
             else {"Run repository test shard", "Fast source-bound release preflight"}
         )
         if name == "pytest shard 0":
