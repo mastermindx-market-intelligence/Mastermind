@@ -106,3 +106,37 @@ Lane `t3/mmos-v2-l1r` (branch on origin). Every row verified by reading trunk co
 - L1B3-5 stays OPEN and is handed to L10 as build-list item 8 of `integrations/mmos/CODING_JOB_REUSE_MAP.md`. Reason not fixed here: the fix is a new supervisor adopt transition for the crash window between `put_launch_receipt` and `record_process` (`executive_supervisor.py` startup reconciliation + `executive_runtime.py` `adopt_attempt` law) — a production-supervisor path other lanes are editing, needing its own crash-window harness; not small, and this lane's brief reserved non-small fixes as recorded-open.
 
 Lane L1 (coding-job engine) CLOSED at trunk merge of the above. Reuse map delivered: `integrations/mmos/CODING_JOB_REUSE_MAP.md`.
+
+## 8. Post-close grok-4.7 attack on the L1B3-1 fix — adjudicated, zero real findings
+
+One grok-4.7 READ_ONLY attack (2026-11-10, capacity_fabric, worktree-isolated)
+returned 7 findings (`/tmp/l1r_grok_attack_l1b3_1.md`). **None survived
+adjudication; no code change made.** Only findings with reproductions count, and
+none of the seven scratch test files existed on disk; every "reproducing
+command" named tests inside repo files that were never written.
+
+- F1/F3 "race between proof and command check / runtime races the check":
+  refuted by ordering — from the `require_read_current()` re-proof through the
+  `admission_command_id` check to `runtime.jobs.admit_child_execution_request`
+  there is **no `await`** (`executive_service.py:7020-7046`); single-threaded
+  asyncio cannot interleave there. A command mismatch returns `invalid_input`
+  BEFORE any admission, so no effect is committed. The proof is itself a
+  double-read stability check (`source.for_principal(...) != before`).
+- F2/F5 "App-side race after checks / `dataclasses.replace` mid-flight":
+  the work-ref mismatch returns pre-send (proven by
+  `test_forwarding_refuses_a_work_ref_the_target_is_not_frozen_on`, whose
+  sender raises if any frame is sent); the App re-checks target identity after
+  its awaits (`coo.py` `self.settings.selected_child_target is not target`),
+  and any App-side mutation is caught by the Control-side re-proof at the
+  claim boundary — the entire point of L1B3-1. There is no path where Control
+  commits and the App reports a pre-send refusal.
+- F4 "root-job None guard skipped": only the child-specific
+  `root_job_id != child.selection.root_job_id` comparison is child-conditional
+  (meaningless on the admit lane — no frozen child exists);
+  `projection["mission"]["work_ref"] != target.work_ref` is unconditional and
+  a missing mission fails the projection read → `authority_refused`.
+- F6 "error mapping hides a command mismatch": the mismatch has its own
+  pre-effect `invalid_input` branch; the `StateConflict` mapping wraps only
+  the runtime admit call.
+- F7 "`require_read_current is None` bypass": the handler's only production
+  caller (`executive_service.py:6920`) always passes it.
