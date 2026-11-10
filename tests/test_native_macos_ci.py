@@ -77,9 +77,9 @@ def test_frontend_build_uses_exact_app_only_production_source_closure():
 def test_compiled_browser_evidence_is_separate_bounded_and_source_bound():
     job = workflow()["jobs"]["frontend"]
     runs = commands(job)
-    assert len(runs) == 6
+    assert len(runs) == 7
     assert runs[4] == "npx vite build --config vite.browser-proof.config.ts"
-    receipt = runs[5]
+    receipt = runs[6]
     for field in (
         'schema: "mastermind.os.compiled_test_receipt.v1"',
         "source_revision: process.env.GITHUB_SHA",
@@ -92,9 +92,10 @@ def test_compiled_browser_evidence_is_separate_bounded_and_source_bound():
     uploads = [step for step in job["steps"]
                if step.get("uses", "").startswith("actions/upload-artifact@")]
     assert {step["with"]["path"] for step in uploads} == {
-        "app/mastermind_os/dist", "app/mastermind_os/dist-browser-proof"
+        "app/mastermind_os/dist", "app/mastermind_os/dist-browser-proof",
+        "${{ runner.temp }}/mastermind-app-control-proof",
     }
-    assert len(uploads) == 2
+    assert len(uploads) == 3
     receipt_index = next(i for i, step in enumerate(job["steps"])
                          if step.get("run") == receipt)
     for step in uploads:
@@ -124,7 +125,13 @@ def test_workflow_and_test_changes_trigger_the_gate_without_write_permissions():
     assert set(config["on"]) == {"pull_request", "merge_group", "push", "workflow_dispatch"}
     for event in ("pull_request", "push"):
         assert set(config["on"][event]["paths"]) == {
-            "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH
+            "app/mastermind_os/**", WORKFLOW_PATH, TEST_PATH,
+            "integrations/worker_browser_runtime/app-control/**",
+            "integrations/workbench_browser_mcp/**",
+            "integrations/workbench_action_mcp/service.py",
+            "control_plane/browser_resource_contract.py",
+            "tests/test_os_app_control_profile.py",
+            "tests/test_workbench_browser_port.py",
         }
     assert config["on"]["push"]["branches"] == ["master"]
     assert config["on"]["merge_group"]["types"] == ["checks_requested"]

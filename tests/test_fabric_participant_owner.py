@@ -10,11 +10,12 @@ import pytest
 
 ROOT=Path(__file__).resolve().parents[1]
 NATIVE=ROOT/'ops/native_fabric/quota_continuity'
+MEMORY_NATIVE=ROOT/'ops/native_fabric/provider_plans/memory118/native_owner'
 # Native modules belong to this fixture's lifetime, including lazy imports.
 # Collection must not preload an unsealed generation into later enrollment.
 @contextlib.contextmanager
 def _native_owner_import_scope():
-    names = {path.stem for directory in (NATIVE / "candidate", NATIVE / "source")
+    names = {path.stem for directory in (MEMORY_NATIVE, NATIVE / "candidate", NATIVE / "source")
              for path in directory.glob("*.py")}
     def yaml_name(name):
         return name == "yaml" or name.startswith("yaml.") or name == "_yaml"
@@ -23,7 +24,7 @@ def _native_owner_import_scope():
     previous = {name: sys.modules.get(name, absent) for name in names}
     previous_path = list(sys.path)
     try:
-        sys.path[:0] = [str(NATIVE / "candidate"), str(NATIVE / "source")]
+        sys.path[:0] = [str(MEMORY_NATIVE), str(NATIVE / "candidate"), str(NATIVE / "source")]
         for name in names:
             sys.modules.pop(name, None)
         yield tuple(importlib.import_module(name) for name in

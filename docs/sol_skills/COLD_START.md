@@ -19,44 +19,25 @@ Identify persona/user and machine jobs, outcome/proof and current Chairman inten
 
 ## Step 2 — Resolve identity, then owner
 
-Resolve existing `WS:<KEY>`, `MAS-###`, repo/PR/branch and runtime intent/Job before
-broad search. Map facts through owners, not similar titles. Historical ownership is not current liveness. Separate role, receiver,
-lease/writer and effects under ACTIVE_EXECUTION recovery. Current assignment owns
-the next recovery action until actual successor acceptance; stale/dead/unavailable
-owners do not justify an owner-only handback. Missing lawful parent is a gap, not
-permission to invent a tidy workstream.
-Before declaring an "owner gate", apply ACTIVE_EXECUTION "Prove an owner gate before using it to stop": a requested reviewer, a historical author or a disabled runtime service is evidence of different things, not a generic instruction to wait.
+Resolve `WS:<KEY>`, `MAS-###`, repo/PR/branch and runtime intent/Job before broad search. Map facts through canonical owners, not similar titles. Historical ownership is not current liveness. Separate role, receiver, lease/writer and effects. Current assignment owns the next recovery action until accepted succession; do not wait for dead chats or invent a workstream. Apply ACTIVE_EXECUTION's owner-gate proof before stopping: a requested reviewer, a historical author or a disabled runtime service are different facts.
 
 ## Step 2A — Recover the current checkpoint before history
 
-After a verified pin/exact operation, use the continuation ref or one exact owner
-lookup. Verify latest cumulative checkpoint owner/identity/revision; refresh only
-material source/law/runtime/effect/custody/interface/return changes. Navigation is
-not authority. Without a valid checkpoint use Step 3 once and save before substantial
-effects. Otherwise no history chains, repeated accepted proof or unrelated scans;
-read deeper only for required decisions/acceptance, never suppressing necessary proof.
+After a verified pin/exact operation, use one continuation ref or owner lookup. Verify latest cumulative checkpoint owner/identity/revision; refresh only material source/law/runtime/effect/custody/interface/return changes. Navigation is not authority. Without a valid checkpoint, use Step 3 once and save before substantial effects. Otherwise no history chains, repeated accepted proof or unrelated scans; deepen only for decisions or acceptance.
 
-Ignoring messages proves no compaction. Bound retrieval; actual fresh context needs
-a genuinely new chat plus verified ref, not an assumed-empty branch. Host Project history is
-advisory. A new chat transfers no lease, STARTed operation, source writer or `EFFECT_UNKNOWN`.
+Ignoring messages proves no compaction. Bound reads; fresh context requires a genuinely new chat and verified ref. Host Project history is advisory. A new chat transfers no lease, STARTed operation, source writer or `EFFECT_UNKNOWN`.
 
 ### Multi-phase project plan recovery
 
-Load same-pin `docs/CEO_PROJECT_PLAN_CONTINUITY.md`. Recover waves/latest handoff,
-then task tree at its artifacts path/containing commit. A valid handoff need not have
-a nonexistent master-plan-SHA field. Wave/editorial/runtime states are separate.
-If no tree exists, resolve owner and persist one with readback **before substantial
-execution or worker delegation**, preceded only by minimum safe scoping. No duplicate
-registry, guessed lifecycle, displaced STARTed worker or draft-as-Agent-OS checkpoint.
-Unavailable writer holds dependent work only.
+Load same-pin `docs/CEO_PROJECT_PLAN_CONTINUITY.md`: recover waves, latest handoff and linked task tree. A handoff need not carry a master-plan SHA; wave, editorial and Runtime states differ. When a tree is absent, resolve its owner and save/read back before major execution/delegation, after minimal scoping. Do not invent a registry, lifecycle, lease or Agent OS checkpoint; unavailable writer blocks dependent work only.
 
 ## Step 3 — Read canonical sources in a bounded ladder
 
-Read only until material questions/disagreements are answered: accepted owning-repo
-architecture/law for sensitive work; Agent OS organizational records; GitHub default
-source/relevant PRs; Linear projection comparisons; relevant Slack hot state/exact
-child thread; advisory Project history for unresolved provenance. Do not scan every
-surface by habit.
+Read only until material disputes resolve: accepted source law; Agent OS records; GitHub source/PR; Linear projection; exact Slack hot carrier; advisory Project history. Do not scan every surface by habit.
+
+### M2 Studio local access versus remote fleet host selection
+
+On the M2 gateway an **unselected** Studio Direct session's `start_process` reaches local `m2studio`. `studio_select_host({hostRef: "m2"})` is the wrong path: that selector binds configured **remote** hosts; `studio_fleet_status.physicalFleet` is advisory, not its allowlist. `FLEET_ROUTE_PREFLIGHT_REFUSED / NOT_APPLIED` from selection does **not** prove a local M2 outage or denial. Verify a distinct authorized local `hostname` call; preserve the original refused effect and other permission gates. Full runbook: `integrations/studio_direct_mcp/README.md`.
 
 ## Step 4 — Build the capability ledger
 
@@ -78,13 +59,7 @@ Check owning repo/adjacent portfolio for overlapping paths/authority, live siste
 
 ## Step 7 — Recover any open reciprocal dialogue before creating new work
 
-Apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` to known watcher-enabled dialogues;
-read the exact lawful thread for the latest BLOCKED/DECISION_REQUEST/RESULT or other
-awaiting-Sol edge. First adjudicate that child and issue exactly one same-carrier
-`SOL CONTINUE`, `SOL RULING / CONTINUE`, `SOL REQUEST_REPAIR`, or terminal
-`SOL STOP`, `SOL ACCEPTED / STOP`, `SOL CLOSED / STOP` with disarm instruction.
-Silence is not terminal or replacement authority. Failed/unknown shutdown preserves
-actual child state: reconcile transport, never let a leftover watcher create work.
+For known watcher-enabled children apply `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`. Read the exact carrier's latest BLOCKED/DECISION_REQUEST/RESULT; adjudicate one same-carrier `SOL CONTINUE`, `SOL RULING / CONTINUE`, `SOL REQUEST_REPAIR` or terminal `SOL STOP`, `SOL ACCEPTED / STOP`, `SOL CLOSED / STOP` with exact-source disarm. Silence is not terminal; failed/unknown shutdown retains child state and requires transport reconciliation, not new work.
 
 ## Step 8 — Read hot/runtime state only when relevant
 

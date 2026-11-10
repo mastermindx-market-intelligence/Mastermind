@@ -289,3 +289,95 @@ def test_combined_host_events_refuse_noncanonical_rpc(rsa_key, tmp_path):
     reader, _ = canonical_read_tool()
     with pytest.raises(ValueError, match="exact authenticated v3 reply-read composition"):
         _event_composition(settings, reader, object())
+
+
+@pytest.mark.parametrize("opt_in", [False, True])
+def test_route_preview_real_mcp_consumer_is_opt_in_and_read_only(
+        rsa_key, tmp_path, monkeypatch, opt_in):
+    """Construct the real COO app and exercise its signed MCP transport."""
+    import sqlite3
+    from control_plane.executive_runtime import Runtime
+    from control_plane.child_execution_contracts import RoutePreview
+    from integrations.executive_mcp.route_preview import RoutePreviewSource
+    from integrations.mastermind_executive_app.gateway import CeoIngressClient
+
+    _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+    assert settings.catalogue_provider is None
+    Runtime.at(tmp_path)
+    database = tmp_path / "data" / "control_plane" / "executive.sqlite3"
+
+    def counts():
+        with sqlite3.connect(database) as connection:
+            return tuple(connection.execute(
+                f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("jobs", "attempts", "worker_quota_classes"))
+
+    ingress_calls = []
+
+    async def no_ingress(*args, **kwargs):
+        ingress_calls.append((args, kwargs))
+        raise AssertionError("route preview must not dispatch an ingress frame")
+
+    monkeypatch.setattr(CeoIngressClient, "send_frame", no_ingress)
+    before = counts()
+    assert before == (0, 0, 0)
+    app = server.build_coo_mcp_app(settings, audit_sink=fixture.Sink(),
+        route_preview_source=RoutePreviewSource() if opt_in else None)
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://127.0.0.1", trust_env=False) as client:
+                listed = await rpc(client, token, "/mcp/coo")
+                assert listed.status_code == 200, listed.text
+                tools = listed.json()["result"]["tools"]
+                expected = COO_TOOL_NAMES + (("route_preview",) if opt_in else ())
+                assert tuple(tool["name"] for tool in tools) == expected
+                if opt_in:
+                    descriptor = tools[-1]
+                    assert descriptor["annotations"]["readOnlyHint"] is True
+                    assert descriptor["securitySchemes"][0]["scopes"] == list(
+                        settings.policy.required_scopes)
+
+                async def preview(arguments, selected_token=token):
+                    return await rpc(client, selected_token, "/mcp/coo",
+                        "tools/call", {"name": "route_preview", "arguments": arguments})
+
+                for route, complexity in (
+                        ("routine", "C1_ROUTINE_BOUNDED"),
+                        ("frontier", "C2_COMPLEX_BOUNDED")):
+                    response = await preview({"route_option": route, "goal": "bounded module"})
+                    assert response.status_code == 200, response.text
+                    result = response.json()["result"]
+                    if not opt_in:
+                        assert result["isError"] is True
+                        continue
+                    assert result["isError"] is False, result
+                    payload = json.loads(result["content"][0]["text"])
+                    assert payload["schema"] == "RoutePreview.v1"
+                    assert payload["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+                    assert payload["production_armed"] is False
+                    assert payload["effective_complexity"] == complexity
+                    assert payload["capacity_knowledge"] == "unknown"
+                    assert payload["rank_basis"] == "suitability_only"
+                    assert payload["decision_id"] == payload["attempt_ref"] == ""
+                    assert RoutePreview.from_dict(payload).to_dict() == payload
+                    if route == "frontier":
+                        assert payload["witness_disposition"] == "downgraded"
+
+                refused = await preview({
+                    "route_option": "routine", "goal": "bounded module", "pool": "caller-pool"})
+                assert refused.status_code == 200, refused.text
+                assert refused.json()["result"]["isError"] is True
+                reader = fixture.fixture._read_token(rsa_key)
+                assert (await preview({"route_option": "routine", "goal": "bounded module"},
+                    reader)).status_code in (401, 403)
+                current["binding"] = {
+                    "schema": BINDING_SCHEMA, "enabled": False, "binding": None}
+                assert (await preview({"route_option": "routine", "goal": "bounded module"}
+                    )).status_code in (401, 403)
+
+    asyncio.run(exercise())
+    assert counts() == before
+    assert ingress_calls == []

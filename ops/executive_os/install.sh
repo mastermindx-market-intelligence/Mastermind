@@ -1480,9 +1480,12 @@ builder = rollout / "build_review_stage.py"
 records = {name: (rollout / name).read_bytes()
            for name in ("native-manifest.json", "native-source-inventory.json")}
 sys.argv = [str(builder), "--output", str(rollout)]
-runpy.run_path(str(builder), run_name="__main__")
-if any((rollout / name).read_bytes() != expected for name, expected in records.items()):
-    raise ValueError("native closure differs from the reviewed release inventory")
+builder_owner = runpy.run_path(str(builder), run_name="__main__")
+if any(((rollout / name).read_bytes() != expected for name, expected in records.items())):
+    try:
+        builder_owner['verify_glm_core_release_records'](rollout.parent, records, {name: (rollout / name).read_bytes() for name in records})
+    except (ValueError, TypeError, KeyError, OSError):
+        raise ValueError('native closure differs from the reviewed release inventory')
 # The installer uses umask077. These are public reviewed code bytes, not state;
 # both service UIDs must traverse/read them after the root-owned seal.
 stage = rollout / "native-code-stage"

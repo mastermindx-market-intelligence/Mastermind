@@ -389,3 +389,37 @@ is a RECOVERABLE phase. An interruption AFTER the publication is closed by
 reading the published observation back EXACTLY: the retained phase is not
 admissible for another publication, so the observation is never written twice
 and no lifecycle effect is dispatched.
+
+
+## Explicit continuation before publication
+
+A source-only live update can be stopped at `CONTROL_BOOTOUT_RECORDED` after
+launchd removed Control but before any target publication. The explicit
+`resume-control-component` action continues that **same original transaction**.
+Ordinary `reconcile-control-component` remains an observe-only postimage proof.
+
+Invoke the wrapper from a normally staged, sealed recovery release:
+
+```bash
+sudo /bin/bash "/Library/Application Support/MastermindExecutive/releases/<recovery-sha>/ops/executive_os/service-control.sh" \
+  resume-control-component --expected-sha <recovery-sha> --target-sha <original-target-sha> \
+  --transaction-id <original-transaction-id> --plan-sha256 <original-plan-sha256>
+```
+
+The recovery implementation must itself belong to that exact sealed release.
+It takes no replacement configuration, source target, binding, receipt or plan.
+It re-derives the original candidate and correlations from the sealed archives,
+joins every original digest, rechecks the actual installed preimages, release
+seals, administrative checkout, interpreter, authority, Runtime and stopped
+service boundary, then performs only the still-unattempted publications and
+bootstrap. It never repeats the recorded bootout. A later phase, changed
+preimage, new binding, active process, changed service override, mismatched
+transaction or plan is refused without a new effect. Any interruption after
+publication remains on the original transaction and its normal reconciliation.
+
+For source-only component updates, the fixed service-UID census accepts Apple's
+`distnoted` for either dedicated principal only through the existing strict
+Darwin classifier: actual launchd attribution, matching UID/PID, verified Apple
+signature and a repeated unchanged census. Additional or unqualified processes
+remain a refusal. Arming and other execution-admission paths retain their
+original Control absence requirement.
