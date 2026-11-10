@@ -284,7 +284,7 @@ and in a browser, and DONE_WHEN 3 is met there.
 to T3 itself. Sending them upstream is a public act under the Chairman's name and waits
 for his word.
 
-## 12. Amendment, 2026-11-10 19:55 UTC: T6 accepted, the team server is installed
+## 12. Amendment, 2026-11-10 18:50 UTC: T6 accepted, the team server is installed
 
 Lane T6 returned and the principal verified it: 23 tests pass, the launcher selftest
 passes, every evidence file is valid JSON, and the lane left no launchd job, listener or
