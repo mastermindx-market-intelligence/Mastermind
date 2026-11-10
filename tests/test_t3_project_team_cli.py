@@ -112,9 +112,24 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     payload, manifest = archive_bytes(root)
     assert manifest["source_status"] == "qualification_only" and manifest["source_revision"] is None
     assert archive_bytes(root)[0] == payload
+    expected_sources = {
+        "integrations/session_bridge/t3_native_client.py",
+        "integrations/session_bridge/t3_mission_brief.py",
+        "integrations/session_bridge/t3_web_client.py",
+        "integrations/session_bridge/t3_project_team.py",
+        "integrations/session_bridge/t3_project_team_inventory.py",
+        "integrations/session_bridge/t3_project_team_results.py",
+        "integrations/session_bridge/t3_project_team_cli.py",
+    }
+    assert set(manifest["files"]) == expected_sources
     with zipfile.ZipFile(BytesIO(payload)) as archive:
-        assert len(archive.namelist()) == 10
-        assert all(not name.startswith("/") and ".." not in name for name in archive.namelist())
+        names = archive.namelist()
+        assert set(names) == expected_sources | {
+            "__main__.py", "build.json", "integrations/__init__.py",
+            "integrations/session_bridge/__init__.py",
+        }
+        assert len(names) == len(set(names))
+        assert all(not name.startswith("/") and ".." not in name for name in names)
     app = tmp_path / "team.pyz"
     app.write_bytes(payload)
     # Isolated cwd and Python mode ensure this is the packaged consumer, not repo imports.
