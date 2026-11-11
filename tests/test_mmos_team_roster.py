@@ -175,7 +175,9 @@ class TestToolLimits:
         assert f"Write(/{home}/**)" in limits["permissions"]["allow"]
         assert f"Write(/{workspace}/**)" in limits["permissions"]["deny"]
         assert "Bash" in limits["permissions"]["deny"]
-        assert "Write(//tmp/**)" in joined
+        # deny_write_roots are kept through the rule-layer cut (realpath
+        # spelling; /tmp resolves to /private/tmp on macOS)
+        assert f"Write(/{os.path.realpath('/tmp')}/**)" in joined
 
 
 class TestToolLimitsCredentials:
@@ -201,10 +203,14 @@ class TestToolLimitsCredentials:
         home = team_roster.teammate_home(spec, mate)
         deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
         for name in ("tool-limits.json", "CHARTER.md", "carrier.json",
-                     "cutover-preimage.json"):
+                     "cutover-preimage.json",
+                     ".claude.json.backup", "CLAUDE.md.backup"):
             assert f"Write(/{home}/{name})" in deny
             assert f"Edit(/{home}/{name})" in deny
-        assert not any("CLAUDE.md" in d for d in deny)
+        # plain CLAUDE.md (memory) stays writable; CLAUDE.md.backup does
+        # not make plain CLAUDE.md denied (exact forms, not substrings)
+        assert f"Write(/{home}/CLAUDE.md)" not in deny
+        assert f"Edit(/{home}/CLAUDE.md)" not in deny
 
     def test_own_claude_configuration_not_writable(self, tmp_path):
         """The home is the teammate's Claude configuration folder: a settings
@@ -219,7 +225,8 @@ class TestToolLimitsCredentials:
             for tool in ("Write", "Edit"):
                 assert f"{tool}(/{home}/{name})" in deny
                 assert f"{tool}(/{home}/{name}/**)" in deny
-        assert not any("CLAUDE.md" in d for d in deny)
+        assert f"Write(/{home}/CLAUDE.md)" not in deny
+        assert f"Edit(/{home}/CLAUDE.md)" not in deny
         allow = team_roster.tool_limits(spec, mate)["permissions"]["allow"]
         assert f"Write(/{home}/**)" in allow
 
@@ -228,7 +235,7 @@ class TestToolLimitsCredentials:
         secret_dir = tmp_path / "elsewhere" / "secrets"
         secret_dir.mkdir(parents=True)
         raw["deny_read_roots"] = [str(secret_dir)]
-        raw["deny_read_root_siblings"] = True
+        raw["deny_read_root_siblings"] = True  # inert since the cut
         spec = load(tmp_path, raw)
         root = team_roster.expand(spec["server"]["root"])
         os.makedirs(root, exist_ok=True)
@@ -237,7 +244,11 @@ class TestToolLimitsCredentials:
         mate = spec["teammates"][0]
         deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
         assert f"Read(/{secret_dir}/**)" in deny
-        assert f"Read(/{sibling}/**)" in deny
+        # rule-layer cut (repair round 2): siblings of the server root are
+        # no longer enumerated as deny rules — the gate refuses every read
+        # outside the roots at call time, including folders created after
+        # apply; the snapshot layer keeps only named paths
+        assert not any(sibling in d for d in deny)
         assert not any(d.startswith(f"Read(/{root}/**") for d in deny)
 
 
@@ -269,10 +280,9 @@ class TestToolLimitsNewKeys:
     def today_rules(spec, mate):
         """The default generation, reconstructed from the module's own
         tuples so the absent-key test fails if the output changes in any
-        way. The write fence enumeration is delegated to
-        rooted_read_denies (its chain/sibling logic has its own direct
-        tests); this reconstruction pins WHICH roots fence writes and how
-        every other deny is composed."""
+        way. Since the rule-layer cut (repair round 2) the reconstruction
+        is the whole story: the census bare denies plus the named
+        write/read surfaces — no sibling enumerations remain."""
         root = os.path.realpath(team_roster.expand(spec["server"]["root"]))
         home = os.path.realpath(team_roster.teammate_home(spec, mate))
         deny_roots = [os.path.realpath(
@@ -315,14 +325,7 @@ class TestToolLimitsNewKeys:
                     deny += [f"{tool}(/{base})", f"{tool}(/{base}/**)"]
         for path in team_roster.deny_read_paths(spec, mate):
             deny += team_roster._read_deny(path)
-        # always-on write fence (attack round): own home only when no
-        # rooted key is set; the read roots join otherwise
-        fence_roots = [home]
-        deny += team_roster.rooted_read_denies(spec, mate, ("Write", "Edit"),
-                                               roots=fence_roots)
-        # same first-occurrence dedupe as tool_limits (components can now
-        # overlap: the explicit t3_bin-dir deny collides with the
-        # enumeration's deny of the same directory as a chain sibling)
+        # same first-occurrence dedupe as tool_limits
         seen = set()
         deny = [d for d in deny if not (d in seen or seen.add(d))]
         allow = ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
@@ -387,11 +390,13 @@ class TestToolLimitsNewKeys:
         assert team_roster.tool_limits(spec, mate)["permissions"] == \
             self.today_rules(spec, mate)["permissions"]
 
-    def test_allow_read_roots_denies_outside_roots(self, tmp_path):
-        """Rooted reads: every directory NOT on the chain to an allowed root
-        is denied for Read/Glob/Grep, in file and tree form; the allowed
-        roots and the own home stay readable; plain Read/Glob/Grep allows
-        are replaced by rooted ones."""
+    def test_allow_read_roots_enforced_by_named_rules_and_gate(self,
+                                                               tmp_path):
+        """Rooted reads after the rule-layer cut (repair round 2): the rule
+        layer keeps the named read denies and root-scoped allows; reads
+        outside the roots are the GATE's call at run time (it refuses
+        every read outside the roots, including folders created after
+        apply — see the gate tests and the post-apply-folder test)."""
         extra_root = tmp_path / "elsewhere" / "ws2"
         extra_root.mkdir(parents=True)
         raw = make_spec(tmp_path)
@@ -400,9 +405,6 @@ class TestToolLimitsNewKeys:
         mate, other = spec["teammates"][0], spec["teammates"][1]
         os.makedirs(team_roster.teammate_home(spec, other))
         home = team_roster.teammate_home(spec, mate)
-        # a sibling of the allowed root under a chain dir: exists at apply
-        # time, so sibling enumeration must deny it (a name created after
-        # apply is the stated future-name gap, not testable here)
         sibling_dir = tmp_path / "elsewhere" / "unrelated-dir"
         sibling_dir.mkdir()
         limits = team_roster.tool_limits(spec, mate)
@@ -415,37 +417,23 @@ class TestToolLimitsNewKeys:
         assert f"Glob(/{extra_root}/**)" in allow
         assert f"Grep(/{extra_root}/**)" in allow
         assert f"Read(/{home}/**)" in allow  # own home stays readable
-        # every top-level directory not on the chain of an allowed root is
-        # denied in file and tree form (chain names derived from the roots,
-        # so the test holds on any host)
-        roots = [os.path.realpath(str(extra_root)),
-                 os.path.realpath(home)]
-        chain_at_root = {r.strip("/").split("/")[0] for r in roots}
-        for tool in ("Read", "Glob", "Grep"):
-            for name in os.listdir("/"):
-                if name in chain_at_root:
-                    continue
-                assert f"{tool}(//{name})" in deny, name
-                assert f"{tool}(//{name}/**)" in deny, name
-        # chain directories get NO deny in any form: a deny on a directory
-        # matches its whole subtree (live-proved: "File is in a directory
-        # that is denied"), so even a file-form deny would deny the allowed
-        # root below it. Their non-chain children that exist at apply time
-        # are denied in both forms.
+        # named read denies survive: other homes, server-private folders
+        assert f"Read(/{team_roster.teammate_home(spec, other)}/**)" in deny
+        root = team_roster.expand(spec["server"]["root"])
+        assert f"Read(/{os.path.join(root, 'run')}/**)" in deny
+        assert "Bash" in deny
+        # nothing denies the allowed roots or the chain parents as trees
         chain_parent = os.path.dirname(str(extra_root))
-        sibling = str(sibling_dir)
         for tool in ("Read", "Glob", "Grep"):
             assert f"{tool}(/{chain_parent})" not in deny
             assert f"{tool}(/{chain_parent}/**)" not in deny
-            assert f"{tool}(/{sibling})" in deny
-            assert f"{tool}(/{sibling}/**)" in deny
-        # the allowed root and the home are never denied as trees
         for allowed in (str(extra_root), home):
             assert not any(d.startswith(f"Read(/{allowed}/**)")
                            for d in deny)
-        # every pre-existing deny survives (second layer)
-        assert f"Read(/{team_roster.teammate_home(spec, other)}/**)" in deny
-        assert "Bash" in deny
+        # no enumeration: an unrelated sibling dir has NO rule deny — the
+        # gate refuses it at call time instead (cut semantics)
+        sibling = str(sibling_dir)
+        assert not any(sibling in d for d in deny)
 
     def test_home_write_allow_denies_other_home_children(self, tmp_path):
         """Rooted writes: only CLAUDE.md and notes/ stay writable in the
@@ -468,10 +456,12 @@ class TestToolLimitsNewKeys:
         assert f"Edit(/{home}/CLAUDE.md)" in allow
         assert f"Write(/{home}/notes/**)" in allow
         assert f"Edit(/{home}/notes/**)" in allow
-        # allowed names never denied
+        # allowed names never denied (exact forms; CLAUDE.md.backup being
+        # denied must not deny plain CLAUDE.md)
         for tool in ("Write", "Edit"):
-            assert not any(d.startswith(f"{tool}(/{home}/CLAUDE.md")
-                           for d in deny)
+            assert f"{tool}(/{home}/CLAUDE.md)" not in deny
+            assert f"{tool}(/{home}/CLAUDE.md/**)" not in deny
+            assert f"{tool}(/{home}/notes)" not in deny
             assert not any(d.startswith(f"{tool}(/{home}/notes/")
                            for d in deny)
         # other existing children denied, config names denied regardless
@@ -1109,14 +1099,18 @@ class TestAttackRoundFixes:
         deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
         denied_paths = [os.path.join(root, "home"),
                         os.path.join(root, "fabric.env"),
-                        os.path.join(root, "teammates", "b"),
-                        os.path.join(str(tmp_path), "zshenv")]
-        # a directory deny matches its whole subtree (live-proved D2), so
-        # home/userdata needs no rule of its own — assert the cover exists
+                        os.path.join(root, "teammates", "b")]
+        # rule-layer cut: named surfaces keep their Write/Edit denies; a
+        # mere chain sibling (tmp_path/zshenv below) has NO rule deny any
+        # more — the gate refuses every write outside the home at call
+        # time (gate tests), and the real ~/.zshenv stays covered by
+        # USER_PROTECTED
         for path in denied_paths:
             for tool in ("Write", "Edit"):
                 assert f"{tool}(/{path})" in deny, (tool, path)
                 assert f"{tool}(/{path}/**)" in deny, (tool, path)
+        assert not any(os.path.join(str(tmp_path), "zshenv") in d
+                       for d in deny)
         # the teammate's own home and its chain stay writable
         assert f"Write(/{home})" not in deny
         assert f"Write(/{home}/**)" not in deny
@@ -1216,28 +1210,29 @@ class TestAttackRoundFixes:
         # enumeration — harmless, and it cannot substitute for the real)
         assert f"Write(/{real})" in deny and f"Write(/{real}/**)" in deny
 
-    def test_sibling_enumeration_fails_closed(self, tmp_path, monkeypatch):
-        """Finding 9: a listdir failure on an EXISTING chain parent dies
-        instead of silently emitting a fence with holes; a parent that
-        does not exist is skipped (fresh installs, foreign paths)."""
+    def test_home_enumeration_fails_closed(self, tmp_path, monkeypatch):
+        """Finding 9 (carried through the rule-layer cut): a listdir
+        failure on an EXISTING home dies instead of silently emitting a
+        weakened write fence; a home that does not exist is skipped
+        (fresh installs). The sibling enumerations are gone; the home
+        children enumeration in rooted_home_write_rules keeps the rule."""
         spec = load(tmp_path, make_spec(tmp_path))
         mate = spec["teammates"][0]
-        os.makedirs(team_roster.teammate_home(spec, mate), exist_ok=True)
-        parent = os.path.realpath(
-            os.path.dirname(team_roster.teammate_home(spec, mate)))
+        team_roster.write_file_assets(spec, mate)
+        home = team_roster.teammate_home(spec, mate)
         real_listdir = os.listdir
         def fake(p):
-            if os.path.realpath(p) == parent:
+            if os.path.realpath(p) == os.path.realpath(home):
                 raise PermissionError(13, "simulated denial")
             return real_listdir(p)
         monkeypatch.setattr(team_roster.os, "listdir", fake)
         with pytest.raises(SystemExit):
-            team_roster.rooted_read_denies(spec, mate, ("Write", "Edit"),
-                                           roots=[team_roster.teammate_home(spec, mate)])
-        # nonexistent parent: skipped, no exception
-        rules = team_roster.rooted_read_denies(
-            spec, mate, ("Write", "Edit"), roots=["/no/such/root"])
-        assert isinstance(rules, list)
+            team_roster.rooted_home_write_rules(spec, mate)
+        monkeypatch.undo()
+        # nonexistent home: skipped, no exception (fresh install)
+        spec2 = load(tmp_path, make_spec(tmp_path, root=str(tmp_path / "fresh")))
+        allow, deny = team_roster.rooted_home_write_rules(spec2, spec2["teammates"][0])
+        assert allow == [] and isinstance(deny, list)
 
     def test_home_write_allow_rejects_config_and_traversal(self, tmp_path):
         """Finding 10: locked/config names, absolute paths, ~ and traversal
@@ -1719,16 +1714,13 @@ class TestRepairRound1:
             for tool in ("Write", "Edit"):
                 for form in forms:
                     assert form in deny, form
-        # any EXISTING sibling of the spec root (other lanes' trees, the
-        # build folder) is denied by the chain enumeration; a sibling
-        # created after apply is refused by the gate instead (the
-        # post-apply-folder test below)
+        # rule-layer cut: an EXISTING sibling of the spec root has NO
+        # Write/Edit rule deny any more — the gate refuses it at call time
+        # (and the post-apply-folder test below proves that live)
         sibling = os.path.join(os.path.dirname(root), "sibling-build")
         os.makedirs(sibling, exist_ok=True)
         deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
-        for tool in ("Write", "Edit"):
-            assert f"{tool}(/{sibling})" in deny
-            assert f"{tool}(/{sibling}/**)" in deny
+        assert not any(sibling in d for d in deny)
 
     # ---- step 6: a new folder needs no regeneration (hook is primary) ----
 

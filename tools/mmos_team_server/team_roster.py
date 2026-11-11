@@ -421,7 +421,12 @@ SERVER_PRIVATE = ("run", "home", "config", "bin", "runtime", "claude-home",
 # Files in a teammate's own home that are config or credentials, not memory.
 # The teammate may not change them; the preimage it may not even read.
 HOME_LOCKED = ("tool-limits.json", "CHARTER.md", "carrier.json",
-               "cutover-preimage.json", "cutover-result.json")
+               "cutover-preimage.json", "cutover-result.json",
+               # restart-honored backup config surfaces (panel 2 q2#6): a
+               # restart does not load them today, but they sit in the
+               # home as published config — deny writes at the rule layer
+               # too, not only in the gate
+               ".claude.json.backup", "CLAUDE.md.backup")
 # What a teammate may not even READ in its own home (repair round 2, M5:
 # the set was only the preimage, leaving .credentials.json, .claude.json
 # and the projects/ transcript folder readable to Grep). Keep in sync with
@@ -447,10 +452,13 @@ HOME_CONFIG = ("settings.json", "settings.local.json", "managed-settings.json",
 # Server-root folders that choose which program the team server runs at its
 # next start (bin/server_runner.sh is what launchd invokes; config names the
 # server binary; runtime holds the pinned packed server; run holds the port
-# and launcher state). Whoever can write them owns the next server start,
-# and the installer cannot defend against that — the teammate limits must.
-# Always denied for Write/Edit, in every spec, new keys or not.
-SERVER_INFRASTRUCTURE = ("bin", "config", "runtime", "run")
+# and launcher state; home and claude-home hold the server's own live-reloaded
+# settings; fabric.env its launch environment). Whoever can write them owns
+# the next server start, and the installer cannot defend against that — the
+# teammate limits must. Always denied for Write/Edit, in every spec, new
+# keys or not. Kept named through the rule-layer cut (panel 2 Volume).
+SERVER_INFRASTRUCTURE = ("bin", "config", "runtime", "run", "home",
+                         "claude-home", "fabric.env")
 
 # User-level autoload, credential, config and personal folders a teammate
 # never needs, denied for Read/Glob/Grep AND Write/Edit whether or not the
@@ -758,12 +766,9 @@ def deny_read_paths(spec, mate):
     # must cover the credential and personal folders whether or not a
     # later spec remembers to name them
     paths += _user_protected_paths(spec)
-    if spec.get("deny_read_root_siblings"):
-        parent = os.path.dirname(root)
-        if os.path.isdir(parent):
-            for name in sorted(os.listdir(parent)):
-                if name != os.path.basename(root):
-                    paths.append(os.path.join(parent, name))
+    # NOTE (rule-layer cut, repair round 2): the deny_read_root_siblings
+    # listing was removed with the sibling enumerations — the gate refuses
+    # every read outside the roots at call time; the spec key is inert.
     seen, out = set(), []
     for path in paths:
         for candidate in [path] + firmlink_aliases(path):
@@ -788,66 +793,6 @@ def _read_allow_roots(spec, mate):
             seen.add(r)
             out.append(r)
     return out
-
-
-def rooted_read_denies(spec, mate, tools=READ_TOOLS, roots=None):
-    """Deny rules that make reads (and, with Write/Edit passed as tools,
-    writes) allowed ONLY under the rooted roots (Part B Q2/Q3).
-
-    Allow rules cannot restrict in the real launch mode (proved live:
-    full-access threads run bypassPermissions, an unmatched tool call is
-    silently allowed, and a more-specific allow never beats a deny), so the
-    rooting is compiled to deny rules by sibling enumeration: for every
-    root chain (/a/b/c), every directory NOT on a chain gets a file and a
-    tree deny. Chain directories get NO deny in any form: a deny rule on a
-    directory matches the directory's whole subtree (live-proved: the
-    refusal text is "File is in a directory that is denied"), so even a
-    file-form deny on a chain directory would deny the allowed root below
-    it — and deny wins. Residual gaps, stated in RL_TEAMMATE_LIMITS.md:
-    a Glob/Grep whose path is a chain directory runs and enumerates its
-    names (names only, never content), and the enumeration is a snapshot —
-    directories created after apply get no deny until the next apply.
-
-    ``roots`` overrides the allowed roots (absolute real paths); the
-    Write/Edit fence calls it with just the teammate's own home.
-
-    Enumeration fails CLOSED for a parent that exists but cannot be
-    listed (attack round, finding 9): a silently skipped level would emit
-    a fence with holes in exactly the place something went wrong. A
-    parent that does not exist (fresh install, or a path that is not on
-    this machine, e.g. /Users in CI) has nothing to enumerate and is
-    skipped.
-    """
-    if roots is None:
-        roots = _read_allow_roots(spec, mate)
-    chain = set()
-    for root in roots:
-        node = root
-        while node != "/":
-            chain.add(node)
-            node = os.path.dirname(node)
-    # Sibling enumeration runs only after every chain is known: a directory
-    # can sit on root 2's chain while being a mere sibling of root 1's chain
-    # (e.g. two roots under the same temp dir), and it must not be denied.
-    denied = set()
-    for node in chain:
-        parent = os.path.dirname(node)
-        try:
-            names = os.listdir(parent)
-        except OSError as exc:
-            if os.path.exists(parent):
-                die(f"cannot enumerate {parent} for the limits fence "
-                    f"({exc}); refusing to emit a fence with holes")
-            names = []
-        for name in names:
-            sib = os.path.join(parent, name)
-            if sib not in chain and sib not in roots:
-                denied.add(sib)
-    rules = []
-    for tool in tools:
-        for path in sorted(denied):
-            rules += [f"{tool}(/{path})", f"{tool}(/{path}/**)"]
-    return rules
 
 
 def _home_write_allow_names(spec):
@@ -969,23 +914,17 @@ def tool_limits(spec, mate):
         deny += _read_deny(path)
     read_rooted = bool(spec.get("allow_read_roots"))
     write_named = bool(spec.get("home_write_allow"))
-    if read_rooted:
-        deny += rooted_read_denies(spec, mate, READ_TOOLS)
-    # ALWAYS-ON write fence (attack round, findings 1-4): a teammate
-    # writes nothing outside its own home — not the server's own home
-    # (its settings.json is reloaded live by the running server; whoever
-    # edits it rewrites launchArgs and can drop --settings), not
-    # fabric.env, not another teammate's home (their limits/charter would
-    # bind at their next start), not the t3_bin install dir (the next
-    # apply executes it), and none of the user's own config surfaces
-    # (~/.zshenv, ~/.ssh, ~/Library/LaunchAgents, ~/.claude, ...). All of
-    # those are non-chain siblings of the teammate home, so one
-    # Write/Edit sibling enumeration covers them.
-    # repair round 1, P2: the fence is rooted at the teammate home in
-    # EVERY spec — naming a folder as a read root never makes it writable
-    # (the previous widening let allow_read_roots: [<root>/home] remove
-    # that home's write deny entirely)
-    deny += rooted_read_denies(spec, mate, ("Write", "Edit"), roots=[home])
+    # RULE-LAYER CUT (panel 2, Volume; repair round 2, separate commit so
+    # it can be dropped): the two sibling enumerations (rooted_read_denies
+    # for reads and for the Write/Edit fence) and the deny_read_root_
+    # siblings listing are REMOVED. They produced ~66k rules in tests /
+    # 8.6k on the dev spec while duplicating what the gate already decides
+    # at call time — including folders created after apply — and they made
+    # status flap (q4 F8: a new sibling between apply and status read as
+    # a stale fence). The rule layer keeps only the short list the panel
+    # ruled sufficient: bare tool denies (census), Write/Edit denies for
+    # the named write-sensitive surfaces, Read/Glob/Grep denies for
+    # deny_read_paths. Everything outside those names is the gate's call.
     allow = [
         "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
         "ToolSearch", f"Write(/{home}/**)", f"Edit(/{home}/**)",
@@ -1012,15 +951,18 @@ def tool_limits(spec, mate):
             "change (apply reports limitsPendingRestart).")
     note += (" SECOND LAYER. The primary fence is the PreToolUse hook "
              "below: it resolves every path (symlinks, .., case, Unicode, "
-             "firmlinks) at call time, so a folder created after this "
-             "apply is still refused by the hook; these enumerated deny "
-             "rules are the snapshot second layer and are regenerated by "
-             "re-running apply. A missing or crashing hook lets calls "
-             "through (live-proved, fail-open) — status verifies the "
-             "hook's presence and sha256.")
+             "firmlinks) at call time and fences reads to the roots, "
+             "writes to the home and web to public hosts — including "
+             "folders created after this apply. These deny rules are the "
+             "short-list backstop for the named sensitive surfaces only "
+             "(census bare denies, write-sensitive names, deny_read_paths); "
+             "they are regenerated by re-running apply. The hook command "
+             "fails closed (|| exit 2); status verifies its presence, "
+             "sha256, mode, interpreter, hook enablement and a canary.")
     if read_rooted or write_named:
-        note += (" allow_read_roots/home_write_allow compiled to deny "
-                 "rules by sibling enumeration (rooted_read_denies).")
+        note += (" allow_read_roots is enforced by the gate at call time; "
+                 "home_write_allow compiles to named Write/Edit rules "
+                 "(rooted_home_write_rules).")
     return {
         "permissions": {"allow": allow, "deny": deny},
         "hooks": gate_hook_block(spec, mate),
