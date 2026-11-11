@@ -1307,3 +1307,42 @@ no teammate run being live; each has its rollback written in its score.
 
 **Routing.** The Opus window of section 30 is closed. Three lanes used it (T10, the BCU
 panel, the second RL panel). New lanes follow section 26 again.
+
+## 32. Amendment, 2026-11-11 15:20 UTC: the team server and the window are switched
+
+**Installs 1 and 2 of section 31 are done, by the principal.**
+
+| What | Now live | Check | Way back |
+| --- | --- | --- | --- |
+| Team server | Its own pinned Node (v24.22.2) and a packed release `t3team-0.1.7-pin0770446-2`, built from the pin with the text-streaming and cross-project patches; folder closed to other accounts; every start checks both trees against their recorded digests | `doctor` exit 0: loaded, answering process is the job's own, both trees verified. Five threads and all run history unchanged | The score's "Going back" sequence to the previous binary, which was not touched. The new trees stay 48 hours either way |
+| Window | The reviewed T8b bundle at `~/Applications/Mastermind OS.app`, set to open on Secretary's conversation and sign itself in | The app's own config check passed; one sign-in on first open, none on reopen | `window_config.sh clear --bundle release` and move the kept copy of the old app back |
+
+**What went wrong in the server switch.** The planned one to three minutes of downtime became
+twenty-two. Started by launchd on a loaded machine, the start-up digest check took about five
+and a half minutes, against under a minute from a shell. The installer waits three minutes,
+saw no answer, and unloaded the job, twice, with an empty log each time. The server came up
+once the job was loaded and left to finish. The first `doctor` run then wrongly named the
+job's own listener as foreign; the second run was right.
+
+Until the repair lands, a restart of the team server at high load takes minutes, not
+seconds. It does come back by itself: launchd keeps the job alive and has no time limit.
+
+**Lane TSHc round 3** proves the cause of the slow start and fixes it without weakening the
+digest check; makes the installer tell "still checking" from "dead" and never unload a job
+that is checking; makes the runner write to the log at each stage; makes `doctor` report an
+unknown as unknown; and takes the ten small follow-ups the second delta panel listed.
+
+**Still unproven on the window.** What it shows on screen (the principal could not read its
+text), and one refused-navigation record on every launch. Lane T8b reads the real window,
+without typing or clicking in it, and explains or repairs the refused navigation.
+
+**Harness item 7** is answered: cross-project workers work on the team server. Sector
+Intelligence runs in the Chairman's T3 Code app, which this programme does not patch, so it
+changes nothing for them without his word.
+
+**Lane T10 returned** with the silent-stop patch: six of seven stop paths closed or already
+closed, one open (a repeated request after a restart can start a second child). A blind panel
+scores it before install 4.
+
+**Routing, by the Chairman (15:15 UTC).** The Opus pool is spent. Opus is for the hardest
+tasks and deputy roles only; `gpt-6.1-sol` may be used where Opus would have been.
