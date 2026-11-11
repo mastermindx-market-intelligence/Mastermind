@@ -535,6 +535,55 @@ def test_reapply_after_a_rotate_refuses_instead_of_reverting(wired):
     assert got["primaryThreadId"] == "mcp:t-rotated"  # the rotate stands
 
 
+def test_rollback_refuses_when_the_teammate_binding_rotated(wired):
+    # Panel-2 M11: rollback popped metadata.teammate wholesale, so a rotate
+    # that ran after the move (fresh thread, revision bump) vanished
+    # silently with rc 0 and the preimage was renamed away. The drift guard
+    # covers the binding too: the move recorded it; a changed live binding
+    # refuses rollback instead of destroying the rotate.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    st.write_binding(http, AID, dict(spec["binding"],
+                                     primaryThreadId="mcp:t-rotated"))
+    with pytest.raises(SystemExit):
+        co.cmd_rollback(spec)
+    got = http.agent["metadata"]["teammate"]["t3"]
+    assert got["primaryThreadId"] == "mcp:t-rotated"  # the rotate stands
+
+
+def test_an_unreadable_result_file_refuses_rollback(wired, tmp_path):
+    # Panel-2 M12: a result file corrupted by a crash mid-write (plain
+    # in-place truncate) silently DISABLED the R14 drift guard — rollback
+    # read it as "no record" and clobbered a third-party change as
+    # "success". An unreadable record is a refusal: a person decides.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    result = os.path.join(spec["agent_dir"], "cutover-result.json")
+    with open(result, "w") as fh:
+        fh.write("{ partial")               # a crash mid-write left this
+    # a third party changed the run command after the move
+    http.agent["adapterConfig"] = dict(http.agent["adapterConfig"],
+                                       timeoutSec=999)
+    with pytest.raises(SystemExit):
+        co.cmd_rollback(spec)
+    assert http.agent["adapterConfig"]["timeoutSec"] == 999  # not clobbered
+
+
+def test_the_result_file_is_written_staged_and_private(wired, tmp_path):
+    # Panel-2 M12, the write side: the move's record was a plain 0644
+    # in-place write — world-readable, and a crash left truncated bytes.
+    # Same law as the config: staged 0600, one rename.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    result = os.path.join(spec["agent_dir"], "cutover-result.json")
+    assert stat.S_IMODE(os.stat(result).st_mode) == 0o600
+    assert json.loads(open(result).read())["agentId"] == AID
+    assert co.cmd_rollback(spec) == 0
+    # the rolledBackAt mark keeps the file private and valid too
+    assert stat.S_IMODE(os.stat(result).st_mode) == 0o600
+    assert json.loads(open(result).read())["rolledBackAt"]
+
+
 def test_reapply_with_an_unchanged_binding_rewrites_nothing(wired):
     spec, http = wired
     assert co.cmd_apply(spec) == 0
@@ -657,3 +706,70 @@ def test_the_live_config_write_is_atomic_and_private(wired, monkeypatch):
     assert co.cmd_apply(spec) == 0
     assert stat.S_IMODE(os.stat(config).st_mode) == 0o600
     assert json.loads(open(config).read())      # valid JSON at rest
+
+
+def test_refresh_carrier_rewrites_the_settings_file_0600(wired, tmp_path,
+                                                          capsys):
+    # Panel-2 M9: refresh-carrier rewrote carrier.json with a bare open(),
+    # so the file that apply had installed 0600 came back world-readable
+    # after a carrier fix. Same law as apply: staged, 0600 from creation,
+    # one rename, no leftovers.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    config = tmp_path / "home" / "carrier.json"
+    assert stat.S_IMODE(os.stat(config).st_mode) == 0o600
+    old = json.loads(config.read_text())
+    old.pop("question_wait_sec")          # force the settings rewrite
+    os.unlink(config)                      # …through the refresh path
+    config.write_text(json.dumps(old))
+    capsys.readouterr()
+    assert co.cmd_refresh_carrier(spec) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["configChanged"] is True
+    assert stat.S_IMODE(os.stat(config).st_mode) == 0o600
+    assert json.loads(config.read_text()) == co.carrier_config(spec)
+
+
+def test_refresh_carrier_keeps_live_keys_the_spec_does_not_hold(
+        wired, tmp_path, capsys):
+    # Panel-2 M10: the refresh replaced the settings file with the spec's
+    # dict wholesale, silently DROPPING live keys the spec does not know
+    # (seen: a person adds coding_job_door; the next carrier fix deletes
+    # it and the door goes dormant with nothing said). Keys the spec lacks
+    # are kept and named in the output; the spec stays authority for its
+    # own keys.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    config = tmp_path / "home" / "carrier.json"
+    old = json.loads(config.read_text())
+    old.pop("question_wait_sec")
+    config.write_text(json.dumps(old))
+    with open(config) as fh:
+        have = json.load(fh)
+    have["coding_job_door"] = "/run/mmos/door.sock"   # a live key, not in spec
+    config.write_text(json.dumps(have))
+    capsys.readouterr()
+    assert co.cmd_refresh_carrier(spec) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["configKeysKept"] == ["coding_job_door"]
+    merged = json.loads(config.read_text())
+    assert merged["coding_job_door"] == "/run/mmos/door.sock"
+    want = co.carrier_config(spec)
+    assert all(merged[k] == want[k] for k in want)  # spec keys all honored
+
+
+def test_reapply_keeps_live_keys_the_spec_does_not_hold(wired, tmp_path):
+    # Panel-2 M10, the apply side: a re-apply on an already-moved agent
+    # rewrote the settings file from the spec alone — same silent drop of
+    # live keys the spec lacks.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    config = tmp_path / "home" / "carrier.json"
+    have = json.loads(config.read_text())
+    have["coding_job_door"] = "/run/mmos/door.sock"
+    config.write_text(json.dumps(have))
+    assert co.cmd_apply(spec) == 0                 # unchanged binding: proceeds
+    merged = json.loads(config.read_text())
+    assert merged["coding_job_door"] == "/run/mmos/door.sock"
+    want = co.carrier_config(spec)
+    assert all(merged[k] == want[k] for k in want)

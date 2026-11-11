@@ -49,29 +49,53 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def base_refusal(base):
+    """The loopback law as a reason string (None = sound). R2a finding 29:
+    the base is pinned by the urlsplit law, not string splits — the
+    local_trusted header rides every call these clients make, so the base
+    must be a plain loopback http origin with a port: scheme http, host
+    127.0.0.1/localhost/::1, no username or password, a real port, and no
+    path, query or fragment. Same law as the carrier's loopback_base_error
+    for carrier.json's paperclip_base (R2a finding 13)."""
+    try:
+        parts = urllib.parse.urlsplit(str(base or ""))
+    except ValueError:
+        return f"{base!r} does not parse as a URL"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    host = (parts.hostname or "").lower()
+    if (parts.scheme != "http" or host not in ("127.0.0.1", "localhost",
+                                               "::1")
+            or parts.username or parts.password or port is None
+            or parts.path not in ("", "/") or parts.query or parts.fragment):
+        return (f"{base!r} is not plain loopback http with a port, like "
+                "http://127.0.0.1:3100")
+    return None
+
+
+def require_paperclip_base(spec):
+    """Round-3 R11: the pinned loopback base is required kit, not an option.
+    A spec without one would write a carrier config the carrier itself
+    refuses to run (an unpinned carrier used to trust the adapter's
+    PAPERCLIP_API_URL); setup refuses first, before any file is written."""
+    base = str(spec.get("paperclip_base") or "").strip()
+    if not base:
+        die("spec has no paperclip_base: the pinned loopback base is required")
+    bad = base_refusal(base)
+    if bad:
+        die(f"spec paperclip_base refused: {bad}")
+    return base
+
+
 class Http:
     """Dev-instance Paperclip client (board actor via local_trusted header)."""
 
     def __init__(self, base):
-        # R2a finding 29: the base is pinned by the urlsplit law, not string
-        # splits — the local_trusted header rides every call this client
-        # makes, so the base must be a plain loopback http origin with a
-        # port: scheme http, host 127.0.0.1/localhost/::1, no username or
-        # password, a real port, and no path, query or fragment. This is the
-        # same law the carrier's loopback_base_error holds for
-        # carrier.json's paperclip_base (R2a finding 13).
-        parts = urllib.parse.urlsplit(base)
-        try:
-            port = parts.port
-        except ValueError:
-            port = None
-        host = (parts.hostname or "").lower()
-        if (parts.scheme != "http" or host not in ("127.0.0.1", "localhost",
-                                                   "::1")
-                or parts.username or parts.password or port is None
-                or parts.path not in ("", "/") or parts.query or parts.fragment):
-            die(f"refusing Paperclip base {base!r}: it must be plain "
-                "loopback http with a port, like http://127.0.0.1:3100")
+        bad = base_refusal(base)
+        if bad:
+            die(f"refusing Paperclip base: {bad}")
         self.base = base.rstrip("/")
         self._opener = urllib.request.build_opener(_NoRedirect)
 
@@ -132,6 +156,49 @@ def config_revisions(http, agent_id):
     if isinstance(rows, dict):
         rows = rows.get("revisions") or rows.get("rows") or []
     return rows
+
+
+def rows_of(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("items", "issues", "rows", "runs"):
+            if isinstance(payload.get(key), list):
+                return payload[key]
+    # R2a finding 30: an unrecognised shape is NOT an empty result. A dict
+    # with no known list key ({"data": ...}, {"error": ...}, {}) — or a
+    # non-object — is a page this tool cannot read; treating it as "no open
+    # issues, no live runs" lets apply and rotate pass their fences on a
+    # misread. Die; every caller changes nothing. Shape only: nothing of
+    # the payload is printed.
+    die("unrecognised response shape from the board (expected a list or an "
+        f"object with one of items/issues/rows/runs, got "
+        f"{type(payload).__name__})")
+
+
+def blockers(spec, agent, open_issues, live_runs):
+    """Reasons this agent must not be moved or rotated right now. Empty
+    list = safe (panel-2 M14: rotate fences with the SAME checks apply and
+    rollback fence with — open issues, and LIVE RUNS: a carrier run in
+    flight used to get its primaryThreadId swapped mid-execution)."""
+    out = []
+    if agent.get("name") != spec.get("agent_name"):
+        out.append(f"agent name is {agent.get('name')!r}, spec says "
+                   f"{spec.get('agent_name')!r}")
+    if agent.get("companyId") != spec["company_id"]:
+        out.append("agent belongs to a different company")
+    if agent.get("status") != "idle":
+        out.append(f"agent status is {agent.get('status')!r}, not idle")
+    heartbeat = (agent.get("runtimeConfig") or {}).get("heartbeat") or {}
+    if heartbeat.get("enabled"):
+        out.append("the agent's timer heartbeat is still on (fence it first)")
+    if open_issues:
+        out.append(f"{len(open_issues)} open issue(s) assigned: "
+                   + ", ".join(str(i.get("identifier")) for i in open_issues[:5]))
+    mine = [r for r in live_runs if r.get("agentId") == agent.get("id")]
+    if mine:
+        out.append(f"{len(mine)} live run(s) for this agent")
+    return out
 
 
 OPEN_WORK_STATES = ("todo", "in_progress", "in_review", "blocked")
@@ -309,9 +376,9 @@ def write_carrier_config(spec, agent_dir):
     # Optional (R2a finding 8 addition): the carrier defaults to 120s absent.
     if spec.get("delivery_reserve_sec") is not None:
         cfg["delivery_reserve_sec"] = int(spec["delivery_reserve_sec"])
-    # Optional (R2a finding 13): the pinned loopback base.
-    if spec.get("paperclip_base"):
-        cfg["paperclip_base"] = spec["paperclip_base"]
+    # R11: the pinned loopback base is required kit, written unconditionally
+    # — the carrier refuses to run without it.
+    cfg["paperclip_base"] = require_paperclip_base(spec)
     path = os.path.join(agent_dir, "carrier.json")
     with open(path, "w") as fh:
         json.dump(cfg, fh, indent=2)
@@ -320,6 +387,7 @@ def write_carrier_config(spec, agent_dir):
 
 def cmd_create(spec_path):
     spec = json.load(open(spec_path))
+    require_paperclip_base(spec)     # R11: refuse before any file is written
     write_charter_and_home(spec)
     ensure_t3_instance(spec)
     log("files and provider instance ready; start the dev T3 server, then run "
@@ -331,7 +399,7 @@ def cmd_threads(spec_path):
     """Second step: with the dev T3 server running, mint the primary thread,
     create the Paperclip agent, write the binding (revision discipline)."""
     spec = json.load(open(spec_path))
-    http = Http(spec["paperclip_base"])
+    http = Http(require_paperclip_base(spec))
     t3 = spec["t3"]
     launched = start_primary_thread(spec)
     thread_id = launched["threadId"]
@@ -388,19 +456,21 @@ def cmd_threads(spec_path):
 def cmd_rotate(spec_path, title, message):
     """DONE_WHEN 3: mint a new primary thread, bump the binding revision."""
     spec = json.load(open(spec_path))
-    http = Http(spec["paperclip_base"])
+    http = Http(require_paperclip_base(spec))
     agent_dir = expand(spec["agent_dir"])
     result = json.load(open(os.path.join(agent_dir, "setup_result.json")))
     agent_id = result["agentId"]
-    # The mint is the irreversible step (a live thread, a revision bump):
-    # it must not start while the agent still holds open work — those
-    # issues would keep waking a carrier whose home just moved under it.
+    # The mint is the irreversible step (a live thread, a revision bump).
+    # Panel-2 M14: it fences with the SAME blockers() the cutover apply and
+    # rollback use — open issues AND live runs. Fencing open issues only let
+    # a carrier run in flight get its primaryThreadId swapped
+    # mid-execution.
+    agent = http.get(f"/api/agents/{agent_id}")
     open_issues = open_assigned_issues(http, spec["company_id"], agent_id)
-    if open_issues:
-        names = ", ".join(str(row.get("identifier") or row.get("id"))
-                          for row in open_issues[:5])
-        die(f"agent {agent_id} still holds {len(open_issues)} open "
-            f"issue(s) ({names}); finish or reassign them before rotating")
+    live = rows_of(http.get(f"/api/companies/{spec['company_id']}/live-runs"))
+    found = blockers(spec, agent, open_issues, live)
+    if found:
+        die("not rotating: " + "; ".join(found))
     t3 = dict(spec["t3"])
     rotate_spec = dict(spec)
     rotate_spec["primary_thread"] = {"title": title,

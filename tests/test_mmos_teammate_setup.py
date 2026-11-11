@@ -134,6 +134,23 @@ def test_an_unsignalable_pid_means_the_server_is_running(tmp_path,
         st.ensure_t3_instance(spec)
 
 
+def test_a_spec_without_a_pinned_loopback_base_refuses_setup(tmp_path):
+    # Round-3 R11: paperclip_base was optional in the spec, and a carrier
+    # config written without it made the carrier TRUST the adapter's
+    # PAPERCLIP_API_URL (base_pin_error said None for an unpinned config).
+    # The pin is required kit now: setup refuses a spec without it before
+    # any file is written.
+    spec, _ = make_home(tmp_path)          # make_home sets no paperclip_base
+    spec["t3"]["charter_text"] = "# charter\n"   # complete except for the base
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    with pytest.raises(SystemExit):
+        st.cmd_create(str(spec_path))
+    # refused before anything was written: the teammate home dir, which
+    # write_charter_and_home would have created, does not exist
+    assert not os.path.exists(st.expand(spec["t3"]["home_path"]))
+
+
 def test_rotate_refuses_while_the_agent_still_holds_open_work(tmp_path,
                                                               monkeypatch):
     # cmd_rotate minted a fresh primary thread and rewrote the binding
@@ -149,7 +166,8 @@ def test_rotate_refuses_while_the_agent_still_holds_open_work(tmp_path,
                           "primaryThreadId": "th-1"}}
     (agent_dir / "setup_result.json").write_text(json.dumps(result))
     spec = {"paperclip_base": "http://127.0.0.1:3100", "company_id": "co-1",
-            "agent_dir": str(agent_dir), "t3": {}}
+            "agent_dir": str(agent_dir), "t3": {},
+            "agent_name": "Assurance"}
 
     class BoardWithOpenWork:
         def __init__(self, base):
@@ -157,12 +175,58 @@ def test_rotate_refuses_while_the_agent_still_holds_open_work(tmp_path,
 
         def get(self, path):
             self.gets.append(path)
+            if path == "/api/agents/ag-1":
+                return {"id": "ag-1", "name": "Assurance",
+                        "companyId": "co-1", "status": "idle",
+                        "runtimeConfig": {"heartbeat": {"enabled": False}}}
             if "status=todo" in path:
                 return [{"id": "is-9", "status": "todo"}]
             return []
 
     minted = []
     monkeypatch.setattr(st, "Http", BoardWithOpenWork)
+    monkeypatch.setattr(st, "start_primary_thread",
+                        lambda spec_: minted.append(spec_) or {"threadId": "th-2"})
+    monkeypatch.setattr(st, "write_binding", lambda *a, **k: {})
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    with pytest.raises(SystemExit):
+        st.cmd_rotate(str(spec_path), "new home", None)
+    assert not minted  # the thread was never minted
+
+
+def test_rotate_refuses_while_a_carrier_run_is_live(tmp_path, monkeypatch):
+    # Panel-2 M14: the rotate fence checked open issues only — a carrier
+    # run in flight (zero open issues in the list states it reads, the run
+    # itself live) got its primaryThreadId swapped mid-execution. Rotate
+    # fences with the SAME blockers() apply and rollback use.
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    result = {"agentId": "ag-1",
+              "binding": {"environmentId": "e", "projectId": "p",
+                          "providerInstanceId": "i",
+                          "primaryThreadId": "th-1"}}
+    (agent_dir / "setup_result.json").write_text(json.dumps(result))
+    spec = {"paperclip_base": "http://127.0.0.1:3100", "company_id": "co-1",
+            "agent_dir": str(agent_dir), "t3": {},
+            "agent_name": "Assurance"}
+
+    class BoardWithALiveRun:
+        def __init__(self, base):
+            self.gets = []
+
+        def get(self, path):
+            self.gets.append(path)
+            if path == "/api/agents/ag-1":
+                return {"id": "ag-1", "name": "Assurance",
+                        "companyId": "co-1", "status": "idle",
+                        "runtimeConfig": {"heartbeat": {"enabled": False}}}
+            if "live-runs" in path:
+                return [{"id": "run-7", "agentId": "ag-1"}]
+            return []                       # no open issues at all
+
+    minted = []
+    monkeypatch.setattr(st, "Http", BoardWithALiveRun)
     monkeypatch.setattr(st, "start_primary_thread",
                         lambda spec_: minted.append(spec_) or {"threadId": "th-2"})
     monkeypatch.setattr(st, "write_binding", lambda *a, **k: {})

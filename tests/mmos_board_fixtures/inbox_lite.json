@@ -1,3 +1,66 @@
-{
- "error": "Agent authentication required"
-}
+[
+ {
+  "id": "ccb5da5f-391b-4024-afa7-96875e206ac4",
+  "identifier": "MMO-120",
+  "title": "RF proof child two \u2014 todo",
+  "status": "todo",
+  "priority": "high",
+  "projectId": null,
+  "goalId": null,
+  "parentId": "940850a7-865e-46c1-8915-caee6cc56736",
+  "updatedAt": "2026-11-11T13:55:35.866Z",
+  "activeRun": null,
+  "activeRecoveryAction": null,
+  "dependencyReady": true,
+  "unresolvedBlockerCount": 0,
+  "unresolvedBlockerIssueIds": []
+ },
+ {
+  "id": "62728f5a-4d9c-4756-aee1-33474cdf2083",
+  "identifier": "MMO-122",
+  "title": "RF proof parent two \u2014 blocked while child runs",
+  "status": "in_progress",
+  "priority": "medium",
+  "projectId": null,
+  "goalId": null,
+  "parentId": null,
+  "updatedAt": "2026-11-11T13:56:08.045Z",
+  "activeRun": null,
+  "activeRecoveryAction": null,
+  "dependencyReady": true,
+  "unresolvedBlockerCount": 0,
+  "unresolvedBlockerIssueIds": []
+ },
+ {
+  "id": "36d2f64b-d902-4554-b7d7-23b5ec2eaa86",
+  "identifier": "MMO-121",
+  "title": "RF proof child three \u2014 in progress",
+  "status": "in_progress",
+  "priority": "medium",
+  "projectId": null,
+  "goalId": null,
+  "parentId": "940850a7-865e-46c1-8915-caee6cc56736",
+  "updatedAt": "2026-11-11T13:55:35.801Z",
+  "activeRun": null,
+  "activeRecoveryAction": null,
+  "dependencyReady": true,
+  "unresolvedBlockerCount": 0,
+  "unresolvedBlockerIssueIds": []
+ },
+ {
+  "id": "940850a7-865e-46c1-8915-caee6cc56736",
+  "identifier": "MMO-118",
+  "title": "RF proof parent \u2014 blocked by a finished child",
+  "status": "in_progress",
+  "priority": "medium",
+  "projectId": null,
+  "goalId": null,
+  "parentId": null,
+  "updatedAt": "2026-11-11T13:55:35.476Z",
+  "activeRun": null,
+  "activeRecoveryAction": null,
+  "dependencyReady": true,
+  "unresolvedBlockerCount": 0,
+  "unresolvedBlockerIssueIds": []
+ }
+]

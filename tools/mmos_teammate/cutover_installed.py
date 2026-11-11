@@ -26,7 +26,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from setup_teammate import (Http, die, expand, log, write_binding,  # noqa: E402
-                            open_assigned_issues)
+                            blockers, open_assigned_issues, rows_of)
 
 OPEN_STATES = ("todo", "in_progress", "in_review", "blocked")
 PREIMAGE_KEYS = ("adapterType", "adapterConfig", "runtimeConfig", "metadata")
@@ -44,44 +44,49 @@ def write_private(path, text):
         fh.write(text)
 
 
-def rows_of(payload):
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        for key in ("items", "issues", "rows", "runs"):
-            if isinstance(payload.get(key), list):
-                return payload[key]
-    # R2a finding 30: an unrecognised shape is NOT an empty result. A dict
-    # with no known list key ({"data": ...}, {"error": ...}, {}) — or a
-    # non-object — is a page this tool cannot read; treating it as "no open
-    # issues, no live runs" lets apply pass its blockers on a misread. Die;
-    # every caller (apply, rollback, refresh-carrier, check) changes
-    # nothing. Shape only: nothing of the payload is printed.
-    die("unrecognised response shape from the board (expected a list or an "
-        f"object with one of items/issues/rows/runs, got "
-        f"{type(payload).__name__})")
+def read_live_config(config_path):
+    """The live settings file as a dict, {} when absent (panel-2 M10). A
+    file that exists but cannot be parsed is REFUSED, not guessed over:
+    merging into garbage would silently drop live keys or overwrite them
+    without a person seeing. Key names only are ever printed."""
+    try:
+        with open(config_path) as fh:
+            have = json.load(fh)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        die(f"{config_path} exists but is not readable JSON; inspect it "
+            "before moving or refreshing this agent")
+    if not isinstance(have, dict):
+        die(f"{config_path} is not a JSON object; inspect it before moving "
+            "or refreshing this agent")
+    return have
 
 
-def blockers(spec, agent, open_issues, live_runs):
-    """Reasons this agent must not be moved right now. Empty list = safe."""
-    out = []
-    if agent.get("name") != spec["agent_name"]:
-        out.append(f"agent name is {agent.get('name')!r}, spec says "
-                   f"{spec['agent_name']!r}")
-    if agent.get("companyId") != spec["company_id"]:
-        out.append("agent belongs to a different company")
-    if agent.get("status") != "idle":
-        out.append(f"agent status is {agent.get('status')!r}, not idle")
-    heartbeat = (agent.get("runtimeConfig") or {}).get("heartbeat") or {}
-    if heartbeat.get("enabled"):
-        out.append("the agent's timer heartbeat is still on (fence it first)")
-    if open_issues:
-        out.append(f"{len(open_issues)} open issue(s) assigned: "
-                   + ", ".join(str(i.get("identifier")) for i in open_issues[:5]))
-    mine = [r for r in live_runs if r.get("agentId") == agent.get("id")]
-    if mine:
-        out.append(f"{len(mine)} live run(s) for this agent")
+def merged_carrier_config(have, want):
+    """The settings the next wake will read. The spec is authority for its
+    OWN keys; live keys the spec does not hold are KEPT (panel-2 M10) — a
+    wholesale rewrite silently deleted a person's coding_job_door once the
+    spec behind it predates the key. No silent drop, ever."""
+    out = dict(have or {})
+    out.update(want)
     return out
+
+
+def write_config_file(config_path, data):
+    """The live settings write (panel-2 M9): staged, 0600 from creation,
+    renamed over in one move — a halfway death never truncates the live
+    bytes and never leaves the file world-readable. Same law as the
+    preimage and settings writes."""
+    staged = f"{config_path}.new-{os.getpid()}"
+    try:
+        fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh, indent=2)
+        os.replace(staged, config_path)
+    finally:
+        if os.path.exists(staged):
+            os.unlink(staged)
 
 
 def carrier_config(spec):
@@ -266,19 +271,16 @@ def cmd_apply(spec):
         die("not moving, state changed while preparing: " + "; ".join(found))
     # R13: the live config is written only AFTER the final gate — an apply
     # that dies here must leave what the next wake reads untouched. The
-    # write itself is staged and renamed, 0600 from creation: a halfway
-    # death never truncates the live bytes in place (same law as the
-    # settings write).
-    staged_cfg = f"{config_path}.new-{os.getpid()}"
-    try:
-        fd = os.open(staged_cfg,
-                     os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            json.dump(carrier_config(spec), fh, indent=2)
-        os.replace(staged_cfg, config_path)
-    finally:
-        if os.path.exists(staged_cfg):
-            os.unlink(staged_cfg)
+    # write itself is staged and renamed, 0600 from creation (panel-2 M9),
+    # and it MERGES over the live file (panel-2 M10): keys the spec does
+    # not hold survive an apply, named in the log.
+    have_cfg = read_live_config(config_path)
+    want_cfg = carrier_config(spec)
+    kept_cfg = sorted(k for k in have_cfg if k not in want_cfg)
+    if kept_cfg:
+        log("keeping live settings this spec does not hold: "
+            + ", ".join(kept_cfg))
+    write_config_file(config_path, merged_carrier_config(have_cfg, want_cfg))
     try:
         patch = adapter_patch(spec, carrier_path, config_path)
         http.patch(f"/api/agents/{spec['agent_id']}", patch)
@@ -312,8 +314,10 @@ def cmd_apply(spec):
         "adapterPatch": patch,   # R14: rollback checks the live agent
         "adapterConfigKeys": sorted(cfg.keys()),
     }
-    with open(os.path.join(agent_dir, "cutover-result.json"), "w") as fh:
-        json.dump(result, fh, indent=2)
+    # Panel-2 M12: staged 0600 write — the record was a plain in-place 0644
+    # truncate; a crash mid-write left truncated bytes that silently
+    # disabled rollback's drift guard.
+    write_config_file(os.path.join(agent_dir, "cutover-result.json"), result)
     print(json.dumps(result, indent=2))
     return 0
 
@@ -342,15 +346,23 @@ def cmd_rollback(spec):
     # runtime config after the move), restoring the saved setup would
     # silently overwrite that change. Refuse and let a person look. Moves
     # from before the record carry no adapterPatch and roll back as before.
+    # Panel-2 M12: a result file that exists but cannot be parsed is a
+    # REFUSAL, not "no record" — a corrupt file silently disabled this
+    # guard and let rollback clobber a third-party change as "success".
     result_path = os.path.join(expand(spec["agent_dir"]),
                                "cutover-result.json")
-    recorded = None
+    result_doc = None
     if os.path.exists(result_path):
         try:
             with open(result_path) as fh:
-                recorded = json.load(fh).get("adapterPatch")
+                result_doc = json.load(fh)
         except ValueError:
-            recorded = None
+            die(f"{result_path} exists but is not readable JSON; the drift "
+                "guard cannot run — inspect the file before rolling back")
+        if not isinstance(result_doc, dict):
+            die(f"{result_path} is not a JSON object; the drift guard cannot "
+                "run — inspect the file before rolling back")
+    recorded = (result_doc or {}).get("adapterPatch")
     if isinstance(recorded, dict):
         drift = []
         if agent.get("adapterType") != recorded.get("adapterType"):
@@ -362,6 +374,16 @@ def cmd_rollback(spec):
                   if not same(got_cfg.get(k), want_cfg.get(k))]
         if not same(agent.get("runtimeConfig"), recorded.get("runtimeConfig")):
             drift.append("runtimeConfig")
+        # Panel-2 M11: the teammate binding is part of what the move
+        # recorded. A rotate that ran after the move (fresh thread,
+        # revision bump) must not vanish under the wholesale teammate pop
+        # below — a changed binding core refuses rollback.
+        live_binding = ((agent.get("metadata") or {}).get("teammate")
+                        or {}).get("t3")
+        moved_binding = (result_doc or {}).get("binding")
+        if live_binding is not None and isinstance(moved_binding, dict) \
+                and binding_core(live_binding) != binding_core(moved_binding):
+            drift.append("metadata.teammate.t3 (rotated after the move?)")
         if drift:
             die("the agent changed after the move (" + ", ".join(drift) +
                 "); not rolling back over it — inspect the agent and the "
@@ -391,15 +413,16 @@ def cmd_rollback(spec):
         # Names only: the values include the old environment.
         die("rollback read-back differs from the saved setup in: "
             + ", ".join(wrong) + f"; the saved setup is still at {preimage}")
-    # R26: the result file must not keep describing a live move.
+    # R26: the result file must not keep describing a live move. The
+    # rolledBackAt mark is the same staged 0600 write (panel-2 M12) — a
+    # crash mid-mark never leaves truncated bytes behind.
     if os.path.exists(result_path):
         try:
             with open(result_path) as fh:
                 result = json.load(fh)
             result["rolledBackAt"] = time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            with open(result_path, "w") as fh:
-                json.dump(result, fh, indent=2)
+            write_config_file(result_path, result)
         except (ValueError, OSError):
             pass  # the rollback itself stands; the record is best-effort
     os.replace(preimage, preimage + ".restored-"
@@ -436,25 +459,22 @@ def cmd_refresh_carrier(spec):
     # This teammate's own settings file follows its spec too: a carrier fix
     # that adds a setting is otherwise installed without it (seen 2026-11-11:
     # the new carrier ran on defaults and without its conversation link).
-    # Same one-rename swap. Key names only are printed.
+    # Same one-rename swap, staged 0600 (panel-2 M9), and a MERGE over the
+    # live file (panel-2 M10): keys the spec does not hold are kept and
+    # named, never silently dropped. Key names only are printed.
     want = carrier_config(spec)
-    try:
-        with open(config_path) as fh:
-            have = json.load(fh)
-    except (OSError, ValueError):
-        have = None
-    config_keys = sorted(k for k in set(want) | set(have or {})
-                         if (have or {}).get(k) != want.get(k))
-    if have != want:
-        staged = f"{config_path}.new-{os.getpid()}"
-        with open(staged, "w") as fh:
-            json.dump(want, fh, indent=2)
-        os.replace(staged, config_path)
+    have = read_live_config(config_path)
+    kept = sorted(k for k in have if k not in want)
+    merged = merged_carrier_config(have, want)
+    config_keys = sorted(k for k in set(want) | set(have)
+                         if have.get(k) != merged.get(k))
+    if have != merged:
+        write_config_file(config_path, merged)
     print(json.dumps({
         "carrierPath": carrier_path, "sha256Before": before,
         "sha256After": sha256_file(carrier_path), "changed": before != after,
-        "configPath": config_path, "configChanged": have != want,
-        "configKeysChanged": config_keys,
+        "configPath": config_path, "configChanged": have != merged,
+        "configKeysChanged": config_keys, "configKeysKept": kept,
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=2))
     return 0
 
