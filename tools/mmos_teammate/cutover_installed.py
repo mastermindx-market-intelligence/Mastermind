@@ -186,9 +186,19 @@ def cmd_apply(spec):
     os.makedirs(os.path.dirname(carrier_path), mode=0o700, exist_ok=True)
     source = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "wake_carrier.py")
-    if not os.path.exists(carrier_path) or \
-            sha256_file(carrier_path) != sha256_file(source):
-        shutil.copyfile(source, carrier_path)
+    # R2a finding 9: the carrier file is shared by every moved agent. A NEW
+    # move may install it only when it is absent or already identical; a
+    # differing file belongs to `refresh-carrier` (which waits out live runs
+    # and swaps in one rename) — never an in-place overwrite here.
+    if os.path.exists(carrier_path):
+        if sha256_file(carrier_path) != sha256_file(source):
+            die(f"the shared carrier at {carrier_path} differs from this "
+                "checkout's copy; refusing to overwrite it. Run "
+                "`refresh-carrier` to update it for every moved agent.")
+    else:
+        staged = f"{carrier_path}.new-{os.getpid()}"
+        shutil.copyfile(source, staged)
+        os.replace(staged, carrier_path)
     with open(config_path, "w") as fh:
         json.dump(carrier_config(spec), fh, indent=2)
 

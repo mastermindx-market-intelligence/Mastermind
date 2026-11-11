@@ -302,3 +302,36 @@ def test_refresh_carrier_refuses_a_live_run_or_an_unmoved_agent(wired, tmp_path)
     with pytest.raises(SystemExit):
         co.cmd_refresh_carrier(spec)
     assert carrier.read_text() == "# an older carrier\n"
+
+
+# --- R2a finding 9: apply never overwrites the shared carrier in place --------
+
+def test_apply_refuses_to_overwrite_a_differing_installed_carrier(
+        wired, tmp_path, capsys):
+    # The carrier file is shared by every moved agent. `apply` is for moving
+    # a NEW agent: when an installed file differs from this checkout's copy,
+    # apply must refuse and point at `refresh-carrier` (which waits for live
+    # runs and swaps in one rename) — never overwrite another version.
+    spec, http = wired
+    carrier, _ = co.carrier_paths(spec)
+    os.makedirs(os.path.dirname(carrier), exist_ok=True)
+    with open(carrier, "w") as fh:
+        fh.write("# a newer carrier another lane installed\n")
+    before = co.sha256_file(carrier)
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec)
+    said = capsys.readouterr()
+    assert "refresh-carrier" in said.err
+    assert co.sha256_file(carrier) == before       # the file is untouched
+    assert http.patches == []                      # the agent was not moved
+
+
+def test_apply_installs_a_missing_carrier_and_leaves_no_staged_file(wired):
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    carrier, _ = co.carrier_paths(spec)
+    here = os.path.dirname(os.path.abspath(co.__file__))
+    assert co.sha256_file(carrier) == co.sha256_file(
+        os.path.join(here, "wake_carrier.py"))
+    assert [f for f in os.listdir(os.path.dirname(carrier))
+            if ".new-" in f] == []                 # one rename, no leftovers
