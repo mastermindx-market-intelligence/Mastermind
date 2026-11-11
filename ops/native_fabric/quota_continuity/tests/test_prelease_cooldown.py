@@ -163,7 +163,10 @@ class PreleaseCooldownRace(unittest.TestCase):
         return self.root / "state/remote_sub" / (run + suffix)
 
     def select(self, *args, **kwargs):
+        excluded = set(kwargs.get("excluded_pools") or ())
         for pool, model in (("minimax", "MiniMax-M2.7"), ("glm", "glm-5.3-flash")):
+            if pool in excluded:
+                continue
             allowed, reason = api.pick.hard_filter(pool, "mechanical", {})
             if allowed:
                 self.route_calls.append({"pool": pool, "reason": reason})
@@ -340,6 +343,191 @@ class PreleaseCooldownRace(unittest.TestCase):
                     path.unlink()
         self.assertEqual(len(self.native_calls), 1)
         self.assertFalse((self.root / "forbidden-transport.jsonl").exists())
+
+
+    def _prepare_busy_minimax(self):
+        # A different retained broker lease consumes the MiniMax slot after
+        # the exact AUTO selection but before the original controller enters.
+        self.accounts["providers"]["minimax"]["concurrency_cap"] = 1
+        self.accounts["providers"]["minimax"]["accounts"][0]["per_account_cap"] = 1
+        (self.root / "accounts.json").write_text(json.dumps(self.accounts))
+
+        def hold_slot():
+            lease = self.br.acquire("other-root", "minimax",
+                model="MiniMax-M2.7", host="fixture",
+                task_class="remote-minimax", ttl=1000, wait=0)
+            self.assertTrue(lease.ok)
+            self.other_lease_id = lease.lease_id
+
+        self.stack.enter_context(patch.object(self, "cool_from_settled_other_commission",
+                                              side_effect=hold_slot))
+
+    def test_broker_busy_no_start_reroutes_using_original_packet(self):
+        self._prepare_busy_minimax()
+
+        def qualified_selection(task, **kwargs):
+            blocked = set(kwargs.get("excluded_pools") or ())
+            for pool, model in (("minimax", "MiniMax-M2.7"), ("glm", "glm-5.3-flash")):
+                if pool not in blocked:
+                    self.route_calls.append({"pool": pool, "reason": "fixture"})
+                    return f"POOL={pool} MODEL={model} HOST=fixture MODE={pool}"
+            return "NONE reason=no_eligible_pool"
+        self.stack.enter_context(patch.object(self, "select", side_effect=qualified_selection))
+
+        rc = fabric_continuation.foreground(api, "origin", "mechanical",
+            cwd="~", packet=None, stdin_bytes=b"immutable busy fixture\\n",
+            root_id="root", parent_run_id="parent",
+            task_complexity="C0_MECHANICAL")
+        first = api.inspect_run("origin")
+        proof = fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
+        resolved = fabric_continuation.resolve(api, "origin")
+        with self.br._conn() as conn:
+            own = conn.execute(
+                "SELECT COUNT(*) FROM leases WHERE orchestrator_id='root' AND pool='minimax'").fetchone()[0]
+            waiter = conn.execute(
+                "SELECT COUNT(*) FROM waiters WHERE orchestrator_id='root' AND pool='minimax'").fetchone()[0]
+        self.assertEqual((first["state"], first["signal"], first["reason"]),
+                         ("TERMINAL_FAILURE", "capacity", "prelease_broker_busy"))
+        self.assertTrue(first["execution_absence_proven"])
+        self.assertEqual((proof["kind"], proof["pool"], proof["broker_reason"]),
+                         ("prelease_broker_busy", "minimax", "cap_full"))
+        self.assertEqual((own, waiter), (0, 0))
+        self.assertFalse(self.path("origin", ".process.jsonl").exists())
+        self.assertEqual([row["pool"] for row in self.route_calls[:2]], ["minimax", "glm"])
+        self.assertEqual(len(resolved["prior_attempts"]), 1)
+        self.assertNotEqual(resolved["effective_run_id"], "origin")
+        self.assertGreaterEqual(len(self.native_calls), 2)
+        self.assertTrue(self.path("origin", ".successor.json").is_file())
+        # The offline controller's forbidden transport is not a worker result;
+        # success/acceptance requires the real installed generation.
+        self.assertNotEqual(rc, 0)
+
+    def test_busy_refusal_requires_exact_broker_and_adapter_receipts(self):
+        self._prepare_busy_minimax()
+        rc = api.request("origin", "mechanical", cwd="~", packet=None,
+            stdin_bytes=b"read-only busy proof fixture\\n", root_id="root",
+            parent_run_id="parent", task_complexity="C0_MECHANICAL",
+            request_capacity_preflight=True, request_remaining_seconds=60,
+            request_deadline_ns=time.monotonic_ns() + 60_000_000_000)
+        self.assertEqual(rc, 75)
+        self.assertEqual(api.inspect_run("origin")["reason"], "prelease_broker_busy")
+        proof = fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
+        self.assertEqual(proof["broker_reason"], "cap_full")
+        for suffix, key, invalid in (
+            (".prelease-quota.json", "broker_reason", "auth_refused"),
+            (".prelease-quota.json", "waiter_cleared", False),
+            (".prelease-quota.json", "task_cli_started", True),
+            (".request-return.json", "controller_rc", 0),
+        ):
+            with self.subTest(suffix=suffix, key=key):
+                path = self.path("origin", suffix)
+                original = path.read_bytes()
+                try:
+                    row = json.loads(original)
+                    row[key] = invalid
+                    path.write_text(json.dumps(row))
+                    self.assertEqual(api.inspect_run("origin")["state"],
+                                     "STATUS_UNREADABLE")
+                    with self.assertRaises(ValueError):
+                        fabric_continuation.eligible(
+                            api, self.root, "origin", "root", "parent")
+                finally:
+                    path.write_bytes(original)
+        returned = self.path("origin", ".request-return.json")
+        original = returned.read_bytes()
+        try:
+            returned.unlink()
+            self.assertEqual(api.inspect_run("origin")["state"], "SETTLING")
+        finally:
+            returned.write_bytes(original)
+
+    def test_pool_exclusion_not_available_to_manual_pins(self):
+        with self.assertRaisesRegex(api.FabricTaskError, "CAPACITY_EXCLUSION"):
+            api.request("pinned", "mechanical", cwd="~", packet=None,
+                stdin_bytes=b"inert", pool="minimax",
+                capacity_excluded_pools=["minimax"],
+                request_capacity_preflight=True)
+        self.assertFalse(self.path("pinned", ".request.json").exists())
+
+    def test_picker_exclusions_are_scoped_and_pins_still_refused(self):
+        routes = {"minimax": ("fixture", "minimax"), "glm": ("fixture", "glm")}
+        def choose(task, **options):
+            self.assertEqual(set(options["host_modes"]), {"glm"})
+            return "POOL=glm KEY=- MODEL=glm-5.3-flash REASON=ok"
+        with patch.object(api.pick, "_eligible_host_routes", return_value=dict(routes)):
+            with patch.object(api.pick, "_format_pick", side_effect=choose):
+                result = api.pick._format_pick_host(
+                    "mechanical", host="auto", excluded_pools=["minimax"])
+                self.assertIn("POOL=glm ", result)
+                self.assertIn("HOST=fixture MODE=glm", result)
+                self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
+                    "mechanical", host="auto", pool="minimax",
+                    excluded_pools=["minimax"]))
+                self.assertIn("invalid excluded_pools", api.pick._format_pick_host(
+                    "mechanical", host="auto", excluded_pools=["unregistered"]))
+
+    def test_no_alternate_after_busy_refuses_without_extra_controller(self):
+        # Original MiniMax becomes full after selection; the only other
+        # compatible route is forbidden by its ordinary capability policy.
+        # Exhausted AUTO options are a visible refusal, not a silent retry.
+        self._prepare_busy_minimax()
+        original_filter = api.pick.hard_filter
+        def unavailable_alternate(pool, *args, **kwargs):
+            if pool == "glm":
+                return False, "alternate unavailable"
+            return original_filter(pool, *args, **kwargs)
+        with patch.object(api.pick, "hard_filter", side_effect=unavailable_alternate):
+            rc = fabric_continuation.foreground(
+                api, "origin", "mechanical", cwd="~",
+                packet=None, stdin_bytes=b"all alternatives unavailable",
+                root_id="root", parent_run_id="parent",
+                task_complexity="C0_MECHANICAL")
+        state = fabric_continuation.resolve(api, "origin")
+        self.assertEqual(rc, 75)
+        self.assertEqual(len(self.native_calls), 1)
+        self.assertEqual(len(state["prior_attempts"]), 1)
+        self.assertEqual(state["prior_attempts"][0]["reason"], "prelease_broker_busy")
+        self.assertEqual(state["controller_reason"], "request_refused_before_launch")
+        self.assertEqual(state["effective_status"]["state"], "REQUEST_REFUSED_BEFORE_LAUNCH")
+        self.assertFalse(self.path(state["effective_run_id"], ".request-launch.json").exists())
+
+    def test_granted_primary_lease_is_not_replayed_on_later_failure(self):
+        # When the primary broker grants a real lease, a subsequent
+        # transport failure is *not* no-start proof and must not reroute.
+        with patch.object(self, "cool_from_settled_other_commission", return_value=None):
+            rc = fabric_continuation.foreground(
+                api, "origin", "mechanical", cwd="~",
+                packet=None, stdin_bytes=b"retained primary",
+                root_id="root", parent_run_id="parent",
+                task_complexity="C0_MECHANICAL")
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(len(self.native_calls), 1)
+        self.assertEqual([row["pool"] for row in self.route_calls], ["minimax"])
+        self.assertIn("LEASE_OK pool=minimax", self.path("origin", ".log").read_text())
+        self.assertFalse(self.path("origin", ".successor.json").exists())
+        self.assertEqual(fabric_continuation.resolve(
+            api, "origin")["prior_attempts"], [])
+
+    def test_broker_busy_handoff_preserves_ordinary_fair_share_mode(self):
+        # The opt-in path may return a typed no-lease decision directly;
+        # it must not register a phantom root in the existing waiter table.
+        # Ordinary calls still receive the unmodified priority-wait result.
+        with patch.object(self.br, "_front_of_queue", return_value=False):
+            fast = self.br.acquire("auto-root", "minimax",
+                model="MiniMax-M2.7", host="fixture", task_class="mechanical",
+                capacity_handoff=True, wait=0)
+            ordinary = self.br.acquire("normal-root", "minimax",
+                model="MiniMax-M2.7", host="fixture", task_class="mechanical",
+                capacity_handoff=False, wait=0)
+        self.assertFalse(fast.ok)
+        self.assertFalse(ordinary.ok)
+        self.assertEqual((fast.reason, ordinary.reason),
+                         ("priority_wait", "priority_wait"))
+        with self.br._conn() as conn:
+            phantom = conn.execute(
+                "SELECT COUNT(*) FROM waiters WHERE orchestrator_id='auto-root'"
+            ).fetchone()[0]
+        self.assertEqual(phantom, 0)
 
 
 if __name__ == "__main__":

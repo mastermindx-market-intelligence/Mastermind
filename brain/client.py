@@ -137,6 +137,13 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
             seat=seat, record_book=record_book,
         )
 
+    if selected == "fabric":
+        from brain import fabric_inference
+        return fabric_inference.call_model(
+            system, user, role=role, max_tokens=max_tokens,
+            seat=seat, record_book=record_book,
+        )
+
     if selected == "explabs":
         from brain import explabs_client, explabs_pool
         if not explabs_pool.available():

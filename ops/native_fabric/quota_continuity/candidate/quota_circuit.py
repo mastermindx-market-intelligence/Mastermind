@@ -19,6 +19,8 @@ import re
 import provider_outcome
 
 PRELEASE_SCHEMA = "mastermind.fabric_prelease_quota_refusal.v1"
+PRELEASE_BUSY_SCHEMA = "mastermind.fabric_prelease_broker_busy.v1"
+PRELEASE_BUSY_REASONS = frozenset(("cap_full", "accounts_at_cap", "lending_blocked", "priority_wait"))
 PRELEASE_SOURCES = ("remote_sub.sh", "lease_broker.py", "quota_circuit.py")
 PRELEASE_UNCERTAINTY_MARKERS = (
     "LEASE_PRESERVED effect_unknown=1", "REMOTE_EFFECT_UNKNOWN", "signal=effect_unknown",
@@ -125,6 +127,45 @@ def write_prelease_refusal(path, *, run_id, root_id, parent_run_id,
     })
 
 
+def write_prelease_busy_refusal(path, *, run_id, root_id, parent_run_id,
+                               pool, host, model, pid, request_sha256,
+                               launch_sha256, controller_sha256, broker_reason):
+    """Publish a *settled* broker no-lease result, after its own waiter is cleared.
+
+    This is not a provider 429, quota exclusion or permission to bypass fair-share.
+    The adapter's exact one-shot controller return must still be observed.
+    """
+    if broker_reason not in PRELEASE_BUSY_REASONS:
+        raise ValueError("prelease_broker_reason_invalid")
+    for value in (run_id, root_id, parent_run_id):
+        if not isinstance(value, str) or not provider_outcome.IDENT.fullmatch(value):
+            raise ValueError("prelease_identity_invalid")
+    for value in (request_sha256, launch_sha256, controller_sha256):
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise ValueError("prelease_source_binding_invalid")
+    if (type(pid) is not int or pid <= 0
+            or not all(isinstance(v, str) and v for v in (pool, host, model))):
+        raise ValueError("prelease_invocation_invalid")
+    here = Path(__file__).resolve().parent
+    sources = {
+        "remote_sub.sh": controller_sha256,
+        "lease_broker.py": provider_outcome.digest(provider_outcome.regular_bytes(
+            here / "lease_broker.py", 256 * 1024)),
+        "quota_circuit.py": provider_outcome.digest(provider_outcome.regular_bytes(
+            here / "quota_circuit.py", 256 * 1024)),
+    }
+    provider_outcome.write_new(Path(path), {
+        "schema": PRELEASE_BUSY_SCHEMA, "run_id": run_id,
+        "root_id": root_id, "parent_run_id": parent_run_id,
+        "pool": pool, "host": host, "model": model,
+        "controller_pid": pid, "reason": "prelease_broker_busy",
+        "broker_reason": broker_reason, "waiter_cleared": True,
+        "rc": 75, "lease_granted": False, "task_cli_started": False,
+        "request_sha256": request_sha256, "launch_sha256": launch_sha256,
+        "native_sources": sources,
+    })
+
+
 def validate_prelease_refusal(here, run, root, parent, *, packet_limit=8 * 1024 * 1024):
     """Read an original controller return; this cannot dispatch or resurrect.
 
@@ -146,15 +187,16 @@ def validate_prelease_refusal(here, run, root, parent, *, packet_limit=8 * 1024 
     launch_raw, launch = read(".request-launch.json")
     refusal_raw, refusal = read(".prelease-quota.json")
     returned_raw, returned = read(".request-return.json")
+    busy = refusal.get("schema") == PRELEASE_BUSY_SCHEMA
     schemas = ((request, "mastermind.fabric_request_artifact.v1"),
                (launch, "mastermind.fabric_request_launch.v1"),
-               (refusal, PRELEASE_SCHEMA),
+               (refusal, PRELEASE_BUSY_SCHEMA if busy else PRELEASE_SCHEMA),
                (returned, "mastermind.fabric_request_return.v1"))
     for obj, schema in schemas:
         if (obj.get("schema") != schema or obj.get("run_id") != run
                 or obj.get("root_id") != root or obj.get("parent_run_id") != parent):
             raise ValueError("prelease_artifact_identity")
-    if (refusal.get("reason") != "prelease_quota_cooldown"
+    if (refusal.get("reason") != ("prelease_broker_busy" if busy else "prelease_quota_cooldown")
             or type(refusal.get("rc")) is not int or refusal["rc"] != 75
             or refusal.get("lease_granted") is not False
             or refusal.get("task_cli_started") is not False
@@ -179,24 +221,30 @@ def validate_prelease_refusal(here, run, root, parent, *, packet_limit=8 * 1024 
     if (not isinstance(route, dict)
             or any(refusal.get(k.lower()) != route.get(k) for k in ("POOL", "HOST", "MODEL"))):
         raise ValueError("prelease_route_changed")
-    blockade = refusal.get("blockade")
-    if (not isinstance(blockade, dict) or type(blockade.get("observed_at")) not in (int, float)
-            or not math.isfinite(blockade["observed_at"])
-            or not isinstance(blockade.get("accounts"), list) or not blockade["accounts"]):
-        raise ValueError("prelease_capacity_evidence_invalid")
-    names = set()
-    for account in blockade["accounts"]:
-        if (not isinstance(account, dict) or not isinstance(account.get("account"), str)
-                or not account["account"] or account["account"] in names
-                or account.get("kind") not in provider_outcome.CAPACITY
-                or not isinstance(account.get("scope"), str) or not account["scope"]
-                or not isinstance(account.get("source_run"), str)
-                or not provider_outcome.IDENT.fullmatch(account["source_run"])
-                or any(type(account.get(k)) not in (int, float) or not math.isfinite(account[k])
-                       for k in ("observed_at", "until_ts"))
-                or not account["observed_at"] <= blockade["observed_at"] < account["until_ts"]):
+    if busy:
+        if (refusal.get("broker_reason") not in PRELEASE_BUSY_REASONS
+                or refusal.get("waiter_cleared") is not True
+                or "blockade" in refusal):
+            raise ValueError("prelease_broker_capacity_evidence_invalid")
+    else:
+        blockade = refusal.get("blockade")
+        if (not isinstance(blockade, dict) or type(blockade.get("observed_at")) not in (int, float)
+                or not math.isfinite(blockade["observed_at"])
+                or not isinstance(blockade.get("accounts"), list) or not blockade["accounts"]):
             raise ValueError("prelease_capacity_evidence_invalid")
-        names.add(account["account"])
+        names = set()
+        for account in blockade["accounts"]:
+            if (not isinstance(account, dict) or not isinstance(account.get("account"), str)
+                    or not account["account"] or account["account"] in names
+                    or account.get("kind") not in provider_outcome.CAPACITY
+                    or not isinstance(account.get("scope"), str) or not account["scope"]
+                    or not isinstance(account.get("source_run"), str)
+                    or not provider_outcome.IDENT.fullmatch(account["source_run"])
+                    or any(type(account.get(k)) not in (int, float) or not math.isfinite(account[k])
+                           for k in ("observed_at", "until_ts"))
+                    or not account["observed_at"] <= blockade["observed_at"] < account["until_ts"]):
+                raise ValueError("prelease_capacity_evidence_invalid")
+            names.add(account["account"])
     log = provider_outcome.regular_bytes(directory / (run + ".log"), 8 * 1024 * 1024)
     if returned.get("log_sha256") != provider_outcome.digest(log):
         raise ValueError("prelease_controller_log_changed")
@@ -219,7 +267,8 @@ def validate_prelease_refusal(here, run, root, parent, *, packet_limit=8 * 1024 
     return {"packet_sha256": request["packet_sha256"],
             "prelease_sha256": provider_outcome.digest(refusal_raw),
             "request_return_sha256": provider_outcome.digest(returned_raw),
-            "kind": "prelease_quota_cooldown"}
+            "kind": "prelease_broker_busy" if busy else "prelease_quota_cooldown",
+            **({"pool": refusal["pool"], "broker_reason": refusal["broker_reason"]} if busy else {})}
 
 
 def init_schema(conn):

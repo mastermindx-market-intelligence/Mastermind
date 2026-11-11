@@ -2177,7 +2177,8 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                 route_key: Optional[str] = None,
                 required_modes: Optional[List[str]] = None,
                 required_platforms: Optional[List[str]] = None,
-                excluded_hosts: Optional[List[str]] = None) -> str:
+                excluded_hosts: Optional[List[str]] = None,
+                excluded_pools: Optional[List[str]] = None) -> str:
     """Select a new request, preserving Grok model affinity on quota exhaustion."""
     if os.environ.get("POOL_OPERATOR_CHILD_BUDGET", "0") != "0":
         # Same model is not the same harness capability. The existing operator
@@ -2197,6 +2198,8 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                   required_platforms=required_platforms)
     if excluded_hosts is not None:
         common["excluded_hosts"] = excluded_hosts
+    if excluded_pools is not None:
+        common["excluded_pools"] = excluded_pools
     affinity = (requested_model in ("grok-4.6", "grok-4.7") and canonical_pool(pool) in (None, "grok")) or (
         canonical_pool(pool) == "grok" and requested_model is None)
     if not affinity:
@@ -2229,8 +2232,17 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
                 route_key: Optional[str] = None,
                 required_modes: Optional[List[str]] = None,
                 required_platforms: Optional[List[str]] = None,
-                excluded_hosts: Optional[List[str]] = None) -> str:
+                excluded_hosts: Optional[List[str]] = None,
+                excluded_pools: Optional[List[str]] = None) -> str:
     """Read-only selection; host name or auto also requires placement eligibility."""
+    if excluded_pools is not None:
+        if (not host or pool is not None or requested_model is not None
+                or type(excluded_pools) is not list
+                or not 1 <= len(excluded_pools) < 3
+                or any(type(item) is not str or item not in _HOST_POOL_MODES
+                       for item in excluded_pools)
+                or len(set(excluded_pools)) != len(excluded_pools)):
+            return "NONE reason=invalid excluded_pools or manual pin"
     if excluded_hosts is not None:
         if (not host or type(excluded_hosts) is not list or len(excluded_hosts) > 64
                 or any(type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value) is None
@@ -2267,6 +2279,11 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
                 **({"required_platforms": required_platforms} if required_platforms is not None else {}),
                 **({"excluded_hosts": excluded_hosts} if excluded_hosts is not None else {}),
             )
+            # Only candidates excluded by an already-proven pre-task broker
+            # refusal are removed. Normal economics/quality/independence and
+            # host admission continue in the incumbent single picker.
+            for excluded_pool in excluded_pools or ():
+                routes.pop(excluded_pool, None)
             modes = {pool: route[1] for pool, route in routes.items()}
             try:
                 observer = _SELECTION_OBSERVER.get()
