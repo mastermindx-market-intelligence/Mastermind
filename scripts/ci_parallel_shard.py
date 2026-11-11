@@ -214,6 +214,28 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+# The pytest shards alone may use this one exact, variable-gated expression.
+# It selects an ephemeral one-job runner lane (own account, HOME, private temp
+# and fresh work tree) only for shard indices the repository variable lists,
+# never for the Docker/sudo shards 0 and 2, never for fork pull requests and
+# for merge groups only behind a second explicit variable. Every other case,
+# including an unset variable, evaluates to the literal hosted image. It never
+# names the shared `ubuntu-latest` label. Exact string equality: no other
+# expression, list or label is accepted, and the PR fast lane and
+# qualification gates keep the literal hosted image.
+PYTEST_FLEET_LABELS = ("self-hosted", "linux", "x64", "mastermind-pytest")
+PYTEST_FLEET_EXCLUDED_SHARDS = (0, 2)
+PYTEST_SHARDS_LANE_RUNS_ON = (
+    "${{ (contains(format(',{0},', vars.MM_PYTEST_FLEET_SHARDS), "
+    "format(',{0},', matrix.index)) && matrix.index != 0 && matrix.index != 2 "
+    "&& (github.event_name != 'merge_group' || "
+    "vars.MM_PYTEST_FLEET_MERGE_GROUP == 'true') && "
+    "(github.event_name != 'pull_request' || "
+    "github.event.pull_request.head.repo.full_name == github.repository)) && "
+    "fromJSON('[\"self-hosted\",\"linux\",\"x64\",\"mastermind-pytest\"]') "
+    "|| 'ubuntu-24.04' }}"
+)
+PYTEST_SHARDS_RUNNERS = (HOSTED_TEST_RUNNER, PYTEST_SHARDS_LANE_RUNS_ON)
 # The workflow root may declare exactly the released keys. A workflow-level
 # `defaults:` (e.g. defaults.run.shell injection) or `env:` (e.g.
 # npm_config_dry_run) applies to every job and could neuter all steps while
@@ -534,8 +556,11 @@ def validate_parallel_workflow(text: str) -> None:
         or shards.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
-    if shards.get("runs-on") != HOSTED_TEST_RUNNER:
-        raise ci_pytest.PolicyError("pytest shards must run on the GitHub-hosted test image")
+    runs_on = shards.get("runs-on")
+    if type(runs_on) is not str or runs_on not in PYTEST_SHARDS_RUNNERS:
+        raise ci_pytest.PolicyError(
+            "pytest shards must run on the GitHub-hosted test image or the exact "
+            "variable-gated ephemeral lane expression")
     if (
         gate.get("name") != _REQUIRED_GATE_NAME
         or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
