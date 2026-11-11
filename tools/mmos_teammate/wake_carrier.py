@@ -551,13 +551,35 @@ def _marker_run_open(marker_run, thread):
     MAS-9 half-finished text of a run still waiting on its question was
     delivered as the answer. The turn is open when it is the thread's active
     run, or when a human question waits and it is the latest run. A thread
-    dict without these fields says nothing (behave as before)."""
+    dict without these fields says nothing (behave as before).
+
+    Attack findings 2 and 3 (attack round on R2a findings 2/3/4): two
+    degraded shapes said "ended" when they could not know. A thread that
+    omits activeRunId entirely while status says the thread is running is a
+    mid-turn read with the field dropped — the turn stays open. A thread
+    that positively reports the marker's own run ended failed/cancelled
+    keeps the turn open too: dead-run prose is never the answer; the carrier
+    waits out and releases the issue for a person instead of delivering it.
+    Both apply only when a LATER run has not superseded the marker's (a
+    newer latestRunId ends the marker's turn whatever the status says)."""
     if not isinstance(thread, dict) or not marker_run:
         return False
     if thread.get("activeRunId") == marker_run:
         return True
-    return _pending_requests(thread) > 0 and \
-        thread.get("latestRunId") == marker_run
+    if _pending_requests(thread) > 0 and \
+            thread.get("latestRunId") == marker_run:
+        return True
+    latest = thread.get("latestRunId")
+    if latest and latest != marker_run:
+        return False  # a later turn superseded the marker's
+    status = str(thread.get("status") or "").lower()
+    if "activeRunId" not in thread and status in ("running", "queued"):
+        return True  # degraded read of a mid-turn thread
+    if thread.get("activeRunId") is None and "activeRunId" in thread \
+            and status in ("running", "queued", "failed", "cancelled",
+                           "error", "stopped"):
+        return True  # the marker's own run ended without completing
+    return False
 
 
 # R2a finding 16: the stated lookback bound before a first send. The thread

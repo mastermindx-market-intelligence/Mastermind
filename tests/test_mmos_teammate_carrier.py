@@ -1587,6 +1587,73 @@ def test_scan_marker_run_not_ended_is_never_a_reply():
     assert wc.scan_marker(msgs, op) == ("reply", "I've exhausted every reachable source")
 
 
+def test_scan_marker_running_thread_without_active_run_id_is_pending():
+    # Attack finding 2 (attack round on R2a findings 2/3/4): a thread dict
+    # that omits activeRunId while saying status "running" is a degraded read
+    # of a mid-turn thread, not proof the turn ended — the partial prose must
+    # stay a pending marker, never the reply.
+    op = "pc-is-1-abc"
+    msgs = [("user", "r1", f"[{op}]\n\nthe task"),
+            ("assistant", "r1", "I will now read the file and")]
+    degraded = {"threadId": "th-1", "latestRunId": "r1",
+                "pendingRequestCount": 0, "status": "running"}
+    assert wc.scan_marker(msgs, op, degraded) == ("pending", None)
+    # a LATER run superseding the marker's still ends the marker's turn
+    superseded = dict(degraded, latestRunId="r2")
+    assert wc.scan_marker(msgs, op, superseded) == \
+        ("reply", "I will now read the file and")
+    # a field-less dict still behaves as before (deliver)
+    assert wc.scan_marker(msgs, op, {"threadId": "th-1"}) == \
+        ("reply", "I will now read the file and")
+
+
+def test_scan_marker_failed_run_prose_is_never_the_reply():
+    # Attack finding 3: a run that ended failed left partial prose behind and
+    # the thread positively reports the failure. Dead-run text is never the
+    # answer — the marker stays pending so the carrier waits out and releases
+    # the issue for a person instead of delivering it.
+    op = "pc-is-1-abc"
+    msgs = [("user", "r1", f"[{op}]\n\nthe task"),
+            ("assistant", "r1", "I will now read the file and then")]
+    failed = {"threadId": "th-1", "activeRunId": None, "latestRunId": "r1",
+              "pendingRequestCount": 0, "status": "failed"}
+    assert wc.scan_marker(msgs, op, failed) == ("pending", None)
+    # the same shape completed is the normal delivery case
+    done = dict(failed, status="completed")
+    assert wc.scan_marker(msgs, op, done) == \
+        ("reply", "I will now read the file and then")
+
+
+def test_failed_run_releases_the_issue_instead_of_delivering():
+    # Attack finding 3, end to end: the provider died mid-turn and the thread
+    # says so. The partial prose is not posted as the answer; the carrier
+    # waits out and releases the issue (todo + release note), nothing else.
+    issue = one_issue()
+    op = wc.op_id("is-1", issue["is-1"]["title"] + "\n"
+                  + issue["is-1"]["description"])
+    failed_thread = {"threadId": "th-1", "activeRunId": None,
+                     "latestRunId": "r1", "pendingRequestCount": 0,
+                     "status": "failed"}
+    t3 = ScriptedT3(states=[(failed_thread,
+                             [("user", "r1", f"[{op}]\n\nthe task"),
+                              ("assistant", "r1",
+                               "I will now read the file and then")])])
+    pc = FakePaperclip(issues=issue)
+    clock = Clock()
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap,
+            "pending_timeout_sec": 20, "poll_interval_sec": 10}
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {}, opts)
+    assert t3.sends == []
+    assert pc.issues["is-1"]["status"] == "todo"
+    assert not any(c[0] == "comment" and c[1] == "is-1" and
+                   "I will now read" in c[2] for c in pc.calls)
+
+
 def test_question_during_turn_carrier_stays_and_finishes():
     # Rule B, entry 1: the send itself stops on a question. One waiting line,
     # the question answered on the third poll, the final reply delivered
