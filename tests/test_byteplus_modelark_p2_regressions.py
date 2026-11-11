@@ -49,9 +49,94 @@ def test_coding_model_pin_blocks_wrong_model_even_under_simulated_review(monkeyp
                      "estimated_startable_jobs": 1, "suggested_parallelism": 1,
                      "expiry_pressure_jobs_per_hour": None}],
     }
-    with pytest.raises(CapacityEconomicsProjectionError, match="unreviewed commercial"):
+    with pytest.raises(CapacityEconomicsProjectionError) as excinfo:
         project_quota_preference(({"tier_id": TIER, "model_aliases": [CODING]},),
                                  preview, reviewed_router=router)
+    message = str(excinfo.value)
+    assert "unreviewed commercial" in message
+    assert "BYTEPLUS_MODEL_PIN_MISMATCH" in message
+
+
+def test_personal_coding_plan_refused_even_under_simulated_full_review(monkeypatch):
+    # The typed refusal is not a review artifact: even with the commercial
+    # realm reviewed and the router canonical, the personal Coding Plan
+    # pool/auth-route identity stays refused with its specific reason code.
+    import control_plane.capacity_economics_projection as cep
+    router = ModelRouter.load()
+    monkeypatch.setitem(REVIEWED_CODEX_PROVIDER_REALMS, BYTEPLUS_MODELARK_COMMERCIAL.realm_id,
+                        BYTEPLUS_MODELARK_COMMERCIAL)
+    monkeypatch.setattr(cep, "_canonical_model_router_matches", lambda r: r is router)
+    personal_preview = {
+        "schema": "mastermind.quota_economics_preview/v1",
+        "as_of": "2026-10-24T08:00:00+00:00",
+        "authority": "NONE_PREVIEW_ONLY", "binding_verification": "NOT_PERFORMED",
+        "live_admission": False, "claim_time_revalidation_required": True,
+        "status": "PREVIEW_READY", "selected_tier": TIER,
+        "suggested_option": "personal",
+        "options": [{"option_id": "personal", "provider": "byteplus",
+                     "model_alias": "byteplus.attended", "eligible_in_preview": True,
+                     "estimated_startable_jobs": 9, "suggested_parallelism": 4,
+                     "expiry_pressure_jobs_per_hour": None}],
+    }
+    with pytest.raises(CapacityEconomicsProjectionError) as excinfo:
+        project_quota_preference(({"tier_id": TIER,
+                                   "model_aliases": ["byteplus.attended"]},),
+                                 personal_preview, reviewed_router=router)
+    message = str(excinfo.value)
+    assert "BYTEPLUS_PERSONAL_CODING_PLAN_REFUSED" in message
+    assert "personal BytePlus Coding Plan" in message
+
+
+def test_unapproved_commercial_alias_refused_with_typed_reason(monkeypatch):
+    # An unselected/unapproved alias on the commercial provider stays
+    # ineligible with a precise typed reason even under simulated review.
+    import control_plane.capacity_economics_projection as cep
+    router = ModelRouter.load()
+    monkeypatch.setitem(REVIEWED_CODEX_PROVIDER_REALMS, BYTEPLUS_MODELARK_COMMERCIAL.realm_id,
+                        BYTEPLUS_MODELARK_COMMERCIAL)
+    monkeypatch.setattr(cep, "_canonical_model_router_matches", lambda r: r is router)
+    unapproved = "byteplus-modelark.experimental-fm"
+    unapproved_preview = {
+        "schema": "mastermind.quota_economics_preview/v1",
+        "as_of": "2026-10-24T08:00:00+00:00",
+        "authority": "NONE_PREVIEW_ONLY", "binding_verification": "NOT_PERFORMED",
+        "live_admission": False, "claim_time_revalidation_required": True,
+        "status": "PREVIEW_READY", "selected_tier": TIER,
+        "suggested_option": "candidate",
+        "options": [{"option_id": "candidate", "provider": "byteplus-modelark",
+                     "model_alias": unapproved, "eligible_in_preview": True,
+                     "estimated_startable_jobs": 3, "suggested_parallelism": 2,
+                     "expiry_pressure_jobs_per_hour": None}],
+    }
+    with pytest.raises(CapacityEconomicsProjectionError) as excinfo:
+        project_quota_preference(({"tier_id": TIER, "model_aliases": [unapproved]},),
+                                 unapproved_preview, reviewed_router=router)
+    assert "BYTEPLUS_MODEL_ALIAS_NOT_PINNED" in str(excinfo.value)
+
+
+def test_near_miss_byteplus_provider_stays_refused_under_simulated_review(monkeypatch):
+    import control_plane.capacity_economics_projection as cep
+    router = ModelRouter.load()
+    monkeypatch.setitem(REVIEWED_CODEX_PROVIDER_REALMS, BYTEPLUS_MODELARK_COMMERCIAL.realm_id,
+                        BYTEPLUS_MODELARK_COMMERCIAL)
+    monkeypatch.setattr(cep, "_canonical_model_router_matches", lambda r: r is router)
+    near_miss_preview = {
+        "schema": "mastermind.quota_economics_preview/v1",
+        "as_of": "2026-10-24T08:00:00+00:00",
+        "authority": "NONE_PREVIEW_ONLY", "binding_verification": "NOT_PERFORMED",
+        "live_admission": False, "claim_time_revalidation_required": True,
+        "status": "PREVIEW_READY", "selected_tier": TIER,
+        "suggested_option": "candidate",
+        "options": [{"option_id": "candidate", "provider": "BytePlusPro",
+                     "model_alias": "fast.engineering", "eligible_in_preview": True,
+                     "estimated_startable_jobs": 3, "suggested_parallelism": 2,
+                     "expiry_pressure_jobs_per_hour": None}],
+    }
+    with pytest.raises(CapacityEconomicsProjectionError) as excinfo:
+        project_quota_preference(({"tier_id": TIER,
+                                   "model_aliases": ["fast.engineering"]},),
+                                 near_miss_preview, reviewed_router=router)
+    assert "BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED" in str(excinfo.value)
 
 
 def test_default_preflight_rejects_custom_router_without_owner_pin():

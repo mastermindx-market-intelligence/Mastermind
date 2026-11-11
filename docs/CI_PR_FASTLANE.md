@@ -1,8 +1,10 @@
 # CI PR Fast Lane — Risk-Tiered Work Without Duplicate Full Suites
 
-Status: **source candidate**, not installed/proven until merged and verified by
-real PR and merge_group runs. Owning repo:
-`mastermindx-market-intelligence/Mastermind`.
+Status: **merged and running** (#2016), with the merge_group path changed by
+#2129 (risk-scoped queue), #2439 (STANDARD groups run full) and #2413 (parallel
+qualification job). The table below describes `scripts/ci_pr_scope.py` as it is
+now; the 2026-11-03 measurements are the original motivation, kept as history.
+Owning repo: `mastermindx-market-intelligence/Mastermind`.
 
 ## Why this is needed
 
@@ -29,28 +31,72 @@ or altered merge-queue admission is introduced.
 The new `pr_scope` job uses exact GitHub-generated PR/base identity, a local
 complete Git diff, and the **accepted** `control_plane/github_review_risk_policy.py`.
 It runs both itself and its risk-policy import from `git archive` of the
-**protected PR base commit**, not PR-authored files. This avoids allowing
-untrusted PR changes to reclassify their own CI. If source is unavailable,
-forked, moved, binary/nonvisual, a deletion/rename, inconsistent or exceeds
-the accepted policy bound, `mode=full` fails closed.
+**protected base commit**, not PR-authored files: the PR's recorded base for a
+pull request, protected `origin/master` for a merge group. This avoids allowing
+untrusted PR changes to reclassify their own CI. The classifier's closure is
+four files (`scripts/__init__.py`, `scripts/ci_pr_scope.py`,
+`control_plane/__init__.py`, `control_plane/github_review_risk_policy.py`). The
+smoke selector `scripts/ci_pr_smoke.py` is not part of it; the workflow
+extracts it only for a protected classifier that still imports it (bases
+between #2380 and #2439). If source is unavailable, forked, moved,
+binary/nonvisual, a deletion/rename, inconsistent or exceeds the accepted
+policy bound, `mode=full` fails closed with tier HOLD.
 
-| Verified PR tier | PR path | Exact merge_group path |
+A merge group is classified as a whole: `classify_merge_group` verifies the
+event identity (base ref `master`, a `gh-readonly-queue/master/` head ref, the
+checked-out head, protected `origin/master`) and then tiers the entire
+`protected base..group head` diff, so one CRITICAL entry makes the whole group
+full.
+
+| Verified tier | Pull request | Merge group (whole integrated candidate) |
 | --- | --- | --- |
-| FAST | Source/whitespace checks, `pr_fast`; no full PR shards | All six complete canonical pytest shards, required `test` |
-| STANDARD | Source/whitespace checks + bounded source-proximate Python tests; web app typecheck when touched | All six complete canonical pytest shards, required `test` |
-| CRITICAL/HOLD | All six complete pytest shards and existing non-pytest qualification | All six complete pytest shards and required `test` |
-| Any push / manual dispatch | No PR-only fast mode | Existing full suite; protected push may reuse an exact accepted merge_group proof |
+| FAST | `mode=fast`: `pr_fast` source/whitespace checks; the web application typecheck also runs in `pr_fast` when the FAST diff itself touches `app/mastermind_os/` (reachable only via visual-asset-only diffs, which stay FAST while setting `needs_node=true`); shards and qualification job skipped | `mode=fast` (since #2129): the same `pr_fast` checks on the exact queue candidate; shards and qualification job skipped |
+| STANDARD | `mode=smoke`: `pr_fast` checks + bounded source-proximate Python tests; web app typecheck when `app/mastermind_os/` is touched | `mode=full`, reason `MERGE_GROUP_STANDARD_REQUIRES_FULL` (since #2439): all six pytest shards and the qualification job; never smoke |
+| CRITICAL | `mode=full`: all six pytest shards and the qualification job | `mode=full`: all six pytest shards and the qualification job |
+| HOLD (unverifiable) | `mode=full`, fail closed | `mode=full`, fail closed |
+| Any push / manual dispatch | not applicable | No scope job. All six shards and the qualification job; a protected push may reuse a same-SHA merge-group proof for the pytest step only |
 
-`pr_scope`, `pr_fast` and `pytest_shards` feed the same existing required
-`test` job. This fan-in rejects a skipped shard matrix unless a verified
-FAST/STANDARD PR's fast job succeeded. For merge_group and protected pushes
-the matrix **must** succeed; no FAST outcome can replace integration proof.
-A failed scope/test/dependency fails the required gate.
+A merge group can therefore reach the required `test` job only as `fast` (FAST
+tier) or `full`. Between #2129 and #2439 a STANDARD group certified on the
+bounded smoke selection; that is no longer possible, because a selection
+cannot prove the tests it did not select (cross-repository pins,
+package-membership counts).
+
+`pr_scope`, `pr_fast`, `pin_guards`, `qualification` and `pytest_shards` feed
+the same existing required `test` job. The fan-in accepts a skipped shard
+matrix only when the trusted scope is `fast` or `smoke` and the fast job
+succeeded; in full mode, and on every push or manual run, the shard matrix and
+the qualification job **must** succeed. A failed scope/test/dependency fails
+the required gate.
 
 The fast job has read-only permission, no PR-secret exposure, bounded tests and
 an eight-minute job budget. It does not run Fabric, deploy services, publish a
 review, bypass GitHub protections or allow a branch merge. Full code coverage
-and all security/non-Python qualification still occur at every merge_group.
+and all security/non-Python qualification occur at every STANDARD, CRITICAL
+and HOLD merge group and at every protected push.
+
+### Web application typecheck
+
+`npm --prefix app/mastermind_os run typecheck` has two owners that never run
+in the same event:
+
+- `pr_fast` (fast/smoke), only when the verified diff touches
+  `app/mastermind_os/` (`needs_node=true`).
+- The qualification job (full mode, push, manual dispatch), unconditionally.
+
+The full-mode gate is not conditioned on `needs_node`. `pr_scope` does not run
+on a push or manual dispatch, so the output does not exist there, and every
+fail-closed HOLD decision reports `needs_node=false` even when the diff
+deletes, renames or re-modes a web application file. Before this gate, no full
+merge group and no push typechecked the web application.
+
+### Measured full merge group (2026-11-10)
+
+Merge group run 42919263806 (PR #2438), after #2439 and #2413: 40 minutes from
+enqueue to green, about 1 minute of runner wait. Pytest shards 3 / 1 / 2 / 4 /
+0 / 5 ran 22 / 25 / 33 / 36 / 38 / 39 minutes; the qualification job ran 4
+minutes beside them. Before those fixes a full group took 70–80 minutes with
+shards 0 and 5 at 41–54 minutes. This is one run, not a p50.
 
 ## Required proof after source acceptance
 
@@ -60,8 +106,10 @@ and all security/non-Python qualification still occur at every merge_group.
    frontend typecheck, full PR matrix skipped, `test` successful.
 3. A CI/security/authority PR: scope CRITICAL, all full shards completed,
    `test` successful.
-4. A native merge_group for the same PR: **all six full shards** and the
-   original non-pytest gates completed, `test` successful only if all did.
+4. A native merge_group: a FAST group runs the fast job with shards skipped;
+   a STANDARD or CRITICAL group runs **all six full shards** and the
+   qualification job (including the web application typecheck); `test` is
+   successful only if every job on that path did.
 5. Missing/invalid source and failed test: required `test` red, not skipped.
 6. Compare GitHub run p50/p95 and compute after rollout: target ordinary PR
    feedback within a few minutes, not a timing guarantee or evidence of live

@@ -217,8 +217,12 @@ def build_profile(snapshot):
             _url(job.get("run_url"), f"{api}/actions/runs/{run_id}", f"job {key}.run_url")
             _url(job.get("url"), f"{api}/actions/jobs/{job_id}", f"job {key}.url")
             _url(job.get("html_url"), f"{web}/actions/runs/{run_id}/job/{job_id}", f"job {key}.html_url")
+        # A job skipped, or cancelled before any runner took it, never executed: GitHub
+        # reports no steps and no runner, and its timestamps are synthetic (real
+        # job129715087606 was cancelled at 08:24:00 with started_at 08:24:01 and an
+        # unexpanded matrix name). A cancelled job with a runner or steps stays strict.
         nonexecuted = (
-            job.get("status") == "completed" and job.get("conclusion") == "skipped"
+            job.get("status") == "completed" and job.get("conclusion") in ("skipped", "cancelled")
             and job.get("steps") == []
             and all(job.get(field) is None for field in (
                 "runner_id", "runner_name", "runner_group_id", "runner_group_name"

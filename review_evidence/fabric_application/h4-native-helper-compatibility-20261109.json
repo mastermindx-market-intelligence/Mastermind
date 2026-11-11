@@ -1,0 +1,194 @@
+{
+  "schema": "h4.native_go_external_helper_compatibility.v1",
+  "captured_at": "2026-11-09T07:10:54.051992+00:00",
+  "protected_base": "bd91db1e999d2eef54b48fdf3614b94933185c3f",
+  "observed_source_previously_protected": false,
+  "observed_source_provenance": "Exact read of the already installed original external GLM helper; admitted only through this new protected source repair after tests.",
+  "helpers": [
+    {
+      "path": "ops/native_fabric/paid_canonical_glm/source/glm_shim.py",
+      "sha256": "020b9ef9c59260d07980a23f2ac277d4e4d7350ff81e010d071fd733cc05b1fc",
+      "bytes": 65508
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/tests/fixtures/glm_helper_531198.py",
+      "sha256": "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2",
+      "bytes": 84202
+    }
+  ],
+  "actual_go_imports": [
+    "acquire_singleton_lock",
+    "check_auth",
+    "ensure_token",
+    "format_sse",
+    "iter_sse_chunks",
+    "redact_secrets",
+    "write_pid"
+  ],
+  "exact_transitive_bindings": [
+    {
+      "name": "Any",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b0d8855ea807156d76753dd15f37c6eb16c8cae192cc5cfc4db4bf78eb461740"
+    },
+    {
+      "name": "Dict",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b0d8855ea807156d76753dd15f37c6eb16c8cae192cc5cfc4db4bf78eb461740"
+    },
+    {
+      "name": "HERE",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "23b6448daffea6947fa94a8eeb3549908f2d11dfd93427a81564c4f1c6f23726"
+    },
+    {
+      "name": "Iterable",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b0d8855ea807156d76753dd15f37c6eb16c8cae192cc5cfc4db4bf78eb461740"
+    },
+    {
+      "name": "Iterator",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b0d8855ea807156d76753dd15f37c6eb16c8cae192cc5cfc4db4bf78eb461740"
+    },
+    {
+      "name": "LOCK_PATH",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "34a560dea597e4f2912e70bbfbcb662612976b4fb5045ca27c842a4f60e6bc18"
+    },
+    {
+      "name": "Optional",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b0d8855ea807156d76753dd15f37c6eb16c8cae192cc5cfc4db4bf78eb461740"
+    },
+    {
+      "name": "PID_PATH",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "c438d1f0af9d1515928075077c061774f2a57f174da8c3f4b275236c17840be5"
+    },
+    {
+      "name": "TOKEN_PATH",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "40f19f3fc57ec33018e439e5432c25abbb575fae2640d2b0d3bbc2250b4b6a6c"
+    },
+    {
+      "name": "acquire_singleton_lock",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "7e7782be07cb34bfdc27e61da422e498237302dc6c5d61a6d6d5603e312d7d37"
+    },
+    {
+      "name": "check_auth",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "9a2eaba21f65813e037996f1aa81705f79755984a8401e8c1806fd26272706b1"
+    },
+    {
+      "name": "ensure_token",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "591b398bc182b8bd19724e730178142c545244c75ca0275a50fa1e536a6f770b"
+    },
+    {
+      "name": "fcntl",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b55442722e8cecc8a093599df3107baed5baee37986890fba38505d8c148b0f4"
+    },
+    {
+      "name": "format_sse",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "b020ad79cb9171eb670865a63027523854e554a7865608c1e8c6718909c65418"
+    },
+    {
+      "name": "hmac",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "556a4446dc28fddfe8af835809ecd440d23617dc289a8e511646cacd9d144503"
+    },
+    {
+      "name": "iter_sse_chunks",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "14c019e6a35ee1156ffc1e09fd82e0e7ce99b6e0ea3fa549be8fdc6c0d6b0fa8"
+    },
+    {
+      "name": "json",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "ff3e4d4dcf7250cae8d622d77c9a6d69aefcf4ab04ef9920218fafe93c0f1991"
+    },
+    {
+      "name": "os",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "de2abade832c8e350a1bdc98cfcdb1e202ac4749c5fc51a4a970d41736b6df5c"
+    },
+    {
+      "name": "redact_secrets",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "65214caba262b626b3012101bec48afc954a4c87a66019a97d47822464ec2fe4"
+    },
+    {
+      "name": "secrets",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "2fa5016fe2990d48d5d94b7691d1a6185ef8ff6e15cddf74b6a11d29bc0c05cc"
+    },
+    {
+      "name": "write_pid",
+      "ast_equal": true,
+      "source_segment_equal": true,
+      "source_segment_sha256": "6c69624533084150908c1af0115061e1b51ced035cc6aa680543a434a3c41ed9"
+    }
+  ],
+  "native_go_handler_sha256": "a5af142fda4911f6dbe72896dd37df3b10d24be26fcff57da61a4ad636c4c14e",
+  "qualification_scope": "Import and the seven shared utility APIs only; not acceptance of the observed helper HTTP/load-balancing changes or APPLICATION admission.",
+  "source_cohort_guards": "Only the two named exact SHA256s; stable regular-file custody; cached module object plus originally loaded digest; unknown or swapped bytes refuse.",
+  "existing_local_helper_modified": false,
+  "existing_4141_service_restarted": false,
+  "credential_files_read": false,
+  "application_driver_preserved_sha256": "d680789e7a184b7b882a57f6cc7b0337b6bebc4e27069ac8263aeffd456c5fed",
+  "live_acceptance": false,
+  "fixture_http_status_review": {
+    "exact_source_sha256": "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2",
+    "sites": [
+      [
+        1430,
+        46,
+        49,
+        "int",
+        "503"
+      ],
+      [
+        1438,
+        42,
+        45,
+        "int",
+        "401"
+      ],
+      [
+        1519,
+        38,
+        41,
+        "int",
+        "502"
+      ]
+    ],
+    "ast_context": "urllib.error.HTTPError keyword argument code",
+    "runtime_identity_authority": false,
+    "scanner_changed": false,
+    "full_source_byte_drift_invalidates_all_sites": true
+  }
+}

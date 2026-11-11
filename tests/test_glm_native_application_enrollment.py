@@ -182,8 +182,13 @@ def test_glm_stage_has_one_closed_pair_and_a_real_fixture_source_commit(glm_sour
             g.manifest_files(partial)
 
 
-def test_flat_inspection_preserves_external_helper_and_has_no_private_effects(service_owner):
+@pytest.mark.parametrize("helper_cohort", ["historical", "observed"])
+def test_flat_inspection_preserves_external_helper_and_has_no_private_effects(service_owner, helper_cohort):
     case = service_owner
+    if helper_cohort == "observed":
+        raw = (NATIVE / "tests/fixtures/glm_helper_531198.py").read_bytes()
+        assert g.digest(raw) == "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2"
+        (case.published.ext / "glm_shim/glm_shim.py").write_bytes(raw)
     with loaded_entry(case.published, clean_yaml=True) as entry:
         startup = inspect(entry, case)
         assert startup.glm_adapter.__name__ == "glm_application_adapter"
@@ -201,8 +206,13 @@ def test_flat_inspection_preserves_external_helper_and_has_no_private_effects(se
 
 
 @pytest.mark.parametrize("profile", PROFILES)
+@pytest.mark.parametrize("helper_cohort", ["historical", "observed"])
 def test_actual_v9_role_captures_custody_and_starts_the_original_http_pool(
-        service_owner, monkeypatch, profile):
+        service_owner, monkeypatch, profile, helper_cohort):
+    if helper_cohort == "observed":
+        raw = (NATIVE / "tests/fixtures/glm_helper_531198.py").read_bytes()
+        assert g.digest(raw) == "531198b6ccbf132e0b70d29706ca8d3ff2f6b89079165d4ca999bee3f2c4eae2"
+        (service_owner.published.ext / "glm_shim/glm_shim.py").write_bytes(raw)
     case = configure_glm_role(service_owner, monkeypatch, profile)
     plan = prepare(case)
     original_secret = installer.secrets.token_urlsafe

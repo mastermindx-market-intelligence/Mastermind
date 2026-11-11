@@ -1121,3 +1121,430 @@ def test_the_control_never_imports_the_integration_package():
                 assert all(not alias.name.startswith("integrations") for alias in node.names), path
             elif isinstance(node, ast.ImportFrom) and node.module:
                 assert not node.module.startswith("integrations"), path
+
+
+# ---------------------------------------------------------------------------
+# 7. WO-13: the child-request admission lane on the private ingress
+# ---------------------------------------------------------------------------
+
+
+def test_child_request_admit_action_is_core_private_not_model_facing():
+    """The admit action rides the private App-to-Control frame only.
+
+    The core frame validator accepts it; the model-facing parser refuses
+    it, so the pinned MCP tool surface is unchanged and the envelope
+    never travels through the model.
+    """
+
+    from control_plane.executive_service import (
+        SELECTED_CHILD_FRAME_SCHEMA as CORE_SCHEMA,
+        _SELECTED_CHILD_ACTIONS as CORE_ACTIONS,
+    )
+    from integrations.hermes_delegate.schema import (
+        SELECTED_CHILD_ACTIONS as MODEL_ACTIONS,
+    )
+
+    assert "selected_child_admit" in CORE_ACTIONS
+    assert "selected_child_admit" not in MODEL_ACTIONS
+    assert "selected_child_submit" in CORE_ACTIONS & MODEL_ACTIONS
+    frame = {
+        "schema": SELECTED_CHILD_FRAME_SCHEMA,
+        "request": {"action": "selected_child_admit",
+                    "command": "child-request:" + "0" * 64},
+        "target_digest": "a" * 64,
+        "principal": {"policy_id": "p", "issuer_digest": "i", "subject_digest": "s",
+                      "client_ref": "c", "resource": "r", "scopes": ["a"]},
+        "principal_context": {"work_ref": WORK_REF,
+                              "principal_binding_digest": "a" * 64,
+                              "mission_authority_ref": "mission-authority-01",
+                              "authority_generation_digest": "a" * 64},
+        "capability_profile_digest": "a" * 64,
+    }
+    from control_plane.executive_service import _selected_child_frame
+    parsed = _selected_child_frame(frame)
+    assert parsed == {"action": "selected_child_admit",
+                      "command": "child-request:" + "0" * 64}
+    assert CORE_SCHEMA == INTEGRATION_FRAME_SCHEMA
+
+
+def _admission_material(root_ref, parent_ref, key, *, brief_digest="a" * 64):
+    """The host-frozen envelope plus the command minted from its triple."""
+
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_admission import admission_command_id
+
+    request = ChildExecutionRequest(
+        root_ref=root_ref, immediate_parent_run_ref=parent_ref,
+        logical_child_key=key, task_kind="research",
+        requested_complexity="C2_COMPLEX_BOUNDED", brief_digest=brief_digest,
+    )
+    return admission_command_id(request), request.to_dict()
+
+
+def test_private_child_request_admit_replay_and_digest_conflict(tmp_path):
+    """The real Unix ingress: idempotent admission, conflict on drift."""
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-c29-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            async with _control(tmp_path, socket_root,
+                                name="child-request-admit") as host:
+                service = host.service
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "ingress-key-0001")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope})
+
+                frame = _frame_for(context, command=command,
+                                   action="selected_child_admit")
+                reply = await _send_frame(host.socket, frame)
+                assert reply["ok"] is True, reply
+                admitted = reply["result"]
+                assert admitted["schema"] == "mastermind.child_request_admission/v1"
+                assert admitted["state"] == "ADMITTED", admitted
+                job_id = admitted["job_id"]
+                assert isinstance(job_id, str) and job_id
+
+                # The same frozen command replays to the same Job handle.
+                replay = await _send_frame(host.socket, frame)
+                assert replay["ok"] is True, replay
+                assert replay["result"]["state"] == "REPLAY", replay
+                assert replay["result"]["job_id"] == job_id
+
+                # An unfrozen admission command never reaches admission.
+                unfrozen = await _send_frame(host.socket, _frame_for(
+                    context, command="child-request:" + "e" * 64,
+                    action="selected_child_admit"))
+                assert unfrozen["ok"] is False, unfrozen
+                assert unfrozen["error"]["code"] == "invalid_input", unfrozen
+
+                # The host re-freezes the SAME key with a different goal
+                # digest: a precise conflict, never a second Job.
+                _, drifted = _admission_material(
+                    host.root.job_id, host.root.job_id, "ingress-key-0001",
+                    brief_digest="c" * 64)
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: drifted})
+                conflict = await _send_frame(host.socket, frame)
+                assert conflict["ok"] is False, conflict
+                assert conflict["error"]["code"] == "conflict", conflict
+                with service.runtime.store.read() as connection:
+                    count = int(connection.execute(
+                        "SELECT COUNT(*) FROM events e JOIN jobs j"
+                        " ON j.job_id=e.job_id"
+                        " WHERE e.event_type='JOB_CREATED'"
+                        " AND json_extract(e.payload_json,"
+                        " '$.provenance.child_request.schema')"
+                        " = 'ChildExecutionRequest.v1'"
+                    ).fetchone()[0])
+                assert count == 1
+                assert service.runtime.jobs.get_job(job_id).attempt_count == 0
+
+    asyncio.run(exercise())
+
+
+def test_private_child_request_admit_queue_full_wait_reason(
+        tmp_path, monkeypatch):
+    """A full ready queue returns precise backpressure, not a retry."""
+
+    async def exercise():
+        monkeypatch.setenv("MMOS_CHILD_ROOT_READY_LIMIT", "1")
+        with tempfile.TemporaryDirectory(prefix="mmx-c29-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            async with _control(tmp_path, socket_root,
+                                name="child-request-wait") as host:
+                service = host.service
+                context = _control_context(host)
+                first_command, first = _admission_material(
+                    host.root.job_id, host.root.job_id, "wait-key-0001")
+                second_command, second = _admission_material(
+                    host.root.job_id, host.root.job_id, "wait-key-0002")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={
+                        first_command: first, second_command: second})
+
+                admitted = await _send_frame(host.socket, _frame_for(
+                    context, command=first_command,
+                    action="selected_child_admit"))
+                assert admitted["ok"] is True, admitted
+                assert admitted["result"]["state"] == "ADMITTED", admitted
+
+                # The per-root cap (configured at one) sends the second
+                # request back to the parent planner with a precise
+                # reason.  Nothing was created; there is no retry loop.
+                wait = await _send_frame(host.socket, _frame_for(
+                    context, command=second_command,
+                    action="selected_child_admit"))
+                assert wait["ok"] is True, wait
+                assert wait["result"]["state"] == "WAIT", wait
+                assert wait["result"]["wait_reason"] == "CHILD_QUEUE_ROOT_READY_FULL"
+                assert wait["result"]["wait_detail"]["root_ready"] == 1
+                assert wait["result"]["wait_detail"]["root_limit"] == 1
+                assert wait["result"]["job_id"] is None
+
+                job_id = admitted["result"]["job_id"]
+                assert service.runtime.jobs.get_job(job_id).attempt_count == 0
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("fault", [
+    "principal", "context", "capability", "root", "command", "governed",
+    "closed_fresh",
+])
+def test_child_request_private_admission_reproves_host_authority(tmp_path, fault):
+    from tests.test_hermes_selected_child_dispatch import _child_request_job_count
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-admit-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="admission-authority") as host:
+                service = host.service
+                if fault == "governed":
+                    host.authority_config["missions"][0]["principal_actions"] = [
+                        "bounded_intent"]
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    "ROOT-FOREIGN" if fault == "root" else host.root.job_id,
+                    host.root.job_id, "authority-key")
+                if fault == "command":
+                    command = "child-request:" + "f" * 64
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope},
+                    principal_admission_armed=fault != "closed_fresh")
+                frame = _frame_for(
+                    context, command=command, action="selected_child_admit")
+                if fault == "principal":
+                    frame["principal"] = dict(frame["principal"],
+                                              subject_digest="f" * 64)
+                elif fault == "context":
+                    frame["principal_context"] = dict(
+                        frame["principal_context"], authority_generation_digest="f" * 64)
+                elif fault == "capability":
+                    frame["capability_profile_digest"] = "f" * 64
+                response = await _send_frame(host.socket, frame)
+                assert response["ok"] is False, response
+                assert "result" not in response
+                assert _child_request_job_count(service.runtime) == 0
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("gate", ["armed", "mission"])
+def test_child_request_replay_remains_readable_after_fresh_disarm(tmp_path, gate):
+    from tests.test_hermes_selected_child_dispatch import _child_request_job_count
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-admit-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="admission-replay") as host:
+                service = host.service
+                context = _control_context(host)
+                first, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "original")
+                second, fresh = _admission_material(
+                    host.root.job_id, host.root.job_id, "fresh")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={first: envelope, second: fresh})
+                frame = _frame_for(context, command=first, action="selected_child_admit")
+                admitted = await _send_frame(host.socket, frame)
+                assert admitted["ok"] is True, admitted
+                assert admitted["result"]["state"] == "ADMITTED"
+                if gate == "armed":
+                    service._ceo_ingress_app_binding = dataclasses.replace(
+                        service._ceo_ingress_app_binding, principal_admission_armed=False)
+                else:
+                    host.authority_config["missions"][0]["enabled"] = False
+                replay = await _send_frame(host.socket, frame)
+                assert replay["ok"] is True, replay
+                assert replay["result"]["state"] == "REPLAY"
+                assert replay["result"]["job_id"] == admitted["result"]["job_id"]
+                refused = await _send_frame(host.socket, _frame_for(
+                    context, command=second, action="selected_child_admit"))
+                assert refused["ok"] is False, refused
+                assert _child_request_job_count(service.runtime) == 1
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("movement", ["principal", "material"])
+def test_child_request_post_insert_movement_rolls_back_admission(
+        tmp_path, monkeypatch, movement):
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from tests.test_hermes_selected_child_dispatch import _child_request_job_count
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-admit-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="admission-rollback") as host:
+                service = host.service
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "rollback")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope})
+                original_insert = service.runtime.jobs._create_job_in_transaction
+                inserted = []
+
+                def insert_then_move(*args, **kwargs):
+                    result = original_insert(*args, **kwargs)
+                    inserted.append(True)
+                    if movement == "principal":
+                        host.authority_config["binding"] = {
+                            "schema": BINDING_SCHEMA, "enabled": False, "binding": None}
+                    else:
+                        changed = dict(envelope)
+                        changed.pop("request_digest")
+                        changed["brief_digest"] = "b" * 64
+                        replacement = ChildExecutionRequest.from_dict(changed).to_dict()
+                        envelope.clear()
+                        envelope.update(replacement)
+                    return result
+
+                monkeypatch.setattr(
+                    service.runtime.jobs, "_create_job_in_transaction", insert_then_move)
+                with service.runtime.store.read() as connection:
+                    before = tuple(connection.execute(
+                        "SELECT (SELECT COUNT(*) FROM jobs),"
+                        " (SELECT COUNT(*) FROM events)").fetchone())
+                response = await _send_frame(host.socket, _frame_for(
+                    context, command=command, action="selected_child_admit"))
+                assert inserted == [True]
+                assert response["ok"] is False, response
+                assert _child_request_job_count(service.runtime) == 0
+                with service.runtime.store.read() as connection:
+                    after = tuple(connection.execute(
+                        "SELECT (SELECT COUNT(*) FROM jobs),"
+                        " (SELECT COUNT(*) FROM events)").fetchone())
+                assert after == before
+
+    asyncio.run(exercise())
+
+
+def test_child_request_rechecks_read_authority_before_replay_disclosure(
+        tmp_path, monkeypatch):
+    from tests.test_hermes_selected_child_dispatch import _child_request_job_count
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-admit-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="admission-readback") as host:
+                service = host.service
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "readback")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope})
+                frame = _frame_for(context, command=command, action="selected_child_admit")
+                admitted = await _send_frame(host.socket, frame)
+                assert admitted["ok"] is True, admitted
+                original_admit = service.runtime.jobs.admit_child_execution_request
+
+                def observe_then_revoke(*args, **kwargs):
+                    result = original_admit(*args, **kwargs)
+                    assert result.state == "REPLAY"
+                    host.authority_config["binding"] = {
+                        "schema": BINDING_SCHEMA, "enabled": False, "binding": None}
+                    return result
+
+                monkeypatch.setattr(
+                    service.runtime.jobs, "admit_child_execution_request",
+                    observe_then_revoke)
+                response = await _send_frame(host.socket, frame)
+                assert response["ok"] is False, response
+                assert response["error"]["code"] == "internal_error"
+                assert "result" not in response
+                assert _child_request_job_count(service.runtime) == 1
+                assert service.runtime.jobs.get_job(admitted["result"]["job_id"]) is not None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_child_request_private_legacy_key_only_observes_retained_work(tmp_path, retained):
+    from hashlib import sha256
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from tests.test_hermes_selected_child_dispatch import (
+        _child_request_job_count, _seed_legacy_child_admission,
+    )
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-admit-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="admission-legacy") as host:
+                service = host.service
+                context = _control_context(host)
+                canonical, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id + "\x1fP", "K")
+                request = ChildExecutionRequest.from_dict(envelope)
+                legacy = "child-request:" + sha256(
+                    "\x1f".join(request.idempotency_key()).encode()).hexdigest()
+                assert canonical != legacy
+                original_job = None
+                if retained:
+                    original_job, original_command = _seed_legacy_child_admission(
+                        service.runtime, request)
+                    assert original_command == legacy
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={legacy: envelope, canonical: envelope},
+                    principal_admission_armed=not retained)
+                response = await _send_frame(host.socket, _frame_for(
+                    context, command=legacy, action="selected_child_admit"))
+                if retained:
+                    assert response["ok"] is True, response
+                    assert response["result"]["state"] == "REPLAY"
+                    assert response["result"]["command_id"] == legacy
+                    assert response["result"]["job_id"] == original_job.job_id
+                else:
+                    assert response["ok"] is False, response
+                    assert _child_request_job_count(service.runtime) == 0
+                    admitted = await _send_frame(host.socket, _frame_for(
+                        context, command=canonical, action="selected_child_admit"))
+                    assert admitted["ok"] is True, admitted
+                    assert admitted["result"]["state"] == "ADMITTED"
+                    replay = await _send_frame(host.socket, _frame_for(
+                        context, command=legacy, action="selected_child_admit"))
+                    assert replay["ok"] is True, replay
+                    assert replay["result"]["state"] == "REPLAY"
+                    assert replay["result"]["command_id"] == canonical
+                    assert replay["result"]["job_id"] == admitted["result"]["job_id"]
+                assert _child_request_job_count(service.runtime) == 1
+
+    asyncio.run(exercise())
+
+
+def test_child_request_notes_change_does_not_change_admission_identity(
+        tmp_path, monkeypatch):
+    from tests.test_hermes_selected_child_dispatch import _child_request_job_count
+
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-admit-", dir="/tmp") as directory:
+            async with _control(tmp_path, Path(directory), name="admission-notes") as host:
+                service = host.service
+                context = _control_context(host)
+                command, envelope = _admission_material(
+                    host.root.job_id, host.root.job_id, "notes")
+                service._ceo_ingress_app_binding = dataclasses.replace(
+                    service._ceo_ingress_app_binding,
+                    child_request_material={command: envelope})
+                original_insert = service.runtime.jobs._create_job_in_transaction
+
+                def insert_then_annotate(*args, **kwargs):
+                    result = original_insert(*args, **kwargs)
+                    envelope["notes"] = "A nonsemantic host annotation."
+                    return result
+
+                monkeypatch.setattr(
+                    service.runtime.jobs, "_create_job_in_transaction", insert_then_annotate)
+                response = await _send_frame(host.socket, _frame_for(
+                    context, command=command, action="selected_child_admit"))
+                assert response["ok"] is True, response
+                assert response["result"]["state"] == "ADMITTED"
+                assert response["result"]["request_digest"] == envelope["request_digest"]
+                assert _child_request_job_count(service.runtime) == 1
+
+    asyncio.run(exercise())

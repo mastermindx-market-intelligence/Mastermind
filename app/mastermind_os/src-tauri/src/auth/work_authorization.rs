@@ -53,12 +53,12 @@ mod disposition_tests {
             let callback = format!("{CALLBACK}?state={}&code=inert", pending.state);
             let (pending, _, client) = inner.consume(&callback).unwrap();
             inner.primary_exchange_current(&pending, &client).unwrap();
-            let next = inner.finish_exchange(&pending, Ok(Token {
+            let next = inner.finish_exchange(&pending, Ok(InitialGrant::fixture(Token {
                 value: "inert-same-account".into(),
                 expires: Instant::now() + Duration::from_secs(60),
                 wall_expires: SystemTime::now() + Duration::from_secs(60),
                 executive_send: false,
-            }));
+            })));
             assert_eq!(next.is_some(), resource == Resource::Acquisition);
         }
         assert!(inner.token(Resource::Acquisition).is_some());
