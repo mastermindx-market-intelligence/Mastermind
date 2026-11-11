@@ -241,6 +241,43 @@ test("F25: a live packer's lock refuses a second run in one line", () => {
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
+test("attack 4: every refusal is ONE stderr line, never a Node stack trace", () => {
+  const { tmp, home, source, root } = fixture();
+  try {
+    makeRuntime(root);
+    const cases = [
+      ["missing source", pack(path.join(tmp, "no-such-source"), root, home)],
+      ["loose root", (() => {
+        fs.chmodSync(root, 0o755);
+        try { return pack(source, root, home); }
+        finally { fs.chmodSync(root, 0o700); }
+      })()],
+    ];
+    for (const [label, run] of cases) {
+      assert.notEqual(run.status, 0, `${label}: unexpectedly succeeded`);
+      const lines = run.stderr.trim().split("\n");
+      assert.equal(lines.length, 1, `${label}: expected one stderr line, got:\n${run.stderr}`);
+      assert.match(lines[0], /^pack_server: /, `${label}: no pack_server: prefix`);
+      assert.ok(!run.stderr.includes("    at "), `${label}: stack frames leaked`);
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("attack 10: lock takeover leaves no tombstone debris in runtime/", () => {
+  const { tmp, home, source, root } = fixture();
+  try {
+    const gone = spawnSync("/usr/bin/true", []);
+    makeRuntime(root);
+    fs.writeFileSync(path.join(root, "runtime", ".packing.lock"), `${gone.pid}\n`);
+    const run = pack(source, root, home);
+    assert.equal(run.status, 0, `pack failed:\n${run.stderr}`);
+    // takeover must go through an atomic rename and clean its tombstone: the
+    // runtime directory ends with exactly the published release, no
+    // .packing.lock.dead-* debris and no staging left behind.
+    assert.deepEqual(runtimeEntries(root), [ID]);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
 test("F24: a second failed install still writes its log; the error stays the install error", () => {
   const { tmp, home, source, root } = fixture();
   try {

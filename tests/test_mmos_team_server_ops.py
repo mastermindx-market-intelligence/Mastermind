@@ -492,3 +492,108 @@ def test_f16_failed_capture_preserves_access_file(h, tmp_path):
     # Byte-identical: nothing truncated or replaced.
     assert access.read_bytes() == sentinel
     assert not (tmp_path / "access.txt.new").exists()
+
+
+# --------------------------------------------------------------------------
+# TSHc attack round: capture / stop / missing-curl truthfulness
+# --------------------------------------------------------------------------
+
+def test_capture_refuses_dead_banner_on_stopped_server(h):
+    # Attack finding 5: after a stop the log still holds the old banner; its
+    # one-time token is dead. capture must not install it as the credential
+    # and report success.
+    server = h.fake_server()
+    proc = h.run_install("--replace", "--server-bin", server)
+    assert "INSTALLED" in proc.stdout, proc.stdout + proc.stderr
+    access = h.root / "run" / "access.txt"
+    assert access.is_file()
+    before = access.read_text()
+    h.run("stop", "--root", h.root, "--label", LABEL)
+    proc = h.run("capture", "--root", h.root, "--label", LABEL, timeout=120)
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "dead" in (proc.stdout + proc.stderr)
+    assert access.read_text() == before
+
+
+def test_stop_names_the_foreign_port_holder_pid(h):
+    # Attack finding 7: "unknown owner" sent the operator hunting a process
+    # that was about to vanish (our own closing server). A genuinely foreign
+    # holder must be named by pid.
+    server = h.fake_server()
+    h.run_install("--replace", "--server-bin", server)
+    subprocess.run([str(h.bindir / "launchctl"), "bootout", f"gui/59999/{LABEL}"],
+                   capture_output=True, env=h.env(), timeout=30)
+    holder = h.hold_port(h.port)
+    try:
+        proc = h.run("stop", "--root", h.root, "--label", LABEL, timeout=120)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "unknown owner" not in proc.stderr
+        assert f"pid {holder.pid}" in proc.stderr
+    finally:
+        holder.terminate()
+
+
+def _lock_holder(path):
+    return subprocess.Popen(
+        [PY, "-c",
+         "import fcntl, sys, time\n"
+         "fd = open(sys.argv[1], 'a+')\n"
+         "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+         "time.sleep(300)\n", str(path)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _lock_is_held(path):
+    return subprocess.run(
+        [PY, "-c",
+         "import fcntl, sys\n"
+         "try:\n"
+         "    fd = open(sys.argv[1], 'a+')\n"
+         "    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+         "except OSError:\n"
+         "    sys.exit(1)\n", str(path)]).returncode == 1
+
+
+def test_stop_without_port_file_refuses_while_lock_held(h):
+    # Attack finding 8: "STOPPED (no port file)" asserted the server was down
+    # without checking anything. A holder of run/home.lock (a server started
+    # outside launchd) must not be reported stopped.
+    server = h.fake_server()
+    h.run_install("--replace", "--server-bin", server)
+    subprocess.run([str(h.bindir / "launchctl"), "bootout", f"gui/59999/{LABEL}"],
+                   capture_output=True, env=h.env(), timeout=30)
+    (h.root / "run" / "port").unlink()
+    holder = _lock_holder(h.root / "run" / "home.lock")
+    h._children.append(holder)
+    assert wait_for(lambda: _lock_is_held(h.root / "run" / "home.lock"), 10), \
+        "lock holder never took the lock"
+    proc = h.run("stop", "--root", h.root, "--label", LABEL, timeout=120)
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "home.lock" in proc.stderr
+
+
+def test_install_dies_early_without_curl(h, tmp_path):
+    # Attack finding 9: a missing curl made wait_http spin the full window and
+    # report "server did not answer" — with the server possibly healthy the
+    # whole time (and then taken down). The tool must name the missing
+    # prerequisite in one line, before touching launchd.
+    server = h.fake_server()
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    for name in ("grep", "sed", "stat", "awk", "tail", "cat", "mv", "rm",
+                 "chmod", "cp", "mkdir", "ln", "env", "head", "basename",
+                 "dirname"):
+        src = shutil.which(name)
+        if src:
+            os.symlink(src, stubs / name)
+    env = h.env()
+    env["PATH"] = f"{h.bindir}:{stubs}:/bin"
+    proc = subprocess.run(
+        ["/bin/sh", str(TOOL), "install", "--root", str(h.root),
+         "--port", str(h.port), "--label", LABEL, "--replace",
+         "--server-bin", str(server)],
+        capture_output=True, text=True, env=env, timeout=60)
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "curl not found" in proc.stderr
+    # the refusal fired before launchd: nothing was started
+    assert not h.loaded()

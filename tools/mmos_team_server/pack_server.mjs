@@ -10,6 +10,15 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
+// Attack finding 4: a CLI refusal must be ONE operator-readable line. Every
+// `throw` below (a designed refusal) would otherwise escape as a multi-line
+// Node stack trace. This handler prints the message with a pack_server:
+// prefix and exits 1 — the runbook's "one line" is then literally true.
+process.on("uncaughtException", (err) => {
+  console.error(`pack_server: ${err.message}`);
+  process.exit(1);
+});
+
 const args = process.argv.slice(2);
 const flag = (name) => args[args.indexOf(`--${name}`) + 1];
 if (args.length !== 6 || process.platform !== "darwin" || process.arch !== "arm64" ||
@@ -57,21 +66,42 @@ function packLockHeldByLiveProcess() {
   catch (err) { if (err.code === "EPERM") return true; /* ESRCH: dead */ return false; }
 }
 function acquirePackLock() {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = fs.openSync(lockPath, "wx", 0o600);
-      fs.writeFileSync(fd, String(process.pid) + "\n");
-      fs.closeSync(fd);
-      return;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      if (packLockHeldByLiveProcess()) {
-        throw new Error("another pack is already running for this root; let it finish before retrying");
-      }
-      try { fs.unlinkSync(lockPath); } catch (e) { if (e.code !== "ENOENT") throw e; }
-    }
+  try {
+    const fd = fs.openSync(lockPath, "wx", 0o600);
+    fs.writeFileSync(fd, String(process.pid) + "\n");
+    fs.closeSync(fd);
+    return;
+  } catch (err) {
+    if (err.code !== "EEXIST") throw err;
   }
-  throw new Error(`could not acquire the packing lock: ${lockPath}`);
+  if (packLockHeldByLiveProcess()) {
+    throw new Error("another pack is already running for this root; let it finish before retrying");
+  }
+  // Dead holder: take over by ATOMIC rename (attack finding 10). Two racing
+  // takers cannot both win — the loser's rename hits ENOENT and its next
+  // open hits the winner's lock. The lock path itself is NEVER unlinked:
+  // that could remove a lock a concurrent packer had just legitimately
+  // re-acquired in the unlink window.
+  const tombstone = `${lockPath}.dead-${process.pid}`;
+  try {
+    fs.renameSync(lockPath, tombstone);
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      throw new Error("another pack acquired the packing lock while we were taking it over; re-run pack");
+    }
+    throw err;
+  }
+  try { fs.unlinkSync(tombstone); } catch { /* already gone */ }
+  try {
+    const fd = fs.openSync(lockPath, "wx", 0o600);
+    fs.writeFileSync(fd, String(process.pid) + "\n");
+    fs.closeSync(fd);
+  } catch (err) {
+    if (err.code === "EEXIST") {
+      throw new Error("another pack acquired the packing lock while we were taking it over; re-run pack");
+    }
+    throw err;
+  }
 }
 acquirePackLock();
 // Everything from here on runs under the lock; the finally releases it no
@@ -81,7 +111,13 @@ let activated = false;
 try {
   // Leftovers with this packer's own prefix are debris from a killed run (we
   // hold the lock, so no live packer owns them) — remove before working.
+  // Takeover tombstones (.packing.lock.dead-*) are always debris too: the
+  // rename that created one already orphaned the lock itself.
   for (const name of fs.readdirSync(runtime)) {
+    if (name.startsWith(".packing.lock.dead-")) {
+      fs.rmSync(path.join(runtime, name), { force: true });
+      continue;
+    }
     if (name.startsWith(".packing-")) {
       const leftover = path.join(runtime, name);
       if (!fs.lstatSync(leftover).isDirectory()) {

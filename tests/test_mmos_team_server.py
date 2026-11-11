@@ -40,7 +40,10 @@ def run_tool(*args, env_extra=None, input=None):
         env.update(env_extra)
     return subprocess.run(
         ["/bin/sh", str(TOOL), *args], capture_output=True, text=True, env=env,
-        timeout=60, input=input,
+        # 180 s, not 60: this Mac runs at load >100 during lane work and a
+        # healthy install (which itself waits up to 180 s for first boot)
+        # can exceed 60 s of wall clock without anything being wrong.
+        timeout=180, input=input,
     )
 
 

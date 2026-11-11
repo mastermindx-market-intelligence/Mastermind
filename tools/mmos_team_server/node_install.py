@@ -413,10 +413,18 @@ def clean_dead_leftovers(root, runtime_dir, staging_parent, config_dir):
         if name.startswith(".node-install-"):
             target = os.path.join(staging_parent, name)
             if os.path.islink(target) or not os.path.isdir(target):
-                raise InstallError(f"unexpected staging leftover (not a directory): {target}")
+                # Attack finding 10: name the removal — a one-line refusal
+                # with no next action is not a recovery.
+                raise InstallError(
+                    f"unexpected staging leftover (not a directory): {target} "
+                    f"— inspect it, remove it by hand (rm -rf {target}), "
+                    f"then re-run install")
             shutil.rmtree(target)
+    # Attack finding 2: python3-path.tmp is this installer's temp too; a kill
+    # during private_write left it behind and O_EXCL refused every later run.
     for temp in (os.path.join(runtime_dir, "install-receipt.json.tmp"),
-                 os.path.join(config_dir, "node-runtime.json.tmp")):
+                 os.path.join(config_dir, "node-runtime.json.tmp"),
+                 os.path.join(config_dir, "python3-path.tmp")):
         if os.path.lexists(temp):
             if os.path.islink(temp):
                 raise InstallError(f"symlinked temp refused: {temp}")
@@ -522,6 +530,17 @@ def _repair_activation(root, archive, expected, destination, runtime_dir,
     payload = content  # the verified in-tree bytes are the canonical payload
     idempotent_receipt(os.path.join(runtime_dir, "install-receipt.json"), payload)
     idempotent_receipt(os.path.join(config_dir, "node-runtime.json"), payload)
+    # Attack finding 1: an interrupted-after-publish install can be missing
+    # config/python3-path (the sole fresh-install writer never ran). The
+    # repair must complete the WHOLE activation — re-record the validated
+    # interpreter this run is executing under — or a later runner start
+    # wedges on exit 78 while this command reports success. The same branch
+    # also heals an interpreter that disappeared after it was recorded
+    # (Homebrew removed it): the recorded path is replaced by the one this
+    # verified run actually uses.
+    interpreter = trusted_interpreter(os.path.realpath(sys.executable),
+                                      destination_root(destination))
+    private_write(os.path.join(config_dir, "python3-path"), interpreter + "\n")
     print(f"NODE_INSTALLED version=v{VERSION} node={receipt['nodePath']} "
           f"sha256={OFFICIAL_SHA256} (activation repaired; tree verified)")
     return existing
@@ -552,8 +571,11 @@ def _fresh_install(archive, expected, destination, runtime_dir,
         ensure_receipt_writable(os.path.join(config_dir, "node-runtime.json"), payload)
         os.rename(extracted, destination)
         fsync_dir(runtime_dir)  # F22: the tree rename is the publish
-        # Activation markers live outside the tree and are repairable on a
-        # retry via the matching-receipt branch above.
+        # Attack finding 3 (honest state): every REFUSAL fires above, before
+        # the rename. An OS error below it (unwritable config/, full disk) can
+        # leave the tree published with markers missing — that is not a
+        # refusal, and the retry completes the whole activation via the
+        # matching-receipt repair branch above (receipts AND interpreter).
         idempotent_receipt(os.path.join(runtime_dir, "install-receipt.json"), payload)
         idempotent_receipt(os.path.join(config_dir, "node-runtime.json"), payload)
         interpreter = trusted_interpreter(os.path.realpath(sys.executable),
@@ -742,7 +764,19 @@ def doctor(root, label, verify_tree=True):
                 ("serverLogCapBytes", cap), ("pairingFileAgeSeconds", age)]
         for key, value in rows:
             print(f"{key}={value}")
-        return 0 if loaded and answering == port else 1
+        # Attack finding 6: exit 1 without a doctor_error= line sent an
+        # operator grepping for the documented token to an empty result on
+        # the commonest failure (server down). The two down states name
+        # themselves and their recovery.
+        if not loaded:
+            print("doctor_error=label not loaded — recovery: runbook step 6 "
+                  "(team_server.sh install --replace), then re-run doctor")
+            return 1
+        if answering != port:
+            print(f"doctor_error=port {port} not answering — recovery: runbook "
+                  f"step 6 (team_server.sh install --replace), then re-run doctor")
+            return 1
+        return 0
     except (InstallError, OSError, ValueError, EOFError, tarfile.TarError,
             sqlite3.Error, subprocess.SubprocessError) as exc:
         print(f"doctor_error={str(exc)[:180]}")

@@ -143,6 +143,15 @@ require_root_label() {
   ROOT=$(root_is_safe "$ROOT") || die "refusing unsafe root: $ROOT (at/inside/resolves into $HOME/.t3)"
 }
 
+require_curl() {
+  # Attack finding 9: a missing curl made wait_http spin its whole window and
+  # report "server did not answer" while the server was healthy the entire
+  # time (and then got taken down). Name the prerequisite before launchd is
+  # touched.
+  command -v curl >/dev/null 2>&1 \
+    || die "curl not found on PATH — required to probe the server port; install curl or fix PATH"
+}
+
 wait_http() {
   _port="$1"; _want="${2:-60}"; _i=0
   while [ "$_i" -lt "$_want" ]; do
@@ -155,6 +164,16 @@ wait_http() {
     _i=$((_i + 1)); sleep 1
   done
   return 1
+}
+
+# One live HTTP-200 probe of a recorded port (used to prove a server is
+# actually serving before its log is trusted — attack finding 5).
+port_answered() {
+  _p="$1"
+  canonical_port "$_p" >/dev/null 2>&1 || return 1
+  _code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_p/" 2>/dev/null) || _code=""
+  [ -n "$_code" ] || _code=000
+  [ "$_code" = "200" ]
 }
 
 # Emit the last complete pairing banner from stdin (never print it elsewhere).
@@ -171,7 +190,11 @@ banner_filter() {
 # banner is the first one appended AFTER this call begins — the previous one
 # in the log is a dead token (attack finding 1). But `start` on an
 # already-running server appends nothing (kickstart does not bounce a healthy
-# job): then the live token is the last complete banner in the whole log.
+# job): then the live token is the last complete banner in the whole log —
+# and that fallback is sound ONLY while this label's server is verifiably
+# running (label loaded AND the recorded port answering HTTP 200, attack
+# finding 5: on a stopped server the last logged banner is a DEAD one-time
+# token and must never be installed as the credential).
 # The existing access.txt is replaced only when a banner was actually found,
 # so a failed capture can never truncate the live credential away.
 # F11/F29: capture returns 0 on success and 1 when no complete banner was
@@ -189,10 +212,15 @@ capture_access() {
     _i=$((_i + 1)); sleep 1
   done
   if ! grep -q '^Pairing URL:' "$_tmp" 2>/dev/null; then
-    # nothing new was appended while waiting: the server was already up and
-    # its live token is the last complete banner in the whole log.
-    banner_filter < "$_log" > "$_tmp" 2>/dev/null || true
-    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+    # nothing new was appended while waiting. Fall back to the whole log ONLY
+    # when this server is verifiably serving right now (attack finding 5).
+    _cport=$(cat "$ROOT/run/port" 2>/dev/null || echo "")
+    if label_loaded "$LABEL" && port_answered "$_cport"; then
+      banner_filter < "$_log" > "$_tmp" 2>/dev/null || true
+      grep -q '^Pairing URL:' "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+    else
+      rm -f "$_tmp"; return 1
+    fi
   fi
   # umask 077 made the temp 0600; a chmod failure here is a live credential
   # sitting world-readable — fatal, never swallowed (attack finding 9).
@@ -213,6 +241,25 @@ atomic_write() {
   mv "$_t" "$_f" || { rm -f "$_t"; die "cannot install $_f"; }
 }
 
+# True when no live server holds <root>/run/home.lock (attack finding 8:
+# `stop` uses the same probe `install` uses, so "the server is down" is
+# always verified, never asserted from a missing file).
+root_lock_free() {
+  "$PYTHON3_BIN" - "$1" <<'PYLOCK'
+import fcntl, os, sys
+root = sys.argv[1]
+try:
+    fd = os.open(os.path.join(root, "run", "home.lock"), os.O_RDWR)
+except FileNotFoundError:
+    sys.exit(0)  # no lock file -> nothing is serving this root
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    sys.exit(1)  # held by a live server for this root
+os.close(fd)
+PYLOCK
+}
+
 cmd_install() {
   [ -n "$PORT" ] || die "missing --port"
   # F10: canonical decimal only. A leading zero ("03773") passed the old
@@ -223,6 +270,7 @@ cmd_install() {
   require_root_label
   label_valid "$LABEL" || die "invalid label: $LABEL"
   port_forbidden "$PORT" && die "port $PORT is reserved for the live T3 servers"
+  require_curl
   # An install over this same label must --replace; boot it out BEFORE the
   # port-busy check so our own server does not count as a foreign occupant.
   if label_loaded "$LABEL" && [ "$REPLACE" -ne 1 ]; then
@@ -271,20 +319,7 @@ cmd_install() {
   # must die here, BEFORE runtime selection and the mkdir/cp/port-write below
   # (attack a4 finding: a hidden-plist install rewrote run/port on a live
   # root; a refused packed-runtime resolution must not mask this refusal).
-  if ! "$PYTHON3_BIN" - "$ROOT" <<'PYLOCK'
-import fcntl, os, sys
-root = sys.argv[1]
-try:
-    fd = os.open(os.path.join(root, "run", "home.lock"), os.O_RDWR)
-except FileNotFoundError:
-    sys.exit(0)  # no lock file -> nothing is serving this root
-try:
-    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-except OSError:
-    sys.exit(1)  # held by a live server for this root
-os.close(fd)
-PYLOCK
-  then
+  if ! root_lock_free "$ROOT"; then
     die "root $ROOT is live under a running server (home.lock held); stop or uninstall it first"
   fi
   # A self-contained packed runtime is the default. An explicit --server-bin
@@ -394,7 +429,7 @@ cmd_capture() {
   [ -f "$ROOT/run/server.log" ] || die "no $ROOT/run/server.log; run install first"
   capture_access \
     && echo "pairing access saved to $ROOT/run/access.txt (mode 0600; not printed)" \
-    || die "no complete pairing banner found in $ROOT/run/server.log"
+    || die "no complete live pairing banner: nothing new in $ROOT/run/server.log and the server is not verified running (label loaded + port answering). A stopped server's logged banner is a DEAD one-time token and is never saved; start the server, then retry"
 }
 
 cmd_start() {
@@ -405,6 +440,7 @@ cmd_start() {
   # F21: an empty or non-canonical port file must refuse now, not spin for
   # 90 s inside wait_http (the old `[ -z ... ] || die` never fired on "").
   canonical_port "$PORT" || die "port file holds a non-canonical port: '$PORT'; re-run install"
+  require_curl
   if label_loaded "$LABEL"; then
     launchctl kickstart "gui/$(id -u)/$LABEL" || die "kickstart failed"
   else
@@ -422,7 +458,14 @@ cmd_start() {
 cmd_stop() {
   require_root_label
   PLIST="$(plist_dir)/$LABEL.plist"
+  # Attack finding 7: capture the job's pid BEFORE bootout, so a port still
+  # held afterwards can be attributed — our own server closing its socket
+  # after SIGTERM is not "another process" and must not send the operator
+  # hunting a process that is about to vanish.
+  _job_pid=""
   if label_loaded "$LABEL"; then
+    _job_pid=$(launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null \
+               | grep -E '^[[:space:]]*pid = [0-9]+' | head -1 | grep -oE '[0-9]+')
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null \
       || launchctl unload -w "$PLIST" 2>/dev/null
   fi
@@ -436,13 +479,38 @@ cmd_stop() {
   fi
   PORT=$(cat "$ROOT/run/port" 2>/dev/null || echo "")
   if [ -z "$PORT" ]; then
-    echo "STOPPED label=$LABEL (no port file)"
+    # Attack finding 8: a missing port file must not ASSERT the server is
+    # down — a server started outside launchd holds run/home.lock with no
+    # launchd label. Verify the same lock install checks.
+    if ! root_lock_free "$ROOT"; then
+      die "STOP_FAILED no port file and $ROOT/run/home.lock is HELD — a server is still serving this root outside launchd; find it: ps ax -o pid,args= | grep -F '$ROOT/bin/server_runner.sh'"
+    fi
+    echo "STOPPED label=$LABEL (no port file; runner lock free)"
     return 0
   fi
+  # Attack finding 7: if the listener is still OUR job's pid the server is
+  # shutting down (a graceful close can outlast 10 s) — wait longer and say
+  # so; only a pid that is not ours is "another process", and it is named.
+  _limit=10
+  [ -n "$_job_pid" ] && _limit=30
   _j=0
-  while port_busy "$PORT" && [ "$_j" -lt 10 ]; do _j=$((_j + 1)); sleep 1; done
+  while [ "$_j" -lt "$_limit" ]; do
+    port_busy "$PORT" || break
+    _holder=$(lsof -tP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
+    if [ -n "$_job_pid" ] && [ -n "$_holder" ] && [ "$_holder" != "$_job_pid" ]; then
+      break  # genuinely foreign holder — no point waiting
+    fi
+    _j=$((_j + 1)); sleep 1
+  done
   if port_busy "$PORT"; then
-    die "STOPPED label=$LABEL (unloaded) but port $PORT is still held by another process (unknown owner); find it: lsof -nP -iTCP:$PORT -sTCP:LISTEN"
+    _holder=$(lsof -tP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
+    if [ -n "$_job_pid" ] && [ "$_holder" = "$_job_pid" ]; then
+      die "STOPPED label=$LABEL (unloaded) but our server pid $_job_pid is still closing port $PORT; it frees it as it exits — re-check: lsof -nP -iTCP:$PORT -sTCP:LISTEN"
+    fi
+    die "STOPPED label=$LABEL (unloaded) but port $PORT is still held by another process (pid ${_holder:-not identified}); find it: lsof -nP -iTCP:$PORT -sTCP:LISTEN"
+  fi
+  if ! root_lock_free "$ROOT"; then
+    die "STOP_FAILED port $PORT is free but $ROOT/run/home.lock is HELD — a server is still serving this root outside launchd; find it: ps ax -o pid,args= | grep -F '$ROOT/bin/server_runner.sh'"
   fi
   echo "STOPPED label=$LABEL port=$PORT free"
   return 0

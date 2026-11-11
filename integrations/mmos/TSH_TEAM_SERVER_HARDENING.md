@@ -75,12 +75,13 @@ Work from a repo checkout that has this lane's branch `t3/mmos-v4-tshc`
 merged. Prerequisites on this Mac (all already present):
 `~/.mastermind/mmos_dev/tsh/downloads/` (verified Node tarball + SHASUMS256),
 `~/.mastermind/mmos_dev/tsh/source/t3-pin0770446/` (pinned T3 source with
-`node_modules` installed). Do the migration when the machine is not under
-heavy load: step 6's first boot runs the state-DB migrations inside a 180 s
-window, and a machine at load >100 (measured during this lane's own proof)
-can stretch a healthy first boot past it — the install then reports the
-failure truthfully and cleans up, and a re-run completes quickly because the
-migrations already finished.
+`node_modules` installed), and `curl` on PATH (`install`/`start` refuse in
+one line without it rather than timing out). Do the migration when the
+machine is not under heavy load: step 6's first boot runs the state-DB
+migrations inside a 180 s window, and a machine at load >100 (measured
+during this lane's own proof) can stretch a healthy first boot past it — the
+install then reports the failure truthfully and cleans up, and a re-run
+completes quickly because the migrations already finished.
 
 Every numbered step below states: what worked prints, what the server state
 is when the step fails, and the exact recovery command. "Nothing is published
@@ -123,11 +124,19 @@ Failure states (all truthful, exit 1):
   Server: still running under launchd. Recovery:
   `launchctl bootout gui/$(id -u)/com.mastermind.t3-team` then re-run the stop
   command.
+- `STOPPED label=… (unloaded) but our server pid N is still closing port 3780`
+  — the job is gone; its own process is still shutting its socket down after
+  SIGTERM. Server: stopping. Recovery: none — re-check in a moment with
+  `lsof -nP -iTCP:3780 -sTCP:LISTEN`; it frees the port as it exits.
 - `STOPPED label=… (unloaded) but port 3780 is still held by another process
-  (unknown owner)` — the label is gone but something else holds 3780. Server:
-  stopped, port occupied. Recovery: `lsof -nP -iTCP:3780 -sTCP:LISTEN` to
-  identify the holder, stop it, then re-run the stop command to see
-  `… free`.
+  (pid N)` — the label is gone and the holder is NOT our server (its pid is
+  named). Server: stopped, port occupied. Recovery:
+  `lsof -nP -iTCP:3780 -sTCP:LISTEN` to identify pid N, stop it, then re-run
+  the stop command to see `… free`.
+- `STOP_FAILED no port file and …/run/home.lock is HELD` — there is no port
+  file (or the label was never loaded) but a server is still serving this
+  root outside launchd. Server: running. Recovery: the printed `ps` line
+  names it; stop that process, re-run stop.
 
 ### Step 2 — tighten the root
 
@@ -157,18 +166,28 @@ Worked prints: `NODE_INSTALLED version=v24.22.2 node=/Users/chriswong/.mastermin
 the tree digest for the receipt.) It also records this run's validated
 absolute python3 into `config/python3-path` — the interpreter the runner will
 execute with `-I` (item 13). Idempotent: with the tree already installed and
-intact it verifies and prints the same line.
+intact it re-verifies the whole tree against the official archive and prints
+the same line with the suffix `(activation repaired; tree verified)` — and
+that repair completes the ENTIRE activation, re-recording the interpreter
+too, so a retry after any interruption leaves a startable runtime.
 
-Failure states (server still down, nothing published — the extract happens in
-a private staging directory and every refusal fires before the publish
-rename):
+Failure states (server still down):
 - Any refusal prints one line `team_runtime: <reason>` (bad checksum, unsafe
   root, conflicting receipt — the message names the exact
-  `mv … .conflict` recovery when an outside receipt conflicts). Recovery:
-  fix the named condition, re-run this step.
+  `mv … .conflict` recovery when an outside receipt conflicts). On a
+  refusal **nothing is published**: the extract happens in a private staging
+  directory and every check that can refuse fires before the publish rename.
+  Recovery: fix the named condition, re-run this step.
 - **Killed mid-extract** (power loss, Ctrl-C): a dead run's staging
-  directories and receipt temps are cleaned automatically under the install
-  lock. Recovery: re-run this exact command; it succeeds.
+  directories and receipt temps (including `config/python3-path.tmp`) are
+  cleaned automatically under the install lock. Recovery: re-run this exact
+  command; it succeeds.
+- **Killed (or an OS error) in the instant after the publish rename**: the
+  tree is left on disk with some activation markers missing — that is not a
+  refusal and not a broken state; nothing else was published. Recovery:
+  re-run this exact command; the repair branch verifies the tree against the
+  archive and completes the whole activation, then prints the
+  `(activation repaired; tree verified)` line above.
 - A second concurrent installer prints `another install is already running
   for this root; let it finish before retrying`. Recovery: wait, re-run.
 
@@ -203,7 +222,8 @@ Worked prints: `PACKInstallingProductionExternals=N` then
 `PACKED version=0.1.7 server=/Users/chriswong/.mastermind/t3-team/runtime/t3team-0.1.7-pin0770446/dist/bin.mjs files=…`
 (~20–90 s, needs the network for production externals; ~345 MB on disk.)
 
-Failure states (server still down):
+Failure states (server still down; every pack refusal prints exactly ONE
+stderr line, `pack_server: <reason>` — never a Node stack trace):
 - `packed runtime or its receipt already exists; …` — one line. If a previous
   pack published the tree but crashed before its config receipt landed, the
   same message names the exact `mv` that finishes the job; otherwise inspect
@@ -232,7 +252,12 @@ and then one of exactly two truthful lines:
 - `pairing access was NOT captured (server is up; banner not in log yet) — to retry: tools/mmos_team_server/team_server.sh capture --root ~/.mastermind/t3-team --label com.mastermind.t3-team`
   — the server IS up and INSTALLED stands; only the convenience copy of the
   pairing banner is missing. Recovery is the printed `capture` command
-  itself. (F29: install must never report failure for a server that is up.)
+  itself, run while the server is running: `capture` saves only a banner it
+  sees appended live, or — when the server was already up before the call —
+  the last logged banner of a server it verifies is loaded AND answering
+  HTTP 200 right now. On a stopped server it refuses: that banner's one-time
+  token is dead and is never saved as the credential. (F29: install must
+  never report failure for a server that is up.)
 
 **server.log truncation at this step, and why rollback needs nothing from
 it:** install truncates `run/server.log` before starting the new server so a
@@ -268,9 +293,12 @@ Worked prints `loaded=yes`, a pid, `port=3780`, `answeringPort=3780`,
 installed Node (attesting provenance must not run the bytes under
 inspection): the version line is receipt-attested, and the receipt's
 `treeSha256` bound the published tree to the verified official archive at
-install time — and still binds it now, re-checked. Failure prints one line
-`doctor_error=<reason>` (exit 1); recovery: fix the named condition (usually
-step 1 + step 6) and re-run. For one live check after migrating:
+install time — and still binds it now, re-checked. Failure prints the
+metadata block and then one line `doctor_error=<reason>` (exit 1) — including
+the two down states `doctor_error=label not loaded` and
+`doctor_error=port N not answering`, each naming runbook step 6 as the
+recovery; fix the named condition and re-run. For one live check after
+migrating:
 
 ```
 ~/.mastermind/t3-team/runtime/node-v24.22.2-darwin-arm64/bin/node --version

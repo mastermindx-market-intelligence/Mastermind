@@ -98,6 +98,68 @@ class TestInstall:
         assert "activation repaired" in capsys.readouterr().out
         assert json.loads((root / "config" / "node-runtime.json").read_text())["schemaVersion"] == node_install.SCHEMA_VERSION
 
+    def test_repair_rerecords_the_interpreter(self, inputs, capsys):
+        # Attack finding 1: a kill between the publish rename and the
+        # interpreter write leaves config/python3-path absent; the retry takes
+        # the repair branch. Repairing without re-recording the interpreter
+        # printed success while every later runner start would exit 78.
+        root, archive, checksum = inputs
+        node_install.install_node(str(root), str(archive), str(checksum))
+        (root / "config" / "python3-path").unlink()
+        node_install.install_node(str(root), str(archive), str(checksum))
+        out = capsys.readouterr().out
+        assert "activation repaired" in out
+        recorded = (root / "config" / "python3-path").read_text().strip()
+        assert os.path.isabs(recorded) and os.path.isfile(recorded)
+
+    def test_stale_python3_path_temp_cleaned_under_lock(self, inputs, capsys):
+        # Attack finding 2: a kill during private_write(python3-path) leaves
+        # config/python3-path.tmp; O_EXCL then refuses every later install
+        # forever. The dead-leftover cleanup must remove it so the runbook's
+        # "re-run this exact command" actually succeeds.
+        root, archive, checksum = inputs
+        node_install.install_node(str(root), str(archive), str(checksum))
+        (root / "config" / "python3-path").unlink()
+        (root / "config" / "python3-path.tmp").write_text("")
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert "activation repaired" in capsys.readouterr().out
+        assert (root / "config" / "python3-path").is_file()
+        assert not (root / "config" / "python3-path.tmp").exists()
+
+    def test_marker_failure_after_publish_retry_completes_activation(self, inputs, capsys):
+        # Attack finding 3: an OS error in the instant after the publish rename
+        # (here: config/ unwritable exactly when the markers are written)
+        # leaves the tree published with markers missing. The re-run must
+        # complete the WHOLE activation — including the interpreter record —
+        # not report success over an unstartable runtime.
+        root, archive, checksum = inputs
+        (root / "config").mkdir(mode=0o700)
+        os.chmod(root / "config", 0o500)
+        with pytest.raises(OSError):
+            node_install.install_node(str(root), str(archive), str(checksum))
+        # the publish rename happened: the tree (with its in-tree receipt) is
+        # on disk — the honest intermediate state — but no config markers
+        assert (root / "runtime" / PREFIX / "INSTALL_RECEIPT.json").is_file()
+        assert not (root / "config" / "node-runtime.json").exists()
+        os.chmod(root / "config", 0o700)
+        node_install.install_node(str(root), str(archive), str(checksum))
+        out = capsys.readouterr().out
+        assert "activation repaired" in out
+        assert (root / "config" / "node-runtime.json").is_file()
+        recorded = (root / "config" / "python3-path").read_text().strip()
+        assert os.path.isabs(recorded) and os.path.isfile(recorded)
+
+    def test_staging_leftover_names_its_removal(self, inputs):
+        # Attack finding 10: a non-directory .node-install-* leftover refused
+        # without naming the removal, leaving the operator a one-line refusal
+        # and no next action.
+        root, archive, checksum = inputs
+        staging = root / "runtime" / "staging"
+        staging.mkdir(parents=True, mode=0o700)
+        (staging / ".node-install-notadir").write_text("debris\n")
+        with pytest.raises(node_install.InstallError, match=r"rm -rf"):
+            node_install.install_node(str(root), str(archive), str(checksum))
+
     def test_destination_with_foreign_receipt_refused(self, inputs):
         root, archive, checksum = inputs
         node_install.install_node(str(root), str(archive), str(checksum))
@@ -636,6 +698,33 @@ class TestDoctor:
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_doctor_failure_line_for_down_server(self, tmp_path, capsys):
+        # Attack finding 6: the runbook documents "failure prints one line
+        # doctor_error=<reason>"; the commonest failure (label not loaded)
+        # used to print only the metadata block and exit 1.
+        from unittest.mock import Mock, patch
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50809\n")
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
+        out = capsys.readouterr().out
+        assert "doctor_error=" in out and "not loaded" in out
+
+    def test_doctor_failure_line_for_unanswered_port(self, tmp_path, capsys):
+        # Attack finding 6, second shape: loaded but not answering must also
+        # print its one doctor_error= line, not just the metadata block.
+        from unittest.mock import Mock, patch
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50809\n")  # nothing listens here
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=0, stdout="pid = 4242\n")):
+            assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
+        out = capsys.readouterr().out
+        assert "doctor_error=port 50809 not answering" in out
 
     def test_attack_reproducer_exists(self):
         attack = (REPO / "tools/mmos_team_server/attack_tsh_node_install.py").read_text()
