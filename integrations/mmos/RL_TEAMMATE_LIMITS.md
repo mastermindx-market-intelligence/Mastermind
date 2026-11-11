@@ -301,9 +301,17 @@ principal's named list plus two round-2 discoveries:
 
 1. **DNS rebinding**: a name that resolves public at check time and
    private at fetch time. The gate resolves when the hook fires; the
-   client fetches afterwards.
+   client fetches afterwards. **Round 3 (panel 3 H-1): not closeable
+   inside the spec + gate — a PreToolUse hook cannot pin what the client
+   re-resolves at fetch time, and no second-resolve/TTL half-measure was
+   shipped. Five options with costs and real-root requirements are
+   escalated for decision in `15-h1-options.md` (lane recommendation:
+   deny WebFetch now as the bridge, a pinned fetch tool as the
+   destination).**
 2. **Redirects**: a redirect from a public host to a private one. The
-   gate checks the original URL only.
+   gate checks the original URL only. **Same root as 1 — the same
+   options close it (deny/proxy/pinned-fetcher); an allowlist alone does
+   not (the client follows redirects with no hook).**
 3. **The client timing out or killing the hook process** (20 s
    wired). `|| exit 2` covers the hook failing, not the client
    discarding it; the gate answers in tens of ms, so the margin is
@@ -379,6 +387,7 @@ and resumes the same thread with full history (transcript-based resume,
 | panel 2 blind score of `7e9a29aa4` (3 HIGH, 6 MED, two live-proof items, "install: ready after listed repairs") | `panel2/SCORE.md` + reviewer files beside it |
 | repair round 2: the 7 live probes (url-field, octal/backslash-`@`, home Grep with hints, `@` write + what the client does with an `@` import, hook env `HOME`/`CLAUDE_CONFIG_DIR`, gate mode 0644/0000 + `status` exit 1, brace-verbatim + 20-call timing), N4 MCP-wildcard non-binding, the webReader server-side finding, the BCU M14 answer, red logs + suite logs | `13-repair2-live-probes.md` + `probe2/` |
 | W-task: webReader source pinned to the router's upstream (full offer census, 96 tools, webReader present, all other MCP = t3-code hook-visible and gate-refused live; restore byte-identical; escalated close steps with checks/rollbacks; the two one-liners) | `14-webreader-close.md` + `probe2/w-census-reply.json` |
+| repair round 3 H-1: DNS rebinding/redirect not closeable in-spec; five options with costs and real-root flags escalated for decision (deny WebFetch bridge, pinned fetch tool, egress proxy, hostname allowlist, accept) | `15-h1-options.md` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
