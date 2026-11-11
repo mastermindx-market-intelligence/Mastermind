@@ -577,15 +577,41 @@ class CodingJobDoor:
 
         return factory
 
-    @staticmethod
-    def _reconcile_only_port_factory(token_value: str):
-        """The executor's supervisor RECONCILES; it never launches.  A port
-        request on that composition is a bug to surface, not a silent
-        wrong-branch launch (the per-job launch port is composed
-        separately in ``_compose_adapter``)."""
-        raise RuntimeError(
-            "the door's reconcile-only supervisor composition requested a "
-            "launch port; recovery must never launch")
+    def _reconcile_only_port_factory(self, token_value: str):
+        """The executor's supervisor RECONCILES and SEALS: status/collect
+        reads pass through to the dev server, launches are refused PRE-SEND
+        at the port's own launch seam.
+
+        The port object is built EAGERLY at composition — a factory that
+        raises kills the executor's supervisor outright and reconcile never
+        runs (caught live by the crash journey, 2026-11-11: the recovery
+        door logged "recovery must never launch" and never adopted).  The
+        per-job launch port stays the ONLY launch path (``_compose_adapter``
+        with the census wrapper and crash hooks); ``requeue_lost=False``
+        plus this refusal seam is belt and braces."""
+        from control_plane.t3_execution_adapter import T3PortRefusalError
+        from control_plane.t3_native_composition import (
+            T3McpHttpTransport,
+            T3McpToolPort,
+        )
+
+        class _ReconcileOnlyPort(T3McpToolPort):
+            def _launch(self, envelope, op):
+                raise T3PortRefusalError(
+                    f"refusing to {op} on the door's reconcile-only "
+                    "supervisor port (recovery must never launch; nothing "
+                    "was sent)")
+
+        transport = T3McpHttpTransport(
+            self.config.t3_proof_base + "/mcp", token_value)
+
+        def call_tool(tool: str, arguments: dict):
+            self._record_census(tool, arguments)
+            return transport.call_tool(tool, arguments)
+
+        return _ReconcileOnlyPort.from_access_token(
+            call_tool, token_value,
+            launch_arguments={"projectId": self.config.t3_project_id})
 
     def _compose_supervisor(self, runtime, *, port_factory):
         """F15 (R4b review) + attack F8: compose the REAL t3-native

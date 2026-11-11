@@ -1086,3 +1086,51 @@ def test_step4_after_seal_crash_window_leaves_a_committed_seal_behind(
     assert exited == [91]  # no second exit
     assert entry2["phase"] == "sealed"
     assert finished == [True]
+
+
+def test_step4_reconcile_port_constructs_and_refuses_only_the_launch(
+        scratch, monkeypatch):
+    """Caught live by the crash journey (2026-11-11): the executor's
+    supervisor composition builds its port EAGERLY, so a factory that
+    RAISES kills reconcile outright — the recovery door logged "recovery
+    must never launch" and never adopted.  The port must CONSTRUCT; reads
+    pass through (and reach the census); launches are refused pre-send at
+    the port's own launch seam with a clean typed refusal."""
+    import base64
+    import control_plane.t3_native_composition as composition_mod
+    from control_plane.t3_execution_adapter import T3PortRefusalError
+
+    d = _attack_door(scratch, monkeypatch)
+
+    calls = []
+
+    class _FakeTransport:
+        def __init__(self, url, token):
+            pass
+
+        def call_tool(self, tool, arguments):
+            calls.append(tool)
+            return {"ok": True}
+
+    monkeypatch.setattr(composition_mod, "T3McpHttpTransport",
+                        _FakeTransport)
+    claims = base64.urlsafe_b64encode(
+        json.dumps({"kind": "session", "sid": "probe-session",
+                    "sub": "mcp-client",
+                    "method": "bearer-access-token"}).encode()
+    ).decode().rstrip("=")
+    port = d._reconcile_only_port_factory(claims + ".sig")
+    assert port is not None  # construction itself: composition survives
+
+    # reads pass through and reach the census
+    payload = port._invoke("t3_thread_read", {"threadId": "mcp:t"},
+                           mutating=False)
+    assert payload == {"ok": True}
+    assert calls == ["t3_thread_read"]
+    census = Path(d.launch_census).read_text(encoding="utf-8")
+    assert '"t3_thread_read"' in census
+
+    # a launch is refused PRE-SEND, cleanly typed, whatever the envelope
+    with pytest.raises(T3PortRefusalError, match="reconcile-only"):
+        port._launch(SimpleNamespace(), "launch")
+    assert "t3_thread_launch" not in calls  # nothing was sent
