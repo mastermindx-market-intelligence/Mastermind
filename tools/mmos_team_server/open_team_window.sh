@@ -5,8 +5,10 @@
 # written or printed here: the file handed to the window holds only the
 # thread address.
 #
-# Usage: open_team_window.sh <instance-id>     e.g. assurance, design-lead
-#        open_team_window.sh --list
+# MM_SHELL_URL_FILE (this script) beats MM_SHELL_URL, and both beat the fixed
+# per-user config that a Finder/Dock launch uses (lane T8; write it with
+# window_config.sh). The window re-pairs itself only through that fixed
+# config's pair-helper, so this env-launched flow keeps its old behaviour.
 set -eu
 ROOT="${MMOS_TEAM_ROOT:-$HOME/.mastermind/t3-team}"
 URLS="$ROOT/run/team_urls.json"

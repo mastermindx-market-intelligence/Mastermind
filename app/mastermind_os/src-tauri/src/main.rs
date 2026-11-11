@@ -1,6 +1,8 @@
 mod auth;
 mod dev_log;
+mod shell_menu;
 mod shell_mode;
+mod shell_pairing;
 mod native_session_send;
 mod project_planning;
 mod project_execution;
@@ -76,28 +78,13 @@ fn readiness() -> Readiness {
 const MAIN_WINDOW_LABEL: &str = "main";
 
 /// Reads the shell URL exactly once, preferring `MM_SHELL_URL_FILE` over the
-/// legacy `MM_SHELL_URL`. The file keeps a one-time pairing fragment out of argv
-/// and the process environment. Unset settings change nothing; refused settings
-/// are logged without their input and are treated exactly like unset.
-fn shell_url_from_env() -> Option<url::Url> {
-    #[cfg(unix)]
-    if let Some(path) = std::env::var_os("MM_SHELL_URL_FILE").filter(|value| !value.is_empty()) {
-        return match shell_mode::read_shell_url_file(std::path::Path::new(&path)) {
-            Ok(url) => Some(url),
-            Err(refusal) => {
-                shell_mode::log_file_refusal(refusal);
-                None
-            }
-        };
-    }
-    let raw = std::env::var("MM_SHELL_URL").ok()?;
-    match shell_mode::parse_shell_url(&raw) {
-        Ok(url) => Some(url),
-        Err(refusal) => {
-            shell_mode::log_refusal(refusal);
-            None
-        }
-    }
+/// legacy `MM_SHELL_URL`, both over the fixed per-user config file (lane T8:
+/// a Finder/Dock launch has no environment). The file keeps a one-time
+/// pairing fragment out of argv and the process environment. Unset settings
+/// and a missing config file change nothing; refused settings are logged
+/// without their input and are treated exactly like unset.
+fn shell_url_from_env(identifier: &str) -> (Option<url::Url>, shell_mode::ShellConfig) {
+    shell_mode::resolve_shell_settings(identifier)
 }
 
 /// Build the shell-mode main window.
@@ -111,6 +98,7 @@ fn shell_url_from_env() -> Option<url::Url> {
 fn build_shell_window(
     app: &tauri::AppHandle,
     url: &url::Url,
+    pair_helper: Option<&std::path::Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = app
         .config()
@@ -123,6 +111,12 @@ fn build_shell_window(
         .initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP)
         .build()?;
     window.navigate(url.clone())?;
+    if let Some(helper) = pair_helper {
+        // Unattended re-pairing (lane T8): runs the fixed helper only when the
+        // loaded page turns out to be this server's pairing page, once per
+        // launch. See shell_pairing.rs for the authority and secret rules.
+        shell_pairing::spawn_watchdog(app.clone(), MAIN_WINDOW_LABEL, url.clone(), helper.to_path_buf());
+    }
     Ok(())
 }
 
@@ -176,8 +170,8 @@ fn reopen_main_window(app: &tauri::AppHandle, shell: Option<&url::Url>) -> Resul
 }
 
 fn main() {
-    let shell_url = shell_url_from_env();
     let mut context = tauri::generate_context!();
+    let (shell_url, shell_config) = shell_url_from_env(&context.config().identifier);
     if shell_url.is_some() {
         // Shell mode builds the main window in `setup` so it can carry the page
         // bootstrap; stop Tauri from creating an unstamped one first.
@@ -188,11 +182,14 @@ fn main() {
         }
     }
     let setup_shell_url = shell_url.clone();
+    let setup_shell_config = shell_config;
     let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
         .manage(terminal_session::TerminalSession::new().expect("Terminal transport configuration"))
+        .manage(shell_menu::ZoomState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
+        .on_menu_event(|app, event| shell_menu::handle_event(app, event.id().as_ref()))
         .setup(move |app| {
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
@@ -203,13 +200,18 @@ fn main() {
                 }
             });
             auth::start_restore(app.handle().clone());
+            shell_menu::install(app.handle())?;
             if let Some(urls) = app.deep_link().get_current()? {
                 for url in urls {
                     dispatch_auth_callback(app.handle().clone(), url);
                 }
             }
             if let Some(url) = setup_shell_url.as_ref() {
-                build_shell_window(app.handle(), url)?;
+                build_shell_window(
+                    app.handle(),
+                    url,
+                    setup_shell_config.pair_helper.as_deref(),
+                )?;
             }
             Ok(())
         })

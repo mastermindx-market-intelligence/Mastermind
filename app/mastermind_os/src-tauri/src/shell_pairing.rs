@@ -1,0 +1,980 @@
+//! Unattended re-pairing of the shell window with its loopback T3 server.
+//!
+//! When the page the window loaded turns out to be the server's pairing page
+//! (first run, expired or cleared session cookie), the window mints a fresh
+//! one-time pairing address by running a helper. The helper's path comes from
+//! the same fixed 0600 config that can supply the shell address — never from
+//! page content. The helper reuses `t3 pair`, whose authority is ownership of
+//! the server home's files: nothing here admits over loopback TCP or a
+//! request header. The minted URL travels only through the helper's stdout
+//! pipe and a webview navigation; it never enters argv, a log, another
+//! process's environment, or an error. One attempt per launch. On failure the
+//! person is left on a plain page that says in one sentence what to do, and
+//! exactly one input-free log record is written.
+//!
+//! The minted address is only ever loaded into a document that was replaced
+//! first: the webview hops through an inert blank page, so whatever script
+//! was running on the pairing page is destroyed before the token exists in a
+//! URL (see [`BLANK_PAGE`]). And the helper executable named by the config
+//! walks a trust check before it runs: every directory component must belong
+//! to this user or root and admit no group or other writes, so a substituted
+//! executable cannot inherit the config file's trust.
+
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use url::Url;
+
+use crate::dev_log::DevLog;
+use crate::shell_mode::{self, parse_shell_url};
+
+/// T3's pairing route (see the server's `buildPairingUrl`).
+pub const PAIR_PATH: &str = "/pair";
+
+/// How often the watchdog reads the webview's current URL.
+const POLL_INTERVAL: Duration = Duration::from_millis(750);
+/// Upper bound for the helper (node start-up, server probe, token mint).
+const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Upper bound for the webview to report the blank page after we navigate to
+/// it, and for the page to leave `/pair` after the minted address is loaded
+/// (token exchange plus the client's reload).
+const EXCHANGE_TIMEOUT: Duration = Duration::from_secs(45);
+/// How long the configured address must stay off the pairing page after the
+/// window returns to it before the exchange is believed. An unauthenticated
+/// client bounces back to `/pair` through a client-side history change, so a
+/// single poll that happens to see the thread URL proves nothing.
+const VERIFY_HOLD: Duration = Duration::from_secs(2);
+/// Largest helper stdout we will even read.
+const MAX_HELPER_OUTPUT: usize = 8 * 1024;
+/// The inert page the watchdog loads between the pairing page and the minted
+/// address. The minted URL differs from `/pair` only by its fragment, and a
+/// fragment-only navigation is a *same-document* jump inside the SPA that
+/// never remounts the auto-submit effect — so the webview is first moved here,
+/// making the load of the minted address a real cross-document navigation.
+/// That replacement is also the token's disclosure boundary: the document
+/// holding the pairing page's script is unloaded here, before any URL carries
+/// a token, so no surviving page script can read the minted fragment.
+const BLANK_PAGE: &str = "about:blank";
+
+/// Two URLs are on the same origin (scheme, host, port).
+pub fn same_origin(a: &Url, b: &Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// The URL is the pairing page of the server we were pointed at.
+pub fn is_pairing_page(url: &Url, origin: &Url) -> bool {
+    same_origin(url, origin) && url.path() == PAIR_PATH
+}
+
+/// The pairing page *needs* us: it is our server's pairing page and the URL
+/// does not itself carry a pairing token (an in-flight manual or scripted
+/// pairing, which must be left alone).
+pub fn needs_pairing(url: &Url, origin: &Url) -> bool {
+    is_pairing_page(url, origin) && !carries_pairing_token(url)
+}
+
+fn carries_pairing_token(url: &Url) -> bool {
+    let fragment = url.fragment().unwrap_or_default();
+    let query = url.query().unwrap_or_default();
+    has_token_parameter(fragment) || has_token_parameter(query)
+}
+
+/// The string carries a form-data parameter literally named `token` with a
+/// non-empty value. Parsing beats substring matching: `not-a-token=` and
+/// `tokens=` are not token parameters and must not suppress re-pairing.
+fn has_token_parameter(data: &str) -> bool {
+    for (name, value) in url::form_urlencoded::parse(data.as_bytes()) {
+        if name == "token" && !value.is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Input-free reasons unattended pairing failed. Exactly one log record is
+/// written per failure; none of these carries the token or any URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PairingFailure {
+    /// The helper process could not be spawned.
+    HelperLaunch,
+    /// The helper path failed the trust check (substitutable executable).
+    HelperUntrusted,
+    /// The helper exited non-zero or was killed.
+    HelperExit,
+    /// The helper did not finish in time.
+    HelperTimeout,
+    /// The helper's stdout was not exactly one loopback http URL.
+    HelperOutput,
+    /// The minted URL targets a different origin than the configured server.
+    OriginMismatch,
+    /// A webview navigation the watchdog issued was refused.
+    LoadFailed,
+    /// The pairing page never completed the exchange.
+    ExchangeTimeout,
+    /// The exchange seemed to finish, but the configured address bounced
+    /// straight back to the pairing page: no session was established.
+    NoSession,
+}
+
+impl PairingFailure {
+    pub fn subcode(self) -> &'static str {
+        match self {
+            Self::HelperLaunch => "helper_launch",
+            Self::HelperUntrusted => "helper_untrusted",
+            Self::HelperExit => "helper_exit",
+            Self::HelperTimeout => "helper_timeout",
+            Self::HelperOutput => "helper_output",
+            Self::OriginMismatch => "origin_mismatch",
+            Self::LoadFailed => "load_failed",
+            Self::ExchangeTimeout => "exchange_timeout",
+            Self::NoSession => "no_session",
+        }
+    }
+
+    pub fn code(self) -> String {
+        format!("PAIRING.FAILED.{}", self.subcode())
+    }
+}
+
+/// The helper path is trusted only when the leaf is a regular executable
+/// file (or a symlink to one) owned by this user or root, every directory
+/// component is a real directory owned by this user or root, and nothing
+/// along the path admits group or other writes. A root-owned symlink
+/// component is allowed (macOS `/var`, `/tmp`), because only root can point
+/// it; a user-owned symlink component is this user's own act and equally
+/// fine, but any component another user could rewrite voids the trust: the
+/// 0600 config names a path, and a path through a writable directory is not
+/// an identity.
+pub fn helper_is_trusted(path: &Path) -> bool {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let current_uid = unsafe { libc::getuid() };
+    let owned_by_us = |meta: &std::fs::Metadata| meta.uid() == current_uid || meta.uid() == 0;
+    let no_group_other_write = |meta: &std::fs::Metadata| {
+        meta.permissions().mode() & 0o022 == 0
+    };
+
+    let mut prefix = PathBuf::new();
+    for component in path.components() {
+        prefix.push(component);
+        let Ok(meta) = std::fs::symlink_metadata(&prefix) else {
+            return false;
+        };
+        let is_leaf = prefix == path;
+        if meta.file_type().is_symlink() {
+            if !owned_by_us(&meta) {
+                return false;
+            }
+            if is_leaf {
+                // Where the link points must pass the same walk; otherwise a
+                // link into a group-writable directory would inherit trust.
+                match std::fs::canonicalize(&prefix) {
+                    Ok(resolved) if resolved != prefix => return helper_is_trusted(&resolved),
+                    Ok(_) => return false,
+                    Err(_) => return false,
+                }
+            }
+            // An intermediate symlink must be ours (or root's, like macOS
+            // `/var`); the components after it are checked through the link.
+            continue;
+        }
+        if is_leaf {
+            if !meta.is_file() || !owned_by_us(&meta) || !no_group_other_write(&meta) {
+                return false;
+            }
+            if meta.permissions().mode() & 0o111 == 0 {
+                return false; // not executable
+            }
+        } else if !meta.is_dir() || !owned_by_us(&meta) || !no_group_other_write(&meta) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Run the pairing helper and return the minted pairing URL.
+///
+/// The helper is executed with a minimal environment (its own defaults decide
+/// which server home it serves) and its stderr is discarded unread, so no
+/// child diagnostics can carry a secret into this process. Stdout must be
+/// exactly one line: the pairing URL, which must be loopback http and on the
+/// same origin as the configured address.
+pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailure> {
+    if !helper_is_trusted(helper) {
+        return Err(PairingFailure::HelperUntrusted);
+    }
+    let mut command = std::process::Command::new(helper);
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .env_clear()
+        .env(
+            "HOME",
+            std::env::var_os("HOME").unwrap_or_else(|| "/".into()),
+        )
+        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
+        .env(
+            "TMPDIR",
+            std::env::var_os("TMPDIR").unwrap_or_else(|| "/tmp".into()),
+        );
+    let mut child = command.spawn().map_err(|_| PairingFailure::HelperLaunch)?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .expect("piped stdout must be available");
+
+    // A reader thread keeps the watchdog responsive: a helper that hangs
+    // without output is killed at the deadline instead of blocking the read.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut collected: Vec<u8> = Vec::new();
+        let mut buffer = [0u8; 1024];
+        loop {
+            match stdout.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => {
+                    collected.extend_from_slice(&buffer[..count]);
+                    if collected.len() > MAX_HELPER_OUTPUT {
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = sender.send(collected);
+    });
+
+    let deadline = Instant::now() + HELPER_TIMEOUT;
+    let collected = loop {
+        match receiver.recv_timeout(POLL_INTERVAL) {
+            Ok(value) => break value,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                break Vec::new();
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(PairingFailure::HelperTimeout);
+                }
+                // The reader is still running; keep waiting for it.
+            }
+        }
+    };
+    let _ = reader.join();
+    let status = child.wait().map_err(|_| PairingFailure::HelperExit)?;
+    if !status.success() {
+        return Err(PairingFailure::HelperExit);
+    }
+    let text = String::from_utf8_lossy(&collected);
+    let line = text.trim();
+    if line.is_empty() || line.contains('\n') || line.len() > 4096 {
+        return Err(PairingFailure::HelperOutput);
+    }
+    let url = parse_shell_url(line).map_err(|_| PairingFailure::HelperOutput)?;
+    if !same_origin(&url, origin) {
+        return Err(PairingFailure::OriginMismatch);
+    }
+    Ok(url)
+}
+
+/// The one sentence the failure page shows.
+pub const FAILURE_MESSAGE: &str = "Mastermind OS could not sign in to the team server automatically \u{2014} ask whoever set up this Mac to re-pair the app.";
+
+/// Plain, inert failure page as a `data:` URL. It has an opaque origin, no
+/// script and no access to the loopback server or any native command.
+pub fn failure_page_url() -> Url {
+    let html = format!(
+        "<!doctype html><meta charset=\"utf-8\"><title>Mastermind OS</title>\
+         <style>body{{font:15px -apple-system,system-ui,sans-serif;display:flex;\
+         align-items:center;justify-content:center;height:100vh;margin:0;\
+         background:#f5f5f7;color:#1d1d1f}}p{{max-width:34em;padding:0 1.5em}}</style>\
+         <p>{FAILURE_MESSAGE}</p>"
+    );
+    let mut encoded = String::from("data:text/html;charset=utf-8,");
+    for byte in html.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    Url::parse(&encoded).expect("failure page data url must parse")
+}
+
+/// Write exactly one input-free failure record to the dev log.
+pub fn log_pairing_failure(failure: PairingFailure) {
+    if let Some(root) = shell_mode::dev_root() {
+        if let Ok(log) = DevLog::open(&root.join("app.log")) {
+            let _ = log.native_failure("shell_pairing", &failure.code());
+        }
+    }
+    eprintln!(
+        "Mastermind OS shell pairing: {}; the window shows a plain page.",
+        failure.code()
+    );
+}
+
+/// One input-free record that unattended pairing succeeded, for post-hoc
+/// evidence that the window signed itself in.
+pub fn log_pairing_done() {
+    if let Some(root) = shell_mode::dev_root() {
+        if let Ok(log) = DevLog::open(&root.join("app.log")) {
+            let _ = log.native_failure("shell_pairing", "PAIRING.DONE");
+        }
+    }
+}
+
+enum Phase {
+    /// Watching for the server's pairing page.
+    Armed,
+    /// A minted address exists and the webview was told to load the blank
+    /// page; waiting for that to commit before loading the address.
+    Blanking { pairing_url: Url, since: Instant },
+    /// The minted address is loaded; waiting for the exchange to finish.
+    Awaiting { since: Instant },
+    /// The window was returned to the configured address; the exchange is
+    /// believed only after the address stays off the pairing page for
+    /// [`VERIFY_HOLD`].
+    Verifying { since: Instant },
+}
+
+/// What one poll of the watchdog thread should do, decided purely from the
+/// phase, the URL the webview currently reports and the configured address.
+#[derive(Debug)]
+enum Decision {
+    /// Nothing to do this tick.
+    Wait,
+    /// The pairing page appeared: mint an address and blank the webview.
+    Mint,
+    /// The blank page is showing: load the minted address.
+    LoadMinted(Url),
+    /// The exchange finished: return the window to the configured address.
+    ReturnToThread,
+    /// The configured address held off the pairing page for the full hold:
+    /// a session exists and pairing is done.
+    Verified,
+    /// The configured address bounced back to the pairing page: no session.
+    NoSession,
+    /// The current phase outlived its budget.
+    TimedOut,
+}
+
+fn decide(phase: &Phase, current: Option<&Url>, original: &Url) -> Decision {
+    match phase {
+        Phase::Armed => {
+            if current.is_some_and(|url| needs_pairing(url, original)) {
+                Decision::Mint
+            } else {
+                Decision::Wait
+            }
+        }
+        Phase::Blanking { pairing_url, since } => {
+            if since.elapsed() > EXCHANGE_TIMEOUT {
+                return Decision::TimedOut;
+            }
+            if current.is_some_and(|url| url.scheme() == "about") {
+                Decision::LoadMinted(pairing_url.clone())
+            } else {
+                Decision::Wait
+            }
+        }
+        Phase::Awaiting { since } => {
+            if since.elapsed() > EXCHANGE_TIMEOUT {
+                return Decision::TimedOut;
+            }
+            let landed = current.is_some_and(|url| {
+                same_origin(url, original) && !is_pairing_page(url, original)
+            });
+            if landed {
+                Decision::ReturnToThread
+            } else {
+                Decision::Wait
+            }
+        }
+        Phase::Verifying { since } => {
+            if since.elapsed() > EXCHANGE_TIMEOUT {
+                return Decision::TimedOut;
+            }
+            if current.is_some_and(|url| is_pairing_page(url, original)) {
+                // The configured address redirected straight back to the
+                // pairing page: whatever the minted load did, no session
+                // survives on the server for this window.
+                return Decision::NoSession;
+            }
+            let held = since.elapsed() >= VERIFY_HOLD
+                && current.is_some_and(|url| {
+                    same_origin(url, original) && !is_pairing_page(url, original)
+                });
+            if held {
+                Decision::Verified
+            } else {
+                Decision::Wait
+            }
+        }
+    }
+}
+
+/// Start the once-per-launch pairing watchdog for one shell window.
+///
+/// Polls the webview's current URL (the unauthenticated redirect to `/pair`
+/// is a client-side history change, so no navigation event fires for it).
+/// When the pairing page appears, mints one address, blanks the webview so
+/// the minted address is a cross-document load (see [`BLANK_PAGE`]), then
+/// returns the window to the address it was configured with — and believes
+/// the exchange only after that address stays off the pairing page for
+/// [`VERIFY_HOLD`], so a bounce back is recorded as [`PairingFailure::NoSession`]
+/// rather than success. Any terminal state ends the watchdog; nothing pairs
+/// twice in one launch.
+pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, helper: PathBuf) {
+    let window_label = window_label.to_string();
+    std::thread::spawn(move || {
+        use tauri::Manager;
+        let blank = Url::parse(BLANK_PAGE).expect("blank page url must parse");
+        let mut phase = Phase::Armed;
+        loop {
+            std::thread::sleep(POLL_INTERVAL);
+            let window = match app.get_webview_window(&window_label) {
+                Some(window) => window,
+                None => continue,
+            };
+            let current = window.url().ok();
+            match decide(&phase, current.as_ref(), &original) {
+                Decision::Wait => {}
+                Decision::Mint => match run_pair_helper(&helper, &original) {
+                    Ok(pairing_url) => {
+                        if window.navigate(blank.clone()).is_err() {
+                            fail(&window, PairingFailure::LoadFailed);
+                            return;
+                        }
+                        phase = Phase::Blanking { pairing_url, since: Instant::now() };
+                    }
+                    Err(failure) => {
+                        fail(&window, failure);
+                        return;
+                    }
+                },
+                Decision::LoadMinted(pairing_url) => {
+                    if window.navigate(pairing_url).is_err() {
+                        fail(&window, PairingFailure::LoadFailed);
+                        return;
+                    }
+                    phase = Phase::Awaiting { since: Instant::now() };
+                }
+                Decision::ReturnToThread => {
+                    if window.navigate(original.clone()).is_err() {
+                        fail(&window, PairingFailure::LoadFailed);
+                        return;
+                    }
+                    phase = Phase::Verifying { since: Instant::now() };
+                }
+                Decision::Verified => {
+                    log_pairing_done();
+                    return;
+                }
+                Decision::NoSession => {
+                    fail(&window, PairingFailure::NoSession);
+                    return;
+                }
+                Decision::TimedOut => {
+                    fail(&window, PairingFailure::ExchangeTimeout);
+                    return;
+                }
+            }
+        }
+    });
+}
+
+fn fail(window: &tauri::WebviewWindow, failure: PairingFailure) {
+    log_pairing_failure(failure);
+    let _ = window.navigate(failure_page_url());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn url(value: &str) -> Url {
+        Url::parse(value).expect("test url")
+    }
+
+    #[test]
+    fn same_origin_compares_scheme_host_port() {
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        assert!(same_origin(&url("http://127.0.0.1:3780/pair"), &origin));
+        assert!(same_origin(&url("http://127.0.0.1:3780/other/path?x=1"), &origin));
+        assert!(same_origin(
+            &url("http://127.0.0.1:3780/pair#token=x"),
+            &origin
+        ));
+        assert!(!same_origin(&url("http://127.0.0.1:3781/pair"), &origin));
+        assert!(!same_origin(&url("http://localhost:3780/pair"), &origin));
+        assert!(!same_origin(&url("http://127.0.0.1:80/env-1/x"), &origin));
+    }
+
+    #[test]
+    fn pairing_page_detection_requires_our_pair_path_without_a_token() {
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        assert!(needs_pairing(&url("http://127.0.0.1:3780/pair"), &origin));
+        // A token in the URL is an in-flight pairing: leave it alone.
+        assert!(!needs_pairing(
+            &url("http://127.0.0.1:3780/pair#token=abc"),
+            &origin
+        ));
+        assert!(!needs_pairing(
+            &url("http://127.0.0.1:3780/pair?token=abc"),
+            &origin
+        ));
+        // The token is a parsed form-data parameter, not a substring: lookalike
+        // parameter names and an empty value do not suppress re-pairing.
+        assert!(needs_pairing(
+            &url("http://127.0.0.1:3780/pair#not-a-token=abc"),
+            &origin
+        ));
+        assert!(needs_pairing(
+            &url("http://127.0.0.1:3780/pair#tokens=abc"),
+            &origin
+        ));
+        assert!(needs_pairing(
+            &url("http://127.0.0.1:3780/pair?x=token%3Dabc"),
+            &origin
+        ));
+        assert!(needs_pairing(&url("http://127.0.0.1:3780/pair#token="), &origin));
+        assert!(!needs_pairing(
+            &url("http://127.0.0.1:3780/pair?a=1&token=abc&b=2"),
+            &origin
+        ));
+        // Other servers and other paths never trigger.
+        assert!(!needs_pairing(&url("http://127.0.0.1:3781/pair"), &origin));
+        assert!(!needs_pairing(
+            &url("http://127.0.0.1:3780/env-1/thread-1"),
+            &origin
+        ));
+        assert!(!needs_pairing(&url("http://127.0.0.1:3780/pairing"), &origin));
+        assert!(!needs_pairing(&url("http://127.0.0.1:3780/pair/"), &origin));
+    }
+
+    /// A scratch helper script for exercising the real spawn path.
+    fn write_helper(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        let mut file = fs::File::create(&path).expect("create helper");
+        file.write_all(body.as_bytes()).expect("write helper");
+        drop(file);
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+            .expect("chmod helper");
+        path
+    }
+
+    fn unique_temp_dir() -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mmos-shell-pairing-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&path).expect("create unique temp directory");
+        path
+    }
+
+    #[test]
+    fn run_pair_helper_accepts_one_same_origin_url_line() {
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        let helper = write_helper(
+            &dir,
+            "good.sh",
+            "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=synthetic0123456789\\n'\n",
+        );
+        let minted = run_pair_helper(&helper, &origin).expect("minted");
+        assert_eq!(minted.path(), "/pair");
+        assert_eq!(minted.fragment(), Some("token=synthetic0123456789"));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn run_pair_helper_refuses_every_failure_shape() {
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+
+        let missing = dir.join("absent.sh");
+        assert_eq!(
+            run_pair_helper(&missing, &origin),
+            // The trust walk fails first: a path that does not exist is not a
+            // helper this window will run, untrusted before any spawn.
+            Err(PairingFailure::HelperUntrusted)
+        );
+
+        let cases: [(&str, &str, PairingFailure); 5] = [
+            (
+                "exit.sh",
+                "#!/bin/sh\nexit 3\n",
+                PairingFailure::HelperExit,
+            ),
+            (
+                "empty.sh",
+                "#!/bin/sh\nexit 0\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "multiline.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#t=1\\nsecond line\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "remote.sh",
+                "#!/bin/sh\nprintf 'http://example.com/pair#token=x\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "otherport.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3781/pair#token=x\\n'\n",
+                PairingFailure::OriginMismatch,
+            ),
+        ];
+        for (name, body, expected) in cases {
+            let helper = write_helper(&dir, name, body);
+            assert_eq!(run_pair_helper(&helper, &origin), Err(expected), "{name}");
+        }
+
+        // A helper that never finishes is killed at the deadline. The test
+        // uses the real timeout, so it costs ~30 seconds once.
+        let sleeper = write_helper(&dir, "sleep.sh", "#!/bin/sh\nsleep 600\n");
+        let started = Instant::now();
+        assert_eq!(
+            run_pair_helper(&sleeper, &origin),
+            Err(PairingFailure::HelperTimeout)
+        );
+        assert!(started.elapsed() >= HELPER_TIMEOUT);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The helper executable earns the config's trust only through a path
+    /// nobody else can rewrite (attack finding: the 0600 config file's checks
+    /// said nothing about the executable it named).
+    #[test]
+    fn helper_trust_path_refuses_substitutable_locations() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/");
+
+        // A helper in a clean private chain is trusted and runs.
+        let good = write_helper(
+            &dir,
+            "good.sh",
+            "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=x\\n'\n",
+        );
+        assert!(helper_is_trusted(&good), "clean chain must be trusted");
+        assert!(run_pair_helper(&good, &origin).is_ok());
+
+        // A group-writable leaf can be replaced by the group.
+        let groupy = write_helper(&dir, "groupy.sh", "#!/bin/sh\ntrue\n");
+        fs::set_permissions(&groupy, fs::Permissions::from_mode(0o770)).unwrap();
+        assert!(!helper_is_trusted(&groupy));
+        assert_eq!(
+            run_pair_helper(&groupy, &origin),
+            Err(PairingFailure::HelperUntrusted)
+        );
+
+        // A world-writable intermediate directory lets anyone plant a helper.
+        let open = dir.join("open");
+        fs::create_dir(&open).unwrap();
+        fs::set_permissions(&open, fs::Permissions::from_mode(0o777)).unwrap();
+        let planted = write_helper(&open, "planted.sh", "#!/bin/sh\ntrue\n");
+        assert!(!helper_is_trusted(&planted));
+        assert_eq!(
+            run_pair_helper(&planted, &origin),
+            Err(PairingFailure::HelperUntrusted)
+        );
+
+        // A leaf symlink pointing into that directory inherits its risk...
+        let risky_link = dir.join("risky-link.sh");
+        std::os::unix::fs::symlink(&planted, &risky_link).unwrap();
+        assert!(!helper_is_trusted(&risky_link));
+        // ...while one to the trusted helper stays trusted.
+        let alias = dir.join("alias.sh");
+        std::os::unix::fs::symlink(&good, &alias).unwrap();
+        assert!(helper_is_trusted(&alias));
+
+        // A directory is never a helper, and a non-executable leaf is not one.
+        assert!(!helper_is_trusted(&dir));
+        let locked = write_helper(&dir, "locked.sh", "#!/bin/sh\ntrue\n");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(!helper_is_trusted(&locked));
+
+        let _ = fs::remove_file(&risky_link);
+        let _ = fs::remove_file(&alias);
+        let _ = fs::remove_dir_all(&open);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn helper_never_receives_or_exposes_parent_environment() {
+        // The child must not inherit this test process's environment: the
+        // helper's authority is the config plus its own defaults, and an
+        // unrelated process's environment must never carry the token.
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/");
+        let helper = write_helper(
+            &dir,
+            "envdump.sh",
+            "#!/bin/sh\nif [ \"$MM_SHELL_URL_FILE\" ] || [ \"$MMOS_T3_DEV_ROOT\" ]; then exit 9; fi\nprintf 'http://127.0.0.1:3780/pair#token=x\\n'\n",
+        );
+        std::env::set_var("MMOS_T3_DEV_ROOT", "/tmp/should-not-pass-through");
+        let result = run_pair_helper(&helper, &origin);
+        std::env::remove_var("MMOS_T3_DEV_ROOT");
+        assert!(result.is_ok(), "helper must not see parent environment");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn failure_codes_are_distinct_and_input_free() {
+        let codes: Vec<String> = [
+            PairingFailure::HelperLaunch,
+            PairingFailure::HelperUntrusted,
+            PairingFailure::HelperExit,
+            PairingFailure::HelperTimeout,
+            PairingFailure::HelperOutput,
+            PairingFailure::OriginMismatch,
+            PairingFailure::LoadFailed,
+            PairingFailure::ExchangeTimeout,
+            PairingFailure::NoSession,
+        ]
+        .iter()
+        .map(|failure| failure.code())
+        .collect();
+        let mut unique = codes.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), codes.len());
+        for code in &codes {
+            assert!(code.starts_with("PAIRING.FAILED."), "{code}");
+            for part in code.split('.') {
+                assert!(part.len() < 20, "{code} part {part} too long for redaction");
+            }
+            assert!(!code.contains("token"), "{code}");
+            assert!(!code.contains("http"), "{code}");
+        }
+    }
+
+    /// The watchdog's whole per-tick state machine, without a window.
+    #[test]
+    fn decide_covers_the_full_watchdog_sequence() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let minted = url("http://127.0.0.1:3780/pair#token=synthetic0123456789");
+        let fresh = Instant::now();
+        let stale = Instant::now() - Duration::from_secs(3600);
+
+        // Armed: only our own tokenless pairing page triggers a mint.
+        assert!(matches!(
+            decide(&Phase::Armed, Some(&url("http://127.0.0.1:3780/thread-1")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&Phase::Armed, Some(&url("http://127.0.0.1:3780/pair#token=x")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&Phase::Armed, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Mint
+        ));
+        assert!(matches!(decide(&Phase::Armed, None, &original), Decision::Wait));
+
+        // Blanking: wait until the webview really reports the blank page, and
+        // never while it still shows the pairing page (the minted address must
+        // be a cross-document load, not a fragment-only jump).
+        let blanking = Phase::Blanking { pairing_url: minted.clone(), since: fresh };
+        assert!(matches!(
+            decide(&blanking, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Wait
+        ));
+        let blank = url("about:blank");
+        match decide(&blanking, Some(&blank), &original) {
+            Decision::LoadMinted(loaded) => assert_eq!(loaded, minted),
+            other => panic!("blank page must trigger loading the minted address, got {other:?}"),
+        }
+        assert!(matches!(
+            decide(
+                &Phase::Blanking { pairing_url: minted.clone(), since: stale },
+                Some(&blank),
+                &original
+            ),
+            Decision::TimedOut
+        ));
+
+        // Awaiting: only a same-origin non-pairing URL finishes; the minted
+        // address itself, its fragment-stripped form and other origins wait.
+        let awaiting = Phase::Awaiting { since: fresh };
+        assert!(matches!(
+            decide(&awaiting, Some(&minted), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3781/other")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&blank), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3780/")), &original),
+            Decision::ReturnToThread
+        ));
+        assert!(matches!(
+            decide(&awaiting, Some(&url("http://127.0.0.1:3780/env-1/thread-1")), &original),
+            Decision::ReturnToThread
+        ));
+        assert!(matches!(
+            decide(&Phase::Awaiting { since: stale }, Some(&minted), &original),
+            Decision::TimedOut
+        ));
+
+        // Verifying: the configured address must stay off the pairing page
+        // for the full hold. Seeing it there — with or without a token —
+        // means no session was established; anything before the hold, any
+        // other origin and the blank page merely wait.
+        let early = Phase::Verifying {
+            since: Instant::now() - VERIFY_HOLD + Duration::from_millis(200),
+        };
+        let held = Phase::Verifying {
+            since: Instant::now() - VERIFY_HOLD - Duration::from_secs(1),
+        };
+        assert!(matches!(
+            decide(&early, Some(&original), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&held, Some(&original), &original),
+            Decision::Verified
+        ));
+        assert!(matches!(
+            decide(&held, Some(&url("http://127.0.0.1:3780/")), &original),
+            Decision::Verified
+        ));
+        assert!(matches!(
+            decide(&held, Some(&minted), &original),
+            Decision::NoSession
+        ));
+        assert!(matches!(
+            decide(&early, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::NoSession
+        ));
+        assert!(matches!(
+            decide(&held, Some(&blank), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&held, Some(&url("http://127.0.0.1:3781/x")), &original),
+            Decision::Wait
+        ));
+        assert!(matches!(
+            decide(&Phase::Verifying { since: stale }, Some(&original), &original),
+            Decision::TimedOut
+        ));
+    }
+
+    /// The disclosure boundary for the minted token: the minted address is
+    /// loaded only after the webview reports the inert blank page, never
+    /// while the pairing page's document — and its script — is still the
+    /// one showing. A fragment-only hop would keep that script alive to
+    /// read the token out of `location.hash`.
+    #[test]
+    fn minted_url_never_loads_over_a_live_pairing_document() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let minted = url("http://127.0.0.1:3780/pair#token=synthetic0123456789");
+        let blanking = Phase::Blanking { pairing_url: minted.clone(), since: Instant::now() };
+        for still_showing in [
+            url("http://127.0.0.1:3780/pair"),
+            url("http://127.0.0.1:3780/pair#token=otherinflight"),
+            original.clone(),
+            url("http://127.0.0.1:3781/pair"),
+        ] {
+            assert!(
+                matches!(decide(&blanking, Some(&still_showing), &original), Decision::Wait),
+                "the minted address must not load while the webview shows {still_showing}"
+            );
+        }
+        match decide(&blanking, Some(&url("about:blank")), &original) {
+            Decision::LoadMinted(loaded) => assert_eq!(loaded, minted),
+            other => panic!("only the blank page releases the minted address, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn blank_page_url_is_inert_and_parseable() {
+        let blank = Url::parse(BLANK_PAGE).expect("blank url parses");
+        assert_eq!(blank.scheme(), "about");
+        assert_eq!(blank.path(), "blank");
+        // It can never be mistaken for the pairing page of any server.
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        assert!(!is_pairing_page(&blank, &original));
+        assert!(!same_origin(&blank, &original));
+    }
+
+    #[test]
+    fn failure_page_is_plain_html_without_secrets() {
+        let page = failure_page_url();
+        assert_eq!(page.scheme(), "data");
+        let body = percent_decode(page.as_str());
+        assert!(body.starts_with("data:text/html;charset=utf-8,"), "{body}");
+        assert!(body.contains("re-pair the app"), "{body}");
+        assert!(!body.contains("token"), "{body}");
+        assert!(!body.contains("127.0.0.1"), "{body}");
+        assert!(!body.contains("<script"), "{body}");
+        assert_eq!(body.matches("ask whoever").count(), 1);
+    }
+
+    #[test]
+    fn failure_logging_writes_exactly_one_record_without_the_token() {
+        let dir = unique_temp_dir();
+        let previous = std::env::var_os("MMOS_DEV_ROOT");
+        std::env::set_var("MMOS_DEV_ROOT", &dir);
+        log_pairing_failure(PairingFailure::HelperOutput);
+        let contents = fs::read_to_string(dir.join("app.log")).expect("app.log written");
+        match previous {
+            Some(value) => std::env::set_var("MMOS_DEV_ROOT", value),
+            None => std::env::remove_var("MMOS_DEV_ROOT"),
+        }
+        let lines: Vec<&str> = contents.lines().filter(|line| !line.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 1, "exactly one record");
+        let record: serde_json::Value =
+            serde_json::from_str(lines[0]).expect("jsonl record");
+        assert_eq!(record["kind"], "native_failure");
+        assert_eq!(record["command"], "shell_pairing");
+        assert_eq!(record["code"], "PAIRING.FAILED.helper_output");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    fn percent_decode(value: &str) -> String {
+        let bytes = value.as_bytes();
+        let mut out: Vec<u8> = Vec::new();
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'%' && index + 2 < bytes.len() {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+                if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                    out.push(byte);
+                    index += 3;
+                    continue;
+                }
+            }
+            out.push(bytes[index]);
+            index += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+}

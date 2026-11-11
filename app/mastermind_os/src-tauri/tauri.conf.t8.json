@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Mastermind OS T8",
+  "identifier": "com.mastermind.os.dev.t8",
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "com.mastermind.os.dev.t8"
+        ]
+      }
+    }
+  }
+}
