@@ -1,4 +1,4 @@
-"""Real ten-job regression and adversarial auxiliary-proof cases.
+"""Real eleven-job regression and adversarial auxiliary-proof cases.
 
 The fixture projects values captured from GitHub; the API reader is replaced,
 not the public verifier. These checks do not qualify a live protected push.
@@ -27,12 +27,12 @@ def test_proof_inventory_matches_the_actual_workflow():
     jobs = yaml.safe_load(workflow.read_text())["jobs"]
     # Expand only the current, explicitly qualified matrix; no generic workflow
     # interpreter or permissive support for future qualification lanes.
-    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"}
+    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}
     matrix = jobs["pytest_shards"]["strategy"]["matrix"]
     assert matrix == {"index": [0, 1, 2, 3, 4, 5]}
     assert jobs["pytest_shards"]["name"] == "pytest shard ${{ matrix.index }}"
     names = [f"pytest shard {index}" for index in matrix["index"]]
-    for key in ("pr_scope", "pr_fast", "pin_guards", "test"):
+    for key in ("pr_scope", "pr_fast", "pin_guards", "qualification", "test"):
         assert "strategy" not in jobs[key]
         names.append(jobs[key]["name"])
     assert len(names) == len(set(names))
@@ -88,14 +88,14 @@ def auxiliary(data, name="PR fast checks"):
     return next(job for job in data["jobs"]["jobs"] if job["name"] == name)
 
 
-def test_captured_full_ten_job_run_qualifies():
+def test_captured_full_eleven_job_run_qualifies():
     data = subject()
     result, reads = evaluate(data)
     assert result == 42548210214
     assert len(reads) == 5
 
 
-@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "PR fast checks"])
+@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "Non-pytest qualification gates", "PR fast checks"])
 def test_every_job_is_required_even_when_total_count_matches_the_missing_inventory(name):
     data = subject()
     data["jobs"]["jobs"] = [job for job in data["jobs"]["jobs"] if job["name"] != name]

@@ -46,7 +46,10 @@
 .capacity-fabric code { overflow-wrap: anywhere; }
 .capacity-fabric :where(button, input, select, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .capacity-fabric :where(button, summary) { touch-action: manipulation; }
-@media (max-width: 900px) { .capacity-fabric-accounts > li { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); } .capacity-fabric-slots { grid-column: 1 / -1; display: flex; gap: var(--sp-5); flex-wrap: wrap; } }
+@media (max-width: 900px) {
+  .capacity-fabric-accounts > li { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+  .capacity-fabric-slots { grid-column: 1 / -1; display: flex; gap: var(--sp-5); flex-wrap: wrap; }
+}
 @media (max-width: 640px) {
   .capacity-fabric-heading, .capacity-fabric-overview { flex-direction: column; }
   .capacity-fabric-controls { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }

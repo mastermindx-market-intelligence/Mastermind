@@ -12,13 +12,15 @@ import hashlib
 import inspect
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any
 
+from control_plane.child_execution_contracts import ExecutionBinding
 from control_plane.codex_worker import (
     _MAX_SCHEMA_BYTES, _git_changed_paths, _git_snapshot, _read_limited, validate_json_schema,
 )
+from control_plane.execution_binding_compat import binding_for_launch_spec
 from control_plane.executive_worker_broker import (
     BrokerEffectUnknownError, BrokerProtocolError, BrokerStateError,
 )
@@ -119,6 +121,7 @@ class _Run:
     baseline: Any
     schema: Any
     turn: AcpReadOnlyTurn
+    binding: ExecutionBinding | None = None
     cancelled: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
     cancel_reason: str | None = None
     task: asyncio.Task[CollectionReceipt] | None = None
@@ -136,10 +139,14 @@ class AcpWorkerAdapter:
     Tests may inject a fixture owner without registering a production descriptor.
     """
     def __init__(self, profile: AcpProfile, *, inspector: ProcessInspector,
-                 open_run: Callable[[WorkerLaunchSpec], Awaitable[AcpRunResources]]) -> None:
+                 open_run: Callable[[WorkerLaunchSpec], Awaitable[AcpRunResources]],
+                 binding_required: bool = False) -> None:
         if not callable(open_run):
             raise ValueError("ACP native resource owner is required")
         self.profile, self.inspector, self._open_run = profile, inspector, open_run
+        #: WO-16: a binding-required lane (placement child) refuses to accept
+        #: any start without the broker-issued ExecutionBinding.v1.
+        self.binding_required = bool(binding_required)
         self._runs: dict[str, _Run] = {}
         self._opening: asyncio.Task[AcpRunResources] | None = None
         self._active: str | None = None
@@ -171,7 +178,15 @@ class AcpWorkerAdapter:
             raise BrokerStateError("unknown or altered ACP process reference")
         return run
 
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+    async def start(self, spec: WorkerLaunchSpec, *,
+                    binding: ExecutionBinding | Mapping[str, Any] | None = None
+                    ) -> WorkerProcessRef:
+        # WO-16 compatibility gate: accept ExecutionBinding.v1 and the admitted
+        # class BEFORE any turn/spec effect.  A binding-required lane refuses a
+        # start without the broker-issued binding; a mismatched binding never
+        # reaches open_run.
+        admitted_binding = binding_for_launch_spec(
+            spec, binding, required=self.binding_required)
         AcpReadOnlyTurn.validate_spec(spec)
         if (self._quarantined or self._opening is not None or self._active is not None
                 or spec.run_id in self._runs or len(self._runs) >= _RUN_LIMIT):
@@ -208,7 +223,8 @@ class AcpWorkerAdapter:
                     or resources.result_schema != schema
                     or (resources.prepare_prompt is not None and not callable(resources.prepare_prompt))):
                 raise BrokerProtocolError("ACP native resources do not match admission")
-            run = _Run(spec, resources, baseline, schema, AcpReadOnlyTurn(self.profile))
+            run = _Run(spec, resources, baseline, schema, AcpReadOnlyTurn(self.profile),
+                       binding=admitted_binding)
             self._runs[spec.run_id] = run
             self._active = spec.run_id
             run.task = asyncio.create_task(self._execute(run))

@@ -54,6 +54,7 @@ it.each(["en", "zh-CN"] as const)("uses exact native causes without guessing res
   expect(nativeAuthFeedback({...state,content:true},locale)).toBe(locale==="en"?"Some app access has expired.":"部分应用访问权限已过期。");
   expect(nativeAuthFeedback({...state,reason:"AUTH_TRANSACTION_EXPIRED"},locale)).toBe(locale==="en"?"The authorization attempt timed out before it completed.":"本次授权尚未完成便已超时。");
   expect(nativeAuthFeedback({...state,reason:"AUTHORIZATION_REFUSED"},locale)).toBe(locale==="en"?"Authorization was not granted.":"授权未获批准。");
+  expect(nativeAuthFeedback({...state,reason:"TOKEN_EXCHANGE_FAILED"},locale)).toContain(locale==="en"?"secure token exchange":"安全令牌交换");
   for(const reason of ["UNKNOWN_TIMEOUT", "EXECUTIVE_EXPIRED_PRIVATE", "NOT_ESTABLISHED", null])expect(nativeAuthFeedback({...state,reason},locale)).toBeNull();
   expect(state).toEqual({status:"signed_out",reason:"NATIVE_TOKEN_EXPIRED",acquisition:false,content:false});
 });

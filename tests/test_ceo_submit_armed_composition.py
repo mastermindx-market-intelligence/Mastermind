@@ -109,7 +109,7 @@ def _added_line_numbers(path: Path, base: str) -> set[int]:
 def _identity_guard_source_path(path: str) -> bool:
     """Keep the identity guard on source/config, not narrative proof records.
 
-    Markdown prose is not Python source. Evidence JSON is routed through the
+    Markdown prose is not Python source. Research JSON is routed through the
     structural identity check below, never exempted from identity checking.
     Executable code and all other configuration retain the generic token guard.
     """
@@ -118,7 +118,7 @@ def _identity_guard_source_path(path: str) -> bool:
         return True
     if parts[0] in {"docs", "research"} and Path(path).suffix == ".md":
         return False
-    if parts[:2] == ("research", "evidence") and Path(path).suffix == ".json":
+    if parts[:2] in {("research", "evidence"), ("research", "data")} and Path(path).suffix == ".json":
         return False
     return True
 
@@ -129,13 +129,26 @@ def _identity_guard_evidence_json_path(path: str) -> bool:
             and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
 
 
-def _scan_evidence_identity_literals(document: str) -> list[str]:
+def _identity_guard_data_json_path(path: str) -> bool:
+    parts = Path(path).parts
+    return (not Path(path).is_absolute() and ".." not in parts
+            and parts[:2] == ("research", "data") and Path(path).suffix == ".json")
+
+
+def _scan_json_identity_literals(
+    document: str, *, research_data: bool = False, path_identity: bool = False,
+) -> list[str]:
     """Check identity-bearing JSON values without treating all metrics as UIDs.
 
     This is a bounded literal guard, not whole-program dataflow analysis. Runtime
-    admission remains authoritative. Malformed/duplicate-key evidence fails closed.
+    admission remains authoritative. Malformed/duplicate-key JSON fails closed.
+    Evidence keeps its record grammar and budgets; research datasets have a
+    larger, still finite profile and retain source/path identity semantics.
     """
-    assert len(document.encode("utf-8")) <= 1024 * 1024, "evidence JSON exceeds limit"
+    role = "data" if research_data else "evidence"
+    max_bytes = 4 * 1024 * 1024 if research_data else 1024 * 1024
+    max_nodes = 100000 if research_data else 10000
+    assert len(document.encode("utf-8")) <= max_bytes, f"{role} JSON exceeds limit"
 
     def unique_object(pairs):
         result = {}
@@ -152,25 +165,46 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
         value = json.loads(document, object_pairs_hook=unique_object,
                            parse_constant=reject_constant)
     except (ValueError, RecursionError) as exc:
-        raise AssertionError("evidence JSON is not an unambiguous document") from exc
-    assert isinstance(value, dict), "evidence JSON must be an object record"
+        raise AssertionError(f"{role} JSON is not an unambiguous document") from exc
+    if not research_data:
+        assert isinstance(value, dict), "evidence JSON must be an object record"
     identity_words = {"uid", "uids", "gid", "gids", "euid", "egid", "suid", "sgid",
                       "peer", "peers", "account", "accounts", "principal", "principals",
                       "user", "users", "group", "groups", "identity", "identities",
                       "owner", "owners"}
+    if research_data:
+        identity_words = _SOURCE_IDENTITY_WORDS
     flagged = []
-    pending = [(value, False, 0)]
+
+    def reserved_account(text):
+        # Preserve the generic scanner's NFKC and real token-boundary rule,
+        # including accounts in neutral notes and dictionary keys.
+        return re.search(r"(?<!\w)_mastermind_\w*", unicodedata.normalize("NFKC", text))
+
+    pending = [(value, path_identity, 0)]
     visited = 0
     while pending:
         item, identity, depth = pending.pop()
         visited += 1
-        assert depth <= 32 and visited <= 10000, "evidence JSON structure exceeds limit"
+        assert depth <= 32 and visited <= max_nodes, f"{role} JSON structure exceeds limit"
         if isinstance(item, float):
-            assert math.isfinite(item), "evidence JSON contains a non-finite number"
+            assert math.isfinite(item), f"{role} JSON contains a non-finite number"
+        if research_data and isinstance(item, str):
+            account = reserved_account(item)
+            if account:
+                flagged.append(account.group(0))
+                continue
         if isinstance(item, dict):
             for key, child in item.items():
-                words = set(re.split(r"[^a-z0-9]+", re.sub(
-                    r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()))
+                if research_data:
+                    words = _semantic_words(key) | {unicodedata.normalize("NFKC", key).casefold()}
+                    if not identity:
+                        account = reserved_account(key)
+                        if account:
+                            flagged.append(account.group(0))
+                else:
+                    words = set(re.split(r"[^a-z0-9]+", re.sub(
+                        r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()))
                 child_identity = identity or bool(words & identity_words)
                 pending.append((child, child_identity, depth + 1))
                 if identity:
@@ -179,7 +213,20 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
             pending.extend((child, identity, depth + 1) for child in item)
         elif identity and not isinstance(item, bool) and item is not None:
             if isinstance(item, str):
+                if research_data:
+                    item = unicodedata.normalize("NFKC", item)
                 item = item.strip()
+                if research_data and len(item) > 256:
+                    # Long labels/URLs are valid data. Long encoded numbers
+                    # fail closed before integer/Decimal expansion; the whole
+                    # document has already passed the data byte budget.
+                    numeric = re.fullmatch(
+                        r"[+-]?(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|"
+                        r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)",
+                        item.replace("_", ""),
+                    )
+                    assert not numeric, "data identity number exceeds normalization limit"
+                    continue
                 assert len(item) <= 256, "evidence identity string exceeds limit"
                 if item.startswith("_mastermind_"):
                     flagged.append(item)
@@ -206,6 +253,17 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
             if 400 <= number <= 999:
                 flagged.append(str(item))
     return flagged
+
+
+def _scan_evidence_identity_literals(document: str) -> list[str]:
+    return _scan_json_identity_literals(document)
+
+
+def _scan_data_identity_literals(document: str, *, path: str) -> list[str]:
+    return _scan_json_identity_literals(
+        document, research_data=True,
+        path_identity=bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS),
+    )
 
 
 _NON_PRODUCTION_IDENTITY_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
@@ -1609,11 +1667,12 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # same AST; retain every path, membership and mutation refusal below.
     # The reviewed pure Memory-validator extraction also preserves that
     # anchor and the imports; only the full-source fingerprint changes.
+    # Capacity Fabric adds a read-only factory input outside the installed wrapper.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'dd09c1cfa20f75beee02dd9102356032bcfe6bdf813d55ab72451f1470fb35e1'):
+            'eb33b3f4982f8248515dd03e0842a58ade6e624628272945ca0c8d088f876bdf'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -2616,12 +2675,15 @@ def test_d8_template_topology_and_protected_defaults():
     for path in changed.split("\0"):
         if not path:
             continue
-        if _identity_guard_evidence_json_path(path):
+        if _identity_guard_evidence_json_path(path) or _identity_guard_data_json_path(path):
             document = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,
             ).stdout
-            assert _scan_evidence_identity_literals(document) == [], path
+            if _identity_guard_data_json_path(path):
+                assert _scan_data_identity_literals(document, path=path) == [], path
+            else:
+                assert _scan_evidence_identity_literals(document) == [], path
             continue
         if not _identity_guard_source_path(path):
             continue

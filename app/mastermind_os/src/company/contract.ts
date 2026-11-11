@@ -1,3 +1,6 @@
+import { projectCompanyConnections, sameConnections } from "./connections";
+import type { CompanyConnections } from "./connections";
+
 export const COMPANY_SCHEMA = "mastermind.paperclip_workspace.v1";
 export const COMPANY_COMMAND_SCHEMA = "mastermind.paperclip_command.v1";
 export const COMPANY_CAP = 2_097_152;
@@ -79,6 +82,7 @@ export interface CompanySnapshot {
   }>;
   readonly receipt?: CompanyReceipt;
   readonly migration?: RuntimeMigration;
+  readonly connections?: CompanyConnections;
 }
 export interface RuntimeMigration {
   readonly state: "PREPARED_NOT_APPLIED";
@@ -503,7 +507,7 @@ export function decodeCompanyRead(
   }
   const observedAt = text(value.observedAt, 64);
   if (!Number.isFinite(Date.parse(observedAt))) fail();
-  return Object.freeze({
+  const snapshot: CompanySnapshot = Object.freeze({
     schema: COMPANY_SCHEMA,
     state: value.state as CompanySnapshot["state"],
     view: selected.view,
@@ -525,6 +529,9 @@ export function decodeCompanyRead(
     ...(receipt ? { receipt } : {}),
     ...(migration ? { migration } : {}),
   });
+  const connections = projectCompanyConnections(snapshot);
+  if (value.connections !== undefined && !sameConnections(value.connections, connections)) fail();
+  return Object.freeze({ ...snapshot, connections });
 }
 export function decodeBacklogResult(
   raw: unknown,
