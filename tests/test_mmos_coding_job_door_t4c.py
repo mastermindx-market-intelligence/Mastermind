@@ -1050,9 +1050,9 @@ def test_step4_after_seal_crash_window_leaves_a_committed_seal_behind(
     # patch it through the function's own globals
     monkeypatch.setattr(door_mod.os, "_exit", fake_exit)
     monkeypatch.setattr(d, "_wait_terminal",
-                        lambda _a, _r, **_k: (["succeeded"],
+                        lambda _a, _r, **_k: (["SUCCEEDED"],
                                               SimpleNamespace(
-                                                  value="succeeded")))
+                                                  value="SUCCEEDED")))
     monkeypatch.setitem(
         type(d)._seal_and_deliver.__globals__,
         "install_execution_return_seam", lambda *a, **k: None)
@@ -1451,6 +1451,238 @@ def test_step5_a_wait_longer_than_the_lease_still_seals(scratch, monkeypatch,
     assert entry["final_status"] == "COMPLETED"
     row = runtime.attempts.get_attempt(attempt_id)
     assert getattr(getattr(row, "status", None), "value", "") == "COMPLETED"
+
+
+# ---------------------------------------------------------------------------
+# Step 5 — the adversarial pass (deepseek-v4.1-flash, branch head 9bd78e5c9):
+# findings F2, F3 and F5 in the door's seal lane and request gate.
+# ---------------------------------------------------------------------------
+
+
+def test_step5_f2_a_failed_native_run_with_a_result_is_sealed_failed(
+        scratch, monkeypatch, tmp_path):
+    """Attack F2 (MED): the seal lane never branched on the native verdict —
+    ``complete_attempt`` unconditionally sealed COMPLETED, so a FAILED run
+    that still carried a terminal result ref (the worker's failure text) was
+    delivered as a completed job's Result.  The service-side finisher DOES
+    branch (``_terminalize``); the two delivery lanes must agree.  A
+    non-SUCCEEDED verdict seals FAILED through the same status-aware seam —
+    the failure text still delivers, under an honest FAILED seal."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    from control_plane.worker_execution_contract import WorkerRunStatus
+
+    runtime, job_id, _ = _runtime_and_job(tmp_path, lease_seconds=30)
+    lease = runtime.broker.claim(job_id, lease_owner="t4c-door")
+    attempt_id = lease.attempt.attempt_id
+
+    d = _attack_door(scratch, monkeypatch)
+    door_globals = type(d)._seal_and_deliver.__globals__
+    command = d.freeze_issue(_issue_row("iss-f2"))
+    entry = d.frozen[command]
+    entry.update({"job_id": job_id, "attempt_id": attempt_id,
+                  "fence_generation": lease.attempt.fence_generation,
+                  "lease_token": lease.lease_token, "phase": "reattached",
+                  "envelope": entry["envelope"]})
+    d._save_frozen()
+
+    class _FailedRunAdapter:
+        async def status(self, _ref):
+            return WorkerRunStatus.FAILED
+
+        async def collect_result(self, _ref):
+            return SimpleNamespace(result=SimpleNamespace(
+                structured_output={"text": "the worker's own failure report",
+                                   "artifacts": []}))
+
+    ref = SimpleNamespace(provider_session_id="mcp:launch:f2")
+    monkeypatch.setitem(door_globals, "ResultDeliveryRegistry",
+                        lambda: SimpleNamespace(
+                            register=lambda *a, **k: None))
+    monkeypatch.setitem(door_globals, "install_execution_return_seam",
+                        lambda *a, **k: None)
+    monkeypatch.setitem(door_globals, "GitHubEvidenceSource",
+                        lambda **k: None)
+    finished = []
+    monkeypatch.setattr(d, "_finish_sealed",
+                        lambda *a, **k: finished.append(True))
+
+    d._seal_and_deliver(runtime, entry, attempt_id, _FailedRunAdapter(),
+                        ref, "t3/mmos-t4b-job-f2")
+    # the native verdict governs the seal, never an upgrade
+    assert entry["phase"] == "sealed"
+    assert entry["final_status"] == "FAILED"
+    row = runtime.attempts.get_attempt(attempt_id)
+    assert getattr(getattr(row, "status", None), "value", "") == "FAILED"
+    job = runtime.jobs.get_job(job_id)
+    assert getattr(job, "status", None).value == "FAILED"
+    # the payload names the native verdict and still carries the worker's
+    # own failure text — honest evidence, delivered
+    summary = str((getattr(job, "result", None) or {}).get("summary", ""))
+    assert "native run ended FAILED" in summary
+    assert "the worker's own failure report" in summary
+    # the delivery read still runs: the failure text reaches the task
+    # under the FAILED seal (the seam is status-aware)
+    assert finished == [True]
+
+
+def test_step5_f3_a_never_terminal_run_parks_typed_never_polls_forever(
+        scratch, monkeypatch, tmp_path):
+    """Attack F3 (MED): after ``_wait_terminal``'s deadline it RETURNS the
+    non-terminal status (it does not raise); ``_seal_and_deliver`` then
+    called ``collect_result`` — which since L8b polls live status FOREVER —
+    so one orphaned native thread blocked the door's single executor thread
+    indefinitely: no cadence reconcile, no other entry served, no typed
+    blocker, the door's own lease lapsing mid-poll.  A non-terminal wait
+    now parks the entry with a typed NATIVE_RUN_TIMEOUT blocker and holds
+    its slot (the attempt is still live engine-side); collect is never
+    entered, and the entry retries on the reconcile cadence."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    from control_plane.worker_execution_contract import WorkerRunStatus
+
+    runtime, job_id, _ = _runtime_and_job(tmp_path, lease_seconds=30)
+    lease = runtime.broker.claim(job_id, lease_owner="t4c-door")
+    attempt_id = lease.attempt.attempt_id
+
+    d = _attack_door(scratch, monkeypatch)
+    command = d.freeze_issue(_issue_row("iss-f3"))
+    entry = d.frozen[command]
+    entry.update({"job_id": job_id, "attempt_id": attempt_id,
+                  "fence_generation": lease.attempt.fence_generation,
+                  "lease_token": lease.lease_token, "phase": "reattached",
+                  "envelope": entry["envelope"]})
+    d._save_frozen()
+
+    waited = {}
+
+    def deadline_expired(adapter, ref, *, runtime=None, entry=None,
+                         **kwargs):
+        # the faithful post-deadline state: _wait_terminal HONORS its
+        # deadline (L5-proven) and returns the still-running status
+        waited.update(kwargs)
+        return (["STARTING", "RUNNING"], WorkerRunStatus.RUNNING)
+
+    monkeypatch.setattr(d, "_wait_terminal", deadline_expired)
+
+    class _OrphanedRunAdapter:
+        collect_calls = 0
+
+        async def collect_result(self, _ref):
+            # the defect itself, made fast: polling a non-terminal run is
+            # exactly what must never happen
+            type(self).collect_calls += 1
+            raise RuntimeError(
+                "F3: collect_result must never poll a non-terminal run")
+
+    surfaced = []
+    monkeypatch.setattr(d, "_surface_blocker",
+                        lambda *a, **k: surfaced.append(a))
+    ref = SimpleNamespace(provider_session_id="mcp:launch:f3")
+    d._seal_and_deliver(runtime, entry, attempt_id, _OrphanedRunAdapter(),
+                        ref, "t3/mmos-t4b-job-f3")
+
+    # collect was never entered; the park is typed and durable
+    assert _OrphanedRunAdapter.collect_calls == 0
+    assert entry["phase"] == "run-timeout"
+    assert entry["blocker"]["code"] == "NATIVE_RUN_TIMEOUT"
+    assert surfaced and surfaced[0][1] == "NATIVE_RUN_TIMEOUT"
+    # the attempt is untouched engine-side: still active, never sealed
+    row = runtime.attempts.get_attempt(attempt_id)
+    assert getattr(getattr(row, "status", None), "value", "") not in (
+        "COMPLETED", "FAILED", "LOST", "CANCELLED")
+    # the slot HOLDS and the retry is cadence-paced: within the interval
+    # the parked entry is not re-executed; once due, the seal is retried
+    assert d._entry_action(entry) == "skip"
+    entry["reconcile_last_ask"] = _iso(3600)
+    assert d._entry_action(entry) == "execute"
+
+
+def test_step5_f3_the_wait_reads_the_doors_own_deadline_knobs(
+        scratch, monkeypatch, tmp_path):
+    """Attack F3's config half: the 1800s/15s wait constants were hardcoded
+    in the method signature — a canary or journey could not shorten them.
+    The door passes its OWN ``wait_deadline_seconds`` /
+    ``poll_interval_seconds`` config into the wait."""
+    d = _attack_door(scratch, monkeypatch)
+    d.config.wait_deadline_seconds = 12.5
+    d.config.poll_interval_seconds = 1.5
+    seen = {}
+
+    def record(adapter, ref, *, deadline_s=None, interval_s=None, **_kw):
+        seen["deadline"] = deadline_s
+        seen["interval"] = interval_s
+        from control_plane.worker_execution_contract import WorkerRunStatus
+        return (["SUCCEEDED"], WorkerRunStatus.SUCCEEDED)
+
+    monkeypatch.setattr(d, "_wait_terminal", record)
+    entry = {"attempt_id": "ATT-K", "fence_generation": 1,
+             "lease_token": "t", "phase": "reattached"}
+
+    class _OkAdapter:
+        async def collect_result(self, _ref):
+            return SimpleNamespace(result=SimpleNamespace(
+                structured_output={"text": "done", "artifacts": []}))
+
+    runtime = SimpleNamespace(attempts=SimpleNamespace(
+        complete_attempt=lambda *a, **k: SimpleNamespace(status="COMPLETED"),
+        heartbeat_attempt=lambda *a, **k: None))
+    door_globals = type(d)._seal_and_deliver.__globals__
+    monkeypatch.setitem(door_globals, "ResultDeliveryRegistry",
+                        lambda: SimpleNamespace(
+                            register=lambda *a, **k: None))
+    monkeypatch.setitem(door_globals, "install_execution_return_seam",
+                        lambda *a, **k: None)
+    monkeypatch.setitem(door_globals, "GitHubEvidenceSource",
+                        lambda **k: None)
+    monkeypatch.setattr(d, "_finish_sealed", lambda *a, **k: None)
+    d._seal_and_deliver(runtime, entry, "ATT-K", _OkAdapter(),
+                        SimpleNamespace(provider_session_id="mcp:k"),
+                        "t3/mmos-t4b-job-k")
+    assert seen["deadline"] == 12.5
+    assert seen["interval"] == 1.5
+
+
+def test_step5_f5_the_request_gate_refuses_degraded_timestamps(
+        scratch, monkeypatch):
+    """Attack F5 (LOW): the "newest agent comment" degraded to ARRIVAL order
+    when any comment lacked a timestamp — and the carrier lists newest
+    first, so ``[-1]`` picked the OLDEST agent comment: a stale request
+    block could authorize admission.  An authorization gate refuses on
+    degraded ordering evidence; and a timestamp-less BOARD row must not
+    degrade the gate when the agent rows' own timestamps are complete."""
+    d = _attack_door(scratch, monkeypatch)
+    command = d.freeze_issue(_issue_row("iss-f5a"))
+    entry = d.frozen[command]
+    row = dict(_issue_row("iss-f5a"))
+
+    # leg 1 — an agent comment WITHOUT a timestamp: the newest agent
+    # request cannot be established, so the gate refuses typed
+    d.paperclip = _CommentsPaperclip(row, [
+        _agent("withdrew the request — no code needed",
+               "2026-11-11T03:00:00Z"),
+        {"authorType": "agent", "body": BLOCK},  # no createdAt
+        _user("board note", "2026-11-11T01:00:00Z")])
+    reply = asyncio.run(d.admit(command))
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "TASK_STATE_UNREADABLE"
+    assert "no timestamp" in reply["error"]["message"]
+    assert "admit_requested_at" not in entry
+
+    # leg 2 — the AGENT rows are fully timestamped: the gate orders by
+    # the agent rows' OWN timestamps, so a timestamp-less board row
+    # degrades nothing and the lawful newest request stands
+    command_b = d.freeze_issue(_issue_row("iss-f5b"))
+    d.paperclip = _CommentsPaperclip(dict(_issue_row("iss-f5b")), [
+        _agent(BLOCK, "2026-11-11T02:00:00Z"),
+        {"authorType": "user", "body": "board note"},  # no createdAt
+        _agent("older answer, superseded", "2026-11-11T01:00:00Z")])
+    monkeypatch.setattr(d, "_frame_context", lambda: {
+        "principal": {}, "principal_context": {},
+        "capability_profile_digest": "", "target_digest": ""})
+    with pytest.raises(FileNotFoundError):
+        # past the gate (the newest AGENT request stands) — the failure is
+        # the not-started service socket, i.e. the admission lane itself
+        asyncio.run(d.admit(command_b))
+    assert d.frozen[command_b].get("admit_requested_at")
 
 
 def test_step6_the_launch_spec_names_the_placement_jobs_own_paths(

@@ -245,6 +245,14 @@ class DoorConfig:
         # (scenarios shorten it to prove the door-down-longer-than-lease
         # recovery).
         self.lease_seconds = int(values.get("lease_seconds", LEASE_SECONDS))
+        # Attack F3 (step 5, 2026-11-11): the door's OWN bounded wait for a
+        # native run to reach a terminal state, and its poll cadence — the
+        # wait must never become an unbounded poll (a non-terminal run
+        # parks the entry typed instead).  Scenarios shorten both.
+        self.wait_deadline_seconds = float(
+            values.get("wait_deadline_seconds", 1800.0))
+        self.poll_interval_seconds = float(
+            values.get("poll_interval_seconds", 15.0))
         self.ready_limit = values.get("child_root_ready_limit")
         self.fleet_limit = values.get("child_fleet_ready_limit")
 
@@ -974,6 +982,21 @@ class CodingJobDoor:
             return ("TASK_REQUEST_MISSING",
                     "no agent comment on the task carries the coding-job "
                     "request block")
+        if not all(row.get("createdAt") for row in agent_rows):
+            # T4c attack F5 (step 5, 2026-11-11): with a timestamp-less
+            # agent row the "newest agent comment" degrades to arrival
+            # order — and the carrier lists newest first, so [-1] is the
+            # OLDEST agent comment: a stale request block could authorize
+            # admission.  An authorization gate refuses on degraded
+            # ordering evidence; it never admits on it.
+            return ("TASK_STATE_UNREADABLE",
+                    "an agent comment on the task carries no timestamp; "
+                    "the newest agent request cannot be established — "
+                    "refusing to admit on degraded ordering evidence")
+        # F5: order by the AGENT rows' own timestamps — a timestamp-less
+        # board row must not degrade this gate's ordering.
+        agent_rows = sorted(agent_rows,
+                            key=lambda row: str(row["createdAt"]))
         newest = agent_rows[-1]
         # the carrier's parser (byte-pinned by its own tests): the LAST
         # fenced paperclip-coding-job block, the comment's own last word
@@ -1294,6 +1317,11 @@ class CodingJobDoor:
                     entry["provider_session_id"] = (
                         run.process_ref.provider_session_id)
                     entry["phase"] = "reattached"
+                    # T4c attack F3: a re-adopted run is a NEW fact — the
+                    # parked blocker (run-timeout or an earlier deferral)
+                    # no longer stands, or the entry would strand at skip
+                    # on its surfaced-blocker record forever.
+                    entry.pop("blocker_surfaced", None)
             self._wake.set()
             self._save_frozen()
         for outcome in outcomes:
@@ -1331,6 +1359,15 @@ class CodingJobDoor:
             # startup reconcile or an earlier adoption); the door watches
             # for the terminal row and finishes the delivery read
             return "execute"
+        if phase == "run-timeout":
+            # T4c attack F3: the native run outlived the door's bounded
+            # wait and the entry parked with a typed blocker (the thread
+            # slot HOLDS — the attempt is still live engine-side).  The
+            # seal is retried when the reconcile cadence is due: the lease
+            # lapsed while parked, the engine adopts at expiry and the
+            # entry resumes from the recovered run — another bounded wait,
+            # never an unbounded poll.
+            return "execute" if self._reconcile_retry_due(entry) else "skip"
         if entry.get("blocker_surfaced"):
             # the blocker is the job's recorded result on the task; a
             # surfaced blocker is terminal for this executor
@@ -1775,12 +1812,45 @@ class CodingJobDoor:
 
     def _seal_and_deliver(self, runtime, entry, attempt_id, adapter, ref,
                           branch) -> None:
-        """The shared tail: wait terminal, collect, seal through the
-        execution-return seam, then read the delivery receipt honestly."""
+        """The shared tail: wait terminal (bounded — F3), collect, seal
+        through the execution-return seam (the native verdict governs the
+        seal — F2), then read the delivery receipt honestly."""
+        from control_plane.worker_execution_contract import WorkerRunStatus
         statuses, final = self._wait_terminal(
-            adapter, ref, runtime=runtime, entry=entry)
+            adapter, ref, runtime=runtime, entry=entry,
+            deadline_s=self.config.wait_deadline_seconds,
+            interval_s=self.config.poll_interval_seconds)
         _log(f"attempt {attempt_id} terminal: {final.value} "
              f"({statuses})")
+        final_value = str(getattr(final, "value", final))
+        terminal_values = frozenset({
+            WorkerRunStatus.SUCCEEDED.value, WorkerRunStatus.FAILED.value,
+            WorkerRunStatus.INVALID_RESULT.value,
+            WorkerRunStatus.CANCELLED.value,
+            WorkerRunStatus.TIMED_OUT.value})
+        if final_value not in terminal_values:
+            # T4c attack F3 (step 5, 2026-11-11): the deadline expired with
+            # the run still non-terminal.  _wait_terminal RETURNS here (it
+            # does not raise), and collect_result would then poll live
+            # status FOREVER (L8b) — one orphaned native thread blocked the
+            # single executor thread indefinitely: no cadence reconcile,
+            # no other entry served, no typed blocker, the door's own lease
+            # lapsing mid-poll.  The entry parks with a typed blocker and
+            # HOLDS its thread slot (the attempt is still live engine-side
+            # — F13's law); the seal is retried on the reconcile cadence,
+            # each round another bounded wait.
+            reason = (f"the native run did not reach a terminal state "
+                      f"within {self.config.wait_deadline_seconds:.0f}s "
+                      f"(last: {final.value}); the attempt stays live "
+                      f"engine-side and the seal is retried on the "
+                      f"reconcile cadence")
+            entry["phase"] = "run-timeout"
+            entry["blocker"] = {"code": "NATIVE_RUN_TIMEOUT",
+                                "reason": reason[:200]}
+            entry["reconcile_last_ask"] = _now()
+            self._save_frozen()
+            self._surface_blocker(entry, "NATIVE_RUN_TIMEOUT", reason[:200])
+            return
 
         collected = asyncio.run(adapter.collect_result(ref))
         output = dict(collected.result.structured_output or {})
@@ -1810,10 +1880,28 @@ class CodingJobDoor:
         # the lease too — renew once more so the seal commits on current
         # credentials (same typed seam, same refusal law as the wait loop).
         self._heartbeat_lease(runtime, entry)
-        sealed = runtime.attempts.complete_attempt(
-            attempt_id, fence_generation=entry["fence_generation"],
-            lease_token=entry["lease_token"],
-            payload={"summary": summary, "artifacts": artifacts})
+        if final_value == WorkerRunStatus.SUCCEEDED.value:
+            sealed = runtime.attempts.complete_attempt(
+                attempt_id, fence_generation=entry["fence_generation"],
+                lease_token=entry["lease_token"],
+                payload={"summary": summary, "artifacts": artifacts})
+        else:
+            # T4c attack F2 (step 5, 2026-11-11): the native verdict
+            # governs the seal.  complete_attempt unconditionally seals
+            # COMPLETED, so a FAILED/CANCELLED/TIMED_OUT run that still
+            # carried a terminal result ref (the worker's failure text)
+            # was delivered as a completed job's Result.  The engine's own
+            # finisher branches on the verdict (_terminalize); the door's
+            # lane must agree.  fail_attempt drives the same status-aware
+            # seam, so the failure text still delivers — under an honest
+            # FAILED seal, named for the native verdict.
+            sealed = runtime.attempts.fail_attempt(
+                attempt_id, fence_generation=entry["fence_generation"],
+                lease_token=entry["lease_token"],
+                payload={"summary":
+                         f"native run ended {final_value}"
+                         + (f": {summary}" if summary else ""),
+                         "artifacts": artifacts})
         if self.config.crash_mode == "after_seal":
             # the second deterministic window (T4c): the seal is COMMITTED
             # in the engine, the frozen entry still says "launched" — a
