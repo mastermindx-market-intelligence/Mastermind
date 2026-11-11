@@ -1102,3 +1102,64 @@ Mastermind OS server, or if the patch is sent upstream, which is a public act an
 the Chairman's word. Until then: launch the other-project thread with
 `workspaceStrategy.startFromOrigin`, and put in its brief that it ends by sending its result
 to the parent thread with `t3_thread_send`.
+
+## 28. Amendment, 2026-11-11 10:50 UTC: harness access, browser use and computer use (lanes BR, HX, BCU)
+
+Two orders arrived on 2026-11-11. The Chairman ordered a browser-use and computer-use layer
+built into T3 and into Mastermind OS: several connected browsers through the Mastermind
+extension, computer use, and a vision relay for models that cannot see images. The Sector
+Intelligence programme relayed a second instruction from him: clear the harness faults that
+cost their sessions time, twelve items, each answered to their thread with one line
+(`HARNESS <n>: fixed — <how to use>` or `HARNESS <n>: needs human action — <exact action>`).
+
+**A correction to how I work.** I spent about 25 minutes diagnosing the browser fault myself.
+The Chairman stopped that: diagnosis is lane work too. A new problem gets a few minutes of
+orientation from me, then a brief to a GLM lane that owns the diagnosis and the repair.
+
+**Lanes.** Each has a GLM driver in its own checkout and installs nothing; every change comes
+back staged with its install command, the sha256 of the file it replaces, and a rollback.
+
+| Lane | Owns | Harness items |
+| --- | --- | --- |
+| BR | The page-read fault in the Mastermind extension (`snapshot` fails in two profiles), a documented paste path, error messages that name their cause | 1, 3, 4 |
+| HX | Fleet browser registration, the worktree quarantine on worker start, the shell guard refusing read-only commands, silent worker stops and restart recovery, the cross-machine thread link, MCP servers that need sign-in | 6, 8, 9, 10, 11, 12 |
+| BCU | Computer use, the vision relay, the browser tools as one layer, a guidance file, registration in both homes | 5 |
+| XPb (section 27) | Cross-project workers | 7 |
+
+Item 2 (submitting the other programme's research prompts) is not ours and was not claimed.
+
+**Order of work, changed the same day.** The Chairman's later word, relayed: computer use
+ahead of browser use, no key-by-key typing, no burst of sessions. BCU therefore delivers one
+slice first: bring a named window to the front, click, paste with the paste chord and restore
+the pasteboard, click a send control, read that one window. The browser tool remains for
+reading.
+
+**Rules the layer carries.**
+- One window per capture, never the full screen. Password managers, Keychain Access and the
+  privacy panes of System Settings are refused for capture, click and paste alike.
+- Every action returns APPLIED, NOT_APPLIED or EFFECT_UNKNOWN. The layer never retries an
+  uncertain action.
+- One holder of the screen at a time, by a lease with an owner and an expiry.
+- No action while a person is using the Mac (idle period, default 3 minutes); a sequence
+  aborts if input arrives in the middle.
+- A minimum interval between paste-and-send sequences per window.
+- It is plain automation. Nothing is built to disguise it from a website or a provider. A
+  challenge, CAPTCHA, sign-in, rate-limit or unusual-activity notice stops the action; the
+  worker reports it and does not retry or switch route.
+- macOS Accessibility and Screen Recording grants are given by a person.
+
+**Reserved to me.** Installing any staged change; turning the layer on for a real teammate
+(per-teammate switch, default off); any router change; driving another host's screen. The
+shell guard, the worktree hook and the computer-use server decide what a worker may touch, so
+each gets a blind panel before install.
+
+**The second T3 build** (`~/Applications/T3-Queue-Stall-Staged-20261109/`) was read. It holds
+four commits of merge-queue and stall recovery for pull-request watching and nothing for
+browser or computer use. Nothing is adopted from it now.
+
+**Panels, as run from today.** A GLM panel lead builds the blind export, starts the DeepSeek
+reviewers, checks every HIGH and MED finding against the code itself and writes `SCORE.md`.
+I read the score. First result (lane RF): do not install as written; three HIGH findings, one
+of them a defence that read a field the server never sends and passed two attack rounds
+because the tests supplied the field by hand. Rule added to `REVIEW_PANEL.md` practice: a
+defence that reads a server field is tested against a captured real response.
