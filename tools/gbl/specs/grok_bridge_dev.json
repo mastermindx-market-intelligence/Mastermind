@@ -1,0 +1,27 @@
+{
+  "_note": "GBL-4 dev-only roster entry for the bridge service agent (BUILD_PLAN install step 3, dev shape). It records the TEST 'Grok Bridge' agent inside the isolated dev Paperclip instance gbl4 under ~/.mastermind/mmos-dev/paperclip/ — never the production Paperclip (127.0.0.1:3100), never instance 'default'. No credential anywhere: the dev instance's local-trusted surface is the only authorization. The admission row is a TEST principal for the dev proof only; production admission is the principal's act (RULING §3).",
+  "kind": "gbl_bridge_service_agent_dev",
+  "paperclip": {
+    "base_url": "http://127.0.0.1:3191",
+    "company_id": "24cd341e-e456-4ec6-9d2c-a88ecbbb1dbb",
+    "company_name": "GBL4 Dev",
+    "agent_id": "84189c01-9f10-4646-a300-ec83b9853f01",
+    "agent_name": "Grok Bridge",
+    "agent_role": "general",
+    "adapter_type": "process",
+    "heartbeat": false
+  },
+  "bridge": {
+    "socket_path": "~/.mastermind/mmos_dev/gbl4/bridge.sock",
+    "peer_uid_note": "admission is the kernel peer uid against the running user; no token, no header"
+  },
+  "admission": [
+    {
+      "_note": "TEST principal, dev instance only",
+      "principal": "grok-account-dev",
+      "targets": ["grok-account-dev"],
+      "kinds": ["question"],
+      "max_asks_per_hour": 20
+    }
+  ]
+}
