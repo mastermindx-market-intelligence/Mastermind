@@ -48,7 +48,12 @@ nothing. The shell window also carries a navigation allowlist: exactly the
 configured origin (scheme, host and port), the app's own inert blank page
 and its failure page load in the window; any other http/https address is
 refused in the window and opened in the person's default browser, and
-everything else is refused and logged.
+everything else is refused and logged. The default-browser opens are
+bounded by one throttle, a token bucket — three opens land back to back,
+then one per minute; a sustained flood never re-arms the burst, and an
+open past the cap is dropped (and logged), never queued — so a page that
+keeps firing outside addresses cannot flood the person's browser with
+tabs.
 
 Because the window clears the helper's environment, `WINDOW_PAIR_T3_BIN` /
 `WINDOW_PAIR_T3_HOME` cannot aim a config-named helper at a dev server. The
@@ -267,9 +272,11 @@ dev T3 server (127.0.0.1:3790). Evidence:
 - Outside link: pressing a link to `https://example.com/…` inside the
   thread left the window on the thread page and wrote no navigation
   record — the thread page's `target="_blank"` link takes WebKit's
-  new-window path, which hands such links to the default browser without
-  the navigation callback (the default browser did come forward). Either
-  path leaves the window never loading an outside origin.
+  new-window path, which funnels into the app's own opener arm (the
+  default browser did come forward). Since repair round 2 every open path
+  is bounded by one opener throttle, a token bucket (three opens back to
+  back, then one per minute; a dropped open is logged, never queued).
+  Either path leaves the window never loading an outside origin.
 - Menus on the repaired binary: View > Reload keeps the signed-in thread
   and adds no pairing record; View > Back from the thread lands on the
   inert blank page; Copy/Paste present and enabled on both the thread and

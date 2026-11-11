@@ -352,3 +352,85 @@ and the allowlist pins the origin; the port's owner is whatever the person
 server (runbook §7) is the mitigation. The config names the helper: the
 app has no other pairing route, and the helper's only authority is being
 the macOS user who owns the server home's files.
+
+## Repair round 2 — the second panel (`panel/SCORE.md`, 2026-11-11)
+
+The second blind panel scored `9d80379ba → bdcc0e343`: no HIGH, two real
+MED, verdict "switch-ready after listed repairs". Its closed list was fixed
+below; nothing outside it was touched. Fail-first evidence for every item:
+`~/.mastermind/mmos_evidence/t8b-20261111/repair2-failfirst/` (stage A —
+assertion failures on the `bdcc0e343` export; stage B — the new symbols
+absent from the export, so the test build fails there).
+
+1. **Opener throttle (REQUIRED; the panel's item 1).** Every
+   `NavDecision::External` opened the person's default browser with no
+   limit — only the log record was throttled, and the WebKit new-window
+   path funnels into the same arm. The opener call now sits behind one
+   throttle (`allow_external_open`, `shell_pairing.rs`): a token bucket of
+   capacity [`OPENER_BURST`] = 3 tokens, refilling one token per
+   [`OPENER_WINDOW`] = 60 s. Chosen over a plain sliding window because a
+   person deliberately clicking real links — three back to back, or spaced
+   further out — never hits the cap, while a page looping `location.href`
+   gets its three opens and is then capped at exactly one per minute, with
+   no re-armed burst while it keeps firing (a sliding window would hand a
+   flood three fresh opens every window). A dropped open writes one throttled input-free
+   `SHELL_NAV.EXTERNAL_THROTTLED` record and is never queued.
+   Tests: `external_opens_burst_then_floor_in_one_throttle` (rust),
+   `test_external_opens_share_one_opener_throttle` (python,
+   source-level: the opener call sits behind the one shared throttle in
+   the External arm).
+2. **`NoSession` only after the hold (the panel's item 2).** Any
+   pairing-page sighting during `Verifying` declared `NoSession`, so a
+   person pressing Back during the exchange got a failure page and a false
+   `PAIRING.FAILED.*` record while the session was live. `decide()` now
+   declares `NoSession` only once `VERIFY_HOLD` has elapsed; a real
+   bounce-back is near-immediate and is still caught at the 2 s mark.
+   Test: `decide_covers_the_full_watchdog_sequence` (the early-sighting
+   expectation flipped to `Wait`; fail-first is the old expectation).
+3. **Helper output refuses `\r` and `\t` (the panel's LOW, q2-1).**
+   WHATWG URL parsing strips a carriage return or a tab anywhere, so a
+   helper whose line carried one would parse as one garbage-token address
+   and burn a mint. Helper output is one line of text: `\n`, `\r` or `\t`
+   is refusal. Test: `helper_output_refuses_carriage_returns_and_tabs`
+   (rust; the `\r` case parses as a valid address on the pre-fix export).
+4. **The committed-load gate never writes backwards (the panel's item 3).
+   `mark_window_committed` now stores with `fetch_max`: an older
+   generation is a no-op, never a store over a newer one, so a late
+   callback from a closed window cannot close the gate for a live
+   successor. Test: the rewritten tail of
+   `url_polling_waits_for_the_window_generation_to_commit_a_load` (a
+   backward store kept the old gate on the pre-fix export).
+5. **The watchdog re-reads the generation after the window fetch (the
+   lead's finding).** If the event loop completed a rebuild between the
+   generation read and the window fetch, the poll could apply the stale
+   gate to the new window — the pre-first-commit poll the gate exists to
+   prevent. The generation is re-read after the fetch and that value is
+   what the gate checks. Test:
+   `test_generation_is_reread_after_the_window_fetch` (python,
+   source-level; there is no second read on the pre-fix export).
+6. **`show` never echoes a multi-line config (the panel's LOW, q1-4).**
+   The shell case patterns match across newlines, so a hand-edited
+   multi-line file was echoed raw. The single-line guard now runs before
+   them: a multi-line file prints `(not shown: not a single line)` — no
+   part of it, for either file. Test:
+   `test_show_never_echoes_a_multiline_config` (python).
+7. **Loader/writer parity on spellings (the panel's LOW, atk-2).** The
+   url parser normalizes IPv4 shorthands (`127.1`, `2130706433`,
+   `0x7f000001`, `127.000.000.001`), a trailing dot and an uppercase
+   scheme, so the loader accepted spellings both writers refuse to write.
+   `parse_shell_url` now requires the writers' exact spelling —
+   `http://127.0.0.1:<port>` — with its own refusal codes
+   (`missing_port` for a port-less exact host, `host_not_loopback` for a
+   shorthand or trailing-dot spelling, `wrong_scheme` for an uppercase
+   one). The minted-address parse (`parse_loopback_http`) is unchanged:
+   the server's helper output is structural, not a config line. Test:
+   `gate_refuses_spellings_no_writer_writes` (rust; the five spellings
+   moved out of `gate_handles_exotic_loopback_spellings`'s accepted list,
+   and the uppercase-scheme case moved out of `accepts_loopback_http_urls`).
+
+Left as recorded, no code (the panel's own verdicts): the config-folder
+ancestor check covers the leaf only (file uid/mode checks still bind); the
+by-design LOWs (budget burned before the failure page commits,
+`observe(None)` during an exchange, the helper group on app quit,
+server-down-at-launch leaving the watchdog inert); the empty `token=` item
+(attack round 8); zoom.

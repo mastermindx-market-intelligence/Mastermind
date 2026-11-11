@@ -215,6 +215,11 @@ case "$CMD" in
     # Attack round: a symlinked config directory is never followed, not even
     # to display.
     if [ -L "$DIR" ]; then echo "window_config: refusing to show a symlinked config directory" >&2; exit 1; fi
+    # Panel round 2: the case patterns below match across newlines, so a
+    # hand-edited multi-line file must be caught before them — no part of a
+    # multi-line config is ever echoed.
+    nl='
+'
     for name in shell-url pair-helper; do
       f="$DIR/$name"
       if [ -f "$f" ]; then
@@ -224,6 +229,8 @@ case "$CMD" in
         # carrying userinfo, a query or a fragment is never echoed. One
         # port digit is as valid as five (attack-round fix).
         case "$line" in
+          *"$nl"*)
+            printf ' -> (not shown: not a single line)\n' ;;
           *@*|*\?*|*\#*)
             printf ' -> (not shown: carries a query, fragment or userinfo)\n' ;;
           http://127.0.0.1:[0-9]*/*)

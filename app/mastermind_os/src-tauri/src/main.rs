@@ -138,13 +138,19 @@ fn create_main_window(
                 shell_pairing::NavDecision::Allow => true,
                 shell_pairing::NavDecision::External => {
                     // The maintained way to hand an outside address to the
-                    // person's default browser is the opener plugin.
-                    let target = url.to_string();
-                    let handle = handle.clone();
-                    std::thread::spawn(move || {
-                        use tauri_plugin_opener::OpenerExt;
-                        let _ = handle.opener().open_url(target, None::<&str>);
-                    });
+                    // person's default browser is the opener plugin, behind
+                    // one throttle (panel round 2): the WebKit new-window
+                    // path funnels into this same arm, so one throttle
+                    // bounds both open paths, and a dropped open is logged
+                    // there, never queued.
+                    if shell_pairing::allow_external_open() {
+                        let target = url.to_string();
+                        let handle = handle.clone();
+                        std::thread::spawn(move || {
+                            use tauri_plugin_opener::OpenerExt;
+                            let _ = handle.opener().open_url(target, None::<&str>);
+                        });
+                    }
                     shell_pairing::log_navigation_refused();
                     false
                 }

@@ -155,8 +155,11 @@ pub fn window_generation() -> u64 {
 static COMMITTED_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Record that the window built in `generation` finished loading a page.
+/// An older generation is never stored over a newer one (panel round 2):
+/// a late callback from a closed window cannot close the gate for a live
+/// successor that already committed.
 pub fn mark_window_committed(generation: u64) {
-    COMMITTED_GENERATION.store(generation, Ordering::SeqCst);
+    COMMITTED_GENERATION.fetch_max(generation, Ordering::SeqCst);
 }
 
 /// Whether polling the webview URL for `generation` is safe: only once
@@ -426,7 +429,16 @@ pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailur
     }
     let text = String::from_utf8_lossy(&collected);
     let line = text.trim();
-    if line.is_empty() || line.contains('\n') || line.len() > 4096 {
+    // WHATWG URL parsing strips `\r` and `\t` anywhere in the input, so a
+    // carriage return or a tab in the helper's one line would merge two
+    // addresses into one garbage-token URL (panel round 2): helper output
+    // is one line of text — any of the three is refusal.
+    if line.is_empty()
+        || line.contains('\n')
+        || line.contains('\r')
+        || line.contains('\t')
+        || line.len() > 4096
+    {
         return Err(PairingFailure::HelperOutput);
     }
     // The structural parse only: a minted address is `/pair#token=...` by
@@ -529,6 +541,75 @@ const NAV_LOG_INTERVAL: Duration = Duration::from_secs(60);
 /// One input-free record that a navigation was refused by the allowlist (at
 /// most one per [`NAV_LOG_INTERVAL`]); the address itself is never recorded.
 pub fn log_navigation_refused() {
+    throttled_nav_record("SHELL_NAV.REFUSED", None);
+}
+
+/// The default-browser opener throttle (panel round 2, item 1). Every
+/// navigation the allowlist hands to the person's browser — the `External`
+/// arm of `on_navigation`, which the WebKit new-window path funnels into as
+/// well — passes through [`allow_external_open`], so one throttle bounds
+/// both open paths. Without it a page looping `location.href` floods the
+/// person's browser with tabs: the refused-navigation *log* was already
+/// throttled, the open itself was not.
+///
+/// Chosen shape: a token bucket with capacity [`OPENER_BURST`] = 3 tokens,
+/// refilling one token per [`OPENER_WINDOW`] = 60 s. A person deliberately
+/// clicking real links never hits the cap — three opens land even when
+/// clicked back to back, and anything spaced further out is covered by the
+/// refill. A page that keeps firing past the burst is capped at exactly one
+/// open per minute, and the full burst never re-arms while it keeps firing
+/// (each sustained flood drains the bucket to the one-per-minute floor). A
+/// dropped open is logged (throttled, input-free) and never queued for
+/// later.
+const OPENER_WINDOW: Duration = Duration::from_secs(60);
+const OPENER_BURST: usize = 3;
+
+/// The token-bucket math behind [`allow_external_open`]: consume one open
+/// at `now` from `(refilled_at, tokens)` and report whether it was
+/// permitted.
+fn external_open_slot(now: Instant, bucket: &mut (Instant, usize)) -> bool {
+    let (refilled_at, mut tokens) = *bucket;
+    // Whole tokens gained since the anchor instant; the remainder stays as
+    // elapsed time toward the next token (the anchor advances by whole
+    // windows only).
+    let gained = (now.duration_since(refilled_at).as_secs()
+        / OPENER_WINDOW.as_secs()) as usize;
+    tokens = (tokens + gained).min(OPENER_BURST);
+    let refilled_at = refilled_at + OPENER_WINDOW * gained as u32;
+    if tokens >= 1 {
+        *bucket = (refilled_at, tokens - 1);
+        true
+    } else {
+        *bucket = (refilled_at, tokens);
+        false
+    }
+}
+
+/// Whether this outside address may be opened in the person's default
+/// browser now. A dropped open is logged here, once per
+/// [`NAV_LOG_INTERVAL`], and never queued.
+pub fn allow_external_open() -> bool {
+    static BUCKET: std::sync::Mutex<Option<(Instant, usize)>> =
+        std::sync::Mutex::new(None);
+    let permitted = (|| {
+        let mut bucket = BUCKET.lock().ok()?;
+        let bucket = bucket.get_or_insert_with(|| (Instant::now(), OPENER_BURST));
+        Some(external_open_slot(Instant::now(), bucket))
+    })()
+    .unwrap_or(false);
+    if !permitted {
+        throttled_nav_record("SHELL_NAV.EXTERNAL_THROTTLED", Some(&THROTTLE_NOTE));
+    }
+    permitted
+}
+
+/// The sentence that accompanies a throttled-away open (the refusal record
+/// itself carries no address, ever).
+const THROTTLE_NOTE: &str =
+    "Mastermind OS shell window: an outside address was not opened in the default browser; the opener is throttled.";
+
+/// The shared throttled writer behind the navigation records.
+fn throttled_nav_record(code: &'static str, note: Option<&str>) {
     let throttle = (|| {
         let mut last = LAST_NAV_LOG.lock().ok()?;
         let now = Instant::now();
@@ -544,12 +625,15 @@ pub fn log_navigation_refused() {
     }
     if let Some(root) = shell_mode::dev_root() {
         if let Ok(log) = DevLog::open(&root.join("app.log")) {
-            let _ = log.native_failure("shell_mode", "SHELL_NAV.REFUSED");
+            let _ = log.native_failure("shell_mode", code);
         }
     }
-    eprintln!(
-        "Mastermind OS shell window: navigation refused; outside http(s) addresses open in the default browser."
-    );
+    match note {
+        Some(sentence) => eprintln!("{sentence}"),
+        None => eprintln!(
+            "Mastermind OS shell window: navigation refused; outside http(s) addresses open in the default browser."
+        ),
+    }
 }
 
 /// One input-free record that the failure explanation page itself could not
@@ -663,10 +747,16 @@ fn decide(phase: &Phase, current: Option<&Url>, original: &Url) -> Decision {
             if since.elapsed() > EXCHANGE_TIMEOUT {
                 return Decision::TimedOut;
             }
-            if current.is_some_and(|url| is_pairing_page(url, original)) {
-                // The configured address redirected straight back to the
-                // pairing page: whatever the minted load did, no session
-                // survives on the server for this window.
+            // NoSession is declared only once the hold has elapsed (panel
+            // round 2): a real bounce-back — the configured address
+            // redirecting straight back to the pairing page — is
+            // near-immediate and is still caught here, but a person
+            // pressing Back during the hold can flash the pairing page
+            // while the session is live, and that must not write a failure
+            // record.
+            if since.elapsed() >= VERIFY_HOLD
+                && current.is_some_and(|url| is_pairing_page(url, original))
+            {
                 return Decision::NoSession;
             }
             let held = since.elapsed() >= VERIFY_HOLD
@@ -833,6 +923,18 @@ pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, 
             std::thread::sleep(POLL_INTERVAL);
             let generation = window_generation();
             let window = app.get_webview_window(&window_label);
+            // Panel round 2 (the lead's finding): the fetch can straddle a
+            // window rebuild on the event loop — the window now held may
+            // belong to a newer generation than the value first read, and
+            // applying that stale value to the gate is exactly the
+            // pre-first-commit poll the gate exists to prevent. Re-read
+            // after the fetch; both reads agree whenever no rebuild
+            // happened.
+            let generation = if window.is_some() {
+                window_generation()
+            } else {
+                generation
+            };
             // Poll the webview URL only once this window generation has
             // committed a load: wry 0.55.1 unwraps a nil WKWebView URL on
             // the event loop, and before the first commit the URL is nil
@@ -1168,6 +1270,41 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    /// Panel round 2: WHATWG URL parsing strips `\r` and `\t` anywhere in
+    /// the input, so a helper whose output carries one — two addresses run
+    /// together with a carriage return, say — would parse as one address
+    /// with a garbage token and burn a mint. Helper output is one line of
+    /// text: a carriage return or a tab is refusal, like a newline.
+    #[test]
+    fn helper_output_refuses_carriage_returns_and_tabs() {
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        let cases: [(&str, &str, PairingFailure); 2] = [
+            (
+                "carriage-return.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=x\\rgarbage\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "tab.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=x\\tgarbage\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+        ];
+        for (name, body, expected) in cases {
+            let helper = write_helper(&dir, name, body);
+            assert_eq!(run_pair_helper(&helper, &origin), Err(expected), "{name}");
+        }
+        // A clean single line is still accepted.
+        let helper = write_helper(
+            &dir,
+            "clean.sh",
+            "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=x\\n'\n",
+        );
+        assert!(run_pair_helper(&helper, &origin).is_ok());
+        fs::remove_dir_all(&dir).ok();
+    }
+
     /// Panel repair A: the mint budget bounds pairing loops.
     #[test]
     fn mint_budget_allows_three_mints_in_any_ten_minutes() {
@@ -1440,11 +1577,57 @@ mod tests {
             "a stale commit must not open the poll for a new window"
         );
 
-        // A late page-load callback from the closed window marks only its
-        // own generation.
+        // The rebuilt window commits its own load: the gate follows
+        // forward.
+        mark_window_committed(rebuilt);
+        assert!(url_poll_is_safe(rebuilt));
+
+        // Panel round 2: a late page-load callback from the closed window
+        // cannot write the gate backwards — an older generation is a no-op,
+        // never a store over the newer one, so the live window keeps its
+        // open gate.
         mark_window_committed(generation);
-        assert!(!url_poll_is_safe(rebuilt));
-        assert!(url_poll_is_safe(generation));
+        assert!(
+            url_poll_is_safe(rebuilt),
+            "an older commit must not close the gate for the live window"
+        );
+        assert!(!url_poll_is_safe(generation));
+    }
+
+    /// Panel round 2, item 1: the default-browser opener is bounded by one
+    /// token bucket — the burst of deliberate opens lands, a flood past it
+    /// is dropped, and the sustained floor is exactly one open per window
+    /// with no re-armed burst while the flood keeps firing.
+    #[test]
+    fn external_opens_burst_then_floor_in_one_throttle() {
+        let t0 = Instant::now();
+        let second = Duration::from_secs(1);
+        let mut bucket = (t0, OPENER_BURST);
+        // The burst: three deliberate opens land back to back.
+        for index in 0..OPENER_BURST {
+            assert!(
+                external_open_slot(t0 + second * index as u32, &mut bucket),
+                "open {index} is inside the burst"
+            );
+        }
+        // The flood past the burst is dropped and stays dropped until a
+        // whole window has passed.
+        assert!(!external_open_slot(t0 + second * 4, &mut bucket));
+        assert!(!external_open_slot(t0 + second * 59, &mut bucket));
+        assert!(!external_open_slot(t0 + OPENER_WINDOW - second, &mut bucket));
+        // The floor: one open per window, never a re-armed burst — the
+        // minute after the floor open still refuses.
+        assert!(external_open_slot(t0 + OPENER_WINDOW, &mut bucket));
+        assert!(!external_open_slot(t0 + OPENER_WINDOW + second, &mut bucket));
+        assert!(!external_open_slot(t0 + OPENER_WINDOW * 2 - second, &mut bucket));
+        assert!(external_open_slot(t0 + OPENER_WINDOW * 2, &mut bucket));
+        // After three quiet windows the bucket is full again — three more
+        // deliberate opens land back to back, and a much later open is
+        // always covered.
+        assert!(external_open_slot(t0 + OPENER_WINDOW * 5, &mut bucket));
+        assert!(external_open_slot(t0 + OPENER_WINDOW * 5 + second, &mut bucket));
+        assert!(external_open_slot(t0 + OPENER_WINDOW * 5 + second * 2, &mut bucket));
+        assert!(external_open_slot(t0 + OPENER_WINDOW * 10, &mut bucket));
     }
 
     /// The helper executable earns the config's trust only through a path
@@ -1661,8 +1844,8 @@ mod tests {
         ));
 
         // Verifying: the configured address must stay off the pairing page
-        // for the full hold. Seeing it there — with or without a token —
-        // means no session was established; anything before the hold, any
+        // for the full hold. Seeing it there once the hold has elapsed —
+        // with or without a token — means no session was established; any
         // other origin and the blank page merely wait.
         let early = Phase::Verifying {
             since: Instant::now() - VERIFY_HOLD + Duration::from_millis(200),
@@ -1687,8 +1870,17 @@ mod tests {
             Decision::NoSession
         ));
         assert!(matches!(
-            decide(&early, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            decide(&held, Some(&url("http://127.0.0.1:3780/pair")), &original),
             Decision::NoSession
+        ));
+        // Panel round 2: a pairing-page sighting before the hold elapses
+        // waits — a person pressing Back during the exchange can flash the
+        // pairing page while the session is live, and that must not write a
+        // failure record. A real bounce-back is near-immediate and is
+        // caught once the hold has passed (the `held` asserts above).
+        assert!(matches!(
+            decide(&early, Some(&url("http://127.0.0.1:3780/pair")), &original),
+            Decision::Wait
         ));
         assert!(matches!(
             decide(&held, Some(&blank), &original),

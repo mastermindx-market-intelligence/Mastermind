@@ -326,6 +326,31 @@ class TestWriteShowClear:
                 assert "token" in result.stderr
             assert not (Path(tmp) / ".mastermind/mmos_dev/window-dev/shell-url").exists()
 
+    def test_show_never_echoes_a_multiline_config(self):
+        # Panel round 2 (q1-4): the shell case patterns in `show` match
+        # across newlines, so a hand-edited multi-line config file would be
+        # echoed raw. The single-line guard runs first: no part of a
+        # multi-line file is ever printed.
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = Path(tmp) / ".mastermind/mmos_dev/window-dev"
+            config_dir.mkdir(parents=True)
+            (config_dir / "shell-url").write_text(
+                "http://127.0.0.1:3780/env-1/t\nsecond line\n"
+            )
+            shown = run_tool("show", "--bundle", "dev", env_extra={"HOME": tmp}, check=False)
+            assert shown.returncode == 0
+            assert "second line" not in shown.stdout
+            assert "env-1" not in shown.stdout, (
+                "no part of a multi-line config is echoed"
+            )
+            assert "(not shown: not a single line)" in shown.stdout
+            # The same guard covers the helper file's line.
+            (config_dir / "shell-url").unlink()
+            (config_dir / "pair-helper").write_text("/bin/good\n/bin/second\n")
+            shown = run_tool("show", "--bundle", "dev", env_extra={"HOME": tmp}, check=False)
+            assert "second" not in shown.stdout
+            assert "(not shown: not a single line)" in shown.stdout
+
     def test_show_prints_scheme_host_port_path_and_never_the_rest(self):
         # Panel repair L: `show` prints the scheme, host, port and path only;
         # a stored line carrying userinfo, a query or a fragment is never
@@ -877,4 +902,59 @@ class TestUrlPollGate:
         assert "mark_window_committed" in main_rs
         assert "window_generation() + 1" in main_rs, (
             "the callback must carry the generation captured at build time, not the current one"
+        )
+
+    def test_generation_is_reread_after_the_window_fetch(self):
+        # Panel round 2 (the lead's finding): between the watchdog's
+        # generation read and its window fetch the event loop can complete a
+        # rebuild — the window then held belongs to a newer generation whose
+        # gate has not opened, and applying the stale first read to it is
+        # exactly the pre-first-commit poll the gate exists to prevent. The
+        # generation must be re-read after the fetch and that value is what
+        # the gate checks.
+        pairing = (
+            REPO / "app" / "mastermind_os" / "src-tauri" / "src" / "shell_pairing.rs"
+        ).read_text()
+        loop = pairing.split("let generation = window_generation();", 1)[1]
+        loop = loop.split("core.observe", 1)[0]
+        fetch = loop.find("get_webview_window")
+        assert fetch != -1, "the watchdog's window fetch is gone; re-check the loop"
+        reread = loop.find("window_generation()", fetch)
+        gate = loop.find("url_poll_is_safe", reread)
+        assert reread > fetch, (
+            "the generation must be re-read after the window fetch"
+        )
+        assert gate > reread, (
+            "the re-read generation is the one the poll gate must check"
+        )
+
+    def test_external_opens_share_one_opener_throttle(self):
+        # Panel round 2, item 1: the default-browser opener call itself —
+        # not just the log record — must sit behind one sliding-window
+        # throttle; the WebKit new-window path funnels into the same
+        # External arm, so one throttle bounds both paths, and a dropped
+        # open is never queued.
+        main_rs = (
+            REPO / "app" / "mastermind_os" / "src-tauri" / "src" / "main.rs"
+        ).read_text()
+        external_arm = main_rs.split("NavDecision::External", 1)[1]
+        throttle = external_arm.find("allow_external_open()")
+        spawn = external_arm.find("std::thread::spawn")
+        opener_call = external_arm.find("open_url")
+        assert "if shell_pairing::allow_external_open()" in external_arm, (
+            "the opener call must be gated by the one shared throttle"
+        )
+        assert -1 not in (throttle, spawn, opener_call)
+        assert throttle < spawn < opener_call, (
+            "the opener call must sit behind the throttle, inside the arm"
+        )
+        pairing = (
+            REPO / "app" / "mastermind_os" / "src-tauri" / "src" / "shell_pairing.rs"
+        ).read_text()
+        assert "const OPENER_WINDOW" in pairing and "const OPENER_BURST" in pairing, (
+            "the throttle's window and burst must be named constants"
+        )
+        slot = pairing.split("fn external_open_slot", 1)[1]
+        assert "duration_since" in slot.split("pub fn", 1)[0], (
+            "the slot math must age entries out by elapsed time"
         )

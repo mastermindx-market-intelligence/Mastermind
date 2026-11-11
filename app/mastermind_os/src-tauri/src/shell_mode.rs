@@ -35,8 +35,12 @@ pub enum ShellUrlRefusal {
     MissingHost,
     /// The URL carries userinfo (`user:pass@`), which can hold a secret.
     UserInfo,
-    /// Host was not exactly `127.0.0.1`.
+    /// Host was not exactly `127.0.0.1` in the writers' spelling — a
+    /// lookalike domain, an IPv4 shorthand or a trailing dot.
     HostNotLoopback,
+    /// The address carries no explicit port; both writers always write one
+    /// (panel round 2, writer parity).
+    MissingPort,
     /// The URL carries a query, which never belongs in a saved config line.
     Query,
     /// The URL carries a fragment (pairing tokens travel in one).
@@ -55,6 +59,7 @@ impl ShellUrlRefusal {
             ShellUrlRefusal::MissingHost => "missing_host",
             ShellUrlRefusal::UserInfo => "userinfo",
             ShellUrlRefusal::HostNotLoopback => "host_not_loopback",
+            ShellUrlRefusal::MissingPort => "missing_port",
             ShellUrlRefusal::Query => "query",
             ShellUrlRefusal::Fragment => "fragment",
             ShellUrlRefusal::ReservedPath => "reserved_path",
@@ -69,6 +74,7 @@ impl ShellUrlRefusal {
             ShellUrlRefusal::MissingHost => "URL has no host",
             ShellUrlRefusal::UserInfo => "URL must not carry userinfo",
             ShellUrlRefusal::HostNotLoopback => "host must be exactly 127.0.0.1",
+            ShellUrlRefusal::MissingPort => "the address must carry an explicit port",
             ShellUrlRefusal::Query => "a query never belongs in the config",
             ShellUrlRefusal::Fragment => "a fragment never belongs in the config",
             ShellUrlRefusal::ReservedPath => {
@@ -121,6 +127,22 @@ pub fn parse_loopback_http(input: &str) -> Result<Url, ShellUrlRefusal> {
 /// write.
 pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
     let parsed = parse_loopback_http(input)?;
+    // Writer parity (panel round 2): both writers spell the address exactly
+    // `http://127.0.0.1:<port>` — lowercase scheme, the host spelled out,
+    // an explicit port. The url parser normalizes IPv4 shorthands
+    // (`127.1`, `2130706433`, `0x7f000001`, `127.000.000.001`), a trailing
+    // dot and an uppercase scheme to the same host and scheme, so without
+    // this check a hand-edited config could carry an address neither
+    // writer writes.
+    if !input.starts_with("http://127.0.0.1:") {
+        return Err(if input.starts_with("http://127.0.0.1/") || input == "http://127.0.0.1" {
+            ShellUrlRefusal::MissingPort
+        } else if input.as_bytes().get(..7) == Some(b"http://") {
+            ShellUrlRefusal::HostNotLoopback
+        } else {
+            ShellUrlRefusal::WrongScheme
+        });
+    }
     if parsed.query().is_some() {
         return Err(ShellUrlRefusal::Query);
     }
@@ -618,7 +640,7 @@ mod tests {
     fn accepts_loopback_http_urls() {
         for value in [
             "http://127.0.0.1:3100/env-1/thread-1",
-            "HTTP://127.0.0.1:8080/env-1/thread-1",
+            "http://127.0.0.1:8080/env-1/thread-1",
         ] {
             let parsed = parse_shell_url(value)
                 .unwrap_or_else(|refusal| panic!("case refused as {}", refusal.subcode()));
@@ -886,23 +908,14 @@ mod tests {
     }
 
     /// S1 attack finding 2 fix: exotic loopback spellings and lookalikes.
-    /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 (still loopback,
-    /// so accepted); lookalike domains, userinfo tricks and IPv6 forms are refused.
-    /// Since the attack round the accepted spellings carry a real thread path —
-    /// the server root itself belongs to the pairing flow, never to the config.
+    /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 — still
+    /// loopback, and since the attack round every accepted spelling carries
+    /// a real thread path. Since panel round 2 the shorthand and
+    /// trailing-dot spellings are refused too: no writer writes them
+    /// (see `gate_refuses_spellings_no_writer_writes`). Lookalike domains,
+    /// userinfo tricks and IPv6 forms are refused.
     #[test]
     fn gate_handles_exotic_loopback_spellings() {
-        for accepted in [
-            "http://127.1/env-1/t",
-            "http://127.0.0.1./env-1/t",
-            "http://2130706433/env-1/t",
-            "http://0x7f000001/env-1/t",
-            "http://127.000.000.001/env-1/t",
-        ] {
-            let parsed = parse_shell_url(accepted)
-                .unwrap_or_else(|r| panic!("{accepted} refused as {}", r.subcode()));
-            assert_eq!(parsed.host_str(), Some("127.0.0.1"), "{accepted}");
-        }
         for refused in [
             "http://127.0.0.1.evil.com",
             "http://127.1.evil.com",
@@ -921,6 +934,50 @@ mod tests {
                 "{refused} must be refused"
             );
         }
+    }
+
+    /// Panel round 2 (writer parity): both writers spell the address exactly
+    /// `http://127.0.0.1:<port>` — lowercase scheme, the host spelled out,
+    /// an explicit port. The url parser normalizes IPv4 shorthands
+    /// (`127.1`, `2130706433`, `0x7f000001`, `127.000.000.001`), a trailing
+    /// dot and an uppercase scheme to the same host and scheme, so without
+    /// an exact-spelling check a hand-edited config could carry an address
+    /// no writer refuses to write but none ever writes. The loader refuses
+    /// every such spelling.
+    #[test]
+    fn gate_refuses_spellings_no_writer_writes() {
+        for (refused, expected) in [
+            ("http://127.1/env-1/t", ShellUrlRefusal::HostNotLoopback),
+            ("http://127.0.0.1./env-1/t", ShellUrlRefusal::HostNotLoopback),
+            (
+                "http://127.0.0.1.:3790/env-1/t",
+                ShellUrlRefusal::HostNotLoopback,
+            ),
+            ("http://2130706433/env-1/t", ShellUrlRefusal::HostNotLoopback),
+            ("http://0x7f000001/env-1/t", ShellUrlRefusal::HostNotLoopback),
+            (
+                "http://127.000.000.001/env-1/t",
+                ShellUrlRefusal::HostNotLoopback,
+            ),
+            ("http://127.0.0.1/env-1/t", ShellUrlRefusal::MissingPort),
+            ("http://127.0.0.1", ShellUrlRefusal::MissingPort),
+            (
+                "HTTP://127.0.0.1:8080/env-1/t",
+                ShellUrlRefusal::WrongScheme,
+            ),
+        ] {
+            assert_eq!(
+                parse_shell_url(refused),
+                Err(expected),
+                "{refused} must be refused as {}",
+                expected.subcode()
+            );
+        }
+        // The spelling both writers write is accepted.
+        let parsed =
+            parse_shell_url("http://127.0.0.1:3790/env-1/t").expect("writer spelling accepted");
+        assert_eq!(parsed.host_str(), Some("127.0.0.1"));
+        assert_eq!(parsed.port(), Some(3790));
     }
 
     #[test]
