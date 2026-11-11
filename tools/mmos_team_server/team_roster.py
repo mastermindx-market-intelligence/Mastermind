@@ -355,6 +355,40 @@ HOME_CONFIG = ("settings.json", "settings.local.json", "managed-settings.json",
                "output-styles", "backups", "sessions", "projects", "todos",
                "shell-snapshots", "statsig", "ide")
 
+# Server-root folders that choose which program the team server runs at its
+# next start (bin/server_runner.sh is what launchd invokes; config names the
+# server binary; runtime holds the pinned packed server; run holds the port
+# and launcher state). Whoever can write them owns the next server start,
+# and the installer cannot defend against that — the teammate limits must.
+# Always denied for Write/Edit, in every spec, new keys or not.
+SERVER_INFRASTRUCTURE = ("bin", "config", "runtime", "run")
+
+
+def assets_dir_for(spec, mate):
+    """Where this teammate's tool-limits.json and CHARTER.md live.
+
+    Part B Q4: with spec.assets_dir set, those two config files are written
+    outside the teammate home (the home is the Claude configuration folder,
+    and config the runtime re-reads is better absent than denied). Returns
+    None when the key is absent — then both files live in the home, as
+    today. The dir is private to one teammate: <assets_dir>/<slug>.
+    """
+    base = spec.get("assets_dir")
+    if not base:
+        return None
+    return os.path.join(expand(base), mate["slug"])
+
+
+def limits_paths(spec, mate):
+    """(limits_path, charter_path) this teammate's launch args point at."""
+    home = teammate_home(spec, mate)
+    assets = assets_dir_for(spec, mate)
+    if assets is None:
+        return (os.path.join(home, "tool-limits.json"),
+                os.path.join(home, "CHARTER.md"))
+    return (os.path.join(assets, "tool-limits.json"),
+            os.path.join(assets, "CHARTER.md"))
+
 
 def _read_deny(path):
     """Deny rules for one path: a directory denies its whole tree."""
@@ -378,6 +412,9 @@ def deny_read_paths(spec, mate):
     for other in spec["teammates"]:
         if other["slug"] != mate["slug"]:
             paths.append(teammate_home(spec, other))
+            other_assets = assets_dir_for(spec, other)
+            if other_assets is not None:
+                paths.append(other_assets)
     home = teammate_home(spec, mate)
     paths += [os.path.join(home, name) for name in HOME_UNREADABLE]
     paths += [expand(r) for r in spec.get("deny_read_roots", [])]
@@ -395,6 +432,114 @@ def deny_read_paths(spec, mate):
     return out
 
 
+READ_TOOLS = ("Read", "Glob", "Grep")
+
+
+def _read_allow_roots(spec, mate):
+    """Absolute real paths reads are rooted to when allow_read_roots is set:
+    the teammate's own home plus the spec's roots."""
+    roots = [os.path.realpath(teammate_home(spec, mate))]
+    roots += [os.path.realpath(expand(r))
+              for r in spec.get("allow_read_roots") or []]
+    seen, out = set(), []
+    for r in roots:
+        if r not in seen:
+            seen.add(r)
+            out.append(r)
+    return out
+
+
+def rooted_read_denies(spec, mate, tools=READ_TOOLS):
+    """Deny rules that make reads (and, with Write/Edit passed as tools,
+    writes) allowed ONLY under the rooted roots (Part B Q2/Q3).
+
+    Allow rules cannot restrict in the real launch mode (proved live:
+    full-access threads run bypassPermissions, an unmatched tool call is
+    silently allowed, and a more-specific allow never beats a deny), so the
+    rooting is compiled to deny rules by sibling enumeration: for every
+    root chain (/a/b/c), every directory NOT on a chain gets a file and a
+    tree deny, and each chain directory gets a file-form deny only — a tree
+    deny on a chain directory would deny the allowed root inside it, and
+    deny wins. The file form stops a Glob/Grep whose path is the directory
+    itself from enumerating names one level above an allowed root.
+    """
+    roots = _read_allow_roots(spec, mate)
+    chain = set()
+    for root in roots:
+        node = root
+        while node != "/":
+            chain.add(node)
+            node = os.path.dirname(node)
+    # Sibling enumeration runs only after every chain is known: a directory
+    # can sit on root 2's chain while being a mere sibling of root 1's chain
+    # (e.g. two roots under the same temp dir), and it must not be denied.
+    denied = set()
+    for node in chain:
+        parent = os.path.dirname(node)
+        try:
+            names = os.listdir(parent)
+        except OSError:
+            names = []
+        for name in names:
+            sib = os.path.join(parent, name)
+            if sib not in chain and sib not in roots:
+                denied.add(sib)
+    rules = []
+    for tool in tools:
+        for path in sorted(denied):
+            rules += [f"{tool}(/{path})", f"{tool}(/{path}/**)"]
+        for path in sorted(c for c in chain if c != "/" and c not in roots):
+            rules.append(f"{tool}(/{path})")
+    return rules
+
+
+def _home_write_allow_names(spec):
+    return list(spec.get("home_write_allow") or [])
+
+
+def rooted_home_write_rules(spec, mate):
+    """(allow, deny) rules replacing the home-wide write allow (Part B Q3).
+
+    Only the named home-relative entries stay writable (a bare name is one
+    file; a trailing slash is a subtree). Everything else in the home is
+    denied: every existing child at apply time plus every HOME_CONFIG and
+    HOME_LOCKED name whether or not it exists. A brand-new top-level name
+    that is in neither list stays creatable but nothing loads it (the
+    loading surface is HOME_CONFIG, all denied) — stated plainly in
+    RL_TEAMMATE_LIMITS.md.
+    """
+    home = teammate_home(spec, mate)
+    names = _home_write_allow_names(spec)
+    allowed_files = {n for n in names if not n.endswith("/")}
+    allowed_dirs = {n.rstrip("/") for n in names if n.endswith("/")}
+    allow = []
+    for name in names:
+        target = os.path.join(home, name.rstrip("/"))
+        if name.endswith("/"):
+            allow += [f"Write(/{target})", f"Write(/{target}/**)",
+                      f"Edit(/{target})", f"Edit(/{target}/**)"]
+        else:
+            allow += [f"Write(/{target})", f"Edit(/{target})"]
+    deny = []
+    for tool in ("Write", "Edit"):
+        for name in sorted(set(HOME_LOCKED + HOME_CONFIG)):
+            if name in allowed_files or name in allowed_dirs:
+                continue  # never granted: locked/config names are not
+                # writable even if a spec mistakenly lists them
+            target = os.path.join(home, name)
+            deny += [f"{tool}(/{target})", f"{tool}(/{target}/**)"]
+        try:
+            children = os.listdir(home)
+        except OSError:
+            children = []
+        for name in sorted(children):
+            if name in allowed_files or name in allowed_dirs:
+                continue
+            target = os.path.join(home, name)
+            deny += [f"{tool}(/{target})", f"{tool}(/{target}/**)"]
+    return allow, deny
+
+
 def tool_limits(spec, mate):
     home = teammate_home(spec, mate)
     deny_roots = [expand(spec["project"]["workspace_root"])]
@@ -409,17 +554,49 @@ def tool_limits(spec, mate):
         config = os.path.join(home, name)
         for tool in ("Write", "Edit"):
             deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
+    root = expand(spec["server"]["root"])
+    for name in SERVER_INFRASTRUCTURE:
+        infra = os.path.join(root, name)
+        for tool in ("Write", "Edit"):
+            deny += [f"{tool}(/{infra})", f"{tool}(/{infra}/**)"]
     for path in deny_read_paths(spec, mate):
         deny += _read_deny(path)
+    read_rooted = bool(spec.get("allow_read_roots"))
+    write_named = bool(spec.get("home_write_allow"))
+    if read_rooted:
+        deny += rooted_read_denies(spec, mate, READ_TOOLS)
+    if write_named:
+        deny += rooted_read_denies(spec, mate, ("Write", "Edit"))
     allow = [
         "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
         f"Write(/{home}/**)", f"Edit(/{home}/**)",
     ]
+    if read_rooted:
+        allow = [a for a in allow if a not in READ_TOOLS]
+        for r in _read_allow_roots(spec, mate):
+            allow += [f"Read(/{r}/**)", f"Glob(/{r}/**)", f"Grep(/{r}/**)"]
+    if write_named:
+        allow = [a for a in allow
+                 if a not in (f"Write(/{home}/**)", f"Edit(/{home}/**)")]
+        extra_allow, extra_deny = rooted_home_write_rules(spec, mate)
+        allow += extra_allow
+        deny += extra_deny
+    seen = set()
+    deny = [d for d in deny if not (d in seen or seen.add(d))]
+    note = ("allow/deny enumerations in Claude Code permission syntax. "
+            "Proved live on the dev server: deny wins over allow at any "
+            "specificity; a bare tool deny removes the tool; and in the "
+            "real launch mode (full-access -> bypassPermissions) allow "
+            "lists do not restrict — a tool call matching neither allow "
+            "nor deny is silently allowed, so every restriction here is a "
+            "deny. Limits bind at session-process start, not on file "
+            "change (apply reports limitsPendingRestart).")
+    if read_rooted or write_named:
+        note += (" allow_read_roots/home_write_allow compiled to deny "
+                 "rules by sibling enumeration (rooted_read_denies).")
     return {
         "permissions": {"allow": allow, "deny": deny},
-        "_note": ("allow/deny enumerations in Claude Code permission syntax; "
-                  "deny wins over allow; an unlisted outside-home write raises "
-                  "an approval request rather than silently writing"),
+        "_note": note,
     }
 
 
@@ -428,13 +605,23 @@ def write_file_assets(spec, mate):
 
     CLAUDE.md is the teammate's live long-term memory: created only when
     missing, never rewritten by apply (a rewrite would erase remembered
-    facts). CHARTER.md and tool-limits.json are config and follow the spec.
+    facts). CHARTER.md and tool-limits.json are config and follow the spec;
+    with spec.assets_dir set they live outside the home (Q4) in a
+    0700 dir of their own.
     """
     home = teammate_home(spec, mate)
     os.makedirs(home, exist_ok=True)
     os.chmod(home, 0o700)
-    charter = os.path.join(home, "CHARTER.md")
-    limits = os.path.join(home, "tool-limits.json")
+    limits_path, charter_path = limits_paths(spec, mate)
+    if assets_dir_for(spec, mate) is not None:
+        os.makedirs(assets_dir_for(spec, mate), exist_ok=True)
+        os.chmod(assets_dir_for(spec, mate), 0o700)
+        # a leftover in-home copy from before assets_dir was set would be
+        # dead config the home deny rules treat as locked: remove it
+        for stale in ("tool-limits.json", "CHARTER.md"):
+            stale_path = os.path.join(home, stale)
+            if os.path.exists(stale_path):
+                os.unlink(stale_path)
     seed = ("<!-- Long-term memory of {name}. Append durable facts below; "
             "they persist across conversations and server restarts. -->\n"
             "# {name} — memory\n\n").format(name=mate["name"])
@@ -443,9 +630,10 @@ def write_file_assets(spec, mate):
     if not os.path.exists(memory):
         write_if_changed(memory, seed, 0o600)
         wrote.append("CLAUDE.md")
-    if write_if_changed(charter, mate["charter"], 0o600):
+    if write_if_changed(charter_path, mate["charter"], 0o600):
         wrote.append("CHARTER.md")
-    if write_if_changed(limits, json.dumps(tool_limits(spec, mate), indent=2) + "\n",
+    if write_if_changed(limits_path,
+                        json.dumps(tool_limits(spec, mate), indent=2) + "\n",
                         0o600):
         wrote.append("tool-limits.json")
     return wrote
@@ -464,9 +652,10 @@ def load_settings(spec):
 
 def instance_for(spec, mate):
     home = teammate_home(spec, mate)
+    limits_path, charter_path = limits_paths(spec, mate)
     launch_args = [
-        "--append-system-prompt-file", os.path.join(home, "CHARTER.md"),
-        "--settings", os.path.join(home, "tool-limits.json"),
+        "--append-system-prompt-file", charter_path,
+        "--settings", limits_path,
     ]
     return {
         "driver": "claudeAgent",

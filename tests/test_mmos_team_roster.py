@@ -241,12 +241,17 @@ class TestToolLimitsCredentials:
 
 class TestToolLimitsNewKeys:
     """Part B Q2/Q3: allow_read_roots and home_write_allow compile to deny
-    rules; a spec WITHOUT the keys must generate exactly today's rules."""
+    rules; a spec WITHOUT the keys must generate exactly the default rules
+    (the server-infrastructure write denies below are always on — whoever
+    can write the team server's own folders chooses which program it runs
+    at its next start, and the limits, not the installer, must prevent
+    that)."""
 
     @staticmethod
     def today_rules(spec, mate):
-        """Today's generation, reconstructed from the module's own tuples so
-        the absent-key test fails if the output changes in any way."""
+        """The default generation, reconstructed from the module's own
+        tuples so the absent-key test fails if the output changes in any
+        way."""
         root = team_roster.expand(spec["server"]["root"])
         home = team_roster.teammate_home(spec, mate)
         deny_roots = [team_roster.expand(spec["project"]["workspace_root"])]
@@ -262,11 +267,29 @@ class TestToolLimitsNewKeys:
             config = os.path.join(home, name)
             for tool in ("Write", "Edit"):
                 deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
+        for name in team_roster.SERVER_INFRASTRUCTURE:
+            infra = os.path.join(root, name)
+            for tool in ("Write", "Edit"):
+                deny += [f"{tool}(/{infra})", f"{tool}(/{infra}/**)"]
         for path in team_roster.deny_read_paths(spec, mate):
             deny += team_roster._read_deny(path)
         allow = ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
                  f"Write(/{home}/**)", f"Edit(/{home}/**)"]
         return {"permissions": {"allow": allow, "deny": deny}}
+
+    def test_infrastructure_folders_never_writable(self, tmp_path):
+        """Server-root bin/, config/, runtime/ and run/ are denied for
+        Write and Edit even in a spec with none of the new keys: whoever
+        can write them chooses which program the server runs next start."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        root = team_roster.expand(spec["server"]["root"])
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in team_roster.SERVER_INFRASTRUCTURE:
+            infra = os.path.join(root, name)
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{infra})" in deny, name
+                assert f"{tool}(/{infra}/**)" in deny, name
 
     def test_absent_keys_give_exactly_today_rules(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))
@@ -300,6 +323,11 @@ class TestToolLimitsNewKeys:
         mate, other = spec["teammates"][0], spec["teammates"][1]
         os.makedirs(team_roster.teammate_home(spec, other))
         home = team_roster.teammate_home(spec, mate)
+        # a sibling of the allowed root under a chain dir: exists at apply
+        # time, so sibling enumeration must deny it (a name created after
+        # apply is the stated future-name gap, not testable here)
+        sibling_dir = tmp_path / "elsewhere" / "unrelated-dir"
+        sibling_dir.mkdir()
         limits = team_roster.tool_limits(spec, mate)
         allow, deny = (limits["permissions"]["allow"],
                        limits["permissions"]["deny"])
@@ -320,16 +348,16 @@ class TestToolLimitsNewKeys:
             for name in os.listdir("/"):
                 if name in chain_at_root:
                     continue
-                assert f"{tool}(/{name})" in deny, name
-                assert f"{tool}(/{name}/**)" in deny, name
+                assert f"{tool}(//{name})" in deny, name
+                assert f"{tool}(//{name}/**)" in deny, name
         # chain directories are denied in FILE form only (a tree form would
-        # deny the allowed root below them too, and deny wins)
+        # deny the allowed root below them too, and deny wins); their
+        # non-chain children that exist at apply time are denied in both
         chain_parent = os.path.dirname(str(extra_root))
-        (tmp_path / "elsewhere" / "unrelated-dir").mkdir()
+        sibling = str(sibling_dir)
         for tool in ("Read", "Glob", "Grep"):
             assert f"{tool}(/{chain_parent})" in deny
             assert f"{tool}(/{chain_parent}/**)" not in deny
-            sibling = os.path.join(chain_parent, "unrelated-dir")
             assert f"{tool}(/{sibling})" in deny
             assert f"{tool}(/{sibling}/**)" in deny
         # the allowed root and the home are never denied as trees
