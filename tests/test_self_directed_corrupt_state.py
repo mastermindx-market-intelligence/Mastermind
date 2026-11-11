@@ -191,3 +191,16 @@ def test_nonfinite_sizing_cannot_create_unreadable_pending_order(sandbox, field)
     result = SD.place_order("MSFT", "buy", **{field: float("inf")}, market_open=False)
     assert result["ok"] is False
     assert not SD._PENDING_PATH.exists()
+
+
+@pytest.mark.parametrize("dangling_link", [False, True], ids=["missing", "dangling"])
+def test_unavailable_book_directory_cannot_report_a_cancel_miss(sandbox, dangling_link):
+    SD._DATA.rmdir()
+    if dangling_link:
+        SD._DATA.symlink_to(sandbox / "offline-book", target_is_directory=True)
+
+    with pytest.raises(SD.SelfDirectedStateCorrupt, match="pending"):
+        SD.cancel_order("queued-1")
+
+    assert not SD._DATA.exists()
+    assert SD._DATA.is_symlink() is dangling_link

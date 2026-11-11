@@ -518,9 +518,11 @@ def _state_text(path: Path, artifact: str) -> str | None:
     try:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
-        if path.is_symlink():
-            raise SelfDirectedStateCorrupt(artifact) from exc
-        return None
+        # An absent file is a first-use default only inside an existing book.
+        status, _, _ = _classify_account_path(path)
+        if status == "absent":
+            return None
+        raise SelfDirectedStateCorrupt(artifact) from exc
     except (OSError, UnicodeError) as exc:
         raise SelfDirectedStateCorrupt(artifact) from exc
 
