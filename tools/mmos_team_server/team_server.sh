@@ -198,8 +198,9 @@ wait_http() {
   while [ "$_i" -lt "$_want" ]; do
     # F20: on a connection failure curl prints 000 AND exits non-zero, so
     # `|| echo 000` produced "000000". Capture, then default only an empty
-    # result.
-    _code=$("$CURL" -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_port/" 2>/dev/null) || _code=""
+    # result. --max-time 5 (micro-fix HIGH-1): curl has no default timeout,
+    # and an unbounded probe against a wedged port hangs the whole wait.
+    _code=$("$CURL" --max-time 5 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_port/" 2>/dev/null) || _code=""
     [ -n "$_code" ] || _code=000
     [ "$_code" = "200" ] && return 0
     _i=$((_i + 1)); sleep 1
@@ -212,7 +213,7 @@ wait_http() {
 port_answered() {
   _p="$1"
   canonical_port "$_p" >/dev/null 2>&1 || return 1
-  _code=$("$CURL" -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_p/" 2>/dev/null) || _code=""
+  _code=$("$CURL" --max-time 5 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_p/" 2>/dev/null) || _code=""
   [ -n "$_code" ] || _code=000
   [ "$_code" = "200" ]
 }
@@ -834,8 +835,8 @@ cmd_status() {
   fi
   echo "pid=${_pid:-none}"
   if [ "$PORT" != "?" ]; then
-    # F20: same 000000 fix as wait_http.
-    _code=$("$CURL" -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null) || _code=""
+    # F20: same 000000 fix as wait_http. --max-time 5 as everywhere (HIGH-1).
+    _code=$("$CURL" --max-time 5 -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null) || _code=""
     [ -n "$_code" ] || _code=000
     echo "port=$PORT http_root=$_code"
     echo "listeners:"

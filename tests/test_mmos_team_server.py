@@ -226,6 +226,17 @@ class TestInstallHygiene:
         assert r.returncode != 0
         assert "not executable" in (r.stdout + r.stderr)
 
+    def test_http_probes_carry_a_max_time(self):
+        # Micro-fix round, HIGH-1: curl has NO default timeout, so an
+        # unbounded probe against a wedged local port can hang an install,
+        # start or stop for minutes past every wait window while the operator
+        # sees nothing. Every HTTP probe the tool makes must bound itself.
+        text = TOOL.read_text()
+        probes = [line for line in text.splitlines()
+                  if '"$CURL"' in line and "%{http_code}" in line]
+        assert len(probes) == 3, probes
+        assert all("--max-time 5" in line for line in probes), probes
+
 
 class TestAttackRoundFixes:
     """Regression tests for the 2026-11-10 attack-round findings (writer:
