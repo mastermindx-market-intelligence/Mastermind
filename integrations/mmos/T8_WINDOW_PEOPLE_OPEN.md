@@ -142,6 +142,19 @@ Proved, live, on the dev/t8 bundle against a private dev T3 server
 - The failure path, live: before the fragment-navigation fix the exchange
   timed out; the window showed the plain one-sentence page and the log
   gained exactly one input-free `PAIRING.FAILED.exchange_timeout` record.
+  Re-proved on the final binary with a failing helper: the window's own
+  accessibility text is exactly one sentence — "Mastermind OS could not
+  sign in to the team server automatically — ask whoever set up this Mac
+  to re-pair the app." — and the log grew by exactly one input-free
+  `PAIRING.FAILED.helper_exit` record (`04-pair-failure/`, read as text,
+  never the pairing page).
+- No config = today's ordinary window: with the t8 config cleared, the
+  relaunch shows the standard product window ("Sign in to account",
+  "Private workspace"), no Team thread and no error
+  (`05-no-config/ax-plain-window.json`). Caveat recorded in the ledger:
+  the child's cookie-delete step aborted on a zsh glob, so this ran with
+  the previous launch's cookie stores — with no config the app never
+  consults a server, so cookies cannot change this path.
 - Every helper failure shape (missing, non-zero exit, empty, multiline,
   off-origin, remote, hung), the tokenless-page detection rules, the
   watchdog's whole state machine, and token-free logging are unit-tested in
