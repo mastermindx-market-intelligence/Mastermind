@@ -557,8 +557,22 @@ def _load_pending() -> list[dict]:
         orders = json.loads(text)
     except ValueError as exc:
         raise SelfDirectedStateCorrupt("pending") from exc
-    if not isinstance(orders, list) or any(not isinstance(order, dict) for order in orders):
+    if not isinstance(orders, list):
         raise SelfDirectedStateCorrupt("pending")
+    # Settle validates the complete batch before the first durable fill.
+    for order in orders:
+        if not isinstance(order, dict) or order.get("side") not in ("buy", "sell"):
+            raise SelfDirectedStateCorrupt("pending")
+        ticker = order.get("ticker")
+        if not isinstance(ticker, str) or not ticker.strip():
+            raise SelfDirectedStateCorrupt("pending")
+        shares, notional = order.get("shares"), order.get("notional")
+        if (shares is None) == (notional is None):
+            raise SelfDirectedStateCorrupt("pending")
+        quantity = shares if shares is not None else notional
+        # Older writers rounded tiny valid quantities to zero before saving.
+        if not _is_account_number(quantity) or quantity < 0:
+            raise SelfDirectedStateCorrupt("pending")
     return orders
 
 
@@ -904,8 +918,8 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
     def _pos(v):
         try:
             v = float(v)
-            return v if v > 0 else None
-        except (TypeError, ValueError):
+            return v if math.isfinite(v) and v > 0 else None
+        except (TypeError, ValueError, OverflowError):
             return None
     sh = _pos(shares)
     nt = _pos(notional)
