@@ -40,6 +40,8 @@ and whose `config.launchArgs` carry `--append-system-prompt-file
 | `*` wildcards inside deny paths | **YES** | `*.txt` probe in 09 |
 | a deny rule naming a DIRECTORY | **matches the directory's whole subtree** ("File is in a directory that is denied") — never deny a chain directory in any form | 10, D2: first-cut design refused all 21 actions incl. allowed roots |
 | exact-path `Write(//path)` rule alone | **never binds — the `//path/**` member is what binds** | 10, D3 (and 10b: this was guarding the teammate's own limits file) |
+| exact-path `Read(//path)` rule alone | **DOES bind** (asymmetric with Write) | 11, S1 (2-rule file, exact-only Read on an existing file → refused) |
+| macOS firmlink spellings (`/System/Volumes/Data/Users/...`) | **the matcher canonicalizes them** — a `/Users`-spelled deny refused a Data-spelled read. realpath does NOT canonicalize (generator emits twin spellings as insurance) | 11, S2 |
 | single-slash forms `Read(/path)`, `Write(/path)` | **never bind; the generator's `//path` double-slash form is required** | 10, D4 |
 | symlink whose given path is not denied but whose target is | **REFUSED — the matcher resolves links** | symlink probe in 09 |
 | `permissions.allow` as a restriction | **NO — inert in bypassPermissions** | unmatched Write outside every root succeeded instantly (06) |
@@ -97,8 +99,24 @@ generates byte-identical permissions to today's (regression test
   structurally. Note the scopes: `allow_read_roots` are *read* scopes;
   the shared workspace stays write-denied by the base rule regardless.
 - `deny_write_roots` (list of absolute paths, predates round 2):
-  Write/Edit denied on the path itself and its whole tree. `abspath` does
-  not expand `~` — entries must be absolute or `~`-expanded by the caller.
+  Write/Edit denied on the path itself and its whole tree, built from
+  realpath (a symlinked spelling would never match) plus its firmlink
+  twin when under /Users.
+- **Always-on write fence (attack round, findings 1-4)**: in every spec,
+  with no new keys, Write/Edit are fenced to the teammate's own home by
+  the same sibling enumeration. This closes what the attack round
+  confirmed writable under the real spec today: the server's own home
+  (its `userdata/settings.json` is watched and reloaded **live** by the
+  running server — writing it rewrites launchArgs and can drop
+  `--settings` at the next session spawn), `fabric.env`, every OTHER
+  teammate's home (their limits/charter would bind at their next
+  process start — lateral takeover), and the user's own config surfaces
+  (`~/.zshenv`, `~/.ssh`, `~/Library/LaunchAgents`, `~/.claude`,
+  `~/.codex`, `~/.gitconfig` — `deny_read_roots` never covered writes).
+  The t3 CLI install dir (`dirname` of `server.t3_bin`) gets its own
+  explicit deny: apply/status execute that binary with the team home,
+  and it need not sit near the home chain. Live-proof: evidence 11,
+  actions N1-N7.
 - `SERVER_INFRASTRUCTURE` (no key; always on): Write/Edit denies
   (file+tree) for `<server root>/{bin,config,runtime,run}` in every
   spec. Whoever can write those folders chooses which program the server
@@ -120,13 +138,16 @@ generates byte-identical permissions to today's (regression test
   never content: the siblings themselves stay denied (R3/R5 refused).
   Listing `/` itself is likewise not denied. Closing this would require
   denying a chain directory, which denies the allowed root beneath it.
-- **Future top-level names in the home**: a file named neither in
-  `HOME_CONFIG`/`HOME_LOCKED` nor among existing children at apply time is
-  creatable under `home_write_allow` (W7 in the final probe: ALLOWED).
-  It is writable-but-not-loaded: Claude Code loads config only under the
-  known names, all of which are denied. The list is the maintenance
-  surface — a reviewer re-checks `HOME_CONFIG` against the CLI's config
-  inventory.
+- **Future top-level names in the home** (and anywhere else): a file
+  named neither in `HOME_CONFIG`/`HOME_LOCKED` nor among existing
+  children at apply time is creatable under `home_write_allow` (W7 in
+  the final probe: ALLOWED); the same applies one level up — a brand-new
+  name directly under the user home or the server root is creatable
+  because chain directories cannot be denied without killing the
+  subtree. It is writable-but-not-loaded: the load surfaces (shell
+  startup files, launchd plists dir contents, `HOME_CONFIG`) are all
+  EXISTING names, all denied. Re-apply after changing the team layout;
+  `_note` says so.
 - **Symlink escapes are blocked by the matcher** (it resolves links —
   evidence 09), so a link inside an allowed root pointing outside is
   refused when the target is denied (R6 in the final probe). A link to an
@@ -138,11 +159,12 @@ generates byte-identical permissions to today's (regression test
   allow inside a tree deny does NOT unlock the subtree. There is no
   gitignore-style cascade, so a compact deny/allow cascade is impossible
   and the enumeration must be precise.
-- **Rule volume**: on this Mac the rooted keys compile to ~8400 deny
-  rules / ~480 KB (838 non-chain sibling paths, 710 of them in the user
-  home alone, × 6 rules each, plus base rules). No cap was observed —
-  the dev proof's 8,409-rule file loaded and enforced fully — but apply
-  time and file size are the practical cost of deny-only rooting.
+- **Rule volume**: the always-on write fence alone compiles to ~3,400
+  deny rules on this Mac (838 non-chain sibling paths, 710 of them in
+  the user home alone, × 4); with the rooted read keys the final
+  measured file is 8,475 deny rules / ~480 KB. No cap was observed —
+  files of that size load and enforce fully — but apply time and file
+  size are the practical cost of deny-only fencing.
 
 ## 5. Safe session restart (for installing new limits)
 
@@ -168,6 +190,7 @@ and resumes the same thread with full history (transcript-based resume,
 | deny absolute over allow; no cascade | `09b-*` |
 | round-2 rule semantics: settings-in-home requirement (D1), directory-subtree matching (D2), exact-write forms (D3), single-slash forms (D4), no rule cap; final 21-action proof of the rooted design incl. infrastructure refusals; invalid runs disclosed | `10-rule-semantics-round2.md` + `10-probe-reply.txt` |
 | HOME_LOCKED exact-form hole and the tree-member fix, live-proved on today's-shape rules | `10b-locked-tree-member-proof.md` + `10b-probe-reply.txt` |
+| attack round: 12 findings + dispositions, exact-Read binding (S1), firmlink canonicalization (S2), final 8-action fence proof on the 445c2662e-generated file (N1-N7 refused, N8 allowed, disk clean) | `11-attack-round-and-fixes.md`, `11-attack-findings.txt`, `11-fence-probe-reply.txt` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
@@ -175,21 +198,22 @@ and resumes the same thread with full history (transcript-based resume,
 ## 7. Proposed spec diff for the real roster (for the principal)
 
 Not applied by this lane (`specs/team_roster.json` is outside my edit
-scope). Exact proposed change — two added keys, two added entries:
+scope). After the attack-round fixes (commit 445c2662e) the write fence
+is always-on — the server's own home, `fabric.env`, other teammates'
+homes, the t3 install dir and the user's config surfaces no longer need
+spec entries. The proposed diff is exactly two added keys:
 
 ```json
- "deny_write_roots": [
-   "/tmp",
-   "/private/tmp",
-   "/private/var/folders",
-+  "/Users/chriswong/.mastermind/t3-team-server",
-+  "/Users/chriswong/Library/LaunchAgents"
- ],
 +"allow_read_roots": ["~/.mastermind/t3-team/team-project"],
 +"home_write_allow": ["CLAUDE.md"],
 ```
 
-What each piece does for Assurance, Design Lead and Secretary (the keys
+Optional belt-and-braces (covered by the always-on fence already):
+adding `"/Users/chriswong/.mastermind/t3-team-server"` and
+`"/Users/chriswong/Library/LaunchAgents"` to `deny_write_roots` is
+harmless but redundant.
+
+What each key does for Assurance, Design Lead and Secretary (the keys
 are spec-level; all three teammates get the same compile):
 
 - `allow_read_roots: ["~/.mastermind/t3-team/team-project"]` — reads
@@ -207,13 +231,9 @@ are spec-level; all three teammates get the same compile):
   home CLAUDE.md as the only long-term memory ("nothing else
   persists"); Secretary's records go to issue comments, not home files.
   Add `"notes/"` for a teammate if the principal wants scratch space;
-  locked/config names can never be granted. TodoWrite is unaffected
-  (its permission is the bare tool name, not a Write path rule).
-- `deny_write_roots` + the two absolute paths — the server build folder
-  and LaunchAgents: whoever can write them chooses which program runs at
-  next start (the infrastructure proof, refusals I5/I6). The
-  `<root>/{bin,config,runtime,run}` folders are already covered
-  always-on by `SERVER_INFRASTRUCTURE`, no spec entry needed.
+  locked/config names can never be granted (refused at load). TodoWrite
+  is unaffected (its permission is the bare tool name, not a Write path
+  rule).
 
 Install procedure (section 5): edit the spec, `team_roster.py apply`
 (writes new `tool-limits.json` per home, reports
@@ -221,8 +241,11 @@ Install procedure (section 5): edit the spec, `team_roster.py apply`
 session restart at a safe boundary (30-min idle self-exit or an
 attended `thread.stop`/`releaseUnlessBusy` — never from this lane on
 the real server), then confirm the new processes started after the
-file mtimes. Expected size: ~8,400 deny rules per teammate on this
-Mac (~480 KB; loads fully — evidence 10).
+file mtimes. Expected size: ~8,500 deny rules per teammate on this Mac
+(~480 KB; loads fully — evidence 10/11). Apply is content-diffed: when
+the surrounding directories change, the generated rules change and the
+next apply rewrites the file — re-run apply after any team-layout
+change (the `_note` in each generated file says so).
 
 ## 8. What could not be proved
 
