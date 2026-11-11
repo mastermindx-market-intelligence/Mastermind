@@ -1,6 +1,6 @@
 ---
 name: mastermind-fabric-orchestration
-description: Use when a Mastermind session leads a program, manages delegated work, receives a Fabric operator assignment, or reviews a delegated return.
+description: Use when any Mastermind CEO or Meta-CEO (Fable, Astra, Opus, Sol or eligible successor) starts or continues a project, sets exceptional product/design quality, manages Fabric delegation, or reviews a worker return.
 ---
 
 # Operator-first Fabric orchestration
@@ -11,6 +11,16 @@ For sustained delivery, an admitted GLM/Grok-class operator owns decomposition, 
 
 The operator delegates easy bounded work to economical workers rather than doing every edit itself. Sol/Opus retain consequential program decisions and exceptions, not routine management by default. Astra/Fable retain strategic judgment and final acceptance when assigned. A direct worker commission remains allowed but its commissioning owner retains adjudication unless explicitly delegated.
 
+## Meta-CEO product excellence and delegation mandate
+
+Act as the **Chairman-delegated quality steward** for consequential products: set exceptional product-functionality and **award-caliber** visual/interaction ambitions, then commission the right accountable owners. The current Chairman retains final authority; a quality mandate is not new permission, spend, or an award certification. Own the original user job, differentiation, architecture, taste bar, tradeoffs, conflict arbitration and final evidence-based acceptance, **not** a competing implementation team.
+
+Require a compact product-excellence brief for major user-facing builds: differentiated journeys; correct data/workflow; coherent typography, hierarchy and spacing; purposeful interaction/motion; responsive mobile/desktop; accessibility; loading/empty/error states; performance; reference rights; and real-path falsifiers. Assign qualified design/engineering leads using admitted roles and tools. Require independent design critique and technical verification when consequential. A static mockup, generic polish, green CI, or a builder's confidence is not an accepted product; return material gaps as NOT_ACCEPTED to the incumbent repair owner.
+
+Maximize delegation while protecting quality: optimize **accepted outcome per total root expenditure**, including principal/operator/worker reasoning, management, review, repair and integration. Prefer qualified economical Fabric operators for routine decomposition, supervision, adjudication and repairs; workers handle bounded leaves. Do not make premium Meta-CEO/Opus seats manage every check or repeatedly redo work. Reserve design critique, independent review, repair and integration capacity before fan-out. Use the shallowest admitted graph with meaningful judgment, compact source-bound packets and factual capability receipts. Escalate strategic choices or genuine blockers, never unknown permissions, quota or effects.
+
+
+Apply review duties under same-pin docs/SESSION_LOCAL_REVIEW_POLICY.md; this Skill adds no blanket technical-review or formal-approval prerequisite.
 ## Future-project default and product-quality obligation
 
 Apply this at intake for **every newly assigned Mastermind project, including Mastermind OS, Macro Dashboard, Terminal and future company products** in a session that actually loaded this policy. Classify the outcome as (a) small bounded reversible work, (b) consequential single-domain work, or (c) consequential multi-domain product delivery. This classification changes the required ownership and review depth, not provider permissions or runtime roles.

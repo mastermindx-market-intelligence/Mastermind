@@ -46,14 +46,18 @@ MANIFEST_PROJECTION={
 OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two independent read-only '
     'analyses cover auth/admission/launch and return/recovery/effect preservation. Review only the '
     'auth/admission/launch analysis; the original parent reconciles both and labels the second unreviewed.')
-# Exact source pins are the qualified H2 App component 1c65016c; old producer semantics remain tested.
+# Exact joined paid producer plus finite-workstream source; any input drift refuses.
+# 2026-11-06 source audit: the shared command owner accepts an absent legacy
+# catalog, while legacy prepare/submit explicitly refuse that absent catalog.
+# With the manifest below, payload construction and operation keys are unchanged.
+# The actual producer still runs below; no payload or installed-source substitute.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
-        '8596eef6272ed1055ed397670bbb0cb27162759539a18e35fbcd43b3a5bae791',
+        'de1b4f7bf74030b6c71b956440801760452f17049d13fa423a9fac6aeec2562f',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        '8e982b602cecac6be11c0c7d294ee4f9992b39512d8ed7f9e911ae041770041e',
+        'd122bbf0d42de8aa247f077dc3c5c43ae5bfe38e22b85dc4a01dfa3bba178f34',
     'app/mastermind_os/src/launch-config.ts':
-        'eb138fd7e02f4bb3a8e28c0e15520612989fada6161be5c69850f2479afb8675',
+        '5a24a817790848228af05fa437bd8bdbbaa5ce12cc0feaeca6e20abb9e9e512e',
 }
 
 
@@ -65,14 +69,16 @@ def actual_launch_payload(tmp_path,principal_scope,*,profile_ref="research_only"
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {stripTypeScriptTypes} from 'node:module';
+
 const input=JSON.parse(fs.readFileSync(0,'utf8'));
+const {sourceTransformer}=await import(pathToFileURL(path.resolve(input.source,'../../../tests/typescript_transform.mjs')));
+const transformSource=await sourceTransformer(input.source);
 const folder=input.scratch;
 for(const [name,source] of [
  ['operation-key', 'orchestration/operation-key.ts'],
  ['executive-launch-command-port','orchestration/executive-launch-command-port.ts'],
  ['launch-config','launch-config.ts']]) {
- let code=stripTypeScriptTypes(fs.readFileSync(path.join(input.source,source),'utf8'),{mode:'transform'});
+ let code=transformSource(source,fs.readFileSync(path.join(input.source,source),'utf8'));
  if(name==='executive-launch-command-port') {
    if(!code.includes('"./operation-key"')) throw Error('unexpected dependency source');
    code=code.replace('"./operation-key"','"./operation-key.mjs"');

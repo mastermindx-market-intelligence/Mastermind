@@ -1,0 +1,76 @@
+{
+  "default_native_closure": {
+    "collector_sha256": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d",
+    "inventory_sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47",
+    "manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a"
+  },
+  "native_os_run": {
+    "attempt": 1,
+    "conclusion": "SUCCESS",
+    "head": "906bb682d3bb061a8db347a871977f2dcfb47a9a",
+    "id": 42404768766
+  },
+  "observed_rwe_failure": {
+    "baseline_cases": {
+      "errors": 0,
+      "failures": 7,
+      "skipped": 0,
+      "total": 66
+    },
+    "baseline_log_sha256": "032c7ac004a95085f8a74647ba7166be88b3b7cc02880828e87e6d631aea8bb6",
+    "failed_node_ids": [
+      "tests.test_fabric_grok47_qwen_release_composition_20261022::test_grok47_merged_source_digest_is_pinned",
+      "tests.test_fabric_grok47_qwen_release_composition_20261022::test_builder_refuses_tampered_overlay_base_despite_valid_forward[artifact_delivery.py]",
+      "tests.test_fabric_grok47_qwen_release_composition_20261022::test_builder_refuses_tampered_overlay_base_despite_valid_forward[pick.py]",
+      "tests.test_fabric_grok47_qwen_release_composition_20261022::test_forward_map_retains_original_four_and_adds_three_long_horizon_bounds",
+      "tests.test_fabric_grok47_qwen_release_composition_20261022::test_protected_qwen_files_and_exact_context_reader_forward",
+      "tests.test_native_pool_policy_publication::test_publisher_successor_preserves_actual_manifest_and_prior_go_validator",
+      "tests.test_native_pool_policy_publication::test_unknown_publisher_never_receives_forward_compatibility"
+    ],
+    "job_id": 128492240807,
+    "run_id": 42401548997,
+    "tested_merge": "1092b0bf8cd37eba04d19be4da3992103f4aa4ac"
+  },
+  "original_head": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3",
+  "production_paths_identical_to_qualified_composition": true,
+  "protected_or_runtime_acceptance": false,
+  "qualified_composition": "906bb682d3bb061a8db347a871977f2dcfb47a9a",
+  "qualified_source_evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6711837521",
+  "repair": {
+    "all_baseline_failures_passed": true,
+    "baseline_failed_ids": 7,
+    "cases": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "total": 66
+    },
+    "changes": {
+      "current_closure_pin": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+      "current_validation_retained": true,
+      "distinct_current_unknown_publisher_refusal_tested": true,
+      "four_existing_mixed_negative_cases_now_have_valid_baseline": true,
+      "historical_parent_pin_preserved": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+      "historical_precise_refusals_retained": true,
+      "publisher_fixture_normalized_before_mutation": true
+    },
+    "issues": [],
+    "log_sha256": "c3f10a075adace0c7a32194c3773838ef13ba5e6a0b346089fcca6d53d5fb848",
+    "only_test_changes": true,
+    "paths": [
+      {
+        "path": "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+        "sha256": "ff5e65e2e830afe41975d4e50f30c586ed62cfd1b2141678d34d985c60eed8ce"
+      },
+      {
+        "path": "tests/test_native_pool_policy_publication.py",
+        "sha256": "67c566fb12d89d82a9f2267bb65da03d084d34f55ec559d81bb7a09a2429a4d4"
+      }
+    ],
+    "returncode": 0,
+    "seconds": 3.404,
+    "source_head": "51b4abe1f68b58b2c41f9aa45aceaf2ab45670f3"
+  },
+  "schema": "mastermind.fabric_application.native_fixture_reconciliation.v1",
+  "unqualified_h3_applied": false
+}

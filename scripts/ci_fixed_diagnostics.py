@@ -10,16 +10,21 @@ from pathlib import Path
 import re
 import stat
 import subprocess
+import sys
 
 MAX_SOURCE = 2 * 1024 * 1024
 MAX_SNAPSHOT = 2 ** 18
 MAX_PROGRESS = 2 ** 9
 MAX_FAILURES = 2 ** 7
+EXIT_EVENTS = ('SESSION_FINISH_ENTERED', 'SESSION_FINISH_RETURNED',
+               'UNCONFIGURE_ENTERED', 'UNCONFIGURE_RETURNED')
+MAX_EXIT_SOURCES = 64
 PHASES = frozenset(('collect', 'setup', 'call', 'teardown'))
 KINDS = {kind: kind.__name__ for kind in (AssertionError, ValueError, TypeError,
     KeyError, IndexError, RuntimeError, OSError, PermissionError, FileNotFoundError,
-    NotADirectoryError, IsADirectoryError, TimeoutError, ImportError, ModuleNotFoundError, SyntaxError)}
+    NotADirectoryError, IsADirectoryError, TimeoutError, subprocess.TimeoutExpired, ImportError, ModuleNotFoundError, SyntaxError)}
 PUBLIC_PATH = re.compile(r'tests/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+[.]py\Z')
+NATIVE_PUBLIC_PATH = re.compile(r'ops/native_fabric/quota_continuity/(?:tests|rollout)/(?:[A-Za-z0-9_]+/)*test_[A-Za-z0-9_]+[.]py\Z')
 IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,127}\Z')
 
 
@@ -33,7 +38,7 @@ class PublicCatalog:
     A .git-less controlled snapshot gets no general catalogue. Its existing
     literal H1 metadata reporter remains independent of this optional helper.
     """
-    def __init__(self, root):
+    def __init__(self, root, *, native=False):
         self.root = Path(root).absolute()
         self.head = None
         self.blobs = {}
@@ -43,7 +48,8 @@ class PublicCatalog:
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=True).stdout.strip()
             if not re.fullmatch(rb'[0-9a-f]{40}', head):
                 return
-            tree = subprocess.run(['git', '-C', str(self.root), 'ls-tree', '-rz', head.decode(), '--', 'tests'],
+            paths=['ops/native_fabric/quota_continuity/tests','ops/native_fabric/quota_continuity/rollout'] if native is True else ['tests']
+            tree = subprocess.run(['git', '-C', str(self.root), 'ls-tree', '-rz', head.decode(), '--', *paths],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, check=True).stdout
             if len(tree) > 4 * 1024 * 1024:
                 return
@@ -59,7 +65,7 @@ class PublicCatalog:
                     continue
                 if (mode in (b'100644', b'100755') and kind == b'blob'
                         and re.fullmatch(rb'[0-9a-f]{40}', digest)
-                        and PUBLIC_PATH.fullmatch(name)):
+                        and (NATIVE_PUBLIC_PATH if native is True else PUBLIC_PATH).fullmatch(name)):
                     blobs[name] = digest.decode()
             self.head, self.blobs = head.decode(), blobs
         except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
@@ -175,6 +181,11 @@ class FixedDiagnostics:
         self.catalog = catalog
         self.progress = []
         self.failures = []
+        self.lifecycle = []
+        self.native_catalog = None
+        # Per-instance admitted row identity/content, never serialized or reused.
+        # Commission and a_f may report the same leaf; membership alone cannot bind its origin.
+        self._native_rows = {}
         self.truncated = False
         self.directory = None
         self.directory_identity = None
@@ -195,6 +206,47 @@ class FixedDiagnostics:
         # An interrupted collection still leaves a closed empty observation,
         # rather than inventing a last module that never started.
         self.flush()
+
+    def lifecycle_record(self, event, exitstatus):
+        """Observation only: no locals/names/IDs, no waiter or process control.
+
+        A Python code filename is not execution attestation. Exact public-source
+        qualification limits disclosure, not authority; phases never prove exit.
+        """
+        if (type(event) is not str or len(self.lifecycle) >= len(EXIT_EVENTS)
+                or event != EXIT_EVENTS[len(self.lifecycle)]
+                or (exitstatus is not None and not _integer(exitstatus, 5))):
+            return
+        sources = set()
+        try:
+            frames = list(sys._current_frames().values())[:128]
+            for frame in frames:
+                for _ in range(64):
+                    if frame is None: break
+                    filename = frame.f_code.co_filename
+                    if type(filename) is str and Path(filename).is_absolute():
+                        try: module = Path(filename).relative_to(self.catalog.root).as_posix()
+                        except ValueError: module = None
+                        # Resolve only existing exact-HEAD public test members.
+                        # Foreign/private paths never cause a source read.
+                        source = self.catalog.source(module) if module in self.catalog.blobs else None
+                        line = frame.f_lineno
+                        if source is not None and _integer(line) and 0 < line <= source['lines']:
+                            sources.add((module, line))
+                    frame = frame.f_back
+            value = dict(event=event, exitstatus=exitstatus,
+                         sources=[dict(module=m,line=n) for m,n in sorted(sources)[:MAX_EXIT_SOURCES]])
+        except (OSError, ValueError, TypeError, RuntimeError):
+            value = dict(event=event, exitstatus=exitstatus, sources=[])
+        self.lifecycle.append(value)
+        self.flush()
+
+    def _payload(self):
+        value = dict(schema='ci.fixed-diagnostics.v1', head=self.catalog.head,
+                     progress=self.progress, failures=self.failures, truncated=self.truncated)
+        if self.lifecycle:
+            value.update(schema='ci.fixed-diagnostics.v2', lifecycle=self.lifecycle)
+        return value
 
     def progress_record(self, event, module, **fields):
         if self.catalog.source(module) is None:
@@ -224,6 +276,21 @@ class FixedDiagnostics:
                 self.failures.append(value.copy())
             else:
                 self.truncated = True
+            # Only the actual selected wrapper exceptions carry a live, validated
+            # private channel. Raw child output is never a diagnostic input.
+            try:
+                from scripts.native_unittest_diagnostics import records_for_error
+                native,native_truncated=records_for_error(error,nodeid,self.catalog.root,self.catalog.head)
+                self.truncated=self.truncated or native_truncated
+                if native:
+                    self.native_catalog=PublicCatalog(self.catalog.root,native=True)
+                    for record in native:
+                        if len(self.failures)<MAX_FAILURES:
+                            row=record.copy()
+                            self._native_rows[len(self.failures)]=(row,tuple(sorted(row.items())))
+                            self.failures.append(row)
+                        else:self.truncated=True
+            except Exception:pass
             self.flush()
         return value
 
@@ -233,7 +300,8 @@ class FixedDiagnostics:
             return False
         if (type(self.truncated) is not bool or type(self.progress) is not list
                 or type(self.failures) is not list or len(self.progress)>MAX_PROGRESS
-                or len(self.failures)>MAX_FAILURES):
+                or len(self.failures)>MAX_FAILURES or type(self._native_rows) is not dict
+                or len(self._native_rows)>MAX_FAILURES):
             return False
         for value in self.progress:
             if type(value) is not dict or type(value.get('module')) is not str or value['module'] not in self.catalog.cache:
@@ -249,20 +317,54 @@ class FixedDiagnostics:
                     or value['cases_finished']>value['cases_started']
                     or type(seconds) not in (int,float) or not math.isfinite(seconds) or not 0<=seconds<=7200):
                 return False
-        for value in self.failures:
-            if type(value) is not dict or set(value)!={'module','case','function','phase','line','kind'}:
+        if type(self.lifecycle) is not list or len(self.lifecycle) > len(EXIT_EVENTS):
+            return False
+        for index, value in enumerate(self.lifecycle):
+            if (type(value) is not dict or set(value) != {'event','exitstatus','sources'}
+                    or value['event'] != EXIT_EVENTS[index]
+                    or (value['exitstatus'] is not None and not _integer(value['exitstatus'],5))
+                    or type(value['sources']) is not list or len(value['sources']) > MAX_EXIT_SOURCES):
                 return False
-            module=value['module']
-            if type(module) is not str or module not in self.catalog.cache:
-                return False
-            source=self.catalog.cache[module]
+            for source in value['sources']:
+                if (type(source) is not dict or set(source) != {'module','line'}
+                        or type(source['module']) is not str or source['module'] not in self.catalog.cache
+                        or not _integer(source['line']) or source['line'] == 0
+                        or source['line'] > self.catalog.cache[source['module']]['lines']):
+                    return False
+        native_indices=set()
+        for index,value in enumerate(self.failures):
+            if type(value) is not dict:return False
+            module=value.get('module')
+            native=type(module) is str and NATIVE_PUBLIC_PATH.fullmatch(module)
+            fields={'module','case','function','phase','line','kind'}
+            if native:fields|={'native_invocation','native_wrapper'}
+            if set(value)!=fields:return False
+            if native:
+                admitted=self._native_rows.get(index)
+                if (type(admitted) is not tuple or len(admitted)!=2 or admitted[0] is not value
+                        or admitted[1]!=tuple(sorted(value.items()))):return False
+                native_indices.add(index)
+                from scripts.native_unittest_diagnostics import module_selected,selection_for_wrapper_name
+                wrapper=value['native_wrapper']
+                selection=selection_for_wrapper_name(wrapper)
+                if (selection is None or not module_selected(module,selection)
+                        or type(value['native_invocation']) is not str
+                        or not re.fullmatch(r'[a-f0-9]{32}',value['native_invocation'])):return False
+                catalog=self.native_catalog
+                if (catalog is None or catalog.head!=self.catalog.head
+                        or catalog.source(module) is None):return False
+                source=catalog.cache[module]
+            else:
+                # Keep ordinary pytest catalogue/cache semantics unchanged.
+                if type(module) is not str or module not in self.catalog.cache:return False
+                source=self.catalog.cache[module]
             if (value['case'] is not None and (type(value['case']) is not str or value['case'] not in source['cases'])
                     or value['function'] is not None and (type(value['function']) is not str or value['function'] not in source['functions'])
                     or type(value['phase']) is not str or value['phase'] not in PHASES
                     or type(value['kind']) is not str or value['kind'] not in {*KINDS.values(),'UNKNOWN'}
                     or value['line'] is not None and (not _integer(value['line'],source['lines']) or value['line']==0)):
                 return False
-        return True
+        return native_indices == set(self._native_rows)
 
     @staticmethod
     def _private_file(info, size):
@@ -284,14 +386,12 @@ class FixedDiagnostics:
         fd = tmp = None
         temporary_identity = None
         try:
-            raw = json.dumps(dict(schema='ci.fixed-diagnostics.v1', head=self.catalog.head,
-                progress=self.progress, failures=self.failures, truncated=self.truncated),
+            raw = json.dumps(self._payload(),
                 sort_keys=True, separators=(',', ':'), allow_nan=False).encode('ascii')
             while len(raw) > MAX_SNAPSHOT and self.progress:
                 del self.progress[0]
                 self.truncated = True
-                raw = json.dumps(dict(schema='ci.fixed-diagnostics.v1', head=self.catalog.head,
-                    progress=self.progress, failures=self.failures, truncated=self.truncated),
+                raw = json.dumps(self._payload(),
                     sort_keys=True, separators=(',', ':'), allow_nan=False).encode('ascii')
             if len(raw) > MAX_SNAPSHOT:
                 return

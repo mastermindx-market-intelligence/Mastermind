@@ -79,6 +79,12 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
+    # Read-only metered principal source seam, deliberately NOT an eligible Worker.
+    # Executive/Capacity owner must qualify the API and install a trusted composition.
+    "anthropic-api-principal": AdapterDescriptor(
+        adapter_id="anthropic-api-principal", implemented=False,
+        implementation="control_plane.fable_api_principal.FableApiPrincipal",
+    ),
     "openai-compatible": AdapterDescriptor(
         adapter_id="openai-compatible", implemented=False
     ),
@@ -86,6 +92,15 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
         adapter_id="acp",
         implemented=False,
         implementation="integrations.acp_worker.installed.InstalledAcpWorkerAdapter",
+    ),
+    # WO-10 (MMOS V1, Rev 4 §S3.D): closed Hermes-native seam.  BUILT but
+    # UNSELECTED — the incumbent runtime must select it before any routing
+    # policy binds a live worker through this id (Rev 4 l.253); merely being
+    # registered selects nothing.  BUILT_NOT_PROVEN source implementation
+    # (see the documented pin in tests/test_worker_adapter.py).
+    "hermes-native": AdapterDescriptor(
+        adapter_id="hermes-native", implemented=True,
+        implementation="control_plane.hermes_worker_adapter.HermesWorkerAdapter",
     ),
 }
 

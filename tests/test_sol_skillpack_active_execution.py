@@ -49,7 +49,7 @@ def test_index_registers_active_execution_and_forward_motion_law():
 
 
 def test_final_response_gate_is_closed_vocabulary_and_more_work_cannot_finalize():
-    text = _read(ACTIVE)
+    text = " ".join(_read(ACTIVE).split())
     for state in (
         "PROVEN_OUTCOME",
         "EXACT_HUMAN_GATE",
@@ -64,42 +64,42 @@ def test_final_response_gate_is_closed_vocabulary_and_more_work_cannot_finalize(
 
 
 def test_non_delta_loop_forces_replan_before_third_artifact_cycle():
-    text = _read(ACTIVE)
-    assert "two consecutive material work cycles" in text
+    text = " ".join(_read(ACTIVE).split())
+    assert 'Two consecutive material cycles' in text
     assert "NO_DELTA_LOOP" in text
     assert "Do not produce a third equivalent" in text
 
 
 def test_blocked_lane_does_not_end_turn_while_independent_work_exists():
-    text = _read(ACTIVE)
+    text = " ".join(_read(ACTIVE).split())
     assert "Treat a blocker as lane-local first" in text
-    assert "switch to it immediately and continue" in text
-    assert "every materially useful in-scope lane is blocked" in text
+    assert 'immediately advance the highest-value safe path-disjoint dependency' in text
+    assert 'no materially useful lane remains' in text
 
 
 def test_effect_unknown_is_terminal_only_when_no_safe_independent_lane_remains():
-    text = _read(ACTIVE)
-    assert "does not itself permit finalization while another useful lane is provably independent" in text
-    assert "makes every remaining useful in-scope action" in text
-    assert "independent of that uncertainty" in text
+    text = " ".join(_read(ACTIVE).split())
+    assert 'continue only work whose safety and result are provably independent of it' in text
+    assert 'makes every useful action unsafe/dependent' in text
+    assert 'independent of it; otherwise reconcile on the original carrier' in text
 
 
 def test_tool_reprobe_requires_a_material_capability_reason():
-    text = _read(ACTIVE)
-    assert "discover the needed schema/capability once" in text
-    assert "do not repeatedly rediscover the same failure" in text
-    assert "connection/device/schema change" in text
+    text = " ".join(_read(ACTIVE).split())
+    assert 'discover each needed action family/schema once' in text
+    assert 'Re-probe only after relevant' in text
+    assert 'connection/device/schema/mode/session change' in text
 
 
 def test_background_continuation_requires_a_real_durable_owner():
-    text = _read(ACTIVE)
+    text = " ".join(_read(ACTIVE).split())
     assert "A ChatGPT reasoning turn is not a daemon" in text
-    assert "Never claim work will continue in the background" in text
-    assert "real external durable owner" in text
+    assert 'Background claims require canonical accepted/started execution evidence' in text
+    assert 'production-proven Executive, Workbench/process, provider-worker or watcher/dialogue owner' in text
 
 
 def test_procedure_rejects_a_duplicate_control_plane():
-    text = _read(ACTIVE)
+    text = " ".join(_read(ACTIVE).split())
     assert "does **not** create a lifecycle, scheduler, retry engine, memory store, queue" in text
     assert "no new lifecycle, queue, retry, memory, permission, or control plane" in text
 
@@ -116,33 +116,33 @@ def _section(heading: str) -> str:
 
 def test_principal_preferences_are_not_duration_or_capability_guarantees():
     text = _section("Step 1A — Select principal duty without inventing authority")
-    assert "Prefer Astra Pro for concentrated design and judgment" in text
-    assert "Prefer Sol Pro for sustained delivery orchestration" in text
-    assert "provisional task-fit preferences, not capability guarantees" in text
-    assert "Never turn observed duration into a minimum run, timeout promise, or stopping target" in text
+    assert 'Astra Pro provisionally fits concentrated thesis/design/synthesis/architecture/adversarial judgment' in text
+    assert 'Sol Pro fits sustained sequencing, return adjudication and integration' in text
+    assert 'Either can do either when actual fit, capability and continuity support it' in text
+    assert 'Duration is neither guarantee, minimum nor stopping target' in text
 
 
 def test_assignment_boundary_cannot_be_shrunk_after_planning():
     text = _section("Step 1A — Select principal duty without inventing authority")
-    assert "Never shrink an end-to-end assignment to a design-only assignment" in text
-    assert "A design result does not complete its parent delivery programme" in text
-    assert "finish early when its actual assigned outcome is accepted" in text
+    assert 'Never narrow end-to-end delivery to design after writing a plan' in text
+    assert 'Parent delivery continues across child milestones' in text
+    assert 'finish an actually accepted assignment early' in text
 
 
 def test_model_preference_does_not_transfer_incumbent_authority():
     text = _section("Step 1A — Select principal duty without inventing authority")
-    assert "Exactly one current action-authoritative owner" in text
-    assert "No mandatory Astra-to-Sol-to-worker chain" in text
-    assert "Do not replace an incumbent principal" in text
-    assert "not new runtime roles, model aliases, or permission grants" in text
+    assert 'exactly one action-authoritative owner per modifying mission' in text
+    assert 'No mandatory principal chain' in text
+    assert 'model preference transfers no incumbent or started operation' in text
+    assert 'No mandatory principal chain, new role/alias, automatic Pro selection or fabricated admission receipt' in text
 
 
 def test_complete_outcomes_default_to_fabric():
     text = _section("Step 2A — Decide execution ownership before routine labor")
-    assert "Default to the existing fabric for independently executable bounded outcomes" in text
-    assert "Delegate an outcome, not a command-by-command conversation" in text
-    assert "investigation may ask a bounded question without prescribing its answer" in text
-    assert "framing + review + expected repair + critical-path delay" in text
+    assert 'Prefer paid Fabric for independently executable bounded outcomes when eligible' in text
+    assert 'without command-by-command parent approval' in text
+    assert 'an investigation need not prescribe its answer' in text
+    assert 'framing, review, expected repair and delay' in text
 
 
 def test_direct_work_has_closed_reasons_and_reassessment():
@@ -150,130 +150,130 @@ def test_direct_work_has_closed_reasons_and_reassessment():
     for reason in ("LOWER_TOTAL_OVERHEAD", "PRINCIPAL_JUDGMENT", "UNIQUE_APPROVED_ACCESS",
                    "CRITICAL_PATH_SHORTCUT", "NO_ELIGIBLE_PRE_EFFECT_WORKER"):
         assert reason in text
-    assert "Reassess when discovery becomes routine execution" in text
-    assert "No fixed delegation percentage or tool-call quota" in text
+    assert 'Reassess as discovery becomes routine' in text
+    assert 'use neither a delegation percentage nor a tool-call or agent quota' in text
 
 
 def test_dispatch_requires_existing_owner_admission():
     text = _section("Step 2A — Decide execution ownership before routine labor")
-    assert "All actual submissions use the current approved Executive ingress" in text
-    assert "Confidentiality, budget, provider activation, credential state, and workspace custody" in text
-    assert "A listed model or reviewed realm alone is not positive admission" in text
-    assert "never duplicate a STARTed or EFFECT_UNKNOWN operation" in text
+    assert 'Submit only through approved Executive ingress' in text
+    assert 'Confidentiality, bounded spend, provider activation, credentials and workspace custody' in text
+    assert 'A listed model/realm is not admission' in text
+    assert 'never duplicate STARTed/unknown work' in text
 
 
 def test_parent_keeps_useful_work_after_dispatch():
     text = _section("Step 2B — Overlap judgment and execution without multiplying management")
-    assert "Dispatch is not a finalization reason" in text
-    assert "Continue the highest-leverage unblocked principal work" in text
-    assert "Do not duplicate the worker's assigned investigation" in text
-    assert "Deterministic waits and routine placement remain with existing owners" in text
+    assert 'Dispatch does not end the turn' in text
+    assert 'Advance independent principal judgment, integration or returned work' in text
+    assert 'do not duplicate a worker or invent filler' in text
+    assert 'Existing deterministic owners handle waits/placement' in text
 
 
 def test_worker_repairs_are_budgeted_and_progress_sensitive():
     text = _section("Step 2B — Overlap judgment and execution without multiplying management")
-    assert "repair allowance comes from the admitted job" in text
-    assert "Two equivalent failures with no new evidence trigger reassessment" in text
-    assert "A new failure signature or changed candidate can justify another bounded attempt" in text
-    assert "Do not kill, reset, or replace a worker outside the existing cancellation" in text
+    assert 'Repair allowance comes from the admitted job' in text
+    assert 'Two equivalent failures require reassessment' in text
+    assert 'A genuinely changed candidate/input/failure signature may justify another bounded attempt' in text
+    assert 'Cancellation/reset/replacement retains its existing effect contract' in text
 
 
 def test_result_summary_is_backed_by_exact_evidence():
     text = _section("Step 2B — Overlap judgment and execution without multiplying management")
-    assert "exact artifact revision/digest, actual validation results" in text
-    assert "Summaries are navigation, not proof" in text
-    assert "Do not replay full worker transcripts" in text
-    assert "Review deeply where consequence or uncertainty requires it" in text
+    assert 'artifact identity/digest, validation, findings, blockers and next decision' in text
+    assert 'A summary navigates to proof; it does not replace proof' in text
+    assert 'without replaying full transcripts or all labor' in text
+    assert 'Read decisive underlying evidence' in text
 
 
 def test_parallelism_respects_global_admission_and_review_capacity():
     text = _section("Step 2B — Overlap judgment and execution without multiplying management")
-    assert "Global Capacity and the existing child/depth/budget policy bound fanout" in text
-    assert "Do not multiply a per-chat allowance across sessions" in text
-    assert "Unconsumed review work applies backpressure" in text
+    assert 'Global Capacity and existing child/depth/budget grants bound fanout' in text
+    assert 'bound fanout across sessions' in text
+    assert 'Unconsumed review backlogs require useful review/integration before more dispatch' in text
 
 
 def test_checkpoint_does_not_transfer_authority_or_invent_continuation():
     text = _section("Step 7A — Preserve operational continuity before interruption")
     assert "Save material decisions and accepted capability changes at coherent milestones" in text
-    assert "Ordinary reads, reversible edits and focused tests do not need separate checkpoints" in text
-    assert "A checkpoint never transfers a lease, source writer, or STARTed operation" in text
-    assert "Exact parent consumption must be proven" in text
-    assert "No supported continuation means an honest held result, not a fabricated wake" in text
+    assert 'not after each read/edit/test' in text
+    assert 'A checkpoint/new chat transfers no lease, source writer or STARTed operation' in text
+    assert 'Verify original-parent consumption' in text
+    assert 'No supported continuation means a held result, not an invented wake' in text
 
 
 def test_role_pressure_cases_are_explicit_and_not_behavioral_proof():
     text = _section("Role-aware pressure cases")
-    for phrase in ("Astra owns the whole delivery", "Sol receives a routine implementation",
-                   "One worker returns while another runs", "A cheap provider is disarmed",
-                   "A worker repeats the same unsuccessful loop"):
+    for phrase in ('Whole-delivery Astra', 'Routine implementation to Sol',
+                   'Consume returned workers without an artificial all-workers-finished barrier', 'Disarmed cheap provider',
+                   'Repeated failed worker loop'):
         assert phrase in text
-    assert "These cases are specifications, not recorded model behavior" in text
+    assert 'These are specifications, not model receipts' in text
 
 
 def test_measurement_rewards_accepted_outcomes_not_elapsed_time():
     text = _section("Step 7A — Preserve operational continuity before interruption")
     assert "accepted capability progress per Pro turn" in text
-    assert "Separate successful early completion from premature stopping and platform interruption" in text
-    assert "Do not score longer runtime as better performance" in text
-    assert "existing evaluation and evidence owners; no new telemetry store" in text
+    assert 'separate waiting, early success, premature stop and platform failure' in text
+    assert 'Neither elapsed time nor source tests prove hidden reasoning or fresh-model behavior' in text
+    assert 'Through existing evaluators measure accepted capability progress' in text
 
 
 def test_design_acceptance_has_a_designated_decision_owner():
     text = _section("Step 1A — Select principal duty without inventing authority")
     assert "Acceptance belongs to the decision owner named by the assignment or current source law" in text
-    assert "pickup acknowledgment is not by itself design acceptance or a transfer of source custody" in text
+    assert 'intended recipient or pickup alone is neither acceptance nor custody transfer' in text
 
 
 def test_manual_carrier_cannot_be_self_approved_by_a_worker():
     text = _section("Step 2A — Decide execution ownership before routine labor")
     assert "Manual-carrier acceptance comes from current source law and its designated authority" in text
-    assert "neither a worker nor this procedure can self-approve a new transport" in text
+    assert 'no raw spawn, self-approved transport or second queue' in text
 
 
 def test_cosmetic_revision_does_not_reset_failed_loop_reassessment():
     text = _section("Step 2B — Overlap judgment and execution without multiplying management")
-    assert "A changed revision alone is not evidence of useful repair" in text
-    assert "a cosmetic edit does not reset reassessment" in text
+    assert 'cosmetic revisions do not reset the count' in text
+    assert 'cosmetic revisions do not reset the count' in text
 
 
 # Cross-skill enrollment/ownership boundaries, not fresh-model behavior.
 def test_detailed_delegation_owner_requires_accepted_same_source_enrollment():
     text = _section("Procedural ownership and companion enrollment")
     assert "WEB_CEO_DELEGATION.md" in text
-    assert "accepted enrollment in the same pinned INDEX" in text
+    assert 'Accepted same-pin INDEX enrollment' in text
     assert "Before accepted enrollment" in text
-    assert "candidate file, an evaluation bundle, or another branch is not enrollment" in text
+    assert 'candidates/evaluation bundles/other branches are not law' in text
 
 
 def test_delegation_companion_does_not_duplicate_active_turn_controller():
     text = _section("Procedural ownership and companion enrollment")
     assert "ACTIVE_EXECUTION remains the sole active-turn owner" in text
     assert "capability delta, lane-local blocking, no-delta re-planning, and finalization" in text
-    assert "detailed role selection, delegation economics, worker packets, and capacity policy" in text
-    assert "do not create another stop-state machine or routing catalog" in text
+    assert 'detailed role/economics/packet/capacity owner' in text
+    assert 'no second stop machine, Runtime role or routing catalog' in text
 
 
 def test_companion_disagreement_preserves_incumbent_effects_and_source_pin():
     text = _section("Procedural ownership and companion enrollment")
     assert "material disagreement requires RECONCILE_STATE" in text
     assert "Do not mix procedure revisions" in text
-    assert "does not transfer an incumbent writer, authorize a retry, or relax admission" in text
-    assert "explanatory notes, not a second closed routing taxonomy" in text
+    assert 'Precedence resolution transfers no writer, retry or admission' in text
+    assert 'Reason labels are explanatory, not Runtime enums' in text
 
 
 # Adaptive attended-mode and recovery source contracts. These are procedural tests, not provider proof.
 def test_attended_mode_recommendation_is_task_and_capability_adaptive():
     text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
     for phrase in (
-        "Sol owns the **mode recommendation**",
-        "Prefer **Pro**",
-        "Prefer **Extra High**",
-        "reversible task-fit defaults, not capability guarantees",
-        "Pro may expose a needed write action",
-        "Extra High is a recovery candidate, not a guarantee",
-        "One successful READ or WRITE",
-        "Do not alternate modes ceremonially",
+        'Sol owns the mode recommendation',
+        'Pro for deep research, synthesis, architecture and adjudication',
+        'Extra High for iterative coding, terminal/browser work, tests and writes',
+        'defaults, not guaranteed capabilities',
+        'Pro may have or lose a write',
+        'Extra High is only a recovery candidate',
+        'One successful READ/WRITE',
+        'Do not bounce mature Sol Pro to Extra High and back merely for tools',
     ):
         assert phrase in text
 
@@ -281,13 +281,13 @@ def test_attended_mode_recommendation_is_task_and_capability_adaptive():
 def test_attended_mode_switch_never_grants_authority_or_bypasses_denial():
     text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
     for phrase in (
-        "grants **no** authority, permission, admission, source custody, carrier transfer, retry",
-        "never bypasses a safety/permission denial",
-        "never clears `EFFECT_UNKNOWN`",
-        "separate from automated Executive/ModelRouter admission",
+        'Switching grants no authority, admission, permission, custody, carrier transfer or retry',
+        'clears neither denial nor `EFFECT_UNKNOWN`',
+        'clears neither denial nor `EFFECT_UNKNOWN`',
+        'Automated Executive/ModelRouter admission',
         "`PRO_MODE_TASK_CLASS`",
         "Text cannot self-switch",
-        "re-verify the exact capability needed",
+        'Reverify the exact needed capability after a relevant change',
     ):
         assert phrase in text
 
@@ -296,10 +296,10 @@ def test_context_rotation_is_procedural_and_effect_fenced():
     text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
     for phrase in (
         "exact surface is `ROTATION_REQUIRED`",
-        "all modifying effects are reconciled",
-        "compact durable continuation exists",
-        "`CONTEXT_ROTATION` is a procedural transition, not a finalization classification",
-        "`EFFECT_UNKNOWN` blocks receiver change and context rotation",
+        'Before actual rotation reconcile effects',
+        'persist the frontier, seal and use one lawful successor',
+        '`CONTEXT_ROTATION` is procedural, not completion, acceptance, finalization, failover or custody transfer',
+        '`EFFECT_UNKNOWN` blocks receiver change and rotation',
     ):
         assert phrase in text
 
@@ -307,8 +307,8 @@ def test_context_rotation_is_procedural_and_effect_fenced():
 def test_final_gate_projects_platform_and_ui_recovery_without_new_lifecycle_states():
     text = " ".join(_section("Step 8 — Final-response gate").split())
     assert "`PLATFORM_FAILURE` is a blocker reason, not a finalization classification" in text
-    assert "`MODE_SWITCH` and `FRESH_CHAT`" in text
-    assert "are human-control/recovery reasons, not lifecycle states" in text
+    assert '`MODE_SWITCH`/`FRESH_CHAT`' in text
+    assert 'are control/recovery reasons, not lifecycle states' in text
     assert "`CHECKPOINTED_CONTINUATION`" in text
     assert "`NOT_CANONICALLY_PERSISTED`" in text
     assert "`EFFECT_UNKNOWN` only for an ambiguous checkpoint write" in text
@@ -325,8 +325,8 @@ def test_long_run_phase_contract_fences_breadth_without_shortening_productive_tu
         "ALLOWED_SURFACES",
         "DEFERRED_NONBLOCKING_FINDINGS",
         "Depth is allowed; breadth is fenced",
-        "one bounded blocking subphase",
-        "phase-boundary re-evaluation",
+        'One blocker may open one bounded subphase',
+        'a second broad blocker requires re-evaluation',
     ):
         assert phrase in text
 
@@ -334,9 +334,9 @@ def test_long_run_phase_contract_fences_breadth_without_shortening_productive_tu
 def test_attended_mode_policy_is_session_sticky_after_substantial_work_begins():
     text = " ".join(_section("Step 1B — Adapt attended reasoning mode to the current phase").split())
     for phrase in (
-        "mode choice is session-level by default",
-        "mode stickiness is the default",
-        "do not bounce a mature Sol Pro conversation",
+        'Mode stickiness is the default',
+        'Mode stickiness is the default',
+        'Do not bounce mature Sol Pro',
         "tool-heavy",
         "fresh-chat boundary",
     ):
@@ -349,9 +349,9 @@ def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime()
         "recovery gap",
         "PHASE BARRIER",
         "MORE_WORK_EXISTS",
-        "start it in the same healthy turn",
-        "same healthy chat",
-        "A checkpoint may occur mid-turn",
+        '**start that next phase in the same turn**',
+        'same-chat continuation',
+        'At a **PHASE BARRIER**, verify/save and reassess',
     ):
         assert phrase in text
 
@@ -359,22 +359,22 @@ def test_phase_barrier_separates_mission_incomplete_from_current_turn_lifetime()
 def test_phase_barrier_pins_healthy_same_turn_continuation_decision():
     text = " ".join(_section("Step 7A — Preserve operational continuity before interruption").split())
     assert "**start that next phase in the same turn**" in text
-    assert "not itself a turn boundary" in text
-    assert "Healthy output pressure alone does not require" in text
+    assert 'Healthy output pressure alone does not require a turn boundary' in text
+    assert 'Healthy output pressure alone does not require a turn boundary' in text
 
 
 def test_support_only_cycles_are_not_capability_delta_or_stop_reason():
     text = " ".join(_section("Step 3 — Require a capability delta, not activity").split())
     for phrase in (
         "review requests",
-        "notifications",
-        "status reads",
-        "projection lookups",
-        "checkpoint/comments",
-        "CI observations",
-        "actually closes a gate or changes what can safely happen next",
+        'messages',
+        'status/projection/CI reads',
+        'status/projection/CI reads',
+        'checkpoints',
+        'status/projection/CI reads',
+        'count only when they unlock, de-risk or prove the capability',
         "NO_DELTA_LOOP",
-        "execute the highest-value ready capability step",
+        'execute a useful ready action in the same scope',
     ):
         assert phrase in text
 
@@ -387,11 +387,11 @@ def test_waiting_external_is_lane_local_and_not_durable_execution():
         "review request",
         "owner message",
         "pending CI/check",
-        "move to it in the same turn",
+        'immediately advance the highest-value safe path-disjoint dependency',
     ):
         assert phrase in blocker
     assert "is not `DURABLE_EXECUTION_RUNNING`" in offload
-    assert "accepted/started execution identity and lawful return/wake path" in offload
+    assert 'proven STARTED/RUNNING and an armed lawful return/wake' in offload
 
 
 def test_checkpointed_continuation_rejects_clean_phase_or_wait_as_exit_coupon():
@@ -403,19 +403,19 @@ def test_checkpointed_continuation_rejects_clean_phase_or_wait_as_exit_coupon():
         "review request",
         "owner message",
         "pending CI",
-        "insufficient while healthy useful authorized work remains",
-        "clean phase boundary is a save-and-reassess point",
+        'cannot end healthy useful work',
+        'Continue safe next units',
     ):
         assert phrase in text
     assert "A specific chunk boundary or observed continuity risk" not in text
-    assert "a specific chunk boundary alone is no longer sufficient" in text
+    assert 'a specific chunk boundary alone is no longer sufficient' in text
 
 
 def test_more_work_exists_continues_across_task_and_phase_boundaries():
     text = " ".join(_section("Step 8 — Final-response gate").split())
     assert "If the truthful classification is `MORE_WORK_EXISTS`, **do not finalize**" in text
-    assert "including across task and phase boundaries" in text
-    assert "support-only cycle cannot manufacture that gate" in text
+    assert 'advance the highest-value unblocked dependency while healthy' in text
+    assert 'support cycles or completed chunks cannot invent it' in text
 
 
 def test_persistence_failure_does_not_invent_human_or_effect_state():

@@ -13,8 +13,12 @@ NODE = shutil.which("node")
 def run_js(code):
     if not NODE:
         pytest.skip("Node is required")
+    # renderPerformance now calls the §3 vocabulary primitives (_unavailHtml,
+    # _epiBadgeHtml, _accountStateInvalid), which ship immediately after t().
+    primitives = HTML[HTML.index("// PBR-B0-PRIMITIVES:BEGIN"):
+                      HTML.index("// PBR-B0-PRIMITIVES:END") + len("// PBR-B0-PRIMITIVES:END")] + "\n"
     start = HTML.index("function _performanceEvidenceText")
-    script = HTML[start:HTML.index("// ── EQUITY CURVE", start)] + code
+    script = primitives + HTML[start:HTML.index("// ── EQUITY CURVE", start)] + code
     result = subprocess.run([NODE], input=script, text=True, capture_output=True, check=True)
     return json.loads(result.stdout)
 
@@ -32,6 +36,8 @@ def test_performance_clears_previous_cash_when_new_response_is_unavailable():
     var _perf = {cash:1234,current_nav:3000,day_change_pct:10,max_drawdown_pct:0,
       day_change_window:{from:'2026-10-09',to:'2026-10-16'},
       drawdown_window:{from:'2026-10-01',to:'2026-10-16'}};
+    // renderPerformance reads the page globals to decide the invalid-account cell.
+    var _book = null, _liveMarks = null;
     renderPerformance();
     var first = E('perf-cash-lbl').textContent;
     var firstRange = E('perf-day-range').textContent;
@@ -39,12 +45,17 @@ def test_performance_clears_previous_cash_when_new_response_is_unavailable():
       availability:{status:'unavailable',valuation_basis:'unavailable',history_status:'missing'}};
     renderPerformance();
     console.log(JSON.stringify({first:first,cash:E('perf-cash-lbl').textContent,
-      nav:E('perf-nav').textContent,note:E('perf-evidence').textContent,
+      navHtml:E('perf-nav').innerHTML,note:E('perf-evidence').textContent,
       firstRange:firstRange,dayRange:E('perf-day-range').textContent,ddRange:E('perf-dd-range').textContent}));
     """)
     assert "$1234" in result["first"]
-    assert result["cash"].endswith("—")
-    assert result["nav"] == "—"
+    # An absent cash is the §3 Unavailable WORD (PBR B0), not an em dash and not the
+    # previous figure: the stale value must be gone and no fabricated number shown.
+    assert result["cash"].endswith("state.unavailable")
+    assert "$1234" not in result["cash"]
+    assert "mm-unavail" in result["navHtml"]
+    assert "state.unavailable" in result["navHtml"]
+    assert "$" not in result["navHtml"] and "NaN" not in result["navHtml"]
     assert "unavailable" in result["note"]
     assert "zero return" in result["note"]
     assert result["firstRange"] == "2026-10-09 → 2026-10-16"

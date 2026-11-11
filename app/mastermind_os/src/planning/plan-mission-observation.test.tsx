@@ -28,7 +28,7 @@ const admitted = () => decodeAdmittedPlan({
     ],
   },
 }, selection);
-function mission(jobs: Array<{ job_id: string; plan_step_id: string | null; status?: string }> = [
+function mission(jobs: Array<{ job_id: string; plan_step_id: string | null; status?: string; parent_job_id?: string | null }> = [
   { job_id: "JOB-340", plan_step_id: "step-two", status: "RUNNING" },
   { job_id: "JOB-341", plan_step_id: "step-two", status: "COMPLETED" },
 ]): MissionDocument {
@@ -38,7 +38,8 @@ function mission(jobs: Array<{ job_id: string; plan_step_id: string | null; stat
     read_state: { state: "CURRENT" },
     source: { owner_observation: { state: "SAME" } },
     children: { state: "AVAILABLE", coverage: "INCOMPLETE", items: jobs.map(j => ({
-      ...j, current_attempt_id: "ATT-" + j.job_id.slice(4), worker_id: "worker-" + j.job_id.slice(4),
+      parent_job_id: selection.root_job_id, ...j,
+      current_attempt_id: "ATT-" + j.job_id.slice(4), worker_id: "worker-" + j.job_id.slice(4),
     })) },
   } as unknown as MissionDocument;
 }
@@ -105,5 +106,35 @@ describe("independent plan vs Mission worker observations", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inspect plan" }));
     expect(await screen.findByText("Verify exact source behavior")).toBeTruthy();
     expect(screen.queryByText(/JOB-340/)).toBeNull();
+  });
+});
+
+
+describe("original-plan worker identity", () => {
+  it("does not attribute a nested coordinator's local step ID to the root plan", () => {
+    const rootPlan = { ...plan(), plan_schema_version: "mastermind.execution_plan/v5",
+      admission_schema_version: "mastermind.coo_plan_admission/v3" };
+    const nested = Array.from({ length: 8 }, (_, index) => ({
+      job_id: "JOB-" + (700 + index), plan_step_id: "step-two",
+      parent_job_id: "JOB-600", status: "RUNNING",
+    }));
+    const readings = observePlanWorkers(selection, rootPlan, mission([
+      { job_id: "JOB-340", plan_step_id: "step-two", parent_job_id: selection.root_job_id },
+      ...nested,
+      { job_id: "JOB-900", plan_step_id: "step-two", parent_job_id: null },
+    ]), "CURRENT", null);
+    expect(readings.get("step-two")).toMatchObject({
+      state: "OBSERVED", coverage: "INCOMPLETE", omitted: false,
+    });
+    expect(readings.get("step-two")?.workers.map(x => x.job_id)).toEqual(["JOB-340"]);
+    const onlyNested = observePlanWorkers(selection, rootPlan, mission(nested), "CURRENT", null);
+    expect(onlyNested.get("step-two")).toMatchObject({
+      state: "NO_MATCH_IN_SAMPLE", coverage: "INCOMPLETE", omitted: false, workers: [],
+    });
+  });
+  it("withholds attribution when the supplied plan belongs to a different original root", () => {
+    const foreign = { ...plan(), root_job_id: "JOB-999" };
+    const readings = observePlanWorkers(selection, foreign, mission(), "CURRENT", null);
+    expect([...readings.values()].every(x => x.state === "UNAVAILABLE" && x.workers.length === 0)).toBe(true);
   });
 });

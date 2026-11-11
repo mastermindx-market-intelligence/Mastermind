@@ -104,6 +104,14 @@ Apply
 `docs/superpowers/specs/2026-09-02-autonomy-release-compatibility-review-reuse.md`
 when this procedure is protected.
 
+### Formal GitHub reviewer identity is independent capability, not a historical seat
+
+A prior handoff/review request naming `mastermindx-2`, another MastermindX login, Dot or archived chat is a **placement clue**, not an exclusive owner/approver, absent a current explicit exact-seat requirement, applicable repository restriction or binding admitted reviewer operation. The actively assigned principal owns the next recovery/repair action; it does not wait for the historical reviewer chat to reappear. For an unstarted, non-denied, non-`EFFECT_UNKNOWN` review, the existing GitHub reviewer-request path may select a different genuinely independent eligible authenticated reviewer without creating a second review queue.
+
+Before a formal review, verify real connected GitHub login/user ID, target repository, original PR author, commits and committers, `Co-authored-by` trailers, substantive prior contributions, full current head SHA, base/CI, existing requested/submitted reviews and live reviewer activity. A different connector login in the **same underlying reasoning session** is not a separate independent adversarial assessment; the source contributor may not self-review by switching accounts. Do not impersonate the previously named login or switch tools/accounts to obtain an explicitly refused or uncertain effect. An actual STARTed independent review stays on its carrier until reconciled; do not duplicate it.
+
+The independent recipient must assess the source and return attributable evidence. Require **one native submitted GitHub review** whose authenticated author, review ID, `commit_id` and disposition are read back against the exact PR head; a Slack technical PASS, GitHub issue comment, requested reviewer or agent launch is not a formal `APPROVED`. Respect true source review findings, required checks and protected release. A reviewer name is never authorization to self-merge or self-approve.
+
 ## Step 2B — GitHub-native Cursor Cloud as an independent *source-review* avenue
 
 A Chairman/Sol-authorized `@cursor` GitHub PR comment may commission a distinct Cursor Cloud

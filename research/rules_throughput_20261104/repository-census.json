@@ -1,0 +1,137 @@
+{
+  "scope": "Accessible non-archived mastermindx-market-intelligence repositories, bounded read-only census",
+  "accessible_non_archived_count": 7,
+  "pagination": {
+    "page1_count": 7,
+    "page2_count": 0
+  },
+  "root_inventories_read": 7,
+  "counts": {
+    "root_AGENTS": 4,
+    "root_CLAUDE": 3,
+    "root_cursorrules": 0,
+    "cursor_directories": 1
+  },
+  "repositories": [
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "default_branch": "main",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [
+        ".cursor",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "root_entry_count": 55,
+      "scope": "already audited application/OS repository; root entrypoints verified"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "default_branch": "master",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "root_entry_count": 47,
+      "scope": "already audited application/OS repository; root entrypoints verified"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/mastermind-terminal",
+      "default_branch": "master",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [
+        "AGENTS.md",
+        "CLAUDE.md"
+      ],
+      "root_entry_count": 27,
+      "scope": "already audited application/OS repository; root entrypoints verified"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/HelloTalk-Profile-Curator",
+      "default_branch": "main",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [],
+      "root_entry_count": 10,
+      "scope": "additional application; root/docs inventory, README and docs/phases.md read"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/aerlor",
+      "default_branch": "main",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [
+        "AGENTS.md"
+      ],
+      "root_entry_count": 45,
+      "scope": "already audited application/OS repository; root entrypoints verified"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/linear-projection-archive",
+      "default_branch": "main",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [],
+      "root_entry_count": 4,
+      "scope": "immutable evidence archive; no archive-record content inspected"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/executive-dr-vault",
+      "default_branch": "main",
+      "archived": false,
+      "root_inventory_read": true,
+      "entrypoints": [],
+      "root_entry_count": 1,
+      "scope": "backup vault; root README only, no backup contents inspected"
+    }
+  ],
+  "new_inspection": {
+    "hellotalk_revision": "f098aad41cbb995ed3e5a9c5ccab7c2160c42f0e",
+    "hellotalk_result": "No root AGENTS.md, CLAUDE.md, .cursorrules or .cursor. No blanket session-review/stop gate found in README and docs/phases.md sample. Existing live-input/calibration/credential requirements are product safety controls, not removed.",
+    "macro_revision": "95a4f76b3fde9dd8224b5d257a5e5a75390a55e1",
+    "cursor_rules": [
+      {
+        "path": ".cursor/rules/execution-continuation.mdc",
+        "blob": "e412f8352eef22dd41fad1a595c59656c597faa4",
+        "lines": "30-46, 66-74",
+        "finding": "Always-applied closed terminal set excludes qualified CHECKPOINTED_CONTINUATION and forbids ALL_SCOPED_LANES_BLOCKED stopping; watcher wording is broader than attended foreground work requires."
+      },
+      {
+        "path": ".cursor/rules/ship-loop-terminal-states.mdc",
+        "blob": "304c0eac71d5206cd081e13bfa59cb211c4f1e23",
+        "lines": "14-23, 31-45",
+        "finding": "PARKED requires title/Draft/green exact-head CI and universal child STOP/watch closure; this can turn an honest held release into continuing foreground ceremony."
+      }
+    ]
+  },
+  "open_prs": [
+    {
+      "number": 8413,
+      "repository": "macro",
+      "author": "mastermindx-2",
+      "head": "7c541a2dc416bb9c56ffb4efa7c2e4aecf4d7562",
+      "draft": true,
+      "state": "open",
+      "overlap": [
+        ".cursor/rules/execution-continuation.mdc"
+      ],
+      "updated_at": "2026-10-16T00:07:41Z"
+    },
+    {
+      "number": 7799,
+      "repository": "macro",
+      "author": "chriswong6031-creator",
+      "head": "e8727ff50dc527b49493d2ca029e5f1b3ea1b630",
+      "draft": true,
+      "state": "open",
+      "overlap": [],
+      "related": "Stop-hook advice and AGENTS/CLAUDE; not Cursor rule files",
+      "updated_at": "2026-11-02T07:11:13Z"
+    }
+  ],
+  "limits": "PR author/last update is not proof of a live writer or lease. Targeted PR text searches and two exact file lists do not establish absence of every other open overlapping PR. No repo edits or external messages."
+}

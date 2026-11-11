@@ -49,6 +49,16 @@ def prepare_document(file_id: str, expected_snapshot: str, operation_id: str, *,
         client.initialize()
         catalog = client.catalog()
         schema = bridge.schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
+        # prepare_document invokes get_basic_info through bridge.snapshot.
+        # The normal MCP/CLI route must prove this exact live reader remains
+        # source-reviewed *before* it can send the implicit Paper read. Keep
+        # private exact-pin synthetic fixtures independently testable.
+        if _catalog_pin == bridge.SUPPORTED_CATALOG_SHA256 and (
+            not schema["server_name_compatible"]
+            or not schema["server_version_compatible"]
+            or not schema["snapshot_tool_compatible"]
+        ):
+            raise bridge.Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
         # Bind and guard the exact requested file first. Another admitted
         # session may change the user's foreground file, and Paper may have no usable
         # default active-file context at all. Neither condition is relevant to an

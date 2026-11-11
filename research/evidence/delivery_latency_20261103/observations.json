@@ -1,0 +1,508 @@
+{
+  "scope": "existing #917/#945; #1957 P3.O3",
+  "source_pin": "7f1242bfa90f0f0448e66e400e054bd5aa5fa15a",
+  "operation_id": "delivery-throughput-80-20261102-sol-001",
+  "target": {
+    "metric": "assignment-to-accepted-capability elapsed time for comparable cohorts",
+    "maximum_new_to_baseline_ratio": 0.2,
+    "achieved": false
+  },
+  "cohort_selection": "Six selected existing delivery-change PRs; not a random or risk-matched sample; source-merge timing only.",
+  "pull_requests": [
+    {
+      "pr": 1932,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1932",
+      "head_sha": "cc591c615dc0c3231ba834c816cf8f82e1fb181c",
+      "created_at": "2026-11-02T05:49:37Z",
+      "merged_at": "2026-11-02T19:20:24Z",
+      "source_merge_seconds": 48647,
+      "changed_files": 2,
+      "events": [
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T05:49:46Z",
+          "actor": "chriswong6031-creator",
+          "commit_id": null,
+          "reviewer": "mastermindx-2"
+        },
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T06:10:00Z",
+          "actor": "chriswong6031-creator",
+          "commit_id": null,
+          "reviewer": "mastermindxryan"
+        },
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T06:28:48Z",
+          "actor": "chriswong6031-creator",
+          "commit_id": null,
+          "reviewer": "mastermindx-3"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T06:32:40Z",
+          "actor": "mastermindx-2",
+          "state": "approved",
+          "commit_id": "cc591c615dc0c3231ba834c816cf8f82e1fb181c"
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T18:33:44Z",
+          "actor": "mastermindxryan",
+          "commit_id": null
+        },
+        {
+          "event": "merged",
+          "at": "2026-11-02T19:20:24Z",
+          "actor": "mastermindxryan",
+          "commit_id": "8917cf86487e495dd584c9844fec8e22d4ab9bde"
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-02T19:20:24Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        }
+      ]
+    },
+    {
+      "pr": 1828,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1828",
+      "head_sha": "60ce5aa43a3875ac5039fcbbc4c1af04058da870",
+      "created_at": "2026-10-24T06:14:16Z",
+      "merged_at": "2026-11-02T19:35:17Z",
+      "source_merge_seconds": 825661,
+      "changed_files": 3,
+      "events": [
+        {
+          "event": "review_requested",
+          "at": "2026-10-24T06:17:18Z",
+          "actor": "mastermindx-3",
+          "commit_id": null,
+          "reviewer": "mastermindx-2"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T07:05:35Z",
+          "actor": "mastermindx-2",
+          "state": "approved",
+          "commit_id": "60ce5aa43a3875ac5039fcbbc4c1af04058da870"
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T07:05:49Z",
+          "actor": "mastermindx-2",
+          "commit_id": null
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-02T08:53:36Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T18:47:36Z",
+          "actor": "mastermindxryan",
+          "commit_id": null
+        },
+        {
+          "event": "merged",
+          "at": "2026-11-02T19:35:17Z",
+          "actor": "mastermindxryan",
+          "commit_id": "660d6cbca7c2ab7d8de229b7626aeb61031397df"
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-02T19:35:17Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        }
+      ]
+    },
+    {
+      "pr": 1616,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1616",
+      "head_sha": "5e3a0f4edab8852ed340dd5def02ee6e785cb8e0",
+      "created_at": "2026-10-18T10:42:02Z",
+      "merged_at": "2026-11-02T20:45:26Z",
+      "source_merge_seconds": 1332204,
+      "changed_files": 6,
+      "events": [
+        {
+          "event": "review_requested",
+          "at": "2026-10-19T10:50:12Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "MastermindX1"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T06:43:28Z",
+          "actor": "chriswong6031-creator",
+          "state": "changes_requested",
+          "commit_id": "88b5f6360b94e6ad627dfe88aa4ce3580918bcd7"
+        },
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T19:04:23Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "chriswong6031-creator"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T19:20:08Z",
+          "actor": "chriswong6031-creator",
+          "state": "approved",
+          "commit_id": "98caac5795c595ed03d0b7d64acf270c3e3d3121"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T19:26:17Z",
+          "actor": "chriswong6031-creator",
+          "state": "changes_requested",
+          "commit_id": "98caac5795c595ed03d0b7d64acf270c3e3d3121"
+        },
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T19:37:30Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "chriswong6031-creator"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T19:51:33Z",
+          "actor": "chriswong6031-creator",
+          "state": "approved",
+          "commit_id": "5e3a0f4edab8852ed340dd5def02ee6e785cb8e0"
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T20:21:31Z",
+          "actor": "chriswong6031-creator",
+          "commit_id": null
+        },
+        {
+          "event": "merged",
+          "at": "2026-11-02T20:45:26Z",
+          "actor": "chriswong6031-creator",
+          "commit_id": "22c08067ed0f480d1d5324a815fa248661c4ab46"
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-02T20:45:26Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        }
+      ]
+    },
+    {
+      "pr": 1924,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1924",
+      "head_sha": "6e1f1b62a9e3e8069de5d60d2c3edfea827444e4",
+      "created_at": "2026-11-02T03:43:48Z",
+      "merged_at": "2026-11-02T22:58:09Z",
+      "source_merge_seconds": 69261,
+      "changed_files": 15,
+      "events": [
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T03:43:53Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "mastermindx-2"
+        },
+        {
+          "event": "ready_for_review",
+          "at": "2026-11-02T05:47:46Z",
+          "actor": "chriswong6031-creator",
+          "commit_id": null
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T06:31:37Z",
+          "actor": "mastermindx-2",
+          "state": "approved",
+          "commit_id": "6e1f1b62a9e3e8069de5d60d2c3edfea827444e4"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T22:11:46Z",
+          "actor": "mastermindx-2",
+          "state": "approved",
+          "commit_id": "6e1f1b62a9e3e8069de5d60d2c3edfea827444e4"
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T22:11:56Z",
+          "actor": "mastermindx-2",
+          "commit_id": null
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-02T22:58:08Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        },
+        {
+          "event": "merged",
+          "at": "2026-11-02T22:58:09Z",
+          "actor": "mastermindx-2",
+          "commit_id": "7f1242bfa90f0f0448e66e400e054bd5aa5fa15a"
+        }
+      ]
+    },
+    {
+      "pr": 1959,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1959",
+      "head_sha": "99e6ace09157c0bc9f6450d28ee2bf9d1dc6b06c",
+      "created_at": "2026-11-02T19:56:25Z",
+      "merged_at": "2026-11-03T00:32:07Z",
+      "source_merge_seconds": 16542,
+      "changed_files": 4,
+      "events": [
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T19:56:27Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "mastermindx-2"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T22:34:49Z",
+          "actor": "MastermindX1",
+          "state": "approved",
+          "commit_id": "99e6ace09157c0bc9f6450d28ee2bf9d1dc6b06c"
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T23:18:22Z",
+          "actor": "mastermindxryan",
+          "commit_id": null
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-03T00:32:06Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        },
+        {
+          "event": "merged",
+          "at": "2026-11-03T00:32:07Z",
+          "actor": "mastermindxryan",
+          "commit_id": "7914bbc97f9d397cc176110f23cd6edffbb0412e"
+        }
+      ]
+    },
+    {
+      "pr": 1965,
+      "url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1965",
+      "head_sha": "59d2275161178cef2ba9e4f7034cade81bd7250d",
+      "created_at": "2026-11-02T21:46:48Z",
+      "merged_at": "2026-11-03T00:09:21Z",
+      "source_merge_seconds": 8553,
+      "changed_files": 4,
+      "events": [
+        {
+          "event": "ready_for_review",
+          "at": "2026-11-02T21:47:33Z",
+          "actor": "mastermindxryan",
+          "commit_id": null
+        },
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T21:47:42Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "mastermindx-2"
+        },
+        {
+          "event": "review_requested",
+          "at": "2026-11-02T22:11:48Z",
+          "actor": "mastermindxryan",
+          "commit_id": null,
+          "reviewer": "chriswong6031-creator"
+        },
+        {
+          "event": "reviewed",
+          "at": "2026-11-02T23:03:05Z",
+          "actor": "chriswong6031-creator",
+          "state": "approved",
+          "commit_id": "59d2275161178cef2ba9e4f7034cade81bd7250d"
+        },
+        {
+          "event": "added_to_merge_queue",
+          "at": "2026-11-02T23:13:33Z",
+          "actor": "mastermindxryan",
+          "commit_id": null
+        },
+        {
+          "event": "removed_from_merge_queue",
+          "at": "2026-11-03T00:09:20Z",
+          "actor": "github-merge-queue[bot]",
+          "commit_id": null
+        },
+        {
+          "event": "merged",
+          "at": "2026-11-03T00:09:21Z",
+          "actor": "mastermindxryan",
+          "commit_id": "7e87f225a4ed03e3b89169f7b7c9052c6a6eac9c"
+        }
+      ]
+    }
+  ],
+  "run_profile_source": {
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "run_id": 41528759464,
+    "run_attempt": 1,
+    "head_sha": "6e1f1b62a9e3e8069de5d60d2c3edfea827444e4",
+    "source_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41528759464",
+    "observed_wall_seconds": 1385,
+    "observed_job_seconds": 6322,
+    "rows": [
+      {
+        "job": "pytest shard 2",
+        "seconds": 840,
+        "start": "2026-11-02T21:29:12Z",
+        "end": "2026-11-02T21:43:12Z",
+        "pytest_seconds": 743
+      },
+      {
+        "job": "pytest shard 4",
+        "seconds": 1069,
+        "start": "2026-11-02T21:29:13Z",
+        "end": "2026-11-02T21:47:02Z",
+        "pytest_seconds": 1003
+      },
+      {
+        "job": "pytest shard 0",
+        "seconds": 1203,
+        "start": "2026-11-02T21:29:13Z",
+        "end": "2026-11-02T21:49:16Z",
+        "pytest_seconds": 994
+      },
+      {
+        "job": "pytest shard 1",
+        "seconds": 1312,
+        "start": "2026-11-02T21:29:13Z",
+        "end": "2026-11-02T21:51:05Z",
+        "pytest_seconds": 1244
+      },
+      {
+        "job": "pytest shard 3",
+        "seconds": 1045,
+        "start": "2026-11-02T21:29:13Z",
+        "end": "2026-11-02T21:46:38Z",
+        "pytest_seconds": 942
+      },
+      {
+        "job": "pytest shard 5",
+        "seconds": 844,
+        "start": "2026-11-02T21:29:13Z",
+        "end": "2026-11-02T21:43:17Z",
+        "pytest_seconds": 785
+      },
+      {
+        "job": "test",
+        "seconds": 9,
+        "start": "2026-11-02T21:52:06Z",
+        "end": "2026-11-02T21:52:15Z",
+        "pytest_seconds": null
+      }
+    ]
+  },
+  "review_qualification": {
+    "pr": 1977,
+    "head": "26369a2a7088f10572f8d04aa501011590e663f4",
+    "run": "delivery80-review1977-26369a2a-20261103-01",
+    "root": "autonomy-admin-friction-relief-20260922-sol-001",
+    "controller_pid": 85515,
+    "state": "TERMINAL_ADMISSION_REFUSED",
+    "reason": "host_temperature_at_or_above_limit",
+    "review_performed": false,
+    "retry_allowed": false
+  },
+  "risk_policy_falsifier": {
+    "pr": 1989,
+    "head": "3a89bf1d1022d447f4fd5cca32ec01a736cae42b",
+    "policy_blob": "6371ea1a323ebbf3d3b8f23d85de577a9ec66c15",
+    "comment": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1989#issuecomment-6597325691",
+    "paths": [
+      "tests/conftest.py",
+      "tests/test_ci_pytest_policy.py",
+      "skills/mastermind-fabric-delegate/SKILL.md"
+    ],
+    "observed_tier": "FAST",
+    "formal_approvals": 0
+  },
+  "implementation_qualification": {
+    "observed_at": "2026-11-03T07:23:10Z",
+    "source_operation": "delivery-throughput-80-20261102-sol-001",
+    "worker": {
+      "run_id": "delivery80-ci-profile-20261103-01",
+      "controller_pid": 93798,
+      "state": "TERMINAL",
+      "rc": 0,
+      "response_sha256": "ab92db1c4b449094d63a644102068c5da5cc0cc4aae68f0b32ffaa847c2c0e80",
+      "disposition": "PARTIAL_CONTRIBUTION_PARENT_REPAIRED",
+      "accepted_unchanged": false
+    },
+    "tests": {
+      "original_cases": 36,
+      "additional_regressions": 25,
+      "final_cases": 61,
+      "exit_code": 0,
+      "python": "3.14.7",
+      "pytest": "9.1.1"
+    },
+    "script_sha256": "9b914f92cc507f5e0db56facf852ca05b9f5a48da4d231508ef41afc85bfaf9f",
+    "test_sha256": "3d3d051380d1f87555a0d88b78ea7acf02cf52f904b6bed210f8cb90f43ad7c9",
+    "real_capture_validation": [
+      {
+        "run_id": 41528759464,
+        "identity_verified": true,
+        "complete_jobs": true,
+        "elapsed_seconds": 1385,
+        "compute_seconds": 6322,
+        "union_seconds": 1322,
+        "pytest_seconds": 5711,
+        "evidence_gaps": []
+      },
+      {
+        "run_id": 41522114032,
+        "identity_verified": true,
+        "complete_jobs": true,
+        "elapsed_seconds": 1402,
+        "compute_seconds": 6765,
+        "union_seconds": 1305,
+        "pytest_seconds": 6176,
+        "evidence_gaps": []
+      }
+    ],
+    "formal_reviews": [
+      {
+        "repository": "mastermindx-market-intelligence/Mastermind",
+        "pr": 1989,
+        "head": "31f1453a1f242e80f1ade90b87ebc29be213bb41",
+        "review_id": 5748343198,
+        "reviewer": "MastermindX1",
+        "verdict": "CHANGES_REQUESTED"
+      },
+      {
+        "repository": "mastermindx-market-intelligence/mastermind-terminal",
+        "pr": 1251,
+        "head": "4dedfaa92bc3fb9510fdb9734156f4c1592fe1f4",
+        "review_id": 5748486833,
+        "reviewer": "MastermindX1",
+        "verdict": "CHANGES_REQUESTED",
+        "independently_passed_new_tests": 23
+      }
+    ],
+    "installed_delivery_optimization": false,
+    "achieved_elapsed_reduction_percent": null
+  }
+}

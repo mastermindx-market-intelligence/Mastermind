@@ -88,7 +88,7 @@ async function choose(user: ReturnType<typeof userEvent.setup>, root: string) {
   await user.click(button!);
 }
 async function openPrograms(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Open Programs" }));
+  await user.click(screen.getByRole("button", { name: "Programs workspace" }));
   await screen.findByText(/Root conflict:/);
 }
 function historyRegion() { return screen.getByRole("region", { name: "Retained results" }); }

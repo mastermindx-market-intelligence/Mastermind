@@ -157,6 +157,7 @@ def build_row(
     question: str,
     answer: str,
     model: str = "",
+    provider: str | None = None,
     seat: str | None = None,
     book: str | None = None,
     role: str | None = None,
@@ -167,8 +168,8 @@ def build_row(
     key_id: str | None = None,
     thread_id: str | None = None,
     latency_ms: int | None = None,
-    input_tokens: int = 0,
-    output_tokens: int = 0,
+    input_tokens: int | None = 0,
+    output_tokens: int | None = 0,
     tools: list | None = None,
     thinking: list | None = None,
     flags: dict | None = None,
@@ -186,14 +187,14 @@ def build_row(
     # don't set the sdk/cli/codex overrides (e.g. backend "none").
     _m = str(model)
     _alias = _m.lower().split("[", 1)[0].split("-", 1)[0]
-    provider = "claude_api" if _m.startswith("claude") else (
+    inferred_provider = "claude_api" if _m.startswith("claude") else (
         "claude_code" if _alias in ("opus", "sonnet", "haiku") else (
             "openai" if _m.startswith("gpt-") or (_m[:1] == "o" and _m[1:2].isdigit()) else (
                 "deepseek" if "deepseek" in _m.lower() else None)))
     if backend == "codex":
-        provider = "openai_codex"
+        inferred_provider = "openai_codex"
     elif backend in ("sdk", "cli"):
-        provider = "claude_code"
+        inferred_provider = "claude_code"
     row: dict[str, Any] = {
         "id": row_id or uuid.uuid4().hex,
         "schema": SCHEMA,
@@ -202,13 +203,13 @@ def build_row(
         "lane": None,
         "mode": mode or None,
         "model": str(model or "unknown"),
-        "provider": provider,
+        "provider": provider if provider is not None else inferred_provider,
         "thread_id": str(thread_id) if thread_id else None,
         "user_ref": "bot",
         "question": _clip(question, _QUESTION_CAP),
         "answer": _clip(answer, _ANSWER_CAP),
-        "input_tokens": int(input_tokens or 0),
-        "output_tokens": int(output_tokens or 0),
+        "input_tokens": None if input_tokens is None else int(input_tokens or 0),
+        "output_tokens": None if output_tokens is None else int(output_tokens or 0),
         "latency_ms": int(latency_ms) if latency_ms is not None else None,
         "context": {},
         "citations": [],

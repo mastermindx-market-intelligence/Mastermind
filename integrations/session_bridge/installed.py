@@ -45,6 +45,21 @@ _PRINCIPAL_KEYS = frozenset({
 _MAX_TARGETS = 256
 
 
+class TransportNotSent(BridgeError):
+    """Private provenance: the trusted transport proved the frame was not sent.
+
+    Issued only inside :class:`InstalledSessionBridgeClient` after an actual
+    trusted transport response reports ``TRANSPORT_NOT_SENT``. It remains a
+    ``BridgeError`` with the incumbent public ``backend_unavailable`` code and
+    message, so existing Session Bridge callers keep their behavior; the
+    foreground admission owner consumes this type, which no wire payload,
+    store or caller-supplied JSON can forge.
+    """
+
+    def __init__(self, message: str = "installed Session Bridge owner is unavailable") -> None:
+        super().__init__("backend_unavailable", message)
+
+
 async def _maybe(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
@@ -89,6 +104,13 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool == "session_web_census":
+        if type(arguments) is not dict or arguments:
+            raise BridgeError("invalid_input", "profile census takes no selectors")
+        return {}
+    if tool == "session_summon":
+        from .schemas import validate_installed_summon_arguments
+        return validate_installed_summon_arguments(arguments)
     if tool == "session_reply_read":
         from .return_tools import NativeReplyReadTool
         try:
@@ -128,6 +150,7 @@ class InstalledSessionBridgeProvider:
         summon_handler: Callable[[NeutralPrincipalProjection, Mapping[str, Any]], Any],
         reply_read_handler: Callable | None = None,
         reference_handler: Callable | None = None,
+        web_census_handler: Callable | None = None,
     ) -> None:
         for name, value in (
             ("target_projector", target_projector),
@@ -145,6 +168,9 @@ class InstalledSessionBridgeProvider:
         if reference_handler is not None and not callable(reference_handler):
             raise TypeError("reference handler must be callable")
         self._reference_handler = reference_handler
+        if web_census_handler is not None and not callable(web_census_handler):
+            raise TypeError("profile census handler must be callable")
+        self._web_census_handler = web_census_handler
 
     async def handle_frame(self, frame: Any) -> dict[str, Any]:
         tool, principal, arguments = validate_private_frame(frame)
@@ -170,6 +196,10 @@ class InstalledSessionBridgeProvider:
                 if self._reference_handler is None:
                     raise BridgeError("reply_unavailable", "authorized canonical references unavailable")
                 data = await _maybe(self._reference_handler(principal, dict(arguments)))
+            elif tool == "session_web_census":
+                if self._web_census_handler is None:
+                    raise BridgeError("backend_unavailable", "profile observation is unavailable")
+                data = await _maybe(self._web_census_handler(principal, dict(arguments)))
             elif tool == "session_send":
                 data = await _maybe(self._reply_handler(principal, dict(arguments)))
             else:
@@ -259,11 +289,29 @@ def build_runtime_native_reply_writer(runtime: Any, *, dialogue_socket_path: Pat
                              socket_path=dialogue_socket_path, service_call=call)
 
 
+def build_runtime_project_conversation_reader(runtime: Any, *, dialogue_socket_path: Path,
+        codex_owner_configured: Callable[[], bool], authorized_policies: Any,
+        reference_cursor_key: bytes, supervisor: Any = None):
+    """Compose only the existing nominal READ source; no listeners or grants."""
+    from .runtime_owner import RuntimeFabricTargetProjector, RuntimeCodexTargetProjector
+    from .runtime_return import RuntimeSessionReturn
+    from .project_conversations import RuntimeProjectConversationsReader
+    fabric = RuntimeFabricTargetProjector(runtime)
+    codex = RuntimeCodexTargetProjector(fabric, owner_configured=codex_owner_configured)
+    return RuntimeProjectConversationsReader(RuntimeSessionReturn(runtime,
+        fabric=fabric, codex=codex, socket_path=dialogue_socket_path,
+        authorized_policies=authorized_policies, reference_cursor_key=reference_cursor_key),
+        supervisor=supervisor).installed_binding()
+
+
 def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  summon_handler: Callable | None = None,
                                  codex_owner_configured: Callable[[], bool] | None = None,
+                                 attention_requester: Callable | None = None,
                                  authorized_policies: Any = None,
-                                 reference_cursor_key: bytes | None = None):
+                                 reference_cursor_key: bytes | None = None,
+                                 hermes_session: Any | None = None,
+                                 web_census_handler: Callable | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
     Compatibility schemas do not grant native Codex or Claude ownership. Those
@@ -285,7 +333,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     returns = RuntimeSessionReturn(runtime, fabric=projector, codex=codex,
                                    socket_path=dialogue_socket_path,
                                    authorized_policies=authorized_policies,
-                                   reference_cursor_key=reference_cursor_key)
+                                   reference_cursor_key=reference_cursor_key,
+                                   hermes=hermes_session)
     reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
                                     projected_principal=True)
     reader = CanonicalTargetReader(
@@ -294,26 +343,40 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     def unavailable(*_):
         raise BridgeError("backend_unavailable", "installed native session owner is unavailable")
 
+    if attention_requester is not None and not callable(attention_requester):
+        raise TypeError("attention_requester must be callable when supplied")
+
     # A canonical reply receipt is never promoted into attention/consumption.
-    # The existing Dialogue/Wake loop remains the attention owner; this bridge
-    # cannot inject a raw provider prompt or launch another worker.
-    def coordinator(targets, principal, arguments):
+    # The installed owner may request the existing Dialogue/Wake path using
+    # only opaque references. This bridge never creates a provider or grant.
+    def coordinator(targets, principal, arguments, read_ref):
         # Bind authorization to this invocation; no cached caller or second
         # writer can enter COMMIT without the original request's durable fence.
         writer = AgentDialogueContinueWriter(
             RuntimeExecutiveReplyBindingResolver(targets), socket_path=dialogue_socket_path,
             before_commit=lambda **facts: returns.begin_continuation_commit(
                 principal, arguments, **facts))
-        return CanonicalReplyCoordinator(
-            reply_writer=writer, attention_waker=lambda *_: {"state": "UNAVAILABLE"})
+        def attention(target_ref, reference):
+            if attention_requester is None:
+                return {"state": "UNAVAILABLE"}
+            return attention_requester(target_ref, reference, read_ref)
+        return CanonicalReplyCoordinator(reply_writer=writer, attention_waker=attention)
 
-    def targets(principal, kind):
-        values = reader(kind)
+    async def targets(principal, kind):
+        from control_plane.native_continuation import HERMES_KINDS
+        if kind in HERMES_KINDS:
+            return await returns.hermes_targets(principal, kind=kind)
+        # The omitted kind preserves the existing legacy inventory. Native
+        # Secretary discovery requires the caller's explicit closed selection.
+        values = await _maybe(reader(kind))
         if isinstance(values, Mapping):
-            return [item for group in values.values() for item in group]
+            values = [item for group in values.values() for item in group]
         return values
 
     async def send(principal, arguments):
+        from control_plane.native_continuation import HERMES_TARGET_PREFIXES
+        if arguments["target_ref"].startswith(HERMES_TARGET_PREFIXES):
+            return await returns.send_hermes(principal, arguments)
         committed = await returns.reconcile_existing_send(principal, arguments)
         read_ref = returns.bind_request(principal, arguments)
         if committed is not None:
@@ -323,19 +386,30 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                     "carrier": committed, "attention": {"state": "EFFECT_UNKNOWN"},
                     "read_ref": read_ref}
         router = ExactTargetRouter(
-            fabric_reply=coordinator(projector, principal, arguments),
-            codex_reply=coordinator(codex, principal, arguments), claude_reply=unavailable)
+            fabric_reply=coordinator(projector, principal, arguments, read_ref),
+            codex_reply=coordinator(codex, principal, arguments, read_ref), claude_reply=unavailable)
         result = await _maybe(router(
             arguments["target_ref"], arguments["instruction"],
             arguments["stop_condition"], arguments["operation_key"]))
         return {**result, "read_ref": read_ref}
 
+    async def read_reply(principal, arguments):
+        from control_plane.native_continuation import HERMES_REQUEST_SCHEMAS
+        read_ref = arguments.get("read_ref")
+        if read_ref is None:
+            read_ref = returns.resolve_operation_read_ref(
+                principal=principal, operation_key=arguments["operation_key"])
+        if returns.original_request_schema(
+                principal=principal, read_ref=read_ref) in HERMES_REQUEST_SCHEMAS:
+            return await returns.read_hermes(principal, read_ref)
+        return await reply_reader(principal, arguments)
+
     def references(principal, arguments):
         return returns.session_reply_references(principal=principal, **arguments)
 
     return private_ingress_owner(InstalledSessionBridgeProvider(
-        target_projector=targets, reply_handler=send, reply_read_handler=reply_reader,
-        reference_handler=references,
+        target_projector=targets, reply_handler=send, reply_read_handler=read_reply,
+        reference_handler=references, web_census_handler=web_census_handler,
         summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 
 
@@ -390,10 +464,9 @@ class InstalledSessionBridgeClient:
         response = await send(self._socket_path, frame)
         transport = getattr(response, "transport", None)
         if transport == TRANSPORT_NOT_SENT:
-            raise BridgeError(
-                "backend_unavailable",
-                "installed Session Bridge owner is unavailable",
-            )
+            # Typed provenance only the trusted transport can issue after it
+            # proved the frame was not sent; the public code is unchanged.
+            raise TransportNotSent("installed Session Bridge owner is unavailable")
         if transport == TRANSPORT_SENT_UNKNOWN:
             raise BridgeError(
                 "effect_unknown" if modifying else "backend_unavailable",
@@ -458,6 +531,9 @@ class InstalledSessionBridgeClient:
         self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]
     ) -> Any:
         return await self._call(principal, "session_send", arguments)
+
+    async def web_census(self, principal: VerifiedPrincipal) -> Any:
+        return await self._call(principal, "session_web_census", {})
 
     async def reply_read(self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]) -> Any:
         return await self._call(principal, "session_reply_read", arguments)

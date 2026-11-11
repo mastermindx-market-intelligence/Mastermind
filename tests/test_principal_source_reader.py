@@ -324,10 +324,13 @@ def _attempt(
     service_call=call_service,
     context: DialogueContextV2 | None = None,
     physical: PhysicalDialogueSourceIdentity | None = None,
+    client_setup: Any = None,
 ) -> tuple[InMemorySlackClient, Any]:
     async def run():
         client = InMemorySlackClient(relay_bot_user_id=BOT)
         _seed(client, **(seed_options or {}))
+        if client_setup is not None:
+            client_setup(client)
         socket_path = tmp_path / "relay" / "principal.sock"
         relay = await _start_relay(socket_path, client)
         try:
@@ -384,15 +387,18 @@ def test_positive_read_returns_canonical_parent_thread_and_exact_predecessor(
 
     client, outcome = _attempt(tmp_path, service_call=recording(call_service))
     assert isinstance(outcome, PrincipalSourceRead)
-    assert operations == ["status", "read_bound_parent", "read_thread"]
+    assert operations == ["status", "read_exact_canonical_thread"]
     assert requests[0] == {
         "version": CONTROL_VERSION_V2,
         "operation": "status",
         "args": {},
     }
-    expected_args = {"context": _context().normalized(), "thread_ts": THREAD}
+    expected_args = {
+        "context": _context().normalized(),
+        "thread_ts": THREAD,
+        "expected_parent_fingerprint": _parent()["fingerprint"],
+    }
     assert requests[1]["args"] == expected_args
-    assert requests[2]["args"] == expected_args
 
     assert dict(outcome.parent) == {**_parent(), "allowed_sol_user_ids": (SOL,)}
     assert isinstance(outcome.parent, MappingProxyType)
@@ -410,10 +416,171 @@ def test_positive_read_returns_canonical_parent_thread_and_exact_predecessor(
     assert outcome.predecessor.primary_ts == PREDECESSOR_TS
     assert outcome.predecessor.duplicate_timestamps == ()
     # Exactly one attempt per operation; the read introduced no send effect.
-    assert client.channel_history_call_count == 2
+    assert client.channel_history_call_count == 0
     assert client.thread_history_call_count == 1
     assert client.post_call_count == 0
     assert client.parent_post_call_count == 0
+
+
+def test_exact_canonical_source_is_readable_when_channel_scan_is_incomplete(
+    tmp_path: Path,
+) -> None:
+    def seed_noisy_channel(client: InMemorySlackClient) -> None:
+        # Channel-wide discovery is no longer the principal source reader's
+        # transport requirement; no unrelated-channel uniqueness is claimed.
+        client.channel_history_complete = False
+        client.channel_mutation_evidence_complete = False
+        for index in range(150):
+            client.add_parent(
+                SlackMessage(
+                    ts=f"178810{index:04d}.123456",
+                    author_user_id=SOL,
+                    text=f"Unrelated high-volume channel message {index}",
+                )
+            )
+
+    client, outcome = _attempt(tmp_path, client_setup=seed_noisy_channel)
+    assert isinstance(outcome, PrincipalSourceRead)
+    assert outcome.predecessor.message["message_key"] == PREDECESSOR["message_key"]
+    assert client.channel_history_call_count == 0
+    assert client.thread_history_call_count == 1
+    assert client.post_call_count == 0
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "root_missing",
+        "root_duplicate",
+        "foreign_author",
+        "root_edited",
+        "root_deleted",
+        "root_wrong_thread",
+        "invalid_parent_frame",
+        "wrong_reply_thread",
+        "thread_incomplete",
+        "mutation_incomplete",
+    ],
+)
+def test_exact_canonical_thread_refuses_unsafe_physical_root_or_page(
+    tmp_path: Path, damage: str
+) -> None:
+    def corrupt(client: InMemorySlackClient) -> None:
+        root = client.channel_messages[0]
+        if damage == "root_missing":
+            client.channel_messages.clear()
+        elif damage == "root_duplicate":
+            client.channel_messages.append(root)
+        elif damage == "foreign_author":
+            client.channel_messages[0] = dataclasses.replace(
+                root, author_user_id=SOL
+            )
+        elif damage == "root_edited":
+            client.channel_messages[0] = dataclasses.replace(
+                root, edited=True, created_text=root.text
+            )
+        elif damage == "root_deleted":
+            client.channel_messages[0] = dataclasses.replace(
+                root, deleted=True, created_text=root.text
+            )
+        elif damage == "root_wrong_thread":
+            client.channel_messages[0] = dataclasses.replace(
+                root, thread_ts=FOREIGN_THREAD
+            )
+        elif damage == "invalid_parent_frame":
+            client.channel_messages[0] = dataclasses.replace(
+                root, text="ordinary non-parent content"
+            )
+        elif damage == "wrong_reply_thread":
+            first = client.thread_messages[THREAD][0]
+            client.thread_messages[THREAD][0] = dataclasses.replace(
+                first, thread_ts=FOREIGN_THREAD
+            )
+        elif damage == "thread_incomplete":
+            client.thread_history_complete = False
+        elif damage == "mutation_incomplete":
+            client.thread_mutation_evidence_complete = False
+
+    client, outcome = _attempt(tmp_path, client_setup=corrupt)
+    _assert_refused(outcome)
+    assert client.channel_history_call_count == 0
+    assert client.thread_history_call_count == 1
+    assert client.post_call_count == client.parent_post_call_count == 0
+
+
+def test_exact_source_rejects_mismatched_trusted_parent_fingerprint(tmp_path: Path) -> None:
+    different = _rebuilt_parent({"session_ref": "asd-session-exec-job-201"})
+    client, outcome = _attempt(tmp_path, physical=_physical(parent=different))
+    _assert_refused(outcome)
+    assert client.channel_history_call_count == 0
+    assert client.thread_history_call_count == 1
+    assert client.post_call_count == 0
+
+
+def test_parent_change_after_status_is_detected_in_the_one_exact_read(
+    tmp_path: Path,
+) -> None:
+    clients: list[InMemorySlackClient] = []
+
+    async def mutate_after_status(socket_path: Path, request: dict[str, Any]):
+        response = await call_service(socket_path, request)
+        if request.get("operation") == "status":
+            clients[0].mutate_parent(
+                message_ts=THREAD,
+                text=render_parent_v2(_rebuilt_parent({
+                    "session_ref": "asd-session-exec-job-201",
+                })),
+            )
+        return response
+
+    client, outcome = _attempt(
+        tmp_path,
+        service_call=mutate_after_status,
+        client_setup=clients.append,
+    )
+    _assert_refused(outcome)
+    assert client.channel_history_call_count == 0
+    assert client.thread_history_call_count == 1
+    assert client.post_call_count == 0
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["missing_fingerprint", "invalid_fingerprint", "extra_argument"],
+)
+def test_exact_thread_service_operation_requires_closed_bound_arguments(
+    tmp_path: Path, damage: str
+) -> None:
+    async def run():
+        client = InMemorySlackClient(relay_bot_user_id=BOT)
+        _seed(client)
+        path = tmp_path / "relay" / "closed-scope.sock"
+        service = await _start_relay(path, client)
+        try:
+            arguments: dict[str, Any] = {
+                "context": _context().normalized(),
+                "thread_ts": THREAD,
+                "expected_parent_fingerprint": _parent()["fingerprint"],
+            }
+            if damage == "missing_fingerprint":
+                del arguments["expected_parent_fingerprint"]
+            elif damage == "invalid_fingerprint":
+                arguments["expected_parent_fingerprint"] = "not-a-digest"
+            else:
+                arguments["unexpected"] = True
+            response = await call_service(path, {
+                "version": CONTROL_VERSION_V2,
+                "operation": "read_exact_canonical_thread",
+                "args": arguments,
+            })
+        finally:
+            await service.close()
+        return client, response
+
+    client, response = asyncio.run(run())
+    assert response.get("ok") is False
+    assert client.channel_history_call_count == 0
+    assert client.post_call_count == client.parent_post_call_count == 0
 
 
 def test_duplicate_physical_timestamps_survive_only_for_same_semantic_message(
@@ -504,7 +671,7 @@ def test_parent_binding_attestation_is_closed_and_required(
 ) -> None:
     client, outcome = _attempt(
         tmp_path,
-        service_call=_mutating(_on("read_bound_parent", mutate_result)),
+        service_call=_mutating(_on("read_exact_canonical_thread", mutate_result)),
     )
     _assert_refused(outcome)
     assert client.post_call_count == 0 and client.parent_post_call_count == 0
@@ -540,7 +707,7 @@ def test_changed_or_malformed_parent_binding_refuses(
 ) -> None:
     client, outcome = _attempt(
         tmp_path,
-        service_call=_mutating(_on("read_bound_parent", mutate_result)),
+        service_call=_mutating(_on("read_exact_canonical_thread", mutate_result)),
     )
     _assert_refused(outcome)
     assert client.post_call_count == 0 and client.parent_post_call_count == 0
@@ -574,7 +741,7 @@ def test_changed_or_malformed_parent_binding_refuses(
 def test_malformed_thread_wire_refuses(tmp_path: Path, mutate_result) -> None:
     client, outcome = _attempt(
         tmp_path,
-        service_call=_mutating(_on("read_thread", mutate_result)),
+        service_call=_mutating(_on("read_exact_canonical_thread", lambda result: mutate_result(result["thread"]))),
     )
     _assert_refused(outcome)
     assert client.post_call_count == 0 and client.parent_post_call_count == 0
@@ -652,7 +819,7 @@ def test_invalid_arguments_refuse_without_any_effect(
 
 def test_foreign_engine_error_is_not_forwarded(tmp_path: Path) -> None:
     def mutate(request, response):
-        if request.get("operation") == "read_bound_parent":
+        if request.get("operation") == "read_exact_canonical_thread":
             response.clear()
             response.update({"ok": False, "error": {"code": "THREAD_CONTEXT_MISMATCH"}})
 
@@ -734,7 +901,7 @@ def test_module_is_read_only_single_attempt_and_statically_inert() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     }
-    assert {"status", "read_bound_parent", "read_thread"} <= constants
+    assert {"status", "read_exact_canonical_thread"} <= constants
     assert constants.isdisjoint(
         {
             "send_message",

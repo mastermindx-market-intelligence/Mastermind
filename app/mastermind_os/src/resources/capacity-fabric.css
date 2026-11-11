@@ -1,0 +1,64 @@
+.capacity-fabric { min-width: 0; display: grid; gap: var(--sp-4); margin-bottom: var(--sp-6); }
+.capacity-fabric-heading, .capacity-fabric-overview { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-4); }
+.capacity-fabric-heading h1, .capacity-fabric-heading h2 { margin-block: var(--sp-2); }
+.capacity-fabric-heading p, .capacity-fabric-overview p { margin-block: var(--sp-2); }
+.capacity-fabric-heading button { min-height: 44px; flex: 0 0 auto; }
+.capacity-fabric-overview { padding-block: var(--sp-4); border-block: 1px solid var(--border); }
+.capacity-fabric-overview h3 { margin: 0; font-size: 22px; }
+.capacity-fabric-time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.capacity-fabric-controls { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: var(--sp-4); align-items: end; }
+.capacity-fabric-controls label { min-width: 0; display: grid; gap: var(--sp-2); font-size: 12px; color: var(--muted); }
+.capacity-fabric-controls input[type=search], .capacity-fabric-controls select { min-height: 44px; width: 100%; min-width: 0; padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); color: var(--text); box-sizing: border-box; }
+.capacity-fabric-controls .capacity-fabric-check { display: flex; align-items: center; min-height: 44px; }
+.capacity-fabric-accounts { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); }
+.capacity-fabric-accounts > li { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(240px, 2fr) minmax(120px, 1fr); column-gap: var(--sp-5); row-gap: var(--sp-2); padding: var(--sp-5); border-bottom: 1px solid var(--border); }
+.capacity-fabric-accounts > li:last-child { border-bottom: 0; }
+.capacity-fabric-account { display: grid; align-content: start; gap: var(--sp-2); min-width: 0; }
+.capacity-fabric-account > strong { font-size: 14px; overflow-wrap: anywhere; }
+.capacity-fabric-status { font-size: 12px; color: var(--muted); }
+.capacity-pressure-limit_reached, .capacity-pressure-cooldown { color: var(--red); }
+.capacity-pressure-low_allowance, .capacity-pressure-slots_occupied { color: var(--brass); }
+.capacity-fabric-windows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
+.capacity-fabric-window { display: grid; gap: var(--sp-2); align-content: start; min-width: 0; }
+.capacity-fabric-window > span, .capacity-fabric-slots, .capacity-fabric-window small { color: var(--muted); font-size: 12px; font-weight: 400; }
+.capacity-fabric-window > strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.capacity-fabric-window .capacity-fabric-unknown { font-size: 12px; font-weight: 400; color: var(--muted); }
+.capacity-fabric-window meter { appearance: none; width: 100%; height: 6px; border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--bg); overflow: hidden; }
+.capacity-fabric-window meter::-webkit-meter-bar { background: var(--bg); border: 0; }
+.capacity-fabric-window meter::-webkit-meter-optimum-value { background: var(--muted); }
+.capacity-fabric-window meter::-moz-meter-bar { background: var(--muted); }
+.capacity-fabric-slots { display: grid; gap: var(--sp-2); align-content: start; }
+.capacity-fabric-slots > span { display: flex; justify-content: space-between; gap: var(--sp-2); }
+.capacity-fabric-slots b { color: var(--text); font-variant-numeric: tabular-nums; }
+.capacity-fabric-accounts details { grid-column: 1 / -1; }
+.capacity-fabric summary { cursor: pointer; min-height: 44px; align-content: center; font-size: 12px; }
+.capacity-fabric details dl { margin: var(--sp-2) 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); font-size: 12px; }
+.capacity-fabric details dt { color: var(--muted); }
+.capacity-fabric details dd { margin: var(--sp-2) 0 0; overflow-wrap: anywhere; }
+.capacity-fabric details dd small { display: block; color: var(--muted); margin-top: var(--sp-2); }
+.capacity-fabric-advice ul, .capacity-fabric-consumers ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.capacity-fabric-advice li, .capacity-fabric-consumers li { padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); min-width: 0; }
+.capacity-fabric-advice strong, .capacity-fabric-consumers strong { font-size: 14px; }
+.capacity-fabric-advice p, .capacity-fabric-consumers p, .capacity-fabric-method p { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.capacity-fabric-consumers span { display: block; font-size: 12px; color: var(--muted); margin-top: var(--sp-2); }
+.capacity-fabric-empty { padding: var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--panel); }
+.capacity-fabric-empty p { color: var(--muted); line-height: 1.6; }
+.capacity-fabric code { overflow-wrap: anywhere; }
+.capacity-fabric :where(button, input, select, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.capacity-fabric :where(button, summary) { touch-action: manipulation; }
+@media (max-width: 900px) {
+  .capacity-fabric-accounts > li { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+  .capacity-fabric-slots { grid-column: 1 / -1; display: flex; gap: var(--sp-5); flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .capacity-fabric-heading, .capacity-fabric-overview { flex-direction: column; }
+  .capacity-fabric-controls { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+  .capacity-fabric-accounts > li { grid-template-columns: minmax(0, 1fr); padding: var(--sp-4); gap: var(--sp-4); }
+  .capacity-fabric-account { grid-template-columns: minmax(0, 1fr); }
+  .capacity-fabric-windows { gap: var(--sp-3); }
+  .capacity-fabric-window > strong { font-size: 18px; }
+  .capacity-fabric-slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }
+  .capacity-fabric-slots > span { display: grid; }
+  .capacity-fabric-advice ul, .capacity-fabric-consumers ul, .capacity-fabric details dl { grid-template-columns: minmax(0, 1fr); }
+  .capacity-fabric-time { white-space: normal; }
+}

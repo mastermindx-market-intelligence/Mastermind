@@ -1,0 +1,149 @@
+{
+  "ci": {
+    "a884_component_steps": {
+      "Verify closed application transport in isolated root fixtures": "SUCCESS",
+      "Verify native application admission and dispatch custody": "SUCCESS",
+      "Verify private Fabric HTTP compatibility and incumbent backend lifetime": "SUCCESS"
+    },
+    "a884_failed_shards": [
+      0,
+      2
+    ],
+    "a884_full_test_conclusion": "FAILURE",
+    "a884_passing_shards": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "a884_run": 42380455963,
+    "a884_shard0_job": 128426787642,
+    "current_hermes_natural_run": 42380883495,
+    "d833_head": "d833bd07819086908c7e6b4695c5da3b389eb2aa",
+    "d833_reconciliation": "ci-d833-reconciliation.json",
+    "d833_run": 42390001239,
+    "d833_status": "SHARD4_FAILED_OTHERS_SUCCESS_OR_RUNNING",
+    "h2_upstream_required_test": "SUCCESS",
+    "h2_upstream_run": 42376635292,
+    "new_exact_head_hosted_result_required": true,
+    "observed": "terminal result consumed",
+    "repair_qualification": "ci-repair-qualification.json"
+  },
+  "compatible_law_pin": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+  "current_final_join": {
+    "compatible_law_pin": "4fb0d3825b5b4b4439e65e7382660112b7c2ef8c",
+    "current_h2_parent": "bcfb8c961c51a491cf66faaf697585675152bb6827ae1c070b9efcf5c7018c8e",
+    "governing_diff": "none",
+    "h5_baseline_incorporated": true,
+    "hosted_current_head": "NOT_YET_RUN",
+    "incoming_ci_preserved": true,
+    "native_junit_suite_counter": 542,
+    "native_receipt": "current-native-composition.json",
+    "native_testcase_records": 533,
+    "old_h2_parent": "historical inverse only",
+    "protected_source": "320611cbd7eca66af86a09d0c6f7622f229bdf73",
+    "runtime_h2_members_changed": false,
+    "source": "552375cd288ebe3c417d10afa17f47114c6319db",
+    "tested_tree": "5467b11de4488f89ae5ceeecc5dce4486de047d5",
+    "worker_2225_incorporated": true
+  },
+  "current_original_carriers": {
+    "Macro10740": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+    "Mastermind2175": "72ffa9b7cead0ac19da3d9aaf3f3c427a0c207b0",
+    "contribution_adoption": "NOT_OBSERVED",
+    "protected_Macro": "a83cfac0845baf5687d0864d56765973f69fe98d",
+    "protected_Mastermind": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c"
+  },
+  "current_studio_diagnostic": "baseline 1/1 and instrumented 1/1 passed at ab4732, exactly one observed driver and no missing candidates",
+  "h1_source_support": {
+    "composed_head": "f71a354219298ac0e15460a4c4bbac3b377caf3f",
+    "guard_qualification": "h1-final-guards.json",
+    "native_conversation_cases": 21,
+    "owner_cases": 383,
+    "provider_calls": false,
+    "qualification": "h1-source-support-composition.json",
+    "source": "887f3dd9db878f77ddc75f963ab1e8c8dc3bf1fc",
+    "source_flag_overrides": false
+  },
+  "h2_runtime_sources_changed": false,
+  "h3_outer_invalidation": {
+    "cases_passed": 4,
+    "guards": [
+      "refresh_pending",
+      "refresh_error",
+      "terminal_refusal"
+    ],
+    "qualification": "h3-outer-invalidation-qualification.json",
+    "selectable_source_changed": false,
+    "strict_scope_qualified": false
+  },
+  "h3_patch_format": "zero-context unified diff; exact whole preimages required; exact two postimages independently reconstructed",
+  "h3_patch_sha256": "5d3ad02f01e6c68184e66a7077ee67c14c7f8ff1213920a899d967d92b54fbf2",
+  "h3_strict_scope_qualified": false,
+  "h4_preparation_incorporated": {
+    "installed": false,
+    "qualification": "completed-worker-h4-composition.json",
+    "source": "9379f8fa84f8f9fee96d58a05e987bade8e76891",
+    "via": "c07bc8544caa498a65b49f12c17b79dba13f8c40"
+  },
+  "h5_inputs": {
+    "baseline_2109_at_4fd_incorporated": true,
+    "contract": "h2-h5-consumer-contract.md",
+    "historical_projection": "h5-historical-derived-view.json",
+    "live_capacity": "NOT_OBSERVED",
+    "outer_route_repaired": true,
+    "physical_account_join": "NOT_JOINED",
+    "qualification": "h5-composition-qualification.json"
+  },
+  "housekeeping": "Commit applied and read back; automatic Git housekeeping reported a permission refusal against an unrelated worktree index. No housekeeping retry or permission mutation was attempted.",
+  "incoming_ci_script_blob": "7eb889d42f46724c939f1d7e62b3655ebc84c0f9",
+  "incoming_hermes": "c40f58b42383684e0ded1db7a7cb48741ddb7abf",
+  "installed": false,
+  "local_correction": "Canonicalize newly created temporary directory before unchanged Node observer custody check; corrected selfcheck exits 0",
+  "macro_10832_10833": "already incorporated; do not reapply",
+  "macro_incorporation_commit": "c2261cb826d1bd76c2e980efb68edb9ed7d0829c",
+  "macro_native_candidate_pins": "19/19 matched at c226 to a884/c40; not a claim about optional emitted H2",
+  "macro_original_carrier_at_readback": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+  "mission_complete": false,
+  "native_loader_repair": "native-loader-qualification.json",
+  "original_carrier_at_join": "da2db3909544137ca8b0602304a9b574b18f5277",
+  "original_j": {
+    "execution_receipt_sha256": "7d8061569b6465c32301ec72098b67be8f5615a841866b5afe7943411c889af7",
+    "lease_settlement": "NOT_RECORDED",
+    "original_collection": "CONTROLLER_UNKNOWN_DESTINATION_ABSENT",
+    "original_execution": "TERMINAL_SUCCESS_REPORTED_AND_REVERIFIED_BY_ORIGINAL_HOST_READERS",
+    "output_sha256": "0fe4c6ecbf185b58b4b8c061fd131a2ab15e04a37a6b6fc86bbe93a3a35d84cb",
+    "recollected": false,
+    "redispatched": false,
+    "root_acceptance": "NOT_RECORDED",
+    "source_comments": [
+      6709365383,
+      6709540563,
+      6709649691,
+      6709989395
+    ],
+    "source_issue": 983
+  },
+  "original_root": "fabric-application-integration-20261104-sol",
+  "primary_core_preimage_qualification": "primary-core-preimages.json",
+  "provider_calls": false,
+  "qualified_base": "a88488670bc99f7156eff193101b76795c16733f",
+  "qualified_merge_commit": "ab4732a81e7101d137f6fe31dea2f17f8a536e1d",
+  "qualified_merge_tree": "55a7e822a6a99bacc40db128a268c5af988bc8f0",
+  "release_registry_equal_entries": 70,
+  "schema": "mastermind.h6-current-source-composition.v1",
+  "selected": false,
+  "studio_fixture_pair_changed": false,
+  "successor_source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+  "worker_join": {
+    "backend_sha256": "8ff1b90a38ee3c16180e74b5a5083451784bfa9f4304e380252224baa0bdd8f1",
+    "current_native_abi_qualification": "PRIOR_IMPORT_FAILED_BEFORE_CASES_NOT_RETRIED",
+    "live_acceptance": false,
+    "newer_completed_checker_contribution": "c07bc8544caa498a65b49f12c17b79dba13f8c40",
+    "newer_completed_checker_incorporated": true,
+    "qualification": "completed-worker-h4-composition.json",
+    "runtime_package_sha256": "7979dd4fbc42eead4d6e24b0fbcd1cbd73bb73fe645f63f7767b6994639e207a",
+    "source": "c07bc8544caa498a65b49f12c17b79dba13f8c40",
+    "upstream_native_component_cases": 25
+  }
+}

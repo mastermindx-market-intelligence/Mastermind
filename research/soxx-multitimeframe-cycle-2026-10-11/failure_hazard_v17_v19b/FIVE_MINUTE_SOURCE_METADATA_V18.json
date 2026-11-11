@@ -1,0 +1,110 @@
+{
+  "SOXX": {
+    "rows": 20000,
+    "days": 258,
+    "first": "2025-10-01",
+    "last": "2026-10-09",
+    "source_counts": {
+      "stored_5m": 19532,
+      "stored_1h": 0,
+      "live_tail": 468,
+      "unattributed": 0
+    },
+    "date_hist": {
+      "26": 1,
+      "78": 255,
+      "42": 2
+    },
+    "source_sha256": "96c230426f6be2900011d861d4596b3b5857045f8a3f4aa7b3d2342db9a4a7f6",
+    "source_store_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "823ad0c9c0b0e4c67234a8bd417a075b648043ed416a51caa46b26d50c9abbe1"
+      }
+    ],
+    "price_adjustment": "not_verified",
+    "historical_availability": "not_verified"
+  },
+  "SMH": {
+    "rows": 20000,
+    "days": 258,
+    "first": "2025-10-01",
+    "last": "2026-10-09",
+    "source_counts": {
+      "stored_5m": 19532,
+      "stored_1h": 0,
+      "live_tail": 468,
+      "unattributed": 0
+    },
+    "date_hist": {
+      "26": 1,
+      "78": 255,
+      "42": 2
+    },
+    "source_sha256": "225312fa6480c79436eaa30d5407831237b9b466eb2c093b42f601559ac4b363",
+    "source_store_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "1541d55da68e5963f605578c5f08e371f48d0e5b71cf1987d322bb3d9b3d8781"
+      }
+    ],
+    "price_adjustment": "not_verified",
+    "historical_availability": "not_verified"
+  },
+  "QQQ": {
+    "rows": 20000,
+    "days": 258,
+    "first": "2025-10-01",
+    "last": "2026-10-09",
+    "source_counts": {
+      "stored_5m": 19532,
+      "stored_1h": 0,
+      "live_tail": 468,
+      "unattributed": 0
+    },
+    "date_hist": {
+      "26": 1,
+      "78": 255,
+      "42": 2
+    },
+    "source_sha256": "55a2d5cecd115aee6bad691bfa07c46531c55a7e6f73144da508c51f9920d8e2",
+    "source_store_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "871e9d96447b58e7ff52aa68b88bec86c3c130d4a9d454ea42ec40bf5df38648"
+      }
+    ],
+    "price_adjustment": "not_verified",
+    "historical_availability": "not_verified"
+  },
+  "AMD": {
+    "rows": 20000,
+    "days": 258,
+    "first": "2025-10-01",
+    "last": "2026-10-09",
+    "source_counts": {
+      "stored_5m": 19532,
+      "stored_1h": 0,
+      "live_tail": 468,
+      "unattributed": 0
+    },
+    "date_hist": {
+      "26": 1,
+      "78": 255,
+      "42": 2
+    },
+    "source_sha256": "f84884c3ccb1439519dfb2f4669696316bfa4f21b0ddfa3d38d4a76911d95f28",
+    "source_store_reads": [
+      {
+        "base": "5m",
+        "status": "available",
+        "content_sha256": "31d54c9b3a8e66ed137bf68d4a0f3e8a36498357f395603d570a6c4e343cfec8"
+      }
+    ],
+    "price_adjustment": "not_verified",
+    "historical_availability": "not_verified"
+  }
+}

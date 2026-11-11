@@ -1,0 +1,1558 @@
+{
+  "schemaVersion": "paper-final-page-reconciliation.v1",
+  "assignment": "Read-only page-list refresh of readable files excluded from the root's 17-file final metadata. One get_basic_info call per file; no Paper mutations.",
+  "startedAt": "2026-11-09 00:09:56 UTC",
+  "sourceInventory": "/workspace/scratch/44569e75bea4/paper-audit/portfolio-inventory-current.json",
+  "alreadyFreshMetadata": "/workspace/scratch/44569e75bea4/paper-audit/portfolio-final-page-metadata.json",
+  "sourcePin": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+  "macroPin": "b5674d8ef898e503d6164922654f5ff89be9981c",
+  "excludedAlreadyFreshFileIds": [
+    "01M5EXPMQTSBFBAM8KKG83FTZH",
+    "01M2VWK62FA5S4VVF6G7SBPE5J",
+    "01M5H6EARN9YHQV17JC6ZG9BRY",
+    "01M6FAXA774QT1VRDMAG7DFQ2W",
+    "01M6Y3CRMC345RTB3ZDP3XSYRP",
+    "01M6JNN71ZN4867VJZ83PPXQZ0",
+    "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+    "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+    "01M3NSZGE8JWN2EZCSF0DT05RM",
+    "01M3NT5Y3G5HTJHVR0K5W2MDJM",
+    "01M5EPQ16VBT7SBW2NQVX2RJG4",
+    "01M5EX8RTPR7YEZD2A144XED2S",
+    "01M6PXFEP1E1T59M2B3N673PMG",
+    "01M6Q4WK0EMPV1G2KDGGRQBC1B",
+    "01M6Y2RQMB5WNV6DHHAY5PJVZS",
+    "01M6Y34XE4JKS3A40GMMZ954JE",
+    "01M5FNCKAND6CBSJNYM5FZWR8Y"
+  ],
+  "skipped": [
+    {
+      "fileId": "01M3NSWX6SGTY4Z5DKBN4YP60M",
+      "name": "Others",
+      "initialState": "TOOL_ERROR",
+      "action": "not retried"
+    }
+  ],
+  "files": [
+    {
+      "fileId": "01M5J3GC90GAKHK8B6SAPRV3JQ",
+      "initialFileName": "Archived · GMI Round 2 · merged into Product system",
+      "requestedAt": "2026-11-09T00:10:30.207Z",
+      "observedAt": "2026-11-09T00:10:52.962Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M5J3GC90GAKHK8B6SAPRV3JQ",
+      "identityMatch": true,
+      "snapshotSha256": "15022b53007c0c4c3c23a04af0c130441834b323454f8ca1f7ae805fbd753f1a",
+      "fileName": "Archived · GMI Round 2 · merged into Product system",
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "Moved · Open canonical GMI Explorer",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": true
+        },
+        {
+          "id": "p-2-0",
+          "name": "Archive · original Round 2 boards",
+          "type": "page",
+          "icon": "images",
+          "isActive": false
+        }
+      ],
+      "initialPageCount": 2,
+      "freshPageCount": 2,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0,
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "Moved · Open canonical GMI Explorer",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": true
+        },
+        {
+          "id": "p-2-0",
+          "name": "Archive · original Round 2 boards",
+          "type": "page",
+          "icon": "images",
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": []
+    },
+    {
+      "fileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "initialFileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "requestedAt": "2026-11-09T00:10:56.128Z",
+      "observedAt": "2026-11-09T00:11:17.834Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M38EVF74SJWG1GANN5VP380Z",
+      "identityMatch": true,
+      "snapshotSha256": "f8cc373dd6d9ace5b1500bfbadcb6327d909212b4a91bd143684b3730f12d8a3",
+      "fileName": "Mastermind · Market Dashboard Popups · Redesign",
+      "pages": [
+        {
+          "id": "p-5-0",
+          "name": "00 · Popups + Risk Radar · Start Here · Design Families",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-1-0",
+          "name": "01 · Risk Radar · Main + Evidence",
+          "type": "page",
+          "icon": "design",
+          "isActive": true
+        },
+        {
+          "id": "p-9-0",
+          "name": "Interaction states · Follow save",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-8-0",
+          "name": "Build · Popup interaction & future states",
+          "type": "page",
+          "icon": "blueprint",
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "01B · Risk Radar · Pullback Underway · US + China",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "China Intelligence · R2 · Progressive Disclosure",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "Events & News · R2 · Briefing to Evidence · 2026-09-29",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "Reference · Historical program handoff",
+          "type": "page",
+          "icon": "info",
+          "isActive": false
+        }
+      ],
+      "initialPageCount": 8,
+      "freshPageCount": 8,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0,
+      "rawPageEntries": [
+        {
+          "id": "p-5-0",
+          "name": "00 · Popups + Risk Radar · Start Here · Design Families",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-1-0",
+          "name": "01 · Risk Radar · Main + Evidence",
+          "type": "page",
+          "icon": "design",
+          "isActive": true
+        },
+        {
+          "id": "p-9-0",
+          "name": "Interaction states · Follow save",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-8-0",
+          "name": "Build · Popup interaction & future states",
+          "type": "page",
+          "icon": "blueprint",
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "01B · Risk Radar · Pullback Underway · US + China",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "China Intelligence · R2 · Progressive Disclosure",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "Events & News · R2 · Briefing to Evidence · 2026-09-29",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "type": "divider"
+        },
+        {
+          "id": "p-2-0",
+          "name": "Reference · Historical program handoff",
+          "type": "page",
+          "icon": "info",
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": [
+        {
+          "id": "p-7-0",
+          "type": "divider"
+        }
+      ]
+    },
+    {
+      "fileId": "01M5JRN1HWF62YK527NKCY7WD5",
+      "initialFileName": "Paper E2E acceptance — file+page+order verified",
+      "requestedAt": "2026-11-09T00:11:53.720Z",
+      "observedAt": "2026-11-09T00:12:05.030Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M5JRN1HWF62YK527NKCY7WD5",
+      "identityMatch": true,
+      "snapshotSha256": "b259e6d6ee6375e61e083954d6fed17aa6aa8aca68c0acc2c06373cadf6c0762",
+      "fileName": "Paper E2E acceptance — file+page+order verified",
+      "rawPageEntries": [
+        {
+          "id": "p-2-0",
+          "name": "E2E scratch second page",
+          "type": "page",
+          "icon": "design",
+          "isActive": true
+        },
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": false
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-2-0",
+          "name": "E2E scratch second page",
+          "type": "page",
+          "icon": "design",
+          "isActive": true
+        },
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": [],
+      "initialPageCount": 2,
+      "freshPageCount": 2,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    },
+    {
+      "fileId": "01M5K0V5AGPSDXKA2K1PH1ABNE",
+      "initialFileName": "Paper visual row guard canary 2026-10-22 (copy)",
+      "requestedAt": "2026-11-09T00:12:05.031Z",
+      "observedAt": "2026-11-09T00:12:08.709Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M5K0V5AGPSDXKA2K1PH1ABNE",
+      "identityMatch": true,
+      "snapshotSha256": "4ab4a15a39923dbcd680b4db04902dc30d380154eb96a5505ba4f3e617f0325a",
+      "fileName": "Paper visual row guard canary 2026-10-22 (copy)",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": true
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": true
+        }
+      ],
+      "nonPageEntries": [],
+      "initialPageCount": 1,
+      "freshPageCount": 1,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    },
+    {
+      "fileId": "01M5JV8SY6WP21H72WKK7GJ5R6",
+      "initialFileName": "Paper reviewed deletion regression 2026-10-22 (copy)",
+      "requestedAt": "2026-11-09T00:12:08.709Z",
+      "observedAt": "2026-11-09T00:12:12.126Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M5JV8SY6WP21H72WKK7GJ5R6",
+      "identityMatch": true,
+      "snapshotSha256": "f760cf3cd38caa0ff66fe1c918db63eb4779880d7be8afe4891e0ff248db8049",
+      "fileName": "Paper reviewed deletion regression 2026-10-22 (copy)",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": true
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": true
+        }
+      ],
+      "nonPageEntries": [],
+      "initialPageCount": 1,
+      "freshPageCount": 1,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    },
+    {
+      "fileId": "01M5K3WQXMD1QKXM2SBD7VABW1",
+      "initialFileName": "Paper exact Copy link canary 2026-10-22 (copy)",
+      "requestedAt": "2026-11-09T00:12:12.126Z",
+      "observedAt": "2026-11-09T00:12:14.783Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M5K3WQXMD1QKXM2SBD7VABW1",
+      "identityMatch": true,
+      "snapshotSha256": "3183f3d4b2543cd435fd5edf55e9b5ebd842797515aa5ef6b85f7c574baedab1",
+      "fileName": "Paper exact Copy link canary 2026-10-22 (copy)",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": true
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "E2E primary retained",
+          "type": "page",
+          "icon": "check",
+          "isActive": true
+        }
+      ],
+      "nonPageEntries": [],
+      "initialPageCount": 1,
+      "freshPageCount": 1,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    },
+    {
+      "fileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "initialFileName": "MarketOntology",
+      "requestedAt": "2026-11-09T00:12:27.065Z",
+      "observedAt": "2026-11-09T00:12:43.834Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M3P1X4FR6BRTB13KA736Y1HT",
+      "identityMatch": true,
+      "snapshotSha256": "c24bdc69c166ffea9d6445bec4af2ec3a083b7ec2ffe150a7903bfcb02b02793",
+      "fileName": "MarketOntology",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "00 · Start here · WTI journey + Scope",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Answers, Context + Evidence",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Thesis Changes + Receipts",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "type": "divider"
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · Retained Shared Shell · Company Comparison + Evidence",
+          "type": "page",
+          "icon": null,
+          "isActive": true
+        },
+        {
+          "id": "p-8-0",
+          "name": "Build · Clarity & receipt contracts",
+          "type": "page",
+          "icon": "blueprint",
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "04 · Implementation + Visual Engine · References",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "00 · Start here · WTI journey + Scope",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Answers, Context + Evidence",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Thesis Changes + Receipts",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · Retained Shared Shell · Company Comparison + Evidence",
+          "type": "page",
+          "icon": null,
+          "isActive": true
+        },
+        {
+          "id": "p-8-0",
+          "name": "Build · Clarity & receipt contracts",
+          "type": "page",
+          "icon": "blueprint",
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "04 · Implementation + Visual Engine · References",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": [
+        {
+          "id": "p-7-0",
+          "type": "divider"
+        }
+      ],
+      "initialPageCount": 7,
+      "freshPageCount": 7,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    },
+    {
+      "fileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "initialFileName": "Mastermind · Market Guide · Re-envisioning",
+      "requestedAt": "2026-11-09T00:12:43.834Z",
+      "observedAt": "2026-11-09T00:13:01.614Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "identityMatch": true,
+      "snapshotSha256": "1d9e7a4139acfdffea26bbb1479efa7ffcb2395a0278c7d3d0242c89460b2f76",
+      "fileName": "Mastermind · Market Guide · Re-envisioning",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "00 · R14 · Market Guide · Start here",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Score Reading · Themes + Locales",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Contextual Help + Visual Explanations",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · Search, Aliases + Recovery",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "04 · Risk Radar Full Guide · Themes + Locales",
+          "type": "page",
+          "icon": null,
+          "isActive": true
+        },
+        {
+          "id": "p-8-0",
+          "name": "Proposed · Guide return clarity",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "type": "divider"
+        },
+        {
+          "id": "p-5-0",
+          "name": "REF · Guide Baseline · Themes + Locales",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "00 · R14 · Market Guide · Start here",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Score Reading · Themes + Locales",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Contextual Help + Visual Explanations",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · Search, Aliases + Recovery",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "04 · Risk Radar Full Guide · Themes + Locales",
+          "type": "page",
+          "icon": null,
+          "isActive": true
+        },
+        {
+          "id": "p-8-0",
+          "name": "Proposed · Guide return clarity",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "REF · Guide Baseline · Themes + Locales",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": [
+        {
+          "id": "p-7-0",
+          "type": "divider"
+        }
+      ],
+      "initialPageCount": 7,
+      "freshPageCount": 7,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    },
+    {
+      "fileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "initialFileName": "International Markets · Core + Global Surveillance",
+      "requestedAt": "2026-11-09T00:13:03.415Z",
+      "observedAt": "2026-11-09T00:13:13.816Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M3P1TW5Y3XWQC37ADDS8K5AG",
+      "identityMatch": true,
+      "snapshotSha256": "640cd29a4c5e433b4e6cf8df9efe63872464a0241c77f337e21fcd0546d9ca4f",
+      "fileName": "International Markets · Core + Global Surveillance",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "00 · Start · Core + Global Surveillance",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": true
+        },
+        {
+          "id": "p-N-0",
+          "name": "User help · Calculation topics",
+          "type": "page",
+          "icon": "question",
+          "isActive": false
+        },
+        {
+          "id": "p-M-0",
+          "name": "Build · Clarity preservation",
+          "type": "page",
+          "icon": "blueprint",
+          "isActive": false
+        },
+        {
+          "id": "p-L-0",
+          "name": "Proposed · Scanner to dossier",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-K-0",
+          "name": "Interaction states · Saved research",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-J-0",
+          "name": "User help · Methods & saved research",
+          "type": "page",
+          "icon": "question",
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Overview, Compare + Navigation",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-E-0",
+          "name": "01A · Country Inspector & Follow · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-F-0",
+          "name": "01B · Company Exposure & Transmission · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Macro, Policy + Risk",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · History + Scenarios",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "04 · Research Library + Search",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-C-0",
+          "name": "04A · Saved Research & Evidence Refresh · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-D-0",
+          "name": "04B · Comparison Setup & Review · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-B-0",
+          "name": "80 · R10 · Builder Contracts & Reference States",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-I-0",
+          "name": "R14 · Global Surveillance · Frozen design",
+          "type": "page",
+          "icon": "paper",
+          "isActive": false
+        },
+        {
+          "id": "p-G-0",
+          "name": "REF · R12 · Country Intelligence",
+          "type": "page",
+          "icon": "paper",
+          "isActive": false
+        },
+        {
+          "id": "p-H-0",
+          "name": "REF · R13 · Global Surveillance · Expansion",
+          "type": "page",
+          "icon": "paper",
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "05 · China Intelligence · vNext",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "name": "06 · Returns Calendar · Terminal + Dossier",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-A-0",
+          "name": "ARCHIVE · Relocated Families · Not for Build",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-9-0",
+          "name": "90 · ARCHIVE · Returns v2 duplicate studies · NOT FOR BUILD",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "00 · Start · Core + Global Surveillance",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": true
+        },
+        {
+          "id": "p-N-0",
+          "name": "User help · Calculation topics",
+          "type": "page",
+          "icon": "question",
+          "isActive": false
+        },
+        {
+          "id": "p-M-0",
+          "name": "Build · Clarity preservation",
+          "type": "page",
+          "icon": "blueprint",
+          "isActive": false
+        },
+        {
+          "id": "p-L-0",
+          "name": "Proposed · Scanner to dossier",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-K-0",
+          "name": "Interaction states · Saved research",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-J-0",
+          "name": "User help · Methods & saved research",
+          "type": "page",
+          "icon": "question",
+          "isActive": false
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Overview, Compare + Navigation",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-E-0",
+          "name": "01A · Country Inspector & Follow · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-F-0",
+          "name": "01B · Company Exposure & Transmission · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Macro, Policy + Risk",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · History + Scenarios",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "04 · Research Library + Search",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-C-0",
+          "name": "04A · Saved Research & Evidence Refresh · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-D-0",
+          "name": "04B · Comparison Setup & Review · R10",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-B-0",
+          "name": "80 · R10 · Builder Contracts & Reference States",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-I-0",
+          "name": "R14 · Global Surveillance · Frozen design",
+          "type": "page",
+          "icon": "paper",
+          "isActive": false
+        },
+        {
+          "id": "p-G-0",
+          "name": "REF · R12 · Country Intelligence",
+          "type": "page",
+          "icon": "paper",
+          "isActive": false
+        },
+        {
+          "id": "p-H-0",
+          "name": "REF · R13 · Global Surveillance · Expansion",
+          "type": "page",
+          "icon": "paper",
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "05 · China Intelligence · vNext",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "name": "06 · Returns Calendar · Terminal + Dossier",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-A-0",
+          "name": "ARCHIVE · Relocated Families · Not for Build",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-9-0",
+          "name": "90 · ARCHIVE · Returns v2 duplicate studies · NOT FOR BUILD",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": [],
+      "initialPageCount": 21,
+      "freshPageCount": 22,
+      "addedPages": [
+        {
+          "id": "p-N-0",
+          "name": "User help · Calculation topics",
+          "classification": "State or user-help reference by page title; behavior unverified.",
+          "classificationBasis": "page title only"
+        }
+      ],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": true,
+      "fileNameChanged": false,
+      "knownPageDelta": 1
+    },
+    {
+      "fileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "initialFileName": "Mastermind AI",
+      "requestedAt": "2026-11-09T00:13:13.817Z",
+      "observedAt": "2026-11-09T00:13:47.816Z",
+      "toolIsError": false,
+      "state": "OBSERVED",
+      "returnedFileId": "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "identityMatch": true,
+      "snapshotSha256": "4495e28a4f5ec2817697ed03e1ddf0842abbd1c2f9e92fb788b753a061903058",
+      "fileName": "Mastermind AI",
+      "rawPageEntries": [
+        {
+          "id": "p-1-0",
+          "name": "00 · R10 · Chat workbench · Start here",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": false
+        },
+        {
+          "id": "p-B-0",
+          "name": "Proposed · Draft mention context",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-8-0",
+          "name": "R10 · Save + Resume · Recovery",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-9-0",
+          "name": "R10 · Build + Implementation Boundaries",
+          "type": "page",
+          "icon": null,
+          "isActive": true
+        },
+        {
+          "id": "p-A-0",
+          "type": "divider"
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Interaction + Recovery · R2 References",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Answer Craft · R7–R8 References",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · Legacy Reference + Assets",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "04 · Retained Shared Shell · Research Reading + Evidence",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "name": "05 · SOURCE ONLY · Chat Live Baseline",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "pages": [
+        {
+          "id": "p-1-0",
+          "name": "00 · R10 · Chat workbench · Start here",
+          "type": "page",
+          "icon": "arrow",
+          "isActive": false
+        },
+        {
+          "id": "p-B-0",
+          "name": "Proposed · Draft mention context",
+          "type": "page",
+          "icon": "design",
+          "isActive": false
+        },
+        {
+          "id": "p-8-0",
+          "name": "R10 · Save + Resume · Recovery",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-9-0",
+          "name": "R10 · Build + Implementation Boundaries",
+          "type": "page",
+          "icon": null,
+          "isActive": true
+        },
+        {
+          "id": "p-2-0",
+          "name": "01 · Interaction + Recovery · R2 References",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-3-0",
+          "name": "02 · Answer Craft · R7–R8 References",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-4-0",
+          "name": "03 · Legacy Reference + Assets",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-5-0",
+          "name": "04 · Retained Shared Shell · Research Reading + Evidence",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-7-0",
+          "name": "05 · SOURCE ONLY · Chat Live Baseline",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        },
+        {
+          "id": "p-6-0",
+          "name": "99 · QA HOLD · Duplicate Shared Shell Transfer · Not for Build",
+          "type": "page",
+          "icon": null,
+          "isActive": false
+        }
+      ],
+      "nonPageEntries": [
+        {
+          "id": "p-A-0",
+          "type": "divider"
+        }
+      ],
+      "initialPageCount": 10,
+      "freshPageCount": 10,
+      "addedPages": [],
+      "removedPages": [],
+      "renamedPages": [],
+      "pageOrderChanged": false,
+      "fileNameChanged": false,
+      "knownPageDelta": 0
+    }
+  ],
+  "lastUpdatedAt": "2026-11-09T00:13:47.816Z",
+  "summary": {
+    "plannedFileCount": 10,
+    "completedFileCount": 10,
+    "observedFileCount": 10,
+    "errorOrIdentityMismatchCount": 0,
+    "initialKnownPagesInCompletedFiles": 60,
+    "freshKnownPagesInCompletedFiles": 61,
+    "knownPageDeltaInObservedFiles": 1,
+    "addedPageCount": 1,
+    "removedPageCount": 0,
+    "renamedPageCount": 0,
+    "nonPageEntryCount": 4,
+    "complete": true
+  },
+  "pageCountingRule": "Count only entries whose native type is page. Keep native divider/other entries separately; do not count them as pages.",
+  "originalPlannedFileCount": 62,
+  "scopeAmendment": {
+    "at": "2026-11-09T00:12:27.065Z",
+    "reason": "Parent narrowed recensus to remaining active products after confirming the initial inventory already excluded dividers. Preserve accepted unchanged history/canary metadata; do not manufacture a simultaneous global census.",
+    "requestedFreshFileIds": [
+      "01M3P1QEHS5XXQY85BJT6QR2E1",
+      "01M3P1X4FR6BRTB13KA736Y1HT",
+      "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "01M3P1TW5Y3XWQC37ADDS8K5AG"
+    ],
+    "completedBeforeAmendment": [
+      "01M5J3GC90GAKHK8B6SAPRV3JQ",
+      "01M38EVF74SJWG1GANN5VP380Z",
+      "01M5JRN1HWF62YK527NKCY7WD5",
+      "01M5K0V5AGPSDXKA2K1PH1ABNE",
+      "01M5JV8SY6WP21H72WKK7GJ5R6",
+      "01M5K3WQXMD1QKXM2SBD7VABW1"
+    ],
+    "notRefreshedFiles": [
+      {
+        "fileId": "01M5JKR6H0JNN07BA3YKQDXBNC",
+        "fileName": "Young harmony (copy)",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M5HDPF3HSZFJJAFMARVQSHZR",
+        "fileName": "Jolly vase",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M5JS8TNZKQ01SJS4D0S9VQFC",
+        "fileName": "Paper E2E acceptance — file+page+order verified (copy)",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M5HVW84WZFE62DREB6QB9ZDJ",
+        "fileName": "MASTERMIND PAGES (copy)",
+        "initialPageCount": 57,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M3NRCX55B452A12819WNE1RH",
+        "fileName": "Mastermind OS",
+        "initialPageCount": 20,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M312VSDSZFVT45674GDVJVZN",
+        "fileName": "Mastermind Product Design System — Canonical",
+        "initialPageCount": 10,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6JA41WWACWMRRVMVX1NQP9K",
+        "fileName": "Mastermind Paper v20 Scratch Acceptance 2026-11-04",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M5HPWFPQ2Z5X79A9H8MJFKK0",
+        "fileName": "Young harmony",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M5HQ8VMMY87NVDENZAGJNYKM",
+        "fileName": "Young harmony (copy)",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M5HRAG5659SFE58D3PTA7D0V",
+        "fileName": "Young harmony (copy)",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M3NQQ5KHTEZ50AGPT3RAD4BN",
+        "fileName": "DUPLICATE DO NOT EDIT",
+        "initialPageCount": 36,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6XNXMVK65A0JRXKJHXT7ZCF",
+        "fileName": "Paper MCP write-path verification · design-lead · 2026-11-08",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6XQBG616KHKS5011KKQTQSN",
+        "fileName": "RECOVERY ONLY - MASTERMIND PAGES - 2026-11-08 - NOT FOR EDITING",
+        "initialPageCount": 62,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y4G3644Y8918FCX2NS9M68",
+        "fileName": "Mastermind - Live Site Baselines - Historical Wave 1",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3VVGX4K4MXZ8JK2A1YG28",
+        "fileName": "Mastermind - Bonds and Transmission - Pre-R30 Archive",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3T1K3573JYPMBATASW1W5",
+        "fileName": "Mastermind - Bonds and Cross-Asset Transmission - Studies",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3RNXNXP3YX0NFBT0YEXS4",
+        "fileName": "Mastermind - Bonds - Decision Workspace R1",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3AT0XJBWTM3AVCMBJQ8TE",
+        "fileName": "Mastermind - Bot Paper Portfolio - V3 Design",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+        "fileName": "Mastermind - Catalyst Intelligence - Decision Desk and Integration",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y396T7MXR7VQXSRKMYS3RM",
+        "fileName": "Mastermind - China Intelligence - Historical Study",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+        "fileName": "Mastermind - Commodities - R1 Source and Legacy Archive",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3HE0HWCX4H3K3HKXCWSE0",
+        "fileName": "Mastermind - Company Intelligence - Archive Not for Build",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "fileName": "Mastermind - Confluence Screener - R2 and Governed References",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+        "fileName": "Mastermind - Crypto Intelligence - R4 References and Archive",
+        "initialPageCount": 3,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y384WPAGQ6BXMHTCZT0WYK",
+        "fileName": "Mastermind - Earnings and Dossiers - Source Archive",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3NE9G4K5625JQS7GDVZ2Z",
+        "fileName": "Mastermind - Forex - Prior Studies Archive",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3PVKKXC83MRGJYCX77959",
+        "fileName": "Mastermind - Forex - R17-R24 and Alternate Studies",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y4CC5V5NZ92G3A0X3XZN3B",
+        "fileName": "Mastermind - Forex Guided Intelligence - Source Revisions",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+        "fileName": "Mastermind - Design Foundations and Archetypes - Migrated References",
+        "initialPageCount": 3,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3397SE03G626MJ72N90PF",
+        "fileName": "Mastermind - Government Revenue - R5 and Builder Contracts",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3X59BVYPETH1DRC4YSVAW",
+        "fileName": "Mastermind - Intelligence Hub - Earlier Archive and References",
+        "initialPageCount": 3,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y486E4X85MVP1AWS8H6E53",
+        "fileName": "Mastermind - Intelligence Hub - R4 Original Source Archive",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3J4X0V4E4J5H2GMAKJVMQ",
+        "fileName": "Mastermind - International Markets - R9 Archive",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2QK8TQZRN8T4BHG10CJXT",
+        "fileName": "Mastermind - Intraday Flow - R1 Draft",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+        "fileName": "Mastermind - Legacy Navigation and Entry Designs - Reference",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+        "fileName": "Mastermind - Market Memory - Evidence Workspace R1",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y36EQAT1J5B6Q7AVYKV2DW",
+        "fileName": "Mastermind - MedTech - Regulatory Catalyst R13 References",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+        "fileName": "Mastermind - News Intelligence - September Source Study",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2X53ABR4MME4ATS15B8SH",
+        "fileName": "Mastermind - Macro and Policy Watch - Reference Studies",
+        "initialPageCount": 3,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y39WH7QVTH07RTWHTSRP65",
+        "fileName": "Mastermind - Returns Calendar - Terminal and Dossier",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2SGKNTEESDJX96ZSJJGPF",
+        "fileName": "Mastermind - Ranked Search and Discovery - T47 Draft",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y4HE5S5YRCQSSWKS5QDBDY",
+        "fileName": "Mastermind - Sector Intelligence - Legacy Archive",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3K1SSX1M108ZY90KJX382",
+        "fileName": "Mastermind - Sector Intelligence - R2 and Study References",
+        "initialPageCount": 4,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y3Z73MXTN3MDX5661VV0KB",
+        "fileName": "Mastermind - Sector Intelligence - R3 Completion",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2Z642VN20X8WDSWV07M0M",
+        "fileName": "Mastermind - Shared Market - Research and Reading References",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y31C449F02KGRNPGK94Q8D",
+        "fileName": "Mastermind - Shared Market - Search and Comparison",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "fileName": "Mastermind - Shared Shell - F01 Candidate and Integration",
+        "initialPageCount": 3,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "fileName": "Mastermind - Shared Market - Tools and Research Launcher",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "fileName": "Mastermind - Shared Market - Watchlists and Save States",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "fileName": "Mastermind - Shared Shell - Earlier Design Studies",
+        "initialPageCount": 2,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M6Y37BWE719DWW5Z0DQS6DS9",
+        "fileName": "Mastermind - Synthetic Catalyst Cases - Archive Not for Build",
+        "initialPageCount": 1,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      },
+      {
+        "fileId": "01M2WGNCX9475G79JRKJTCM08P",
+        "fileName": "MASTERMIND PAGES - MOVED - Navigation only",
+        "initialPageCount": 62,
+        "disposition": "Reuse initial inventory; not freshly reread in this supplement."
+      }
+    ]
+  },
+  "observationWindowQualifier": "Non-atomic observation window: final coverage combines the initial inventory for untouched files, the root's 17-file final metadata, and these timestamped fresh reads. It is not a globally simultaneous canvas snapshot.",
+  "completedAt": "2026-11-09T00:14:09.445Z",
+  "observedWindow": {
+    "firstRequest": "2026-11-09T00:10:30.207Z",
+    "lastRead": "2026-11-09T00:13:47.816Z",
+    "atomic": false
+  },
+  "portfolioReconciliation": {
+    "initialKnownPages": 502,
+    "rootFreshFileCount": 17,
+    "rootInitialPages": 124,
+    "rootFreshRealPages": 130,
+    "rootKnownPageDelta": 6,
+    "supplementFreshFileCount": 10,
+    "supplementInitialPages": 60,
+    "supplementFreshPages": 61,
+    "supplementKnownPageDelta": 1,
+    "reusedInitialFileCount": 52,
+    "reusedInitialKnownPages": 318,
+    "combinedReadableFiles": 79,
+    "combinedKnownPages": 509,
+    "unreadCatalogEntry": "Others (01M3NSWX6SGTY4Z5DKBN4YP60M); not retried; page count unknown.",
+    "duplicateFileIdsBetweenRootAndSupplement": []
+  }
+}

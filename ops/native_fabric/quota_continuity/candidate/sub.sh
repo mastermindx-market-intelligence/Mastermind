@@ -557,21 +557,26 @@ def main():
         raise LaneRuntimeConfigError("grok_local_host_policy_required")
     config = load_runtime_config(env)
     complexity = str(env.get("POOL_TASK_COMPLEXITY") or "").strip().upper()
-    default_worker_timeout = 7200.0 if complexity == "C3_FRONTIER_JUDGMENT" else 3600.0
+    default_worker_timeout = 14400.0 if complexity == "C3_FRONTIER_JUDGMENT" else (7200.0 if complexity == "C2_COMPLEX_BOUNDED" else 3600.0)
     worker_timeout = parse_bounded_seconds(
         env.get("POOL_CHILD_TIMEOUT_SECONDS"),
         default=default_worker_timeout,
         minimum=60.0,
-        maximum=7200.0,
+        maximum=14400.0,
         key="POOL_CHILD_TIMEOUT_SECONDS",
     )
     # Match the remote fabric's reviewed runtime-floor semantics: a stale caller
     # may tighten C0/C1 intentionally, but must not silently collapse already
     # classified long work below its custody-safe execution window.
-    if complexity == "C2_COMPLEX_BOUNDED":
-        worker_timeout = max(worker_timeout, 3600.0)
-    elif complexity == "C3_FRONTIER_JUDGMENT":
-        worker_timeout = max(worker_timeout, 7200.0)
+    # Classification raises only the *default* opportunity, never a shorter
+    # explicitly admitted commission budget. The existing owner supplies the
+    # deadline; this layer must not turn an inherited 20-minute child into 4h.
+    explicit_child_budget = str(env.get("POOL_CHILD_TIMEOUT_SECONDS") or "").strip()
+    if not explicit_child_budget:
+        if complexity == "C2_COMPLEX_BOUNDED":
+            worker_timeout = max(worker_timeout, 7200.0)
+        elif complexity == "C3_FRONTIER_JUDGMENT":
+            worker_timeout = max(worker_timeout, 14400.0)
 
     default_turns = 140
     if complexity == "C2_COMPLEX_BOUNDED":
@@ -614,6 +619,19 @@ def main():
                    "--reasoning-effort", env.get("LANE_GROK_EFFORT") or "high"]
         if model:
             command += ["-m", model]
+        # Pass the validated existing Grok worker budget into the nested
+        # slot supervisor. Merely raising slot's maximum leaves its default
+        # at two hours and prematurely terminates a qualified C3 worker.
+        # Preserve an explicit shorter limit; never globally change slot.
+        slot_timeout = worker_timeout
+        for name in ("SLOT_CHILD_TIMEOUT_SECONDS",):
+            raw = env.get(name)
+            if raw is not None and str(raw).strip():
+                slot_timeout = min(slot_timeout, parse_bounded_seconds(
+                    raw, default=7200.0, minimum=1.0, maximum=14400.0,
+                    key=name,
+                ))
+        env["SLOT_CHILD_TIMEOUT_SECONDS"] = str(slot_timeout)
         # Host LaneLease is not a provider lease: slot keeps broker+heartbeat.
         result = run_owned_process(
             command, cwd=cwd, env=env, timeout=worker_timeout, nice=config.nice,

@@ -22,6 +22,10 @@ import artifact_reader as reader
 
 from native_runtime_bindings import owner_path
 
+# Exact reviewed remote recovery program. Protected generation publication binds
+# this incumbent pin; neither request fields nor mutable module names set it.
+ADVERTISED_RECOVERY_SOURCE_SHA256 = '46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0'
+
 HERE = Path(__file__).resolve().parent
 DESTINATION_ROOT = Path("/Volumes/Mastermind/evidence")
 CAPSULE_SOURCE_FILES = {'declaration': {'path': '/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/capsule-path-correction-20261011/CURRENT_PARENT_DECLARATION.json',
@@ -861,6 +865,34 @@ def qualify_native(request, raw):
     return {"lease_id": lease["id"], "mode": terminal.get("mode")}
 
 
+def advertised_recovery_source():
+    """One fixed source read checked by the protected incumbent, before use."""
+    raw = local_file(HERE / 'original_advertised_artifact.py', 131072)
+    if digest(raw) != ADVERTISED_RECOVERY_SOURCE_SHA256:
+        raise ValueError('advertised_remote_source_changed')
+    return raw
+
+
+def advertised_recovery_module():
+    """Execute only the checked fixed bundle, never an import/cache reread."""
+    import types
+    raw = advertised_recovery_source()
+    module = types.ModuleType('_source_admitted_advertised_recovery')
+    module.__file__ = str(HERE / 'original_advertised_artifact.py')
+    exec(compile(raw, module.__file__, 'exec'), module.__dict__)
+    # Keep this already loaded incumbent as owner, including when invoked as
+    # __main__; the delayed owner import must not reopen a different module.
+    owner = types.SimpleNamespace(
+        HERE=HERE, ADVERTISED_RECOVERY_SOURCE_SHA256=ADVERTISED_RECOVERY_SOURCE_SHA256,
+        local_file=local_file, advertised_recovery_source=advertised_recovery_source,
+        validate_capsule_process=validate_capsule_process,
+        reserve_destination=reserve_destination, write_exclusive=write_exclusive,
+        transport=transport, verify_delivered=verify_delivered,
+        publish_receipt=publish_receipt)
+    module._delivery = lambda: owner
+    return module
+
+
 def transport(alias, request, *, observer_source_hash=None, current_sources_sha256=None):
     # Fixed code, fixed interpreter, validated registry alias; paths travel in stdin.
     response_limit = reader.MAX_RESPONSE
@@ -880,6 +912,13 @@ def transport(alias, request, *, observer_source_hash=None, current_sources_sha2
         import original_result_read
         code = original_result_read.code_for_request(request, expected_hashes=current_sources_sha256)
         response_limit = original_result_read.MAX_RESPONSE
+    elif type(request) is dict and request.get("schema") == "mastermind.source_admitted_advertised_artifact_read.v1":
+        # Exact source-admitted advertised artifact recovery: one closed scope,
+        # one remote read, no producer attestation and no outcome acceptance.
+        # Do not import or execute mutable module bytes to check themselves.
+        # The incumbent hashes one byte string, then transports that same string.
+        code = advertised_recovery_source().decode('utf-8')
+        response_limit = 1048576
     elif type(request) is dict and request.get("schema") == "mastermind.native_host_review_source_read.v1":
         if digest(local_file(HERE / "native_host_review_source_delivery.py", 65536)) != '3ec53fa0be3c69c28e265a1bb5b1cab3cc0ee3f6f6c03b93908d6c2685f2e902':
             raise ValueError("native_source_delivery_head_changed")
@@ -893,6 +932,10 @@ def transport(alias, request, *, observer_source_hash=None, current_sources_sha2
     elif type(request) is dict and request.get("schema") == "mastermind.fabric_run_observation_request.v1":
         import run_observation_delivery
         code = run_observation_delivery.code_for_request(request, expected_hash=observer_source_hash)
+    elif type(request) is dict and request.get("schema") == "mastermind.fabric_post_failure_observation.v1":
+        import post_failure_observation_delivery
+        code = post_failure_observation_delivery.code_for_request(request, expected_sources=current_sources_sha256)
+        response_limit = reader.MAX_RESPONSE
     elif type(request) is dict and request.get("schema") == "mastermind.fabric_current_source_request.v1":
         # Fixed generated reader composed only from reviewed module source; the
         # request travels on stdin, so no caller bytes can shape the command.
@@ -1595,6 +1638,9 @@ def main():
             if args.run_id == "rf-codegen-contracts-impl-01a1333c-v1":
                 import operator_stdout_delivery
                 receipt = operator_stdout_delivery.collect(args.run_id, args.destination)
+            elif args.run_id == "mm-u0-revision-lens-component-20261105-root":
+                recovery = advertised_recovery_module()
+                receipt = recovery.collect(args.run_id, args.destination)
             elif args.run_id in ("rf-static-checks-01a1333c-v1", "rf-fixed-smoke-runsc-01a1333c-v1", "rf-fixed-smoke-runsc-01a1333c-v2", "rf-fixed-smoke-runsc-01a1333c-v3"):
                 import current_failed_artifact_evidence
                 receipt = current_failed_artifact_evidence.export(args.run_id, args.destination)

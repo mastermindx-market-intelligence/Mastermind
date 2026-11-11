@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from control_plane.ceo_intent import submit_intent
 from control_plane.executive_paid_fabric_composition import PaidWorkPlacement, placement_member
 from control_plane.executive_runtime import Runtime, OrchestrationDispatchOutcome
@@ -20,7 +22,7 @@ from test_executive_os_phase1fc import _v2_intent, _v3_execution_binding, _compl
 from test_executive_paid_runtime import _paid_source_document
 
 
-def paid_cycle_claim(tmp_path):
+def paid_cycle_claim(tmp_path, *, include_native=False):
     workspace = tmp_path/'workspaces'/'control-source'
     workspace.mkdir(parents=True, mode=0o700)
     subprocess.run(['git','init','-q',str(workspace)],check=True)
@@ -88,10 +90,18 @@ def paid_cycle_claim(tmp_path):
             'requested_authorities':['READ'],'allowed_write_paths':[],'validation_ids':[],
             'attempt_limit':1,'cost_class':'small','placement':{'provider_realm':'glm','quota_class':'paid-read'},
             'prerequisite_step_ids':[]}]}
+    if include_native:
+        body['steps'].append({'ordinal':1,'step_id':'native-step',
+            'objective':'Verify the original project lineage against supplied source evidence.',
+            'business_impact':'routine','review_required':False,
+            'requested_authorities':['READ'],'allowed_write_paths':[],'validation_ids':[],
+            'attempt_limit':1,'cost_class':'small',
+            'placement':{'provider_realm':'codex','quota_class':'codex-plan-small'},
+            'prerequisite_step_ids':[]})
     _complete_ohf_role(runtime,planning,body,identity_seed=9901)
     admitted=runtime.jobs.admit_cycle_plan(root.job_id,command_id=f'coo-cycle:{root.job_id}:admit-plan:{planning.attempt.attempt_id}')
-    assert len(admitted)==1
-    job=admitted[0]
+    assert len(admitted)==(2 if include_native else 1)
+    job=next(child for child in admitted if child.plan_step_id=='paid-step')
     claimed=runtime.attempts.dispatch_cycle_job(job.job_id,command_id=f'coo-cycle:{root.job_id}:dispatch:{job.job_id}:attempt:1',
         worker_id='paid-subject',quota_class='paid-read')
     assert isinstance(claimed,OrchestrationDispatchOutcome)
@@ -113,7 +123,7 @@ def test_paid_claim_uses_existing_root_plan_capacity_and_claim_owners(tmp_path):
     assert frozen['execution_profile_digest']==job.constraints['execution_profile_digest']
 
 
-def paid_running(tmp_path):
+def paid_running(tmp_path, *, include_native=False):
     """Real Runtime/Control composition of explicitly inert owner observations."""
     from types import SimpleNamespace
     from control_plane.executive_paid_fabric_adapter import CanonicalPaidFabricWorkerAdapter
@@ -123,7 +133,7 @@ def paid_running(tmp_path):
     from control_plane.worker_execution_contract import PaidModelProcessRef
     from control_plane import paid_model_execution_contract as contract, paid_fabric_wire as wire
     from control_plane.executive_paid_runtime import paid_physical_binding_from_worker_source
-    runtime,root,job,claimed,source,body,planner=paid_cycle_claim(tmp_path)
+    runtime,root,job,claimed,source,body,planner=paid_cycle_claim(tmp_path,include_native=include_native)
     lease=AttemptLease(attempt=claimed.attempt,lease_token=claimed.lease_token)
     adapter=object.__new__(CanonicalPaidFabricWorkerAdapter)
     adapter.runtime=runtime;adapter.inspector=object()
@@ -212,13 +222,13 @@ def test_paid_running_seals_actual_contract_principal_from_original_owner_chain(
     assert 'provider_home_identity' not in attempt.execution_principal_snapshot
 
 
-def paid_completed(tmp_path):
+def paid_completed(tmp_path, *, include_native=False):
     import asyncio
     from control_plane.executive_runtime import AttemptLease
     from control_plane.executive_supervisor import ActiveRun
     from control_plane.executive_orchestration_result import RESULT_SCHEMA, canonical_bytes
     from control_plane import paid_fabric_wire as wire
-    state=paid_running(tmp_path)
+    state=paid_running(tmp_path,include_native=include_native)
     runtime,job,attempt=state['runtime'],state['job'],state['running']
     envelope={'schema_version':RESULT_SCHEMA,'job_id':job.job_id,'run_id':attempt.attempt_id,
         'worker_id':attempt.worker_id,'role':'work','status':'COMPLETED',
@@ -343,7 +353,8 @@ def test_paid_recovery_changed_private_prompt_refuses_before_owner_status(tmp_pa
     assert state['runtime'].attempts.get_attempt(state['running'].attempt_id).fence_generation==state['running'].fence_generation
 
 
-def test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_path):
+@pytest.mark.parametrize("include_native,review_fault", [(False,False),(True,False),(False,True)])
+def test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_path, monkeypatch, include_native, review_fault):
     import asyncio,dataclasses,os,pwd
     from control_plane.executive_coo_cycle import CooCycle
     from control_plane.executive_supervisor import ExecutiveSupervisor
@@ -351,8 +362,23 @@ def test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_pa
     from control_plane.reviewed_role_input import reviewed_role_input,reviewed_role_prompt_suffix
     from test_executive_terminal_return import _PlannerSealedWorkerAdapter,_SEALED_WORKER_SECRET_CANARY
     from test_executive_supervisor import FakeInspector,FakeProcessController
-    state=paid_completed(tmp_path)
+    state=paid_completed(tmp_path,include_native=include_native)
     runtime,root,subject=state['runtime'],state['root'],state['completed']
+    subjects=[runtime.validated_role_completion(subject.job_id,
+        expected_attempt_id=state['running'].attempt_id)]
+    if include_native:
+        native=next(job for job in runtime.jobs.list_jobs() if job.plan_step_id=='native-step')
+        dispatched=runtime.attempts.dispatch_cycle_job(native.job_id,
+            command_id=f'coo-cycle:{root.job_id}:dispatch:{native.job_id}:attempt:1',
+            worker_id='codex-plan',quota_class='codex-plan-small')
+        result={'schema_version':'mastermind.work_result/v1','root_job_id':root.job_id,
+            'plan_attempt_id':native.plan_attempt_id,'plan_digest':native.plan_digest,
+            'plan_step_id':native.plan_step_id,'repair_round':0,'artifacts':[],'evidence_digests':[]}
+        _complete_ohf_role(runtime,dispatched,result,identity_seed=9907)
+        subjects.append(runtime.validated_role_completion(native.job_id,
+            expected_attempt_id=dispatched.attempt.attempt_id))
+        assert subjects[0].job.job_id!=subjects[1].job.job_id
+        assert subjects[0].attempt.worker_id!=subjects[1].attempt.worker_id
     # The original planner is terminal; none of its same-Worker quotas remain
     # held. This is the legal release before readonly review, not an extra slot.
     assert runtime.workers.get_quota_class('codex-plan','codex-plan-small').active_attempt_id is None
@@ -372,16 +398,31 @@ def test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_pa
         'plan_step_id':subject.plan_step_id,'reviewed_job_id':subject.job_id,
         'reviewed_attempt_id':target.attempt.attempt_id,'reviewed_result_digest':target.role_result_digest,
         'repair_round':0,'verdict':'approve','evidence_digests':[],'findings':[]}
-    class ReadonlyReviewAdapter(_PlannerSealedWorkerAdapter):
+    class RetainedRoleAdapter(_PlannerSealedWorkerAdapter):
+        # Advertise the existing recovery contract so the real supervisor seals
+        # its launch binding. Physical processes remain inert in this fixture.
+        adapter_id='codex-cli'
+        def reattach(self,spec,binding):
+            assert binding.recover_launch_spec(type(spec))==spec
+            self.spec,self.ref=spec,binding.process_ref
+            return self.ref
         async def collect_result(self,ref):
             receipt=await super().collect_result(ref)
-            envelope=dict(receipt.result.structured_output,role='review',role_result=copy.deepcopy(body))
+            role=runtime.jobs.get_job(self.spec.job_id).orchestration_role
+            if role=='aggregation':
+                packet,_=json.JSONDecoder().raw_decode(self.spec.prompt[self.spec.prompt.index('{'):])
+                received=packet['orchestration']['aggregation_result_inputs']['revisions']
+                body['aggregate_summary']='; '.join(row['current']['result_envelope']['summary'] for row in received)
+            envelope=dict(receipt.result.structured_output,role=role,role_result=copy.deepcopy(body))
             raw=canonical_bytes(envelope);Path(ref.result_path).write_bytes(raw)
             return dataclasses.replace(receipt,result=dataclasses.replace(receipt.result,
                 structured_output=envelope),result_sha256=hashlib.sha256(raw).hexdigest())
+    uid,gid=os.geteuid(),os.getegid()
     home=tmp_path/'review-codex-home';home.mkdir(mode=0o700)
-    adapter=ReadonlyReviewAdapter(FakeInspector(),root_job_id=root.job_id,provider_home=home)
-    uid,gid=os.geteuid(),os.getegid();runs=tmp_path/'codex-runs'
+    # Match the fixture's worker group even when temporary directories inherit another group.
+    os.chown(home,-1,gid)
+    adapter=RetainedRoleAdapter(FakeInspector(),root_job_id=root.job_id,provider_home=home)
+    runs=tmp_path/'codex-runs'
     supervisor=ExecutiveSupervisor(runtime,adapter,runs_root=runs,
         isolation_roots=(Path(root.worktree).parent,runs),worker_user=pwd.getpwuid(uid).pw_name,
         worker_uid=uid,worker_gid=gid,inspector=adapter.inspector,
@@ -411,14 +452,102 @@ def test_paid_subject_real_codex_review_prompt_and_serial_worker_schedule(tmp_pa
     assert runtime.workers.get_quota_class('codex-plan','codex-read').active_attempt_id is None
     handoff=cycle.run_once(root.job_id)
     assert handoff.action=='HANDOFF_CREATED',handoff
+    # Continue through the existing original-parent consumer, not only its
+    # claim. Paid terminal DATA, the real adapter decoder, Runtime seals and
+    # review above feed the actual supervisor's immutable aggregation packet.
+    retained_handoff=runtime.jobs.get_cycle_handoff(root.job_id)
+    revision=retained_handoff['revisions'][0]
+    assert revision['current_job_id']==subject.job_id
+    assert revision['current_attempt_id']==state['running'].attempt_id
+    assert revision['current_result_digest']==target.role_result_digest
+    assert revision['qualifying_review_job_id']==review.job_id
+    assert revision['qualifying_review_attempt_id']==receipt.attempt.attempt_id
+    keys={'ordinal','plan_step_id','current_job_id','current_attempt_id',
+        'current_result_digest','repair_round','review_required','qualifying_review_job_id',
+        'qualifying_review_attempt_id','qualifying_review_result_digest'}
+    body={'schema_version':retained_handoff['aggregate_result_schema'],
+        **{key:retained_handoff[key] for key in
+            ('root_job_id','handoff_digest','policy_sha','plan_attempt_id','plan_digest')},
+        'revisions':[{key:value for key,value in row.items() if key in keys}
+            for row in retained_handoff['revisions']],
+        'aggregate_summary':'Original parent consumed the retained paid result and its review.',
+        'evidence_digests':[]}
+    if body['schema_version']=='mastermind.aggregation_result/v2':
+        body['coordinator_job_id']=root.job_id
+    parent_runs=[]
     def dispatch_root(job_id,command_id):
         assert job_id==root.job_id
-        return runtime.attempts.dispatch_cycle_job(job_id,command_id=command_id,
-            worker_id='codex-plan',quota_class='codex-root-default')
+        active=asyncio.run(supervisor.start_cycle_job(job_id,command_id=command_id))
+        parent_runs.append(active)
+        return active
+    if review_fault:
+        from control_plane.executive_supervisor import SupervisorError
+        original=type(runtime).validated_role_completion
+        def foreign_review(owner,job_id,*,expected_attempt_id):
+            found=original(owner,job_id,expected_attempt_id=expected_attempt_id)
+            if owner is runtime and job_id==review.job_id:
+                return dataclasses.replace(found,job=dataclasses.replace(found.job,reviews_job_id='JOB-foreign'))
+            return found
+        monkeypatch.setattr(type(runtime),'validated_role_completion',foreign_review)
+        monkeypatch.setattr(supervisor,'_seal_terminal_assignment',lambda **_kwargs:None)
+        monkeypatch.setattr(supervisor,'_fail_claim',lambda *_args:None)
+        with pytest.raises(SupervisorError,match='^aggregation result input is unavailable$'):
+            asyncio.run(supervisor.start_cycle_job(root.job_id,
+                command_id=f'coo-cycle:{root.job_id}:dispatch:{root.job_id}:attempt:1'))
+        assert adapter.spec.job_id==review.job_id and parent_runs==[]
+        return
     aggregate=CooCycle(runtime,dispatcher=dispatch_root).run_once(root.job_id)
     assert aggregate.action=='DISPATCHED',aggregate
-    aggregate_attempt=runtime.attempts.get_attempt(runtime.jobs.get_job(root.job_id).current_attempt_id)
+    assert len(parent_runs)==1
+    parent=parent_runs[0]
+    aggregate_attempt=runtime.attempts.get_attempt(parent.lease.attempt.attempt_id)
     assert aggregate_attempt.worker_id=='codex-plan' and aggregate_attempt.quota_class=='codex-root-default'
+    packet,_=json.JSONDecoder().raw_decode(adapter.spec.prompt[adapter.spec.prompt.index('{'):])
+    assert packet['orchestration']['aggregation_handoff']==retained_handoff
+    inputs=packet['orchestration']['aggregation_result_inputs']
+    assert inputs['handoff_digest']==retained_handoff['handoff_digest']
+    assert inputs['execution_authority'] is False
+    assert len(inputs['revisions'])==len(subjects)
+    for received,expected in zip(inputs['revisions'],subjects):
+        assert received['current']['job_id']==expected.job.job_id
+        assert received['current']['attempt_id']==expected.attempt.attempt_id
+        assert received['current']['result_envelope']==expected.result_envelope
+        assert received['current']['role_result_digest']==expected.role_result_digest
+    received=inputs['revisions'][0]
+    assert received['current']['result_envelope']==state['envelope']
+    assert received['current']['result_digest']==target.result_digest
+    assert received['current']['role_result_digest']==target.role_result_digest
+    reviewed=runtime.validated_role_completion(review.job_id,expected_attempt_id=receipt.attempt.attempt_id)
+    assert received['qualifying_review']['result_envelope']==reviewed.result_envelope
+    assert received['qualifying_review']['role_result_digest']==reviewed.role_result_digest
+    assert state['envelope']['summary'] in adapter.spec.prompt
+    prompt_path=Path(adapter.spec.result_schema_path).parent/'worker-prompt.txt'
+    sealed_prompt=prompt_path.read_bytes()
+    assert sealed_prompt==adapter.spec.prompt.encode('utf-8')
+    completed_parent=asyncio.run(supervisor.finish_job(parent))
+    assert completed_parent.job.job_id==root.job_id
+    assert completed_parent.job.status.value=='COMPLETED'
+    completion=runtime.validated_role_completion(root.job_id,
+        expected_attempt_id=aggregate_attempt.attempt_id)
+    assert completion.role_result_digest==canonical_digest(body)
+    assert completion.result_envelope['role_result']['aggregate_summary']=='; '.join(item.result_envelope['summary'] for item in subjects)
+    original_attempts=runtime.attempts.list_attempts()
+    reopened=Runtime.at(runtime.store.root,create=False,existing_writable=True)
+    retained=reopened.validated_role_completion(root.job_id,
+        expected_attempt_id=aggregate_attempt.attempt_id)
+    assert retained.result_digest==completion.result_digest
+    assert retained.role_result_digest==completion.role_result_digest
+    assert reopened.jobs.get_cycle_handoff(root.job_id)==retained_handoff
+    assert prompt_path.read_bytes()==sealed_prompt
+    from control_plane.worker_execution_contract import WorkerRecoveryBinding,OrchestrationLaunchSpec
+    original=reopened.attempts.get_attempt(aggregate_attempt.attempt_id)
+    recovery=WorkerRecoveryBinding.from_dict(original.launch_metadata['worker_recovery_binding'])
+    restored_spec=recovery.recover_launch_spec(OrchestrationLaunchSpec)
+    assert restored_spec.run_id==aggregate_attempt.attempt_id and restored_spec.job_id==root.job_id
+    assert restored_spec.prompt.encode('utf-8')==sealed_prompt
+    assert CooCycle(reopened).run_once(root.job_id).action=='NO_ACTION'
+    assert reopened.attempts.list_attempts()==original_attempts
+    assert len(parent_runs)==1
 
 
 def test_cycle_waits_on_same_paid_attempt_before_parent_or_review_admission(tmp_path):

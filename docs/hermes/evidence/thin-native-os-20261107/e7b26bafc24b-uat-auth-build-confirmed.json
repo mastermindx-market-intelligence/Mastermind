@@ -1,0 +1,11 @@
+{
+  "observed_at": "2026-11-07T06:36:43.949Z",
+  "pid": 35606,
+  "signed_in": true,
+  "source": "e7b26bafc24bb63a6078a930ac7a56360cbc1ce9",
+  "build": "hermes-thin-native-e7b26bafc24b-20261107-pro-02",
+  "native_client_ref": "native-client:v1:47cabc2a4fe992f317c895bb619d0fcf64b49f1e03d9992781d1dca7c77cb423",
+  "native_runtime": "Hermes v0.23.0",
+  "organization": "Organization and goal lineage",
+  "callback_app": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-e7b26bafc24b/Mastermind OS.app"
+}

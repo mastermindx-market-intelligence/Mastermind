@@ -1,0 +1,407 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "originalSource": "/Volumes/Mastermind 2/agent-evidence/hermes-thin-os-integration-20261106-c1-01/candidate-1f431c6c4087/uat-useful-send-first-result.json",
+  "originalSha256": "56ca2869e10c12a7149a50d032ca11b3871725ba3749fa6404f406ae551c142e",
+  "projection": "Original request/admission and send controls retained; unrelated history-row titles omitted",
+  "observation": {
+    "at": "2026-11-07T08:59:26.087Z",
+    "pid": 80261,
+    "signedIn": "Signed in",
+    "items": [
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          3
+        ],
+        "role": "AXButton",
+        "name": "New conversation",
+        "value": null,
+        "enabled": false,
+        "children": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          4
+        ],
+        "role": "AXButton",
+        "name": "Local history",
+        "value": null,
+        "enabled": false,
+        "children": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          5
+        ],
+        "role": "AXButton",
+        "name": "Check previous request",
+        "value": null,
+        "enabled": true,
+        "children": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          6
+        ],
+        "role": "AXGroup",
+        "name": null,
+        "value": "",
+        "enabled": true,
+        "children": [
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              6,
+              0
+            ],
+            "role": "AXStaticText",
+            "name": "Original request",
+            "value": "Original request",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              6,
+              1
+            ],
+            "role": "AXStaticText",
+            "name": ": ",
+            "value": ": ",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              6,
+              2
+            ],
+            "role": "AXGroup",
+            "name": null,
+            "value": "",
+            "enabled": true,
+            "children": [
+              {
+                "path": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  2,
+                  2,
+                  7,
+                  6,
+                  2,
+                  0
+                ],
+                "role": "AXStaticText",
+                "name": "5226a1441f084477a0fc523796fbe55f",
+                "value": "5226a1441f084477a0fc523796fbe55f",
+                "enabled": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          8
+        ],
+        "role": "AXGroup",
+        "name": null,
+        "value": "",
+        "enabled": true,
+        "children": [
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              8,
+              0
+            ],
+            "role": "AXStaticText",
+            "name": "Native admission",
+            "value": "Native admission",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              8,
+              1
+            ],
+            "role": "AXStaticText",
+            "name": ": ",
+            "value": ": ",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              8,
+              2
+            ],
+            "role": "AXGroup",
+            "name": null,
+            "value": "",
+            "enabled": true,
+            "children": [
+              {
+                "path": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  2,
+                  2,
+                  7,
+                  8,
+                  2,
+                  0
+                ],
+                "role": "AXStaticText",
+                "name": "d901546607d64c1e9c7cd195e4ddf532",
+                "value": "d901546607d64c1e9c7cd195e4ddf532",
+                "enabled": true
+              }
+            ]
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              8,
+              3
+            ],
+            "role": "AXStaticText",
+            "name": " \u00b7 ",
+            "value": " \u00b7 ",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              8,
+              4
+            ],
+            "role": "AXStaticText",
+            "name": "started",
+            "value": "started",
+            "enabled": true,
+            "children": []
+          }
+        ]
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          10
+        ],
+        "role": "AXButton",
+        "name": "Read original conversation",
+        "value": null,
+        "enabled": false,
+        "children": []
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          13
+        ],
+        "role": "AXGroup",
+        "name": null,
+        "value": "",
+        "enabled": true,
+        "children": [
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              13,
+              0
+            ],
+            "role": "AXStaticText",
+            "name": "Message Hermes",
+            "value": "Message Hermes",
+            "enabled": true,
+            "children": []
+          },
+          {
+            "path": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              7,
+              13,
+              1
+            ],
+            "role": "AXTextArea",
+            "name": "Message Hermes",
+            "value": "",
+            "enabled": false,
+            "children": [
+              {
+                "path": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  2,
+                  2,
+                  7,
+                  13,
+                  1,
+                  0
+                ],
+                "role": "AXGroup",
+                "name": null,
+                "value": "",
+                "enabled": true
+              },
+              {
+                "path": [
+                  0,
+                  0,
+                  0,
+                  0,
+                  2,
+                  2,
+                  7,
+                  13,
+                  1,
+                  1
+                ],
+                "role": "AXGroup",
+                "name": null,
+                "value": "",
+                "enabled": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "path": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          2,
+          7,
+          15
+        ],
+        "role": "AXButton",
+        "name": "Working\u2026",
+        "value": null,
+        "enabled": false,
+        "children": []
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ shell effects or permission to inspect a credential. Import is side-effect free.
 """
 from __future__ import annotations
 import hashlib
+from contextlib import contextmanager
 import json
 import os
 from pathlib import PurePosixPath
@@ -27,7 +28,7 @@ NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0
 NESTED_OUTER_SIZE = 587
 _TOKEN_DATA = _NESTED_DATA = None
 _INITIALIZER_SOURCE_HASHES = None
-_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': 'e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2'}
+_CANONICAL_ENTRY_SOURCES = {'paid_provider_entry.py': '780e4b45c12bdb52c2b56bf17a4842faffbaecc2253aa43d96a484c9a05023c0', 'paid_glm_model_client.py': 'd35d6761dbaf7445455f6db285a87c3b6e90a236307ecc6356f5d7c4d922d18e', 'linux_process_identity.py': '11a0771d7f8fb8c8288303b3d182100341413098c1ee31d12339330dd869e71e'}
 PURPOSE = 'canonical-paid-qualification.v1'
 LIMIT = 16384
 _SHA = re.compile(r'[0-9a-f]{64}\Z')
@@ -77,7 +78,10 @@ class _IgnoredNoSiteNode:
   if (self._identity(os.fstat(self.directory))!=self.directory_before
     or self._identity(os.fstat(self.fd))!=self.before
     or self._identity(os.stat(self.NAME,dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
- def __enter__(self):self.check();return self
+ def __enter__(self):
+  try:self.check();return self
+  except BaseException:
+   self.__exit__(None,None,None);raise
  def __exit__(self,*ignored):
   try:self.check()
   finally:
@@ -392,40 +396,36 @@ def run_canonical_entry(request, *, source_bundle):
 def run_bootstrap(request, probe_source):
  """Original qualification purpose: ten-second probe, 64 KiB DATA return."""
  return _run_owner(request,probe_source)
-def _run_owner(request, probe_source, *, _entry=None):
- """One Linux qualification child; caller already owns request/source trust.
+@contextmanager
+def held_runtime_custody(*,bootstrap_python,launch_python,startup,boundary_check=None):
+ """Hold approved Linux interpreter/prefix inputs; no paid account or private IO.
 
-    The fixed bootstrap image is an independently approved platform prerequisite,
-    not made trustworthy by its self-observation here. All descriptors below are
-    ephemeral. A failure after this function is invoked is conservatively unknown
-    to the Root reservation owner; it never licenses a repeat.
-    """
- import base64
+ Early no-site policy is a caller prerequisite. The private path primitives are
+ reused only by the existing paid wrapper; normal runtime admission uses Root.
+ """
  from contextlib import ExitStack
+ from types import SimpleNamespace
  import errno
- import fcntl
- import pwd
- import shlex
  import stat
- import subprocess
  import sys
  if sys.platform!='linux' or os.execve not in os.supports_fd:refuse()
- commitment=validate_commitment(request['initializer_commitment'],
-  host_ref=request['host_ref'],transport_alias=request['transport_alias'],
-  python_path=request['python_path'],capture_root=request['capture_root'])
- if hashlib.sha256(canonical(commitment)).hexdigest()!=request['initializer_commitment_sha256']:refuse()
- no_site=commitment['startup']['profile']==NO_SITE_PROFILE
- if no_site:
-  require_no_site_policy()
-  if _entry is None and (type(probe_source)is not str or hashlib.sha256(probe_source.encode()).hexdigest()!=request['probe_sha256']):refuse()
- if _entry is not None:_entry.check()
- account=commitment['account'];uid=account['uid'];gid=account['gid']
- if (os.getuid()!=uid or os.geteuid()!=uid or os.getgid()!=gid or os.getegid()!=gid
-   or pwd.getpwuid(uid).pw_name!=account['user']
-   or pwd.getpwnam(account['user']).pw_uid!=uid
-   or pwd.getpwuid(uid).pw_dir!=account['home']
-   or os.environ.get('HOME')!=account['home']):refuse()
+ if boundary_check is not None and not callable(boundary_check):refuse()
+ commitment={}
+ for key,value in (('bootstrap_python',bootstrap_python),('launch_python',launch_python)):
+  binary=dict(closed(value,('path','real_path','sha256')))
+  path(binary['path']);path(binary['real_path']);text(binary['sha256'],_SHA)
+  if not re.fullmatch(r'python3(?:\.12)?',PurePosixPath(binary['path']).name):refuse()
+  commitment[key]=binary
+ startup=dict(closed(startup,('profile','prefix','exec_prefix','base_prefix','base_exec_prefix')))
+ if startup['profile'] not in ('cpython-3.12-linux-root-prefix.v1',NO_SITE_PROFILE):refuse()
+ for key in ('prefix','exec_prefix','base_prefix','base_exec_prefix'):path(startup[key])
+ commitment['startup']=startup
+ no_site=startup['profile']==NO_SITE_PROFILE
+ if no_site:require_no_site_policy()
+ if boundary_check is not None:boundary_check()
+ uid=os.getuid()
  held=[]; roots=[]; contexts=ExitStack();ignored_nodes=[]
+ bootstrap_links=[];launch_links=[]
  def identity(s):
   return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
  def no_acl(fd):
@@ -444,12 +444,14 @@ def _run_owner(request, probe_source, *, _entry=None):
     is_dir=index<len(parts)-1 or directory
     flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|(os.O_DIRECTORY if is_dir else 0)
     fd=os.open(part,flags,dir_fd=parent)
-    info=os.fstat(fd);no_acl(fd)
-    if (info.st_uid not in ((0,uid) if owners is None else owners) or info.st_mode&0o022
-      or (is_dir and not stat.S_ISDIR(info.st_mode))
-      or (not is_dir and (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1
-             or not 0<info.st_size<=maximum))):
-     os.close(fd);refuse()
+    try:
+     info=os.fstat(fd);no_acl(fd)
+     if (info.st_uid not in ((0,uid) if owners is None else owners) or info.st_mode&0o022
+       or (is_dir and not stat.S_ISDIR(info.st_mode))
+       or (not is_dir and (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1
+              or not 0<info.st_size<=maximum))):refuse()
+    except BaseException:
+     os.close(fd);raise
     held.append((fd,parent,part,identity(info)))
     parent=fd
    if directory or not read_file:
@@ -466,12 +468,13 @@ def _run_owner(request, probe_source, *, _entry=None):
   except BaseException:
    raise
  def check():
-  if _entry is not None:_entry.check()
+  if boundary_check is not None:boundary_check()
   if no_site:require_no_site_policy()
   for node in ignored_nodes:node.check()
   for fd,parent,name,before in held:
    no_acl(fd)
    if identity(os.fstat(fd))!=before or identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before:refuse()
+  recheck_image_aliases()
  def pin_image(binding):
   links=[];current=binding['path']
   for _ in range(9):
@@ -488,6 +491,9 @@ def _run_owner(request, probe_source, *, _entry=None):
   for name,before,target in links:
    if identity(os.lstat(name))!=before or os.readlink(name)!=target:refuse()
   return fd,links
+ def recheck_image_aliases():
+  for name,before,target in bootstrap_links+launch_links:
+   if identity(os.lstat(name))!=before or os.readlink(name)!=target:refuse()
  snapshots=[]
  try:
   bootstrap_fd,bootstrap_links=pin_image(commitment['bootstrap_python'])
@@ -550,6 +556,63 @@ def _run_owner(request, probe_source, *, _entry=None):
       values[key]=value.strip()
     if values.get('home') not in {commitment['startup'][k]+'/bin' for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix')}:refuse()
     pin(path(values['home']),directory=True,owners={0})
+  check()
+  yield SimpleNamespace(launch_fd=launch_fd,check=check,
+   recheck_image_aliases=recheck_image_aliases,
+   _pin=pin,_identity=identity,_contexts=contexts,_snapshots=snapshots)
+ finally:
+  try:
+   check()
+  finally:
+   try:
+    contexts.close()
+   finally:
+    for fd in snapshots:
+     os.close(fd)
+    closed_fds=set()
+    for fd,parent,_,_ in reversed(held):
+     for item in (fd,parent):
+      if item not in closed_fds:
+       os.close(item);closed_fds.add(item)
+    for fd in roots:
+     if fd not in closed_fds:os.close(fd);closed_fds.add(fd)
+
+def _run_owner(request, probe_source, *, _entry=None):
+ """One Linux qualification child; caller already owns request/source trust.
+
+    The fixed bootstrap image is an independently approved platform prerequisite,
+    not made trustworthy by its self-observation here. All descriptors below are
+    ephemeral. A failure after this function is invoked is conservatively unknown
+    to the Root reservation owner; it never licenses a repeat.
+    """
+ import base64
+ import pwd
+ import shlex
+ import stat
+ import subprocess
+ import sys
+ if sys.platform!='linux' or os.execve not in os.supports_fd:refuse()
+ commitment=validate_commitment(request['initializer_commitment'],
+  host_ref=request['host_ref'],transport_alias=request['transport_alias'],
+  python_path=request['python_path'],capture_root=request['capture_root'])
+ if hashlib.sha256(canonical(commitment)).hexdigest()!=request['initializer_commitment_sha256']:refuse()
+ no_site=commitment['startup']['profile']==NO_SITE_PROFILE
+ if no_site:
+  require_no_site_policy()
+  if _entry is None and (type(probe_source)is not str or hashlib.sha256(probe_source.encode()).hexdigest()!=request['probe_sha256']):refuse()
+ if _entry is not None:_entry.check()
+ account=commitment['account'];uid=account['uid'];gid=account['gid']
+ if (os.getuid()!=uid or os.geteuid()!=uid or os.getgid()!=gid or os.getegid()!=gid
+   or pwd.getpwuid(uid).pw_name!=account['user']
+   or pwd.getpwnam(account['user']).pw_uid!=uid
+   or pwd.getpwuid(uid).pw_dir!=account['home']
+   or os.environ.get('HOME')!=account['home']):refuse()
+ with held_runtime_custody(bootstrap_python=commitment['bootstrap_python'],
+   launch_python=commitment['launch_python'],startup=commitment['startup'],
+   boundary_check=_entry.check if _entry is not None else None) as runtime:
+  pin=runtime._pin;check=runtime.check;identity=runtime._identity
+  contexts=runtime._contexts;snapshots=runtime._snapshots
+  launch_fd=runtime.launch_fd;logical=commitment['launch_python']['path']
   startup_code="import json,sys;print(json.dumps({k:getattr(sys,k) for k in ('executable','prefix','exec_prefix','base_prefix','base_exec_prefix')}))"
   if no_site:startup_code=NO_SITE_PREAMBLE+startup_code+'\n_paid_no_site_check()'
   startup_child=subprocess.run([logical,'-I','-S','-B','-c',startup_code],
@@ -610,24 +673,10 @@ def _run_owner(request, probe_source, *, _entry=None):
    executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
    env=initialized,timeout=10)
   check()
-  for name,before,target in bootstrap_links+launch_links:
-   if identity(os.lstat(name))!=before or os.readlink(name)!=target:refuse()
+  runtime.recheck_image_aliases()
   if prepared is not None:prepared.check_environment(initialized)
   result=json.loads(child)
   result['pre_execution']=_pre_execution_witness(request,commitment,prepared,hs,helper_identity)
   output=canonical(result)
   if len(output)>65536:refuse()
   return output
- finally:
-  try:
-   contexts.close()
-  finally:
-   for fd in snapshots:
-    os.close(fd)
-   closed_fds=set()
-   for fd,parent,_,_ in reversed(held):
-    for item in (fd,parent):
-     if item not in closed_fds:
-      os.close(item);closed_fds.add(item)
-   for fd in roots:
-    if fd not in closed_fds:os.close(fd);closed_fds.add(fd)

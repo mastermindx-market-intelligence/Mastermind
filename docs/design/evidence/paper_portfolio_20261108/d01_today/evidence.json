@@ -1,0 +1,881 @@
+{
+  "schema": "mastermind.paper.portfolio-native-evidence.v1",
+  "date": "2026-11-08",
+  "domain": "D01 Today",
+  "status": "PROPOSED_NATIVE_VERIFIED",
+  "production_acceptance": false,
+  "procedure_pin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "native": {
+    "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+    "page_id": "p-3-0",
+    "url": "https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-3-0",
+    "node_count": 392,
+    "boards": [
+      {
+        "id": "33A-0",
+        "name": "01 · PROPOSED · Today comparison basis",
+        "childCount": 2,
+        "width": 1440,
+        "height": 900,
+        "worldX": -1480,
+        "worldY": -858
+      },
+      {
+        "id": "375-0",
+        "name": "02 · PROPOSED · Today baseline and read states",
+        "childCount": 2,
+        "width": 1440,
+        "height": 900,
+        "worldX": -3000,
+        "worldY": 122
+      },
+      {
+        "id": "3B0-0",
+        "name": "03 · D01 · Quiet reading and existing owner",
+        "childCount": 2,
+        "width": 1440,
+        "height": 900,
+        "worldX": 40,
+        "worldY": -858
+      }
+    ],
+    "original_page_id": "p-2-0",
+    "original_copy": [
+      {
+        "board": "1K5-0",
+        "nodeId": "1NQ-0",
+        "before": "RESEARCH · OPENED ON THIS DEVICE",
+        "html": "RESEARCH · SAVED IN THIS BROWSER"
+      },
+      {
+        "board": "1ZH-0",
+        "nodeId": "20Q-0",
+        "before": "在此设备上继续阅读",
+        "html": "在此浏览器中继续阅读"
+      }
+    ],
+    "warned_original": {
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "mode": "READ_ONLY",
+      "relocation_pointer": "p-23-0 / 74YX-0 / 74Z6-0"
+    }
+  },
+  "sources": [
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/app/(shell)/today/page.tsx",
+      "blob": "b94f199d4eec4bd996e23f599fc4716d96858102",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/app/(shell)/today/page.tsx"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/components/mounts/TodayWorkspaceMount.tsx",
+      "blob": "c6987ff0b207838087f8557328a3f8496d3d2214",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/components/mounts/TodayWorkspaceMount.tsx"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/components/workspaces/TodayWorkspace.tsx",
+      "blob": "3b776f1c92de04b234d502da900cdbf1590ce12f",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/components/workspaces/TodayWorkspace.tsx"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/components/workspaces/TodaySinceLastVisit.tsx",
+      "blob": "e520d0219331e36cf922ee9b4e9a78ccc0c9f2c0",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/components/workspaces/TodaySinceLastVisit.tsx"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/components/workspaces/TodayResearchAttention.tsx",
+      "blob": "5ad137d48bd449c46f40dda068581f131b6d1e57",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/components/workspaces/TodayResearchAttention.tsx"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/components/workspaces/TodayWatchAttention.tsx",
+      "blob": "b2b195060c1752e3c7f761031b4911bbb5fb7eb8",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/components/workspaces/TodayWatchAttention.tsx"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/lib/shared-shell/memberIdentity.ts",
+      "blob": "9c3f1bae59ebcf79870b7236cf9248b2cba5ccfc",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/lib/shared-shell/memberIdentity.ts"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/app/api/portfolio-changes/route.ts",
+      "blob": "7c6b8fcb0776d25f521bc92b1168f4b91db3e26d",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/app/api/portfolio-changes/route.ts"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/app/api/portfolio-brief/route.ts",
+      "blob": "e525181ddf75d937288591e5f473bb8c902779de",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/app/api/portfolio-brief/route.ts"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Macro",
+      "commit": "ac830737b94697bcc77672062aaf278a5ca6f45d",
+      "path": "engine/portfolio_changes.py",
+      "blob": "4a8f30476f57cc2db1fe62e4410eb03c17f6a47e",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/ac830737b94697bcc77672062aaf278a5ca6f45d/engine/portfolio_changes.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Macro",
+      "commit": "ac830737b94697bcc77672062aaf278a5ca6f45d",
+      "path": "engine/portfolio_brief.py",
+      "blob": "a767e2e33f24cdd6f778c88525ebdcddd5608743",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/ac830737b94697bcc77672062aaf278a5ca6f45d/engine/portfolio_brief.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Macro",
+      "commit": "ac830737b94697bcc77672062aaf278a5ca6f45d",
+      "path": "app/main.py",
+      "blob": "64b3b5fe385313098e4606320eb9aeff2d7ed9c0",
+      "url": "https://github.com/mastermindx-market-intelligence/macro/blob/ac830737b94697bcc77672062aaf278a5ca6f45d/app/main.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Terminal",
+      "commit": "c30eab3f38717f571abcb8bb24a9df3e0a8edd30",
+      "path": "terminal/lib/ownerStorage.ts",
+      "blob": "0505411a83a1e8d3e89e02ce52937d8203180392",
+      "url": "https://github.com/mastermindx-market-intelligence/mastermind-terminal/blob/c30eab3f38717f571abcb8bb24a9df3e0a8edd30/terminal/lib/ownerStorage.ts"
+    }
+  ],
+  "changes": {
+    "product_facing_refinements": [
+      {
+        "key": "basis",
+        "board": "33A-0",
+        "nodeId": "3G0-0",
+        "before": "Resume the selected report revision. Its saved position and access are checked by the existing Research owner.",
+        "html": "Continue the report and revision you selected. Access is checked when you reopen."
+      },
+      {
+        "key": "states",
+        "board": "375-0",
+        "nodeId": "3HP-0",
+        "before": "“相关标的”不预先假设是持仓。当前读取成功后再显示其实际名称集合。",
+        "html": "读取恢复前，仍可继续查看研究资料库。"
+      },
+      {
+        "key": "states",
+        "board": "375-0",
+        "nodeId": "3I4-0",
+        "before": "不会自动重试保存，也不会为此创建新的同步队列。",
+        "html": "此浏览器与其他浏览器分别保存比较记录。"
+      },
+      {
+        "key": "contract",
+        "board": "3B0-0",
+        "nodeId": "3IV-0",
+        "before": "A saved baseline exists even when its represented-name map is empty. That does not establish empty watchlists or an empty portfolio.",
+        "html": "A saved comparison can exist even when it contains no covered names. Coverage does not describe your full watchlists or positions."
+      },
+      {
+        "key": "contract",
+        "board": "3B0-0",
+        "nodeId": "3J1-0",
+        "before": "Date unavailable remains a date gap. Equal or reversed desk dates do not become an invented visit interval.",
+        "html": "A missing source date does not remove a saved comparison. Reading dates do not show when you visited Today."
+      }
+    ],
+    "source_critique_corrections": [
+      {
+        "board": "375-0",
+        "nodeId": "3HJ-0",
+        "before": "先前比较记录保持原样",
+        "html": "此次读取未保存新比较记录"
+      },
+      {
+        "board": "375-0",
+        "nodeId": "3HK-0",
+        "before": "失败的读取不会推进已保存记录。其他今日板块仍可独立使用。",
+        "html": "此次未成功读取当前比较，因此未写入新记录。其他今日板块仍可使用。"
+      },
+      {
+        "board": "375-0",
+        "nodeId": "3H7-0",
+        "before": "Explore its source evidence while you build a reading history here.",
+        "html": "Portfolio remains available as a separate view."
+      },
+      {
+        "board": "33A-0",
+        "nodeId": "3FR-0",
+        "before": "Joining this read can reflect a coverage change. Inspect the list before drawing a conclusion about its membership.",
+        "html": "Joining this reading can reflect a change in desk coverage; it does not establish a change to your watchlists."
+      },
+      {
+        "board": "3B0-0",
+        "nodeId": "3J1-0",
+        "before": "A missing source date does not remove a saved comparison. Reading dates do not show when you visited Today.",
+        "html": "A missing date for the saved reading does not remove that comparison. Reading dates do not show when you visited Today."
+      },
+      {
+        "board": "3B0-0",
+        "nodeId": "3IV-0",
+        "before": "A saved comparison can exist even when it contains no covered names. Coverage does not describe your full watchlists or positions.",
+        "html": "A saved comparison is available, with no covered names in that reading. This does not mean your watchlists or positions are empty."
+      }
+    ],
+    "new_endpoint": false,
+    "new_storage_key": false,
+    "new_retry_queue": false,
+    "runtime_code_changed": false
+  },
+  "operations": [
+    {
+      "key": "browser-scope-copy",
+      "id": "paper-portfolio-d01-comparison-20261108-browser-scope-copy-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "9d39979e40b7f2aff1f39089e76b87e8b37a52e4dc3d073d026a9cc8aab5deb7",
+      "after_guard": "9d39979e40b7f2aff1f39089e76b87e8b37a52e4dc3d073d026a9cc8aab5deb7"
+    },
+    {
+      "key": "finish-existing-copy",
+      "id": "paper-portfolio-d01-comparison-20261108-finish-existing-copy-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "9d39979e40b7f2aff1f39089e76b87e8b37a52e4dc3d073d026a9cc8aab5deb7",
+      "after_guard": "9d39979e40b7f2aff1f39089e76b87e8b37a52e4dc3d073d026a9cc8aab5deb7"
+    },
+    {
+      "key": "create-page",
+      "id": "paper-portfolio-d01-comparison-20261108-create-page-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "9d39979e40b7f2aff1f39089e76b87e8b37a52e4dc3d073d026a9cc8aab5deb7",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "duplicate-basis",
+      "id": "paper-portfolio-d01-comparison-20261108-duplicate-basis-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "rename-basis",
+      "id": "paper-portfolio-d01-comparison-20261108-rename-basis-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "duplicate-states",
+      "id": "paper-portfolio-d01-comparison-20261108-duplicate-states-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "duplicate-contract",
+      "id": "paper-portfolio-d01-comparison-20261108-duplicate-contract-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "rename-states-contract",
+      "id": "paper-portfolio-d01-comparison-20261108-rename-states-contract-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "basis-body",
+      "id": "paper-portfolio-d01-comparison-20261108-basis-body-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "states-body",
+      "id": "paper-portfolio-d01-comparison-20261108-states-body-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "contract-body",
+      "id": "paper-portfolio-d01-comparison-20261108-contract-body-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "basis-content",
+      "id": "paper-portfolio-d01-comparison-20261108-basis-content-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "basis-footer",
+      "id": "paper-portfolio-d01-comparison-20261108-basis-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "states-content",
+      "id": "paper-portfolio-d01-comparison-20261108-states-content-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "states-footer",
+      "id": "paper-portfolio-d01-comparison-20261108-states-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "contract-content",
+      "id": "paper-portfolio-d01-comparison-20261108-contract-content-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "contract-footer",
+      "id": "paper-portfolio-d01-comparison-20261108-contract-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "user-facing-copy",
+      "id": "paper-portfolio-d01-comparison-20261108-user-facing-copy-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "finish-owned-study",
+      "id": "paper-portfolio-d01-comparison-20261108-finish-owned-study-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "critic-precision",
+      "id": "paper-portfolio-d01-comparison-20261108-critic-precision-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "finish-critic-precision",
+      "id": "paper-portfolio-d01-comparison-20261108-finish-critic-precision-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "empty-baseline-specificity",
+      "id": "paper-portfolio-d01-comparison-20261108-empty-baseline-specificity-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    },
+    {
+      "key": "finish-empty-baseline",
+      "id": "paper-portfolio-d01-comparison-20261108-finish-empty-baseline-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8",
+      "after_guard": "7f163808d26e855e7a85134b513d32037a8afd67ea0149e6d5aee0137d569be8"
+    }
+  ],
+  "checks": {
+    "initial_whole_board": [
+      {
+        "id": "33A-0",
+        "kind": "new",
+        "exact": true,
+        "chars": 30064
+      },
+      {
+        "id": "375-0",
+        "kind": "new",
+        "exact": true,
+        "chars": 28348
+      },
+      {
+        "id": "3B0-0",
+        "kind": "new",
+        "exact": true,
+        "chars": 27744
+      },
+      {
+        "id": "1K5-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 28980
+      },
+      {
+        "id": "1O0-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 29386
+      },
+      {
+        "id": "1RW-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 30632
+      },
+      {
+        "id": "1VT-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 27468
+      },
+      {
+        "id": "1ZH-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 12368
+      },
+      {
+        "id": "20V-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 73190
+      },
+      {
+        "id": "2FM-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 8952
+      },
+      {
+        "id": "2GM-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 8568
+      },
+      {
+        "id": "2HL-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 8043
+      },
+      {
+        "id": "2IH-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 20128
+      },
+      {
+        "id": "2L8-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 7893
+      },
+      {
+        "id": "2M4-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 13005
+      },
+      {
+        "id": "2NP-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 29178
+      },
+      {
+        "id": "2RK-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 37670
+      },
+      {
+        "id": "2WG-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 19989
+      },
+      {
+        "id": "2YL-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 16094
+      },
+      {
+        "id": "30C-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 16268
+      }
+    ],
+    "final_critic_readback": [
+      {
+        "key": "33A-0",
+        "kind": "jsx",
+        "ok": true,
+        "result": {
+          "key": "33A-0",
+          "kind": "jsx",
+          "state": "OBSERVED",
+          "exact": true
+        }
+      },
+      {
+        "key": "375-0",
+        "kind": "jsx",
+        "ok": true,
+        "result": {
+          "key": "375-0",
+          "kind": "jsx",
+          "state": "OBSERVED",
+          "exact": true
+        }
+      },
+      {
+        "key": "3B0-0",
+        "kind": "jsx",
+        "ok": true,
+        "result": {
+          "key": "3B0-0",
+          "kind": "jsx",
+          "state": "OBSERVED",
+          "exact": true
+        }
+      },
+      {
+        "key": "basis",
+        "kind": "screen",
+        "ok": true,
+        "result": {
+          "key": "basis",
+          "kind": "screen",
+          "state": "OBSERVED"
+        }
+      },
+      {
+        "key": "states",
+        "kind": "screen",
+        "ok": true,
+        "result": {
+          "key": "states",
+          "kind": "screen",
+          "state": "OBSERVED"
+        }
+      },
+      {
+        "key": "contract",
+        "kind": "screen",
+        "ok": true,
+        "result": {
+          "key": "contract",
+          "kind": "screen",
+          "state": "OBSERVED"
+        }
+      }
+    ],
+    "actions": [
+      {
+        "board": "33A-0",
+        "id": "3FT-0",
+        "name": "Action · Comparison basis",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "33A-0",
+        "id": "3FV-0",
+        "name": "Action · Open NVDA in Analysis",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "33A-0",
+        "id": "3G1-0",
+        "name": "Action · Open Research",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "33A-0",
+        "id": "3G6-0",
+        "name": "Action · Close ×",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "33A-0",
+        "id": "3GR-0",
+        "name": "Action · Back to changes",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3H8-0",
+        "name": "Action · Open Portfolio",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3HL-0",
+        "name": "Action · 重新检查",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3HN-0",
+        "name": "Action · 继续研究",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3I0-0",
+        "name": "Action · 查看当前比较依据",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3I2-0",
+        "name": "Action · 继续研究",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "3B0-0",
+        "id": "3IX-0",
+        "name": "Action · Back to changes",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "board": "3B0-0",
+        "id": "3IZ-0",
+        "name": "Action · Open Monitor",
+        "minHeight": "44px",
+        "ok": true
+      }
+    ],
+    "responsive_frames": [
+      {
+        "board": "375-0",
+        "id": "3GY-0",
+        "name": "390 EN · no usable saved baseline",
+        "width": "390px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3HB-0",
+        "name": "390 ZH · comparison read unavailable",
+        "width": "390px",
+        "ok": true
+      },
+      {
+        "board": "375-0",
+        "id": "3HQ-0",
+        "name": "320 ZH · local saving unconfirmed",
+        "width": "320px",
+        "ok": true
+      },
+      {
+        "board": "3B0-0",
+        "id": "3IA-0",
+        "name": "768 tablet · valid empty baseline and quiet response",
+        "width": "768px",
+        "ok": true
+      }
+    ],
+    "frame_query_correction": {
+      "reason": "Initial name-only selector also matched two Text labels; frame check is scoped to nodes whose observed component is Frame.",
+      "excluded": [
+        {
+          "id": "3HT-0",
+          "name": "320 · ZH"
+        },
+        {
+          "id": "3ID-0",
+          "name": "768 · EN · LIGHT"
+        }
+      ]
+    },
+    "overlap": {
+      "count": 3,
+      "overlap": []
+    },
+    "screenshots_inspected": [
+      "basis",
+      "states",
+      "contract",
+      "original_1K5-0",
+      "original_1ZH-0"
+    ],
+    "unknown_effects": 0,
+    "originals_after_critic": "Later operations targeted only three new boards; original17 preservation evidence retained",
+    "runtime_verified": false,
+    "visual_scope": "Five final static native screenshots; not browser interaction/reflow"
+  },
+  "artifacts": [
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/33A-0.jsx",
+      "bytes": 30071,
+      "sha256": "4eea9ba3cc4ec11442e60c3cce54a61c1b1810db371cfefda6fadec9b96ef565",
+      "git_blob_sha": "367e2704cd3a080a5bfd00a18671db76504aa39d"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/375-0.jsx",
+      "bytes": 28789,
+      "sha256": "42d9ae393ad6e57308cd990432cdf6481a7e17a90bb15867f12ca640ec972db0",
+      "git_blob_sha": "6ae4abab8f4a3bd0d148ee2d8bf21d620f24405f"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/3B0-0.jsx",
+      "bytes": 27772,
+      "sha256": "cd2192a13acbba351e20e7749d1354cf18707d03b693b3836396dbcb90f5e4b0",
+      "git_blob_sha": "4a99ca7853a707395bea67cc3cee7c62e0150e68"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/1K5-0.before.jsx",
+      "bytes": 29012,
+      "sha256": "a973a2f315a14967c202f110312d07bafce0dd2c786cdf0999f1f48251e32619",
+      "git_blob_sha": "7ad0002e8a4f56a8869a331fe3c138eceaf42e65"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/1K5-0.after.jsx",
+      "bytes": 29012,
+      "sha256": "466d4ba6a71686aaf64a0262c0c164f2a783b4feba721be1908ac4c7681b0c02",
+      "git_blob_sha": "4488eb59ca665b6912fea8e35aef4c4e9f3c1e91"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/1ZH-0.before.jsx",
+      "bytes": 12747,
+      "sha256": "403312156dc2b66cc4a8caa25af7a4ff129f3e208bbd8a56f303d2b1e4d7011d",
+      "git_blob_sha": "0d3279bb419c8a1c5434f9a83eb954a7bc165f5d"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/1ZH-0.after.jsx",
+      "bytes": 12750,
+      "sha256": "f6f4ab5905e80a231f6d58e232af4b13e0a93e38ac97ffd47bfb98e847d62cfd",
+      "git_blob_sha": "4502f95fec1f00d1dd7a5913a7f9543aab2dd108"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/original-preservation.json",
+      "bytes": 10249,
+      "sha256": "ed755a44c70bb8bc9cb2b1afe06f5d227d957ad90f3fd3241aa9dd68b94442a2",
+      "git_blob_sha": "0437604ded955d9c6fcdcac6b0f35d771bc65c9d"
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/BUILD_CONTRACT.md",
+      "bytes": 12858,
+      "sha256": "4433a40dce1fb8a19d04de1c35e9de20e6dfb8871599b307ff2cdd45ee3ef6a0",
+      "git_blob_sha": "1664b270a41f5687c386a6690bb556e967332bfc"
+    }
+  ],
+  "screenshots": [
+    {
+      "key": "basis",
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/basis.jpg",
+      "mime_type": "image/jpeg",
+      "base64_chars": 198876,
+      "sha": "de883ec399da20a6b6eb8b583ee1c9e331c0bd3b"
+    },
+    {
+      "key": "states",
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/states.jpg",
+      "mime_type": "image/jpeg",
+      "base64_chars": 225288,
+      "sha": "d90e82faab0f61b719dd48833ff8fb0dd3036fd8"
+    },
+    {
+      "key": "contract",
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/contract.jpg",
+      "mime_type": "image/jpeg",
+      "base64_chars": 242972,
+      "sha": "4520e0fe260dc6671d184d9fc2ab6924b75d0174"
+    },
+    {
+      "key": "original_1K5-0",
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/original_1K5-0.jpg",
+      "mime_type": "image/jpeg",
+      "base64_chars": 194568,
+      "sha": "8f2a6dad3de90d997e25e0286ba95df4d2b8e5f6"
+    },
+    {
+      "key": "original_1ZH-0",
+      "path": "docs/design/evidence/paper_portfolio_20261108/d01_today/original_1ZH-0.jpg",
+      "mime_type": "image/jpeg",
+      "base64_chars": 82420,
+      "sha": "47cb75d1851baa070618fe6f107a872e57e4de18"
+    }
+  ],
+  "limitations": [
+    "Fixtures are illustrative; no live account endpoints called.",
+    "Missing prior population remains unknown; dates are desk dates, not visit timestamps.",
+    "Covered names and changes are bounded, not a full list/position census.",
+    "Visible save status and transient captured comparison are proposed in existing owner.",
+    "Source critic is not native reference approval or GitHub approval.",
+    "Visible JSX equality excludes hidden properties and is not full-file backup.",
+    "Guard snapshots do not prove immutable Paper revisions."
+  ]
+}

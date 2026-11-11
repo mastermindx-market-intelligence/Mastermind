@@ -149,7 +149,7 @@ def _validate_payload(payload):
     if type(payload["pid"]) is not int or payload["pid"] <= 1:
         raise CapabilityError("invalid capability")
     requested_ttl = payload["expires_at"] - payload["issued_at"]
-    if not 1 <= requested_ttl <= 7500 or requested_ttl != int(requested_ttl):
+    if not 1 <= requested_ttl <= 15000 or requested_ttl != int(requested_ttl):
         raise CapabilityError("invalid capability")
     if payload["granted_at"] > payload["issued_at"]:
         raise CapabilityError("invalid capability")
@@ -200,7 +200,7 @@ def _validate_lease_common(lease, now, requested_expiry):
 def mint(signing_key, lease, *, root, model, run_id, host, now, ttl=300):
     _validate_key(signing_key)
     _validate_now(now)
-    if type(ttl) is not int or not 1 <= ttl <= 7500:
+    if type(ttl) is not int or not 1 <= ttl <= 15000:
         raise CapabilityError("invalid capability")
     for value in (root, model, run_id, host):
         _identifier(value, "capability")
@@ -361,7 +361,7 @@ def _validate_payload_v2(payload):
     for field in ("issued_at", "expires_at", "granted_at"):
         _timestamp(payload[field], "capability")
     requested_ttl = payload["expires_at"] - payload["issued_at"]
-    if not 1 <= requested_ttl <= 7500 or requested_ttl != int(requested_ttl):
+    if not 1 <= requested_ttl <= 15000 or requested_ttl != int(requested_ttl):
         raise CapabilityError("invalid capability")
     if payload["granted_at"] > payload["issued_at"]:
         raise CapabilityError("invalid capability")
@@ -391,7 +391,7 @@ def mint_canonical(
     """Mint a v2 canonical paid capability bound to the full Control scope."""
     _validate_key(signing_key)
     _validate_now(now)
-    if type(ttl) is not int or not 1 <= ttl <= 7500:
+    if type(ttl) is not int or not 1 <= ttl <= 15000:
         raise CapabilityError("invalid capability")
     for value in (root, job_id, attempt_id, model, host):
         _identifier(value, "capability")
@@ -494,3 +494,32 @@ def authorize_canonical(token, signing_key, lease_lookup, *, model, run_id, host
             or (lease['pool'] == 'glm-frontier' and model != 'glm-5.3')):
         raise CapabilityError('lease unavailable')
     return dict(payload)
+
+
+# APPLICATION uses the original common Broker owner and a distinct GLM domain.
+def mint_application(signing_key, lease, turn, *, now):
+    import go_lease_capability as application_codec
+    try:
+        if (lease.get("pool") != "glm" or turn.get("pool") != "glm"
+                or turn.get("transport_kind") is not None):
+            raise CapabilityError("invalid GLM application capability")
+        return application_codec.mint_application(signing_key, lease, turn, now=now)
+    except application_codec.CapabilityError as error:
+        raise CapabilityError("invalid GLM application capability") from error
+
+
+def authorize_application(token, signing_key, lease_lookup, turn_lookup, *,
+                          principal_id, host, turn_id, model, now,
+                          recovery_only=False):
+    import go_lease_capability as application_codec
+    try:
+        claims = application_codec.authorize_application(
+            token, signing_key, lease_lookup, turn_lookup,
+            principal_id=principal_id, host=host, turn_id=turn_id,
+            model=model, now=now, recovery_only=recovery_only,
+            expected_pool="glm")
+        if claims["v"] != 4:
+            raise CapabilityError("invalid GLM application capability")
+        return claims
+    except application_codec.CapabilityError as error:
+        raise CapabilityError("invalid GLM application capability") from error

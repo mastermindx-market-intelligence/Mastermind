@@ -1,0 +1,15 @@
+{
+  "schema": "mastermind.design.recommendation.v1",
+  "action": "gather_missing_evidence",
+  "completion_sha256": "e4de6184b918cb640616c28fe21835d0d7b41df3c08538ccc89d3b8c7866e312",
+  "critique_sha256": "d191a9a116a179b4015c257630c335eb495e4977434fa9607e4fa5ad2d6be9c3",
+  "unviewed_screenshots": [],
+  "not_observed": [
+    "accessibility",
+    "responsive"
+  ],
+  "new_scope_requires_canonical_verification": [],
+  "issues": [],
+  "design_accepted": false,
+  "production_proven": false
+}

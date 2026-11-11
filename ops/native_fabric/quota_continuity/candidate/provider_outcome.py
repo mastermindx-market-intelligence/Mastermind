@@ -500,7 +500,106 @@ def claude_main(args: list[str]) -> int:
     return rc
 
 
+def diagnostic_retention_ready(lane_root, run_id, root_id):
+    """Internal same-run cleanup predicate. No output, mutation or generic read.
+
+    Paths come from the controller's verified lane binding. Preserve proof only
+    when the original producer's private, complete capture physically matches.
+    This is not a result, acceptance, retry grant or effect-absence assertion.
+    """
+    fds=[];edges=[];files=[]
+    try:
+        root=Path(lane_root)
+        if (not root.is_absolute() or '..' in root.parts or not IDENT.fullmatch(run_id)
+                or not IDENT.fullmatch(root_id)):
+            return False
+        fd=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);fds.append(fd)
+        for component in (*root.parts[1:],'ext','lanes'):
+            parent=fd;fd=os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=parent)
+            fds.append(fd);edges.append((parent,component,fd))
+        def identity_of(info):
+            return (info.st_dev,info.st_ino,info.st_size,info.st_mtime_ns,info.st_ctime_ns,info.st_mode,info.st_uid,info.st_nlink)
+        def verify():
+            for dfd in fds:
+                info=os.fstat(dfd)
+                if not stat.S_ISDIR(info.st_mode) or info.st_uid not in (0,os.geteuid()) or info.st_mode&0o022:
+                    raise ValueError('private_diagnostic_unqualified')
+            for parent,name,child in edges:
+                a=os.stat(name,dir_fd=parent,follow_symlinks=False);b=os.fstat(child)
+                if (a.st_dev,a.st_ino,a.st_mode,a.st_uid)!=(b.st_dev,b.st_ino,b.st_mode,b.st_uid):
+                    raise ValueError('private_diagnostic_unqualified')
+            for name,handle,identity in files:
+                if identity!=identity_of(os.fstat(handle)) or identity!=identity_of(os.stat(name,dir_fd=fd,follow_symlinks=False)):
+                    raise ValueError('private_diagnostic_unqualified')
+        def read(name,limit):
+            verify();handle=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
+            fds_to_close.append(handle);info=os.fstat(handle)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid!=os.geteuid() or info.st_nlink!=1
+                    or stat.S_IMODE(info.st_mode)!=0o600 or not 0<info.st_size<=limit):
+                raise ValueError('private_diagnostic_unqualified')
+            raw=b''
+            while len(raw)<=limit:
+                part=os.read(handle,min(65536,limit+1-len(raw)))
+                if not part:break
+                raw+=part
+            files.append((name,handle,identity_of(info)));verify()
+            if len(raw)!=info.st_size:raise ValueError('private_diagnostic_unqualified')
+            return raw
+        fds_to_close=[]
+        # Hold absence is checked in the same exact marker namespace as launch.
+        active=os.open('active',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fds[-2])
+        fds.append(active);edges.append((fds[-3],'active',active))
+        def inactive():
+            verify()
+            try:os.stat(run_id,dir_fd=active,follow_symlinks=False)
+            except FileNotFoundError:return
+            raise ValueError('private_diagnostic_unqualified')
+        inactive()
+        def pairs(items):
+            result={}
+            for k,v in items:
+                if k in result:raise ValueError('duplicate')
+                result[k]=v
+            return result
+        def parse(value):
+            return json.loads(value,object_pairs_hook=pairs,
+                parse_constant=lambda _: (_ for _ in ()).throw(ValueError('nonfinite')))
+        outcome=parse(read(run_id+'.provider.json',65536));process=parse(read(run_id+'.process.jsonl',65536))
+        validate_receipt(outcome,process,run_id)
+        if (outcome.get('root_id')!=root_id or outcome.get('provider')!='glm'
+                or type(process.get('returncode')) is not int or not 1<=process['returncode']<=255):
+            return False
+        meta=outcome.get('diagnostic_capture')
+        if (type(meta) is not dict or set(meta)!={'file','sha256','bytes','source_bytes','truncated'}
+                or meta['file']!=run_id+'.provider.capture.jsonl' or meta['truncated'] is not False
+                or type(meta['bytes']) is not int or not 0<meta['bytes']<=64*1024*1024
+                or type(meta['source_bytes']) is not int or meta['source_bytes']!=meta['bytes']
+                or type(meta['sha256']) is not str or not re.fullmatch(r'[a-f0-9]{64}',meta['sha256'])
+                or outcome.get('capture_bytes')!=meta['bytes'] or outcome.get('capture_sha256')!=meta['sha256']
+                or parse(read(run_id+'.provider.capture.json',65536))!=meta):
+            return False
+        raw=read(meta['file'],64*1024*1024)
+        if len(raw)!=meta['bytes'] or digest(raw)!=meta['sha256']:return False
+        # No classification from prose; this merely rejects incomplete captures.
+        try:events=parse(raw)
+        except ValueError:events=[parse(line) for line in raw.splitlines() if line.strip()]
+        if type(events) is dict:events=[events]
+        if (type(events) is not list or not events or any(type(e) is not dict for e in events)
+                or len([e for e in events if e.get('type')=='result'])!=1 or events[-1].get('type')!='result'):
+            return False
+        inactive();verify();return True
+    except Exception:
+        return False
+    finally:
+        for handle in reversed(locals().get('fds_to_close',[])):os.close(handle)
+        for handle in reversed(fds):os.close(handle)
+
+
 if __name__ == "__main__":
+    if len(sys.argv) == 5 and sys.argv[1] == "retained-diagnostic-ready":
+        # Predicate false is ordinary failure. Exit 76 belongs to the outer
+        # owned-process wrapper's unproved cleanup/capture result.
+        raise SystemExit(0 if diagnostic_retention_ready(*sys.argv[2:]) else 1)
     if len(sys.argv) == 7 and sys.argv[1] == "codex":
         raise SystemExit(codex_main(sys.argv[2:]))
     if len(sys.argv) == 8 and sys.argv[1] == "codex":

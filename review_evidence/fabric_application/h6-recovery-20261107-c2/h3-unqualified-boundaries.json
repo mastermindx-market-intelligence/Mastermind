@@ -1,0 +1,72 @@
+{
+  "schema": "mastermind.h3-unqualified-boundary-probes.v1",
+  "source": {
+    "schema": "mastermind.h2-h3-source-composition-qualification.v1",
+    "source_head": "a88488670bc99f7156eff193101b76795c16733f",
+    "h3_source": "ef95049fa2e1f8c981497c8a21b643fcbe59f25b",
+    "root": "/tmp/h6-h3-h2-qualification-ezhym46i",
+    "returncode": 0,
+    "seconds": 3.127,
+    "runtime_selected": false,
+    "provider_calls": false,
+    "native_builder_changed": false,
+    "files": {
+      "lease_broker.py": {
+        "sha256": "760a4432373c5785d107096af410dbcae77cdd3c77cb8dc0cab54a2ca8fe0815",
+        "bytes": 222103
+      },
+      "quota_remote.py": {
+        "sha256": "8218b1f98e4b20c1dbe4f34b2d9525532865f98f09954278cd28ad32a4deaa7a",
+        "bytes": 80850
+      }
+    }
+  },
+  "provider_calls": false,
+  "synthetic_receipts": true,
+  "runtime_effects": false,
+  "native_selection": false,
+  "strict_scope_qualified": false,
+  "results": [
+    {
+      "probe": "refresh_in_progress",
+      "claim_granted": true,
+      "reason": "",
+      "required_disposition": "REFUSE_UNQUALIFIED_OUTER_H2_LINEAGE",
+      "gap_observed": true
+    },
+    {
+      "probe": "refresh_failed",
+      "claim_granted": true,
+      "reason": "",
+      "required_disposition": "REFUSE_UNQUALIFIED_OUTER_H2_LINEAGE",
+      "gap_observed": true
+    },
+    {
+      "probe": "terminal_refusal",
+      "claim_granted": true,
+      "reason": "",
+      "required_disposition": "REFUSE_UNQUALIFIED_OUTER_H2_LINEAGE",
+      "gap_observed": true
+    },
+    {
+      "probe": "stale_outer_binding",
+      "claim_granted": true,
+      "reason": "",
+      "required_disposition": "REFUSE_UNQUALIFIED_OUTER_H2_LINEAGE",
+      "gap_observed": true
+    },
+    {
+      "probe": "reservation_is_not_step_enforcement",
+      "first_dispatch_prepared": true,
+      "second_dispatch_prepared": true,
+      "application_max_steps": 2,
+      "configured_claim_maxima": {
+        "5h": 1,
+        "weekly": 1
+      },
+      "request_records": 2,
+      "required_disposition": "RESERVE_OR_ENFORCE_ALL_REQUESTS_IN_EACH_NATIVE_METER",
+      "gap_observed": true
+    }
+  ]
+}

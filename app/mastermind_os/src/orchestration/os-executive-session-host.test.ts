@@ -1,3 +1,4 @@
+import { searchSavedConversations } from "../discovery/saved-conversations";
 // Focused coverage for the separately mounted session host lifecycle.
 // Every fixture is in-memory: no backend, route, credential or producer.
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -123,6 +124,87 @@ function mount(f: ReturnType<typeof fixture>) {
 }
 
 describe("selected-session host lifecycle", () => {
+  it("searches an original other-root answer through the real mounted qualified-answer decoder", async()=>{
+    const f=fixture();
+    const digest="1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e";
+    const originalKey="session-continue-"+"b".repeat(64);
+    const readRef="session-reply-"+digest;
+    f.transport.projectReferences=vi.fn(async()=>({
+      schema:"mastermind.os.executive.session_result.v1",operation:"references",ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.session_reply_references.v1",status:"COMPLETE",high_water:5,next_cursor:null,references:[{
+        read_ref:readRef,operation_key:originalKey,request_ref:"session-bridge-continue:"+digest,
+        request_event_id:5,request_revision:"e".repeat(64),requested_at:"2026-11-03T10:20:30Z",
+        work_ref:WS,root_job_id:"JOB-2",target_ref:REF,reference_only:true}]}}));
+    vi.mocked(f.transport.reply).mockResolvedValue({
+      schema:"mastermind.os.executive.session_result.v1",operation:"reply",ok:true,effect:"CONTINUATION_COMMITTED",operation_key:originalKey,error:null,
+      data:{schema:"mastermind.native_reply_read.v1",read_ref:readRef,request_ref:"session-bridge-continue:"+digest,
+        in_reply_to:"asd-dot-continue-c81bfcc7ccadd7372a1b0d05bb610f9d147b43b9",
+        message_key:"asd-native-reply-4310b611582e4d2fa8f7053ea19490441b3e3db1",fingerprint:"f".repeat(64),
+        text:"Historical native A recovered",next_step:"B remains pending",primary_ts:"1728620000.000001",
+        reply_committed:true,parent_consumed:false,operation_key:originalKey}});
+    const host=mount(f);await host.ready;
+    const result=await searchSavedConversations({workRef:WS,query:"Historical",signal:new AbortController().signal},host.binding.port.projectHistory!);
+    expect(result.state).toBe("AVAILABLE");expect(result.items).toHaveLength(1);
+    expect(result.items[0].reference.root_job_id).toBe("JOB-2");
+    expect(result.items[0].excerpt).toBe("Historical native A recovered");
+    expect(f.transport.reply).toHaveBeenCalledWith({operation_key:originalKey},expect.any(AbortSignal));
+    expect(f.transport.projectReferences).toHaveBeenCalledWith({work_ref:WS,page_size:4},expect.any(AbortSignal));
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+
+  it("reads one project history page under the same Session owner without root or pointer writes", async () => {
+    const f = fixture();
+    f.transport.projectReferences = vi.fn(async () => ({ original: "other-root reference" }));
+    const store = memStore(), reserve = vi.spyOn(store, "reserve"), clear = vi.spyOn(store, "clearIfEqual");
+    const host = createOsExecutiveSessionHost(f.transport, store);
+    disposables.push(host.dispose);
+    const history = host.binding.port.projectHistory!;
+    const signal = new AbortController().signal;
+    await expect(history.readReferences({workRef:WS,pageSize:4,signal})).rejects.toThrow();
+    expect(f.transport.projectReferences).not.toHaveBeenCalled();
+    await host.refresh({workRef:WS,rootJobId:ROOT});
+    await expect(history.readReferences({workRef:"WS:OTHER",pageSize:4,signal})).rejects.toThrow();
+    await expect(history.readReferences({workRef:WS,pageSize:16 as 4,signal})).rejects.toThrow();
+    await expect(history.readReferences({workRef:WS,pageSize:4,signal,cursor:"bad/.."})).rejects.toThrow();
+    expect(f.transport.projectReferences).not.toHaveBeenCalled();
+    await expect(history.readReferences({workRef:WS,pageSize:4,signal,cursor:"YQ=="}))
+      .resolves.toEqual({original:"other-root reference"});
+    expect(f.transport.projectReferences).toHaveBeenCalledWith({work_ref:WS,page_size:4,cursor:"YQ=="},signal);
+    expect(f.transport.references).not.toHaveBeenCalled();
+    expect(f.transport.send).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled(); expect(clear).not.toHaveBeenCalled();
+  });
+  it.each(["refresh", "auth", "method", "abort"])("withholds project history after %s changes", async change => {
+    const f = fixture(); let release!: (v:unknown)=>void;
+    f.transport.projectReferences = vi.fn(() => new Promise(resolve => {release=resolve;}));
+    const host = mount(f); await host.ready;
+    const abort = new AbortController();
+    const pending = host.binding.port.projectHistory!.readReferences({workRef:WS,pageSize:4,signal:abort.signal});
+    const rejected = expect(pending).rejects.toThrow("session_references_unavailable");
+    if (change === "refresh") {
+      await host.refresh(null); await host.refresh({workRef:WS,rootJobId:ROOT});
+    } else if (change === "auth") f.bumpAuth();
+    else if (change === "method") f.transport.projectReferences = vi.fn(async()=>({}));
+    else abort.abort();
+    release({private:"old"}); await rejected;
+    expect(f.transport.send).not.toHaveBeenCalled();
+  });
+  it("does not invent project history for older hosts or a Session without reply READ", async () => {
+    const f = fixture(), old = mount(f); await old.ready;
+    expect(old.binding.port.projectHistory).toBeUndefined();
+    f.transport.projectReferences = vi.fn(async()=>({}));
+    const denied = fixture();
+    denied.transport.projectReferences = vi.fn(async()=>({}));
+    vi.mocked(denied.transport.context).mockImplementation(async()=>({
+      schema:"mastermind.os.executive.session_result.v1",operation:"context",ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.os.executive.session_context.v1",principal_scope:SCOPE,verified_expiry:4102444800,
+        selection:{work_ref:WS,root_job_id:ROOT},selection_state:"UNAVAILABLE",target:null,
+        capabilities:{send:false,reply_read:false,stop:false}}}));
+    const host = mount(denied); await host.ready;
+    await expect(host.binding.port.projectHistory!.readReferences({workRef:WS,pageSize:4,signal:new AbortController().signal})).rejects.toThrow();
+    expect(denied.transport.projectReferences).not.toHaveBeenCalled();
+  });
+
   it("binds historical reference READ to the verified selection before starting HTTP", async () => {
     const f = fixture();
     const store = memStore();
@@ -215,6 +297,7 @@ describe("selected-session host lifecycle", () => {
     const host = mount(f); await host.ready;
     expect(readSessionOwnerContext(host.binding)?.principalScope).toBe(SCOPE);
     expect(host.binding.port.currentTargetRef()).toBeNull();
+    expect(host.binding.port.currentObservation?.()).toBeNull();
     expect(host.binding.makeSessionMessageIntent(REF, "Continue", "done")).toBeNull();
   });
   it("refreshes on EVERY pushed selection transition, including same-value and A→B→A", async () => {
@@ -232,6 +315,7 @@ describe("selected-session host lifecycle", () => {
     expect(f.contextCalls()).toBe(3);
     expect(f.contextSelections[2]).toEqual({ workRef: "WS:OTHER", rootJobId: ROOT });
     expect(host.binding.port.context()).toBeNull();
+    expect(host.binding.port.currentObservation?.()).toBeNull();
     await host.refresh({ workRef: WS, rootJobId: ROOT });
     expect(f.contextCalls()).toBe(4);
     const generations = new Set([
@@ -240,6 +324,12 @@ describe("selected-session host lifecycle", () => {
     ]);
     expect(generations.size).toBe(2);
     expect(host.binding.port.currentTargetRef()).toBe(REF);
+    expect(host.binding.port.currentObservation?.()).toEqual({
+      targetRef: REF,
+      selection: { workRef: WS, rootJobId: ROOT },
+      principalScope: SCOPE,
+      generation: host.binding.port.context()?.generation,
+    });
   });
 
   it("clears a null push and sends nothing while the transport is unavailable", async () => {

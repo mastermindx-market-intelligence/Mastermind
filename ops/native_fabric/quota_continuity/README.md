@@ -554,3 +554,37 @@ The existing deadline assertion is not removed, weakened or marked expected to
 fail. Runtime source and the 85-file native manifest are unchanged by these
 fixture improvements. Evidence remains in this operation's native-regression
 directory; production selection and both owning release processes remain pending.
+
+## Finite long-horizon execution policy (source candidate, 2026-11-03)
+
+The current candidate increases the finite classified-runtime window while retaining
+original Job/Attempt, native Fabric, broker, host, lease, and settlement ownership:
+
+| Class / route | Window | Guard |
+| --- | ---: | --- |
+| C0/C1 (routine) | Existing short/default behavior | No runtime expansion |
+| C2 complex bounded | At least 7,200 seconds (2h) | Original shorter commission deadline still narrows successors |
+| C3 frontier judgment | At least 14,400 seconds (4h) | Finite 14,400-second maximum; original-root budget and quotas remain |
+| go-codex special mode | Existing ~210-second controller default | Excluded from long-horizon lift |
+| canonical paid sealed-model service | Existing source 7,200-second contract | Not admitted to the new long-horizon tier without its own qualification |
+| GLM signed-capability routes (e.g. glm-codex) | Existing 7,200-second controller window | Explicit pre-lease narrowing and log until the separate GLM gateway/issuer can be qualified for more than 7,500 seconds |
+
+The remote controller reserves two poll intervals before its terminal fuse for
+worker cleanup/result observation. The child runner, native lease window, provider
+lease TTL and operator grant now recognize the longer classified window; the
+lease TTL is capped at 15,000 seconds including settlement headroom. Broker
+heartbeats, lease revocation, lost-lease termination and `EFFECT_UNKNOWN`
+settlement are unchanged. Five-digit commission budgets must be accepted all the
+way through controller and worker preflight; 14,401 seconds is rejected.
+
+An interactive tool's short response wait does **not** determine the worker's
+runtime. Source inclusion and test success do not establish installation: select
+an immutable reviewed generation, qualify the actual host/provider and observe a
+new correct-classification START, terminal result and original-parent acceptance.
+Running operations remain bound to their original generation. No automatic
+mid-task replay, chat wake, cost bypass or infinite child lease is introduced.
+
+Longer than four hours requires separately reviewed, explicit admission,
+checkpoint/continuation and lease/credential/window qualification. Turn ceilings
+(maximum 400 where the admitted Claude wrapper supports them) and provider
+context/quota can still terminate earlier than the wall clock.

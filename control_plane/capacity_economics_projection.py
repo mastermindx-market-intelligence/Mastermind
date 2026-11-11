@@ -12,16 +12,147 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from datetime import datetime, timezone
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 QUOTA_PREVIEW_SCHEMA = "mastermind.quota_economics_preview/v1"
 PROJECTION_SCHEMA = "mastermind.capacity_economics_projection/v1"
+
+# Commercial API model IDs, not Personal Coding Plan names. These are
+# catalog candidates until exact ProviderRealm, ModelRouter and Capacity
+# owners independently qualify the live adapter/credential/model.
+BYTEPLUS_COMMERCIAL_FLASH_MODELS = {
+    "byteplus-modelark.glm-5.3-flash": "glm-5-3-flash-260828",
+    "byteplus-modelark.deepseek-v4.1-flash": "deepseek-v4-1-flash-261017",
+}
+BYTEPLUS_COMMERCIAL_MODEL_PINS = {
+    **BYTEPLUS_COMMERCIAL_FLASH_MODELS,
+    "byteplus-modelark.commercial-coding": "dola-seed-2-1-turbo-260628",
+}
+_ZAI_FLASH_MODELS = frozenset({"glm-5.3-flash", "glm-5-3-flash-260828"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+
+# Typed provider/auth-route/pool diagnostics. Commercial recognition uses
+# exact identity; normalized family matching only selects refusals.
+# Real identities from the owner registry projection
+# (owner_ext_projection.json, 2026-11-08, 13 pools): pool id "byteplus"
+# (model catalog only; the incumbent native Fabric owns account selection,
+# subscription quotas and physical capacity), commercial provider alias
+# "byteplus-modelark" with realm "byteplus-modelark-commercial" and
+# credential key BYTEPLUS_MODELARK_API_KEY, and the individual personal
+# Coding Plan subscription auth route "personal-coding-plan", which is valid
+# only inside vendor-supported coding tools and never enters autonomous
+# capacity. Eligibility is decided only by the reviewed commercial owner
+# path below — identity text alone never grants it.
+BYTEPLUS_ELIGIBILITY_SCHEMA = "mastermind.byteplus_route_eligibility/v1"
+BYTEPLUS_COMMERCIAL_PROVIDER = "byteplus-modelark"
+BYTEPLUS_POOL_ID = "byteplus"
+BYTEPLUS_PERSONAL_CODING_ALIAS = "byteplus.attended"
+BYTEPLUS_AUTH_ROUTE_COMMERCIAL = "modelark-commercial-api-key"
+BYTEPLUS_AUTH_ROUTE_PERSONAL_CODING_PLAN = "personal-coding-plan"
+BYTEPLUS_AUTH_ROUTE_UNRECOGNIZED = "unrecognized"
+
+# Typed eligibility reason codes: every refusal carries one specific code
+# instead of one blanket substring-gate message.
+BYTEPLUS_ROUTE_NOT_APPLICABLE = "BYTEPLUS_ROUTE_NOT_APPLICABLE"
+BYTEPLUS_ROUTE_REVIEWED_COMMERCIAL = "BYTEPLUS_ROUTE_REVIEWED_COMMERCIAL"
+BYTEPLUS_PERSONAL_CODING_PLAN_REFUSED = "BYTEPLUS_PERSONAL_CODING_PLAN_REFUSED"
+BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED = "BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED"
+BYTEPLUS_MODEL_ALIAS_NOT_PINNED = "BYTEPLUS_MODEL_ALIAS_NOT_PINNED"
+BYTEPLUS_ROUTER_NOT_REVIEWED = "BYTEPLUS_ROUTER_NOT_REVIEWED"
+BYTEPLUS_REALM_NOT_REVIEWED = "BYTEPLUS_REALM_NOT_REVIEWED"
+BYTEPLUS_PROVIDER_NOT_IN_REVIEWED_ROUTER = "BYTEPLUS_PROVIDER_NOT_IN_REVIEWED_ROUTER"
+BYTEPLUS_PROVIDER_ADAPTER_MISMATCH = "BYTEPLUS_PROVIDER_ADAPTER_MISMATCH"
+BYTEPLUS_PROVIDER_DISABLED = "BYTEPLUS_PROVIDER_DISABLED"
+BYTEPLUS_PROVIDER_AUTONOMY_NOT_ALLOWED = "BYTEPLUS_PROVIDER_AUTONOMY_NOT_ALLOWED"
+BYTEPLUS_MODEL_NOT_IN_REVIEWED_ROUTER = "BYTEPLUS_MODEL_NOT_IN_REVIEWED_ROUTER"
+BYTEPLUS_MODEL_PROVIDER_ALIAS_MISMATCH = "BYTEPLUS_MODEL_PROVIDER_ALIAS_MISMATCH"
+BYTEPLUS_MODEL_ADAPTER_MISMATCH = "BYTEPLUS_MODEL_ADAPTER_MISMATCH"
+BYTEPLUS_MODEL_NOT_WORKER_ELIGIBLE = "BYTEPLUS_MODEL_NOT_WORKER_ELIGIBLE"
+BYTEPLUS_MODEL_PIN_MISMATCH = "BYTEPLUS_MODEL_PIN_MISMATCH"
+BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER = "BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BytePlusRouteEligibility:
+    """Typed provider/auth-route/pool eligibility verdict for one identity.
+
+    gate_applies is False for bounded identities outside this BytePlus gate.
+    eligible=True then means only that this gate does not refuse the identity,
+    not that another provider is registered or admitted. Within BytePlus, only
+    the reviewed commercial owner path can be eligible; personal and unknown
+    routes stay ineligible. Auth-route and pool labels are derived diagnostics,
+    not credential, entitlement or Capacity receipts.
+    """
+
+    provider: str
+    model_alias: str
+    auth_route: str
+    pool_id: str
+    gate_applies: bool
+    eligible: bool
+    reason_code: str
+    detail: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": BYTEPLUS_ELIGIBILITY_SCHEMA,
+            "provider": self.provider,
+            "model_alias": self.model_alias,
+            "auth_route": self.auth_route,
+            "pool_id": self.pool_id,
+            "gate_applies": self.gate_applies,
+            "eligible": self.eligible,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+        }
 
 
 class CapacityEconomicsProjectionError(ValueError):
     """The router/quota preview composition is invalid or non-actionable."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QuotaPreviewFreshness:
+    """Owner-supplied advisory timestamps; never a signed quota/Worker grant.
+
+    observed_at: independent Provider Control observation time, not a value
+    copied from the untrusted preview. verified_at: the owner's current time
+    at evaluation. Neither value is sampled implicitly in this projection.
+    """
+    observed_at: datetime
+    verified_at: datetime
+    max_age_seconds: int
+
+
+def _source_freshness_ok(as_of: str, freshness: Any) -> bool:
+    if type(freshness) is not QuotaPreviewFreshness:
+        return False
+    age_limit = freshness.max_age_seconds
+    if type(age_limit) is not int or not 1 <= age_limit <= 900:
+        return False
+    stamps = (freshness.observed_at, freshness.verified_at)
+    if any(type(stamp) is not datetime or stamp.tzinfo is None
+           or stamp.utcoffset() is None for stamp in stamps):
+        return False
+    try:
+        preview_time = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if preview_time.tzinfo is None or preview_time.utcoffset() is None:
+        return False
+    observed = freshness.observed_at.astimezone(timezone.utc)
+    verified = freshness.verified_at.astimezone(timezone.utc)
+    preview = preview_time.astimezone(timezone.utc)
+    observed_lag = (observed - preview).total_seconds()
+    verified_lag = (verified - observed).total_seconds()
+    end_to_end_age = (verified - preview).total_seconds()
+    return (
+        0 <= observed_lag
+        and 0 <= verified_lag
+        and 0 <= end_to_end_age <= age_limit
+    )
 
 
 def _token(value: Any, *, field: str) -> str:
@@ -30,16 +161,391 @@ def _token(value: Any, *, field: str) -> str:
     return value
 
 
-def _mentions_byteplus(value: str) -> bool:
-    """Conservatively refuse BytePlus-looking identities in untrusted previews.
+def _compact_identity(value: str) -> str:
+    return re.sub(r"[-._:]", "", value.casefold())
 
-    Provider Control's preview is not an authoritative binding. Identifiers
-    can add prefixes, suffixes, or ASCII separators; none may convert a
-    personal Coding Plan into an autonomous worker. A separately licensed
-    commercial route needs its own reviewed owner, not a preview rename.
+
+def _byteplus_family_token(value: str) -> bool:
+    return "byteplus" in _compact_identity(value)
+
+
+def _personal_plan_shaped(compact: str) -> bool:
+    return "codingplan" in compact or ("coding" in compact and "plan" in compact)
+
+
+def _byteplus_identity_class(provider: str, model_alias: str) -> str | None:
+    """Classify a preview identity into typed BytePlus route families.
+
+    The classification only chooses which typed eligibility verdict applies;
+    it never grants eligibility. Exact reviewed identities are recognized by
+    equality; anything that merely resembles BytePlus stays in the personal
+    (Coding Plan) or unrecognized family and is refused. None means the
+    identity is not a BytePlus identity and the typed gate does not apply.
     """
-    compact = re.sub(r"[-._:]", "", value.casefold())
-    return "byteplus" in compact
+    compact_provider = _compact_identity(provider)
+    compact_alias = _compact_identity(model_alias)
+    if provider == BYTEPLUS_COMMERCIAL_PROVIDER:
+        return "commercial"
+    if provider == BYTEPLUS_POOL_ID:
+        return "personal"
+    if compact_alias == _compact_identity(BYTEPLUS_PERSONAL_CODING_ALIAS):
+        return "personal"
+    if _byteplus_family_token(provider):
+        return "personal" if _personal_plan_shaped(compact_provider) else "unrecognized"
+    if _byteplus_family_token(model_alias):
+        return "personal" if _personal_plan_shaped(compact_alias) else "unrecognized"
+    return None
+
+
+def evaluate_byteplus_route_eligibility(
+    provider: Any,
+    model_alias: Any,
+    *,
+    first_tier_id: str,
+    first_tier_aliases: tuple[str, ...],
+    reviewed_router: Any,
+) -> BytePlusRouteEligibility:
+    """Typed provider/auth-route/pool eligibility verdict for one option.
+
+    Both identity inputs must satisfy the projection's bounded grammar.
+    Conservative normalized family matching selects refusal diagnostics only;
+    a BytePlus commercial route still requires the reviewed owner path. The
+    personal Coding Plan route is always refused. NOT_APPLICABLE only means
+    this BytePlus-specific gate does not apply, not general route permission.
+    """
+    if any(
+        not isinstance(value, str) or _ID_RE.fullmatch(value) is None
+        for value in (provider, model_alias)
+    ):
+        return BytePlusRouteEligibility(
+            provider="", model_alias="",
+            auth_route=BYTEPLUS_AUTH_ROUTE_UNRECOGNIZED, pool_id="",
+            gate_applies=True, eligible=False,
+            reason_code=BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED,
+            detail="malformed identity is not a bounded identifier; refused fail-closed",
+        )
+    identity_class = _byteplus_identity_class(provider, model_alias)
+    if identity_class is None:
+        return BytePlusRouteEligibility(
+            provider=provider, model_alias=model_alias,
+            auth_route="not-byteplus", pool_id="",
+            gate_applies=False, eligible=True,
+            reason_code=BYTEPLUS_ROUTE_NOT_APPLICABLE,
+            detail="identity is not a BytePlus provider/auth-route/pool; typed gate not applicable",
+        )
+    if identity_class == "personal":
+        return BytePlusRouteEligibility(
+            provider=provider, model_alias=model_alias,
+            auth_route=BYTEPLUS_AUTH_ROUTE_PERSONAL_CODING_PLAN,
+            pool_id=BYTEPLUS_POOL_ID,
+            gate_applies=True, eligible=False,
+            reason_code=BYTEPLUS_PERSONAL_CODING_PLAN_REFUSED,
+            detail=(
+                "personal BytePlus Coding Plan quota is valid only inside "
+                "vendor-supported coding tools for its individual subscriber; "
+                f"auth route '{BYTEPLUS_AUTH_ROUTE_PERSONAL_CODING_PLAN}' on pool "
+                f"'{BYTEPLUS_POOL_ID}' cannot enter an autonomous Capacity preference"
+            ),
+        )
+    if identity_class == "unrecognized":
+        return BytePlusRouteEligibility(
+            provider=provider, model_alias=model_alias,
+            auth_route=BYTEPLUS_AUTH_ROUTE_UNRECOGNIZED,
+            pool_id=BYTEPLUS_POOL_ID,
+            gate_applies=True, eligible=False,
+            reason_code=BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED,
+            detail=(
+                "unrecognized byteplus-family identity is neither the reviewed "
+                f"commercial provider '{BYTEPLUS_COMMERCIAL_PROVIDER}' nor an "
+                "approved auth route; preview text cannot mint commercial scope"
+            ),
+        )
+    refusal = _commercial_byteplus_reviewed_refusal(
+        provider, model_alias, first_tier_id, first_tier_aliases, reviewed_router,
+    )
+    if refusal is not None:
+        reason_code, detail = refusal
+        return BytePlusRouteEligibility(
+            provider=provider, model_alias=model_alias,
+            auth_route=BYTEPLUS_AUTH_ROUTE_COMMERCIAL,
+            pool_id=BYTEPLUS_POOL_ID,
+            gate_applies=True, eligible=False,
+            reason_code=reason_code, detail=detail,
+        )
+    return BytePlusRouteEligibility(
+        provider=provider, model_alias=model_alias,
+        auth_route=BYTEPLUS_AUTH_ROUTE_COMMERCIAL,
+        pool_id=BYTEPLUS_POOL_ID,
+        gate_applies=True, eligible=True,
+        reason_code=BYTEPLUS_ROUTE_REVIEWED_COMMERCIAL,
+        detail=(
+            "reviewed commercial ModelArk route: realm reviewed, provider enabled "
+            "and autonomous-allowed, model pinned and worker-eligible, first tier "
+            "matched; credential, balance, activation and claim-time Capacity "
+            "still require their incumbent owners"
+        ),
+    )
+
+
+def _canonical_model_router_matches(candidate: Any) -> bool:
+    """Reject caller-mutated router objects that are not the installed policy.
+
+    A canonical source reload is a necessary source-integrity preflight,
+    **not** the issuer/Worker/Capacity owner attestation. Until those owners
+    issue independent receipts, live START remains held by codex_worker.
+    """
+    from control_plane.model_router import ModelRouter
+    if type(candidate) is not ModelRouter:
+        return False
+    try:
+        installed = ModelRouter.load()
+    except (OSError, ValueError):
+        return False
+    return (
+        candidate.source_path == installed.source_path
+        and candidate.policy_version == installed.policy_version
+        and candidate.providers == installed.providers
+        and candidate.model_aliases == installed.model_aliases
+        and candidate.routes == installed.routes
+        and candidate.capability_registry.policy_version
+            == installed.capability_registry.policy_version
+        and candidate.capability_registry.policy_digest
+            == installed.capability_registry.policy_digest
+        and candidate.capability_registry.source_path
+            == installed.capability_registry.source_path
+    )
+
+
+def _commercial_byteplus_reviewed_refusal(
+    provider: str,
+    model_alias: str,
+    first_tier_id: str,
+    first_tier_aliases: tuple[str, ...],
+    reviewed_router: Any,
+) -> tuple[str, str] | None:
+    """Typed diagnostics for the reviewed commercial ModelArk path.
+
+    Same checks, in the same order, as the historical boolean gate; each
+    failure now carries a specific reason code. Returns None only when every
+    reviewed-owner check passes. The issuer credential, balance, model
+    activation, host and claim-time Capacity must still be independently
+    proven by their incumbent owners. No file, provider or network read
+    occurs beyond the canonical router identity preflight.
+    """
+    prefix = "unreviewed commercial route rejected"
+    if model_alias not in BYTEPLUS_COMMERCIAL_MODEL_PINS:
+        return (
+            BYTEPLUS_MODEL_ALIAS_NOT_PINNED,
+            f"{prefix}: model alias is not pinned in the commercial pin table; "
+            "a preview label cannot expand commercial scope",
+        )
+
+    from control_plane.codex_provider_realm import (
+        BYTEPLUS_MODELARK_COMMERCIAL,
+        REVIEWED_CODEX_PROVIDER_REALMS,
+    )
+
+    if not _canonical_model_router_matches(reviewed_router):
+        return (
+            BYTEPLUS_ROUTER_NOT_REVIEWED,
+            f"{prefix}: no canonical reviewed ModelRouter receipt was supplied "
+            "or it does not match the installed policy",
+        )
+    if (
+        REVIEWED_CODEX_PROVIDER_REALMS.get(
+            BYTEPLUS_MODELARK_COMMERCIAL.realm_id
+        )
+        is not BYTEPLUS_MODELARK_COMMERCIAL
+    ):
+        return (
+            BYTEPLUS_REALM_NOT_REVIEWED,
+            f"{prefix}: provider realm "
+            f"'{BYTEPLUS_MODELARK_COMMERCIAL.realm_id}' is not in the reviewed "
+            "provider realm registry",
+        )
+    registered_provider = reviewed_router.providers.get(provider)
+    registered_model = reviewed_router.model_aliases.get(model_alias)
+    if registered_provider is None:
+        return (
+            BYTEPLUS_PROVIDER_NOT_IN_REVIEWED_ROUTER,
+            f"{prefix}: provider '{provider}' is not registered in the reviewed router",
+        )
+    if registered_provider.adapter_id != "codex-cli":
+        return (
+            BYTEPLUS_PROVIDER_ADAPTER_MISMATCH,
+            f"{prefix}: reviewed provider adapter is not 'codex-cli'",
+        )
+    if registered_provider.enabled is not True:
+        return (
+            BYTEPLUS_PROVIDER_DISABLED,
+            f"{prefix}: reviewed provider is not enabled",
+        )
+    if registered_provider.autonomous_allowed is not True:
+        return (
+            BYTEPLUS_PROVIDER_AUTONOMY_NOT_ALLOWED,
+            f"{prefix}: reviewed provider does not allow autonomous use",
+        )
+    if registered_model is None:
+        return (
+            BYTEPLUS_MODEL_NOT_IN_REVIEWED_ROUTER,
+            f"{prefix}: model alias '{model_alias}' is not registered in the "
+            "reviewed router",
+        )
+    if registered_model.provider_alias != provider:
+        return (
+            BYTEPLUS_MODEL_PROVIDER_ALIAS_MISMATCH,
+            f"{prefix}: reviewed model provider_alias does not match '{provider}'",
+        )
+    if registered_model.adapter_id != "codex-cli":
+        return (
+            BYTEPLUS_MODEL_ADAPTER_MISMATCH,
+            f"{prefix}: reviewed model adapter is not 'codex-cli'",
+        )
+    if registered_model.worker_eligible is not True:
+        return (
+            BYTEPLUS_MODEL_NOT_WORKER_ELIGIBLE,
+            f"{prefix}: reviewed model is not worker-eligible",
+        )
+    pinned = BYTEPLUS_COMMERCIAL_MODEL_PINS[model_alias]
+    if registered_model.model != pinned:
+        return (
+            BYTEPLUS_MODEL_PIN_MISMATCH,
+            f"{prefix}: reviewed model '{registered_model.model}' does not match "
+            f"the commercial pin '{pinned}'",
+        )
+    # Caller-supplied first-tier text is not routing authority. Require an
+    # actual first tier of the reviewed ModelRouter with the same identity.
+    if not any(
+        risk in route
+        and bool(route[risk])
+        and route[risk][0].tier_id == first_tier_id
+        and tuple(route[risk][0].model_aliases) == first_tier_aliases
+        for route in reviewed_router.routes.values()
+        for risk in ("routine", "elevated")
+    ):
+        return (
+            BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER,
+            f"{prefix}: caller-supplied first tier is not an actual first tier "
+            "of the reviewed ModelRouter with the same identity",
+        )
+    return None
+
+
+def _commercial_byteplus_reviewed(
+    provider: str,
+    model_alias: str,
+    first_tier_id: str,
+    first_tier_aliases: tuple[str, ...],
+    reviewed_router: Any,
+) -> bool:
+    """Accept only an already reviewed commercial route, never preview rights.
+
+    Typed wrapper: True exactly when the typed diagnostics above find no
+    refusal. The issuer credential, balance, model activation, host and
+    claim-time Capacity must still be independently proven by their incumbent
+    owners. Only the existing canonical-router identity preflight may read
+    local policy files; this projection makes no provider, broker or network call.
+    """
+    if provider != BYTEPLUS_COMMERCIAL_PROVIDER:
+        return False
+    return _commercial_byteplus_reviewed_refusal(
+        provider, model_alias, first_tier_id, first_tier_aliases, reviewed_router,
+    ) is None
+
+
+def _prefer_commercial_flash_over_zai_flash(
+    selected: Mapping[str, Any],
+    options: Sequence[Mapping[str, Any]],
+    *,
+    first_tier_id: str,
+    first_tier_aliases: tuple[str, ...],
+    reviewed_router: Any,
+    source_freshness_ok: bool,
+) -> Mapping[str, Any]:
+    """Project scarcity priority inside the first *already lawful* tier.
+
+    When the preview otherwise favors Z.AI GLM Flash, commercial ModelArk
+    Flash is preferred if the same tier has a reviewed, *eligible* BytePlus
+    account-backed option with positive observed-preview headroom. This
+    spares Z.AI headroom for full GLM 5.3. Never use this rule to displace
+    a full-model job, switch suitability tiers, claim capacity or infer that
+    a credential/worker has been activated.
+    """
+    from control_plane.model_router import ModelRouter
+
+    if not source_freshness_ok or type(reviewed_router) is not ModelRouter:
+        return selected
+    if selected.get("provider") != "glm":
+        return selected
+    zai_alias = selected.get("model_alias")
+    if type(zai_alias) is not str or _ID_RE.fullmatch(zai_alias) is None:
+        return selected
+    # A malformed original recommendation must not be "repaired" by
+    # preferentially selecting an alternative from untrusted preview bytes.
+    starting = selected.get("estimated_startable_jobs")
+    concurrency = selected.get("suggested_parallelism")
+    pressure = selected.get("expiry_pressure_jobs_per_hour")
+    if (
+        type(starting) is not int
+        or type(concurrency) is not int
+        or not (0 < concurrency <= starting)
+        or (pressure is not None and (
+            type(pressure) is not str or not 0 < len(pressure) <= 64
+        ))
+    ):
+        return selected
+    zai_model = reviewed_router.model_aliases.get(zai_alias)
+    if (
+        zai_model is None
+        or zai_model.provider_alias != "glm"
+        or zai_model.model not in _ZAI_FLASH_MODELS
+        or zai_alias not in first_tier_aliases
+    ):
+        return selected
+    candidates = []
+    for option in options:
+        if not isinstance(option, Mapping):
+            continue
+        alias = option.get("model_alias")
+        if type(alias) is not str or alias not in BYTEPLUS_COMMERCIAL_FLASH_MODELS:
+            continue
+        if option.get("provider") != "byteplus-modelark":
+            continue
+        if alias not in first_tier_aliases:
+            continue
+        if option.get("eligible_in_preview") is not True:
+            continue
+        estimated = option.get("estimated_startable_jobs")
+        parallelism = option.get("suggested_parallelism")
+        if (type(estimated) is not int or type(parallelism) is not int
+                or not (0 < parallelism <= estimated)):
+            continue
+        option_id = option.get("option_id")
+        if (not isinstance(option_id, str)
+                or _ID_RE.fullmatch(option_id) is None):
+            continue
+        if sum(
+            isinstance(row, Mapping) and row.get("option_id") == option_id
+            for row in options
+        ) != 1:
+            continue
+        if not _commercial_byteplus_reviewed(
+            "byteplus-modelark", alias, first_tier_id,
+            first_tier_aliases, reviewed_router,
+        ):
+            continue
+        # Tie-breaking is deterministic, not a provider-cost or quota claim.
+        # Prefer more usable preview slots; both Flash models are viable
+        # alternatives, with the GLM identity stable on exact ties.
+        candidates.append((
+            -parallelism, -estimated,
+            list(BYTEPLUS_COMMERCIAL_FLASH_MODELS).index(alias),
+            option_id, option,
+        ))
+    if not candidates:
+        return selected
+    candidates.sort(key=lambda item: item[:4])
+    return candidates[0][-1]
 
 
 def _validate_tiers(value: Any) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -95,6 +601,8 @@ class EconomicRoutePreference:
     estimated_startable_jobs: int
     suggested_parallelism: int
     expiry_pressure_jobs_per_hour: str | None
+    original_suggested_option_id: str = ""
+    preference_substituted: bool = False
     selection_is_commitment: bool = False
     claim_time_revalidation_required: bool = True
 
@@ -109,6 +617,8 @@ class EconomicRoutePreference:
             "estimated_startable_jobs": self.estimated_startable_jobs,
             "suggested_parallelism": self.suggested_parallelism,
             "expiry_pressure_jobs_per_hour": self.expiry_pressure_jobs_per_hour,
+            "original_suggested_option_id": self.original_suggested_option_id,
+            "preference_substituted": self.preference_substituted,
             "selection_is_commitment": self.selection_is_commitment,
             "claim_time_revalidation_required": self.claim_time_revalidation_required,
         }
@@ -123,6 +633,9 @@ def _nonnegative_int(value: Any, *, field: str) -> int:
 def project_quota_preference(
     suitability_tiers: Sequence[Mapping[str, Any]],
     quota_preview: Mapping[str, Any],
+    *,
+    reviewed_router: Any = None,
+    owner_freshness: QuotaPreviewFreshness | None = None,
 ) -> EconomicRoutePreference:
     """Project one provider/model economic preference without changing authority.
 
@@ -169,22 +682,34 @@ def project_quota_preference(
     if row.get("eligible_in_preview") is not True:
         raise CapacityEconomicsProjectionError("suggested option is not eligible in preview")
 
+    # No new quota/selection owner: this advisory projection consumes the
+    # incumbent Provider Control preview and cannot promote a held alias.
+    row = _prefer_commercial_flash_over_zai_flash(
+        row, options, first_tier_id=first_tier_id,
+        first_tier_aliases=first_tier_aliases,
+        reviewed_router=reviewed_router,
+        source_freshness_ok=_source_freshness_ok(as_of, owner_freshness),
+    )
     model_alias = _token(row.get("model_alias"), field="option.model_alias")
     if model_alias not in first_tier_aliases:
         raise CapacityEconomicsProjectionError(
             "suggested model alias is outside the first lawful suitability tier"
         )
     provider = _token(row.get("provider"), field="option.provider")
-    # BytePlus Personal Coding Plan quota is valid only inside vendor-supported
-    # coding tools for its individual subscriber. A provider-economics PREVIEW
-    # does not attest that execution surface, consent or a plan-funded worker.
-    # Never turn a forged positive Capacity estimate into an autonomous worker.
-    # Neither the exact personal alias nor a near-miss label supplied by the
-    # untrusted preview can assert license/Capacity facts. A commercial
-    # BytePlus grant requires an explicit independently reviewed owner path.
-    if _mentions_byteplus(provider) or _mentions_byteplus(model_alias):
+    # Typed BytePlus diagnostics are derived from bounded identity inputs.
+    # The personal Coding Plan route and every unreviewed/unapproved
+    # BytePlus identity are refused with a specific reason code;
+    # only the independently reviewed commercial owner path can pass, and it
+    # still requires claim-time revalidation by the incumbent owners.
+    verdict = evaluate_byteplus_route_eligibility(
+        provider, model_alias,
+        first_tier_id=first_tier_id,
+        first_tier_aliases=first_tier_aliases,
+        reviewed_router=reviewed_router,
+    )
+    if not verdict.eligible:
         raise CapacityEconomicsProjectionError(
-            "personal BytePlus Coding Plan cannot enter autonomous Capacity preference"
+            f"{verdict.reason_code}: {verdict.detail}"
         )
     option_id = _token(row.get("option_id"), field="option.option_id")
     estimated = _nonnegative_int(
@@ -216,4 +741,6 @@ def project_quota_preference(
         estimated_startable_jobs=estimated,
         suggested_parallelism=parallelism,
         expiry_pressure_jobs_per_hour=pressure,
+        original_suggested_option_id=suggested_option,
+        preference_substituted=(option_id != suggested_option),
     )

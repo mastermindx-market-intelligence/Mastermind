@@ -545,7 +545,7 @@ def test_bounded_policy_source_coo_overflow_precedes_decode_and_parse(
     selected.write_bytes(raw)
     requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
 
-    def forbidden_parse(_raw):
+    def forbidden_parse(*_args, **_kwargs):
         pytest.fail("over-limit COO policy source reached the parser")
 
     monkeypatch.setattr(policy_module, "_extract_block", forbidden_parse)

@@ -36,6 +36,7 @@ it("actual frontend Launch→selected direct result→explicit consume preserves
       ],
     }),
   )!;
+  if ("bindings" in config) throw new Error("Expected the legacy v1 fixture");
   const output = () => ({
     schema: "mastermind.direct_native_result_response.v1",
     selection: {

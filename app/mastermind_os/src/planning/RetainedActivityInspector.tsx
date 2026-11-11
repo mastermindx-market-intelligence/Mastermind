@@ -78,7 +78,7 @@ export function RetainedActivityInspector({
       if (authorized()) setState("unavailable");
     }
   };
-  return <section className="mm-retained" aria-label={chinese ? "代理保留活动记录" : "Retained operator activity"}>
+  return <section className="mm-retained" lang={locale} aria-label={chinese ? "代理保留活动记录" : "Retained operator activity"}>
     <button type="button" disabled={!ready || state === "loading"} onClick={open}>
       {state === "loading" ? (chinese ? "读取中…" : "Reading…") :
         (chinese ? "查看已保留的代理活动" : "Inspect retained activity")}
@@ -86,22 +86,24 @@ export function RetainedActivityInspector({
     {ready && state === "unavailable" && <span role="status">{chinese ?
       "原始来源或权限不可用；未推断执行状态。" : "Original source or permission unavailable; execution state unknown."}</span>}
     {display?.availability === "UNAVAILABLE" && <span role="status">{chinese ?
-      "没有可展示的已授权活动。" : "No authorized activity available."} ({display.reasons.join(", ")})</span>}
+      "无法显示这些活动记录。" : "These activity records are unavailable."}</span>}
+    {display?.availability === "UNAVAILABLE" && <details><summary>{chinese ? "来源详情" : "Source details"}</summary><code>{display.reasons.join(", ")}</code></details>}
     {display?.availability === "AVAILABLE" && <div className="mm-retained__details">
-      <strong>{chinese ? "候选证据元数据" : "Candidate evidence metadata"}</strong>
+      <strong>{chinese ? "已记录的活动" : "Recorded activity"}</strong>
       <p>{chinese ? "仅包含已经记录的候选事件；不是实时工具流或模型内部推理。" :
         "Recorded candidate events only; not live tool streaming or private model reasoning."}</p>
-      <p>{chinese ? "来源覆盖" : "Source coverage"}: {display.coverage}
-        {display.sourceTruncated || display.omittedInSample ? " · PARTIAL" : ""}
-        {display.omittedInSample ? ` · ${display.omittedInSample} omitted in sample` : ""}
+      <p>{chinese ? `此样本包含 ${display.rows.length} 条已记录活动，整体活动总数未知。` : `${display.rows.length} recorded events in this sample; the overall activity total is unknown.`}
+        {display.coverage === "PARTIAL" || display.sourceTruncated || display.omittedInSample ? (chinese ? " 此样本不完整。" : " This sample is partial.") : ""}
+        {display.omittedInSample ? (chinese ? ` 样本中另有 ${display.omittedInSample} 条记录未显示。` : ` ${display.omittedInSample} additional events are omitted from this sample.`) : ""}
       </p>
       {display.rows.length === 0 && <p>{chinese ? "未观察到候选记录；不能据此推断代理空闲。" :
         "No retained candidates in this sample; this does not establish an idle worker."}</p>}
       {display.rows.length > 0 && <ol>{display.rows.map(row =>
         <li key={row.candidate_event_id + ":" + row.ordinal_in_candidate}>
-          <span>{row.category.replaceAll("_", " ").toLowerCase()}</span>
+          <span>{({TURN_COMPLETED:chinese ? "回合完成记录" : "Turn completion recorded",TURN_ACTIVITY:chinese ? "回合活动" : "Turn activity",ITEM_ACTIVITY:chinese ? "工作项活动" : "Item activity",TOOL_ACTIVITY:chinese ? "工具活动" : "Tool activity",MODEL_ACTIVITY:chinese ? "模型活动" : "Model activity",OTHER_REDACTED_EVENT:chinese ? "其他活动（内容已隐去）" : "Other activity (content withheld)"})[row.category]}</span>
           <small> · {chinese ? "候选保存时间" : "candidate recorded"}: {row.candidate_recorded_at}</small>
         </li>)}</ol>}
+      <details><summary>{chinese ? "来源详情" : "Source details"}</summary><p>{chinese ? "来源覆盖" : "Source coverage"}: <code>{display.coverage}</code> · {display.sourceState}</p><pre>{JSON.stringify(display.rows,null,2)}</pre></details>
       <p className="mm-retained__footnote">{chinese ?
         "执行、审查、验收仍需独立的原始证据。" :
         "Completion, review and acceptance require separate original evidence."}</p>

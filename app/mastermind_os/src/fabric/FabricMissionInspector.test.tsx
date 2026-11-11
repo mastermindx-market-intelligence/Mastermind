@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ChildCard, Missionv3Document } from "../mission";
 import fixture from "../fixtures/mission-v3-owner-current-operator-harness.json";
@@ -51,6 +51,27 @@ describe("owner-backed Fabric interiors", () => {
   it("refuses inferred root membership on root conflict", () => {
     const d = doc(); d.mission.root_job_ambiguous = true;
     expect(missionInteriors(d).rows[0].problem).toBe("ROOT_NOT_QUALIFIED");
+  });
+  it("does not report zero active workers when a supplied root is conflicted", () => {
+    const d = doc(); d.mission.runtime_root_state = "CONFLICT";
+    render(<FabricMissionInspector mission={d} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+    expect(screen.getAllByText("With results").map(el => el.querySelector("strong")?.textContent).find(Boolean)).toBe("Unknown");
+    expect(screen.getByText(/Current activity counts are unknown/)).toBeTruthy();
+  });
+  it("reports totals only when source time, coverage and parent chains are qualified", () => {
+    const d = doc();
+    const view = render(<FabricMissionInspector mission={d} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("1");
+    const orphan = doc([child("JOB-2", { parent_job_id: "JOB-99" })]);
+    view.rerender(<FabricMissionInspector mission={orphan} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+    const historical = doc(); historical.read_state.state = "HISTORICAL";
+    view.rerender(<FabricMissionInspector mission={historical} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
+    const partial = doc(); partial.children.coverage = "INCOMPLETE";
+    view.rerender(<FabricMissionInspector mission={partial} />);
+    expect(screen.getByText("Observed running").querySelector("strong")?.textContent).toBe("Unknown");
   });
   it("bounds visible rows and exposes local truncation", () => {
     const d = doc(Array.from({ length: 270 }, (_, i) => child(`JOB-${i+2}`)));
@@ -106,6 +127,130 @@ describe("owner-backed Fabric interiors", () => {
     expect(detail().getByText(/Latest attempt is not the current attempt/)).toBeTruthy();
     expect(screen.getByText("NOT_PROJECTED")).toBeTruthy();
     expect(screen.getByText(/not acceptance of each child/)).toBeTruthy();
+  });
+  it("navigates source-qualified immediate parent and children inside the supplied mission only", () => {
+    const rootChild = child("JOB-2", { worker_id: "worker-parent" });
+    const grandChild = child("JOB-3", { parent_job_id: "JOB-2", worker_id: "worker-leaf" });
+    render(<FabricMissionInspector mission={doc([grandChild, rootChild])} />);
+    pick("JOB-2");
+    expect(detail().getByRole("button", { name: "View observed child: JOB-3" })).toBeTruthy();
+    fireEvent.click(detail().getByRole("button", { name: "View observed child: JOB-3" }));
+    expect(detail().getByText("worker-leaf")).toBeTruthy();
+    expect(detail().getByText("JOB-1 → JOB-2 → JOB-3")).toBeTruthy();
+    fireEvent.click(detail().getByRole("button", { name: "View observed parent: JOB-2" }));
+    expect(detail().getByText("worker-parent")).toBeTruthy();
+    expect(detail().queryByRole("button", { name: "View observed parent: JOB-1" })).toBeNull();
+  });
+  it("resets a restrictive worker filter to reach a verified relative but does not dispatch", () => {
+    const one = child("JOB-2", { status: "FAILED" });
+    const two = child("JOB-3", { parent_job_id: "JOB-2", status: "RUNNING" });
+    render(<FabricMissionInspector mission={doc([one, two])} />);
+    fireEvent.click(screen.getByRole("button", { name: "Problems" }));
+    pick("JOB-2");
+    fireEvent.click(detail().getByRole("button", { name: "View observed child: JOB-3" }));
+    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+    expect(detail().getByText("JOB-1 → JOB-2 → JOB-3")).toBeTruthy();
+  });
+  it("does not navigate through unavailable or conflicted lineage", () => {
+    const d = doc([child("JOB-2", { parent_job_id: "JOB-3" }), child("JOB-3", { parent_job_id: "JOB-2" })]);
+    const view = render(<FabricMissionInspector mission={d} />);
+    pick("JOB-2");
+    expect(detail().queryByRole("button", { name: /^View observed (parent|child)/ })).toBeNull();
+    const conflict = doc([child("JOB-2"), child("JOB-3", { parent_job_id: "JOB-2" })]);
+    conflict.mission.root_job_ambiguous = true;
+    view.rerender(<FabricMissionInspector mission={conflict} />);
+    pick("JOB-2");
+    expect(detail().queryByRole("button", { name: /^View observed (parent|child)/ })).toBeNull();
+  });
+  it("clears previously selected worker and filter on a different mission root", () => {
+    const rootOne = doc([child("JOB-2", { status: "FAILED" })]);
+    const view = render(<FabricMissionInspector mission={rootOne} />);
+    fireEvent.click(screen.getByRole("button", { name: "Problems" }));
+    pick("JOB-2");
+    const rootTwo = doc([child("JOB-8", { parent_job_id: "JOB-9", status: "RUNNING" })]);
+    rootTwo.mission.root_job_id = "JOB-9";
+    view.rerender(<FabricMissionInspector mission={rootTwo} />);
+    expect(detail().queryByText("worker-observed-1")).toBeNull();
+    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /^JOB-8 / })).toBeTruthy();
+  });
+  it("does not treat a validated parent after the display cap as a displayed navigation target", () => {
+    const members = Array.from({length:270},(_,index)=>child("JOB-"+(index+2)));
+    members[0].parent_job_id = "JOB-260";
+    const d=doc(members);
+    const view=render(<FabricMissionInspector mission={d} />);
+    pick("JOB-2");
+    // The companion #1435 decoder repair may prove ancestry using the full
+    // supplied source. It must not produce an invisible/off-cap action.
+    expect(detail().queryByRole("button",{name:"View observed parent: JOB-260"})).toBeNull();
+  });
+  it("opens only the exact indexed, unvalidated result from the selected current Mission worker", () => {
+    const sample = doc();
+    const ref = sample.result_refs.refs[0];
+    const c = child(ref.job_id, { parent_job_id: ref.root_job_id, status: "COMPLETED",
+      orchestration_role: ref.orchestration_role, current_attempt_id: ref.attempt_id,
+      latest_attempt: { ...child().latest_attempt!, attempt_id: ref.attempt_id,
+        has_result: true, status: "COMPLETED", finished_at: "2026-10-15T17:00:00Z" } });
+    sample.mission.root_job_id = ref.root_job_id; sample.children.items = [c];
+    const opened = vi.fn();
+    render(<FabricMissionInspector mission={sample} onInspectResult={opened} />);
+    pick(ref.job_id);
+    fireEvent.click(detail().getByRole("button", { name: "Inspect indexed result" }));
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(opened).toHaveBeenCalledWith({
+      workRef: sample.program.work_ref, rootJobId: ref.root_job_id,
+      jobId: ref.job_id, attemptId: ref.attempt_id, resultEnvelopeDigest: ref.result_envelope_digest,
+    });
+    expect(detail().getByText(/UNVALIDATED/)).toBeTruthy();
+  });
+  it("distinguishes an exact reference from a missing authorized reader", () => {
+    const sample = doc(), ref = sample.result_refs.refs[0];
+    sample.mission.root_job_id = ref.root_job_id;
+    sample.children.items = [child(ref.job_id, {
+      parent_job_id: ref.root_job_id, status: "COMPLETED",
+      orchestration_role: ref.orchestration_role,
+      current_attempt_id: ref.attempt_id,
+      latest_attempt: { ...child().latest_attempt!, attempt_id: ref.attempt_id,
+        status: "COMPLETED", has_result: true },
+    })];
+    render(<FabricMissionInspector mission={sample} />);
+    pick(ref.job_id);
+    expect(detail().queryByRole("button", { name: "Inspect indexed result" })).toBeNull();
+    expect(detail().getByText(/exact result reference exists, but no authorized result reader/)).toBeTruthy();
+  });
+  it("hides the result read when its apparent worker result lacks exact source-index evidence", () => {
+    const sample = doc();
+    const ref = sample.result_refs.refs[0];
+    sample.mission.root_job_id = ref.root_job_id;
+    const c = child(ref.job_id, { parent_job_id: ref.root_job_id, status: "COMPLETED",
+      current_attempt_id: "ATT-" + "a".repeat(32),
+      latest_attempt: { ...child().latest_attempt!, has_result: true,
+        attempt_id: "ATT-" + "a".repeat(32), status: "COMPLETED" } });
+    sample.children.items = [c];
+    const opened = vi.fn(); const view = render(<FabricMissionInspector mission={sample} onInspectResult={opened} />);
+    pick(ref.job_id);
+    expect(detail().queryByRole("button", { name: "Inspect indexed result" })).toBeNull();
+    expect(detail().getByText(/No exact result reference is available/)).toBeTruthy();
+    sample.result_refs.generation.state = "CONFLICT";
+    view.rerender(<FabricMissionInspector mission={sample} onInspectResult={opened} />);
+    expect(detail().queryByRole("button", { name: "Inspect indexed result" })).toBeNull();
+    expect(opened).not.toHaveBeenCalled();
+  });
+  it("keeps the latest returned attempt distinct from the current attempt when inspecting its indexed result", () => {
+    const sample = doc(); const ref = sample.result_refs.refs[0];
+    sample.mission.root_job_id = ref.root_job_id;
+    const c = child(ref.job_id, { parent_job_id: ref.root_job_id, orchestration_role: ref.orchestration_role,
+      current_attempt_id: "ATT-" + "f".repeat(32),
+      latest_attempt: { ...child().latest_attempt!, attempt_id: ref.attempt_id,
+        status: "COMPLETED", has_result: true } });
+    sample.children.items = [c];
+    const opened = vi.fn();
+    render(<FabricMissionInspector mission={sample} onInspectResult={opened} />);
+    pick(ref.job_id);
+    expect(detail().getByText(/Latest attempt is not the current attempt/)).toBeTruthy();
+    fireEvent.click(detail().getByRole("button", { name: "Inspect indexed result" }));
+    expect(opened.mock.calls[0][0].attemptId).toBe(ref.attempt_id);
+    expect(opened.mock.calls[0][0].attemptId).not.toBe(c.current_attempt_id);
   });
   it("keeps unknown attempt fields unknown and supports the current app locale", () => {
     const c = child(); c.latest_attempt = null;

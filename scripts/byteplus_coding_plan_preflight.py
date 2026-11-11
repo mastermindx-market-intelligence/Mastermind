@@ -56,7 +56,7 @@ def source_preflight() -> dict[str, object]:
         or in_automatic_tiers
     ):
         raise RuntimeError("BytePlus personal policy unexpectedly armed")
-    if binding.implementation_state != "SPEC_ONLY":
+    if binding.implementation_state not in {"BUILT_NOT_PROVEN", "PROVEN_LIVE"}:
         raise RuntimeError("BytePlus canary implementation state unexpectedly changed")
     if binding.profile_id != profile.profile_id or binding.provider != profile.provider:
         raise RuntimeError("BytePlus profile/binding identity drift")
@@ -103,10 +103,18 @@ def source_preflight() -> dict[str, object]:
         "models_by_source_role": models_by_role,
         "individual_supported_tool_mode_statically_allowed": statically_allowed,
         "canary_preparation_only": True,
+        "native_coding_plan_implementation_state": binding.implementation_state,
+        "native_admission_policy": "bounded_attempt_under_provider_enforcement",
+        "provider_quota_remaining": None,
+        "operator_concurrency_is_provider_quota": False,
         "canary_start_authorized": False,
         "canary_source_blockers": list(canary),
         "autonomous_start_authorized": False,
         "production_source_blockers": list(autonomous),
+        "required_quota_windows": ["session", "weekly", "monthly"],
+        "quota_scope": "ONE_SUBSCRIPTION_ALL_MODELS_AND_KEYS",
+        "additional_key_creates_capacity": False,
+        "additional_subscription_requires_distinct_owner_identity": True,
         "actual_concurrent_worker_limit": None,
         "estimated_startable_jobs": None,
         "additional_owner_proofs_required": [

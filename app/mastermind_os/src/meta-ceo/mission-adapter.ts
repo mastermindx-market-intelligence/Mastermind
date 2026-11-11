@@ -1,7 +1,15 @@
 /** Presentation adapter only: the existing MissionHost owns acquisition and decoding. */
 import type { MissionDocument, Missionv3Document } from "../mission";
+import type { ResultEnvelopeDigestShape } from "../result";
 import { decodeOwnerObservation } from "../workspace-contract";
-import { sameTarget, type ProjectionContext, type ReadSnapshot, type SourceClaim } from "./projection";
+import {
+  projectOffice,
+  sameTarget,
+  type OfficeInput,
+  type ProjectionContext,
+  type ReadSnapshot,
+  type SourceClaim,
+} from "./projection";
 
 type Document = MissionDocument | Missionv3Document;
 export interface PendingMissionOfficeRead { readonly context: ProjectionContext }
@@ -87,5 +95,133 @@ export function completeMissionOfficeRead(
       context: structuredClone(context), source,
       value: qualified && source.state !== "UNAVAILABLE" ? structuredClone(document) : null,
     },
+  };
+}
+
+export interface PendingMissionResultOfficeRead {
+  readonly token: number;
+  readonly context: ProjectionContext;
+}
+export type MissionResultOfficeObservation =
+  | {
+      kind: "observed";
+      context: ProjectionContext;
+      mission: ReadSnapshot<Missionv3Document>;
+      result: ReadSnapshot<ResultEnvelopeDigestShape>;
+    }
+  | { kind: "discarded"; state: "WITHHELD" | "UNASSOCIATED" | "STALE"; reason: string };
+
+/** Capture one frozen context for both halves before the compound read. */
+export function captureMissionResultOfficeRead(
+  current: ProjectionContext,
+  token: number,
+): PendingMissionResultOfficeRead {
+  return { token, context: captureMissionOfficeRead(current).context };
+}
+
+function resultRevision(result: ResultEnvelopeDigestShape): string | null {
+  const observation = result.source_observation;
+  const control = observation.control_room;
+  const runtime = observation.runtime;
+  const qualifiedAvailability = result.availability === "AVAILABLE" || result.availability === "CONTENT_OVER_BUDGET";
+  if (!qualifiedAvailability || observation.state !== "SAME" || !control || !runtime
+    || control.document_digest === null || control.instance_before === null || control.instance_after === null
+    || control.publication_before === null || control.publication_after === null
+    || runtime.state !== "SAME" || runtime.source_identity === null || runtime.before === null || runtime.after === null)
+    return null;
+  return "result-source-observation:v1:" + JSON.stringify([
+    observation.schema,
+    observation.selection,
+    control.instance_before,
+    control.instance_after,
+    control.publication_before,
+    control.publication_after,
+    control.document_digest,
+    control.source_validity_digest,
+    control.cache_currentness_digest,
+    runtime.schema,
+    runtime.state,
+    runtime.source_identity,
+    runtime.before,
+    runtime.after,
+  ]);
+}
+
+type ResultOfficeObservation =
+  | { kind: "observed"; context: ProjectionContext; snapshot: ReadSnapshot<ResultEnvelopeDigestShape> }
+  | { kind: "discarded"; state: "WITHHELD" | "UNASSOCIATED" | "STALE"; reason: string };
+
+function completeResultOfficeRead(
+  pending: ProjectionContext,
+  current: ProjectionContext,
+  result: ResultEnvelopeDigestShape,
+  localAcquiredAt: string,
+): ResultOfficeObservation {
+  if (pending.authGeneration !== current.authGeneration)
+    return { kind: "discarded", state: "WITHHELD", reason: "AUTH_GENERATION_CHANGED" };
+  if (!sameTarget(pending, current))
+    return { kind: "discarded", state: "UNASSOCIATED", reason: "TARGET_CHANGED" };
+  if (current.revisions.result !== pending.revisions.result)
+    return { kind: "discarded", state: "STALE", reason: "READ_SUPERSEDED" };
+  const validTime = /^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(localAcquiredAt) && Number.isFinite(Date.parse(localAcquiredAt));
+  const revision = validTime ? resultRevision(result) : null;
+  const qualified = revision !== null;
+  const source: SourceClaim = {
+    owner: "EXECUTIVE_OS",
+    ref: qualified ? result.source_observation.control_room!.document_digest : null,
+    ref_kind: "CONTROL_ROOM_DOCUMENT_DIGEST",
+    revision: qualified ? revision : null,
+    observed_at: validTime ? localAcquiredAt : null,
+    observed_at_kind: "LOCAL_ACQUISITION",
+    state: qualified ? "CURRENT" : "UNKNOWN",
+    coverage: qualified && result.availability === "AVAILABLE" ? "COMPLETE" : "INCOMPLETE",
+  };
+  const context = structuredClone(current);
+  context.revisions.result = source.revision;
+  return {
+    kind: "observed",
+    context,
+    snapshot: {
+      context: structuredClone(context),
+      source,
+      value: qualified ? structuredClone(result) : null,
+    },
+  };
+}
+
+/**
+ * Admit both snapshots or neither. projectOffice remains the association
+ * authority: a decoded pair it will not qualify is discarded here.
+ */
+export function completeMissionResultOfficeRead(
+  pending: PendingMissionResultOfficeRead,
+  current: ProjectionContext,
+  mission: Missionv3Document,
+  result: ResultEnvelopeDigestShape,
+  localAcquiredAt: string,
+  rest: Pick<OfficeInput, "programs" | "conversation"> = { programs: null, conversation: null },
+): MissionResultOfficeObservation {
+  const missionRead = completeMissionOfficeRead(pending, current, mission, localAcquiredAt);
+  if (missionRead.kind !== "observed" || missionRead.snapshot.value?.schema !== "mastermind.mission_workspace.v3") {
+    return missionRead.kind === "discarded"
+      ? missionRead
+      : { kind: "discarded", state: "UNASSOCIATED", reason: "MISSION_VALUE_ABSENT" };
+  }
+  const resultRead = completeResultOfficeRead(pending.context, missionRead.context, result, localAcquiredAt);
+  if (resultRead.kind !== "observed" || !resultRead.snapshot.value)
+    return resultRead.kind === "discarded"
+      ? resultRead
+      : { kind: "discarded", state: "UNASSOCIATED", reason: "RESULT_VALUE_ABSENT" };
+  const projection = projectOffice(
+    { mission: missionRead.snapshot, programs: rest.programs, result: resultRead.snapshot, conversation: rest.conversation },
+    resultRead.context,
+  );
+  if (!projection.result.value || projection.mission.value == null)
+    return { kind: "discarded", state: "UNASSOCIATED", reason: projection.result.reason ?? "RESULT_UNQUALIFIED" };
+  return {
+    kind: "observed",
+    context: resultRead.context,
+    mission: missionRead.snapshot as ReadSnapshot<Missionv3Document>,
+    result: resultRead.snapshot,
   };
 }

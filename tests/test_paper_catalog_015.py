@@ -43,7 +43,13 @@ class CatalogTests(unittest.TestCase):
         for name in ("get_jsx", "create_file", "delete_nodes"):
             mutated = copy.deepcopy(CURRENT)
             mutated[name]["description"] += " drift"
-            self.assertFalse(b.schema_receipt(Client(), mutated)["accepted_for_write"])
+            receipt = b.schema_receipt(Client(), mutated)
+            # Presentation drift and blocked new/vendor tools cannot disable
+            # unrelated qualified Paper edits.
+            self.assertTrue(receipt["accepted_for_write"])
+            self.assertFalse(receipt["full_catalog_known"])
+            self.assertIn("create_artboard", receipt["compatible_write_tools"])
+            self.assertNotIn("delete_nodes", receipt["compatible_write_tools"])
 
     def test_explicit_custom_pin_does_not_inherit_unrelated_compatibility(self):
         class Client:

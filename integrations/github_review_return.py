@@ -152,6 +152,7 @@ class GitHubReviewReturn:
             or provenance.get("frozen_head_sha") != decision.frozen_head_sha
             or provenance.get("command_id") != decision.command_id
             or provenance.get("actor") != decision.actor
+            or ("decision" in provenance and provenance["decision"] != decision.to_dict())
         ):
             raise ReviewVerificationRefused("REVIEW_JOB_SOURCE_IDENTITY_MISMATCH")
         # VerifiedReviewResult/its source checks still live in the existing

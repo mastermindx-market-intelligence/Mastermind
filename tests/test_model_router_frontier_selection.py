@@ -49,8 +49,6 @@ def _policy(tmp_path, *, provider="codex", remove_default=False, disable_provide
         WorkRequest("planning"),
         WorkRequest("judgment"),
         WorkRequest("escalation"),
-        WorkRequest("implementation", risk="critical"),
-        WorkRequest("implementation", ambiguity="high"),
     ],
 )
 def test_explicit_frontier_selection_returns_selected_identity_without_worker_authority(
@@ -141,7 +139,7 @@ def test_explicit_selection_checks_caller_capabilities_without_worker_route_inhe
 ):
     router = _policy(tmp_path)
     selected = router.route(
-        WorkRequest("implementation", risk="critical"),
+        WorkRequest("judgment"),
         frontier_model_alias="fixture.frontier",
     )
     assert selected.required_capabilities == ()
@@ -155,17 +153,20 @@ def test_explicit_selection_checks_caller_capabilities_without_worker_route_inhe
     with pytest.raises(RoutingPolicyError, match="cannot satisfy requested capabilities"):
         router.route(
             WorkRequest(
-                "implementation", risk="critical", required_capabilities=("code",)
+                "planning", required_capabilities=("code",)
             ),
             frontier_model_alias="fixture.frontier",
         )
 
-    # Existing callers keep the legacy critical/high-ambiguity lead behavior.
-    legacy = router.route(
+    # OQ-8 (WO-06): critical risk no longer inflates child cognition to the
+    # lead lane; the bounded worker route stands and the principal review
+    # requirement is surfaced on the decision instead.
+    worker = router.route(
         WorkRequest("implementation", risk="critical", required_capabilities=("code",))
     )
-    assert legacy.preferred_model_aliases == ("frontier.orchestrator",)
-    assert "frontier_model_selected" not in legacy.reason_codes
+    assert worker.mode is RouteMode.WORKER
+    assert worker.principal_review_required is True
+    assert {"critical_risk", "principal_review_required"} <= set(worker.reason_codes)
 
 
 @pytest.mark.parametrize("task_kind", ["implementation", "mechanical", "tests", "research", "review"])
