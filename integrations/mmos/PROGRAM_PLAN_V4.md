@@ -1206,3 +1206,46 @@ duties the lane returns early with the evidence.
 and the `m2` MastermindX profile need the extension loaded from the right folder, which the
 computer-use worker does once its first slice passes review. Item 12: one interactive sign-in
 by the Chairman.
+
+## 30. Amendment, 2026-11-11 12:55 UTC: browser repair lane BF, three accepted results, the silent-stop patch, a short Opus window
+
+**Priority change from Sector Intelligence.** Their team will use the browser for ChatGPT Pro
+runs with sends at least a minute apart, so harness item 1 (page reads fail in the ChatGPT
+profiles) is at the front again and item 5 (computer use) no longer blocks them.
+
+**Lane BF (browser fix), by the Chairman's order.** One `glm-5.3` engineering worker repairs
+the ChatGPT profiles where the page cannot be read. What it established: ChatGPT1, 2 and 3
+loaded the extension before its site permission existed and were never reloaded; ChatGPT4
+already works and is left alone. The repaired extension files from lane BR were scored
+`reload-ready` by a second check and sit staged in the ChatGPT1 and ChatGPT2 folders. BF finds
+the Reload control on the real Chrome window by its label, presses it once per profile in the
+order 1, 2, 3 (stopping if the first press gives no working page read), then proves a page
+read and one text fill in its own new ChatGPT tab in each profile, a minute apart, never
+sending. BF touches no tab it did not open. Harness answers 1, 3 and 4 follow its receipts.
+
+**Accepted since section 29.**
+
+| Lane | Result | State |
+| --- | --- | --- |
+| HX (harness access) | Items 8, 9, 11 answered; item 10 diagnosed with patch points | Notes merged; the read-only allow fragment for item 9 is not installed (principal's decision: the guard that causes the prompts is inside the CLI binary and no allow rule passes it) |
+| T8b (window pairing) | Two MED from the panel fixed: default-browser opens are rate limited; no false signed-out state before the hold time | Merged; the release bundle is built and not installed; the on-screen proof is owed at the real switch |
+| BR (browser plugin) | Seven of seven repairs; delta check `reload-ready` | Staged; merge to trunk after BF's proof. Installing a new bridge release still needs the Chairman's word |
+
+**Lane T10 (silent stops), harness item 10.** A patch to our T3 pin so that a child whose run
+ends without a normal result always settles with a return line naming the cause and wakes its
+parent once, and so that after a server restart every running child is resumed or settled and
+reported. A resume never re-sends a prompt that may already have run tools. Own source clone,
+own dev server, tests beside the code, no Mastermind names in T3 code. It is an exactly-once
+surface: a blind panel scores it before it goes on the team server. It repairs our own server
+only; this programme does not patch the Chairman's T3 Code app.
+
+**Computer-use server review.** The layer lane BCU built is scored by a blind panel against
+its eleven product rules before it is registered in any provider home or switched on for any
+teammate. BCU's four-model first-slice proof runs through a command-line entry on the same
+code, so no registration is needed for the proof.
+
+**Opus window.** The Chairman opened the Opus pool for new lanes for one to two hours on
+2026-11-11 (a limit on one account that would otherwise lapse; the pool is shared with the CI
+programme). Two lanes use it: T10 and the BCU panel lead, each with DeepSeek Flash children.
+After the window, routing returns to section 26: `glm-5.3` drives lanes and leads panels,
+DeepSeek Flash reviews and tests.
