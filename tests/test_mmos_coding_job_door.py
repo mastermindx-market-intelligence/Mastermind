@@ -56,7 +56,9 @@ def _make_door(scratch: Path):
     config = door_mod.DoorConfig({
         "scratch_root": str(scratch),
         "paperclip_base_url": "http://127.0.0.1:3199",  # deliberately dead
+        "paperclip_allowed": ["127.0.0.1:3199"],
         "paperclip_company_id": "cmp-test",
+        "teammates": ["ag-1"],
         "t3": {
             # A dead port INSIDE the dev range: the pairing CLI leg is pinned
             # to this same server, so no leg can reach the live T3 app.
@@ -77,7 +79,9 @@ def _config(scratch, t3_overrides=None):
     values = {
         "scratch_root": str(scratch),
         "paperclip_base_url": "http://127.0.0.1:3190",
+        "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": "c",
+        "teammates": ["ag-1"],
         "t3": {
             "proof_base_url": "http://127.0.0.1:3800",
             "home_dir": str(scratch / "t3home"),
@@ -134,6 +138,11 @@ def test_admit_replay_conflict_wait_and_unfrozen_round_trip(scratch,
     unfrozen command refused."""
     async def exercise():
         d = _make_door(scratch)
+        # The admission LANE is under test here with a deliberately dead dev
+        # Paperclip; the F10 task-shows-request gate (which needs a live
+        # task) has its own tests in test_mmos_coding_job_door_t4c.py.
+        monkeypatch.setattr(d, "_task_request_error",
+                            lambda _cmd, _entry: None)
         await d.start()
 
         def ask(method, target, body=None):
@@ -313,9 +322,12 @@ def test_f6_entry_action_routes_every_phase_once(scratch, monkeypatch):
     # never admitted by the door (the live default-journey regression)
     assert d._entry_action({}) == "skip"
     assert d._entry_action({"admit_requested_at": "t"}) == "admit"
-    # a WAIT/refusal was already answered — the carrier owns the retry
+    # a WAIT is retried by the door itself once the retry interval elapses
+    # (R4b finding 12 — same command, so still one admission); an
+    # unageable timestamp reads as due.  A REFUSAL stays answered: the
+    # carrier owns that retry.
     assert d._entry_action(
-        {"admit_requested_at": "t", "admit_outcome": "WAIT"}) == "skip"
+        {"admit_requested_at": "t", "admit_outcome": "WAIT"}) == "admit"
     assert d._entry_action(
         {"admit_requested_at": "t", "admit_outcome": "conflict"}) == "skip"
     assert d._entry_action({"job_id": "J"}) == "execute"     # fresh claim
@@ -423,7 +435,9 @@ def test_f3_hard_readmission_refusal_parks_with_the_code(
     d._ensure_admitted(command2, entry2)
     assert entry2.get("phase") is None
     assert not entry2.get("blocker")
-    assert d._entry_action(entry2) == "skip"
+    # F12 (R4b review): the WAIT is stale (asked 2026-11-10) — the door
+    # itself now re-asks the same command when the interval elapses
+    assert d._entry_action(entry2) == "admit"
     assert len(d.paperclip.comments) == 1  # only the refusal comment
 
 
@@ -504,8 +518,10 @@ def test_f1_attempted_launch_without_receipt_parks_never_relaunches(
     assert entry["blocker"]["code"] == "LAUNCH_UNCERTAIN"
     assert d.paperclip.comments and "LAUNCH_UNCERTAIN" in (
         d.paperclip.comments[0][1])
-    # surfaced blocker = terminal for this executor: never re-executed
-    assert d._entry_action(entry) == "skip"
+    # never re-executed — but (R4b finding 13) the entry KEEPS ITS WAKE
+    # until the attempt row is reconciled terminal, because its thread
+    # slot is held; the blocker branch closes it then and only then
+    assert d._entry_action(entry) == "blocker"
 
 
 def test_f2_recovery_skips_record_process_when_identity_is_durable(

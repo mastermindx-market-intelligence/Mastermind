@@ -145,12 +145,30 @@ def _document_key(attempt_id: str) -> str:
     return f"coding-job-return-{safe}"[:120]
 
 
+def _quoted_worker_text(text: str) -> str:
+    """F4 (R4b review): worker output rides inside a code fence longer than
+    any backtick run in it, so worker words can never pose as the board's
+    prose (the whole comment also opens with the ``[coding-job]`` line)."""
+    longest = 0
+    run = 0
+    for char in text:
+        run = run + 1 if char == "`" else 0
+        if run > longest:
+            longest = run
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{text}\n{fence}"
+
+
 def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     """The comment body: deterministic, built only from fields that exist.
 
     Job identity (attempt, root, idempotency key, T3 thread/run), the result
     line, artifact refs and the GitHub evidence the record actually carries.
     An unobserved GitHub fact is written as ``unknown`` — never invented.
+
+    F4 (R4b review): the first line is the ``[coding-job]`` marker — every
+    comment this transport writes opens with it, so the carrier never takes
+    it as a board note — and the worker's text is fenced as quoted output.
     """
     attempt = payload.get("attempt")
     attempt = attempt if isinstance(attempt, Mapping) else {}
@@ -162,7 +180,7 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     stage = payload.get("stage")
     stage = stage if type(stage) is str and stage else "unknown"
     lines: list[str] = [
-        f"## Coding job result — {stage}",
+        f"[coding-job] Coding job result — {stage}",
         "",
         f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id}",
         "",
@@ -186,9 +204,12 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     acceptance = acceptance if type(acceptance) is str and acceptance else "not_accepted"
     lines.append(f"- acceptance: {acceptance} (delivery is not acceptance)")
 
-    lines.extend(["", "**Result**", ""])
+    lines.extend(["", "**Result** (the worker's output, quoted verbatim)",
+                  ""])
     text = result.get("text")
-    lines.append(text if type(text) is str and text else "(no result text recorded)")
+    lines.append(_quoted_worker_text(text)
+                 if type(text) is str and text else
+                 "(no result text recorded)")
     refs = result.get("artifact_refs")
     if isinstance(refs, list) and refs:
         lines.extend(["", "**Artifacts**"])

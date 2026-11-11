@@ -63,6 +63,10 @@ PY = sys.executable or "/opt/homebrew/bin/python3.12"
 
 FAIL = 3
 COMPANY: dict[str, str] = {}
+# The enrolled teammate every journey task is assigned to (finding 10: the
+# door freezes only enrolled assignees and admits only on the task's own
+# agent request).
+JOURNEY_TEAMMATE = "ag-journey-worker"
 
 
 def log(msg: str) -> None:
@@ -145,14 +149,20 @@ def make_task(title: str, description: str) -> dict:
 
 
 def door_config(scratch: Path, *, crash_mode=None, fleet_limit=None,
-                register_transport=True, t3_port=DEV_T3_PORT) -> Path:
+                register_transport=True, t3_port=DEV_T3_PORT,
+                teammates=None) -> Path:
     config = {
         "scratch_root": str(scratch),
         "paperclip_base_url": DEV_PAPERCLIP,
+        # R4b finding 9: the explicit host:port allowlist
+        "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": COMPANY["id"],
         # the dev instance's implicit board actor (its local-trusted surface);
         # the door's result/blocker comments ride the same header
         "paperclip_headers": {"x-instance-role": "local_trusted"},
+        # R4b finding 10: the enrolled-teammate roster; the journey's tasks
+        # are assigned to JOURNEY_TEAMMATE before the reply is posted
+        "teammates": teammates or [JOURNEY_TEAMMATE],
         "t3": {
             "proof_base_url": f"http://127.0.0.1:{t3_port}",
             "home_dir": os.path.expanduser(DEV_T3_HOME),
@@ -163,6 +173,8 @@ def door_config(scratch: Path, *, crash_mode=None, fleet_limit=None,
             "model_selection": MODEL_SELECTION,
         },
         "intake_poll_seconds": 1.0,
+        # R4b finding 12: the door retries a WAIT itself after this interval
+        "wait_retry_seconds": 10.0,
     }
     if crash_mode:
         config["crash_mode"] = crash_mode
