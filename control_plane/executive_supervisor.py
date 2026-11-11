@@ -3400,6 +3400,20 @@ class ExecutiveSupervisor:
         cancel_entered=False
         try:
             while True:
+                # L9a (lease-expiry journey round 7, 2026-11-11): renew
+                # IMMEDIATELY on entry, before the first wait.  An
+                # expired-lease adoption leaves the lease un-renewed, and
+                # in the adoption->first-heartbeat gap ANY concurrent
+                # reconcile pass (the recovery door's own cadence lane, a
+                # second supervisor instance on the shared store) lawfully
+                # re-adopts and fences this finisher out — after which the
+                # finisher's ownership-loss cleanup would kill the very
+                # run the new owner is recovering.
+                self.runtime.attempts.heartbeat_attempt(
+                    attempt.attempt_id,
+                    fence_generation=attempt.fence_generation,
+                    lease_token=active.lease.lease_token,
+                )
                 done, _ = await asyncio.wait(
                     {task}, timeout=self.heartbeat_interval_seconds
                 )
@@ -3423,11 +3437,6 @@ class ExecutiveSupervisor:
                                 self.runtime.record_direct_native_cancel_unavailable(attempt.attempt_id,
                                     fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token,
                                     unsupported=isinstance(exc,NotImplementedError))
-                self.runtime.attempts.heartbeat_attempt(
-                    attempt.attempt_id,
-                    fence_generation=attempt.fence_generation,
-                    lease_token=active.lease.lease_token,
-                )
         except Exception:
             if not task.done() and direct and cancel_entered:
                 # The original cancel may have executed. Do not use generic
@@ -3435,10 +3444,23 @@ class ExecutiveSupervisor:
                 task.cancel()
                 await asyncio.gather(task,return_exceptions=True)
             elif not task.done():
-                try:
-                    await self.adapter.cancel(active.process_ref, "supervisor ownership lost")
-                finally:
+                if getattr(active.process_ref, "pid", None) is None:
+                    # L9b (lease-expiry journey round 7, 2026-11-11): a
+                    # provider-managed run (pid None — the supervisor
+                    # boundary's twin shape) has NO orphan hazard: the
+                    # provider keeps executing and the next reconcile
+                    # adopts and finishes it.  Cancelling here issues the
+                    # adapter's interrupt (on the t3 wire a
+                    # t3_thread_interrupt) and DESTROYS the still-live
+                    # native execution the new owner is recovering.  Only
+                    # the local collection task is ended.
+                    task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
+                else:
+                    try:
+                        await self.adapter.cancel(active.process_ref, "supervisor ownership lost")
+                    finally:
+                        await asyncio.gather(task, return_exceptions=True)
             raise
 
     def _persist_collection(self, active: ActiveRun, receipt: CollectionReceipt) -> Path:

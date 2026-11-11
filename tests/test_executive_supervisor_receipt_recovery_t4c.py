@@ -821,3 +821,122 @@ def test_boundary_projection_twins_and_refuses_a_foreign_receipt_binding(
     with pytest.raises(T3NativeCompositionError, match="retained"):
         SupervisorBoundaryT3Adapter(lying).receipt_recovery_binding(
             "run-b", prompt_path=str(prompt_path))
+
+
+# ---------------------------------------------------------------------------
+# L9 (lease-expiry journey round 7, 2026-11-11): the recovered-run finisher
+# must hold its lease from the first instant, and a fenced-out finisher must
+# never kill the provider-managed run it is no longer allowed to finish.
+# ---------------------------------------------------------------------------
+
+class _BlockingCollectAdapter(ComposedBoundaryAdapter):
+    """A provider-managed adapter whose run stays LIVE: collect_result
+    blocks until the test releases it (the still-executing native run of
+    the lease-expiry journey — the whole point of the wait)."""
+
+    def __init__(self, inspector: FakeInspector) -> None:
+        super().__init__(inspector)
+        self.collect_gate: asyncio.Event = asyncio.Event()
+        self.cancel_reasons: list[str] = []
+
+    async def collect_result(self, ref):
+        await self.collect_gate.wait()
+        return await super().collect_result(ref)
+
+    async def cancel(self, ref, reason):
+        self.cancel_reasons.append(reason)
+        return await super().cancel(ref, reason)
+
+
+def test_recovered_run_finisher_renews_the_lease_before_its_first_wait(
+        tmp_path, monkeypatch):
+    """L9a: the finisher's first heartbeat used to come only AFTER a full
+    heartbeat interval — and an expired-lease adoption leaves the lease
+    un-renewed, so in that gap ANY concurrent reconcile pass (the recovery
+    door's own cadence lane, a second supervisor instance on the shared
+    store) lawfully re-adopts and fences the finisher out.  The finisher
+    must renew IMMEDIATELY on entry, before its first wait."""
+    runtime, job_id, attempt_id, adapter, now = _crash_between_receipt_and_record(
+        tmp_path, monkeypatch, lease_seconds=2,
+        adapter_factory=_BlockingCollectAdapter)
+    now[0] += 3_000  # the crashed claimant's 2s lease expires
+    finisher = _restart_supervisor(
+        runtime, tmp_path, adapter, instance_id="finisher")
+    # the first WAIT must never elapse inside the test: only the immediate
+    # renewal on entry can keep the lease alive
+    finisher.heartbeat_interval_seconds = 30.0
+    outcomes = finisher.reconcile_restart(requeue_lost=False)
+    assert outcomes, "the expired lease must reconcile to an adoption"
+    actives = finisher.take_recovered_runs()
+    assert len(actives) == 1
+    before = runtime.attempts.get_attempt(attempt_id).lease_expires_at
+    # under one lease forward (still a lawful renewal): an immediate
+    # renewal lands in a LATER second, the adoption-time expiry does not
+    now[0] += 1_500
+
+    async def main() -> None:
+        task = asyncio.ensure_future(finisher.finish_job(actives[0]))
+        try:
+            renewed = None
+            for _ in range(50):  # 1s of real time — a fraction of the 30s wait
+                await asyncio.sleep(0.02)
+                renewed = runtime.attempts.get_attempt(
+                    attempt_id).lease_expires_at
+                if renewed > before:
+                    break
+            assert renewed > before, (
+                "the recovered-run finisher must renew the lease IMMEDIATELY "
+                "— in the adoption->first-heartbeat gap a concurrent "
+                "reconcile pass re-adopts, fences the finisher out, and its "
+                "ownership-loss cleanup kills the still-live native run")
+            assert not task.done(), "the live run must still be waited on"
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(main())
+
+
+def test_a_fenced_out_finisher_never_cancels_the_provider_run(
+        tmp_path, monkeypatch):
+    """L9b: when the finisher does lose the lease (a concurrent lane
+    adopted in its renewal gap), its ownership-loss cleanup used to issue
+    adapter.cancel — on the t3 wire a t3_thread_interrupt that KILLED the
+    still-live native run the new owner was recovering (journey round 7:
+    the run was cancelled 46s in and the job became undeliverable).  A
+    provider-managed ref (pid None, the supervisor-boundary twin shape)
+    has no orphan hazard: the provider keeps executing and the next
+    reconcile adopts it — the cleanup cancels only the collection task."""
+    runtime, job_id, attempt_id, adapter, now = _crash_between_receipt_and_record(
+        tmp_path, monkeypatch, lease_seconds=1,
+        adapter_factory=_BlockingCollectAdapter)
+    now[0] += 2_000
+    finisher = _restart_supervisor(
+        runtime, tmp_path, adapter, instance_id="finisher")
+    finisher.heartbeat_interval_seconds = 0.05
+    outcomes = finisher.reconcile_restart(requeue_lost=False)
+    assert outcomes, "the expired lease must reconcile to an adoption"
+    actives = finisher.take_recovered_runs()
+    assert len(actives) == 1
+
+    async def main() -> None:
+        task = asyncio.ensure_future(finisher.finish_job(actives[0]))
+        await asyncio.sleep(0.02)  # the finisher is inside its collect wait
+        # a concurrent lane lawfully adopts once the renewal gap lets the
+        # lease lapse (clock past the finisher's renewed expiry)
+        now[0] += 2_000
+        door_lane = _restart_supervisor(
+            runtime, tmp_path, adapter, instance_id="door-lane")
+        adopted = door_lane.reconcile_restart(requeue_lost=False)
+        assert adopted, "the door lane must adopt the lapsed lease"
+        # the finisher's next heartbeat is refused (fence moved): its
+        # cleanup must end its collection WITHOUT touching the native run
+        with pytest.raises(Exception):
+            await asyncio.wait_for(task, timeout=5.0)
+        assert adapter.cancel_reasons == [], (
+            "a fenced-out finisher must never cancel a provider-managed "
+            "run — the interrupt destroys the still-live native execution "
+            "the new owner is recovering")
+        assert adapter.start_calls == 1, "exactly one native launch, ever"
+
+    asyncio.run(main())
