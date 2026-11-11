@@ -193,12 +193,28 @@ def cmd_apply(spec):
     preimage = os.path.join(agent_dir, "cutover-preimage.json")
     if not is_ours(agent, carrier_path):
         if os.path.exists(preimage):
-            die(f"{preimage} already exists but the agent is not moved; "
-                "inspect it before trying again")
-        # Holds the old run command and its environment: private, never printed.
-        write_private(preimage, json.dumps(
-            {k: agent.get(k) for k in PREIMAGE_KEYS}, indent=2))
-        log(f"old setup saved to {preimage} (0600)")
+            # R2a finding 31: a first apply can stop at the second blockers
+            # check AFTER the preimage was saved (a wake started meanwhile) —
+            # the move never happened, and the retry used to die on its own
+            # saved file. When the agent still carries EXACTLY the saved
+            # values for every preimage key, the file describes the agent as
+            # it stands: reuse it and finish the move. When any value
+            # differs, the file is stale and refusal stands. Values are
+            # compared in memory and never printed; nothing is deleted.
+            with open(preimage) as fh:
+                saved = json.load(fh)
+            current = {k: agent.get(k) for k in PREIMAGE_KEYS}
+            if any(saved.get(k) != current.get(k) for k in PREIMAGE_KEYS):
+                die(f"{preimage} exists and the agent has changed since it "
+                    "was saved; inspect it before trying again")
+            log(f"{preimage} already matches this agent's saved setup "
+                f"exactly; reusing it")
+        else:
+            # Holds the old run command and its environment: private, never
+            # printed.
+            write_private(preimage, json.dumps(
+                {k: agent.get(k) for k in PREIMAGE_KEYS}, indent=2))
+            log(f"old setup saved to {preimage} (0600)")
 
     os.makedirs(os.path.dirname(carrier_path), mode=0o700, exist_ok=True)
     source = os.path.join(os.path.dirname(os.path.abspath(__file__)),

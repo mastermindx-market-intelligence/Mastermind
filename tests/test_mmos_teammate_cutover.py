@@ -98,6 +98,65 @@ def test_paperclip_base_must_be_plain_loopback_http():
         assert st.Http(ok).base.rstrip("/") == ok.rstrip("/")
 
 
+def test_second_apply_reuses_a_preimage_when_the_agent_is_unchanged(
+        wired, tmp_path, monkeypatch):
+    # R2a finding 31: a first apply can stop at the SECOND blockers check
+    # after the preimage was already saved (a wake started meanwhile); the
+    # move never happened. The second apply reuses the saved file when the
+    # agent still carries exactly the saved values, refuses when any value
+    # changed, and never deletes or rewrites the file.
+    spec, http = wired
+    real = co.read_state
+    calls = {"n": 0}
+
+    def flaky(h, s):
+        calls["n"] += 1
+        agent, issues, live = real(h, s)
+        if calls["n"] == 2:  # a wake started while preparing
+            agent = dict(agent, status="running")
+        return agent, issues, live
+
+    monkeypatch.setattr(co, "read_state", flaky)
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec)  # first apply: stopped at the second check
+    preimage = os.path.join(spec["agent_dir"], "cutover-preimage.json")
+    assert os.path.exists(preimage)
+    assert http.patches == []  # the agent was never patched
+    before = open(preimage, "rb").read()
+
+    # second apply, agent unchanged: reuses the saved bytes, finishes the move
+    monkeypatch.setattr(co, "read_state", real)
+    co.cmd_apply(spec)
+    assert open(preimage, "rb").read() == before  # the file is untouched
+    assert http.agent["adapterType"] == "process"  # the move happened
+
+    # with the agent CHANGED since the save, the leftover file refuses
+    spec2 = make_spec(tmp_path)
+    http2 = FakeHttp(old_agent())
+    monkeypatch.setattr(co, "Http", lambda base: http2)
+    calls2 = {"n": 0}
+
+    def flaky2(h, s):
+        calls2["n"] += 1
+        agent, issues, live = real(h, s)
+        if calls2["n"] == 2:
+            agent = dict(agent, status="running")
+        return agent, issues, live
+
+    monkeypatch.setattr(co, "read_state", flaky2)
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec2)
+    preimage2 = os.path.join(spec2["agent_dir"], "cutover-preimage.json")
+    assert os.path.exists(preimage2)
+    bytes2 = open(preimage2, "rb").read()
+    http2.agent["adapterConfig"]["env"]["OLD_HOME"] = "/new/home"
+    monkeypatch.setattr(co, "read_state", real)
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec2)  # refuses: the saved file no longer describes it
+    assert open(preimage2, "rb").read() == bytes2
+    assert http2.patches == []
+
+
 def test_unrecognised_board_shape_stops_every_write(tmp_path, monkeypatch):
     # R2a finding 30: rows_of treated any unrecognised dict as an EMPTY
     # result, so {"error": ...} read as "no open issues, no live runs" and
