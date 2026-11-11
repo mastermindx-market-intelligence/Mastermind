@@ -644,7 +644,7 @@ until the dev server answers. Test: `test_config_requires_the_dev_server_pin`.
 | 10 | Coding job and crash recovery proven on dev instances; installed app is lane T4c. The improvement loop has not run |
 
 
-## 18. Amendment, 2026-11-11 01:00 UTC: the review says the coding job is not safe to build on
+## 18. Amendment, 2026-11-11 00:30 UTC: the review says the coding job is not safe to build on
 
 **R4b returned**: `R4B_REVIEW_FINDINGS.md` (15 findings, my decision on each, the reviewer's
 reproductions). I re-ran the reproductions on trunk; all five reproduce. The reviewer found no
@@ -678,3 +678,31 @@ twelve things and missed the four that mattered. For a critical surface the inde
 goes before acceptance, not at the release tail. The other half of that review (socket door,
 shell-URL loader, cut-over tool, the rest of the carrier, T8's pairing path) therefore runs as
 soon as T8, TSH and CQ are merged, before any of it is switched on for the Chairman.
+
+
+## 19. Amendment, 2026-11-11 00:40 UTC: a teammate's question no longer strands its task
+
+**Lane CQ returned and is merged** (`4938b2f9d`, 135 tests). I read the carrier diff line by
+line, installed it for Assurance and Design Lead, and tested it on the installed app.
+
+**The live test, MAS-10.** A real task for Assurance that needed one fact from a person.
+One run (`96fd0332`, 60 seconds): the question appeared 25 seconds in; the task got one line
+naming the teammate with a link to its conversation; I answered in the web page; the same run
+delivered the finished reply 14 seconds later with its confirmation; I accepted; the task is
+done. No half-finished text was delivered and no board action was needed to continue.
+Evidence: `~/.mastermind/mmos_evidence/cq-20261111/`.
+
+**Found while installing.** `refresh-carrier` replaced the carrier file and left each
+teammate's settings file as written at cut-over, so a fix that adds a setting was installed
+without it. Fixed on trunk (`905e85458`) with a test; both settings files now match their specs.
+
+**Not proven yet.** What happens when nobody answers in time. The carrier ends the run with
+the task unchanged; the installed Paperclip retries twice and then marks the task blocked; and
+the carrier leaves a blocked task alone, so the line's promise that a comment wakes it is not
+true today. This is item 5 of the lane's second task, and I test it live when it returns.
+
+**Lane CQ, second task (running):** the carrier halves of review findings 4 and 5 (a comment
+that starts with `[coding-job]` or `[t2-carrier]` is never a person's words, feedback or an
+answer), the blocked-task gap above, a stricter check on the conversation link, the waiting
+line reworded as Assurance proposed in MAS-10, and tests for the three behaviours the lane
+said it had not covered. The door key stays unread by any installed teammate.
