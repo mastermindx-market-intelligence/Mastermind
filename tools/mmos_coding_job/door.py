@@ -1924,6 +1924,7 @@ class CodingJobDoor:
         os.chmod(run_dir / "input" / "worker-prompt.txt", 0o600)
         return WorkerLaunchSpec(
             run_id=run_id, job_id=job_id, worker_id=WORKER_ID,
+            authorities=("READ",),
             workspace_path=self.root / "run" / "jobs" / f"{run_id}-ws",
             run_dir=run_dir, prompt=prompt,
             result_schema_path=run_dir / "input" / "schema.json",

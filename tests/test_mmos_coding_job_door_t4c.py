@@ -1189,6 +1189,13 @@ def test_step4_launch_spec_carries_the_attempt_s_own_job(
     # request job — the engine's receipt-adoption check compares them.
     assert launched[0].job_id == "JOB-PLACE"
     assert launched[0].run_id == "ATT-SPEC1"
+    # L3 (crash journey, same check family): the placement Job is created
+    # by compose_child_execution with the runtime's default READ authority;
+    # the launch spec must carry the SAME authority set or the engine's
+    # receipt-adoption contract check refuses ("launch contract differs
+    # from the durable Job").
+    assert tuple(launched[0].authorities) == ("READ",)
+    assert tuple(launched[0].allowed_artifact_paths) == ()
 
     # --- leg 2: the F1 relaunch of an attempt whose launch was never
     # attempted.  The frozen entry still names the request job; the attempt
