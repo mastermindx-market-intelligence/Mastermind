@@ -287,6 +287,122 @@ class TestToolLimitsNewKeys:
         assert team_roster.tool_limits(spec, mate)["permissions"] == \
             self.today_rules(spec, mate)["permissions"]
 
+    def test_allow_read_roots_denies_outside_roots(self, tmp_path):
+        """Rooted reads: every directory NOT on the chain to an allowed root
+        is denied for Read/Glob/Grep, in file and tree form; the allowed
+        roots and the own home stay readable; plain Read/Glob/Grep allows
+        are replaced by rooted ones."""
+        extra_root = tmp_path / "elsewhere" / "ws2"
+        extra_root.mkdir(parents=True)
+        raw = make_spec(tmp_path)
+        raw["allow_read_roots"] = [str(extra_root)]
+        spec = load(tmp_path, raw)
+        mate, other = spec["teammates"][0], spec["teammates"][1]
+        os.makedirs(team_roster.teammate_home(spec, other))
+        home = team_roster.teammate_home(spec, mate)
+        limits = team_roster.tool_limits(spec, mate)
+        allow, deny = (limits["permissions"]["allow"],
+                       limits["permissions"]["deny"])
+        # plain read tools replaced by rooted allows
+        for bare in ("Read", "Glob", "Grep"):
+            assert bare not in allow
+        assert f"Read(/{extra_root}/**)" in allow
+        assert f"Glob(/{extra_root}/**)" in allow
+        assert f"Grep(/{extra_root}/**)" in allow
+        assert f"Read(/{home}/**)" in allow  # own home stays readable
+        # every top-level directory not on the chain of an allowed root is
+        # denied in file and tree form (chain names derived from the roots,
+        # so the test holds on any host)
+        roots = [os.path.realpath(str(extra_root)),
+                 os.path.realpath(home)]
+        chain_at_root = {r.strip("/").split("/")[0] for r in roots}
+        for tool in ("Read", "Glob", "Grep"):
+            for name in os.listdir("/"):
+                if name in chain_at_root:
+                    continue
+                assert f"{tool}(/{name})" in deny, name
+                assert f"{tool}(/{name}/**)" in deny, name
+        # chain directories are denied in FILE form only (a tree form would
+        # deny the allowed root below them too, and deny wins)
+        chain_parent = os.path.dirname(str(extra_root))
+        (tmp_path / "elsewhere" / "unrelated-dir").mkdir()
+        for tool in ("Read", "Glob", "Grep"):
+            assert f"{tool}(/{chain_parent})" in deny
+            assert f"{tool}(/{chain_parent}/**)" not in deny
+            sibling = os.path.join(chain_parent, "unrelated-dir")
+            assert f"{tool}(/{sibling})" in deny
+            assert f"{tool}(/{sibling}/**)" in deny
+        # the allowed root and the home are never denied as trees
+        for allowed in (str(extra_root), home):
+            assert not any(d.startswith(f"Read(/{allowed}/**)")
+                           for d in deny)
+        # every pre-existing deny survives (second layer)
+        assert f"Read(/{team_roster.teammate_home(spec, other)}/**)" in deny
+        assert "Bash" in deny
+
+    def test_home_write_allow_denies_other_home_children(self, tmp_path):
+        """Rooted writes: only CLAUDE.md and notes/ stay writable in the
+        home; every other existing child plus all config names are denied."""
+        raw = make_spec(tmp_path)
+        raw["home_write_allow"] = ["CLAUDE.md", "notes/"]
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        os.makedirs(os.path.join(home, "notes"), exist_ok=True)
+        os.makedirs(os.path.join(home, "skills"), exist_ok=True)
+        open(os.path.join(home, "stray.md"), "w").write("x")
+        limits = team_roster.tool_limits(spec, mate)
+        allow, deny = (limits["permissions"]["allow"],
+                       limits["permissions"]["deny"])
+        # home-wide write allow replaced by named allows
+        assert f"Write(/{home}/**)" not in allow
+        assert f"Edit(/{home}/**)" not in allow
+        assert f"Write(/{home}/CLAUDE.md)" in allow
+        assert f"Edit(/{home}/CLAUDE.md)" in allow
+        assert f"Write(/{home}/notes/**)" in allow
+        assert f"Edit(/{home}/notes/**)" in allow
+        # allowed names never denied
+        for tool in ("Write", "Edit"):
+            assert not any(d.startswith(f"{tool}(/{home}/CLAUDE.md")
+                           for d in deny)
+            assert not any(d.startswith(f"{tool}(/{home}/notes/")
+                           for d in deny)
+        # other existing children denied, config names denied regardless
+        for tool in ("Write", "Edit"):
+            assert f"{tool}(/{home}/stray.md)" in deny
+            assert f"{tool}(/{home}/skills)" in deny
+            assert f"{tool}(/{home}/skills/**)" in deny
+            assert f"{tool}(/{home}/settings.json)" in deny
+            assert f"{tool}(/{home}/.mcp.json)" in deny
+            assert f"{tool}(/{home}/tool-limits.json)" in deny
+
+    def test_assets_dir_moves_limits_and_charter(self, tmp_path):
+        """Q4: with assets_dir set, tool-limits.json and CHARTER.md are
+        written outside the teammate home, the launch args point there, and
+        other teammates cannot read that directory."""
+        raw = make_spec(tmp_path)
+        raw["assets_dir"] = str(tmp_path / "assets")
+        spec = load(tmp_path, raw)
+        mate, other = spec["teammates"][0], spec["teammates"][1]
+        os.makedirs(team_roster.teammate_home(spec, other))
+        wrote = team_roster.write_file_assets(spec, mate)
+        home = team_roster.teammate_home(spec, mate)
+        assets = os.path.join(team_roster.expand(spec["assets_dir"]),
+                              mate["slug"])
+        assert not os.path.exists(os.path.join(home, "tool-limits.json"))
+        assert not os.path.exists(os.path.join(home, "CHARTER.md"))
+        assert os.path.exists(os.path.join(assets, "tool-limits.json"))
+        assert os.path.exists(os.path.join(assets, "CHARTER.md"))
+        assert os.path.exists(os.path.join(home, "CLAUDE.md"))  # memory stays
+        assert set(wrote) == {"CLAUDE.md", "CHARTER.md", "tool-limits.json"}
+        instance = team_roster.instance_for(spec, mate)
+        args = instance["config"]["launchArgs"]
+        assert f"--settings {os.path.join(assets, 'tool-limits.json')}" in args
+        assert f"--append-system-prompt-file" in args
+        assert os.path.join(assets, "CHARTER.md") in args
+        deny = team_roster.tool_limits(spec, other)["permissions"]["deny"]
+        assert f"Read(/{assets}/**)" in deny
+
 
 class TestAtomicWrites:
     """Review R2a finding 11: the server watches settings.json and reloads it
