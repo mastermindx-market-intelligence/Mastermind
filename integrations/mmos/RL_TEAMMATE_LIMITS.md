@@ -39,6 +39,30 @@ evidence files in `~/.mastermind/mmos_evidence/rl-20261111/`.
 > python3, `disableAllHooks`, or a canary that does not exit 2 (R6c).
 > Live probes: evidence 13. Residuals in §4, plainly.
 
+> **Repair round 3 (2026-11-11, after panel 3 — the last round under the
+> programme's repair-loop rule):** three of four findings fixed, one
+> commit each — `9d4c75ad3` (H-2: the unreadable set is now DERIVED from
+> the gate's one canonical list, so the read fence can no longer drift
+> from the write-fence class; `.claude/settings.json`,
+> `.claude/.credentials.json`, `.mcp.json`, `keybindings.json`,
+> `sessions/`, `CLAUDE.md.backup` and friends are unreadable at both
+> layers), `506645157` (M-R1: config-side firmlink spellings are
+> canonicalized at load — a Data-prefixed `home`/`read_roots`/`deny_reads`
+> entry binds identically to its primary spelling; non-string entries are
+> refused), `d891ef66b` (M-R2: the hook interpreter is the validated
+> absolute binary `/usr/bin/python3`, checked at apply and by `status` —
+> no PATH lookup; live before/after proof: the as-was 0000-mode refusal
+> showed homebrew Python 3.14 executing the gate, the fixed one shows the
+> Xcode CLT shim target of the pinned path). H-1 (DNS rebinding +
+> redirects, one root) is NOT closeable inside the spec + gate and was
+> escalated with five costed options (`dec288b79`, evidence 15) —
+> `h1=needs-decision`; no half-measure was shipped. Rule layer grows to
+> **1,355 deny rules (95.8 KB)** covering the H-2 config class. All 9
+> probes (the seven + H-2 + M-R1) PASS on the round-3 install: evidence
+> 16. Kept rulings held: url-field web check, one unreadable set for
+> Read/Glob/Grep incl. preimage and Claude config, `|| exit 2` +
+> `python3 -I`.
+
 ## 1. How a teammate session actually launches
 
 A teammate is a T3 thread pinned to a per-teammate provider instance
@@ -109,13 +133,14 @@ outside the home, so it protects its own binary). Each teammate's
 ```json
 {"hooks": {"PreToolUse": [{"matcher": "*", "hooks":
   [{"type": "command",
-    "command": "/usr/bin/env python3 -I '<root>/bin/teammate_gate.py' --config '<root>/config/teammate-gate/<slug>.json' || exit 2",
+    "command": "/usr/bin/python3 -I '<root>/bin/teammate_gate.py' --config '<root>/config/teammate-gate/<slug>.json' || exit 2",
     "timeout": 20}]}]}}
 ```
 
-Round 2 (R4) rewrote that command; each part earns its place
-(`test_r4_gate_command_shape`, `test_r4_fail_closed_through_the_wired_
-command`, live evidence 13 items 4–5):
+Round 2 (R4) rewrote that command and round 3 (M-R2) pinned its
+interpreter; each part earns its place (`test_r4_gate_command_shape`,
+`test_r4_fail_closed_through_the_wired_command`, `test_mr2_*`, live
+evidence 13 items 4–5 and 16):
 
 - **Both paths single-quoted** by the generator — a server root
   containing a space still parses (tested with root `"server root"`).
@@ -125,9 +150,13 @@ command`, live evidence 13 items 4–5):
   would load `usercustomize.py` and user site-packages from the user's
   own home, a file any teammate could try to plant. `-I` skips
   site-packages, `PYTHON*` env vars and usercustomize (panel N1).
-- **`env python3`** — the gate's own exec bit is irrelevant to this
-  command (`env python3 <file>` reads the file); mode integrity is
-  `status`'s job (R6c).
+- **`/usr/bin/python3` (pinned, M-R2)** — an absolute, validated binary:
+  `apply` and `status` both die if it is missing or not executable, so
+  the hook never resolves an interpreter through the runtime PATH (the
+  as-was defect, proved live: `/usr/bin/env python3` let PATH pick
+  homebrew Python 3.14 to execute the gate — evidence 16 baseline). The
+  gate's own exec bit is irrelevant to this command (`python3 <file>`
+  reads the file); mode integrity is `status`'s job (R6c).
 - **`|| exit 2`** — the client fails OPEN on any hook exit other than
   0/2 (panel M2); the wrapper collapses crash (exit 1), kill, missing
   file and unreadable file all to 2 = refuse. Live: gate at mode 0000
@@ -160,11 +189,23 @@ evidence 12 for round 1, evidence 13 for the round-2 checks):
   checked AFTER resolution. In deny-list mode (spec without
   `allow_read_roots`) the deny list alone decides, matching the rule
   layer's semantics — but the production shape still gets rooting
-  because the gate always roots to home + workspace + spec roots.
-  One unreadable set (R3, panel H3/M5): `cutover-preimage.json`,
-  `.credentials.json`, `.claude.json` + backups, `carrier.json`,
-  `tool-limits.json`, `settings*.json`, `projects/` — the same list
-  the rule layer carries, sync-tested.
+  because the gate always roots to home + workspace + spec roots
+  (spec `home`/`read_roots`/`deny_reads` spellings are canonicalized
+  at gate-config load, M-R1 — a Data-prefixed firmlink spelling binds
+  identically to its primary twin, and a non-string entry refuses the
+  config).
+  One unreadable set (R3 + round-3 H-2): the runtime-private names
+  (`cutover-preimage.json`, `cutover-result.json`, `carrier.json`,
+  `tool-limits.json`), restart backups (`.claude.json.backup`,
+  `CLAUDE.md.backup`), and the whole Claude-config class
+  (`CLAUDE_CONFIG_NAMES`: `.claude/settings.json`,
+  `.claude/.credentials.json`, `.mcp.json`, `keybindings.json`,
+  `sessions/`, `.claude.json` + backups, `settings*.json`,
+  `projects/`, …) — **derived from the gate's one canonical list**
+  (`teammate_gate.py` exports it; `team_roster.py` imports and derives
+  HOME_UNREADABLE/HOME_LOCKED/HOME_CONFIG from it), so the read fence
+  and the write-fence class cannot drift apart; the rule layer carries
+  the same expansion, sync-tested.
 - **searches** (Glob/Grep): the search root must pass the read policy,
   must not sit at or above any unreadable/denied path (P4 + R3), and
   when refused the message NAMES searchable folders ("search instead:
@@ -388,6 +429,7 @@ and resumes the same thread with full history (transcript-based resume,
 | repair round 2: the 7 live probes (url-field, octal/backslash-`@`, home Grep with hints, `@` write + what the client does with an `@` import, hook env `HOME`/`CLAUDE_CONFIG_DIR`, gate mode 0644/0000 + `status` exit 1, brace-verbatim + 20-call timing), N4 MCP-wildcard non-binding, the webReader server-side finding, the BCU M14 answer, red logs + suite logs | `13-repair2-live-probes.md` + `probe2/` |
 | W-task: webReader source pinned to the router's upstream (full offer census, 96 tools, webReader present, all other MCP = t3-code hook-visible and gate-refused live; restore byte-identical; escalated close steps with checks/rollbacks; the two one-liners) | `14-webreader-close.md` + `probe2/w-census-reply.json` |
 | repair round 3 H-1: DNS rebinding/redirect not closeable in-spec; five options with costs and real-root flags escalated for decision (deny WebFetch bridge, pinned fetch tool, egress proxy, hostname allowlist, accept) | `15-h1-options.md` |
+| repair round 3: all 9 live probes on the round-3 install (the seven re-runs under the pinned `/usr/bin/python3` command, H-2 config-class unreadable at both layers, M-R1 Data-spelled spec canonicalized) incl. as-was baseline showing the PATH-resolved interpreter defect, 1,355-rule count, 20-call latency | `16-repair3-live-probes.md` + `probe2/` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
