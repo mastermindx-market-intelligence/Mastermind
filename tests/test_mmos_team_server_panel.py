@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -313,6 +314,64 @@ class TestA1NodeTreeStatCache:
         cache.unlink()                                  # a deleted cache = slow, not wrong
         with pytest.raises(node_install.InstallError, match="Node tree"):
             node_install.runtime_paths(str(root))
+
+
+class TestMF2VerifyNodeHeartbeat:
+    """Micro-fix round, HIGH-2: a long node-tree walk used to write ONE
+    boot.status note at its start, so during the 199 MB verify the last
+    stage's age grew past wait_ours's 30 s freshness rule and a working boot
+    read as dead. The server tree already heartbeats every 500 entries; the
+    node walks must do the same."""
+
+    def test_mf2_valve_notes_after_its_sleep(self, tmp_path, monkeypatch):
+        # The test valve must model the starvation it exists to reproduce: a
+        # note written BEFORE sleeping is exactly the stale note a silent
+        # walk produced. The valve holds first, notes after — freshness then
+        # comes only from the real heartbeats in the walks.
+        status = tmp_path / "boot.status"
+        monkeypatch.setenv("MMOS_TEST_SEAMS", "1")
+        monkeypatch.setenv("MMOS_VERIFY_DELAY_SECONDS", "2")
+        started = time.time()
+        node_install._verify_valve("verify-node", str(status))
+        lines = [line for line in status.read_text().splitlines()
+                 if line.startswith("stage=verify-node ")]
+        assert lines, "the valve must still note its stage"
+        noted = int(lines[-1].rsplit(" ", 1)[1])
+        assert noted >= started + 1, \
+            "the note landed before the hold — a held verify looks alive"
+
+    @staticmethod
+    def _grow_tree_and_repin(root):
+        """505 extra files so a walk crosses the every-500-entries boundary,
+        and both receipts re-pinned to the grown tree's digest."""
+        install_dir = root / "runtime" / PREFIX
+        swarm = install_dir / "swarm"
+        swarm.mkdir()
+        for index in range(505):
+            (swarm / f"f{index:03}").write_bytes(b"x\n")
+        receipt = json.loads(
+            (root / "config" / "node-runtime.json").read_text())
+        receipt["treeSha256"] = node_install.tree_sha256(str(install_dir))
+        payload = json.dumps(receipt, indent=2) + "\n"
+        (install_dir / "INSTALL_RECEIPT.json").write_text(payload)
+        (root / "config" / "node-runtime.json").write_text(payload)
+
+    def test_mf2_both_node_walks_heartbeat(self, tmp_path):
+        # Cold verify (full digest) and warm verify (stat walk) must each
+        # note BEFORE starting and DURING the walk every 500 entries —
+        # pre-fix each emitted exactly one note and a long walk went silent.
+        root, _, _ = packed_runtime(tmp_path)
+        self._grow_tree_and_repin(root)
+        status = tmp_path / "boot.status"
+        node_install.runtime_paths(str(root), status_file=str(status))
+        cold = sum(1 for line in status.read_text().splitlines()
+                   if line.startswith("stage=verify-node "))
+        assert cold >= 2, f"cold verify noted {cold} time(s) — walk went silent"
+        status.unlink()                                 # only the warm pass counts
+        node_install.runtime_paths(str(root), status_file=str(status))
+        warm = sum(1 for line in status.read_text().splitlines()
+                   if line.startswith("stage=verify-node "))
+        assert warm >= 2, f"warm verify noted {warm} time(s) — walk went silent"
 
 
 # --------------------------------------------------------------------------
