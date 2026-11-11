@@ -17,16 +17,30 @@ M5), no redirect following and a per-request URL law (M6), ambiguous 4xx on
 create as EFFECT_UNKNOWN (M7), ``HTTPException`` caught (M8), strict id
 charset + percent-encoded path segments (M9), and comment author/order
 provenance exposed for the bridge (M1/M2 client side).
+
+Round 2 (GBL_REPAIR1_NOTES §1–§3): ``create_ask`` is CREATE-IF-ABSENT
+(None when created, the existing record when the deterministic id is
+present — never a second issue); every appended event is stamped with a
+per-record strictly-increasing integer ``seq`` and authenticated by a
+host-held HMAC v1 tag bound to (ask_id, seq, event) — a comment whose tag
+is absent, malformed, cross-ask, or failing verification surfaces
+``trusted: False`` and the bridge ignores it; the HMAC key is a harmless
+FIXTURE value read from a file (never argv, never a log, never the wire).
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import itertools
 import json
+import os
+import stat
 import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -35,6 +49,7 @@ import pytest
 from common.gbl_contract import build_ask
 from integrations.gbl.bridge_service import (
     GblBridge,
+    GblBridgeError,
     GblCreateEffectUnknown,
     PrincipalAdmission,
 )
@@ -52,6 +67,12 @@ from integrations.gbl.paperclip_client import (
 COMPANY_ID = "11111111-1111-4111-8111-111111111111"
 AGENT_ID = "22222222-2222-4222-8222-222222222222"
 PRINCIPAL = "grok-account-fixture"
+
+# The HMAC key fixture: harmless words, exactly 32 bytes (the v1 key size),
+# read from a file the client is given — never argv, never a log, never a
+# commit.  Every key in this suite is this value or os-generated noise.
+KEY_BYTES = (b"gbl4-harmless-fixture-key-" * 2)[:32]
+HMAC_KEY_PATH: Path | None = None        # set by the autouse fixture below
 
 
 def envelope(key: str = "k-1", body: str = "A harmless fixture question.",
@@ -76,6 +97,7 @@ class FakePaperclipState:
         self.agents: dict[str, dict] = {}
         self.requests: list[tuple[str, str]] = []
         self.headers_log: list[tuple[str, str, dict]] = []
+        self.request_bodies: list[str] = []    # round 2: key-hygiene checks
         self.create_delay = 0.0             # sleep AFTER performing a create
         self.create_fail_status: int | None = None   # refuse BEFORE landing
         self.create_reply_status: int | None = None  # land, then answer this
@@ -214,9 +236,13 @@ def make_handler(state: FakePaperclipState):
             delay = state.slow_paths.get((method, clean))
             if delay:
                 time.sleep(delay)          # no mutation happened for these
-            status = state.fail_status.get((method, self.path))
+            status = (state.fail_status.get((method, self.path))
+                      if (method, self.path) in state.fail_status
+                      else state.fail_status.get((method, clean)))
             length = int(self.headers.get("content-length") or 0)
             body = json.loads(self.rfile.read(length)) if length else None
+            state.request_bodies.append(json.dumps(body)
+                                        if body is not None else "")
             if status is None:
                 status, payload = state.handle(method, clean,
                                                parse_qs(split.query), body)
@@ -275,8 +301,23 @@ def fake():
 
 def client(fake, **over) -> PaperclipAskClient:
     kwargs = dict(timeout_seconds=0.5)
+    if HMAC_KEY_PATH is not None and "hmac_key_path" not in over:
+        kwargs["hmac_key_path"] = HMAC_KEY_PATH
     kwargs.update(over)
     return PaperclipAskClient(fake.base, COMPANY_ID, AGENT_ID, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def fixture_key(tmp_path) -> Path:
+    """Every client in this suite gets the harmless fixture key file (round
+    2: the HMAC key is always read from a config-given path, never inlined)."""
+    global HMAC_KEY_PATH
+    path = tmp_path / "hmac_v1.key"
+    path.write_bytes(KEY_BYTES)
+    os.chmod(path, 0o600)
+    HMAC_KEY_PATH = path
+    yield path
+    HMAC_KEY_PATH = None
 
 
 def bridge_over(client_: PaperclipAskClient) -> GblBridge:
@@ -305,9 +346,25 @@ def count(fake, method: str, path: str) -> int:
 
 
 def core_of(event: dict) -> dict:
-    """The event without the comment-provenance keys the client adds."""
+    """The event without the keys the store adds on read (comment
+    provenance is display metadata; seq/trusted are the store's stamps)."""
     return {k: v for k, v in event.items()
-            if not k.startswith("comment_")}
+            if not k.startswith("comment_") and k not in ("seq", "trusted")}
+
+
+def stored_comment(fake, issue_id: str, index: int = -1) -> dict:
+    """The parsed JSON of a stored comment body (round 2 inspection)."""
+    body = str(fake.state.comments[issue_id][index].get("body") or "")
+    return json.loads(body[len(pc.EVENT_MARKER) + 1:])
+
+
+def expect_tag(key: bytes, ask_id: str, seq: int, event: dict) -> str:
+    """An INDEPENDENT recomputation of the §2 v1 tag (sorted keys, compact
+    separators, UTF-8) — the test does not import the client's helper."""
+    message = (ask_id + "\n" + str(seq) + "\n"
+               + json.dumps(event, sort_keys=True, separators=(",", ":"),
+                            ensure_ascii=False)).encode("utf-8")
+    return "v1:" + hmac.new(key, message, hashlib.sha256).hexdigest()
 
 
 ISSUES_PATH = f"/api/companies/{COMPANY_ID}/issues"
@@ -635,6 +692,71 @@ class TestExactResolution:
         assert ask_client.read_ask(row["ask_id"]) is None
 
 
+# ── §1.1: create_ask is CREATE-IF-ABSENT (no second record, ever) ────────────
+
+
+class TestCreateIfAbsent:
+    def test_second_create_returns_the_existing_record(self, fake):
+        ask_client = client(fake)
+        row = envelope()
+        assert ask_client.create_ask(row) is None          # created
+        again = client(fake).create_ask(row)               # fresh client
+        assert again is not None                           # §1.1: the record
+        assert again["ask_id"] == row["ask_id"]
+        assert again["events"] == []
+        assert count(fake, "POST", ISSUES_PATH) == 1       # never a second
+        assert len(fake.state.order) == 1                  # issue
+
+    def test_the_returned_record_is_a_copy(self, fake):
+        ask_client = client(fake)
+        row = envelope()
+        ask_client.create_ask(row)
+        again = ask_client.create_ask(row)
+        assert again is not None
+        again["title"] = "mutated by the caller"
+        again["events"].append({"type": "state", "state": "ANSWERED"})
+        fresh = ask_client.read_ask(row["ask_id"])
+        assert fresh["title"] == row["title"]
+        assert fresh["events"] == []
+
+    def test_replay_through_the_bridge_never_duplicates(self, fake):
+        core = bridge_over(client(fake))
+        first = core.submit_ask(**submits())
+        assert first["status"] == "CREATED"
+        second = core.submit_ask(**submits())     # same key + same text
+        assert second["status"] == "IDEMPOTENT"
+        assert count(fake, "POST", ISSUES_PATH) == 1
+        assert second["ask"]["ask_id"] == first["ask"]["ask_id"]
+
+    def test_ambiguous_landing_then_replay_still_one_issue(self, fake):
+        # M7 + §1.1: the 409 landed; the read-back reconcile classifies it,
+        # and the NEXT create-if-absent check returns the record (no POST).
+        fake.state.create_reply_status = 409
+        core = bridge_over(client(fake))
+        assert core.submit_ask(**submits())["status"] == "IDEMPOTENT"
+        assert core.submit_ask(**submits())["status"] == "IDEMPOTENT"
+        assert count(fake, "POST", ISSUES_PATH) == 1
+
+    def test_precheck_failure_is_typed_not_effect_unknown(self, fake):
+        # The pre-create absence check failing is NOT an unknown create
+        # effect (nothing began): the typed read error propagates and no
+        # create POST is issued.
+        ask_client = client(fake)
+        ask_client.create_ask(envelope())
+        fake.state.fail_status[("GET", ISSUES_PATH)] = 503
+        with pytest.raises(GblPaperclipServerError):
+            ask_client.create_ask(envelope(key="k-2"))
+        assert count(fake, "POST", ISSUES_PATH) == 1
+
+    def test_key_reuse_with_new_text_is_conflict_not_duplicate(self, fake):
+        core = bridge_over(client(fake))
+        core.submit_ask(**submits())
+        with pytest.raises(GblBridgeError) as err:
+            core.submit_ask(**submits(body="Different harmless fixture text."))
+        assert err.value.code == "CONFLICT"
+        assert count(fake, "POST", ISSUES_PATH) == 1
+
+
 # ── EFFECT_UNKNOWN: a lost create is reconciled by read-back, never retried ──
 
 
@@ -875,6 +997,285 @@ class TestCommentProvenance:
         assert events[0]["comment_author"] is None
 
 
+# ── §1.2 + §2: seq stamping, the HMAC v1 tag, untrusted surfacing ────────────
+
+
+class TestEventSeqAndTrust:
+    def seed_ask(self, fake, key: str = "k-1") -> tuple[PaperclipAskClient, dict]:
+        ask_client = client(fake)
+        row = envelope(key=key)
+        assert ask_client.create_ask(row) is None
+        return ask_client, row
+
+    def test_appends_are_stamped_with_increasing_seq(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "CONSUMED"})
+        issue_id = fake.state.order[0]
+        first = stored_comment(fake, issue_id, 0)
+        second = stored_comment(fake, issue_id, 1)
+        assert first["seq"] == 1 and type(first["seq"]) is int
+        assert second["seq"] == 2
+
+    def test_seq_is_per_record_and_stateless(self, fake):
+        # A FRESH client (new bridge instance, empty cache) still continues
+        # the record's sequence: derivation is from the stored record.
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        fresh = client(fake)                       # no shared state
+        fresh.append_ask_event(row["ask_id"],
+                               {"type": "state", "state": "CONSUMED"})
+        issue_id = fake.state.order[0]
+        assert [stored_comment(fake, issue_id, i)["seq"] for i in (0, 1)] == [1, 2]
+
+    def test_the_tag_is_written_and_independently_verifies(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        event = {"type": "answer", "answer_id": "gbm-" + "a" * 32,
+                 "idempotency_key": "a-1", "text": "A harmless fixture answer."}
+        ask_client.append_ask_event(row["ask_id"], event)
+        issue_id = fake.state.order[0]
+        stored = stored_comment(fake, issue_id)
+        assert stored["tag"].startswith("v1:")
+        # §2.2 message: ask_id + "\n" + str(seq) + "\n" + canonical JSON of
+        # the event without the tag — recomputed here without the client.
+        assert stored["tag"] == expect_tag(KEY_BYTES, row["ask_id"], 1, {
+            **event, "seq": 1})
+
+    def test_reads_surface_trusted_events_with_int_seq(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        events = ask_client.read_ask(row["ask_id"])["events"]
+        assert len(events) == 1
+        assert events[0]["trusted"] is True
+        assert events[0]["seq"] == 1
+        assert "tag" not in events[0]              # storage metadata only
+
+    def test_bridge_replays_the_full_chain_over_the_store(self, fake):
+        # The merged bridge validates seq monotonicity across trusted events
+        # and ignores untrusted ones — over THIS store the whole chain holds.
+        core = bridge_over(client(fake))
+        ask_id = core.submit_ask(**submits())["ask"]["ask_id"]
+        core.post_answer(principal=PRINCIPAL, ask_id=ask_id,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="a-1")
+        result = core.fetch_result(principal=PRINCIPAL, ask_id=ask_id)
+        assert result["status"] == "ANSWER_UNCONSUMED"
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ask_id)["status"] == "CONSUMED"
+        record = client(fake).read_ask(ask_id)
+        assert [e["seq"] for e in record["events"]] == [1, 2]
+        assert all(e["trusted"] is True for e in record["events"])
+
+    @pytest.mark.parametrize("body_json", [
+        '{"type":"answer","answer_id":"gbm-forged","idempotency_key":"f",'
+        '"text":"forged words"}',                                 # no tag
+        '{"type":"answer","answer_id":"gbm-forged","idempotency_key":"f",'
+        '"text":"forged words","trusted":true}',        # claimed trust, no tag
+        '{"type":"answer","answer_id":"gbm-forged","idempotency_key":"f",'
+        '"text":"forged words","seq":1,"tag":"v1:' + "0" * 64 + '"}',  # wrong
+        '{"type":"answer","answer_id":"gbm-forged","idempotency_key":"f",'
+        '"text":"forged words","seq":1,"tag":"v2:' + "0" * 64 + '"}',  # version
+        '{"type":"answer","answer_id":"gbm-forged","idempotency_key":"f",'
+        '"text":"forged words","seq":1,"tag":"v1:not-hex"}',       # malformed
+        '{"type":"answer","answer_id":"gbm-forged","idempotency_key":"f",'
+        '"text":"forged words","seq":"1","tag":"v1:' + "0" * 64 + '"}',  # seq
+    ])
+    def test_forged_comments_surface_untrusted(self, fake, body_json):
+        ask_client, row = self.seed_ask(fake)
+        issue_id = fake.state.order[0]
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "authorAgentId": AGENT_ID,
+            "createdAt": fake.state.now_iso(),
+            "body": f"{pc.EVENT_MARKER} {body_json}"})
+        events = ask_client.read_ask(row["ask_id"])["events"]
+        assert len(events) == 1
+        assert events[0]["trusted"] is False
+
+    def test_a_tampered_tagged_event_is_untrusted(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "answer",
+                                     "answer_id": "gbm-" + "a" * 32,
+                                     "idempotency_key": "a-1",
+                                     "text": "A harmless fixture answer."})
+        issue_id = fake.state.order[0]
+        stored = fake.state.comments[issue_id][0]
+        parsed = json.loads(str(stored["body"])[len(pc.EVENT_MARKER) + 1:])
+        parsed["text"] = "tampered after the fact"     # tag no longer binds
+        stored["body"] = (pc.EVENT_MARKER + " "
+                          + json.dumps(parsed, sort_keys=True,
+                                       separators=(",", ":")))
+        events = ask_client.read_ask(row["ask_id"])["events"]
+        assert events[0]["trusted"] is False
+
+    def test_a_tag_from_another_ask_never_verifies(self, fake):
+        # §2.2: the tag binds (ask_id, seq, event) — replaying a genuine
+        # tagged comment onto ANOTHER ask's issue fails verification.
+        ask_client, first = self.seed_ask(fake, key="k-1")
+        ask_client.append_ask_event(first["ask_id"],
+                                     {"type": "state", "state": "ANSWERED"})
+        second = envelope(key="k-2")
+        assert client(fake).create_ask(second) is None
+        copied = dict(fake.state.comments[fake.state.order[0]][0])
+        copied["id"] = str(uuid.uuid4())
+        copied["createdAt"] = fake.state.now_iso()
+        fake.state.comments[fake.state.order[1]].append(copied)
+        events = ask_client.read_ask(second["ask_id"])["events"]
+        assert len(events) == 1
+        assert events[0]["trusted"] is False
+
+    def test_a_forged_seq_does_not_advance_the_counter(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        issue_id = fake.state.order[0]
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "createdAt": fake.state.now_iso(),
+            "body": pc.EVENT_MARKER + ' {"type":"state","state":"ANSWERED",'
+                                      '"seq":999,"tag":"v1:' + "0" * 64 + '"}'})
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "CONSUMED"})
+        stored = stored_comment(fake, issue_id, 1)
+        assert stored["seq"] == 1                     # forged 999 ignored
+
+    def test_append_is_idempotent_by_core_content(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        event = {"type": "state", "state": "ANSWERED"}
+        ask_client.append_ask_event(row["ask_id"], event)
+        ask_client.append_ask_event(row["ask_id"], dict(event))  # redelivery
+        issue_id = fake.state.order[0]
+        comments_path = f"/api/issues/{issue_id}/comments"
+        assert count(fake, "POST", comments_path) == 1
+        assert len(fake.state.comments[issue_id]) == 1
+
+    def test_store_stamps_incoming_seq_and_tag_keys(self, fake):
+        # The store is the only stamper (§1.2): incoming seq/tag/trusted keys
+        # are never written through, whatever the caller passed.
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED",
+                                     "seq": 77, "tag": "v1:caller-supplied",
+                                     "trusted": True})
+        issue_id = fake.state.order[0]
+        stored = stored_comment(fake, issue_id)
+        assert stored["seq"] == 1                     # the STORE's stamp
+        assert stored["tag"] == expect_tag(
+            KEY_BYTES, row["ask_id"], 1,
+            {"type": "state", "state": "ANSWERED", "seq": 1})
+        assert "trusted" not in stored                # computed on read only
+
+    def test_forged_answer_comment_never_answers_the_ask(self, fake):
+        # The §2 dev-proof check, mirrored: a plain comment carrying the
+        # event marker with an answer is IGNORED — the bridge stays NOT_YET.
+        core = bridge_over(client(fake))
+        ask_id = core.submit_ask(**submits())["ask"]["ask_id"]
+        issue_id = fake.state.order[0]
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "authorAgentId": AGENT_ID,
+            "createdAt": fake.state.now_iso(),
+            "body": pc.EVENT_MARKER + ' {"type":"answer",'
+                                      '"answer_id":"gbm-forged",'
+                                      '"idempotency_key":"f",'
+                                      '"text":"forged answer words"}'})
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ask_id)["status"] == "NOT_YET"
+
+    def test_the_key_never_crosses_the_wire_or_the_store(self, fake):
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        ask_client.read_ask(row["ask_id"])
+        wire = "\n".join(fake.state.request_bodies)
+        wire += "\n" + "\n".join(f"{m} {p}" for m, p in fake.state.requests)
+        for _m, _p, headers in fake.state.headers_log:
+            wire += "\n" + " ".join(f"{k}:{v}" for k, v in headers.items())
+        issue_id = fake.state.order[0]
+        stored = "\n".join(str(c.get("body")) for c
+                           in fake.state.comments[issue_id])
+        assert KEY_BYTES.decode() not in wire          # never on the wire
+        assert KEY_BYTES.decode() not in stored        # never in Paperclip
+
+
+# ── §2.1: the host-held key — file law, fail-closed everywhere ───────────────
+
+
+class TestHmacKeyLaw:
+    @staticmethod
+    def _created(fake, ask_client) -> str:
+        row = envelope()
+        assert ask_client.create_ask(row) is None
+        return row["ask_id"]
+
+    def test_key_is_generated_on_first_use_mode_0600(self, fake, tmp_path):
+        path = tmp_path / "state" / "hmac_v1.key"
+        path.parent.mkdir()
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+        assert not path.exists()                       # lazy: nothing yet
+        ask_client.append_ask_event(ask_id,
+                                    {"type": "state", "state": "ANSWERED"})
+        assert path.exists()
+        assert path.stat().st_size == 32
+        assert stat.S_IMODE(path.stat().st_mode) & 0o777 == 0o600
+
+    def test_wrong_length_key_is_a_typed_error(self, fake, tmp_path):
+        path = tmp_path / "short.key"
+        path.write_bytes(KEY_BYTES[:31])
+        os.chmod(path, 0o600)
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id, {"type": "state",
+                                                 "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+
+    def test_group_readable_key_is_a_typed_error(self, fake, tmp_path):
+        path = tmp_path / "loose.key"
+        path.write_bytes(KEY_BYTES)
+        os.chmod(path, 0o644)
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id, {"type": "state",
+                                                 "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+
+    def test_missing_state_dir_is_a_typed_error_never_mkdir(self, fake,
+                                                            tmp_path):
+        path = tmp_path / "nowhere" / "hmac_v1.key"
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "state",
+                                         "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+        assert not (tmp_path / "nowhere").exists()     # no directory minted
+
+    def test_a_tagged_event_without_a_configured_key_is_typed(self, fake):
+        # Not silent "untrusted": a tagged event proves a key exists; a
+        # client with no key configured fails closed and visibly.
+        keyed = client(fake)
+        row = envelope()
+        keyed.create_ask(row)
+        keyed.append_ask_event(row["ask_id"],
+                               {"type": "state", "state": "ANSWERED"})
+        keyless = client(fake, hmac_key_path=None)
+        with pytest.raises(GblPaperclipError) as err:
+            keyless.read_ask(row["ask_id"])
+        assert "HMAC_KEY" in err.value.code
+
+    def test_append_without_a_configured_key_is_typed(self, fake):
+        ask_client = client(fake, hmac_key_path=None)
+        ask_id = self._created(fake, ask_client)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id, {"type": "state",
+                                                 "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+
+
 # ── 4xx / 5xx → typed errors ────────────────────────────────────────────────
 
 
@@ -922,13 +1323,14 @@ class TestTypedHttpErrors:
 
 
 class TestSpecLoading:
-    def test_from_spec_builds_a_client(self, fake, tmp_path):
+    def test_from_spec_builds_a_client(self, fake, tmp_path, fixture_key):
         spec = {
             "kind": "gbl_bridge_service_agent_dev",
             "paperclip": {
                 "base_url": fake.base,
                 "company_id": COMPANY_ID,
                 "agent_id": AGENT_ID,
+                "hmac_key_path": str(fixture_key),
             },
         }
         path = tmp_path / "spec.json"
@@ -940,7 +1342,8 @@ class TestSpecLoading:
 
     def test_from_spec_refuses_a_bad_base_url(self, tmp_path):
         spec = {"paperclip": {"base_url": "http://127.0.0.1:3100",
-                              "company_id": COMPANY_ID, "agent_id": AGENT_ID}}
+                              "company_id": COMPANY_ID, "agent_id": AGENT_ID,
+                              "hmac_key_path": str(tmp_path / "k.key")}}
         path = tmp_path / "spec.json"
         path.write_text(json.dumps(spec))
         with pytest.raises(ValueError):
@@ -950,5 +1353,15 @@ class TestSpecLoading:
         path = tmp_path / "spec.json"
         path.write_text(json.dumps({"paperclip": {"base_url":
                                                   "http://127.0.0.1:3191"}}))
+        with pytest.raises(ValueError):
+            PaperclipAskClient.from_spec(path)
+
+    def test_from_spec_requires_the_hmac_key_path(self, fake, tmp_path):
+        # Round 2 fail-closed law: no spec silently configures a client that
+        # could read tagged events without the key (trust-absent mode).
+        spec = {"paperclip": {"base_url": fake.base, "company_id": COMPANY_ID,
+                              "agent_id": AGENT_ID}}
+        path = tmp_path / "spec.json"
+        path.write_text(json.dumps(spec))
         with pytest.raises(ValueError):
             PaperclipAskClient.from_spec(path)

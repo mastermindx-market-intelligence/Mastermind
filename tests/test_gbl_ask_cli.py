@@ -432,6 +432,115 @@ class TestWaitResilience:
         assert rc == 2
 
 
+# ── Round 2 (GBL contract): status carries expires_at; reconcile op ─────────
+
+
+def run_raw(capsys, *args) -> tuple[int, str]:
+    """Drive the CLI verbatim (no injected --socket/--bot): reconcile takes
+    ONLY --id on the wire (merge §3: its argument set is exactly {ask_id})."""
+    rc = gbl_ask.main(list(args))
+    captured = capsys.readouterr()
+    return rc, captured.out + captured.err
+
+
+EXPIRED_STATUS = {"ask_id": "gb-" + "1" * 32, "state": "EXPIRED",
+                  "status": "EXPIRED", "expires_at": "2026-11-11T12:00:00Z"}
+
+
+class TestStatusContract:
+    def test_status_prints_expires_at(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION)
+        ask_id = ask_id_from(out)
+        rc, out = run_cli(capsys, service, "status", "--id", ask_id)
+        assert rc == 0
+        assert "expires_at=" in out
+        assert "expires_at=None" not in out
+
+    def test_status_reports_expired_with_rc_4(self, capsys, monkeypatch):
+        rc, out = run_scripted(capsys, monkeypatch,
+                               [("status", EXPIRED_STATUS)],
+                               "status", "--id", "gb-" + "1" * 32)
+        assert rc == 4
+        assert "status=EXPIRED" in out
+        assert "expires_at=2026-11-11T12:00:00Z" in out
+
+    def test_status_expired_over_the_real_door(self, service, capsys):
+        envelope = build_ask(kind="question", principal=BOT, target=BOT,
+                             idempotency_key="k-exp2",
+                             title="Expiry fixture",
+                             body="An ask that expires immediately.",
+                             ttl_seconds=1, now=datetime.now(timezone.utc))
+        service.store.create_ask(envelope)
+        time.sleep(1.2)
+        rc, out = run_cli(capsys, service, "status", "--id",
+                          envelope["ask_id"])
+        assert rc == 4
+        assert "EXPIRED" in out
+
+
+RECONCILED = {"status": "RECONCILED_DELIVERED", "ask_id": "gb-" + "1" * 32,
+              "nudge_count": 1}
+
+
+class TestReconcile:
+    def test_reconcile_sends_exactly_ask_id(self, capsys, monkeypatch):
+        made: list[ScriptedBridge] = []
+
+        def factory(socket_path, timeout=gbl_ask.REQUEST_TIMEOUT_SECONDS):
+            bridge = ScriptedBridge(socket_path,
+                                    script=[("ok", RECONCILED)])
+            made.append(bridge)
+            return bridge
+
+        monkeypatch.setattr(gbl_ask, "BridgeSocketClient", factory)
+        rc, out = run_raw(capsys, "reconcile", "--socket",
+                          "/tmp/gbl-fixture.sock", "--id", "gb-" + "1" * 32)
+        assert rc == 0
+        assert "status=RECONCILED_DELIVERED" in out
+        assert made[0].calls == [("reconcile", {"ask_id": "gb-" + "1" * 32})]
+
+    def test_reconcile_takes_no_bot_flag(self, capsys, monkeypatch):
+        made: list[ScriptedBridge] = []
+
+        def factory(socket_path, timeout=gbl_ask.REQUEST_TIMEOUT_SECONDS):
+            bridge = ScriptedBridge(socket_path,
+                                    script=[("ok", RECONCILED)])
+            made.append(bridge)
+            return bridge
+
+        monkeypatch.setattr(gbl_ask, "BridgeSocketClient", factory)
+        # --bot is not a reconcile option: the wire law is {ask_id} only.
+        rc, out = run_raw(capsys, "reconcile", "--socket",
+                          "/tmp/gbl-fixture.sock", "--id", "gb-" + "1" * 32,
+                          "--bot", BOT)
+        assert rc == 2                          # argparse usage refusal
+        assert made == []                       # nothing was sent
+
+    def test_reconcile_over_the_real_door_is_typed(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION)
+        ask_id = ask_id_from(out)
+        rc, out = run_raw(capsys, "reconcile", "--socket", service.socket,
+                          "--id", ask_id)
+        assert rc == 5          # typed: no nudge attempt exists to settle
+        assert "NUDGE_ATTEMPT_NOT_FOUND" in out
+
+    def test_reconcile_unknown_ask_is_typed(self, service, capsys):
+        rc, out = run_raw(capsys, "reconcile", "--socket", service.socket,
+                          "--id", "gb-" + "0" * 32)
+        assert rc == 5
+        assert "ASK_NOT_FOUND" in out
+
+    def test_reconcile_refuses_a_malformed_ask_id(self, capsys, monkeypatch):
+        rc, out = run_raw(capsys, "reconcile", "--socket",
+                          "/tmp/gbl-fixture.sock", "--id", "not-an-ask-id")
+        assert rc == 2
+        assert "INVALID_ASK_ID" in out
+
+    def test_help_lists_reconcile_without_a_bot_option(self):
+        help_text = gbl_ask.build_parser().format_help().lower()
+        assert "reconcile" in help_text
+
+
 class TestTokenHygiene:
     def test_help_offers_no_credential_option(self):
         help_text = gbl_ask.build_parser().format_help().lower()
