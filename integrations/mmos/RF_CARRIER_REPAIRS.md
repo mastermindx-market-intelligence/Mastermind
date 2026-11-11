@@ -428,3 +428,185 @@ or removed this round.
 
 No panel finding was judged false after reading the code; none is
 refuted.
+
+## Round 3 (2026-11-11) — the second blind panel's 17 real findings
+
+The second panel (score in `~/.mastermind/mmos_evidence/rf-20261111/
+panel2/SCORE.md`, five blind reviewers) scored `608ea1ccc` "install-ready
+after listed repairs": 1 HIGH, 16 MEDIUM real, plus 7 small extras it
+named. Every required item below has a failing test first and a red log in
+`~/.mastermind/mmos_evidence/rf-20261111/round3/red/`.
+
+### Required items (10 of 10 fixed)
+
+- **H1 — the return edge delivered the newest served comment, not the
+  oldest.** The board serves comments newest-first; the "last" carrier note
+  the edge picked was whatever the walk saw last. Comments are now ordered
+  by `createdAt` before any oldest/latest decision.
+  Test: `test_last_result_comment_delivers_the_newest_answer_in_served_order`
+  (`tests/test_mmos_teammate_carrier.py:2112`). Deciding lines:
+  `wake_carrier.py:1687-1688` (`ordered_oldest_first`).
+- **H2 — marker authority checked `authorType` only.** A person's comment
+  that quoted a carrier note's text was treated as the carrier's own. A
+  carrier note now requires `authorType == "agent"` AND `authorAgentId`
+  equal to this carrier's agent. Test:
+  `test_another_agents_note_is_not_the_carriers_marker` and
+  `test_a_retry_line_a_person_wrote_is_not_a_retry`
+  (`tests/test_mmos_teammate_coding_job.py:296,468`). Deciding lines:
+  `wake_carrier.py:2123-2141` (`carrier_note_bodies`).
+- **M2 — create-ok/block-failed parked the family for a person forever.**
+  The create can succeed while the block PATCH fails (child visible, no
+  relation): the board's `createdByAgentId` names a child this carrier
+  issued, so the block is retried, and the board answer (not a silent
+  park) decides. Tests:
+  `test_a_carrier_issued_child_with_a_missing_relation_gets_the_block_retried`,
+  `test_a_carrier_issued_done_child_with_a_missing_relation_still_returns`
+  (`tests/test_mmos_teammate_carrier.py:1137,1168`). Deciding lines:
+  `wake_carrier.py:2445` region.
+- **M3 — retry keys came from comment text unvalidated.** A `coding-job-retry:`
+  line now counts only when its key passes the same identifier rule as the
+  fresh path and sits in a carrier-authored note. Test:
+  `test_retry_keys_that_are_not_safe_identifiers_never_reach_the_door`
+  (`tests/test_mmos_teammate_coding_job.py:443`). Deciding lines:
+  `wake_carrier.py:294-308`.
+- **M4 — retries were unbounded.** Retries are counted per key and capped
+  (`coding_job_max_retries`, default 3); at the cap a note for a person
+  ends the loop. Tests:
+  `test_retries_are_bounded_per_key_and_end_in_a_note_for_a_person`,
+  `test_below_the_bound_the_retry_still_happens`
+  (`tests/test_mmos_teammate_coding_job.py:487,510`). Deciding lines:
+  `wake_carrier.py:309` (`_retry_cap`).
+- **M5 — unknown 200 shapes read as empty.** One shared shape guard
+  `served_rows(raw, *keys)` raises on a shape this build does not read;
+  every list reader on the carrier path uses it. Test:
+  `test_an_unrecognised_children_shape_is_an_error_not_an_empty_list`
+  (`tests/test_mmos_teammate_carrier.py:4075`). Deciding lines:
+  `wake_carrier.py:2091` (`served_rows`).
+- **M6 — child-side recognition matched a marker with no parent read.**
+  `asked_child_of` now requires the parent's recorded blocker set to name
+  the child (fresh parent read; `recorded_blocker_ids` reads served
+  `blockedBy` summaries plus the legacy `blockedByIssueIds` fallback);
+  otherwise the issue is a plain task with the full help. Test:
+  `test_a_forged_child_the_parent_does_not_block_on_is_a_plain_task`
+  (`tests/test_mmos_teammate_carrier.py:3122`). Deciding lines:
+  `wake_carrier.py:512` (`asked_child_of`), `:1718`
+  (`recorded_blocker_ids`).
+- **M8 — a non-HTTP door answer escaped as ValueError.** The door's status
+  line is parsed defensively; a malformed answer lands in the transient
+  (retryable) path. Test:
+  `test_a_non_http_door_answer_lands_in_the_transient_path`
+  (`tests/test_mmos_teammate_coding_job.py:415`). Deciding lines:
+  `wake_carrier.py:166,171`.
+- **M9 — refresh-carrier wrote carrier.json in place.** All config writes
+  (refresh, apply, rollback marks) go through one staged-0600-then-rename
+  writer; a failed write leaves the original bytes. Test:
+  `test_refresh_carrier_rewrites_the_settings_file_0600`
+  (`tests/test_mmos_teammate_cutover.py:711`). Deciding lines:
+  `cutover_installed.py:76` (`write_config_file`).
+- **M10 — refresh-carrier dropped live config keys.** The live file is
+  read and merged; keys the spec does not hold are kept and logged
+  (`configKeysKept` in the refresh result). Tests:
+  `test_refresh_carrier_keeps_live_keys_the_spec_does_not_hold`,
+  `test_reapply_keeps_live_keys_the_spec_does_not_hold`
+  (`tests/test_mmos_teammate_cutover.py:733,761`). Deciding lines:
+  `cutover_installed.py:47,66` (`read_live_config`,
+  `merged_carrier_config`).
+
+### Extras (7 of 7 fixed)
+
+- **M1 — a later stale reply could overwrite an earlier fresh one.**
+  Test: `test_two_reconciled_returns_deliver_the_asks_newest_answer`
+  (`carrier.py:1296`); `wake_carrier.py:1829`.
+- **M7 — a block duplicated from the issue description was admitted.**
+  A block now counts only when its fenced text is NOT already in the task
+  text the carrier sent. Tests:
+  `test_a_block_echoed_from_the_task_text_is_not_an_ask`,
+  `test_a_job_block_echoed_from_the_task_text_opens_no_door`
+  (`carrier.py:1345`, `coding_job` monkeypatch variant at `:1376`);
+  `wake_carrier.py:390` (`block_quoted_from_task`).
+- **M14 — rotate fenced open issues only, not live runs.** `blockers()`
+  moved to `setup_teammate.py` and rotate fences with the same checks
+  apply and rollback use. Test:
+  `test_rotate_refuses_while_a_carrier_run_is_live`
+  (`tests/test_mmos_teammate_setup.py:198`); `setup_teammate.py:179,473`.
+- **q1-10 — a cancelled ask child was never terminal for the return
+  edge.** Cancelled children are excluded from the family; all-cancelled
+  leaves the issue for a person. Test:
+  `test_a_cancelled_ask_child_is_terminal_for_the_return_edge`
+  (`carrier.py:1326`); `wake_carrier.py:1948,2523`.
+- **M15 — job help never said first-answer-only.** The help text states a
+  block runs in the FIRST answer to the task only. Test:
+  `test_the_job_help_says_a_block_runs_in_the_first_answer_only`
+  (`carrier.py:1366`); `wake_carrier.py:664`.
+- **M11 — rollback ignored a teammate-binding change made after the
+  move.** Rollback compares the live `metadata.teammate.t3` core with the
+  result file's recorded binding and refuses on drift. Test:
+  `test_rollback_refuses_when_the_teammate_binding_rotated`
+  (`tests/test_mmos_teammate_cutover.py:538`).
+- **M12 — the result file was written in place and rollback trusted any
+  readable JSON.** The result file is staged-0600-atomic; an unreadable or
+  non-object result refuses rollback. Tests:
+  `test_the_result_file_is_written_staged_and_private`,
+  `test_an_unreadable_result_file_refuses_rollback`
+  (`tests/test_mmos_teammate_cutover.py:572,554`).
+
+### R11 resolved by lane decision (the panel scored it "conditional")
+
+Panel-2's R11 row said the install was safe "ONLY if the install specs pin
+`paperclip_base`". The pin is now required kit, closing the condition:
+`setup_teammate.py` refuses a spec without a loopback `paperclip_base`
+before any file is written (`require_paperclip_base`,
+`setup_teammate.py:78`; the urlsplit loopback law is one helper
+`base_refusal` shared with `Http`), the carrier refuses an unpinned config
+outright instead of trusting `PAPERCLIP_API_URL` (`base_pin_error`,
+`wake_carrier.py:1558`), and `write_carrier_config` writes the pin
+unconditionally. Test:
+`test_a_spec_without_a_pinned_loopback_base_refuses_setup`
+(`tests/test_mmos_teammate_setup.py:137`) plus the flipped final assertion
+of `test_base_is_pinned_by_the_config_and_loopback_only`
+(`carrier.py:3628`).
+
+**R8 stays open as recorded above** — the persisted-ask-record migration
+is an A4-class protocol change for the principal.
+
+### The three live proofs, answered from captures
+
+1. **Is `dependencyReady` served, and does it track the blocker?**
+   Served on the inbox projection, and it is a real gate: while the
+   blocker is open the row carries `dependencyReady: false` with
+   `unresolvedBlockerCount` > 0 and `unresolvedBlockerIds` naming the
+   blocking issue; once the blocker reaches done the same row serves
+   `dependencyReady: true` with count 0, and the resolved child leaves
+   the blocked list. Fixtures: `inbox_lite.json`,
+   `inbox_lite_blocked.json`.
+2. **Does a children list row hide the ask marker?** Yes: rows are
+   ordered newest-activity-first and the description is hard-truncated at
+   1200 chars with `descriptionTruncated: true` — the marker line (last
+   line of the full description) is invisible in list reads; the full
+   issue GET serves it. Consequence repaired (P2): a truncated list row
+   is re-read in full before any family decision
+   (`untruncated_children`, `wake_carrier.py:2034`; test
+   `test_a_truncated_child_list_row_is_re_read_in_full`, `carrier.py:1073`).
+   Fixtures: `children_query_dev.json`, `child_truncated_full.json`.
+3. **What does `t3 thread show --json --messages N` serve?** The
+   latest-N window — `min(N, available)` messages, oldest-first within
+   the window; mid-run the thread row carries `status: "running"` and a
+   non-null `activeRunId` and the in-flight assistant row is NOT served;
+   idle it serves `status: "completed"`, `activeRunId: null`. A bogus
+   thread id exits 1 with stderr. Consequence repaired (P3):
+   `T3Thread.messages()` shape-hardens the answer (dict with a
+   `messages` list and a `thread` dict, else `CarrierError`); a JSON
+   error no longer escapes and an empty `{"items": []}` no longer reads
+   as "no messages" (which silently re-sent the task). Tests:
+   `test_t3_show_reads_the_captured_window_shapes`,
+   `test_t3_show_in_a_shape_this_build_cannot_read_is_unknown`
+   (`carrier.py:600` region). Fixtures: `t3_thread_show_running.json`,
+   `t3_thread_show_idle.json`.
+
+### Still open after round 3
+
+- **M13** — named by the panel, not repaired this round.
+- The panel's remaining LOW findings.
+- **atk-6** — `control_plane/paperclip_result_delivery.py` follows
+  redirects; outside this lane's delta, not changed here.
+- **R8** — as recorded above (principal decision).
