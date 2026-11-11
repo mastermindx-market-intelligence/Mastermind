@@ -89,7 +89,9 @@ def service(tmp_path):
 
 
 def run_cli(capsys, service, *args) -> tuple[int, str]:
-    rc = gbl_ask.main(["--socket", service.socket, "--bot", BOT, *args])
+    command, *rest = args
+    rc = gbl_ask.main([command, "--socket", service.socket,
+                       "--bot", BOT, *rest])
     captured = capsys.readouterr()
     return rc, captured.out + captured.err
 
@@ -195,8 +197,8 @@ class TestAsk:
 
     def test_unreachable_socket_is_a_clean_error(self, tmp_path, capsys):
         rc = gbl_ask.main([
-            "--socket", str(tmp_path / "absent.sock"),
-            "--bot", BOT, "status", "--id", "gb-" + "0" * 32])
+            "status", "--socket", str(tmp_path / "absent.sock"),
+            "--bot", BOT, "--id", "gb-" + "0" * 32])
         out = capsys.readouterr()
         assert rc == 2
         assert "BRIDGE_UNREACHABLE" in out.out + out.err

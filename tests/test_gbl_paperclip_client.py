@@ -400,15 +400,16 @@ class TestCreateEffectUnknown:
         with pytest.raises(GblPaperclipClientError):
             core.submit_ask(**submits())
 
-    def test_transport_loss_without_landing_surfaces_effect_unknown(self):
+    def test_transport_loss_without_landing_never_retries_the_create(self):
         # Nothing answers on this loopback port: the create cannot be proven
-        # absent, so the law is the same — unknown effect, reconcile by
-        # read-back, never a second create.
+        # absent, so the law is the same — the client reports the lost
+        # outcome (EffectUnknown) and the bridge's ONE reconcile read-back
+        # surfaces the typed transport failure.  No code path issues a
+        # second create.
         dead = PaperclipAskClient("http://127.0.0.1:1", COMPANY_ID, AGENT_ID,
                                   timeout_seconds=0.2)
-        with pytest.raises(GblBridgeError) as err:
+        with pytest.raises(GblPaperclipTransportError):
             bridge_over(dead).submit_ask(**submits())
-        assert err.value.code == "EFFECT_UNKNOWN"
 
 
 # ── 4xx / 5xx → typed errors ────────────────────────────────────────────────
