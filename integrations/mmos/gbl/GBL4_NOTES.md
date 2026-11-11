@@ -15,7 +15,7 @@ sole writer:
   bridge service agent in the isolated dev instance (no existing roster or
   spec was edited).
 - `tests/test_gbl_ask_cli.py` (44 after round 2),
-  `tests/test_gbl_paperclip_client.py` (121 after round 2).
+  `tests/test_gbl_paperclip_client.py` (132 after round 3).
 - this note.
 
 `common/gbl_contract.py` and the GBL-1/GBL-2 modules were imported and NOT
@@ -340,16 +340,90 @@ create the file — or pre-create it:
    — restore from backup or accept the migration; do not delete it
    casually. A fresh dev instance may freely generate a new one.
 
-## Test-run evidence (one file at a time)
+## Round 3 (panel B delta 1, micro round, 2026-11-11)
+
+Head under review `894f8aae5`: 10/10 round-1 items CLOSED, F1 seam
+CLOSED, HMAC core held, 398/398. This round fixes the two required MEDs
+in new code and the two cheap med-notes; LOWs left as noted by the panel.
+
+- **D1 + D2 (MED, fixed — unparseable forgery never raises)** — the law:
+  a comment whose JSON cannot be parsed or canonicalised (NaN/Infinity,
+  nesting past the recursion limit, anything oversized, any parse or
+  canonical error) is UNTRUSTED and ignored, never a raw exception out
+  of `read_ask`/`append_ask_event`. Implemented as the deputy's
+  sanctioned shape — a LENGTH CAP plus a RecursionError catch around the
+  parse and canonicalise steps, with `parse_constant` rejecting the
+  NaN/Infinity family:
+  - `_parse_event_body`: `MAX_EVENT_JSON_CHARS` (64 KiB — ~16× the
+    store's own largest write) caps the payload BEFORE `json.loads`;
+    `parse_constant=_reject_json_constant` turns NaN/Infinity/-Infinity
+    into a parse failure; the except is now `(ValueError,
+    RecursionError)`.  Every failure → `None` (the R3-precedent drop:
+    unparseable = not an event = ignored).
+  - `_verified_event`: the canonicalise step (`_event_tag` →
+    `_canonical`) is wrapped in the same `(ValueError, RecursionError)`
+    catch — an event that parses but cannot be canonicalised verifies as
+    nothing → `trusted: False`. (Defense in depth: with the parse-time
+    constant rejection, NaN can no longer reach canonicalisation at
+    all; the catch also covers a parse-shallow/canonicalise-deep
+    asymmetry.)
+  - Sibling surface, same paths: the ISSUE DESCRIPTION is foreign-writable
+    too. `_parse_ask_envelope` takes the same `parse_constant` and the
+    `RecursionError` in its except — on that surface the law is the
+    typed `RECORD_INVALID` (panel B H4: corruption is never read as
+    absence), which is what a deep marker payload and a NaN marker
+    payload now both raise instead of a raw RecursionError / surfaced
+    `float('nan')` data.
+  - Tests (one per shape, each showing the ask still reads AND appends
+    with the forgery present, seq counter untouched): NaN / Infinity /
+    -Infinity, ~20k-deep nesting, oversize (cap+1), deep marker payload,
+    NaN marker payload — plus the four key-anchor tests below. All were
+    failing first against `894f8aae5` (raw `ValueError`, raw
+    `RecursionError`, symlink adopted, group-writable dir accepted).
+- **D3 (MED-note, fixed — dangling-symlink recursion)** — the first-use
+  race retry was an unbounded `return _load_or_create_hmac_key(path)`:
+  a dangling symlink (stat→FileNotFoundError, O_EXCL create→EEXIST)
+  looped to a raw RecursionError. Now `FileExistsError` takes ONE
+  bounded `lstat` of whatever exists and falls through to the normal
+  law (typed `HMAC_KEY_UNREADABLE` if nothing is there); no recursion.
+- **D5 (MED-note, fixed — key-anchor hardening, the cheap parts)** —
+  `lstat` + `S_ISLNK` refusal (`HMAC_KEY_IS_SYMLINK`: a symlink to a
+  valid 0600 key is no longer adopted verbatim, and a dangling one is
+  refused as a symlink before any create loop); `O_NOFOLLOW` on the
+  first-use create open; and a state-root mode check refusing group- or
+  other-WRITE bits (`HMAC_KEY_DIR_MODE_INVALID`, mask 0o022 — the
+  ordinary 0755 dev/production roots stay legal, tested).  Residual,
+  accepted: `lstat`-then-`read_bytes` still has an unlink+replace TOCTOU
+  window requiring local write at the state root (an install-law
+  violation) — an fd-based `O_NOFOLLOW` read would close it if a future
+  round wants it.
+- **D4 (MED-note, left as a note)** — two COLD racing `create_ask`
+  callers can both pass the absence read and POST twice (2 issues, same
+  ask id).  Unreachable in v1: the store's only caller (the bridge)
+  serves strictly serialized.  Flagged for any future multi-writer
+  round; not fixed here (not a few lines — it needs a server-side
+  uniqueness constraint or a create-then-reconcile-merge the contract
+  does not define).
+- **LOWs R1–R6 (left, per the deputy)** — unchanged.
+
+### Install: HMAC key — one added line for the principal
+
+The install step in the section below gains one check: the state root
+directory must not be group- or other-writable (`chmod 750`/`755` fine,
+`770`/`777` refused with `HMAC_KEY_DIR_MODE_INVALID` at first use), and
+the key file must be a regular file — a symlink, even to a valid key,
+is refused (`HMAC_KEY_IS_SYMLINK`).
+
+
 
 `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest
--p no:cacheprovider <file>` — at the round-2 head (merge of
-`e5a69f9ff`), all eight GBL files one at a time:
+-p no:cacheprovider <file>` — at the round-3 head, all eight GBL files
+one at a time:
 
-- `tests/test_gbl_paperclip_client.py` — 121/121 (also run 3× back-to-back
-  after fixing a latent coin-flip tie in one provenance test; the fake
-  HTTP server binds 127.0.0.1 on an EPHEMERAL port, and the real
-  GblBridge is driven over the client for the EFFECT_UNKNOWN tests)
+- `tests/test_gbl_paperclip_client.py` — 132/132 (121 at round 2, +11 in
+  round 3: the D1/D2 shapes and the key-anchor law; the fake HTTP server
+  binds 127.0.0.1 on an EPHEMERAL port, and the real GblBridge is driven
+  over the client for the EFFECT_UNKNOWN tests)
 - `tests/test_gbl_ask_cli.py` — 44/44 (real GBL-2 `GblBridge`+
   `BridgeServer` on a temp socket, `allowed_peer_uids=(uid,)`, a real
   `PaperclipAskClient` behind it for the door tests)

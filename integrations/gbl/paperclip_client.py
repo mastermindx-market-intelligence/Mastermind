@@ -117,6 +117,19 @@ RESPONSE_MAX_BYTES = 4 * 1024 * 1024
 LIST_PAGE_LIMIT = 200
 MAX_LIST_PAGES = 50          # 10,000 issues; past this, fail closed
 
+# Panel B delta 1 (D1/D2): a comment body past this cap cannot be one of
+# the store's own event writes (an answer event is ≤ ~4 KiB of canonical
+# JSON); it is foreign by definition and is never parsed.
+MAX_EVENT_JSON_CHARS = 64 * 1024
+
+
+def _reject_json_constant(name: str):
+    """``json.loads`` accepts NaN/Infinity/-Infinity as a Python extension;
+    the ask/event storage formats are STRICT JSON (panel B D1), so the
+    constants are refused at parse time — the comment is then just another
+    unparseable (untrusted) body."""
+    raise ValueError(f"{name} is not valid JSON")
+
 # The storage format.  One marker, then canonical JSON — found anywhere in
 # the text (appended or reflowed prose is tolerated; panel B H4).
 ASK_MARKER = "gbl-ask-v1"
@@ -223,35 +236,62 @@ def _canonical(value: Mapping[str, Any]) -> str:
 
 
 def _load_or_create_hmac_key(path: Path) -> bytes:
-    """The host-held key (§2.1): read from ``path`` when present (exactly 32
-    bytes, no group/other permission bits — fail closed on anything else),
-    else generated on first use with 0600 inside the EXISTING state
-    directory.  The key never appears in an error, a log, or an exception:
-    only the path and the rule are named."""
+    """The host-held key (§2.1): read from ``path`` when present (a REGULAR
+    file — never a symlink — of exactly 32 bytes, no group/other permission
+    bits; fail closed on anything else), else generated on first use with
+    0600 inside the EXISTING state directory (itself refused when group- or
+    other-writable).  The key never appears in an error, a log, or an
+    exception: only the path and the rule are named."""
+    parent = path.parent
     try:
-        info = path.stat()
+        parent_mode = stat.S_IMODE(parent.stat().st_mode)
+    except OSError:
+        raise GblPaperclipError(
+            "HMAC_KEY_DIR_MISSING",
+            f"state dir {parent} does not exist; the install step "
+            "creates it — this client never mints directories") from None
+    if parent_mode & 0o022:
+        # A group-/other-writable state root allows unlink+replace of the
+        # anchor (panel B D5); ordinary 0755 roots stay legal — only the
+        # WRITE bits are refused.
+        raise GblPaperclipError(
+            "HMAC_KEY_DIR_MODE_INVALID",
+            f"{parent} must not be group- or other-writable "
+            f"(found {parent_mode:03o})")
+    try:
+        info = path.lstat()            # the anchor itself, never the target
     except FileNotFoundError:
-        parent = path.parent
-        if not parent.is_dir():
-            raise GblPaperclipError(
-                "HMAC_KEY_DIR_MISSING",
-                f"state dir {parent} does not exist; the install step "
-                "creates it — this client never mints directories") from None
         data = secrets.token_bytes(HMAC_KEY_BYTES)
         try:
-            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                             0o600)
-        except FileExistsError:                    # a racing first use
-            return _load_or_create_hmac_key(path)
-        try:
-            os.write(handle, data)
-        finally:
-            os.close(handle)
-        return data
+            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        except FileExistsError:
+            # Lost a first-use race (or the path changed shape under us):
+            # ONE bounded read of whatever is there now — never a recursive
+            # retry loop (panel B D3).
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise GblPaperclipError(
+                    "HMAC_KEY_UNREADABLE",
+                    f"cannot state {path}: {type(exc).__name__}") from None
+        else:
+            try:
+                os.write(handle, data)
+            finally:
+                os.close(handle)
+            return data
     except OSError as exc:
         raise GblPaperclipError(
             "HMAC_KEY_UNREADABLE",
             f"cannot state {path}: {type(exc).__name__}") from None
+    if stat.S_ISLNK(info.st_mode):
+        # stat/read FOLLOW symlinks, so a link to a valid 0600 key would
+        # otherwise be adopted verbatim (panel B D5): the anchor shape
+        # itself is refused.
+        raise GblPaperclipError(
+            "HMAC_KEY_IS_SYMLINK",
+            f"{path} must be a regular file, not a symlink")
     if stat.S_IMODE(info.st_mode) & 0o077:
         raise GblPaperclipError(
             "HMAC_KEY_MODE_INVALID",
@@ -679,8 +719,16 @@ class PaperclipAskClient:
         if _tag_is_wellformed(tag):
             seq = event.get("seq")
             if type(seq) is int:
-                expected = _event_tag(self._hmac_key(), ask_id, seq, event)
-                trusted = hmac.compare_digest(expected, str(tag))
+                try:
+                    expected = _event_tag(self._hmac_key(), ask_id, seq,
+                                          event)
+                except (ValueError, RecursionError):
+                    # an event that cannot be canonicalised (panel B D1/D2:
+                    # a float the strict encoder refuses, depth the dumper
+                    # cannot take) is untrusted — never a raw exception
+                    expected = None
+                trusted = (expected is not None
+                           and hmac.compare_digest(expected, str(tag)))
         event["trusted"] = trusted
         return event, trusted
 
@@ -797,8 +845,13 @@ def _parse_ask_envelope(description: Any) -> dict[str, Any] | None:
     if end < 0:
         raise GblPaperclipError("RECORD_INVALID", "unterminated JSON payload")
     try:
-        value = json.loads(description[brace:end + 1])
-    except ValueError:
+        value = json.loads(description[brace:end + 1],
+                           parse_constant=_reject_json_constant)
+    except (ValueError, RecursionError):
+        # NaN/Infinity constants are not valid JSON in this format, and a
+        # payload nested past the recursion limit is the description-side
+        # twin of D2 — both refuse as the typed RECORD_INVALID (panel B
+        # H4/D1/D2), never a raw exception.
         raise GblPaperclipError("RECORD_INVALID",
                                 "payload is not JSON") from None
     if not isinstance(value, dict):
@@ -835,13 +888,20 @@ def _json_object_end(text: str, start: int) -> int:
 
 def _parse_event_body(body: str) -> dict[str, Any] | None:
     """Parse one event from a comment body: the event marker, then canonical
-    JSON.  Foreign comments (human words, untrusted) → None, never parsed."""
+    JSON.  Foreign comments (human words, untrusted) → None, never parsed.
+    A body that cannot be parsed — NaN/Infinity constants, nesting past the
+    interpreter's recursion limit, anything past the size cap, any parse
+    error — is ALSO None: an unparseable forgery is ignored (untrusted),
+    never raised into the record's read/append paths (panel B D1/D2)."""
     prefix = f"{EVENT_MARKER} "
     if not body.startswith(prefix):
         return None
+    payload = body[len(prefix):]
+    if len(payload) > MAX_EVENT_JSON_CHARS:
+        return None                      # oversized: foreign by definition
     try:
-        value = json.loads(body[len(prefix):])
-    except ValueError:
+        value = json.loads(payload, parse_constant=_reject_json_constant)
+    except (ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
 

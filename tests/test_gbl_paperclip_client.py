@@ -1234,6 +1234,104 @@ class TestEventSeqAndTrust:
         assert KEY_BYTES.decode() not in stored        # never in Paperclip
 
 
+# ── Panel B delta 1, D1 + D2: no forged body can crash the record ────────────
+
+
+class TestForgedParseHardening:
+    """A comment (or marker payload) whose JSON cannot be parsed or
+    canonicalised — NaN/Infinity constants, nesting past the recursion
+    limit, anything oversized — is UNTRUSTED and ignored (or, on the
+    description surface, a typed ``RECORD_INVALID``); it is never a raw
+    ValueError/RecursionError out of ``read_ask``/``append_ask_event``."""
+
+    def seed(self, fake) -> tuple[PaperclipAskClient, dict]:
+        ask_client = client(fake)
+        row = envelope()
+        assert ask_client.create_ask(row) is None
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        return ask_client, row
+
+    def plant(self, fake, payload: str) -> None:
+        issue_id = fake.state.order[0]
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "createdAt": fake.state.now_iso(),
+            "body": f"{pc.EVENT_MARKER} {payload}"})
+
+    def assert_record_healthy(self, fake, ask_client, row) -> None:
+        """The ask still reads and appends normally with the forgery in
+        place: the forged comment is gone from the surfaced events, and
+        the next append keeps the trusted sequence going."""
+        record = ask_client.read_ask(row["ask_id"])
+        assert [e.get("state") for e in record["events"]] == ["ANSWERED"]
+        assert all(e["trusted"] is True for e in record["events"])
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "CONSUMED"})
+        issue_id = fake.state.order[0]
+        assert stored_comment(fake, issue_id, 2)["seq"] == 2   # counter intact
+        assert ask_client.read_ask(row["ask_id"])["events"][-1][
+            "state"] == "CONSUMED"
+
+    @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+    def test_nan_like_forged_events_are_ignored(self, fake, constant):
+        # D1: json.loads ACCEPTS these constants; canonicalisation
+        # (allow_nan=False) then raised a raw ValueError out of BOTH
+        # read_ask and append_ask_event while the comment existed.
+        ask_client, row = self.seed(fake)
+        self.plant(fake, '{"seq":2,"tag":"v1:' + "0" * 64 + '",'
+                         '"type":"answer","x":' + constant + '}')
+        self.assert_record_healthy(fake, ask_client, row)
+
+    def test_deeply_nested_forged_event_is_ignored(self, fake):
+        # D2: a ~20k-deep forged body raised RecursionError out of
+        # json.loads, which the ValueError-only except let escape raw.
+        ask_client, row = self.seed(fake)
+        depth = 20000
+        self.plant(fake, '{"seq":2,"tag":"v1:' + "0" * 64 + '",'
+                         '"type":"state","d":' + "[" * depth
+                         + "]" * depth + '}')
+        self.assert_record_healthy(fake, ask_client, row)
+
+    def test_oversized_forged_event_is_ignored(self, fake):
+        # "too large": beyond the event-JSON cap the body is foreign by
+        # definition (the store's own writes stay far below it) and is
+        # never parsed.
+        ask_client, row = self.seed(fake)
+        self.plant(fake, '{"seq":2,"tag":"v1:' + "0" * 64 + '",'
+                         '"type":"state","x":"'
+                         + "A" * (pc.MAX_EVENT_JSON_CHARS + 1) + '"}')
+        self.assert_record_healthy(fake, ask_client, row)
+
+    def test_deeply_nested_marker_payload_is_a_typed_record_error(self, fake):
+        # D2's sibling surface: the issue DESCRIPTION is foreign-writable
+        # too; a deep marker payload crashed read_ask the same raw way.
+        # On this surface the law is the typed RECORD_INVALID (panel B H4:
+        # corruption is never read as absence), never a raw exception.
+        ask_client = client(fake)
+        row = envelope()
+        assert ask_client.create_ask(row) is None
+        issue = fake.state.issues[fake.state.order[0]]
+        depth = 20000
+        issue["description"] = (pc.ASK_MARKER + ' {"d":' + "[" * depth
+                                + "]" * depth + "}")
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.read_ask(row["ask_id"])
+        assert err.value.code == "RECORD_INVALID"
+
+    def test_nan_marker_payload_is_a_typed_record_error(self, fake):
+        # D1's sibling surface: the marker payload is the store's OWN
+        # strict-JSON format; a NaN constant is unparseable under it and
+        # must refuse as RECORD_INVALID, not surface float('nan') data.
+        ask_client = client(fake)
+        row = envelope()
+        assert ask_client.create_ask(row) is None
+        issue = fake.state.issues[fake.state.order[0]]
+        issue["description"] = pc.ASK_MARKER + ' {"x":NaN}'
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.read_ask(row["ask_id"])
+        assert err.value.code == "RECORD_INVALID"
+
+
 # ── §2.1: the host-held key — file law, fail-closed everywhere ───────────────
 
 
@@ -1289,6 +1387,77 @@ class TestHmacKeyLaw:
                                          "state": "ANSWERED"})
         assert "HMAC_KEY" in err.value.code
         assert not (tmp_path / "nowhere").exists()     # no directory minted
+
+    # -- panel B delta 1: key-anchor hardening (D3 dangling symlink, D5) -------
+
+    def test_dangling_symlink_key_is_a_typed_error(self, fake, tmp_path):
+        # D3: a dangling symlink used to loop stat→create(O_EXCL)→
+        # FileExistsError→recurse until a raw RecursionError.
+        path = tmp_path / "dangling.key"
+        os.symlink(tmp_path / "absent.key", path)
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "state",
+                                         "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+        assert not (tmp_path / "absent.key").exists()  # nothing minted
+
+    def test_symlink_to_a_valid_key_is_refused(self, fake, tmp_path):
+        # D5: stat()/read_bytes() FOLLOW symlinks, so a symlink to a valid
+        # 0600 32-byte key used to be adopted verbatim.  lstat + S_ISLNK
+        # refuses the anchor shape itself.
+        target = tmp_path / "real.key"
+        target.write_bytes(KEY_BYTES)
+        os.chmod(target, 0o600)
+        path = tmp_path / "link.key"
+        os.symlink(target, path)
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "state",
+                                         "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+
+    def test_group_writable_state_dir_is_a_typed_error(self, fake, tmp_path):
+        # D5: a group-/other-writable state root allows unlink+replace of
+        # the anchor; the load refuses it (a normal 0755 root stays legal —
+        # only the WRITE bits are refused).
+        state = tmp_path / "state"
+        state.mkdir()
+        os.chmod(state, 0o770)
+        try:
+            path = state / "hmac_v1.key"
+            ask_client = client(fake, hmac_key_path=path)
+            ask_id = self._created(fake, ask_client)
+            with pytest.raises(GblPaperclipError) as err:
+                ask_client.append_ask_event(
+                    ask_id, {"type": "state", "state": "ANSWERED"})
+            assert "HMAC_KEY" in err.value.code
+            assert not path.exists()               # nothing generated
+        finally:
+            os.chmod(state, 0o700)
+
+    def test_state_dir_without_group_write_stays_legal(self, fake, tmp_path):
+        # Compatibility guard: the dev/production state roots are ordinary
+        # 0755 directories (r-x group/other); only group/other WRITE bits
+        # are refused.
+        state = tmp_path / "state"
+        state.mkdir()
+        os.chmod(state, 0o755)
+        try:
+            path = state / "hmac_v1.key"
+            ask_client = client(fake, hmac_key_path=path)
+            ask_id = self._created(fake, ask_client)
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "state",
+                                         "state": "ANSWERED"})
+            assert path.exists()
+            assert stat.S_IMODE(path.stat().st_mode) & 0o777 == 0o600
+        finally:
+            os.chmod(state, 0o700)
 
     def test_a_tagged_event_without_a_configured_key_is_typed(self, fake):
         # Not silent "untrusted": a tagged event proves a key exists; a
