@@ -327,10 +327,9 @@ $ node ".../vitest.mjs" run src/orchestration-v2/ThreadLaunchService.test.ts
       Tests  49 passed (49)               # green_thread_launch.log
 $ node ".../vitest.mjs" run src/orchestration-v2/CrossProjectDelegation.test.ts \
     src/orchestration-v2/ThreadLaunchService.test.ts src/mcp/OrchestratorMcpService.test.ts \
-    src/orchestration-v2/DelegatedTaskSupervisor.test.ts \
-    src/orchestration-v2/DelegatedTaskQuestionReactor.test.ts \
-    src/orchestration-v2/DelegatedTaskCompletionReactor.test.ts
-      Tests  234 passed (234)             # green_affected_suites.log
+    src/orchestration-v2/DelegatedCompletionDelivery.test.ts \
+    src/orchestration-v2/RemoteDelegatedTask.test.ts
+      Tests  167 passed (167)             # green_affected_suites.log
 $ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
 $ cd packages/contracts && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
       # both exit 0 — typecheck_apps_server.log / typecheck_packages_contracts.log

@@ -1,94 +1,264 @@
 # Lane XP — cross-project delegated child (pin 0770446 + our two patches)
 
-Status: IN PROGRESS (skeleton, first push). Driver model: glm-5.3. Branch
-`t3/mmos-v4-xp`. Patch target: `integrations/t3/upstream_patches/cross_project_child_0770446.patch`.
-Source clone: `/Volumes/Mastermind/build-cache/xp-t3code` (external volume, pin `0770446`,
-both existing patches applied). Evidence: `~/.mastermind/mmos_evidence/xp-20261111/`.
+Status: DONE (implementation, tests, live proof, attack round — see the evidence ledger).
+Driver model: glm-5.3. Branch `t3/mmos-v4-xp`. Patch:
+`integrations/t3/upstream_patches/cross_project_child_0770446.patch` (10 files, 1144
+insertions; sha256 `9038b359c1a3b7f13d23d4cdb13c789e6072ae36754eb835465cc39f36aabbba`;
+MANIFEST entry with exact commands beside it). Source clone:
+`/Volumes/Mastermind/build-cache/xp-t3code` (external volume, pin `0770446`, both prior
+patches applied). Evidence: `~/.mastermind/mmos_evidence/xp-20261111/`.
 
-## The goal
+## The goal, restated as what shipped
 
 From a thread in project A, one `delegate_task` with `target.projectId` of project B starts
 the child in B: isolated worktree in B's repository cut from the remote default-branch head
 after a fetch; B's instructions and hooks apply to the child; the task stays on the parent
-(`task_status`, `task_cancel`, finish wakes the parent, sidebar shows the child under the
-parent); the child's permissions are no broader than the parent's (runtime mode clamped to
-the parent's, provider enabled in B, B a registered project; unknown/archived/disabled
-project id refused with one plain sentence).
+(`task_status`, `task_cancel`, finish wakes the parent, lineage shows the child as the
+parent's subagent); the child's permissions are no broader than the parent's (runtime mode
+clamped to the parent's, provider enabled in B, B a registered project;
+unknown/archived/deleted project id refused with one plain sentence).
 
-## Design choice (working, to be finalized with census evidence)
+## Design choice (three sentences)
 
-Extend the LOCAL delegated-task path, not the remote-delegation path. Evidence so far:
+We extended the local delegated-task path — MCP admission plus a `projectId` carried on the
+command through the single dispatch chokepoint into the child-thread record — rather than the
+remote peer-delegation path, because the remote path refuses worktree isolation by design
+("runs in that project's checkout"), adds a network hop for a same-server case, and cannot
+keep task ownership on the parent thread. All cross-project admission happens in one
+MCP-layer block before dispatch (registered, not archived/deleted, provider enabled in the
+target project, isolation `worktree`, runtime-mode clamp unchanged from upstream), and the
+only downstream widening is `command.projectId ?? parent.thread.projectId`, so every other
+consumer of dispatch keeps its current behavior. The child's worktree is cut strictly from
+B's resolved remote default head after a fetch (`requireRemoteBase`: refuse rather than fall
+back to the local branch), which makes "never from a stale local branch" structural instead
+of advisory.
 
-- `OrchestratorMcpService.delegateTask` (apps/server/src/mcp/OrchestratorMcpService.ts:2396)
-  dispatches `delegated_task.request`; `Orchestrator.dispatchDelegatedTaskRequest`
-  (apps/server/src/orchestration-v2/Orchestrator.ts:8031) builds the child thread with
-  `makeSubagentChildThread` (packages/provider-core/src/server/subagentProjection.ts:52),
-  which spreads `...parentThread` — so the child inherits `projectId` from the parent. That
-  spread is the one place a different project has to be injected.
-- Worktree preparation runs under the CHILD thread's project:
-  `ThreadLaunchService.scheduleRunPreparation` reads `thread.projectId`
-  (apps/server/src/orchestration-v2/ThreadLaunchService.ts:1149) and creates the worktree
-  with `cwd: project.workspaceRoot`. Setting the child's projectId to B therefore makes the
-  child's worktree live in B's repository.
-- The remote path (`peer/RemoteDelegation.ts:215-221`) explicitly REFUSES
-  `isolation: "worktree"` ("A task in a linked environment runs in that project's checkout")
-  and depends on a peer link plus follower polling; it cannot give done-when #2 (isolated
-  checkout at remote head) and adds a network hop for a same-server case.
+Why not the alternatives, in one line each:
 
-Planned shape (subject to census):
+- Remote delegation (`peer/RemoteDelegation.ts:215-221`) refuses `isolation: "worktree"`
+  outright and depends on peer links plus follower polling — wrong shape for same-server.
+- A "run in B's checkout directly" variant would violate done-when #2 (isolation) and
+  write into a checkout another session may own; refused by sentence, not by convention.
 
-1. `delegated_task.request` command gains an optional `projectId` (contracts).
-2. MCP `delegateTask`: when `target.projectId` names another registered project, admit it
-   (registered, not archived/disabled; provider enabled in B), then pass that project on the
-   command. Runtime-mode clamping against the parent stays where it is
-   (`resolveRuntimeMode(parent.thread.runtimeMode, …)`).
-3. Orchestrator: `childThread.projectId = command.projectId ?? parent's`; for a cross-project
-   worktree child, the workspace strategy is cut from B's default branch as
-   `origin/<default>` with `startFromOrigin: true` (fetch first; refuse on fetch failure —
-   never silently fall back to a stale local branch).
+## What changed (10 files)
 
-## `t3_thread_launch` with `delegatedFrom` (question from the principal)
+- `packages/contracts/src/orchestrationV2.ts` — `delegated_task.request` gains optional
+  `projectId`; the worktree strategy gains optional `requireRemoteBase`.
+- `packages/contracts/src/orchestratorMcp.ts` — `OrchestratorMcpTarget.projectId` docs.
+- `apps/server/src/mcp/OrchestratorMcpService.ts` — the cross-project admission block in
+  `delegateTask` (~:2434-2571): isolation/registration/state checks, provider enablement in
+  the TARGET project, strict remote-default resolution
+  (`resolveRemoteDefaultBaseRef`, ~:1911 — returns `${remote}/${default}` or null, never
+  guesses), strategy forced to `{type:"worktree", baseRef, startFromOrigin:true,
+  requireRemoteBase:true}`, dispatch passes `projectId` through, and a retry of an accepted
+  delegation with the same `clientRequestId` reuses the recorded task (no second child or
+  worktree) with `skipProjectEnablementFilter`.
+- `apps/server/src/orchestration-v2/ThreadManagementService.ts` — chokepoint:
+  `projectId: command.projectId ?? parent.thread.projectId`.
+- `apps/server/src/orchestration-v2/Orchestrator.ts` — the spawned child thread record
+  overrides `projectId` when the command carries one (upstream's `makeSubagentChildThread`
+  spreads the parent; this is the one injection point).
+- `apps/server/src/orchestration-v2/ThreadLaunchService.ts` — `ThreadLaunchWorkspaceStrategy`
+  gains `requireRemoteBase`; when set and the fetch produced no remote base, the launch
+  fails BEFORE any worktree exists.
+- `apps/server/src/mcp/toolkits/orchestrator/tools.ts` — `delegate_task` description
+  documents `target.projectId`.
+- Tests colocated upstream-style: `CrossProjectDelegation.test.ts` (new), plus additions to
+  `OrchestratorMcpService.test.ts` and `ThreadLaunchService.test.ts`.
+
+## Cases refused and their exact sentences
+
+| Case | Sentence (live or pinned by test) |
+| --- | --- |
+| `target.projectId` names no registered project | `Project project:does-not-exist was not found.` (code `invalid_request`; observed live) |
+| Target project archived | `Project <id> is archived, so it cannot run delegated tasks.` |
+| Target project deleted | `Project <id> is deleted, so it cannot run delegated tasks.` |
+| Cross-project without `isolation: "worktree"` (incl. omitted) | `A task in project <id> needs isolation "worktree"; any other isolation would work directly in that project's checkout.` (observed live) |
+| Provider instance enabled in A but disabled in B | `Provider instance "<instanceId>" is disabled for project <B>.` (`ThreadManagementProviderInstanceDisabledError` → `invalid_request`) |
+| Remote default branch unresolvable (unborn HEAD, no remote, symbolic-ref games) | `Unable to resolve a remote default branch for project "<title>" (<workspaceRoot>), so a worktree cannot be cut from its remote head.` |
+| Fetch cannot produce the remote base (with `requireRemoteBase`) | `Unable to fetch <baseRef> from the remote, so no worktree was created. This launch requires the remote base rather than the local branch.` — fails before any worktree is created |
+| Runtime-mode escalation (`runtimeMode: "full-access"` from an `auto` parent) | `Child runtime mode full-access is broader than parent mode auto.` (code `runtime_mode_escalation_denied`; observed live) |
+
+Upstream's pre-patch behavior at the same spot refused ANY cross-project `target.projectId`
+(`A local task runs in this thread's project. Omit target.projectId, or pass
+target.environmentId …`); this patch replaces that blanket refusal with the admission block
+above. Cross-ENVIRONMENT delegation remains on the existing `target.environmentId` path,
+unchanged.
+
+## Admission checks — added or changed (for the principal review panel)
+
+Added:
+
+1. Cross-project targets require `isolation: "worktree"` — anything else would work
+   directly in B's checkout (one plain sentence, above).
+2. Cross-project targets must be registered on this server (`requireProject`).
+3. Archived targets refused; deleted targets refused (distinct sentences).
+4. The chosen provider instance must be enabled in the TARGET project — per-project
+   enablement overrides are now checked against B, not only the caller's project. Disabled
+   → `ThreadManagementProviderInstanceDisabledError`.
+5. Strict remote-default resolution: if `origin`-equivalent remote + default branch cannot
+   be resolved, refuse; never guess, never fall back to a local branch.
+6. Worktree strategy is forced to the resolved remote base with `startFromOrigin: true,
+   requireRemoteBase: true`; a failed fetch fails the launch before any worktree exists.
+
+Changed:
+
+7. Retry of an accepted delegation (same `clientRequestId`) now reuses the recorded
+   task/thread and passes `skipProjectEnablementFilter`, so an idempotent replay cannot
+   double-create children or worktrees. (Enablement is still enforced on first admission;
+   a disablement that lands between attempt and retry is honored because the replay returns
+   the already-admitted task rather than starting new work.)
+
+Unchanged but now cross-project-covering:
+
+8. Runtime-mode and interaction-mode clamping to the parent's mode (upstream mechanism;
+   escalation refused with `runtime_mode_escalation_denied`).
+9. `delegate_task` itself still requires the thread-scoped MCP credential
+   (`thread_credential_required` for external OAuth clients) — verified live: the driver's
+   own external client cannot call `task_cancel`; only the in-thread parent agent can.
+
+Known asymmetry (documented, not changed): `resolveTarget`'s driverKind CANDIDATE filtering
+still filters by enablement in the PARENT's project; the cross-project block then re-checks
+enablement in B and refuses if not enabled there. An explicit `providerInstanceId` bypasses
+candidate filtering and is fully re-checked against B — the fully-controlled path.
+
+## Restart behavior (census4, answered)
+
+Startup recovery runs `recoverDelegatedTasks` after provider reconciliation
+(`serverRuntimeStartup.ts:436`); it resolves the parent from `lineage.parentThreadId` and
+finalizes the task under the parent's lock — lineage-keyed and **project-blind** (no code
+compares the child's project to the parent's; equality was only ever a construction
+invariant of the spread, which this patch deliberately breaks for cross-project children).
+`prepareForShutdown`'s `getRecoveryThreadIds("restart-continuations")` filters on the child
+thread's own `project_id` row — now B's for a cross-project child, which is correct: the
+run is re-prepared under B. Runs still in `preparing` when the server stops are cancelled at
+startup rather than half-resumed, so a cross-project child never comes back on a stale base.
+
+## Fetch failure (answered, structural)
+
+`ThreadLaunchService` resolves `remoteBase` via `fetchWorktreeBaseCommit` after the fetch
+stage; with `requireRemoteBase: true` a null result fails the launch
+(`provision-worktree` error, sentence above) BEFORE `git.createWorktree` runs. Without the
+strict flag this site silently fell back to the local `baseRef` — that fallback is exactly
+what the flag removes. Pinned by three tests: "fetches the origin base from the remote it
+already resolved", "refuses a remote-required worktree when the remote ref cannot be
+fetched", "refuses a remote-required worktree when no remote is configured".
+
+## `t3_thread_launch` with `delegatedFrom` (principal's question)
 
 `delegatedFrom` is a separate display field on the thread, not `lineage`
-(packages/contracts/src/orchestrationV2.ts:461; ThreadForkService deliberately strips it on
-fork). The id it carries is a thread on ANOTHER server, so it cannot become
-`lineage.parentThreadId` here; that is why the requester saw null. Fixing that display gap is
-NOT this change: a same-server cross-project child gets real `lineage` through the
-delegated-task path we extend here (makeSubagentChildThread sets
-`parentThreadId`/`relationshipToParent: "subagent"`).
+(`packages/contracts/src/orchestrationV2.ts:461`; ThreadForkService deliberately strips it
+on fork). The id it carries is a thread on ANOTHER server, so it cannot become
+`lineage.parentThreadId` here — that is why the requester saw null. Fixing that display gap
+is NOT this change: a same-server cross-project child gets real `lineage` through the
+delegated-task path we extended (`makeSubagentChildThread` sets `parentThreadId` /
+`relationshipToParent: "subagent"`), confirmed live in the receipt.
 
-## Admission checks (who may be a target) — DRAFT, principal review panel decides
+## Sidebar rendering (census3)
 
-- target project must be registered on this server (exists in project service)
-- not archived / deleted / disabled (exact state names from census)
-- provider instance enabled in B (mirrors the caller-project check that exists today)
-- runtime mode + interaction mode clamp to the parent's (existing mechanism, unchanged)
-- cross-project child requires isolation "worktree" (no writing in B's root checkout)
+Lineage resolution is keyed on `environmentId` + `threadId` only — `projectId` never enters
+it (`Sidebar.logic.ts:573-588`, `entities.ts:386-429`). The cross-project child therefore
+appears UNDER ITS PARENT in project A's sidebar group (it is excluded from B's own list by
+`isShownUnderParent`, and its row filter would use B's project key). Consequence: if A's
+section is collapsed, the child is not reachable from B's list. Cross-ENVIRONMENT parents
+break the lineage path entirely and rely on `delegatedFrom` rendering instead. This is
+upstream display behavior; we did not change it in this lane.
 
-## Cases refused and their sentences — DRAFT
+## Claude Code extra-directory question (answered; recommendation only)
 
-(To be filled with the exact final sentences.)
+Against the Claude Code used by this T3 build (CLI 2.1.322; SDK
+`@anthropic-ai/claude-agent-sdk@0.3.316`):
 
-## Restart behavior — TO VERIFY
+- CLI `--add-dir <directories...>` exists (variadic). `/add-dir` exists as a slash command.
+  `permissions.additionalDirectories` exists in settings.
+- `--bare`'s help groups `--add-dir` under "(CLAUDE.md dirs)": an added directory's
+  CLAUDE.md IS loaded into the session context.
+- SDK: `Options.additionalDirectories?: string[]` (the SDK's own claim-time help echoes "As
+  `--add-dir`"), plus `projectConfigRoot` for relocating settings discovery.
 
-`RestartContinuation.test.ts` covers prepared-run recovery; verify a cross-project child in
-`preparing` state is re-prepared under B (task record stays on parent A's thread either way).
+Recommendation: **do not** give a parent thread the other project's root as an extra read
+directory by default. Instruction loading is cwd-rooted, so an added dir's CLAUDE.md would
+flow into the PARENT's A-side turns — the exact "A's instructions are not carried over"
+boundary this lane proves would blur in the other direction, and B's repo would gain silent
+read influence over A's reasoning. If a specific workflow ever needs cross-repo read
+access, opt in per-call at the driver layer (per-launch `additionalDirectories`), never
+server-wide. Not built here.
 
-## Fetch failure — TO VERIFY
+## Done-when evidence (test + live proof each)
 
-`git.fetchWorktreeBaseCommit` semantics on failure: must refuse the launch, not fall back to
-the stale local ref. Census question open.
+Receipt: `~/.mastermind/mmos_evidence/xp-20261111/live_proof_receipt.json` (live dev
+server, own home + own port, free probe agent, throwaway projects A/B with bare origins, B's
+local checkout deliberately one commit behind its origin).
 
-## Claude Code extra-directory question — TO ANSWER
+1. **`delegate_task` with `target.projectId` of B starts the child in B.**
+   Test: `CrossProjectDelegation.test.ts` "creates a cross-project child in the target
+   project with a strict worktree"; `OrchestratorMcpService.test.ts` "dispatches a
+   cross-project task with a strict remote worktree strategy". Live: `receipt.core.
+   childProjectId == projectB`; `childRelationship == "subagent"` with
+   `childParentThreadId == parentThreadId`.
+2. **Own isolated worktree in B's repo, cut from the remote default head after a fetch,
+   never a stale local branch.** Tests: `ThreadLaunchService.test.ts` "fetches the origin
+   base from the remote it already resolved" / "refuses a remote-required worktree when the
+   remote ref cannot be fetched" / "…when no remote is configured". Live: worktree HEAD ==
+   bare origin-b main `ebcf330…` while B's local checkout sits at stale `01d6422…`;
+   `origin-head-marker.txt` PRESENT in the worktree and absent from B's checkout.
+3. **B's instructions/hooks apply; A's are not carried over.** Structural (census3): the
+   server loads no instruction files itself; SDK settings/CLAUDE.md discovery is rooted at
+   the turn cwd = the child's worktree inside B's repo. Live: worktree `AGENTS.md` head is
+   `XPMARK-B-7f3a` (A's marker `XPMARK-A-4c1e` absent); the child's own report shows its
+   cwd = the B worktree (`receipt.core.childReport`).
+4. **The task stays on the parent.** Tests: `CrossProjectDelegation.test.ts` "cancelling
+   the task stops the cross-project child", "a question from the cross-project child wakes
+   the parent", "replaying an accepted cross-project request creates no second child";
+   `OrchestratorMcpService.test.ts` "replaying an accepted cross-project delegation skips
+   re-admission and rebuilds no worktree". Live: `task_cancel` called BY the parent agent
+   (thread credential) → `cancel_requested`, child run `interrupted`; `task_status` returns
+   task + childThreadId; the child's completion wakes the parent as a second completed run
+   (`receipt.wake.parentRuns` ordinal 2) whose prompt — recorded verbatim by the woken
+   probe agent in its own run-2 report, `receipt.wake.parentItems[2]` — begins
+   `Delegated task <the delegated task's exact id>`, i.e. the result was delivered into the
+   parent. (`t3_thread_read` does not surface the reactor's notification item itself; the
+   unit tests cover that item, the live receipt proves the wake run and its payload.)
+   Retry with the same `clientRequestId` returns the SAME task and thread
+   (`receipt.retry.sameThread/sameTask`, two attempts).
+5. **Permissions no broader than the parent's.** Tests:
+   `OrchestratorMcpService.test.ts` "clamps a cross-project task's runtime mode to the
+   parent's", "refuses a cross-project task for $name" (unknown/archived/deleted table),
+   "refuses a cross-project task whose provider is disabled in the target project",
+   "refuses a cross-project task with $isolation isolation", "refuses a cross-project task
+   without a resolvable remote default branch". Live: the three refusal sentences observed
+   verbatim (`receipt.refusals`), including `runtime_mode_escalation_denied` for
+   `full-access` from an `auto` parent.
 
-Which of `--add-dir`, `/add-dir`, `permissions.additionalDirectories`, SDK
-`additionalDirectories` this build's Claude Code supports; whether instructions from an
-added folder load; recommendation only (not built in this lane).
+Dev-server hygiene: server booted from the patched tree per the MANIFEST recipe with its own
+home and a dynamically chosen free port in 3915–3964 (3773/3774/3780 excluded by code);
+receipt records the port and `portFreeAfterStop: true` (rebind proof after stop). The
+pairing token never appears in any log or receipt (the boot helper captures it in-process;
+sha256-only would apply if it were ever recorded).
 
-## Done-when evidence
+## Attack round
 
-(To be filled: five lines, each test name + evidence file.)
+One deepseek-v4.1-flash child (effort max, `capacity_fabric_worker`), given the applied
+patch and the verbatim position: "You control the arguments of `delegate_task` and the
+contents of project B's repository: start a child with broader permissions than the parent,
+in a folder that is not a registered project, or outside an isolated worktree." Report:
+`attack1_report.md` in the evidence dir; adjudication and any failing-test-first fixes are
+recorded in the evidence LEDGER.
 
-## Ledger of what changed
+## Ledger of what changed (chronological)
 
-(To be filled at the end.)
+1. Census (4 × deepseek-v4.1-flash): completion/question path, worktree+fetch semantics,
+   child binding/instruction loading/sidebar, restart recovery. Reports in evidence dir.
+2. Implementation on the SSD clone, failing tests first (red logs in evidence dir), then
+   green: 4 + 49 + 69 tests in the three touched suites, 167 across the five affected
+   suites, both typechecks exit 0.
+3. Typecheck correction: the first post-slice apps/server typecheck exit 2 (4 real errors —
+   missing `requireRemoteBase` on the local strategy type, an Effect idiom, a widened test
+   literal) → fixed, re-run exit 0; patch regenerated (sha `9038b359…abbba`) and re-verified
+   in place against the pin+two-patch base.
+4. Live proof driver (own dev server + free probe agent): five scenarios, receipt JSON,
+   port-free proof. Driver-side parsing bugs found and fixed along the way (item truncation
+   cap, `childThreadId` key, single-object directive parsing collapsing arrays, wake-poll
+   race); none touched the server code.
+5. Attack round (deepseek-v4.1-flash, different model from the author): adjudicated below
+   in the evidence LEDGER; real findings fixed failing-test-first.
