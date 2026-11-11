@@ -23,7 +23,7 @@ CLAUDE_PATH = Path.home() / ".claude.json"
 COO_URL = "http://127.0.0.1:8443/mcp/coo"
 RESOURCE_URL = "http://127.0.0.1:8444/.well-known/oauth-protected-resource"
 AUTH_URL = "http://127.0.0.1:8444/.well-known/oauth-authorization-server"
-MAX_BYTES = 16384
+MAX_BYTES = 65536
 MCP_INITIALIZE = json.dumps({
     "jsonrpc": "2.0", "id": 1, "method": "initialize",
     "params": {"protocolVersion": "2025-06-18",
@@ -110,7 +110,9 @@ def evaluate(installed: dict | None, claude: dict | None,
         else:
             policy = coo["policy"]
             scopes = policy.get("required_scopes")
-            if type(scopes) is not list or set(scopes) != EXPECTED_SCOPES or len(scopes) != 2:
+            if (type(scopes) is not list or len(scopes) != 2 or
+                    any(type(scope) is not str for scope in scopes)
+                    or set(scopes) != EXPECTED_SCOPES):
                 problems.append("COO_SCOPE_CONTRACT_INVALID")
             read = policies.get("read") if type(policies) is dict else None
             if type(read) is not dict or (policy.get("resource") != read.get("resource")
@@ -153,8 +155,12 @@ def evaluate(installed: dict | None, claude: dict | None,
     metadata = resource.get("json") if resource.get("status") == 200 else None
     if type(metadata) is not dict or metadata.get("resource") != "http://127.0.0.1:8444/mcp":
         problems.append("LOCAL_MCP_RESOURCE_METADATA_INVALID")
-    elif set(metadata.get("scopes_supported", [])) != EXPECTED_SCOPES:
-        problems.append("LOCAL_MCP_ROLE_SCOPES_INVALID")
+    else:
+        scopes = metadata.get("scopes_supported")
+        if (type(scopes) is not list or len(scopes) != 2
+                or any(type(scope) is not str for scope in scopes)
+                or set(scopes) != EXPECTED_SCOPES):
+            problems.append("LOCAL_MCP_ROLE_SCOPES_INVALID")
     as_metadata = auth.get("json") if auth.get("status") == 200 else None
     if type(as_metadata) is not dict:
         problems.append("LOCAL_OAUTH_DISCOVERY_UNAVAILABLE")
