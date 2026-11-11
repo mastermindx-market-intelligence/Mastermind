@@ -127,6 +127,93 @@ was edited; no credential anywhere in it.
 - Comments: `clientRequestId` must be a UUID; comments are served
   newest-first.
 
+## Repair 1 (panel B round, 2026-11-11)
+
+Fixed in `integrations/gbl/paperclip_client.py` and `tools/gbl/gbl_ask.py`
+(tests first, `8968fad56`; fixes `bbc91a48b`):
+
+- **H2** — `_iter_issues` paginates (`limit`+`offset`) to exhaustion, dedup
+  by issue id, `PAGINATION_UNSUPPORTED` when a server replays a page head
+  (offset ignored), `LIST_TOO_LARGE` past 50 pages. `count_asks` fails
+  closed on every doubt (shapes, pagination, corrupt records); it can no
+  longer under-count.
+- **H4** — the envelope parse finds the `gbl-ask-v1` marker and the first
+  balanced JSON object ANYWHERE in the description (appended/reflowed text
+  tolerated). A marker-bearing description that cannot be parsed raises
+  `RECORD_INVALID` — never read as "absent" (absence mints duplicate
+  creates).
+- **M3** — resolution is by the parsed description envelope's EXACT ask id
+  only (stronger than the allowed exact-title-token fallback: a decoy with
+  the token but a foreign description resolves nothing). Title substrings
+  never resolve; only an exact match is cached; a stale cache entry is
+  re-resolved, never trusted.
+- **M4/M5** — unknown list/comments envelope shapes and junk rows are typed
+  errors (`UNPARSEABLE_*`), never empty lists.
+- **M6** — a module opener with `_NoRedirectHandler` + `ProxyHandler({})`
+  (no redirects, no proxies); a 3xx is the typed
+  `GblPaperclipRedirectError` (subclasses `GblPaperclipServerError`, so a
+  create redirect is EFFECT_UNKNOWN). `_checked_url` re-verifies the
+  loopback law (scheme/host/port/no-userinfo/no-fragment) on EVERY request.
+- **M7** — 408/409/425/429/499 on create map to `GblCreateEffectUnknown`
+  (ambiguous, read-back reconciled); definite 4xx stay
+  `GblPaperclipClientError`. Typed errors carry `.status`.
+- **M8** — `http.client.HTTPException` (IncompleteRead, BadStatusLine, …)
+  is caught with the transport family; a truncated create reply is
+  EFFECT_UNKNOWN with the read-back reconcile, never a raw exception.
+- **M9** — every path segment passes `_quote_segment`: strict charset
+  `[A-Za-z0-9_-]{1,128}` (no dots, no slashes) then percent-encoded.
+  company/agent ids raise `ValueError` at construction; server-supplied
+  issue ids raise the typed `INVALID_ISSUE_ID` (fail closed), including
+  ids inside list rows.
+- **M1/M2 exposure (client side; protocol unchanged)** — every parsed
+  event gains `comment_id`, `comment_author`, `comment_created_at` and
+  `comment_order` (`"<createdAt-or-''>|<comment id>"`, the same total key
+  the client sorts by). Author is read from `authorAgentId` / `agentId` /
+  `authorId` / `createdBy` / `author` (first present string), else None.
+  **Awaiting the GBL lane's trusted-author/order/create-if-absent
+  contract to rename or extend these fields.** Real-build fact for that
+  round: comments POSTed via `/api/issues/{id}/comments` under
+  `x-instance-role: local_trusted` come back with `authorAgentId: null`,
+  `authorType: "user"`, `authorUserId: "local-board"` — the plain REST
+  route cannot produce agent-attributed comments on this build, so
+  author-based trust needs an agent-authenticated comment surface (or a
+  server change); the client already reads whichever field lands.
+- **L6/L7/L8** — custom headers MERGE with the default instance-role
+  header; credential-shaped header names are banned BY WORD (token/secret/
+  password/auth/cookie/credential/api-key/apikey/bearer); the explicit
+  port must be in 1..65535.
+- **CLI (N1/N3/L10/L11)** — `--wait` retries transient bridge conditions
+  (`BRIDGE_UNREACHABLE`, `BRIDGE_RESPONSE_INVALID`) until the deadline and
+  at the deadline keeps the non-wait exit code (unreachable = 2, not 5);
+  an ask reply without a well-formed ask_id is `BRIDGE_RESPONSE_INVALID`
+  (never `ask_id=None`, never a silently skipped wait); `--poll-seconds`
+  must be finite > 0 and `--deadline-seconds` finite >= 0 (usage errors).
+
+Not fixed here (not mine / deferred, with reasons):
+
+- **H1, H3, M1-full, M2-full, N2, L1, L2, L3, L5** — `bridge_service.py` /
+  `common/gbl_contract.py`, owned by the GBL lane (panel A + panel B
+  H1/H3/M1/M2 repair round). This lane supplies the author/order
+  provenance fields above for their M1/M2 fix.
+- **L4** (`status` never reports EXPIRED) — the bridge's `status` op
+  result (`ask_status`) carries no `expires_at`, so the CLI has no data to
+  display; needs a GBL-lane op change, listed for their round.
+- **L9** (`create_service_agent` not idempotent / weak role validation) —
+  create-if-absent is exactly what the GBL lane's pending contract round
+  is defining; implementing a name-scan heuristic now would pre-empt it.
+
+Dev proof re-run after the repairs (same persisted dev instance, own
+ports, everything stopped after): see the "Repair 1 re-run" section of
+`~/.mastermind/mmos_evidence/gbl-20261111/gbl4-devproof.md`. New probed
+facts recorded there: real pagination IS supported (offset honored, bare
+array), and the comments route's author-null behavior above.
+
+Test evidence for this round (same command, one file at a time):
+`tests/test_gbl_paperclip_client.py` 88/88, `tests/test_gbl_ask_cli.py`
+35/35; regressions `tests/common/gbl_contract_test.py` 72/72,
+`tests/test_gbl_bridge_service.py` 35/35, `tests/test_gbl_nudge.py`
+10/10, `tests/test_gbl_message_send.py` 19/19.
+
 ## Test-run evidence (one file at a time)
 
 `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q
