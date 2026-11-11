@@ -1796,6 +1796,13 @@ def handle_return(pc, t3, issue, ask_op, opts):
     single = len(done_rows) == 1
     stale_reply = None   # reconciled from a turn an earlier run sent
     fresh_reply = None   # produced by THIS run's send/wait
+    # Delta-3 N2: the children list serves newest-activity-first (captured
+    # children_query_dev.json), so the first row the walk sees is the NEWEST
+    # child. The legacy unsuffixed return op belongs to the OLDEST child —
+    # the single-child era's turn is the first child's answer — so it is
+    # adopted by the earliest createdAt, never by walk position.
+    oldest_id = min(done_rows,
+                    key=lambda row: row.get("createdAt") or "").get("id")
     for idx, child in enumerate(done_rows):
         ret_op = _return_op(ask_op, child, single)
         # The single-child era addressed its return turn with the unsuffixed
@@ -1803,7 +1810,8 @@ def handle_return(pc, t3, issue, ask_op, opts):
         # is absent but the legacy one lives in the thread, reconcile it —
         # a single-to-multi transition must not resend a duplicate turn.
         legacy_op = None
-        if idx == 0 and ret_op != f"{ask_op}-ret":
+        if (child.get("id") == oldest_id
+                and ret_op != f"{ask_op}-ret"):
             legacy_op = f"{ask_op}-ret"
         # R2a finding 16: the bounded lookback applies to the return marker.
         state, existing, thread = scan_marker_deep(t3, ret_op)

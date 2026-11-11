@@ -1323,6 +1323,41 @@ def test_two_reconciled_returns_deliver_the_asks_newest_answer():
     assert pc.issues["is-1"]["status"] == "in_review"
 
 
+def test_the_legacy_return_op_is_adopted_by_the_oldest_child():
+    # Delta-3 N2: the single-child era addressed its return turn with the
+    # unsuffixed op, so that answered turn is the OLDEST child's answer.
+    # The children list serves newest-activity-first (captured
+    # children_query_dev.json), so the first row the walk sees is the
+    # NEWEST child — and adopting the legacy turn positionally (idx == 0)
+    # handed the newest child the oldest child's answered turn, then
+    # re-sent the oldest child a duplicate ask under its per-child op. The
+    # legacy op is adopted by the earliest createdAt, never by position.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it",
+                  createdAt="2026-11-11T11:00:00.000Z")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]   # served newest-first
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    pc.comment_rows["ch-2"] = [board.served_comment(
+        "the review agrees", author_agent_id="ag-vega")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
+                          ("assistant", "r1", "OLD: the file has 12 lines")],
+                replies=["SECOND: the review agrees"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1
+    assert "MMO-3" in t3.sends[0]            # the newest child, freshly sent
+    assert "MMO-2" not in t3.sends[0]        # the oldest reconciled, no resend
+    assert pc.issues["is-1"]["status"] == "in_review"
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"
+              and not c[2].startswith("[t2-carrier]")]
+    assert bodies == ["SECOND: the review agrees"]   # one delivery, the run's
+    assert not any("OLD" in b for b in bodies)       # answer, not the stale
+
+
 def test_a_cancelled_ask_child_is_terminal_for_the_return_edge():
     # Panel-2 q1-10: a cancelled child counted as open work, so the parent
     # stayed blocked forever with nothing left to wait for. Cancelled is
