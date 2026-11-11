@@ -152,17 +152,56 @@ def test_finite_cash_retains_its_value(sandbox, cash):
     assert SD._load_account()["cash"] == cash
 
 
-def test_malformed_later_pending_row_preserves_prior_fill_and_account(sandbox):
+@pytest.mark.parametrize("bad_order", [
+    None, {"shares": "bad"}, {"notional": False}, {"shares": float("inf")},
+    {"shares": -1}, {}, {"shares": 1, "notional": 100},
+    {"ticker": 7, "shares": 1}, {"ticker": " ", "shares": 1},
+    {"side": "unknown", "shares": 1},
+])
+def test_malformed_later_pending_row_preserves_prior_fill_and_account(sandbox, bad_order):
     original = _seed_account()
     pending = [
         {"order_id": "queued-1", "ticker": "MSFT", "side": "buy", "shares": 1.0},
-        None,
+        {"ticker": "AAPL", "side": "sell", **bad_order} if bad_order is not None else None,
     ]
-    SD._PENDING_PATH.write_text(json.dumps(pending))
+    snapshot = json.dumps(pending)
+    SD._PENDING_PATH.write_text(snapshot)
 
-    with pytest.raises(SD.SelfDirectedStateCorrupt, match="pending"):
-        SD.settle_pending(market_open=True, prices={"MSFT": 200.0})
+    for _ in range(2):
+        with pytest.raises(SD.SelfDirectedStateCorrupt, match="pending"):
+            SD.settle_pending(market_open=True, prices={"MSFT": 200.0, "AAPL": 100.0})
+    assert SD._PENDING_PATH.read_text() == snapshot
 
     assert SD._load_account() == original
     assert json.loads(SD._PENDING_PATH.read_text()) == pending
     assert not SD._FILLS_PATH.exists()
+
+
+@pytest.mark.parametrize("sizing", [{"shares": 0.0}, {"notional": 0, "shares": None}])
+def test_legacy_rounded_zero_order_settles_without_fill(sandbox, sizing):
+    _seed_account()
+    SD._save_pending([{"ticker": "MSFT", "side": "buy", **sizing}])
+    settled = SD.settle_pending(market_open=True, prices={"MSFT": 200.0})
+    assert [order["status"] for order in settled] == ["cancelled"]
+    assert not SD._FILLS_PATH.exists()
+
+
+@pytest.mark.parametrize("field", ["shares", "notional"])
+def test_nonfinite_sizing_cannot_create_unreadable_pending_order(sandbox, field):
+    result = SD.place_order("MSFT", "buy", **{field: float("inf")}, market_open=False)
+    assert result["ok"] is False
+    assert not SD._PENDING_PATH.exists()
+
+
+@pytest.mark.strict_book_dirs
+@pytest.mark.parametrize("dangling_link", [False, True], ids=["missing", "dangling"])
+def test_unavailable_book_directory_cannot_report_a_cancel_miss(sandbox, dangling_link):
+    SD._DATA.rmdir()
+    if dangling_link:
+        SD._DATA.symlink_to(sandbox / "offline-book", target_is_directory=True)
+
+    with pytest.raises(SD.SelfDirectedStateCorrupt, match="pending"):
+        SD.cancel_order("queued-1")
+
+    assert not SD._DATA.exists()
+    assert SD._DATA.is_symlink() is dangling_link
