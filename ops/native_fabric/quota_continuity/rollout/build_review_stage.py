@@ -3019,6 +3019,7 @@ def main():
     if "--broker-busy-epoch" not in argv:
         return _MAIN_UPSTREAM()
     global _BROKER_BUSY_EPOCH
+    _previous_busy_epoch = _BROKER_BUSY_EPOCH
     _BROKER_BUSY_EPOCH = True
     argv = [arg for arg in argv if arg != "--broker-busy-epoch"]
     draft = Path(__file__).resolve().parent
@@ -3047,7 +3048,16 @@ def main():
     parser.add_argument("--include-application-glm", action="store_true",
                         help='seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go')
     args = parser.parse_args(argv)
-    _main_busy_build(args, root)
+    try:
+        _main_busy_build(args, root)
+    finally:
+        # The epoch flag is build-scoped state, not process state: in-process
+        # callers (pytest fixtures co-running default builds in the same
+        # interpreter) must never inherit a previous busy build. Restoring the
+        # previous value keeps every later default build byte-identical
+        # (observed as CI shards 3/5 'ValueError: application carrier source
+        # changed during build' when the flag leaked across tests).
+        _BROKER_BUSY_EPOCH = _previous_busy_epoch
 
 
 def _main_busy_build(args, root):
