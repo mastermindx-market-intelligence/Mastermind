@@ -817,3 +817,56 @@ origin (`t3/mmos-v4-t8` at `593aeb9d8`, `t3/mmos-v4-t4c` at `f31bf26b6`).
   This is now in `LANE_RULES_V4.md`.
 
 **Running now, at the width cap of four:** T8, T4c, TSHb, TSR.
+
+## 23. Amendment, 2026-11-11 02:20 UTC: short names are live and Secretary is the third teammate
+
+**Lane TSR is accepted and merged** (`0bc336a1f`, trunk `d798d9f34`). It ran all seven
+steps on a team server of its own and found three defects that the unit tests had not, each
+fixed with a test that failed first:
+- The rename helper called a browser-only function from Node, so every rename failed.
+- The roster spec could not describe the long-title starting state or the way back. A spec
+  can now say `"allow_long_titles": true`.
+- A warning was printed into the `status` output, which is meant to be machine-readable. It
+  now goes to the error stream.
+
+**The short names are on the real team server** (applied by me, 02:05 UTC). The threads
+are `Assurance — quality` and `Design Lead — product`. Thread ids and pins are unchanged, no
+thread was created, and a second apply changed nothing. The real spec lacked the
+`browser_profile` key the rename needs; the runbook did not say so. The key is now in the
+spec.
+
+**Secretary is the third teammate** (cut over 02:13:47 UTC, trunk `2f543e683`). Its thread
+is `mcp:7955c764-a883-4774-abb8-297a4579ebf8`, pinned. Its Hermes persona file has almost no
+role prose, so I wrote its charter: it keeps the view of a piece of work, states a request
+back, routes the specialist part to a teammate, checks what comes back, and keeps the
+company record. It cannot decide strategy or approve a release. The other two teammates'
+carrier configs were refreshed, so each of the three can ask the other two. The way back is
+`cutover_installed.py rollback tools/mmos_teammate/specs/secretary.installed.json`. The
+limit of three teammates is reached; ten agents stay on Hermes.
+
+**Proof on the installed app: MAS-12 and MAS-13.** Secretary was asked to write the day's
+company record after asking Design Lead one question. This is the kind of task it failed on
+Hermes in MAS-9, where the run ended after thirty minutes with nothing written.
+- Three runs, all succeeded, 61 seconds end to end (02:14:34 to 02:15:35 UTC): Secretary
+  asked, Design Lead answered in MAS-13, the answer woke Secretary, Secretary posted the
+  record and asked for confirmation.
+- I accepted the confirmation. MAS-12 and MAS-13 are done.
+
+**Design Lead's answer changed the product.** The question was whether `follow-up` is the
+right word after Secretary's name. Its answer: no, it names an activity rather than a domain
+and is the weakest of the three; use `records`. I adopted it. The thread is now
+`Secretary — records`, renamed through the same proven path, pin unchanged, and the charter
+says what the record is. This is the first product change that came from one teammate
+asking another.
+
+**What the attention list shows now:** three items, all Astra's (the Meta-CEO agent's error
+and MAS-4). None is from this program.
+
+**DONE_WHEN.** Item 4 now has three teammates with different charters and tools; the
+rotation proof on a real teammate is still owed. Items 1 and 2 wait on T8. Item 3 waits on
+the Chairman's linked-environment switch. Item 10's installed coding job is lane T4d, after
+T4c and an independent review.
+
+**Running now:** T8, T4c, TSHb. One slot is free.
+
+Evidence: `~/.mastermind/mmos_evidence/short-names-20261111/LEDGER.md`.
