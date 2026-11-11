@@ -69,7 +69,10 @@ directory your brief names, each on a port you pick and state in your return.
   - `deepseek-v4.1-flash` is as good as unlimited. Use it freely and in parallel for work
     with a mechanical check: reading a file and reporting facts with line numbers, writing a
     failing test for a stated defect, running a test sweep and returning the output, one
-    bounded edit with its test. Up to four at once per driver.
+    bounded edit with its test. Up to four at once per driver. Its routes drop a long run
+    now and then (a 502 from the gateway, seen twice in one hour on 2026-11-11): tell every
+    DeepSeek child to write its result file early and keep adding to it, and restart the same
+    thread once when it fails that way.
   - `kimi-k3.1-pro` is free but slow and shared by every lane (one pool, about 150 tokens a
     second). Use it for the hardest part of your lane: the design question, the attack on
     your diff, the bug you failed at twice. One Kimi child per lane at a time. If it fails
