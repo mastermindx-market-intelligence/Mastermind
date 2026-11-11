@@ -229,6 +229,54 @@ Proved, live, on the dev/t8 bundle against a private dev T3 server
   watchdog's whole state machine, and token-free logging are unit-tested in
   `shell_pairing.rs` and `tests/test_mmos_window_config.py`.
 
+### T8b — re-proof on the repaired binary (2026-11-11)
+
+The second review panel's findings were fixed on branch `t3/mmos-v4-t8b`
+(repairs A–P plus an attack round; see
+`integrations/mmos/T8B_PANEL_REPAIRS.md`), and the good path and failure
+path were re-proved live on the rebuilt dev bundle against the private
+dev T3 server (127.0.0.1:3790). Evidence:
+`~/.mastermind/mmos_evidence/t8b-20261111/`.
+
+- The app starts. The first live-proof round of this lane could not even
+  launch: the watchdog's URL poll hit wry's nil-URL unwrap before the
+  first load committed and the app died at every launch
+  (`01-dead-helper/launch3-backtrace.log`). Fixed with a committed-load
+  gate keyed to the window generation; the smoke launch then ran the full
+  mint→verify cycle (`00-smoke-fixed/`).
+- First open pairs with no typing (`PAIRING.DONE`; `02-good-path/`).
+- A session revoked mid-launch re-pairs through View > Go to Server in
+  the same launch — a second `PAIRING.DONE` ~8 s later, no relaunch
+  (`02-good-path/`, steps 8).
+- Closing the window exits this single-window app (§6 already records
+  this for Close Window); opening the app again pairs again
+  (`02-good-path/`, steps 9–10).
+- A second launch while the first runs starts nothing: the second process
+  exits immediately, exactly one process remains (`02-good-path/`,
+  launch3).
+- The failure path with a dead helper (`03-dead-helper/*-r2`): exactly
+  three helper runs, one input-free `PAIRING.FAILED.helper_exit` record
+  per attempt and the one-sentence page each time (View > Back and View >
+  Go to Server each re-engage it); past the budget the helper runs zero
+  times and one input-free `PAIRING.FAILED.rate_limited` record is
+  written. The rate-limit page shows the same sentence as the
+  helper-failure page — the log, not the page wording, distinguishes
+  them. One more Go to Server after the rate-limited page lands on the
+  server's own pairing page (the pre-watchdog baseline behaviour; the
+  helper still runs zero times).
+- Outside link: pressing a link to `https://example.com/…` inside the
+  thread left the window on the thread page and wrote no navigation
+  record — the thread page's `target="_blank"` link takes WebKit's
+  new-window path, which hands such links to the default browser without
+  the navigation callback (the default browser did come forward). Either
+  path leaves the window never loading an outside origin.
+- Menus on the repaired binary: View > Reload keeps the signed-in thread
+  and adds no pairing record; View > Back from the thread lands on the
+  inert blank page; Copy/Paste present and enabled on both the thread and
+  failure pages (not pressed); Zoom Out and Actual Size pressed via
+  AXPress produced no measured scale change and Actual Size never
+  disabled — the §6 zoom rows stand.
+
 Not proved by this lane: the release bundle build and the real team server
 on 3780 (forbidden to the lane; that is exactly what sections 1–3 hand
 you), a real multi-day session expiry (cookie deletion is the stand-in),
@@ -269,18 +317,18 @@ rows were measured on the shipped menu):
 
 | Action | Verdict | Evidence and limitation |
 |---|---|---|
-| Copy — ⌘C | does-not-work | Key event delivered to the exact PID with the draft selected; system pasteboard unchanged. Menu item `Edit > Copy` exists. |
-| Paste — ⌘V | does-not-work | Pasteboard set to a known marker; ⌘V left the draft unchanged, marker still on pasteboard. Menu item exists. |
+| Copy — ⌘C | does-not-work | Key event delivered to the exact PID with the draft selected; system pasteboard unchanged. Menu item `Edit > Copy` exists, enabled on the thread and failure pages (T8b, not pressed). |
+| Paste — ⌘V | does-not-work | Pasteboard set to a known marker; ⌘V left the draft unchanged, marker still on pasteboard. Menu item exists, enabled on the thread and failure pages (T8b, not pressed). |
 | Select all — ⌘A | works | Draft range `17,0` → `0,17` after the key (`task4`, `task5` receipts). |
 | Undo — ⌘Z | works | Lane keystroke run: draft typed with real per-PID keystrokes, ⌘Z reverted the field to empty (`task4-lane/edit-run-final2.txt`). |
 | Find — ⌘F | works | Opens the in-window "Find in thread" field (web-side control; there is no Find menu item — noted, not fixed: it already works). |
-| Reload — ⌘R (T8) | NOT TESTED | Menu item present; the child's dispatch receipt is empty and before/after AX reads are identical, so neither works nor fails is proven. |
+| Reload — ⌘R (T8) | works via menu | View > Reload pressed (AXPress) on the signed-in thread: page intact, no new pairing record (T8b `02-good-path/`). The ⌘R key itself was not fired. |
 | Close window — ⌘W | works via menu | `File > Close Window` terminated the single-window app; the ⌘W key itself was not separately fired. |
 | Quit — ⌘Q | not-tested | Menu advertises ⌘Q; every attempt found the process already gone (close had terminated it). |
 | Zoom in — ⌘= (T8) | works | AX element sizes grew 28→32 px / 239→264 px after the key (`task5/zoom-*-verified-ax.json`). |
-| Zoom out — ⌘- (T8) | does-not-work | Dispatch receipt present; AX sizes unchanged from the zoomed state across two passes. |
-| Actual size — ⌘0 (T8) | does-not-work | Dispatch receipt present; AX sizes unchanged from the zoomed state across two passes. |
-| Back — ⌘[ (T8) | NOT TESTED | Navigating to a second thread first was refused by the desktop tooling, so no history existed for ⌘[ to walk. |
+| Zoom out — ⌘- (T8) | does-not-work | Dispatch receipt present; AX sizes unchanged from the zoomed state across two passes. T8b: menu item enabled and pressed via AXPress — no measured scale change; still not working by any tested path. |
+| Actual size — ⌘0 (T8) | does-not-work | Dispatch receipt present; AX sizes unchanged from the zoomed state across two passes. T8b: menu item enabled and pressed via AXPress at all zoom states (never disabled); still not working by any tested path. |
+| Back — ⌘[ (T8) | works via menu | View > Back pressed from the signed-in thread: the window lands on the inert blank page ("Mastermind OS", 11 nodes), as the location.replace design predicts (T8b `02-good-path/window8`). The ⌘[ key itself was not fired. |
 | Reopen after close | works | 30 s after verified process exit, `open -n` returned exactly one instance, signed in on the same thread, no pairing. |
 
 Honest caveat on the T8 zoom rows: all shortcuts were driven by synthetic

@@ -249,6 +249,44 @@ fail-first evidence is the crash itself plus
 `test_watchdog_never_polls_the_url_before_a_committed_load` (python,
 source-level, failed on the pre-fix commit export).
 
+## Live-proof rounds 2–4 on the fixed binary
+
+All evidence under `~/.mastermind/mmos_evidence/t8b-20261111/`
+(`00-smoke-fixed/`, `02-good-path/`, `03-dead-helper/`; the blocked third
+round's files are kept under `03-dead-helper/` without the `-r2` suffix).
+
+- **The app starts and pairs** (smoke, then `02-good-path/`): first open
+  with no session → `PAIRING.DONE`, signed-in thread, no typing.
+- **A later `/pair` arrival re-pairs in the same launch**: session
+  revoked mid-launch, View > Go to Server → second `PAIRING.DONE` in ~8 s
+  (repair A's re-arm).
+- **Closed → reopened pairs again**: closing the window exits this
+  single-window app (incumbent Tauri behaviour, already recorded in the
+  runbook §6); the relaunch pairs (third `DONE`).
+- **Single instance** (repair G): a second launch while the first runs
+  exits immediately; exactly one process remains; the good-path child
+  proved it against a live first instance.
+- **Dead helper → failure page, budget enforced**: three helper runs
+  (initial arrival, Back, Go to Server), one input-free
+  `PAIRING.FAILED.helper_exit` per attempt and the one-sentence page each
+  time; past the budget the helper runs zero times and exactly one
+  input-free `PAIRING.FAILED.rate_limited` record is written
+  (`03-dead-helper/*-r2`).
+- **Outside link never loads in the window**: pressing an example.com
+  link in the thread left the window on the thread page; the page's
+  `target="_blank"` link takes WebKit's new-window path, which hands such
+  links to the default browser without the navigation callback (the
+  default browser came forward). The navigation-allowlist half is
+  unit-tested; the new-window half is this live observation.
+
+Recorded as-is (not defects, not reopened): the rate-limit page reuses
+the helper-failure sentence — the log's input-free codes distinguish
+them; a fifth arrival after the rate-limited page shows the server's own
+pairing page (the pre-watchdog baseline; the helper still runs zero
+times); Zoom Out / Actual Size pressed via AXPress produced no measured
+scale change (the runbook §6 zoom rows stand); Copy/Paste were verified
+present and enabled only, never pressed.
+
 ## Attack round (two effort-max children on the part-1 export)
 
 Two children worked the exported part-1 commit (`/tmp/t8b-atk/src`): one
