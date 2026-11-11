@@ -805,6 +805,47 @@ def test_ask_title_that_is_only_a_marker_gets_a_plain_title():
     assert "[pc-" not in child["title"]
 
 
+def test_an_identical_re_ask_after_the_child_finished_creates_new_work():
+    # The reuse scan matched assignee + sanitised title only, so an
+    # identical re-ask in the return turn's reply reused a DONE child: the
+    # parent re-blocked on a finished blocker, the next wake resolved it
+    # again, the return edge re-delivered the old answer — a wedge with no
+    # progress. A finished child is not work in flight: only an OPEN child
+    # of this same ask is reusable; otherwise the ask is new work and gets
+    # a new child.
+    roster = {"Atlas-TEST": "ag-atlas"}
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    ask_op = f"{op}-ask"
+    parent = board.served_parent(
+        id="is-1", identifier="MMO-1", status="blocked",
+        dependencyReady=True,
+        title="Summarize file X",
+        description="Write a three-line summary.")
+    done_child = board.served_child(
+        id="ch-1", identifier="MMO-2", parentId="is-1",
+        assigneeAgentId="ag-atlas", title="Count lines in t45_alpha.txt",
+        status="done",
+        description=f"Asked by Mira on MMO-1 [{ask_op}]")
+    parent["blockedBy"] = board.blocked_by(done_child)  # the old record
+    pc = FakePaperclip(issues={"is-1": parent})
+    pc.child_rows["is-1"] = [dict(done_child)]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    ret_op = f"{ask_op}-ret"
+    t3 = FakeT3(messages=[("user", "r1", f"[{ret_op}]\n\nthe ask came back"),
+                          ("assistant", "r1", ASK_REPLY)])  # the re-ask
+    assert run_with_roster(pc, t3, roster) == 0
+    assert t3.sends == []                 # the return turn only reconciled
+    creates = [c for c in pc.calls if c[0] == "create_issue"]
+    assert len(creates) == 1              # a NEW child, not the done one
+    new_id = creates[0][2]
+    assert new_id != "ch-1"
+    kids = {row["id"]: row for row in pc.child_rows["is-1"]}
+    assert kids[new_id]["assigneeAgentId"] == "ag-atlas"
+    # the parent waits on the new child, not the finished one
+    assert pc.issues["is-1"]["status"] == "blocked"
+    assert new_id in [row["id"] for row in pc.issues["is-1"]["blockedBy"]]
+
+
 def test_a_revised_ask_to_another_teammate_creates_its_own_child():
     # Attack finding 16: the marker is the PARENT's content, so two different
     # asks on one parent share it; reuse keyed on the marker alone swallowed a

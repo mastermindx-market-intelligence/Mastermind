@@ -1703,7 +1703,13 @@ def handle_ask(pc, issue, reply, ask, op, opts):
     # one, which left the second teammate never woken.
     want_title = strip_markers(ask["title"])
     for row in pc.children(issue["id"]):
+        # A finished (done/cancelled) child is not work in flight: reusing
+        # it re-blocked the parent on a DONE blocker — the return edge
+        # re-delivered the old answer and the new ask never happened. Only
+        # an OPEN child of this same ask is reusable; otherwise the ask is
+        # new work and gets a new child.
         if (is_ask_child_of(row, issue)
+                and row.get("status") not in ("done", "cancelled")
                 and row.get("assigneeAgentId") == agent_id
                 and (row.get("title") or "") == want_title):
             child = row
