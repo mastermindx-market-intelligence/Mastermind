@@ -2761,6 +2761,7 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
+        _log.warning("Self-Directed book unavailable: %s", type(exc).__name__)
         # A read we could not perform renders `unavailable` — never a fabricated funded book
         # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
         try:
@@ -2772,7 +2773,8 @@ def api_self_directed() -> JSONResponse:
                    "reason_code": "self_directed_book_unreadable",
                    "nav": None, "cash": None, "invested": None,
                    "starting_nav": None, "positions": [], "pending": [],
-                   "allocation": None, "market": market, "error": str(exc)}
+                   "allocation": None, "market": market, "valuation_complete": False,
+                   "error": "self_directed_unavailable"}
         # E13: the typed invalid-account error keeps its own reason code and evidence instead
         # of collapsing into the generic unreadable string.
         reason_code = getattr(exc, "reason_code", None)
@@ -3634,7 +3636,7 @@ def api_runs() -> JSONResponse:
     """
     try:
         from brain import runlog
-        runs = runlog.list_runs()
+        runs = runlog.list_runs(strict=True)
         for r in runs:
             tz = _cached_zh(r.get("title") or "")
             if tz:
@@ -3644,7 +3646,9 @@ def api_runs() -> JSONResponse:
                 r["summary_zh"] = sz
         return JSONResponse(runs)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("run history unavailable (%s)", type(exc).__name__)
+        return JSONResponse({"run_status": "unavailable", "runs": None,
+                             "error": "run_history_unavailable"}, status_code=500)
 
 
 @router.get("/api/runlog")
@@ -3654,10 +3658,17 @@ def api_runlog(run_id: str | None = None) -> JSONResponse:
     Returns {run_id, ts, kind, title, steps: [{ts, type, title, detail, ...}]}."""
     try:
         from brain import runlog
-        return JSONResponse(runlog.read_run(run_id or None))
-    except Exception:
-        _log.exception("runlog read failed")
-        return JSONResponse({"run_id": run_id, "steps": [], "error": "runlog unavailable"}, status_code=500)
+        if run_id:
+            try:
+                runlog.validate_run_id(run_id)
+            except ValueError:
+                return JSONResponse({"run_id": None, "trace_status": "unavailable",
+                                     "steps": None, "error": "invalid run_id"}, status_code=400)
+        return JSONResponse(runlog.read_run(run_id or None, strict=True))
+    except Exception as exc:
+        _log.warning("runlog unavailable (%s)", type(exc).__name__)
+        return JSONResponse({"trace_status": "unavailable", "steps": None,
+                             "error": "runlog unavailable"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------

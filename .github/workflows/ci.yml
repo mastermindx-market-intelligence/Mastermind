@@ -57,10 +57,19 @@ jobs:
             trusted_base="$(git rev-parse --verify refs/remotes/origin/master 2>/dev/null || true)"
           fi
           if [ -n "$trusted_base" ] &&
+             git cat-file -e "${trusted_base}:scripts/__init__.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&
+             git cat-file -e "${trusted_base}:control_plane/__init__.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
-            git archive "$trusted_base" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |
+            git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py control_plane/__init__.py control_plane/github_review_risk_policy.py |
               tar -x -C "$trusted"
+            # The current classifier's closure is the four files above. A PR
+            # whose recorded base predates #2439 still classifies with a
+            # protected classifier that imports the smoke selector; only that
+            # legacy classifier receives its own protected-base copy.
+            if grep -q '^from scripts\.ci_pr_smoke import ' "$trusted/scripts/ci_pr_scope.py"; then
+              git archive "$trusted_base" scripts/ci_pr_smoke.py | tar -x -C "$trusted"
+            fi
             if grep -q '^def classify_merge_group(' "$trusted/scripts/ci_pr_scope.py"; then
               PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
                 --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
@@ -78,8 +87,8 @@ jobs:
             echo 'CI_SCOPE source not in protected base: required full suite'
           fi
 
-  # Fast and standard integrated queue candidates reuse the same trusted,
-  # bounded PR checks; critical or unqualified groups run every full shard.
+  # FAST integrated queue candidates reuse the same trusted, bounded PR
+  # checks; standard, critical or unqualified groups run every full shard.
   # The stable protected status context is still the final job named 'test'.
   # Heavy work must stop when this same-PR run is superseded/cancelled.
   # Keep the small final test gate on always() so cancellation cannot look green.
@@ -87,7 +96,8 @@ jobs:
     name: PR fast checks
     needs: [pr_scope]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}
-    runs-on: ubuntu-latest
+    # Test-executing jobs run on a GitHub-hosted image only (see pytest_shards).
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
       contents: read
@@ -181,6 +191,86 @@ jobs:
       - name: Run pinned source-identity guard suite
         run: python -m scripts.ci_pin_guards
 
+  # CI Lightning F3: the five once-per-checkout non-pytest qualification
+  # gates moved out of shard 0 into this parallel job. Measured on merge
+  # group 42708053350 they serialized ~4m43s ahead of shard 0's pytest
+  # mass; here they run beside all six shards instead. Commands are
+  # byte-identical and each gate still executes on every full CI run
+  # (push, dispatch, and full-mode PR/merge group), including pushes that
+  # reuse a same-SHA merge-group pytest proof -- reuse may skip only the
+  # pytest step, never a qualification gate.
+  # Sixth gate: the web application typecheck. pr_fast typechecks only
+  # fast/smoke candidates, and it is skipped in full mode, so before this
+  # gate no full merge group and no push typechecked app/mastermind_os.
+  # It is unconditional by design: pr_scope does not run on push/dispatch,
+  # and every fail-closed HOLD decision reports needs_node=false, so that
+  # output cannot gate it. pr_fast (mode != full) and this job (mode ==
+  # full) are mutually exclusive, so the typecheck never runs twice.
+  # Hosted-only label: the Fabric gate installs from the checkout and
+  # refuses group/other-writable or foreign-owned source directories
+  # (control_bundle SOURCE_DIRECTORY_INVALID), which the shared persistent
+  # self-hosted "ubuntu-latest" hosts produced on 2026-11-10. ubuntu-24.04
+  # selects a clean GitHub-hosted runner every time.
+  qualification:
+    name: Non-pytest qualification gates
+    needs: [pr_scope]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: |
+            integrations/studio_direct_mcp/package-lock.json
+            app/mastermind_os/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project
+        run: |-
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Verify Paper direct pinned MCP SDK
+        run: |
+          PAPER_MCP_VENV="$RUNNER_TEMP/paper-direct-mcp-ci"
+          python -m venv "$PAPER_MCP_VENV"
+          "$PAPER_MCP_VENV/bin/python" -m pip install --disable-pip-version-check \
+            -r integrations/paper_desktop/requirements-mcp.txt
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
+      - name: Verify Paper Studio prepare guard
+        working-directory: integrations/studio_direct_mcp
+        run: node --test paper-design.test.mjs
+      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
+        working-directory: integrations/studio_direct_mcp
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
+          python -m unittest discover -s . -p 'private_service*test.py'
+          python -m unittest discover -s . -p 'control_bundle*test.py'
+      - name: Compile source
+        run: >-
+          python -m compileall -q
+          app bot brain bridge common control_plane data_layer integrations loop
+          portfolio scripts
+      - name: Validate shell scripts
+        run: |
+          find scripts ops/executive_os -type f -name '*.sh' -print0 |
+            xargs -0 -n1 bash -n
+      - name: Typecheck web application
+        run: |
+          npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
+          npm --prefix app/mastermind_os run typecheck
+
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules
   # or the repository's one protected status context named "test".
@@ -194,7 +284,14 @@ jobs:
     permissions:
       contents: read
       actions: read
-    runs-on: ubuntu-latest
+    # GitHub-hosted image only. In this organization `ubuntu-latest` can also be
+    # served by persistent, multi-slot self-hosted runners. This suite asserts
+    # single-tenant host invariants (ancestor directory identity, modes, ACLs,
+    # a private temp tree), so a shared persistent host fails it regardless of
+    # the change under test. No self-hosted runner carries `ubuntu-24.04`.
+    # Scope classification and the `test` fan-in execute no suite and stay on
+    # `ubuntu-latest`.
+    runs-on: ubuntu-24.04
     # Keep every prerequisite and the full 45-minute repository allowance.
     # Actual setup took ~23m; a successful test/upload then crossed job60 in
     # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
@@ -284,47 +381,6 @@ jobs:
           tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
           tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
           tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
-
-      # Non-pytest qualification is required once per immutable CI checkout.
-      # Failure of shard 0 also fails the exact required fan-in status.
-      - name: Verify Paper direct pinned MCP SDK
-        if: matrix.index == 0
-        run: |
-          PAPER_MCP_VENV="$RUNNER_TEMP/paper-direct-mcp-ci"
-          python -m venv "$PAPER_MCP_VENV"
-          "$PAPER_MCP_VENV/bin/python" -m pip install --disable-pip-version-check \
-            -r integrations/paper_desktop/requirements-mcp.txt
-          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
-          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
-
-      # Exercise the guarded Paper Studio prepare action in hosted CI.
-      # These Node tests are not included in the canonical pytest shard plan.
-      - name: Verify Paper Studio prepare guard
-        if: matrix.index == 0
-        working-directory: integrations/studio_direct_mcp
-        run: node --test paper-design.test.mjs
-
-      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
-        if: matrix.index == 0
-        working-directory: integrations/studio_direct_mcp
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
-          python -m unittest discover -s . -p 'private_service*test.py'
-          python -m unittest discover -s . -p 'control_bundle*test.py'
-
-      - name: Compile source
-        if: matrix.index == 0
-        run: >-
-          python -m compileall -q
-          app bot brain bridge common control_plane data_layer integrations loop
-          portfolio scripts
-
-      - name: Validate shell scripts
-        if: matrix.index == 0
-        run: |
-          find scripts ops/executive_os -type f -name '*.sh' -print0 |
-            xargs -0 -n1 bash -n
 
       # Supplementary fast discrimination for the three observed Linux
       # initializer failures. A green matrix still requires every full shard.
@@ -652,7 +708,7 @@ jobs:
     # Metadata-only edits publish no required test result, even a skipped one.
     # Real source/base events retain the same name and strict always() fan-in.
     name: ${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && 'PR metadata edit' || 'test' }}
-    needs: [pr_scope, pr_fast, pin_guards, pytest_shards]
+    needs: [pr_scope, pr_fast, pin_guards, qualification, pytest_shards]
     if: ${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -671,6 +727,7 @@ jobs:
           PR_SCOPE_MODE: ${{ needs.pr_scope.outputs.mode }}
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
           GUARDS_STATUS: ${{ needs.pin_guards.result }}
+          QUAL_STATUS: ${{ needs.qualification.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
         run: |
           set -euo pipefail
@@ -685,13 +742,13 @@ jobs:
             fi
             case "$PR_SCOPE_MODE" in
               full)
-                if [ "$SHARDS_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
+                if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
                   echo "critical/unqualified source must pass all six pytest shards"
                   exit 1
                 fi
                 ;;
               fast|smoke)
-                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ]; then
+                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUAL_STATUS" != skipped ]; then
                   echo "eligible source must pass its exact fast/smoke check"
                   exit 1
                 fi
@@ -702,10 +759,11 @@ jobs:
                 ;;
             esac
           else
-            # Protected pushes and deliberate manual CI always run all shards.
-            # Excluded guard modules must pass here too: manual runs and
-            # pushes without reusable proof still require complete coverage.
-            if [ "$SHARDS_STATUS" != success ] ||
+            # Protected pushes and deliberate manual CI always run all shards
+            # and every non-pytest qualification gate. Excluded guard modules
+            # must pass here too: manual runs and pushes without reusable
+            # proof still require complete coverage.
+            if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] ||
                [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||
                [ "$GUARDS_STATUS" != success ]; then
               echo "integration/release CI must pass the full matrix"

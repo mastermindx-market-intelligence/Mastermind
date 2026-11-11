@@ -479,3 +479,100 @@ def test_nonzero_partial_observation_retains_qualified_source_custody(bound, mon
     assert report['installed_service_peer_attested'] is report['campaign_qualified'] is False
     assert cli.main(['--summarize-observations', str(path)]) == 2
     assert json.loads(capsys.readouterr().out) == report
+
+
+# ---------------------------------------------------------------------------
+# MMOS V1 WO-09 — QuotaEconomicsPreviewProducer runtime reads (deployed
+# broker schema, read-only custody, deterministic real-path behavior).
+# ---------------------------------------------------------------------------
+
+
+def test_quota_preview_broker_read_is_strictly_read_only(tmp_path):
+    from control_plane import executive_capacity_observation_producer as factory
+    from control_plane import quota_economics_preview_producer as quota
+    from tests.test_executive_capacity_observation_producer import (
+        QUOTA_OBSERVED,
+        quota_broker,
+        quota_projection,
+        source_config,
+    )
+
+    projection_path = tmp_path / "owner_ext_projection.json"
+    projection_path.write_text(json.dumps(quota_projection()))
+    broker_path = quota_broker(
+        tmp_path / "leases.sqlite",
+        held=(("bailian:Chris", "held"),),
+        released=(("bailian:Chris", "released"),),
+    )
+    before = broker_path.read_bytes()
+    before_mode = broker_path.stat().st_mode & 0o777
+    config = factory.validate_worker_capacity_source_config(source_config())
+    preview = quota.produce_quota_economics_preview(
+        source_config=config,
+        projection_path=projection_path,
+        broker_db_path=broker_path,
+        observed_at=QUOTA_OBSERVED,
+    )
+    assert preview.document["resources"]
+    assert broker_path.read_bytes() == before
+    assert broker_path.stat().st_mode & 0o777 == before_mode
+    # A read-only URI open leaves no journal/WAL sidecar behind.
+    assert not list(tmp_path.glob("leases.sqlite-*"))
+    observation = quota.read_broker_observation(broker_path)
+    assert observation["generation"] == 2
+    assert observation["leases_by_state"] == {"held": 1, "released": 1}
+    assert observation["active_by_quota_scope"] == {"bailian:Chris": 1}
+    assert observation["waiters_total"] == 0
+
+
+def test_quota_preview_reports_unassignable_declared_cooldown_scopes(tmp_path):
+    from datetime import datetime, timezone
+
+    from tests.test_executive_capacity_observation_producer import quota_preview
+
+    until = datetime(2026, 9, 17, 6, 0, tzinfo=timezone.utc).timestamp()
+    preview, _, _ = quota_preview(
+        tmp_path,
+        cooldowns=(("declared:byteplus:deadbeef", until - 60, until),),
+    )
+    document = preview.to_dict()
+    # A declared-subscription scope never maps to a projection account and is
+    # reported unassigned instead of being guessed onto a resource.
+    assert document["broker"]["cooldown_scopes_unassigned"] == [
+        "declared:byteplus:deadbeef"
+    ]
+    for row in document["resources"]:
+        assert row["cooldown_source"] != "lease_broker_quota_cooldown"
+
+
+def test_quota_preview_is_deterministic_and_pins_its_factory_config(tmp_path):
+    from control_plane import executive_capacity_observation_producer as factory
+    from control_plane import quota_economics_preview_producer as quota
+    from tests.test_executive_capacity_observation_producer import (
+        QUOTA_OBSERVED,
+        quota_preview,
+        source_config,
+    )
+
+    first, config, _ = quota_preview(tmp_path)
+    # Same explicit inputs (paths, sealed config, observed_at) reproduce the
+    # exact same canonical artifact bytes.
+    again = quota.produce_quota_economics_preview(
+        source_config=config,
+        projection_path=tmp_path / "owner_ext_projection.json",
+        broker_db_path=tmp_path / "leases.sqlite",
+        observed_at=QUOTA_OBSERVED,
+    )
+    assert first.canonical_bytes() == again.canonical_bytes()
+    assert first.to_dict()["observation_digest"] == again.to_dict()["observation_digest"]
+    # The artifact pins the sealed trusted-factory source identity digest.
+    document = first.to_dict()
+    assert document["producer"]["source_config_digest"] == (
+        factory.worker_capacity_source_config_digest(config)
+    )
+    assert document["producer"]["source_config"]["capacity_capability_id"] == (
+        source_config()["capacity_capability_id"]
+    )
+    # And the document round-trips through canonical JSON unchanged.
+    assert json.loads(first.canonical_bytes()) == document
+    assert quota.QuotaEconomicsPreview(document=document).to_dict() == document

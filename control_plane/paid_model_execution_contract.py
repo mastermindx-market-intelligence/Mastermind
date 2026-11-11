@@ -57,7 +57,7 @@ def compile_request(payload):
                 'validation_commands', 'paid_route', 'paid_input'} <= set(payload)
                 or set(payload) - {'binding', 'physical_binding_sha256', 'launch_spec',
                 'validation_commands', 'paid_route', 'paid_input', 'control_start',
-                'start_request_sha256', 'control_recovery', 'paid_physical_binding', 'paid_source_config', 'paid_account', 'paid_quota_class'}
+                'start_request_sha256', 'control_recovery', 'paid_physical_binding', 'paid_source_config', 'paid_account', 'paid_quota_class', 'paid_child_admission'}
                 or type(payload['physical_binding_sha256']) is not str
                 or not _DIGEST.fullmatch(payload['physical_binding_sha256'])):
             raise ValueError

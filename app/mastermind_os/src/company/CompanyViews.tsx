@@ -2,6 +2,7 @@ import { SourceLink } from "./SourceLink";
 import { TaskOutputs } from "./TaskOutputs";
 import { useState } from "react";
 import { RuntimeIntegrationView } from "./RuntimeIntegrationView";
+import { CompanyConnectionsView } from "./CompanyConnectionsView";
 import type {
   CompanyCollection,
   CompanyRecord,
@@ -217,6 +218,7 @@ export function CompanyViews({
             </p>
           </section>
         </div>
+        <CompanyConnectionsView snapshot={snapshot} locale={locale} onSelect={onSelect} onOpenProject={onOpenProject} />
       </>
     );
   }
@@ -430,11 +432,9 @@ export function CompanyViews({
                   <dd>
                     {manager
                       ? title(manager)
-                      : value(
-                          agent,
-                          "reportsTo",
-                          t("Company leadership", "公司负责人"),
-                        )}
+                      : agent.reportsTo
+                        ? t("Manager outside this loaded view", "汇报对象不在当前已载入视图中")
+                        : t("No manager recorded", "未记录汇报对象")}
                   </dd>
                   <dt>{t("Paperclip adapter", "Paperclip 适配器")}</dt>
                   <dd>{value(agent, "adapterType")}</dd>

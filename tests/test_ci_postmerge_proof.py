@@ -65,17 +65,11 @@ def _push() -> dict:
 
 
 def _steps(index: int) -> list[dict]:
+    # index 0-5 are the shards; 6 is the "test" fan-in (see _jobs()).
     names = (
         ["Run repository test gate"] if index == 6 else
         ["Fast source-bound release preflight", "Run repository test shard"]
     )
-    if index == 0:
-        names[:0] = [
-            "Verify Paper direct pinned MCP SDK",
-            "Verify Paper Studio prepare guard",
-            "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-            "Compile source", "Validate shell scripts",
-        ]
     if index == 2:
         names[:0] = [
             "H1 initializer Linux fast preflight",
@@ -84,12 +78,26 @@ def _steps(index: int) -> list[dict]:
     return [{"name": name, "status": "completed", "conclusion": "success"} for name in names]
 
 
+def _qualification_steps() -> list[dict]:
+    # The five non-pytest gates the F3 qualification job must prove ran.
+    return [
+        {"name": name, "status": "completed", "conclusion": "success"}
+        for name in (
+            "Verify Paper direct pinned MCP SDK",
+            "Verify Paper Studio prepare guard",
+            "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "Compile source", "Validate shell scripts",
+        )
+    ]
+
+
 def _jobs() -> dict:
     names = [f"pytest shard {index}" for index in range(6)] + [
-        "test", "PR test scope", "Pin and identity guards", "PR fast checks",
+        "test", "PR test scope", "Pin and identity guards",
+        "Non-pytest qualification gates", "PR fast checks",
     ]
     return {
-        "total_count": 10,
+        "total_count": 11,
         "jobs": [
             {
                 "id": 117196531521 + index,
@@ -109,7 +117,9 @@ def _jobs() -> dict:
                     if name == "PR test scope" else
                     [{"name": "Run pinned source-identity guard suite",
                       "status": "completed", "conclusion": "success"}]
-                    if name == "Pin and identity guards" else _steps(index)
+                    if name == "Pin and identity guards" else
+                    _qualification_steps()
+                    if name == "Non-pytest qualification gates" else _steps(index)
                 ),
                 "check_run_url": f"https://api.github.com{_PREFIX}/check-runs/{117196531521 + index}",
             }
@@ -153,7 +163,7 @@ def _read(subject: dict, touched: list[str] | None = None):
     return fetch
 
 
-def test_exact_same_sha_successful_merge_group_reuses_complete_ten_jobs():
+def test_exact_same_sha_successful_merge_group_reuses_complete_eleven_jobs():
     touched: list[str] = []
     assert proof.find_reusable_run(_env(), read_json=_read(_subject(), touched)) == _RUN_ID
     assert len(touched) == 5
@@ -222,7 +232,7 @@ def test_unproven_source_never_queries_api(key: str, replacement: str):
         ("jobs", ("jobs", 0, "check_run_url"), "https://example.com/false"),
         ("jobs", ("jobs", 0, "workflow_name"), "Unknown"),
         ("jobs", ("jobs", 0, "steps", 0, "conclusion"), "skipped"),
-        ("jobs", ("jobs", 0, "steps", 4, "conclusion"), "skipped"),
+        ("jobs", ("jobs", 0, "steps", 1, "conclusion"), "skipped"),
         ("jobs", ("jobs", 1, "steps", 0, "conclusion"), "skipped"),
         ("jobs", ("jobs", 2, "steps", 0, "name"), "echo bypass"),
         ("jobs", ("jobs", 6, "steps", 0, "conclusion"), "skipped"),
@@ -389,6 +399,9 @@ _REQUIRED_STEPS = [
     # Auxiliary jobs whose single mandatory step is pinned inline in _jobs().
     (7, "Classify integrated source diff using protected base code"),
     (8, "Run pinned source-identity guard suite"),
+] + [
+    # Every one of the five qualification gates is individually mandatory.
+    (9, step["name"]) for step in _qualification_steps()
 ]
 
 
@@ -407,24 +420,24 @@ def test_all_jobs_require_unique_successful_mandatory_steps(index, name, mode):
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
-@pytest.mark.parametrize("index", range(10))
+@pytest.mark.parametrize("index", range(11))
 def test_each_job_is_mandatory_even_when_the_reported_count_matches(index):
     subject = _subject()
     subject["jobs"]["jobs"].pop(index)
-    subject["jobs"]["total_count"] = 9
+    subject["jobs"]["total_count"] = 10
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
 @pytest.mark.parametrize("case", ["old-three-shard-proof", "incomplete-page", "noninteger-count"])
-def test_ten_job_proof_refuses_legacy_or_incomplete_job_shape(case):
+def test_eleven_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     subject = _subject()
     if case == "old-three-shard-proof":
         subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:3] + subject["jobs"]["jobs"][6:]
         subject["jobs"]["total_count"] = len(subject["jobs"]["jobs"])
     elif case == "incomplete-page":
-        subject["jobs"]["total_count"] = 11
+        subject["jobs"]["total_count"] = 12
     else:
-        subject["jobs"]["total_count"] = 10.0
+        subject["jobs"]["total_count"] = 11.0
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
@@ -496,13 +509,17 @@ def test_authenticated_same_origin_api_response_preserves_normal_json(monkeypatc
 
 @pytest.mark.parametrize("mutation", ["missing", "skipped", "failure", "duplicate", "pending"])
 def test_released_paper_guard_must_have_run_before_reusing_pytest(mutation):
+    # CI Lightning F3: the Paper Studio prepare guard moved from shard zero
+    # into the parallel qualification job; reuse still proves it executed.
     subject = _subject()
-    steps = subject["jobs"]["jobs"][0]["steps"]
-    guard = next(step for step in steps if step["name"] == "Verify Paper Studio prepare guard")
+    qual = next(job for job in subject["jobs"]["jobs"]
+                if job["name"] == "Non-pytest qualification gates")
+    guard = next(step for step in qual["steps"]
+                 if step["name"] == "Verify Paper Studio prepare guard")
     if mutation == "missing":
-        steps.remove(guard)
+        qual["steps"].remove(guard)
     elif mutation == "duplicate":
-        steps.append(deepcopy(guard))
+        qual["steps"].append(deepcopy(guard))
     elif mutation == "pending":
         guard.update(status="in_progress", conclusion=None)
     else:
