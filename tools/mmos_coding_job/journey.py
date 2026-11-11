@@ -414,6 +414,29 @@ def door_log_text(scratch: Path) -> str:
             if path.exists() else "")
 
 
+def seal_verdict(scratch: Path) -> tuple[str, str]:
+    """(job_status, attempt_status) from the scratch runtime store — the
+    honest seal verdict behind the delivery.  T4c L10: the lease-expiry
+    journey PASSED round 9 while the service's finisher sealed the
+    SUCCEEDED run as FAILED; a journey PASS must never ride a dishonest
+    seal."""
+    import sqlite3
+
+    db = scratch / "runtime" / "data" / "control_plane" / "executive.sqlite3"
+    if not db.exists():
+        return ("missing", "missing")
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        job = conn.execute(
+            "SELECT status FROM jobs ORDER BY rowid DESC LIMIT 1").fetchone()
+        att = conn.execute(
+            "SELECT status FROM attempts ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    return (str(job[0]) if job else "?", str(att[0]) if att else "?")
+
+
 def report(scenario: str, issue: dict, state: dict, extra: str = "") -> None:
     print("\n===== T4b journey result =====")
     print(f"scenario        : {scenario}")
@@ -499,13 +522,17 @@ def scenario_crash(scratch: Path) -> int:
                  f"{issue.get('identifier')}") if result else \
                 "result landed   : NOWHERE"
         deferred = door_log_text(scratch).count("engine deferred")
+        job_status, attempt_status = seal_verdict(scratch)
         where += f"\ncadence         : engine deferred {deferred}x before " \
                  "adoption (>=1 proves the live-lease deferral)"
+        where += (f"\nseal verdict    : job {job_status}, attempt "
+                  f"{attempt_status} (must be COMPLETED — L10)")
         report("crash", issue, state, where)
         ok = (state.get("phase") == "delivered"
               and state.get("attempt_id") == at_crash
               and state.get("native_launches") == 1 and result is not None
-              and deferred >= 1)
+              and deferred >= 1
+              and job_status == "COMPLETED" and attempt_status == "COMPLETED")
         log("PASS" if ok else "FAIL")
         return 0 if ok else FAIL
     finally:
@@ -606,13 +633,17 @@ def scenario_lease_expiry(scratch: Path) -> int:
         where = (f"result landed   : comment {result.get('id')} on "
                  f"{issue.get('identifier')}") if result else \
                 "result landed   : NOWHERE"
+        job_status, attempt_status = seal_verdict(scratch)
         where += f"\ncadence         : engine deferred {deferred}x " \
                  "(must be 0 — the lease was already dead at recovery)"
+        where += (f"\nseal verdict    : job {job_status}, attempt "
+                  f"{attempt_status} (must be COMPLETED — L10)")
         report("lease-expiry", issue, state, where)
         ok = (state.get("phase") == "delivered"
               and state.get("attempt_id") == at_crash
               and state.get("native_launches") == 1 and result is not None
-              and deferred == 0)
+              and deferred == 0
+              and job_status == "COMPLETED" and attempt_status == "COMPLETED")
         log("PASS" if ok else "FAIL")
         return 0 if ok else FAIL
     finally:
