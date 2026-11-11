@@ -49,6 +49,34 @@ class FabricTaskError(RuntimeError):
     pass
 
 
+# Closed diagnostics only: these labels grant no routing, retry or acceptance.
+# Never retain arbitrary picker text, provider output, paths or account detail.
+_REQUEST_REFUSAL_CODES = frozenset({
+    "NO_OPERATOR_AVAILABLE", "NO_POOL_AVAILABLE", "NO_ROUTE",
+    "ROUTE_INCOMPLETE", "REQUEST_ROUTING_RETURN_UNQUALIFIED",
+    "REQUEST_MAX_TURNS_INVALID", "REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED",
+    "ECONOMIC_POLICY_REFUSED", "UNCLASSIFIED_PRELAUNCH_REFUSAL",
+})
+
+
+def _safe_request_refusal_code(exc: BaseException) -> str:
+    unknown = "UNCLASSIFIED_PRELAUNCH_REFUSAL"
+    if type(exc) is not FabricTaskError:
+        return unknown
+    args = exc.args
+    if not args or type(args[0]) is not str or len(args[0]) > 1024:
+        return unknown
+    message = args[0]
+    # The deadline-aware picker runs in an owned subprocess. It returns only
+    # this fixed no-operator marker; historical receipts omitted the cause.
+    if message == "NONE reason=no_operator_available":
+        return "NO_OPERATOR_AVAILABLE"
+    if message == "NONE reason=no_pool_available":
+        return "NO_POOL_AVAILABLE"
+    code = message.partition(":")[0]
+    return code if code in _REQUEST_REFUSAL_CODES else unknown
+
+
 def validate_run_id(value: object) -> str:
     token = str(value or "").strip()
     if not RUN_ID_RE.fullmatch(token):
@@ -114,22 +142,24 @@ def _bounded_regular(path: Path, limit: int) -> bytes:
     return data
 
 
-def _paths(run_id: str) -> tuple[Path, Path]:
+def _paths(run_id: str, *, owner_ext: Path | None = None) -> tuple[Path, Path]:
     rid = validate_run_id(run_id)
+    here = HERE if owner_ext is None else owner_ext
     return (
-        HERE / "state" / "remote_sub" / f"{rid}.log",
-        HERE / "lanes" / f"{rid}.remote.stdout",
+        here / "state" / "remote_sub" / f"{rid}.log",
+        here / "lanes" / f"{rid}.remote.stdout",
     )
 
 
 
 
-def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None) -> bytes:
+def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None,
+                     *, owner_ext: Path | None = None) -> bytes:
     """Read one coherent result observation under the current run's protocol."""
     from remote_sub_helpers import read_macro_result
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, owner_ext=owner_ext)
     log = _bounded_regular(log_path, MAX_LOG_BYTES) if original_log is None else original_log
-    verified = read_macro_result(HERE, log_path, rid, limit, log)
+    verified = read_macro_result(HERE if owner_ext is None else owner_ext, log_path, rid, limit, log)
     if verified is not None:
         return verified
     # Intact legacy logs keep their bounded result reads.  An orphan or a
@@ -147,7 +177,8 @@ def _acceptance_unknown(reason: str) -> dict[str, Any]:
             "acceptance_reason": reason, "root_id": None, "parent_run_id": None}
 
 
-def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
+def _active_lineage_projection(rid: str, original_log: bytes,
+                               *, owner_ext: Path | None = None) -> dict[str, Any]:
     """Read existing artifact PRE_LAUNCH correlation, never worker/auth proof.
 
     The original controller validates the artifact packet and acquire response
@@ -158,7 +189,7 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
     unknown = {"controller_lineage": {"state": "UNVERIFIED"}}
     try:
         import artifact_delivery as delivery
-        log_path, _ = _paths(rid)
+        log_path, _ = _paths(rid, owner_ext=owner_ext)
         initial = log_path.lstat()
         def identity(info):
             return (info.st_dev, info.st_ino, info.st_uid, info.st_mode,
@@ -255,7 +286,9 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         return unknown
 
 
-def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes) -> dict[str, Any]:
+def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes,
+                           *, owner_ext: Path | None = None) -> dict[str, Any]:
+    ledger = {} if owner_ext is None else {"ledger_path": str(owner_ext.parent / "orch/fabric/ledger.jsonl")}
     # Retain all legacy execution fields. This additive observation neither
     # accepts a result nor creates a native RuntimeBinding or retry right.
     if (status["state"] != "TERMINAL" or status["rc"] != 0
@@ -266,17 +299,17 @@ def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes
         if (status["state"] == "TERMINAL" and type(status["rc"]) is int
                 and status["rc"] != 0 and status["signal"] != "effect_unknown"):
             try:
-                log_path, _ = _paths(rid)
+                log_path, _ = _paths(rid, owner_ext=owner_ext)
                 if _bounded_regular(log_path, MAX_LOG_BYTES) != original_log:
                     return projection
                 identity = pool_ledger.read_execution_identity(
-                    rid, expected_rc=status["rc"], expected_signal=status["signal"])
+                    rid, expected_rc=status["rc"], expected_signal=status["signal"], **ledger)
                 if _bounded_regular(log_path, MAX_LOG_BYTES) == original_log:
                     projection.update(identity)
             except (AttributeError, OSError, FabricTaskError):
                 pass
         return projection
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, owner_ext=owner_ext)
     # Transport retains group-writable result modes (e.g. 0664). Preserve that
     # existing format; require local ownership, no world write, and stable reads.
     # Ledger acceptance does not attest result bytes or authenticate the parent.
@@ -299,7 +332,7 @@ def _acceptance_projection(rid: str, status: dict[str, Any], original_log: bytes
             return _acceptance_unknown("RESULT_NOT_VERIFIABLE")
         if log[0] != original_log:
             return _acceptance_unknown("ARTIFACT_CHANGED")
-        projection = pool_ledger.read_acceptance(rid, expected_rc=status["rc"], expected_signal=status["signal"])
+        projection = pool_ledger.read_acceptance(rid, expected_rc=status["rc"], expected_signal=status["signal"], **ledger)
         if (artifact(result_path, MAX_RESULT_BYTES) != result
                 or artifact(log_path, MAX_LOG_BYTES) != log):
             return _acceptance_unknown("ARTIFACT_CHANGED")
@@ -365,9 +398,330 @@ def _controller_observation(text: str, rid: str) -> dict[str, Any] | None:
     }
 
 
-def inspect_run(run_id: str) -> dict[str, Any]:
+# These reviewed wrapper bytes classify normal SSH255 as controller uncertainty
+# and rescan that earlier marker at exit. They identify affected source semantics,
+# not a run, principal, lease, helper generation, or permission to consume output.
+_POLL255_AFFECTED_WRAPPERS = frozenset({
+    "e24d6123ae1c303fe7a72b88c9ae6093979dcf35a9984d7ba16ccb9689700b05",
+    "a1e271170778f992cf07c780234620c22d17f6242581311c414e30dd428ade40",
+})
+_PROCESS_RECEIPT_KEYS = frozenset({
+    "schema", "label", "pid", "pgid", "started_at", "ended_at", "returncode",
+    "timed_out", "nice_requested", "nice_applied", "stdout_bytes", "stdout_sha256",
+    "stderr_bytes", "stdout_truncated", "stderr_truncated", "runtime_failure_code", "cleanup",
+})
+
+
+def _normal_process_receipt(row: dict[str, Any], *, label: str, rc: int) -> tuple[datetime, datetime]:
+    """Require the narrow normal-completion form of the existing process owner."""
+    from lane_runtime import cleanup_receipt_is_proven
+    if (set(row) != _PROCESS_RECEIPT_KEYS
+            or row.get("schema") != "mastermind.local_owned_process_receipt.v1"
+            or row.get("label") != label
+            or type(row.get("returncode")) is not int or row["returncode"] != rc
+            or any(type(row.get(k)) is not int or row[k] <= 0 for k in ("pid", "pgid"))
+            or row["pid"] != row["pgid"]
+            or any(type(row.get(k)) is not int or row[k] < 0 for k in ("stdout_bytes", "stderr_bytes"))
+            or any(row.get(k) is not False for k in ("timed_out", "stdout_truncated", "stderr_truncated"))
+            or row.get("runtime_failure_code") is not None
+            or type(row.get("nice_applied")) is not bool
+            or not (row.get("nice_requested") is None or type(row["nice_requested"]) is int)
+            or type(row.get("stdout_sha256")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", row["stdout_sha256"]) is None):
+        raise ValueError("poll_reconciliation_process_unqualified")
+    cleanup = row.get("cleanup")
+    if (not isinstance(cleanup, dict) or not cleanup_receipt_is_proven(cleanup)
+            or type(cleanup.get("residual_count")) is not int
+            or cleanup.get("status") != "not_needed"
+            or cleanup.get("reason") != "normal_completion"
+            or any(cleanup.get(k) is not False for k in ("sigterm_sent", "sigkill_sent"))
+            or any(cleanup.get(k) is not True for k in (
+                "stdout_capture_complete", "stderr_capture_complete", "stdin_delivery_complete"))
+            or any(k not in cleanup or cleanup[k] is not None for k in (
+                "error_code", "stdout_capture_error", "stderr_capture_error", "stdin_delivery_error"))):
+        raise ValueError("poll_reconciliation_cleanup_unqualified")
+    stamps = []
+    for key in ("started_at", "ended_at"):
+        value = row.get(key)
+        if type(value) is not str or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", value) is None:
+            raise ValueError("poll_reconciliation_process_time")
+        stamps.append(datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc))
+    if stamps[0] > stamps[1]:
+        raise ValueError("poll_reconciliation_process_order")
+    return stamps[0], stamps[1]
+
+
+def _poll255_request_chain(raw: dict[str, bytes], rid: str) -> tuple[dict, dict, dict]:
+    import hashlib
+    import quota_circuit
+    sha = lambda value: hashlib.sha256(value).hexdigest()
+    request, launch, returned = [pool_ledger._strict_json(raw[s].decode("utf-8"))
+                                for s in (".request.json", ".request-launch.json", ".request-return.json")]
+    # These three records come from provider_outcome.write_new. Require that
+    # owner's complete JSON line, including its final newline, before composing
+    # the retained byte digests; a partial or rewritten encoding is not a return.
+    for suffix, value in zip((".request.json", ".request-launch.json", ".request-return.json"),
+                             (request, launch, returned)):
+        if raw[suffix] != (json.dumps(value, sort_keys=True, allow_nan=False) + "\n").encode():
+            raise ValueError("poll_reconciliation_record_encoding")
+    fields = (
+        (request, "mastermind.fabric_request_artifact.v1", {
+            "schema", "run_id", "root_id", "parent_run_id", "task_class", "cwd", "packet",
+            "packet_sha256", "packet_bytes", "created_at", "automatic_background_execution"}),
+        (launch, "mastermind.fabric_request_launch.v1", {
+            "schema", "run_id", "root_id", "parent_run_id", "packet_sha256", "state", "created_at",
+            "request_sha256", "capacity_handoff", "route", "native_sources"}),
+        (returned, "mastermind.fabric_request_return.v1", {
+            "schema", "run_id", "root_id", "parent_run_id", "state", "controller_rc",
+            "request_sha256", "launch_sha256", "prelease_sha256", "log_sha256"}),
+    )
+    for value, schema, keys in fields:
+        if (set(value) != keys or value["schema"] != schema or value["run_id"] != rid
+                or any(type(value[k]) is not str or not RUN_ID_RE.fullmatch(value[k])
+                       or value[k] != request[k] for k in ("root_id", "parent_run_id"))):
+            raise ValueError("poll_reconciliation_request_identity")
+    if (request["automatic_background_execution"] is not False
+            or type(request["task_class"]) is not str or not RUN_ID_RE.fullmatch(request["task_class"])
+            or request["cwd"] != "~"
+            or request["packet"] != rid + ".request.packet"
+            or type(request["packet_bytes"]) is not int
+            or not 0 < request["packet_bytes"] <= MAX_RESULT_BYTES
+            or len(raw[".request.packet"]) != request["packet_bytes"]
+            or request["packet_sha256"] != sha(raw[".request.packet"])
+            or launch["packet_sha256"] != request["packet_sha256"]
+            or launch["state"] != "LAUNCH_ATTEMPT_RESERVED"
+            or launch["capacity_handoff"] is not True
+            or returned["state"] != "NATIVE_CONTROLLER_RETURNED"
+            or type(returned["controller_rc"]) is not int or returned["controller_rc"] != 0
+            or returned["prelease_sha256"] is not None
+            or any(value["request_sha256"] != sha(raw[".request.json"]) for value in (launch, returned))
+            or returned["launch_sha256"] != sha(raw[".request-launch.json"])
+            or returned["log_sha256"] != sha(raw[".log"])
+            or any(type(value["created_at"]) not in (int, float) or value["created_at"] <= 0
+                   for value in (request, launch))
+            or request["created_at"] > launch["created_at"]):
+        raise ValueError("poll_reconciliation_request_binding")
+    sources, route = launch["native_sources"], launch["route"]
+    if (not isinstance(sources, dict) or set(sources) != set(quota_circuit.PRELEASE_SOURCES)
+            or any(type(v) is not str or re.fullmatch(r"[0-9a-f]{64}", v) is None for v in sources.values())
+            or sources["remote_sub.sh"] not in _POLL255_AFFECTED_WRAPPERS
+            or not isinstance(route, dict)
+            or set(route) != {"ESCALATE_TO", "HOST", "KEY", "MODE", "MODEL", "POOL", "REASON"}
+            or any(type(v) is not str or re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", v) is None
+                   for v in route.values())
+            or route["MODE"] != "minimax" or route["POOL"] != "minimax"
+            or re.fullmatch(r"[A-Za-z0-9_.-]+", route["HOST"]) is None):
+        raise ValueError("poll_reconciliation_source_or_route")
+    return request, launch, returned
+
+
+def _poll255_event_sequence(raw: bytes, rid: str, route: dict, rows: list[dict],
+                            worker: dict, provider: dict) -> None:
+    import hashlib
+    from remote_sub_helpers import _macro_log_events, macro_result_status_text
+    projected = macro_result_status_text(raw, rid).encode("utf-8")
+    events, _ = _macro_log_events(projected, rid, route["HOST"])
+    lines = projected.decode("utf-8").splitlines()
+    def once(prefix: str, exact: str | None = None) -> int:
+        found = [i for i, event in enumerate(events) if event.startswith(prefix)]
+        if len(found) != 1 or (exact is not None and events[found[0]] != exact):
+            raise ValueError("poll_reconciliation_event_count")
+        return found[0]
+    reserved = once("RUN_RESERVED", "RUN_RESERVED explicit=1")
+    lease = once("LEASE_OK", "LEASE_OK pool=" + route["POOL"])
+    launch = once("LAUNCH stdout=")
+    attempt = once("LAUNCH_ATTEMPT", "LAUNCH_ATTEMPT attempt=1")
+    remote_done = once("REMOTE_DONE", "REMOTE_DONE rc=0")
+    process_saved = once("PROCESS_RECEIPT_SAVED", "PROCESS_RECEIPT_SAVED file=" + rid + ".process.jsonl")
+    provider_saved = once("PROVIDER_OUTCOME_RECORDED", "PROVIDER_OUTCOME_RECORDED file=" + rid + ".provider.json")
+    cleaned = once("REMOTE_CLEANED")
+    if re.fullmatch(r"REMOTE_CLEANED transport=1 receipt_saved=1 usage_saved=[01]", events[cleaned]) is None:
+        raise ValueError("poll_reconciliation_remote_cleanup")
+    done = once("DONE", "DONE rc=0 signal=ok")
+    held = once("LEASE_PRESERVED", "LEASE_PRESERVED effect_unknown=1 lease=" + provider["lease_id"])
+    if (not reserved < lease < launch < attempt < remote_done < process_saved < provider_saved < cleaned < done < held
+            or held != len(events) - 1
+            or re.fullmatch(r"LAUNCH stdout=lanes_" + re.escape(rid)
+                            + r"\.stdout rc_file=ext/lanes_" + re.escape(rid) + r"\.rc cwd=~", events[launch]) is None):
+        raise ValueError("poll_reconciliation_terminal_order")
+    bad_markers = []
+    for i, event in enumerate(events):
+        if event == "CONTROLLER_PROCESS_UNPROVEN stage=poll rc=255":
+            bad_markers.append(i)
+            continue
+        if i == held or re.fullmatch(r"POLL_TRANSPORT_FAILED rc=255 poll=[1-9][0-9]*", event):
+            continue
+        if (any(token in event for token in ("UNPROVEN", "EFFECT_UNKNOWN", "signal=effect_unknown",
+                                            "FAILED", "REFUSED", "LEASE_PRESERVED"))
+                or event.startswith(("ADMISSION_", "RESULT_UNAVAILABLE", "POLL_PROTOCOL_INVALID"))):
+            raise ValueError("poll_reconciliation_other_uncertainty")
+    if not bad_markers:
+        raise ValueError("poll_reconciliation_no_affected_poll")
+    intervals = []
+    for row in rows:
+        label, rc = row.get("label"), row.get("returncode")
+        if (type(label) is not str or re.fullmatch(r"commission-[a-z][a-z0-9_-]{0,63}", label) is None
+                or type(rc) is not int or rc not in (0, 255)
+                or rc == 255 and label != "commission-poll"):
+            raise ValueError("poll_reconciliation_controller_failure")
+        interval = _normal_process_receipt(row, label=label, rc=rc)
+        if intervals and interval[0] < intervals[-1][1]:
+            raise ValueError("poll_reconciliation_controller_order")
+        intervals.append(interval)
+    launches = [row for row in rows if row["label"] == "commission-launch"]
+    polls = [row for row in rows if row["label"] == "commission-poll"]
+    if len(launches) != 1 or launches[0]["returncode"] != 0 or not polls:
+        raise ValueError("poll_reconciliation_execution_count")
+    headers = [(i, re.fullmatch(r"POLL ([1-9][0-9]*)/([1-9][0-9]*) elapsed=([0-9]+) file=(.+)", event))
+               for i, event in enumerate(events) if event.startswith("POLL ")]
+    if len(headers) != len(polls) or any(match is None for _, match in headers):
+        raise ValueError("poll_reconciliation_poll_count")
+    matched_bad = []
+    matched_outcomes = []
+    bound, elapsed = None, -1
+    for position, ((index, match), receipt) in enumerate(zip(headers, polls), start=1):
+        assert match is not None
+        end = headers[position][0] if position < len(headers) else remote_done
+        if (not attempt < index < end <= remote_done or int(match[1]) != position
+                or bound is not None and int(match[2]) != bound
+                or int(match[3]) < elapsed
+                or not match[4].endswith("/ext/lanes_" + rid + ".rc")):
+            raise ValueError("poll_reconciliation_poll_order")
+        bound, elapsed = int(match[2]), int(match[3])
+        segment = events[index + 1:end]
+        outcomes = [(j, event) for j, event in enumerate(segment, start=index + 1)
+                    if event.startswith(("POLL_PENDING", "POLL_TRANSPORT_FAILED", "RC value="))]
+        if len(outcomes) != 1:
+            raise ValueError("poll_reconciliation_poll_result")
+        outcome_index, outcome = outcomes[0]
+        matched_outcomes.append(outcome_index)
+        unproven = [j for j in bad_markers if index < j < end]
+        if receipt["returncode"] == 255:
+            if (outcome != f"POLL_TRANSPORT_FAILED rc=255 poll={position}"
+                    or len(unproven) != 1 or not unproven[0] < outcome_index
+                    or receipt["stdout_bytes"] != 0
+                    or receipt["stdout_sha256"] != hashlib.sha256(b"").hexdigest()):
+                raise ValueError("poll_reconciliation_failed_poll_binding")
+            matched_bad.extend(unproven)
+        else:
+            expected = (f"RC value=0 poll={position}" if position == len(headers)
+                        else f"POLL_PENDING poll={position}")
+            output = b"0\n" if position == len(headers) else b"__REMOTE_SUB_PENDING__\n"
+            if (unproven or outcome != expected or receipt["stdout_bytes"] != len(output)
+                    or receipt["stdout_sha256"] != hashlib.sha256(output).hexdigest()):
+                raise ValueError("poll_reconciliation_successful_poll_binding")
+        start, finish = _normal_process_receipt(receipt, label="commission-poll", rc=receipt["returncode"])
+        log_start = datetime.strptime(lines[index][:17], "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc)
+        log_finish = datetime.strptime(lines[outcome_index][:17], "%Y-%m-%dT%H:%MZ").replace(tzinfo=timezone.utc)
+        if start < log_start or not log_finish.timestamp() <= finish.timestamp() < log_finish.timestamp() + 60:
+            raise ValueError("poll_reconciliation_poll_time_binding")
+    all_outcomes = [i for i, event in enumerate(events)
+                    if event.startswith(("POLL_PENDING", "POLL_TRANSPORT_FAILED", "RC value="))]
+    if (matched_bad != bad_markers or matched_outcomes != all_outcomes
+            or polls[-1]["returncode"] != 0):
+        raise ValueError("poll_reconciliation_unmatched_uncertainty")
+    worker_start, worker_end = _normal_process_receipt(worker, label=rid, rc=0)
+    launch_start, _ = _normal_process_receipt(launches[0], label="commission-launch", rc=0)
+    final_start, _ = _normal_process_receipt(polls[-1], label="commission-poll", rc=0)
+    if not launch_start <= worker_start <= worker_end <= final_start:
+        raise ValueError("poll_reconciliation_worker_time_order")
+
+
+def _qualify_completed_poll255(rid: str, original_log: bytes, *, owner_ext: Path | None = None) -> bool:
+    """Read-only correction of one proven completed plain MiniMax execution.
+
+    The incumbent private namespace, original request/return, process/provider
+    receipts and unique terminal ledger must all agree. This reads no result or
+    provider capture, grants no authority, writes nothing and never releases a
+    held lease. Missing or different evidence retains the original uncertainty.
+    """
+    import artifact_delivery as delivery
+    import provider_outcome
+    from native_runtime_bindings import owner_path
+    try:
+        here = HERE if owner_ext is None else Path(owner_ext)
+        directory = owner_path(here / "state" / "remote_sub", HERE)
+        ledger = owner_path(here.parent / "orch" / "fabric" / "ledger.jsonl", HERE)
+        limits = {".request.json": 32768, ".request-launch.json": 32768,
+                  ".request-return.json": 32768, ".request.packet": MAX_RESULT_BYTES,
+                  ".log": MAX_LOG_BYTES, ".controller-process.jsonl": 2 * 1024 * 1024,
+                  ".process.jsonl": 32768, ".provider.json": 32768}
+        with delivery.DirectoryChain(directory) as chain:
+            def artifact(suffix: str) -> tuple[bytes, tuple[int, ...]]:
+                name = rid + suffix
+                before = os.stat(name, dir_fd=chain.fd, follow_symlinks=False)
+                identity = lambda s: (s.st_dev, s.st_ino, s.st_uid, s.st_gid, s.st_mode,
+                                      s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+                if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                        or stat.S_IMODE(before.st_mode) != 0o600 or before.st_nlink != 1):
+                    raise ValueError("poll_reconciliation_receipt_custody")
+                data = delivery.read_local_at(chain, name, limits[suffix])
+                after = os.stat(name, dir_fd=chain.fd, follow_symlinks=False)
+                if identity(before) != identity(after):
+                    raise ValueError("poll_reconciliation_receipt_changed")
+                return data, identity(after)
+            retained = {suffix: artifact(suffix) for suffix in limits}
+            raw = {suffix: value[0] for suffix, value in retained.items()}
+            if raw[".log"] != original_log:
+                raise ValueError("poll_reconciliation_log_changed")
+            request, launch, _ = _poll255_request_chain(raw, rid)
+            def jsonlines(suffix: str, maximum: int) -> list[dict]:
+                data = raw[suffix]
+                lines = data.splitlines()
+                if (not data.endswith(b"\n") or not 0 < len(lines) <= maximum
+                        or any(not line or len(line) > 8192 for line in lines)):
+                    raise ValueError("poll_reconciliation_receipt_lines")
+                return [pool_ledger._strict_json(line.decode("utf-8")) for line in lines]
+            workers = jsonlines(".process.jsonl", 1)
+            worker = workers[0]
+            _normal_process_receipt(worker, label=rid, rc=0)
+            provider = pool_ledger._strict_json(raw[".provider.json"].decode("utf-8"))
+            provider_outcome.validate_receipt(provider, worker, rid)
+            if (provider.get("root_id") != request["root_id"]
+                    or any(provider.get(k) != launch["route"][source] for k, source in
+                           (("host", "HOST"), ("model", "MODEL"), ("provider", "MODE")))
+                    or provider.get("kind") != "success" or provider.get("cli_subtype") != "success"
+                    or provider.get("cli_terminal_reason") != "completed"
+                    or provider.get("complete_event_capture") is not True
+                    or provider.get("initial_rejection") is not False
+                    or any(type(provider.get(k)) is not int or provider[k] != 0
+                           for k in ("command_rc", "cli_command_rc", "permission_denial_count"))
+                    or provider.get("permission_denials_role") != "none"
+                    or type(provider.get("lease_id")) is not str
+                    or re.fullmatch(r"[0-9a-f]{12}", provider["lease_id"]) is None
+                    or type(provider.get("account")) is not str
+                    or re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", provider["account"]) is None
+                    or worker["stdout_bytes"] <= 0):
+                raise ValueError("poll_reconciliation_provider_binding")
+            _poll255_event_sequence(original_log, rid, launch["route"],
+                                    jsonlines(".controller-process.jsonl", 4096), worker, provider)
+            identity = pool_ledger.read_execution_identity(
+                rid, expected_rc=0, expected_signal="ok", ledger_path=str(ledger))
+            expected = {"lineage_state": "VERIFIED_TERMINAL", "root_id": request["root_id"],
+                        "parent_run_id": request["parent_run_id"]}
+            if identity != expected:
+                raise ValueError("poll_reconciliation_terminal_unqualified")
+            if any(artifact(suffix) != retained[suffix] for suffix in limits):
+                raise ValueError("poll_reconciliation_snapshot_changed")
+            chain.verify()
+            # Unrelated ledger appends are allowed; a conflicting original
+            # terminal or outcome is still rejected by the incumbent reader.
+            return pool_ledger.read_execution_identity(
+                rid, expected_rc=0, expected_signal="ok", ledger_path=str(ledger)) == expected
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        return False
+
+
+def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]:
+    # The original paid owner binds immutable code to its fixed existing data
+    # namespace. This read-only parameter grants no caller authority, starts
+    # no process, and never changes module globals shared by concurrent reads.
+    here = HERE if owner_ext is None else Path(owner_ext)
+    if not here.is_absolute() or ".." in here.parts:
+        raise ValueError("invalid Fabric owner namespace")
+    owner = {} if owner_ext is None else {"owner_ext": here}
     rid = validate_run_id(run_id)
-    log_path, result_path = _paths(rid)
+    log_path, result_path = _paths(rid, **owner)
     missing_log = False
     metadata_error = None
     try:
@@ -377,13 +731,21 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     except OSError as exc:
         metadata_error = exc
     if missing_log:
-        retained = HERE / "state" / "remote_sub" / f"{rid}.request.json"
-        if retained.exists() or retained.is_symlink():
+        retained = here / "state" / "remote_sub" / f"{rid}.request.json"
+        retained_present, artifact_unverified = True, False
+        try:
+            retained.lstat()
+        except FileNotFoundError:
+            retained_present = False
+        except OSError:
+            retained_present, artifact_unverified = False, True
+        if retained_present:
             try:
                 row = json.loads(_bounded_regular(retained, 32768))
                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
                     raise FabricTaskError("retained_request_invalid")
                 state = "REQUEST_RETAINED_NO_START_EVIDENCE"
+                refusal_diagnostic: dict[str, str] = {}
                 refused = retained.with_name(rid + ".request-refused.json")
                 launch = retained.with_name(rid + ".request-launch.json")
                 if refused.exists() and not (launch.exists() or launch.is_symlink()):
@@ -396,6 +758,10 @@ def inspect_run(run_id: str) -> dict[str, Any]:
                             or proof.get("launch_attempted") is not False):
                         raise FabricTaskError("retained_refusal_invalid")
                     state = "REQUEST_REFUSED_BEFORE_LAUNCH"
+                    code = proof.get("refusal_code")
+                    refusal_diagnostic["request_refusal_code"] = (
+                        code if type(code) is str and code in _REQUEST_REFUSAL_CODES
+                        else "UNCLASSIFIED_PRELAUNCH_REFUSAL")
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": state, "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
@@ -403,17 +769,32 @@ def inspect_run(run_id: str) -> dict[str, Any]:
                     "request_root_id": row.get("root_id"), "request_parent_run_id": row.get("parent_run_id"),
                     "execution_absence_proven": state == "REQUEST_REFUSED_BEFORE_LAUNCH",
                     "background_execution": False, "request_retained": True,
-                    "same_run_replay_allowed": False}
+                    "same_run_replay_allowed": False, **refusal_diagnostic}
             except (OSError, ValueError, FabricTaskError, AttributeError):
                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
                     "result_available": False, "result_bytes": None,
                     **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+        # The packet is fsynced before its descriptor. A crash in that window
+        # still occupies the original run, as does an orphan result. Check only
+        # the fixed artifacts guarded by request(); their presence or unreadable
+        # metadata proves neither execution absence nor root identity. Never read
+        # their contents or turn a missing log into permission to redispatch.
+        if not artifact_unverified:
+            for artifact in (retained.with_name(f"{rid}.request.packet"), result_path):
+                try:
+                    artifact.lstat()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    pass
+                artifact_unverified = True
+                break
         return {
             "schema": "mastermind.fabric_task_status.v1",
             "run_id": rid,
-            "state": "NOT_FOUND",
-            **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
+            "state": "STATUS_UNREADABLE" if artifact_unverified else "NOT_FOUND",
+            **_acceptance_unknown("ARTIFACT_UNVERIFIED" if artifact_unverified else "EXECUTION_NOT_ELIGIBLE"),
             "rc": None,
             "signal": None,
             "result_available": False,
@@ -437,7 +818,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
             "result_bytes": None,
         }
 
-    prelease = HERE / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
+    prelease = here / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
     if prelease.exists() or prelease.is_symlink():
         import quota_circuit
         # Preserve the incumbent sticky uncertainty rule before any new
@@ -459,7 +840,7 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         try:
             request = json.loads(_bounded_regular(prelease.with_name(rid + ".request.json"), 32768))
             root, parent = request.get("root_id"), request.get("parent_run_id")
-            quota_circuit.validate_prelease_refusal(HERE, rid, root, parent,
+            quota_circuit.validate_prelease_refusal(here, rid, root, parent,
                                                    packet_limit=MAX_RESULT_BYTES)
             return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                 **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
@@ -512,6 +893,9 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         elif _REMOTE_DONE_RE.search(text):
             state = "SETTLING"
 
+    if state == "EFFECT_UNKNOWN" and _qualify_completed_poll255(rid, original_log, **owner):
+        state, rc, signal = "TERMINAL", 0, "ok"
+
     if (state == "TERMINAL_FAILURE" and rc == 78 and signal == "prelaunch_failure"
             and rid == "news-9612-exact-3a663-release-review-20261021"):
         import native_plain_packet_reconcile as packet_reconcile
@@ -548,13 +932,13 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     if state == "SETTLING" and rid in completion_reconcile.KNOWN_RUNS:
         verified = completion_reconcile.status_from_receipt(rid)
         if verified is not None:
-            verified.update(_acceptance_projection(rid, verified, original_log))
+            verified.update(_acceptance_projection(rid, verified, original_log, **owner))
             return verified
 
     result_available = False
     result_bytes = None
     try:
-        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log)
+        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log, **owner)
         result_available = True
         result_bytes = len(snapshot)
     except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
@@ -573,11 +957,11 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         observation = _controller_observation(text, rid)
         if observation is not None:
             status["controller_observation"] = observation
-    status.update(_acceptance_projection(rid, status, original_log))
+    status.update(_acceptance_projection(rid, status, original_log, **owner))
     if state == "ACTIVE_OR_WAITING":
-        status.update(_active_lineage_projection(rid, original_log))
+        status.update(_active_lineage_projection(rid, original_log, **owner))
     for suffix in (".session-retained.json", ".session-created.json"):
-        path = HERE / "state" / "remote_sub" / (rid + suffix)
+        path = here / "state" / "remote_sub" / (rid + suffix)
         if suffix == ".session-created.json" and rc == 0:
             continue
         try:
@@ -655,6 +1039,85 @@ def _route_with_deadline(task_class, options, deadline_ns, env, state_dir, run_i
     return result.stdout.strip()
 
 
+def validate_request_max_turns(value: object) -> int:
+    """Validate a per-request ceiling; the existing shell profile owns limits."""
+    if type(value) is not int or not 1 <= value <= 400:
+        raise FabricTaskError("REQUEST_MAX_TURNS_INVALID")
+    return value
+
+
+def _manual_token(value: str | None) -> str | None:
+    """A literal preference is not an admission or quota grant."""
+    if value is None:
+        return None
+    if type(value) is not str:
+        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
+    token = value.strip()
+    if not token or token.casefold() == "auto":
+        return None
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", token) is None:
+        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
+    return token
+
+
+def _enforce_manual_route(route: dict[str, str], pool: str | None, model: str | None) -> None:
+    """Match the reselected *actual* worker route before native launch effects."""
+    named_pool = _manual_token(pool)
+    if named_pool is None:
+        raise FabricTaskError("MANUAL_POOL_REQUIRED")
+    canonical = pick.canonical_pool(named_pool)
+    canonical = pick.ROUTING_TOKEN_POOLS.get(canonical, canonical)
+    if route.get("POOL") != canonical:
+        raise FabricTaskError("MANUAL_POOL_ROUTE_MISMATCH")
+    if route.get("MODE") not in pick._HOST_POOL_MODES.get(canonical, ()):
+        raise FabricTaskError("MANUAL_POOL_MODE_MISMATCH")
+    named_model = _manual_token(model)
+    if named_model is not None and route.get("MODEL", "").casefold() != named_model.casefold():
+        raise FabricTaskError("MANUAL_MODEL_ROUTE_MISMATCH")
+
+
+def preview_route(
+    run_id: str,
+    task_class: str,
+    *,
+    pool: str | None = None,
+    model: str | None = None,
+    prefer: str | None = None,
+    subject_pool: str | None = None,
+    task_complexity: str = "",
+    escalation_reason: str = "",
+) -> dict[str, object]:
+    """Read-only incumbent picker and economic preflight; no lease, packet or worker."""
+    rid = validate_run_id(run_id)
+    selected_pool = _manual_token(pool)
+    selected_model = _manual_token(model)
+    if selected_model is not None and selected_pool is None:
+        raise FabricTaskError("MANUAL_MODEL_REQUIRES_POOL")
+    route = _parse_route(pick.format_pick(
+        task_class, host="auto", pool=selected_pool,
+        prefer=_manual_token(prefer),
+        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
+        task_complexity=task_complexity, escalation_reason=escalation_reason,
+        requested_model=selected_model, route_key=rid,
+    ))
+    if selected_pool is not None:
+        _enforce_manual_route(route, selected_pool, selected_model)
+    policy = pick.launch_policy(
+        route["MODE"], task_class, route["MODEL"],
+        escalation_reason=escalation_reason, task_complexity=task_complexity,
+    )
+    if not policy.get("allowed"):
+        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(policy.get("reason")))
+    return {
+        "state": "PREVIEW_ONLY", "reserved": False, "run_id": rid,
+        "pool": route["POOL"], "model": route["MODEL"],
+        "host": route["HOST"], "mode": route["MODE"],
+        "reason": route.get("REASON") or "",
+        "selection_rechecked_at_request": True,
+        "strict_pin_enforced_at_request": selected_pool is not None,
+    }
+
+
 def request(
     run_id: str,
     task_class: str,
@@ -675,14 +1138,34 @@ def request(
     qualification_host: str | None = None,
     new_macro_worktree: str | None = None,
     cpu_scope_percent: int | None = None,
+    max_turns: int | None = None,
     request_remaining_seconds: int | None = None,
     request_capacity_preflight: bool = False,
     request_deadline_ns: int | None = None,
+    not_before: str | None = None,
+    strict_manual_pin: bool = False,
 ) -> int:
     rid = validate_run_id(run_id)
+    # Match preview: AUTO is never a literal provider/model pin. Validate
+    # before retaining a packet or consulting any provider/runtime owner.
+    pool = _manual_token(pool)
+    requested_model = _manual_token(requested_model)
+    prefer = _manual_token(prefer)
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
+    if max_turns is not None:
+        max_turns = validate_request_max_turns(max_turns)
     env = os.environ.copy()
+    # An inherited transport label cannot silently constrain or authorize a new request.
+    env.pop("POOL_CALLER_NOT_BEFORE", None)
+    if not_before is not None:
+        from commission_deadline import validate_not_before
+        not_before = validate_not_before(not_before)
+        env["POOL_CALLER_NOT_BEFORE"] = not_before
+    # A parent request ceiling must not leak into unrelated child commissions.
+    env.pop("POOL_REQUEST_MAX_TURNS", None)
+    if max_turns is not None:
+        env["POOL_REQUEST_MAX_TURNS"] = str(max_turns)
     env.pop("POOL_CAPACITY_PREFLIGHT",None)
     env.pop("POOL_COMMISSION_DEADLINE_NS", None)
     env.pop("POOL_PRELEASE_HANDOFF", None)
@@ -691,17 +1174,20 @@ def request(
     if request_capacity_preflight is True:
         env["POOL_CAPACITY_PREFLIGHT"]="1"
     if request_remaining_seconds is not None:
-        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 7200:
+        if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 14400:
             raise FabricTaskError("REQUEST_REMAINING_TIME_INVALID")
         env["POOL_COMMISSION_REMAINING_SECONDS"] = str(request_remaining_seconds)
     if request_deadline_ns is not None:
         from commission_deadline import (DEADLINE_ENV, CommissionDeadlineExpired,
                                          require_remaining, validate_deadline_ns)
         request_deadline_ns = validate_deadline_ns(request_deadline_ns)
-        if request_deadline_ns > time.monotonic_ns() + 7200 * 1_000_000_000:
+        if request_deadline_ns > time.monotonic_ns() + 14400 * 1_000_000_000:
             raise FabricTaskError("REQUEST_DEADLINE_INVALID")
         env[DEADLINE_ENV] = str(request_deadline_ns)
     def check_deadline():
+        if not_before is not None:
+            from commission_deadline import require_not_before
+            require_not_before(not_before)
         if request_deadline_ns is not None:
             remaining = int(require_remaining(request_deadline_ns, minimum_seconds=1))
             if request_remaining_seconds is not None:
@@ -734,8 +1220,11 @@ def request(
         "packet_sha256": hashlib.sha256(source).hexdigest(),
         "packet_bytes": len(source), "created_at": time.time(),
         "automatic_background_execution": False,
+        **({"not_before": not_before} if not_before is not None else {}),
+        **({"max_turns": max_turns} if max_turns is not None else {}),
     })
     packet, stdin_bytes = retained_packet, None
+    selection_key, selection_facts, selection_line = object(), None, None
     try:
         check_deadline()
         # An explicit NEW worktree request is not permission to adopt an existing
@@ -760,11 +1249,11 @@ def request(
         if artifact_names:
             import artifact_production
         if qualification_host:
-            if pool != "grok" or artifact_names or native_return or requested_model or prefer:
+            if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:
                 raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
             import fabric_host_qualification
             route = _parse_route(fabric_host_qualification.qualification_route(
-                qualification_host, task_class=task_class, complexity=complexity,
+                qualification_host, pool=pool, task_class=task_class, complexity=complexity,
                 reason=reason, subject_pool=subject_pool,
                 root=observed_root, parent=parent_run_id,
             ))
@@ -776,12 +1265,34 @@ def request(
                 requested_model=requested_model, route_key=rid,
                 **({"required_modes": sorted(artifact_production.MODES),
                     "required_platforms": ["linux"]} if artifact_names else
-                   {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
+                   {"required_modes": sorted({"glm", "glm-codex", "minimax", "qwen"}),
+                    "required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
             )
-            route = _parse_route(
-                _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
-                if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
+            if max_turns is not None:
+                # Only these admitted remote wrappers enforce the existing Claude
+                # turn fuse. Never silently ignore the requested ceiling elsewhere.
+                route_options["required_modes"] = sorted(
+                    set(route_options.get("required_modes", ("glm", "minimax")))
+                    & {"glm", "minimax"})
+            if request_deadline_ns is not None:
+                selection_line = _route_with_deadline(
+                    task_class, route_options, request_deadline_ns, env, state_dir, rid)
+            else:
+                selection_request_sha = None
+                try:
+                    selection_request_sha = provider_outcome.digest(
+                        provider_outcome.regular_bytes(request_file, 32768))
+                except Exception:
+                    pass  # Optional diagnostics cannot prevent the original pick.
+                selection_line, selection_facts = pick.observed_format_pick(
+                    task_class, observation_key=selection_key,
+                    request_sha256=selection_request_sha, **route_options)
+            route = _parse_route(selection_line)
+        if strict_manual_pin:
+            _enforce_manual_route(route, pool, requested_model)
         check_deadline()
+        if max_turns is not None and route["MODE"] not in {"glm", "minimax"}:
+            raise FabricTaskError("REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED")
         guard = pick.launch_policy(
             route["MODE"], task_class, route["MODEL"],
             escalation_reason=reason, task_complexity=complexity,
@@ -789,7 +1300,7 @@ def request(
         if not guard.get("allowed"):
             raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(guard.get("reason")))
         if new_macro_worktree is not None:
-            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}:
+            if route["HOST"] not in {"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}:
                 raise FabricTaskError("FABRIC_SPARSE_HOST_REFUSED")
             if route["MODE"] not in {"glm", "glm-codex", "minimax", "qwen"}:
                 raise FabricTaskError("FABRIC_SPARSE_MODE_NOT_YET_QUALIFIED")
@@ -866,6 +1377,8 @@ def request(
                 "--run-id",
                 rid,
             ]
+            if not_before is not None:
+                argv.extend(["--not-before", not_before])
             if new_macro_worktree is not None:
                 argv.extend(["--new-macro-worktree", new_macro_worktree])
             if cpu_scope_percent is not None:
@@ -878,6 +1391,7 @@ def request(
                 "packet_sha256": hashlib.sha256(source).hexdigest(),
                 "state": "LAUNCH_ATTEMPT_RESERVED", "created_at": time.time(),
                 "request_sha256": request_sha,
+                **({"not_before": not_before} if not_before is not None else {}),
             }
             if request_capacity_preflight is True:
                 import quota_circuit
@@ -920,12 +1434,22 @@ def request(
         launch = state_dir / f"{rid}.request-launch.json"
         if not any(p.exists() or p.is_symlink() for p in (*_paths(rid), launch)):
             try:
+                refused_request_sha = provider_outcome.digest(
+                    provider_outcome.regular_bytes(request_file, 32768))
+                try:
+                    selection_diagnostics = pick.consume_selection_refusal(
+                        selection_facts, selection_key, refused_request_sha, selection_line)
+                except Exception:
+                    selection_diagnostics = None
                 provider_outcome.write_new(state_dir / f"{rid}.request-refused.json", {
                     "schema": "mastermind.fabric_request_refusal.v1", "run_id": rid,
                     "root_id": observed_root, "parent_run_id": parent_run_id,
-                    "request_sha256": provider_outcome.digest(
-                        provider_outcome.regular_bytes(request_file, 32768)),
+                    "request_sha256": refused_request_sha,
+                    **({"selection_diagnostics": selection_diagnostics}
+                       if selection_diagnostics is not None else {}),
                     "reason": "prelaunch_" + type(exc).__name__,
+                    "refusal_code": _safe_request_refusal_code(exc),
+                    **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
                     "launch_attempted": False, "created_at": time.time(),
                 })
             except (OSError, ValueError):
@@ -1070,7 +1594,7 @@ def plan_accepted_macro_worktree_release(
     pattern = re.compile(
         r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
         r"\[remote_sub id=" + re.escape(rid) +
-        r" host=(?P<host>ubuntu[0-3])\] "
+        r" host=(?P<host>ubuntu[0-4])\] "
         r"FABRIC_NEW_MACRO_WORKTREE run=" + re.escape(rid) +
         r" commit=(?P<sha>[0-9a-f]{40}) "
         r"root=(?P<root>[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}) "
@@ -1180,12 +1704,25 @@ def main(argv: list[str] | None = None) -> int:
     p_packet_reconcile.add_argument("--root", required=True)
     p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
 
+
+    p_preview = sub.add_parser("preview", help="read-only incumbent model and provider selection")
+    p_preview.add_argument("--id", required=True)
+    p_preview.add_argument("--class", dest="task_class", required=True)
+    p_preview.add_argument("--pool", default="auto")
+    p_preview.add_argument("--model", dest="requested_model", default="auto")
+    p_preview.add_argument("--prefer")
+    p_preview.add_argument("--subject-pool")
+    p_preview.add_argument("--task-complexity", default="")
+    p_preview.add_argument("--escalation-reason", default="")
+
     p_request = sub.add_parser("request")
     p_request.add_argument("--id", required=True)
     p_request.add_argument("--class", dest="task_class", required=True)
     p_request.add_argument("--native-return", action="store_true", help="Subscribe this new paid child to the separately reviewed/trusted native Stop hook")
     p_request.add_argument("--artifact-output", action="append", help="Required new file basename; opts into verified artifact production")
-    p_request.add_argument("--cwd", default=os.getcwd())
+    # Resolve an implicit working directory on the receiving host.
+    # The receiving host still validates explicit --cwd values.
+    p_request.add_argument("--cwd", default="~")
     p_request.add_argument("--new-macro-worktree", metavar="COMMIT_SHA40",
                            help="Explicit new Macro sparse workspace at original run ID; never resume/reuse")
     p_request.add_argument("--cpu-scope-percent", type=int, choices=(100, 200, 400),
@@ -1194,7 +1731,8 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--packet")
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
-    p_request.add_argument("--qualification-host", choices=("mb", "m1"), help="Explicit first Grok worker on a pending qualified Mac; no enrollment")
+    p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
+    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
     p_request.add_argument("--root")
@@ -1202,6 +1740,9 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--task-complexity")
     p_request.add_argument("--escalation-reason")
     p_request.add_argument("--model", dest="requested_model")
+    p_request.add_argument("--not-before", help="Strict UTC Z lower bound for this new request; never queues or authorizes retry")
+    p_request.add_argument("--max-turns", type=int,
+                           help="Per-request Claude turn ceiling (1..400); only tightens the existing admitted wrapper limit")
     p_request.add_argument("--quota-fallback", action="store_true",
                            help="Bounded foreground successors for proven initial quota rejection; inspect with status --follow")
 
@@ -1217,6 +1758,11 @@ def main(argv: list[str] | None = None) -> int:
             collect_parser.add_argument("--"+name, required=True)
         for name in (("binding", "destination") if command == "collect" else ("collection", "receipt-sha256")):
             collect_parser.add_argument("--"+name, required=True)
+
+    p_diag = sub.add_parser("provider-diagnostics", help="Explicit original-owner safe diagnostic projection; no raw capture or acceptance")
+    p_diag.add_argument("run_id")
+    for name in ("root", "parent", "binding", "destination"):
+        p_diag.add_argument("--"+name, required=True)
 
     p_status = sub.add_parser("status")
     p_status.add_argument("run_id")
@@ -1313,6 +1859,15 @@ def main(argv: list[str] | None = None) -> int:
     p_completed.add_argument("--apply", action="store_true")
 
     args = parser.parse_args(argv)
+    if args.cmd == "provider-diagnostics":
+        import original_delivery_collector as collector
+        try:
+            result=collector.collect_provider_diagnostics(args.binding,run_id=args.run_id,root=args.root,parent=args.parent,destination=args.destination)
+            print(json.dumps(result,sort_keys=True))
+            return 0
+        except Exception:
+            print('{"state":"UNAVAILABLE","reason":"diagnostic_unavailable"}')
+            return 76
     if args.cmd in {"collect", "collection-result"}:
         command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
                    "--root", args.root, "--parent", args.parent]
@@ -1441,7 +1996,19 @@ def main(argv: list[str] | None = None) -> int:
             except (prestart_reconcile.PrestartReconcileError, OSError, ValueError) as exc:
                 print(str(exc), file=sys.stderr)
                 return 78
+
+        if args.cmd == "preview":
+            _json(preview_route(
+                args.id, args.task_class, pool=args.pool,
+                model=args.requested_model, prefer=args.prefer,
+                subject_pool=args.subject_pool,
+                task_complexity=args.task_complexity,
+                escalation_reason=args.escalation_reason,
+            ))
+            return 0
         if args.cmd == "request":
+            if args.strict_manual_pin and args.quota_fallback:
+                raise FabricTaskError("MANUAL_PIN_QUOTA_FALLBACK_REFUSED")
             stdin_bytes = sys.stdin.buffer.read() if args.stdin else None
             request_fn = request
             if args.quota_fallback:
@@ -1466,6 +2033,9 @@ def main(argv: list[str] | None = None) -> int:
                 qualification_host=args.qualification_host,
                 new_macro_worktree=args.new_macro_worktree,
                 cpu_scope_percent=args.cpu_scope_percent,
+                strict_manual_pin=args.strict_manual_pin,
+                **({"not_before": args.not_before} if args.not_before is not None else {}),
+                **({"max_turns": args.max_turns} if args.max_turns is not None else {}),
             )
         if args.cmd == "status":
             if args.follow:

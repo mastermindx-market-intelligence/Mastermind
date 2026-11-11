@@ -1,0 +1,100 @@
+{
+  "schema": "h4.existing_home_application_hop_qualification.v1",
+  "observed_at": "2026-11-09T12:50:34.669737+00:00",
+  "source_base": "9e6659c4a49ee6f11a6f6ee690d222ce81d67b09",
+  "operation_id": "h4-role-local-application-hop-20261109",
+  "problem": "VPS reverse loopback aliases do not create listeners on the separate Ubuntu1 role host.",
+  "scope": "Fixed successor for the existing mm-chisel-home.service in the existing application_tunnel_control owner.",
+  "source_qualification": {
+    "tested_files": {
+      "ops/executive_os/install_source_policy.py": "27b39c5b9a227c0857fddf2cb4da5fdcf70ed1a92ffe4789818782ddd5a20023",
+      "ops/executive_os/os_public_edge_publication.py": "d51417fea73c23beb72ed67a66e0d5f46ec89e30bdc9dac4547cf3ef9166d0d3",
+      "ops/executive_os/os_tunnel_entry.py": "efc4c0b637e03dfd949aca72d6ccc7ad6e305373b7e433b788141ae5fc97bb37",
+      "ops/executive_os/release_manifest.py": "c2e07c6a9cb3220749a9c1fc6ac6bf8451a0c1e3d715e8455c227a3783334726",
+      "ops/executive_os/application_tunnel_entry.py": "199928f4aab26c5764c5bb3fa1ca855f5658ec903c0bff33424baccd2677a0a4",
+      "control_plane/fs_security.py": "4a9aa64a34cbc84601fbfd5ea68b9792eb1c5558116c48d52c797ad0c83758a5",
+      "ops/executive_os/com.mastermind.executive.fabric-application-tunnel.plist.template": "89626e206fb41595064b1379ee7a47db9bad97f7e931c10c79fd2690109067e8",
+      "tests/application_tunnel_ci/Dockerfile": "b5bd8cb072b139ad72a6ffb3249d206d05fe91db57098c898a2a2a6bb4be6f35",
+      "tests/application_tunnel_ci/require_proof.py": "1faaaa5bd1acc1c3803b393f57e12fd52a7e868a8deb3e24d995d2eff89869d0",
+      "integrations/mastermind_executive_app/os_assets.py": "4d818931292741bc6c6c32750b5e6ffb8f3031a85481420cb5475979cdef0fb1",
+      "ops/executive_os/os_public_edge_transition.py": "da8f7ce2bfdf2b0e0d38f64caabca0fa74e4e12eb0c69eb5ea82811f75f5a18c",
+      "ops/executive_os/executive_mcp_entry.py": "00162c27336c84f5aa5c9c2fb22f3b293cf14ea4424eff6b041065dc6bb24f84",
+      "ops/executive_os/os_public_edge.py": "99c7bc39322304e833815d9b6c4f016971c971c720acadbc4abbf915ed5e2de6",
+      "tests/test_application_tunnel_entry.py": "a293ac933f5553f0c4d14289eac0e98d102f6bec3867eb9ae8674a50f22a9713",
+      "tests/test_os_tunnel_entry.py": "7279d6d676162ad26711180f3d1c61f1df77e988471e47d265aee07f8276d8b4",
+      "control_plane/__init__.py": "8fa406e6a2b3a127e89cef26eb55fe49224faac59847777eda004c0081296b05",
+      "integrations/__init__.py": "cdd316a5a23f07d22f51f90a2b29603474eeaae96e630d2f0550a0be7b4aeb2a",
+      "integrations/mastermind_executive_app/__init__.py": "5db3814a1c9fe185d7e17054ef67368e6d1079e5d9985d2480f439577859db48",
+      "ops/executive_os/application_tunnel_control.py": "841775c92cebaf4adbcea6da819a7ae2913671751b124224556e06ff9e7fb724",
+      "ops/executive_os/os_release_assets.py": "235c690a5d460e9872a4191a8409654f9e2b80a0a780e45663f5c58149cf24f1",
+      "tests/test_application_tunnel_control.py": "1661294c2cf463fd19b2946f29fa8bc333969d637de023c48f14955822261842",
+      "tests/test_application_tunnel_lifecycle.py": "170ce06f507ec7a49fb6e3b347db2e76ddb181db0021965b55bb334a2d711e1f",
+      "tests/test_hermes_primary_application_tunnel.py": "e98921f81c1afd6229dc8a0e5b924ae5d7da54f30c582f22b489cdcf049d7ad9",
+      "tests/test_application_tunnel_home.py": "6b6bcde1e83b1ff4e5dbfffad17414d853a785f8ce956d35f829fd3d08c12302"
+    },
+    "fixture_image": "sha256:ffee2f08b4c2cae70590b8cef22cd9d4232c014e199f34c5cbeec262501a487a",
+    "source_manifest_sha256": "ff2aa7a2193b18479ca7366f6d8654ffa72cbfd9f20b336d4067af2477aea035",
+    "complete_owner_suite": {
+      "tests": 201,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "completed_at": "2026-11-09T12:50:34.669737+00:00",
+      "log_sha256": "cb2c58f6c75067747d3f503ed0b1020cc8f9758b7e4009deba8e1d38c123b289"
+    },
+    "focused_phase": {
+      "tests": 27,
+      "passed": 27,
+      "overlaps_complete_owner_suite": true,
+      "log_sha256": "1cccdb452d5e8bdd9c62403e24b33f13cdf37d03b873d2e21a8c240aa95caebf"
+    },
+    "repaired_findings": [
+      "Added fixed executable custody and original client publication intent before lost-ack adoption.",
+      "Preserved the original v1/v2 refusal message while requiring HOME-specific forward semantics.",
+      "Resolve the existing home account by name and bind its UID/GID in retained credential metadata; absent or remapped accounts fail before publication.",
+      "Clarify the candidate file metadata parameter without changing its executable permission or custody checks."
+    ],
+    "d8_scan": {
+      "scanner_sha256": "a3d8801e88594b53e79d0ea513ff8fe0183db647972d9c9f027f9a15c5176758",
+      "source_diff_sha256": "3a0bb6a4831d1df441c00e8d981dc4cd7bdebda714c3c19531375a56f76d157a",
+      "findings": [],
+      "evidence_findings": [],
+      "git_diff_check": 0,
+      "scope": "Eight-file staged candidate before this final evidence receipt refresh; source/test hashes above are unchanged."
+    }
+  },
+  "real_binary_protocol": {
+    "receipt_path": "integrations/hermes_application_fabric/qualification/home_forward_protocol_receipt.json",
+    "harness_path": "integrations/hermes_application_fabric/qualification/qualify_home_forward_protocol.py",
+    "harness_sha256": "c8f279dfd73e1f809e8dcb55fdc4287934bd52fb3380e83db360a7d8c68999b8",
+    "binary_sha256": "811362311f13ac4bdc42fe4e7650aca618a68e3a40f930de88536d18b14d2b52",
+    "passed": true,
+    "distinct_network_namespaces": 3,
+    "normal_forward_acl_required": true,
+    "ssh_return_retained": true,
+    "retained_authenticated_connection": true,
+    "all_owned_fixture_resources_removed": true,
+    "denied_backend_arrivals": 0,
+    "duplicate_accepted_backend_arrivals": 0,
+    "scope": "Synthetic native application, VPS and home host on an internal Docker network; no host ports or production credentials."
+  },
+  "actual_incumbent_observations": {
+    "home_launcher_sha256": "2136b9c691f517471d35c2d93a33671776cbf37bcab2691d8700c42b5a4ff8a0",
+    "home_unit_sha256": "59eef5192e4117f9b9c1f8688a7284245b024de9b1d4708955e06b2c4d546df9",
+    "home_binary_sha256": "811362311f13ac4bdc42fe4e7650aca618a68e3a40f930de88536d18b14d2b52",
+    "home_binary_version": "1.12.0",
+    "original_vps_receipt_sha256": "607666a2c7e93e73b5d26c698b42519b5dffa5ae8a1d7092ea2602ee550a38c3",
+    "whole_vps_authfile_matches_original": true,
+    "original_vps_process_matches": true,
+    "matching_original_home_identity_count": 1,
+    "home_fingerprint_matches_original": true,
+    "secret_values_exported": false
+  },
+  "production_home_grant_applied": false,
+  "production_home_launcher_applied": false,
+  "production_home_service_restarted": false,
+  "production_tunnel_proven": false,
+  "application_proven": false,
+  "provider_effects_settled": false,
+  "next_action": "Protected source release; original v2 reverse qualification; fixed home stage and server/client phases; original role/native APPLICATION acceptance."
+}

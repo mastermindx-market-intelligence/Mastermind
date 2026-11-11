@@ -40,6 +40,16 @@ mmx-workspace acquire --repository macro \
 mmx-workspace status --repository macro --operation-id "$OPERATION" --lane web
 ```
 
+### Exact base availability and bounded diagnosis
+
+The selected-repository base check is a local Git observation with `GIT_NO_LAZY_FETCH=1`. A healthy binding or `READY` discovery result does not prove that the requested exact commit is present locally. Acquisition does not automatically fetch to satisfy this check.
+
+A failed base observation can report `REPOSITORY_SOURCE_UNAVAILABLE`; this alone does not prove either a missing object or an unhealthy repository. Even diagnostic wording identifying exact-base verification describes the failed phase, not its cause. Through the existing authorized host/source owner, verify the bound source identity and canonical origin, then check that the requested lowercase 40-character SHA resolves locally to that exact commit using the same no-lazy-fetch observation. Keep raw Git stderr and credential-bearing URLs out of shared receipts.
+
+Only when the intended canonical commit is independently qualified and that diagnosis establishes its local absence, an already-authorized source owner may separately fetch that exact commit from the same verified canonical origin, then recheck identity and exact local availability. Fetch is a separate network/write effect, not an automatic recovery action or authority granted by this runbook. Do not substitute another origin, account, source checkout or base, alter bindings, reset work, or use another actor/tool to bypass a refusal. Explicit safety, provider or tool refusals stop this flow.
+
+Preserve the original acquisition receipt and operation identity. For a failed acquisition, only a matching versioned pre-construction refusal establishes `NOT_APPLIED`; the Studio adapter can label this technical result `REFUSED`. Neither the error code nor the effect label establishes the cause or permission to retry. An absent, malformed or uncertain response remains `EFFECT_UNKNOWN` and requires existing same-operation reconciliation before another effect. After a confirmed no-effect missing-object result and authorized source preparation, reassess the original acquisition through its existing owner and gates; do not blindly replay it.
+
 Use the returned `workspace_path`; do not construct another worktree, override the launcher environment, or directly invoke its Python payload as a production allocation shortcut. A second acquisition with the identical repository/operation/base/branch identity reuses that exact workspace. A mismatch refuses; it is not permission to reset or duplicate it.
 
 Mastermind retains its original `<host-root>/<lane>/<operation>` layout. Macro and Terminal use `<host-root>/<repository>/<lane>/<operation>`. The same operation name in two repositories therefore cannot silently share a workspace or Git common directory. The Web branch remains operation-derived, `sol/web-<operation>`, inside the selected repository. Sparse construction consumes that repository's profile at the exact base commit and does not retrofit an active checkout.
@@ -59,6 +69,33 @@ An opted-in gateway advertises:
 Commit still requires exact expected local HEAD; push still requires a clean workspace and fixed same-branch canonical origin, without force/tags/arbitrary destinations. Repo-aware publication reuses the original implementation and its destination/ref fences. The adapter adds no second Git publisher.
 
 Acquisition is honestly modifying and non-auto-retryable. Its open-world annotation accounts for the existing Git owner's possible retrieval of missing objects from the already-bound canonical origin. Discovery remains non-network. A failed or unqualified return after allocation may have started is `EFFECT_UNKNOWN`; it is not ordinary `NOT_APPLIED`. Only a versioned matching pre-construction repository/storage refusal establishes no allocation effect. Reconcile the same repository/operation through the existing owner before any retry or other effect; a new operation ID does not clear uncertainty.
+
+## Reviewed protected-base integration
+
+The existing commit tool also supports an optional closed `merge` object:
+
+```json
+{
+  "repository": "mastermind",
+  "operation_id": "<existing-operation>",
+  "expected_head_sha": "<exact-current-owned-head>",
+  "message": "Integrate the reviewed protected base",
+  "merge": {
+    "expected_protected_base_sha": "<qualified-protected-base>",
+    "expected_tree_sha": "<reviewed-prepared-tree>"
+  }
+}
+```
+
+Both merge fields are exact lowercase 40-character object IDs. They do not select a repository path, branch, remote, or fetch operation. The installed host fixes the local tracking ref by the existing repository alias: Mastermind and Terminal use `refs/remotes/origin/master`; Macro uses `refs/remotes/origin/main`. This is a local snapshot check. The normal source owner must separately make the qualified protected base available; matching a local tracking ref does not establish the latest remote state.
+
+Prepare and review the resolved candidate in the original operation's workspace. The publisher derives its tree using the existing private index, verifies the supplied tree and protected-base snapshot, and creates exactly two ordered parents: the expected owned HEAD, then the qualified protected base. It verifies the new commit's tree and parents and rechecks the protected snapshot before the existing compare-and-swap of the owned branch. A stale HEAD, mismatched tree, changed protected snapshot, duplicate parent, already-contained base, or unrelated history refuses before that branch update. The same-tree case is allowed when the missing ancestry is the intended change.
+
+Omitting `merge` retains the ordinary single-parent commit contract. A `MERGE_HEAD` file alone does not select this mode. Push remains the separate, existing clean-workspace and same-branch operation. Existing uncertain-effect and index-reconciliation rules still apply; the merge option provides no alternate publisher or permission to retry an uncertain publication.
+
+Source tests exercise this capability in disposable Git repositories. Real use requires the accepted implementation to be installed through the existing service owner and the intended client's advertised tool schema to include the nested fields. A candidate checkout or a manually added argument is not evidence of installed support.
+
+For an already enrolled fleet-v0.1.10 account, the existing `private_service.py` publisher compatibility migration recognizes the exact sealed index-sync predecessor pair (`d8f7f771…` publisher and `9c4c20dd…` workspace adapter) under its existing closed repository configuration. It replaces only those two modules with the reviewed merge-capable pair, preserves the original configuration bytes, and retains the gateway, fleet/Paper modules, dependency seal, Node/backend identity and permissions. Its historical legacy/index-sync transitions keep their original target pins; a mixed or unrecognized predecessor pair refuses. Qualify the intended account's exact manifest with the existing read-only preflight, then use the same stopped-service, manifest-CAS transaction after source acceptance and active-operation reconciliation. The installer does not start a service or refresh the client's action schema. Failure after manifest commit remains `EFFECT_UNKNOWN`; it gives no automatic retry authority.
 
 ## Workbench boundary
 

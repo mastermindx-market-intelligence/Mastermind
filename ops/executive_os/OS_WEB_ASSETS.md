@@ -41,7 +41,7 @@ sudo '<qualified Executive Python>' -I -S -B \
 ```
 
 The resulting artifact contains only `app/mastermind_os/dist` and
-`build-receipt.json`. The incumbent asset validator enforces its three/nine-file
+`build-receipt.json`. The incumbent asset validator enforces its closed three/nine/thirteen-file
 layout, MIME set, `/os/` index references, hashes and budgets. The receipt binds
 the source commit/tree, lockfile/build configuration/helper hashes, public build
 input, non-root builder/tool metadata and asset manifest. Root-sealed paths,
@@ -89,17 +89,49 @@ manifests and the reserved loopback relay port. The planner refuses unless the
 observed config has exactly one `mcp.mastermind-x.com` host route whose GET
 matcher already carries exactly the incumbent fixed routes plus the current
 manifest's asset paths (either the normalized set or the known fixed+index `/os/` duplicate is accepted;
-no other repeat is permitted), exactly the three POST paths, and exactly the two existing
-reverse_proxy upstreams at the loopback reserved port. Duplicate hosts, extra
-or ambiguous matchers, wildcards, extra paths and wrong upstreams refuse.
+no other repeat is permitted), and a complete fixed route profile. Existing
+profiles retain either the historical eight GET routes or the incumbent eleven
+GET routes, paired with the sealed three POST routes or the six routes including
+READ-only session/context, session/reply and session/references. Two complete
+Control Room predecessor pairs are also retained: its ten-GET/three-POST baseline
+and thirteen-GET/seven-POST expansion. The combined profile contains all fourteen
+GET and ten POST routes together. These seven exact pairs are the entire input
+contract; other partial or mixed combinations fail closed. The effectful session/send route
+remains excluded. The two existing reverse_proxy upstreams stay bound to the
+reserved loopback port. Duplicate hosts, extra or ambiguous matchers, wildcards,
+foreign paths and wrong upstreams refuse.
 
-`prepare-config` admits the sorted unique union of the retired and candidate
-asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
-asset availability remains a separately verified host/publisher obligation; `final-config` admits only the candidate asset routes
-plus the fixed routes, so only retired asset paths are removed. Every other
-config field — POST handlers, header rewrites, body limits, TLS, unrelated
-sites, the relay — is preserved semantically; only the selected GET path list
-differs, and caller inputs are never mutated. For a shared non-index asset
+The planner accepts two inner shapes only: the three-branch OS shape (GET, POST,
+terminal abort) and the five-branch shape that adds the public MCP entrypoint
+(GET, POST, MCP metadata GET, MCP POST, terminal abort). The two MCP branches are
+observed, never rewritten: metadata is exactly GET `/.well-known/oauth-protected-resource/mcp`,
+and MCP is exactly POST `/mcp` with a 64000-byte body limit (an integer) before a
+loopback reverse_proxy at the same relay port. Every branch's proxy handler must
+equal the rendered one exactly: the relay upstream, the stripped forwarding and
+CDN client-identity headers, the rewritten X-Forwarded-For/-Proto, and the
+branch's own upstream Host (loopback for `/mcp`, the public host for the rest).
+A wildcard, extra path or method, a missing, duplicated or reordered MCP branch,
+a different body limit, an unexpected upstream or any extra or missing proxy
+field refuses. The planner only proves the Caddy shape; it does not prove the
+gateway behind it. The MCP branches are safe to install only after the installed
+gateway runs with the sealed `public_mcp_resource` key (see
+`docs/EXECUTIVE_MCP.md` section 8), which is outside this planner.
+
+`prepare-config` admits the sorted unique union of retired and candidate assets
+plus all fourteen fixed GET routes and all ten fixed POST routes. `final-config`
+admits only candidate assets plus the same complete fixed routes. Only those two
+OS path lists change; the observed three- or five-branch topology, MCP branches,
+POST handlers, body limits, header rewrites, TLS, unrelated sites and relay stay
+unchanged. The effectful session/send route remains closed. An old Python path
+fence still rejects unimplemented routes, and actual asset availability is a
+separately verified host/publisher obligation. Caller inputs are never mutated.
+
+The renderer includes the two MCP branches, while the transition planner never
+adds them. Updating an existing three-branch OS installation must use its observed
+transition; loading the raw five-branch template requires the separately qualified
+public-audience gateway. Merging source alone selects neither topology nor audience.
+
+For a shared non-index asset
 name, the planner compares manifest-declared SHA256, byte count and MIME;
 `shared_assets_verified` names only that comparison, and no asset bytes are
 read here. The existing host/preparer must verify actual bytes and availability.
@@ -140,3 +172,84 @@ config, the host switch, and the final cleanup, under full request equality,
 custody checks and no replay after uncertainty. This staging is preparation
 only: it does not compose, install or publish a production release, and it
 adds no new policy approval gate.
+
+
+## Rich client artifact profile
+
+The previous protected 11-file profile (Noir nine plus the two exact third-party
+notices) remains fully supported. Exact admitted profiles are 3, 9, 11, 12, 13 and 14;
+12 and 14 include the private-entry JPEG, 13 adds the two SourceMarkdown lazy chunks,
+and 14 adds the two CompanyWorkspace lazy chunks. Publication index sizes
+include one additional manifest entry each. Neither notices nor chunks are
+optional within their respective profiles.
+
+The thirteen-file profile extends the complete nine-file Noir layout with exactly
+one `assets/SourceMarkdown-<hash>.js`, one matching-name-family CSS chunk, and the
+two fixed plain-text notices `third-party/deepseek-harness-LICENSE.txt` and
+`third-party/deepseek-client-dependency-NOTICES.txt`. Both chunks and both notices
+are required together. The JS and CSS content hashes are independent; no invented
+same-hash constraint is applied. No other feature chunk, source map, secret,
+license name, partial set or directory is admitted. Index HTML still references
+only the existing index JS/CSS; those load the lazy reader through its existing
+bundle. The launcher derives required directories from the already-admitted names
+and retains all current immutable byte/hash, symlink, seal and budget checks.
+
+The fourteen-file Team profile extends the complete private-entry twelve-file
+layout with exactly one `assets/CompanyWorkspace-<hash>.js` and one
+`assets/CompanyWorkspace-<hash>.css`. Both chunks are required, with independent
+content hashes. The existing index JS/CSS remain the only index HTML references.
+A private-entry layout combined with SourceMarkdown chunks is not this profile
+and remains refused, as do partial Team pairs, duplicate chunks and other names.
+
+The existing public-edge planner and static application consume that same closed
+name/MIME owner; adding this profile does not introduce wildcard HTTP routes or
+change authentication, request methods, CSP, provider admission or service arming.
+It repairs source/build compatibility only. Production packaging/publication must
+still use the existing accepted release owner and all of its custody gates.
+
+
+### Staged public-edge publication compatibility
+
+The original publisher's staged file index contains the manifest *plus* each admitted
+asset, so the six closed asset profiles have 4, 10, 12, 13, 14 and 15 index entries.
+`ops/executive_os/os_public_edge_publication.py` obtains the allowed index
+cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
+closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*
+reading caller-supplied stage labels; then the normal manifest/byte/receipt checks
+prove exact names, digest and source identity. Do not add wildcards or an
+independent hardcoded 14-file route policy.
+
+`tests/test_os_public_edge_publication.py` includes a full inert 9-to-13
+two-phase publication test, parameterized to cover both valid 9-to-13 and
+11-to-13 transitions from a qualified bundle and old seal through stage,
+prepare, cutover readiness and finalization. The test-host release switch and
+HTTP stand-in are fixtures only. These checks **do not** prove root-sealed
+production publication, permission activation, provider SEND or authentic
+original-parent consumption.
+
+
+## Licensed private-entry artifact profile
+
+The closed12 profile is the complete licensed11 profile plus exactly one
+`assets/private-entry-[A-Za-z0-9_-]+.jpg`, served as `image/jpeg`. It retains
+index HTML, one main JS and CSS file, the atelier JPEG, Manrope TTF, Inter WOFF2,
+all three font documents and both third-party notices. Its exact directories
+remain `assets`, `licenses`, `licenses/fonts` and `third-party`.
+
+This is a separate profile: removing just the private-entry JPEG yields valid
+licensed11. A raw seven-file Vite bundle, unlicensed10, a partial set, a second
+private-entry image, a same-count hybrid, or rich13 plus the JPEG (14 files)
+remains invalid. SourceMarkdown chunks belong only to rich13. No asset name is
+an arbitrary glob and callers cannot choose MIME types.
+
+The same `OS_ASSET_PROFILE_FILE_COUNTS` owner drives capture, manifest, immutable
+loading and staged publication. Twelve manifest files produce thirteen staged
+index entries including the manifest itself. The inert publication regression
+covers old9/11/13 to new12 through PREPARED, CUTOVER_READY and FINAL, preserving
+the original two configuration mutations and removing old-only routes.
+
+All prior byte limits, hashes, exact index references, source/input provenance,
+sealed ownership, ACL/link/special-file checks, import/compare rules and release
+holds remain binding. A disposable successful build is source evidence; actual
+production preparation still requires the exact qualified protected packaging
+generation and its supported explicit public inputs.

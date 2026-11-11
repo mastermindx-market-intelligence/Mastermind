@@ -36,6 +36,29 @@ from lane_runtime import (
 )
 
 
+
+def _slot_child_timeout_env(child_env: dict[str, str], outer_timeout: float) -> dict[str, str]:
+    """Preserve a stricter slot limit while passing the original outer fuse.
+
+    Called after the existing commissioner/lease clock has narrowed the
+    outer process timeout. Slot remains the sole nested timeout monitor.
+    This is an environment contract, not a second clock or lease.
+    """
+    deadline = parse_bounded_seconds(
+        outer_timeout, default=7200.0, minimum=1.0, maximum=14400.0,
+        key="SLOT_CHILD_TIMEOUT_SECONDS",
+    )
+    for key in ("SLOT_CHILD_TIMEOUT_SECONDS", "POOL_CHILD_TIMEOUT_SECONDS"):
+        raw = child_env.get(key)
+        if raw is not None and str(raw).strip():
+            deadline = min(deadline, parse_bounded_seconds(
+                raw, default=7200.0, minimum=1.0, maximum=14400.0,
+                key=key,
+            ))
+    result = dict(child_env)
+    result["SLOT_CHILD_TIMEOUT_SECONDS"] = str(deadline)
+    return result
+
 def _fail(message: str, code: int) -> int:
     print(message, file=sys.stderr, flush=True)
     return code
@@ -55,6 +78,11 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         return ("", None) if raw.lstrip().startswith(("{", "[")) else (raw, None)
     if not isinstance(parsed, dict):
         return "", None
+    # Model conflict must be checked before any optional or malformed final
+    # fields, not only after usage/session parsing or visible text extraction.
+    reported_model = parsed.get("model")
+    if reported_model is not None and reported_model != model:
+        raise ValueError("grok_final_model_conflict")
     text = parsed.get("text")
     if not isinstance(text, str):
         return "", None
@@ -72,8 +100,11 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
     full_input = noncached + cached + extra
     if full_input > 2**53 or full_input + output != observed_total:
         return text, None
+    # A CLI pin is a requested model, not a witnessed served-model identity.
+    # Some native JSON finals omit a model entirely. Do not invent one.
+    has_reported_model = type(reported_model) is str and reported_model == model
     return text, {
-        "schema": "mastermind.grok_usage.v1",
+        "schema": "mastermind.grok_usage.v2",
         "status": "observed",
         "reason": "native_headless_final",
         "session_ids": [sid],
@@ -82,16 +113,19 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         "output_tokens": output,
         "total_tokens": observed_total,
         "source": "grok_native_headless",
-        "served_model": model,
+        "served_model": reported_model if has_reported_model else None,
+        "requested_model": model,
+        "model_identity_source": ("native_headless_final_model_field"
+                                  if has_reported_model else "requested_cli_only"),
         "run_id": run_id,
     }
 
 
 
-def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout, env):
+def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout, env, model):
     """Original producer binds normalized output; never backfills an old run."""
     import artifact_production
-    if grok_plaintext_and_usage(raw_stdout, contract['run_id'], 'grok-4.6')[0] != display_stdout:
+    if grok_plaintext_and_usage(raw_stdout, contract['run_id'], model)[0] != display_stdout:
         raise ValueError('grok_output_transform_mismatch')
     row = json.loads(Path(receipt).read_text().splitlines()[-1])
     raw = raw_stdout.encode('utf-8');normalized = display_stdout.encode('utf-8')
@@ -111,7 +145,7 @@ def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout,
     if not all(native_remote.IDENT.fullmatch(scope[k]) for k in ('root','parent','run_id','host','lease_id','account')):
         raise ValueError('grok_output_scope')
     return dict(schema='mastermind.grok_normalized_output.v1', algorithm='grok_plaintext_and_usage_v1',
-        **scope, mode='grok', model='grok-4.6', raw_bytes=len(raw),raw_sha256=hashlib.sha256(raw).hexdigest(),
+        **scope, mode='grok', model=model, raw_bytes=len(raw),raw_sha256=hashlib.sha256(raw).hexdigest(),
         normalized_bytes=len(normalized),normalized_sha256=hashlib.sha256(normalized).hexdigest(),
         contract=contract,manifest=manifest)
 
@@ -129,6 +163,9 @@ _SPARSE_GIT_SETTINGS = (
     ("core.untrackedCache", "false"), ("core.useReplaceRefs", "false"),
     ("maintenance.auto", "false"), ("gc.auto", "0"),
     ("protocol.allow", "never"),
+    # Valid sparse-index reads can emit this informational advisory on newer Git.
+    # Keep every other stderr diagnostic subject to the strict observer check.
+    ("advice.sparseIndexExpanded", "false"),
 )
 
 
@@ -251,6 +288,17 @@ def _sparse_config(path: Path) -> tuple[dict, tuple | None]:
                 value = value.lower()
                 if value not in exact_values[key]:
                     raise ValueError("unsupported value")
+            elif key == "extensions.partialclone":
+                # This names the existing remote; preserve its case-sensitive
+                # identity. It grants no transport or lazy-fetch capability.
+                if value != "origin":
+                    raise ValueError("unsupported partial clone remote")
+            elif key in {"http.postbuffer", "http.lowspeedlimit", "http.lowspeedtime"}:
+                # Unscoped data only. Git's signs, units and other numeric
+                # spellings stay outside this deliberately closed parser.
+                if (re.fullmatch(r"0|[1-9][0-9]{0,9}", value) is None
+                        or int(value) > 2147483647):
+                    raise ValueError("unsupported HTTP numeric value")
             elif key in {"user.name", "user.email"}:
                 pass
             elif (section.startswith("remote.") and section.count(".") >= 2
@@ -558,6 +606,18 @@ def _new_macro_workspace(key: str, cwd: str, here: Path, env: dict,
             raise SparseWorkspaceRefused("FABRIC_SPARSE_REVIEWED_DONOR_DRIFT",
                                          effect_unknown=exc.effect_unknown) from exc
         raise
+    # Qualify the exact local commit before entering the effectful mint owner.
+    # Its own check remains authoritative after this observation; a later
+    # failure still retains the existing unknown-effect hold.
+    try:
+        commit_kind = _sparse_git(donor, common, "cat-file", "-t", commit)
+    except SparseWorkspaceRefused as exc:
+        if exc.effect_unknown:
+            raise
+        raise SparseWorkspaceRefused(
+            "FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED") from exc
+    if commit_kind != b"commit\n":
+        raise SparseWorkspaceRefused("FABRIC_SPARSE_PINNED_COMMIT_UNQUALIFIED")
     try:
         if _sparse_read(helper) != (content, identity):
             raise SparseWorkspaceRefused("FABRIC_SPARSE_HELPER_CHANGED")
@@ -686,20 +746,456 @@ def _bound_lane_packet(key, mode, packet_path, cwd, here, env):
     return layout, packet
 
 
-def _execute(argv: list[str], state: dict) -> int:
+def _canonical_model_command(here, packet_path, key, mode, model, env, *, context=None, timeout=1):
+    """Closed trusted program selection; an environment flag grants nothing.
+
+    The actual model client and controller gateway verify the signed capsule
+    and exact body. No CLI, prompt-to-shell, home hooks or model tools execute.
+    """
+    selected = env.get('FABRIC_CANONICAL_PAID_MODE')
+    if selected is None:
+        return None
+    if (selected != 'sealed-model-only-v1' or mode != 'glm'
+            or model not in {'glm-5.3', 'glm-5.3-flash'}
+            or env.get('FABRIC_OPERATOR_CAPSULE')
+            or env.get('FABRIC_OPERATOR_CAPABILITY')
+            or env.get('FABRIC_NEW_MACRO_COMMIT')):
+        raise ValueError('CANONICAL_PAID_MODE_REFUSED')
+    lanes = Path(env.get('REMOTE_SUB_LANES', ''))
+    capsule = Path(env.get('GLM_REMOTE_CAPABILITY_FILE', ''))
+    if (not lanes.is_absolute() or capsule != lanes / 'tmp' / (key + '.glm-cap.json')
+            or packet_path != lanes / 'tmp' / (key + '.txt')):
+        raise ValueError('CANONICAL_PAID_INPUT_REFUSED')
+    from paid_provider_entry import require_executor_context,model_command
+    import secrets
+    context=require_executor_context(context)
+    request=context.request(key,model,packet_path,env,timeout,secrets.token_hex(32))
+    return model_command(here,request,context._owner.expected),request
+
+
+# APPLICATION purpose: the private executor seam and the physical carrier.
+# This branch reuses the incumbent host, support generation, physical
+# LaneLease, owned process group, capture and cleanup. It never acquires,
+# renews, adopts or settles a worker provider lease, never writes a worker
+# ledger and never fabricates a Job/Attempt; A stays the sole durable
+# dispatch/terminal/recovery/close owner.
+_APPLICATION_SEAL = object()
+_APPLICATION_OWNERS: dict = {}
+
+
+class ApplicationContext:
+    """Process-local source custody for one APPLICATION invocation. Exact type,
+    a module-private seal and a source-bound owner identity: a caller
+    dictionary, subclass, environment flag, packet string, callback, module
+    path or serialized object cannot create this authority."""
+
+    __slots__ = ("envelope", "owner", "support_digest", "pid")
+
+    def __init__(self, envelope, owner, support_digest, *, _seal=None):
+        if _seal is not _APPLICATION_SEAL:
+            raise ValueError("application_context_seal_required")
+        object.__setattr__(self, "envelope", envelope)
+        object.__setattr__(self, "owner", owner)
+        object.__setattr__(self, "support_digest", support_digest)
+        object.__setattr__(self, "pid", os.getpid())
+
+    def check(self):
+        if self.pid != os.getpid():
+            raise ValueError("application_context_pid_mismatch")
+        if self.support_digest != os.environ.get("SUPPORT_DIGEST", ""):
+            raise ValueError("application_context_support_mismatch")
+        if not callable(getattr(self.owner, "application_owner_check", None)):
+            raise ValueError("application_owner_contract_refused")
+
+
+def require_application_context(value, owner):
+    """Accept only the sealed, source-bound APPLICATION context."""
+    if type(value) is not ApplicationContext:
+        raise ValueError("application_context_type_refused")
+    if value.owner is not owner:
+        raise ValueError("application_context_owner_refused")
+    value.check()
+    return value
+
+
+def _application_owner(here: Path, support_digest: str):
+    """Load the root-owned APPLICATION owner from the digest-bound release.
+    It is published only when the trusted A/B native extension exists. At this
+    base it is absent, so the public production entry stays closed."""
+    import importlib.util
+    cached = _APPLICATION_OWNERS.get((str(here), support_digest))
+    if cached is not None:
+        return cached
+    release = here.parent
+    if not support_digest or release.name != support_digest:
+        raise ValueError("application_support_digest_mismatch")
+    try:
+        meta = json.loads((release / "RELEASE.json").read_text(encoding="utf-8"))
+        files = meta.get("files") if type(meta) is dict else None
+        canonical = json.dumps({"schema": "remote-support-code.v1", "files": files},
+                               sort_keys=True, separators=(",", ":"),
+                               ensure_ascii=True).encode("utf-8")
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError("application_support_manifest_refused") from exc
+    if (type(files) is not dict or not files or meta.get("digest") != support_digest
+            or hashlib.sha256(canonical).hexdigest() != support_digest):
+        raise ValueError("application_support_manifest_refused")
+    name = native_remote.APPLICATION_OWNER_MODULE
+    if name not in files:
+        raise ValueError("application_owner_absent")
+    try:
+        path = here / name
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o555
+                    or info.st_size > 2 * 1024 * 1024):
+                raise ValueError("application_owner_source_refused")
+            source = stream.read(2 * 1024 * 1024 + 1)
+            visible = path.lstat()
+            if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) != (
+                    visible.st_dev, visible.st_ino, visible.st_size, visible.st_mtime_ns):
+                raise ValueError("application_owner_source_changed")
+    except OSError as exc:
+        raise ValueError("application_owner_source_unavailable") from exc
+    if hashlib.sha256(source).hexdigest() != files[name]:
+        raise ValueError("application_owner_source_refused")
+    # Execute the captured, verified bytes. A second path lookup or pyc loader
+    # must never choose a different source image after the hash check.
+    spec = importlib.util.spec_from_loader(
+        "mastermind_application_native_owner", loader=None, origin=str(path))
+    module = importlib.util.module_from_spec(spec)
+    module.__file__ = str(path)
+    exec(compile(source, str(path), "exec"), module.__dict__)
+    if not callable(getattr(module, "application_owner_bind", None)):
+        raise ValueError("application_owner_contract_refused")
+    _APPLICATION_OWNERS[(str(here), support_digest)] = (module, files)
+    return module, files
+
+
+def _bootstrap_application_context(argv: list[str]):
+    """Rebuild the sealed APPLICATION context inside this fresh interpreter.
+    The trusted owner authenticates the prepared dispatch and pins the
+    profile; this carrier never authenticates a caller itself."""
+    here = Path(__file__).resolve().parent
+    support_digest = os.environ.get("SUPPORT_DIGEST", "")
+    owner, _ = _application_owner(here, support_digest)
+    try:
+        raw = json.loads(Path(argv[3]).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError("application_envelope_unreadable") from exc
+    return ApplicationContext(native_remote.application_scope(raw), owner,
+                              support_digest, _seal=_APPLICATION_SEAL)
+
+
+def _write_application_record(path: Path, value: dict) -> None:
+    """Exclusively publish on the incumbent lane with file and directory durability."""
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    parent = os.open(path.parent, flags)
+    try:
+        directory = os.fstat(parent)
+        if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.getuid():
+            raise OSError("application_parent_refused")
+        fd = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                     | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0), 0o600, dir_fd=parent)
+        with os.fdopen(fd, "w") as stream:
+            observed = os.fstat(stream.fileno())
+            visible = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+            if (not stat.S_ISREG(observed.st_mode)
+                    or (observed.st_dev, observed.st_ino) != (visible.st_dev, visible.st_ino)):
+                raise OSError("application_record_identity_refused")
+            json.dump(value, stream, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.fsync(parent)
+        visible_parent = path.parent.stat()
+        if (directory.st_dev, directory.st_ino) != (visible_parent.st_dev, visible_parent.st_ino):
+            raise OSError("application_parent_changed")
+    finally:
+        os.close(parent)
+
+
+def _write_application_terminal(path: Path, value: dict) -> bool:
+    """A partial or unconfirmed terminal remains reserved, never silently replaced."""
+    try:
+        _write_application_record(path, value)
+    except OSError:
+        return False
+    return True
+
+
+def _hold_lease(lease, reason: str) -> None:
+    """Retain the original marker. Never lose custody to a cleanup exception."""
+    try:
+        lease.hold_for_reconciliation(reason)
+    except LaneRuntimeError:
+        pass
+
+
+def _application_terminal_matches_receipt(value, path: Path) -> bool:
+    """Correlate a recovered terminal with the incumbent original process receipt."""
+    if value["status"] == "not_started":
+        return not os.path.lexists(path)
+    if not value["process"]:
+        return value["status"] == "effect_unknown"
+    try:
+        if path.is_symlink():
+            return False
+        row = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
+        process, capture = value["process"], value["capture"]
+        if (type(row) is not dict or row.get("schema") != process["receipt_schema"]
+                or row.get("label") != process["label"]
+                or row.get("pid") != process["pid"] or row.get("pgid") != process["pgid"]
+                or type(row.get("returncode")) is not int
+                or row["returncode"] != process["receipt_returncode"]
+                or type(row.get("timed_out")) is not bool
+                or row["timed_out"] != process["receipt_timed_out"]
+                or row.get("cleanup") != value["cleanup"]):
+            return False
+        return all(type(row.get(name)) is type(capture[name]) and row[name] == capture[name]
+                   for name in ("stdout_bytes", "stderr_bytes", "stdout_truncated",
+                                "stderr_truncated", "stdout_sha256"))
+    except (OSError, ValueError, TypeError, IndexError, UnicodeError):
+        return False
+
+
+def _execute_application(argv: list[str], state: dict, context) -> int:
+    """One APPLICATION invocation on the incumbent physical owner."""
+    if len(argv) != 6 or argv[2] != "application":
+        return _fail("APPLICATION_ARGUMENTS_INVALID", 2)
+    key, envelope_path = argv[1], argv[3]
+    here = Path(__file__).resolve().parent
+    support_digest = os.environ.get("SUPPORT_DIGEST", "")
+    try:
+        owner, files = _application_owner(here, support_digest)
+        require_application_context(context, owner)
+        envelope = native_remote.application_scope(context.envelope)
+        if key != native_remote.application_carrier_key(envelope):
+            raise ValueError("application_carrier_key_refused")
+    except (ValueError, TypeError, KeyError):
+        return _fail("APPLICATION_CONTEXT_REFUSED before_admission=1", 78)
+    if (not support_digest or support_digest != envelope["support_digest"]
+            or (argv[5] and argv[5] != envelope["model"])):
+        return _fail("APPLICATION_SCOPE_REFUSED before_admission=1", 78)
+    try:
+        observed = native_remote.application_scope(
+            json.loads(Path(envelope_path).read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return _fail("APPLICATION_ENVELOPE_REFUSED before_admission=1", 78)
+    if observed != envelope:
+        return _fail("APPLICATION_ENVELOPE_CHANGED before_admission=1", 78)
+    # Bind and check authority before reading any retained terminal. Recovery
+    # receives the same original key and cannot skip owner authorization.
+    try:
+        bound = owner.application_owner_bind(
+            envelope, support_digest=support_digest, run_id=key,
+            source_digests=files)
+        profile = native_remote.application_profile(bound, envelope)
+        argv_frozen, cwd = list(profile["argv"]), profile["cwd"]
+        if (native_remote.application_invocation_digest(envelope, argv_frozen, cwd)
+                != envelope["invocation_digest"]):
+            raise ValueError("application_invocation_digest_mismatch")
+        context.check()
+        owner.application_owner_check(envelope)
+    except (ValueError, TypeError, KeyError):
+        return _fail("APPLICATION_INVOCATION_REFUSED before_admission=1", 78)
+    lanes_dir = here / "lanes"
+    prepare_path = lanes_dir / (key + ".application-prepare.json")
+    terminal_path = lanes_dir / (key + ".application-terminal.json")
+    receipt_path = lanes_dir / (key + ".process.jsonl")
+    try:
+        lanes_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return _fail("APPLICATION_LANES_UNAVAILABLE before_admission=1", 78)
+    if os.path.lexists(terminal_path):
+        try:
+            if terminal_path.is_symlink():
+                raise ValueError("application_terminal_link_refused")
+            recorded = json.loads(terminal_path.read_text(encoding="utf-8"))
+            rc = native_remote.application_carrier_returncode(recorded, envelope)
+            if not _application_terminal_matches_receipt(recorded, receipt_path):
+                raise ValueError("application_terminal_process_mismatch")
+            return rc
+        except (OSError, ValueError, TypeError, KeyError, UnicodeError):
+            return _fail("APPLICATION_TERMINAL_AMBIGUOUS before_admission=1", 76)
+    if os.path.lexists(prepare_path) or os.path.lexists(receipt_path):
+        return _fail("APPLICATION_LAUNCH_ALREADY_ATTEMPTED before_admission=1", 75)
+    # Freeze both the incoming duration and absolute expiry on this host's
+    # original monotonic entry clock. Binding/admission never refresh the fuse.
+    entered_wall = state["entered_wall_time"]
+    duration = min(float(envelope["remaining_seconds"]),
+                   float(envelope["expires_at"]) - entered_wall)
+    deadline_ns = state["entered_monotonic_ns"] + int(duration * 1_000_000_000)
+    try:
+        require_remaining(deadline_ns, minimum_seconds=0.05)
+        if time.time() >= envelope["expires_at"]:
+            raise CommissionDeadlineExpired("application_expired")
+    except CommissionDeadlineExpired:
+        return _fail("APPLICATION_EXPIRED before_admission=1", 78)
+    try:
+        config = load_runtime_config(os.environ, cpu_count=os.cpu_count() or 1)
+        install_signal_cleanup()
+        lease = LaneLease.acquire(here / "active", key=key, label=key,
+                                   env=os.environ, reconcile_unreleased=True)
+    except LaneAdmissionRefused as exc:
+        return _fail("APPLICATION_ADMISSION_REFUSED " + json.dumps(
+            exc.snapshot.public_dict(), sort_keys=True, separators=(",", ":")), 75)
+    except (LaneRuntimeError, LaneRuntimeConfigError) as exc:
+        return _fail("APPLICATION_ADMISSION_ERROR " + type(exc).__name__, 78)
+    argv_digest = hashlib.sha256(json.dumps(
+        argv_frozen, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True).encode("utf-8")).hexdigest()
+    prepare = {"schema": native_remote.APPLICATION_PREPARE_SCHEMA,
+               "dispatch_id": envelope["dispatch_id"],
+               "invocation_digest": envelope["invocation_digest"],
+               "profile_digest": envelope["profile_digest"],
+               "support_digest": envelope["support_digest"],
+               "argv_sha256": argv_digest,
+               "cwd_sha256": hashlib.sha256(cwd.encode("utf-8")).hexdigest(),
+               "entered_monotonic_ns": state["entered_monotonic_ns"],
+               "deadline_monotonic_ns": deadline_ns}
+    try:
+        _write_application_record(prepare_path, prepare)
+    except FileExistsError:
+        lease.release()
+        return _fail("APPLICATION_LAUNCH_ALREADY_ATTEMPTED before_launch=1", 75)
+    except OSError:
+        _hold_lease(lease, "application_prepare_write_unconfirmed")
+        return _fail("APPLICATION_PREPARE_UNAVAILABLE before_launch=1", 78)
+    child_env = dict(os.environ)
+    for name in ("FABRIC_OPERATOR_CAPSULE", "FABRIC_OPERATOR_CAPABILITY",
+                 "FABRIC_NEW_MACRO_COMMIT", "FABRIC_CPU_SCOPE_QUOTA_PCT",
+                 "POOL_USAGE_FILE", "POOL_USAGE_RUN_ID", "POOL_OUTCOME_FILE"):
+        child_env.pop(name, None)
+    child_env.update(profile.get("env", {}))
+    child_env.update(POOL_LEASE_ID=envelope["lease_id"],
+                     POOL_ACCOUNT=envelope["account"],
+                     REMOTE_SUB_RUN_ID=key, LANE_REMOTE_HOST=envelope["host"])
+    install_signal_cleanup(on_unproven=lease.hold_for_reconciliation)
+
+    def record_terminal(**fields):
+        value = native_remote.application_result(envelope, **fields)
+        if not native_remote.application_result_valid(value, envelope):
+            _hold_lease(lease, "application_terminal_evidence_unqualified")
+            value = native_remote.application_result(
+                envelope, status="effect_unknown", started=True, returncode=76)
+        if not _write_application_terminal(terminal_path, value):
+            _hold_lease(lease, "application_terminal_write_unconfirmed")
+            return 76, value
+        return native_remote.application_carrier_returncode(value, envelope), value
+
+    with lease:
+        try:
+            timeout = require_remaining(deadline_ns, minimum_seconds=0.05)
+            if time.time() >= envelope["expires_at"]:
+                raise CommissionDeadlineExpired("application_expired")
+        except CommissionDeadlineExpired:
+            rc, _ = record_terminal(status="not_started", started=False, returncode=75)
+            return _fail("APPLICATION_EXPIRED before_launch=1", rc)
+        try:
+            result = run_owned_process(
+                argv_frozen, cwd=cwd, timeout=timeout,
+                input_text=envelope["user_text"], env=child_env, nice=config.nice,
+                label=key, receipt_path=receipt_path, timeout_returncode=124,
+                capture_limit_bytes=min(int(profile.get(
+                    "max_output_bytes", envelope["max_output_bytes"])),
+                    int(envelope["max_output_bytes"])))
+        except OwnedProcessStartError as exc:
+            number = str(exc.error_number) if exc.error_number is not None else "unknown"
+            rc, _ = record_terminal(status="not_started", started=False, returncode=78)
+            return _fail("APPLICATION_EXEC_NOT_STARTED errno=" + number, rc)
+        except (LaneRuntimeError, OSError, ValueError) as exc:
+            _hold_lease(lease, "application_cleanup_unproven")
+            rc, _ = record_terminal(status="effect_unknown", started=True, returncode=76)
+            return _fail("APPLICATION_EFFECT_UNKNOWN " + type(exc).__name__, rc)
+        receipt = None
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8").splitlines()[-1])
+            matches = (
+                receipt.get("schema") == "mastermind.local_owned_process_receipt.v1"
+                and receipt.get("label") == key
+                and type(receipt.get("pid")) is int and receipt["pid"] == result.pid
+                and type(receipt.get("pgid")) is int and receipt["pgid"] == result.pgid
+                and type(receipt.get("returncode")) is int
+                and receipt["returncode"] == result.returncode
+                and type(receipt.get("timed_out")) is bool
+                and receipt["timed_out"] == result.timed_out
+                and receipt.get("cleanup") == result.cleanup)
+            for stream in ("stdout", "stderr"):
+                matches = (matches and type(receipt.get(stream + "_bytes")) is int
+                           and receipt[stream + "_bytes"] == getattr(result, stream + "_bytes")
+                           and type(receipt.get(stream + "_truncated")) is bool
+                           and receipt[stream + "_truncated"] == getattr(result, stream + "_truncated"))
+            if not result.stdout_truncated:
+                raw = result.stdout.encode("utf-8")
+                matches = (matches and len(raw) == result.stdout_bytes
+                           and hashlib.sha256(raw).hexdigest() == receipt.get("stdout_sha256"))
+            elif receipt.get("stdout_sha256") is not None:
+                # The incumbent collector hashes the entire drained stream even
+                # when its retained text is truncated. Preserve that evidence.
+                digest = receipt["stdout_sha256"]
+                matches = (matches and type(digest) is str
+                           and re.fullmatch(r"[0-9a-f]{64}", digest) is not None)
+            if not matches:
+                receipt = None
+        except (OSError, ValueError, TypeError, AttributeError, IndexError):
+            receipt = None
+        if receipt is None:
+            _hold_lease(lease, "application_capture_unqualified")
+            rc, _ = record_terminal(status="effect_unknown", started=True, returncode=76)
+            return _fail("APPLICATION_EFFECT_UNKNOWN capture_unqualified=1", rc)
+        capture = {"stdout_bytes": result.stdout_bytes, "stderr_bytes": result.stderr_bytes,
+                   "stdout_truncated": result.stdout_truncated,
+                   "stderr_truncated": result.stderr_truncated,
+                   "stdout_complete": not result.stdout_truncated,
+                   "stderr_complete": not result.stderr_truncated,
+                   "stdout_sha256": receipt["stdout_sha256"]}
+        proven = cleanup_receipt_is_proven(receipt["cleanup"])
+        if not proven:
+            _hold_lease(lease, "application_cleanup_unproven")
+            status = "effect_unknown"
+        elif not capture["stdout_complete"] or not capture["stderr_complete"]:
+            status = "incomplete"
+        elif result.returncode == 0 and not result.timed_out:
+            status = "completed"
+        else:
+            status = "failed"
+        rc, value = record_terminal(
+            status=status, started=True, returncode=result.returncode,
+            process={"pid": result.pid, "pgid": result.pgid, "label": key,
+                     "receipt_schema": receipt["schema"],
+                     "receipt_returncode": receipt["returncode"],
+                     "receipt_timed_out": receipt["timed_out"]},
+            capture=capture, cleanup=result.cleanup)
+        if rc == 76:
+            return _fail("APPLICATION_RESULT_HELD status=" + value["status"], rc)
+        if result.stdout:
+            sys.stdout.write(result.stdout)
+            sys.stdout.flush()
+        return rc
+
+
+def _execute(argv: list[str], state: dict, *, _canonical_context=None) -> int:
     if len(argv) != 6:
         return _fail(
             "usage: remote_sub_exec.py <key> <mode> <packet> <cwd> <model>", 2
         )
     _, key, mode, packet, cwd, model = argv
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') is not None:
+        try:
+            from paid_provider_entry import require_executor_context
+            require_executor_context(_canonical_context)
+        except (ImportError,ValueError,OSError):
+            return _fail('CANONICAL_PAID_CONTEXT_REFUSED before_admission=1',78)
     # The controller sends a duration immediately before this transport's
     # launch, never its monotonic clock. Anchor in this host's own clock at
     # executor entry so admission/preparation cannot refresh the worker fuse.
     commission_budget = os.environ.get('REMOTE_SUB_COMMISSION_BUDGET_SECONDS')
     if commission_budget is not None:
         if (mode not in {'glm', 'glm-codex', 'minimax', 'minimax-codex', 'qwen'}
-                or not re.fullmatch(r'[1-9][0-9]{0,3}', commission_budget)
-                or int(commission_budget) > 7200):
+                or not re.fullmatch(r'[1-9][0-9]{0,4}', commission_budget)
+                or int(commission_budget) > 14400):
             return _fail('REMOTE_SUB_COMMISSION_BUDGET_INVALID', 78)
         state['commission_deadline_ns'] = narrow_deadline_ns(
             None, int(commission_budget), now_ns=state['entered_monotonic_ns'])
@@ -748,7 +1244,7 @@ def _execute(argv: list[str], state: dict) -> int:
             os.environ.get("REMOTE_SUB_CHILD_TIMEOUT"),
             default=7000.0,
             minimum=0.05,
-            maximum=7200.0,
+            maximum=14400.0,
             key="REMOTE_SUB_CHILD_TIMEOUT",
         )
     except LaneRuntimeConfigError as exc:
@@ -758,6 +1254,12 @@ def _execute(argv: list[str], state: dict) -> int:
     install_signal_cleanup()
     state_ext = (Path(bound_packet[0]["binding"]["path"]) / "ext"
                  if bound_packet is not None else here)
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') == 'sealed-model-only-v1' and bound_packet is None:
+        try:
+            from paid_model_owner import canonical_state_ext
+            state_ext = canonical_state_ext(here, os.environ)
+        except (OSError, ValueError, TypeError, KeyError):
+            return _fail("CANONICAL_PAID_SUPPORT_REFUSED before_worker=1", 78)
     active_dir = state_ext / "active"
     try:
         lease = LaneLease.acquire(
@@ -795,6 +1297,20 @@ def _execute(argv: list[str], state: dict) -> int:
         command.append(model)
     if mode in native_remote.MODES:
         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
+    canonical_command = None
+    canonical_request = None
+    try:
+        canonical = _canonical_model_command(here, packet_path, key, mode, model, os.environ,
+                                              context=_canonical_context,timeout=timeout)
+        if canonical is not None:canonical_command,canonical_request=canonical
+    except (ValueError, OSError):
+        lease.release()
+        return _fail('CANONICAL_PAID_PREFLIGHT_REFUSED before_worker=1', 78)
+    if canonical_command is not None:
+        if artifact_contract is not None:
+            lease.release()
+            return _fail('CANONICAL_PAID_ARTIFACT_REFUSED before_worker=1', 78)
+        command = canonical_command
     lanes_dir = state_ext / "lanes"
     child_env = dict(os.environ)
     if 'commission_deadline_ns' in state:
@@ -817,6 +1333,10 @@ def _execute(argv: list[str], state: dict) -> int:
         if timeout <= 0:
             lease.release()
             return _fail("native_remote_lease_expired", 78)
+    if canonical_command is not None:
+        child_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
+                     'PYTHONDONTWRITEBYTECODE': '1',
+                     'HOME':canonical_request['initializer_commitment']['account']['home']}
     receipt = lanes_dir / f"{key}.process.jsonl"
     diagnostic_reader = None
     if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
@@ -898,6 +1418,15 @@ def _execute(argv: list[str], state: dict) -> int:
                         timeout = min(timeout, require_remaining(state['commission_deadline_ns'], minimum_seconds=0.05))
                     except CommissionDeadlineExpired:
                         return _fail('REMOTE_SUB_COMMISSION_TIME_EXHAUSTED before_worker=1 stage=launch', 75)
+                # The provider child may enter slot.py under sub.sh. Pass the
+                # *narrowed* existing owner timeout, never the nominal 4h
+                # complexity profile. Without this slot silently defaults to
+                # 7200s and kills a qualified 4h child prematurely.
+                if canonical_command is None and mode in ("glm", "minimax", "qwen"):
+                    try:
+                        child_env = _slot_child_timeout_env(child_env, timeout)
+                    except LaneRuntimeConfigError:
+                        return _fail("REMOTE_SUB_SLOT_TIMEOUT_REFUSED before_worker=1", 78)
                 state["started"] = True
                 result = run_owned_process(
                     command,
@@ -909,6 +1438,10 @@ def _execute(argv: list[str], state: dict) -> int:
                     receipt_path=receipt,
                     timeout_returncode=124,
                     receipt_diagnostics=diagnostic_reader,
+                    launch_observer=(None if canonical_command is None else
+                        __import__('paid_model_owner').launch_observer(
+                            here, packet_path, key, model, receipt,
+                            entry_request=canonical_request)),
                 )
             except OwnedProcessStartError as exc:
                 state["started"] = False
@@ -944,7 +1477,17 @@ def _execute(argv: list[str], state: dict) -> int:
             if mode == "grok":
                 # Normalize even when the provider rc is nonzero. Never
                 # echo structured JSON including its private thought field.
-                display_stdout, usage_record = grok_plaintext_and_usage(result.stdout, key, model)
+                try:
+                    display_stdout, usage_record = grok_plaintext_and_usage(result.stdout, key, model)
+                except ValueError as exc:
+                    # No private JSON fields should reach the parent on an
+                    # observed native-final model conflict. The original
+                    # child already ran; never retry it to resolve identity.
+                    if str(exc) != "grok_final_model_conflict":
+                        raise
+                    if not result.cleanup_proven:
+                        return _fail("REMOTE_CLEANUP_UNPROVEN", 76)
+                    return _fail("GROK_NATIVE_FINAL_MODEL_CONFLICT", 76)
                 if (usage_record is not None and result.returncode == 0
                         and result.cleanup_proven
                         and not result.stdout_truncated and not result.stderr_truncated):
@@ -968,7 +1511,7 @@ def _execute(argv: list[str], state: dict) -> int:
                         artifact_contract, artifact_owner, display_stdout, child_env["LANE_REMOTE_HOST"])
                     if mode == "grok":
                         state['output_binding'] = grok_output_binding(
-                            receipt, artifact_contract, manifest, result.stdout, display_stdout, child_env)
+                            receipt, artifact_contract, manifest, result.stdout, display_stdout, child_env, model)
                     if mode in artifact_production.ORDINARY_MODES:
                         artifact_production.record_ordinary_completion(
                             receipt, artifact_contract, manifest, result.stdout, mode=mode)
@@ -980,6 +1523,16 @@ def _execute(argv: list[str], state: dict) -> int:
             return _fail("REMOTE_CLEANUP_UNPROVEN " + type(exc).__name__, 76)
         return _fail("REMOTE_SUB_RUNTIME_ERROR " + type(exc).__name__, 78)
 
+    if canonical_command is not None and int(result.returncode) == 0:
+        try:
+            __import__('paid_model_owner').retain_result(receipt,key,result)
+        except (OSError,ValueError,KeyError,UnicodeError):
+            return _fail('CANONICAL_PAID_RESULT_RETENTION_UNCONFIRMED same_run=1',76)
+
+    if canonical_command is not None and (
+            int(result.returncode) != 0 or not result.cleanup_proven
+            or result.stdout_truncated or result.stderr_truncated):
+        display_stdout = ''
     if display_stdout:
         sys.stdout.write(display_stdout)
         sys.stdout.flush()
@@ -1005,14 +1558,32 @@ def _execute(argv: list[str], state: dict) -> int:
     return int(result.returncode)
 
 
-def main(argv: list[str]) -> int:
-    state = {"started": False, "entered_monotonic_ns": time.monotonic_ns()}
+def main(argv: list[str], *, _canonical_context=None, _application_context=None) -> int:
+    if _canonical_context is not None and _application_context is not None:
+        print("APPLICATION_CONTEXT_EXCLUSIVE_REFUSED", file=sys.stderr, flush=True)
+        return 78
+    state = {"started": False, "entered_monotonic_ns": time.monotonic_ns(),
+             "entered_wall_time": time.time()}
     if len(argv) == 6 and argv[2] in native_remote.MODES:
         state["timing"] = {"remote_exec_entered_at": time.time()}
     is_go = len(argv) == 6 and argv[2] == "go-codex"
     rc = 78
     try:
-        rc = _execute(argv, state)
+        if _application_context is not None:
+            rc = _execute_application(argv, state, _application_context)
+        elif len(argv) == 6 and argv[2] == "application":
+            try:
+                context = _bootstrap_application_context(argv)
+            except (ImportError, OSError, ValueError, KeyError, TypeError) as exc:
+                # The public production entry stays closed until the trusted
+                # A/B native extension publishes the owner module.
+                print("APPLICATION_AUTHORITY_REFUSED reason=" + type(exc).__name__,
+                      file=sys.stderr, flush=True)
+                return 78
+            rc = _execute_application(argv, state, context)
+        else:
+            rc = (_execute(argv,state) if _canonical_context is None else
+                  _execute(argv,state,_canonical_context=_canonical_context))
         return rc
     except BaseException as exc:
         if isinstance(exc, SystemExit) and isinstance(exc.code, int):

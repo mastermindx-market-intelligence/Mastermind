@@ -12,6 +12,9 @@ Never prints key values. Reads config only at runtime.
 from __future__ import annotations
 
 import argparse
+import contextvars
+import io
+import stat
 import hashlib
 import json
 import math
@@ -32,6 +35,211 @@ POOLS_YAML = os.path.join(HERE, "..", "orch", "fabric", "pools.yaml")
 if os.path.lexists(os.path.join(HERE, "pools.yaml")):
     from fabric_policy_snapshot import verified_snapshot_path
     POOLS_YAML = str(verified_snapshot_path(HERE))
+# Optional diagnostics observe this exact call; they never ask capacity twice.
+_SELECTION_OBSERVER = contextvars.ContextVar("fabric_selection_observer", default=None)
+_POOLS_INPUT = None
+_GROK_OBSERVATION_UNSET = object()
+_DIAGNOSTIC_POOLS = frozenset({"glm", "grok", "cursor", "minimax", "bailian",
+                             "go", "codex-native", "claude-native", "claude", "fable", "claude-fable", "ocfree"})
+_DIAGNOSTIC_HOSTS = frozenset({"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4", "m2"})
+_DIAGNOSTIC_MODELS = frozenset({"glm-5.3", "glm-5.3-flash", "grok-4.6", "grok-4.7",
+    "cursor-grok-4.6-high", "qwen3.8-max", "qwen3-coder-plus", "MiniMax-M2.5", "MiniMax-M3"})
+_DIAGNOSTIC_REASONS = {
+    "host_mode": {"host_mode_absent"}, "policy": {"policy_refused"},
+    "needs": {"capability_refused"}, "subject": {"independence_refused"},
+    "hard_filter": {"quota_cooldown", "quota_state_unavailable", "model_cap",
+                    "pool_cap", "pool_disabled", "pool_exhausted", "hard_filter_refused"},
+    "meter": {"meter_parked", "meter_spill"},
+    "emission": {"economic_refused", "emission_refused"},
+}
+
+
+def _diagnostic_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+
+
+def _selection_regular_bytes(path, limit):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise ValueError("diagnostic input unavailable")
+        raw = b""
+        while len(raw) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(raw)))
+            if not part: break
+            raw += part
+        after, retained = os.fstat(fd), os.lstat(path)
+        fields = lambda st: (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+        if (len(raw) != before.st_size or fields(before) != fields(after)
+                or fields(before) != fields(retained)):
+            raise ValueError("diagnostic input changed")
+        return raw
+    finally:
+        os.close(fd)
+
+
+def _selection_source_hashes():
+    # Fixed incumbent source operands only. No caller-selected reader path.
+    return {name: hashlib.sha256(_selection_regular_bytes(
+        os.path.join(os.path.dirname(__file__), name), 256 * 1024)).hexdigest()
+        for name in ("pick.py", "fabric_task.py")}
+
+
+class _SelectionFacts:
+    __slots__ = ("key", "request_sha256", "line_sha256", "raw", "seal", "sources", "policy", "consumed")
+
+    def __init__(self, key, request_sha256, line_sha256, raw, seal, sources, policy):
+        for name, value in zip(self.__slots__, (key, request_sha256, line_sha256,
+                raw, seal, sources, policy, False)):
+            object.__setattr__(self, name, value)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("issued observation is immutable")
+
+
+class _SelectionCapture:
+    def __init__(self):
+        self.rows, self.routes, self.policy = [], {}, None
+        self.truncated, self.invalid = False, False
+
+    def record(self, pool, stage, reason, model=None):
+        if pool not in _DIAGNOSTIC_POOLS or reason not in _DIAGNOSTIC_REASONS.get(stage, ()):
+            self.invalid = True
+            return
+        if len(self.rows) >= 64:
+            self.truncated = True
+            return
+        host, mode = self.routes.get(pool, (None, None))
+        self.rows.append({"pool": pool, "stage": stage, "reason": reason,
+            "host": host if host in _DIAGNOSTIC_HOSTS else None,
+            "mode": mode if mode in {m for values in _HOST_POOL_MODES.values() for m in values} else None,
+            "model": model if model in _DIAGNOSTIC_MODELS else None})
+
+
+def _selection_record(pool, stage, reason, model=None):
+    try:
+        observer = _SELECTION_OBSERVER.get()
+        if observer is not None: observer.record(pool, stage, reason, model)
+    except Exception:
+        # Diagnostics never become a new routing/refusal condition.
+        pass
+
+
+def _selection_hard_rejection(pool, reason):
+    try:
+        category = "hard_filter_refused"
+        if type(reason) is str:
+            if reason == "provider quota cooldown": category = "quota_cooldown"
+            elif reason == "provider quota state unavailable": category = "quota_state_unavailable"
+            elif reason.startswith("glm model at broker cap (") and reason.endswith(")"): category = "model_cap"
+            elif (re.fullmatch(r"(?:grok|cursor|bailian|minimax|go) at cap [0-9]+", reason)
+                    or reason == "native subscription at shared cap"): category = "pool_cap"
+            elif reason == "glm disabled (no key)": category = "pool_disabled"
+            elif reason == "grok exhausted (GROK_EXHAUSTED marker)": category = "pool_exhausted"
+        _selection_record(pool, "hard_filter", category)
+    except Exception:
+        pass
+
+
+def _selection_policy(doc):
+    try:
+        observer = _SELECTION_OBSERVER.get()
+        if observer is None: return
+        binding = _POOLS_INPUT
+        if binding is None or binding[2] is not doc:
+            observer.invalid = True
+            return
+        parsed = hashlib.sha256(_diagnostic_json(doc)).hexdigest()
+        if parsed != binding[3] or (observer.policy is not None and observer.policy != binding):
+            observer.invalid = True
+        else:
+            observer.policy = binding
+    except Exception:
+        if _SELECTION_OBSERVER.get() is not None:
+            _SELECTION_OBSERVER.get().invalid = True
+
+
+def observed_format_pick(task_class, *, observation_key, request_sha256, **options):
+    """One normal pick plus optional facts; no alternate selection on failure."""
+    capture, sources = None, None
+    try:
+        sources = _selection_source_hashes()
+        capture = _SelectionCapture()
+    except Exception:
+        pass
+    token = _SELECTION_OBSERVER.set(capture)
+    try:
+        line = format_pick(task_class, **options)
+    finally:
+        _SELECTION_OBSERVER.reset(token)
+    facts = None
+    try:
+        if (capture is not None and not capture.invalid and capture.policy is not None
+                and capture.rows and type(line) is str and line == "NONE reason=no_operator_available"
+                and type(request_sha256) is str and re.fullmatch("[a-f0-9]{64}", request_sha256)):
+            policy = capture.policy
+            value = {"schema": "mastermind.fabric_selection_diagnostics.v1",
+                "request_sha256": request_sha256, "sources": sources,
+                "coverage": "judgment_rejection_branches",
+                "policy_sha256": policy[1], "parsed_policy_sha256": policy[3],
+                "decisions": capture.rows, "truncated": capture.truncated}
+            raw = _diagnostic_json(value)
+            if len(raw) <= 16384:
+                facts = _SelectionFacts(observation_key, request_sha256,
+                    hashlib.sha256(line.encode()).hexdigest(), raw,
+                    hashlib.sha256(raw).hexdigest(), sources, policy)
+    except Exception:
+        pass
+    return line, facts
+
+
+def consume_selection_refusal(facts, key, request_sha256, line):
+    """One issued observer, exact request/line and unchanged evaluated inputs.
+
+    Failure omits optional facts; it cannot change the incumbent refusal outcome.
+    """
+    try:
+        if (type(facts) is not _SelectionFacts or facts.key is not key or facts.consumed
+                or facts.request_sha256 != request_sha256 or type(line) is not str
+                or line != "NONE reason=no_operator_available"
+                or facts.line_sha256 != hashlib.sha256(line.encode()).hexdigest()):
+            return None
+        object.__setattr__(facts, "consumed", True)
+        if (len(facts.raw) > 16384 or hashlib.sha256(facts.raw).hexdigest() != facts.seal
+                or _selection_source_hashes() != facts.sources):
+            return None
+        path, input_sha, doc, parsed_sha = facts.policy
+        # This is an integrity recheck of the consumed text, not another YAML
+        # evaluation. Text-mode normalization matches incumbent load_pools.
+        raw_policy = _selection_regular_bytes(path, 1024 * 1024)
+        text = io.TextIOWrapper(io.BytesIO(raw_policy), encoding="utf-8").read()
+        if (hashlib.sha256(text.encode()).hexdigest() != input_sha
+                or hashlib.sha256(_diagnostic_json(doc)).hexdigest() != parsed_sha):
+            return None
+        value = json.loads(facts.raw)
+        if (set(value) != {"schema", "request_sha256", "sources", "policy_sha256",
+                "parsed_policy_sha256", "coverage", "decisions", "truncated"}
+                or value["schema"] != "mastermind.fabric_selection_diagnostics.v1"
+                or value["coverage"] != "judgment_rejection_branches"
+                or value["sources"] != facts.sources or value["request_sha256"] != request_sha256
+                or value["policy_sha256"] != input_sha or value["parsed_policy_sha256"] != parsed_sha
+                or type(value["truncated"]) is not bool
+                or not 1 <= len(value["decisions"]) <= 64):
+            return None
+        for row in value["decisions"]:
+            if (set(row) != {"pool", "stage", "reason", "host", "mode", "model"}
+                    or row["pool"] not in _DIAGNOSTIC_POOLS
+                    or row["reason"] not in _DIAGNOSTIC_REASONS.get(row["stage"], ())
+                    or row["host"] not in _DIAGNOSTIC_HOSTS | {None}
+                    or row["mode"] not in {None, *[m for modes in _HOST_POOL_MODES.values() for m in modes]}
+                    or row["model"] not in _DIAGNOSTIC_MODELS | {None}):
+                return None
+        return value
+    except Exception:
+        return None
+
+
 LEDGER_PATH = os.path.join(HERE, "..", "orch", "fabric", "ledger.jsonl")
 SLOT_ROOT = os.path.join(HERE, "slots")
 GROK_EXHAUSTED = os.path.join(HERE, "GROK_EXHAUSTED")
@@ -107,11 +315,12 @@ GLM_FULL_CLASSES = frozenset({
 })
 # Routing/ladder tokens → concrete pool ("glm-flash" = pool glm + glm-5.3-flash,
 # "glm-5.3" = pool glm + glm-5.3, "bailian-max" = pool bailian + qwen3.8-max).
-ROUTING_TOKEN_POOLS = {
-    "glm-flash": "glm",
-    "glm-5.3": "glm",
-    "bailian-max": "bailian",
+ROUTING_TOKEN_RECIPES = {
+    "glm-flash": ("glm", "glm-5.3-flash"),
+    "glm-5.3": ("glm", "glm-5.3"),
+    "bailian-max": ("bailian", "qwen3.8-max"),
 }
+ROUTING_TOKEN_POOLS = {token: recipe[0] for token, recipe in ROUTING_TOKEN_RECIPES.items()}
 
 _POOLS_DOC: Optional[Dict[str, Any]] = None
 
@@ -217,11 +426,16 @@ def _grok_burn_down_window(doc=None, now=None):
         return None
 
 
-def _grok_priority_active(doc=None, task_class=None):
+def _grok_priority_active(doc=None, task_class=None, now=None, *,
+                          grok_exhausted=_GROK_OBSERVATION_UNSET):
     source = load_pools() if doc is None else doc
     cfg = _routing(source).get("grok_expiring_priority") or {}
-    pair = _grok_burn_down_window(source)
-    if cfg.get("enabled") is not True or pair is None or pair[1] < 15 or _grok_exhausted():
+    pair = _grok_burn_down_window(source, now=now)
+    if cfg.get("enabled") is not True or pair is None or pair[1] < 15:
+        return False
+    if grok_exhausted is _GROK_OBSERVATION_UNSET:
+        grok_exhausted = _grok_exhausted()
+    if grok_exhausted is not False:
         return False
     allowed = {"execute", "fix_build", "mechanical", "review", "audit", "census", "verify",
                "build", "fix", "heal", "extract", "tests-only-repair", "integration", "design",
@@ -358,12 +572,17 @@ def _burn_down_cfg(doc: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     }
 
 
-def burn_down_urgent(pool: str, doc: Optional[Dict[str, Any]] = None) -> bool:
+def burn_down_urgent(pool: str, doc: Optional[Dict[str, Any]] = None,
+                     windows: Optional[Dict[str, Any]] = None, *,
+                     grok_exhausted=_GROK_OBSERVATION_UNSET) -> bool:
     """R31 use-it-or-lose-it: weekly-window pool resetting within
     hours_before_reset with >= min_remaining_pct unspent.
 
     MiniMax and GLM require fresh paired provider observations. Grok accepts the
-    dated operator-supplied provider screenshot. Unknown quota is never urgent."""
+    dated operator-supplied provider screenshot. Unknown quota is never urgent.
+    `windows` supplies one explicit (hours, remaining_pct) pair per pool for
+    callers that already hold source-identified observations; the default keeps
+    the incumbent ambient reads verbatim."""
     p = canonical_pool(pool) or pool
     if p not in _BURN_DOWN_POOLS_R31:
         p = pool_family(p) or p
@@ -372,17 +591,30 @@ def burn_down_urgent(pool: str, doc: Optional[Dict[str, Any]] = None) -> bool:
     cfg = _burn_down_cfg(doc)
     if not cfg["promote"]:
         return False
-    if p == "grok" and _grok_exhausted():
-        return False
+    if p == "grok":
+        exhausted = (_grok_exhausted() if grok_exhausted is _GROK_OBSERVATION_UNSET
+                     else grok_exhausted)
+        if exhausted is not False:
+            return False
     if p in {"glm", "minimax", "grok"}:
         # Bind the pair ONCE per verdict. Sampling it twice -- _hours_to_reset()
         # and then _weekly_remaining_pct(), each calling _glm_burn_down_window()
         # on its own -- leaves a TOCTOU against a concurrent cache writer that
         # can recombine tonight's clock with a FAR window's remaining, which is
         # round-1 MAJOR 2's exact symptom (Grok round 2, MINOR 1).
-        pair = (_minimax_burn_down_window(doc) if p == "minimax"
-                else _grok_burn_down_window(doc) if p == "grok"
-                else _glm_burn_down_window(doc))
+        if windows is not None:
+            supplied = windows.get(p) if isinstance(windows, dict) else None
+            if (type(supplied) in (list, tuple) and len(supplied) == 2
+                    and all(type(value) in (int, float)
+                            and not isinstance(value, bool)
+                            and math.isfinite(value) for value in supplied)):
+                pair = (float(supplied[0]), float(supplied[1]))
+            else:
+                pair = None
+        else:
+            pair = (_minimax_burn_down_window(doc) if p == "minimax"
+                    else _grok_burn_down_window(doc) if p == "grok"
+                    else _glm_burn_down_window(doc))
         if pair is None:
             return False
         hours, rem = pair
@@ -397,13 +629,17 @@ def burn_down_urgent(pool: str, doc: Optional[Dict[str, Any]] = None) -> bool:
 
 
 def _promote_urgent(tokens: List[str], doc: Optional[Dict[str, Any]] = None,
-                    allowed_pools: Optional[frozenset] = None) -> List[str]:
+                    allowed_pools: Optional[frozenset] = None,
+                    windows: Optional[Dict[str, Any]] = None, *,
+                    grok_exhausted=_GROK_OBSERVATION_UNSET) -> List[str]:
     """Stable partition: urgent pools first, everything else in original order.
     allowed_pools restricts which pools may be promoted (role law, R17)."""
     urgent, rest = [], []
     for tok in tokens:
         p = ROUTING_TOKEN_POOLS.get(tok, tok)
-        if (allowed_pools is None or p in allowed_pools) and burn_down_urgent(p, doc):
+        if ((allowed_pools is None or p in allowed_pools)
+                and burn_down_urgent(p, doc, windows=windows,
+                                     grok_exhausted=grok_exhausted)):
             urgent.append(tok)
         else:
             rest.append(tok)
@@ -872,12 +1108,13 @@ def _glm_credit_promo_policy(
     }
 
 
-def glm_credit_promo_active(doc: Optional[Dict[str, Any]] = None) -> bool:
+def glm_credit_promo_active(doc: Optional[Dict[str, Any]] = None,
+                            now: Optional[datetime] = None) -> bool:
     """True only while a fully valid temporary GLM economics policy is active."""
     policy = _glm_credit_promo_policy(doc)
     if policy is None:
         return False
-    now = _glm_now()
+    now = _glm_now() if now is None else now
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     return policy["start"] <= now < policy["end"]
@@ -885,36 +1122,39 @@ def glm_credit_promo_active(doc: Optional[Dict[str, Any]] = None) -> bool:
 
 def glm_credit_promo_model_eligible(
     model: Optional[str], doc: Optional[Dict[str, Any]] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """A pool is promo-preferred only when its concrete selected model is covered."""
     policy = _glm_credit_promo_policy(doc)
-    if policy is None or not glm_credit_promo_active(doc):
+    if policy is None or not glm_credit_promo_active(doc, now=now):
         return False
     return bool(model) and str(model) in policy["models"]
 
 
 def glm_peak_active(
     doc: Optional[Dict[str, Any]] = None, model: Optional[str] = None,
+    now: Optional[datetime] = None,
 ) -> bool:
     """Normal peak pricing, suppressed only for models covered by the all-day promo."""
-    if model is not None and glm_credit_promo_model_eligible(model, doc):
+    if model is not None and glm_credit_promo_model_eligible(model, doc, now=now):
         return False
-    if model is None and glm_credit_promo_active(doc):
+    if model is None and glm_credit_promo_active(doc, now=now):
         configured = frozenset(_glm_models(doc).values())
         policy = _glm_credit_promo_policy(doc)
         if configured and policy is not None and configured.issubset(policy["models"]):
             return False
-    return _in_daily_window(_routing(doc).get("glm_peak_window"))
+    return _in_daily_window(_routing(doc).get("glm_peak_window"), now)
 
 
-def glm_flash_campaign_active(doc: Optional[Dict[str, Any]] = None) -> bool:
+def glm_flash_campaign_active(doc: Optional[Dict[str, Any]] = None,
+                              now: Optional[datetime] = None) -> bool:
     """Flash-only nightly doubled-quota campaign with an absolute expiry."""
     win = _routing(doc).get("glm_flash_campaign")
-    if not isinstance(win, dict) or not _in_daily_window(win):
+    if not isinstance(win, dict) or not _in_daily_window(win, now):
         return False
     end = _parse_promo_time(win.get("ends_at"))
     if end is not None:
-        now = _glm_now()
+        now = _glm_now() if now is None else now
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         return now < end
@@ -922,7 +1162,7 @@ def glm_flash_campaign_active(doc: Optional[Dict[str, Any]] = None) -> bool:
     until = win.get("until")
     if not until:
         return True
-    dt = _glm_now()
+    dt = _glm_now() if now is None else now
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     try:
@@ -997,7 +1237,7 @@ def _glm_pick_model(task_class: Optional[str],
     """Resolve (model, demoted). R27: inside the peak window glm-5.3 is demoted
     to flash for execute classes only; flash and review/operator picks stay."""
     model = _glm_model_for_class(task_class, doc, now)
-    if not glm_peak_active(doc, model=model) or not _glm_labor_class(task_class, doc):
+    if not glm_peak_active(doc, model=model, now=now) or not _glm_labor_class(task_class, doc):
         return model, False
     flash = _glm_models(doc).get("executor")
     if flash and model != flash:
@@ -1006,16 +1246,48 @@ def _glm_pick_model(task_class: Optional[str],
 
 
 def _parked_bailian_keys() -> set:
-    """Keys parked due to high usage."""
+    """Keys parked due to high usage.
+
+    Only a fresh, applicable usage row with a literal parked=True parks its
+    account; stale, future, expired, malformed or missing usage facts stay
+    UNKNOWN and leave the key eligible (unknown usage never fabricates
+    exhaustion). Reads the same existing BAILIAN_USAGE document through the
+    shared bailian_keys.read_usage_eligibility helper; an unreadable document
+    or an unavailable helper parks nothing (previous behavior).
+    """
     parked = set()
     try:
-        with open(BAILIAN_USAGE, encoding="utf-8") as fh:
-            data = json.load(fh)
-        for name, info in data.get("keys", {}).items():
-            if info.get("parked"):
-                parked.add(name)
+        with open(BAILIAN_USAGE, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return parked
+        data = json.loads(raw)
     except Exception:
-        pass
+        return parked
+    try:
+        import os as _os
+        import sys as _sys
+
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        import bailian_keys
+
+        _reader = bailian_keys.read_usage_eligibility
+    except Exception:
+        return parked
+    if not isinstance(data, dict):
+        return parked
+    keys_map = data.get("keys")
+    if not isinstance(keys_map, dict):
+        return parked
+    for _name in list(keys_map):
+        try:
+            _info = _reader(_name, path=BAILIAN_USAGE)
+        except Exception:
+            continue
+        if _info.get("state") == "CURRENT" and _info.get("parked") is True:
+            parked.add(_name)
     return parked
 
 
@@ -1091,7 +1363,7 @@ def _default_model(pool: str, task_class: Optional[str] = None) -> str:
             return _glm_model_for_class(task_class)
         return _glm_model()
     MODELS = {
-        "grok":    "grok-4.6",
+        "grok":    "grok-4.7",
         "cursor":  "composer-2.5",
         "codex-native": "gpt-6.1-sol",
         "claude-native": "opus",
@@ -1107,24 +1379,36 @@ def _default_model(pool: str, task_class: Optional[str] = None) -> str:
 
 def load_pools(path: Optional[str] = None) -> Dict[str, Any]:
     """Load orch/fabric/pools.yaml. Cached. Empty dict if unreadable."""
-    global _POOLS_DOC
+    global _POOLS_DOC, _POOLS_INPUT
     if path is None and _POOLS_DOC is not None:
+        _selection_policy(_POOLS_DOC)
         return _POOLS_DOC
     target = path or POOLS_YAML
     try:
         import yaml  # type: ignore
         with open(target, encoding="utf-8") as fh:
-            doc = yaml.safe_load(fh) or {}
+            text = fh.read()
+        doc = yaml.safe_load(text) or {}
     except Exception:
         doc = {}
+        text = None
     if path is None:
         _POOLS_DOC = doc
+        _POOLS_INPUT = None
+        try:
+            if text is not None:
+                _POOLS_INPUT = (target, hashlib.sha256(text.encode()).hexdigest(), doc,
+                                hashlib.sha256(_diagnostic_json(doc)).hexdigest())
+        except Exception:
+            pass
+        _selection_policy(doc)
     return doc
 
 
 def reset_pools_cache() -> None:
-    global _POOLS_DOC
+    global _POOLS_DOC, _POOLS_INPUT
     _POOLS_DOC = None
+    _POOLS_INPUT = None
 
 
 def canonical_pool(name: Optional[str]) -> Optional[str]:
@@ -1177,7 +1461,7 @@ def judgment_order(doc: Optional[Dict[str, Any]] = None) -> List[str]:
 
 
 JUDGMENT_CLASSES_R28 = frozenset({
-    "operator", "reviewer", "adjudicate", "decompose", "audit", "repair",
+    "operator", "reviewer", "review", "adjudicate", "decompose", "audit", "repair",
     "domain_orchestration",
 })
 LABOR_CLASSES_R30 = frozenset({
@@ -1289,21 +1573,41 @@ def _escalate_picked_token(pool: str, model: Optional[str]) -> str:
 
 
 def _cursor_grok_quota_affinity(model: Optional[str], task_class: str,
-                                doc: Optional[Dict[str, Any]] = None) -> bool:
-    return (model == "cursor-grok-4.6-high" and _grok_exhausted()
-            and policy_allows("grok", task_class, doc)[0])
+                                doc: Optional[Dict[str, Any]] = None,
+                                exhausted: Optional[bool] = None, *,
+                                now: Optional[datetime] = None,
+                                application: bool = False) -> bool:
+    if model != "cursor-grok-4.6-high":
+        return False
+    if exhausted is None:
+        if application:
+            return False
+        exhausted = _grok_exhausted()
+    if not exhausted:
+        return False
+    if application:
+        return policy_allows("grok", task_class, doc, now=now,
+                             grok_exhausted=exhausted)[0]
+    return policy_allows("grok", task_class, doc)[0]
 
 
 def policy_allows(pool: str, task_class: str,
                   doc: Optional[Dict[str, Any]] = None,
-                  model: Optional[str] = None) -> Tuple[bool, str]:
+                  model: Optional[str] = None,
+                  now: Optional[datetime] = None, *,
+                  grok_exhausted=_GROK_OBSERVATION_UNSET) -> Tuple[bool, str]:
     """Enforce role/class (R20/R23). One-line reason on refuse."""
     tc = task_class.lower()
     p = canonical_pool(pool) or pool
     # Chairman's quota-only exception follows this exact Grok model's class
     # capability. Composer and ordinary Cursor routes retain R30 unchanged.
-    if p == "cursor" and _cursor_grok_quota_affinity(model, tc, doc):
-        p = "grok"
+    if p == "cursor":
+        affinity = (_cursor_grok_quota_affinity(model, tc, doc)
+                    if grok_exhausted is _GROK_OBSERVATION_UNSET
+                    else _cursor_grok_quota_affinity(model, tc, doc,
+                         exhausted=grok_exhausted, now=now, application=True))
+        if affinity:
+            p = "grok"
     # Hard boundary independent of optional YAML parsing: top-level orchestration
     # remains seat-only, while bounded domain orchestration is restricted to the
     # qualified frontier coordinator families. This does not grant recursive spawn
@@ -1330,7 +1634,8 @@ def policy_allows(pool: str, task_class: str,
             "(R17/R23: Claude never for mechanical)"
         )
     allowed = pool_task_classes(p, doc)
-    if p == "grok" and _grok_priority_active(doc, tc):
+    if p == "grok" and _grok_priority_active(doc, tc, now=now,
+                                            grok_exhausted=grok_exhausted):
         return True, "grok_expiring_priority_class"
     if allowed and tc not in allowed:
         return False, f"{p} role does not allow class={tc} (R23)"
@@ -1378,20 +1683,24 @@ def _routing_cohort(
 
 
 def _glm_credit_promo_share(doc: Optional[Dict[str, Any]] = None,
-                            task_class: Optional[str] = None
+                            task_class: Optional[str] = None,
+                            records: Optional[List[dict]] = None,
+                            now: Optional[datetime] = None
                             ) -> Tuple[int, int, float, float]:
     """Recent realized GLM share for this routing cohort during the promo only.
 
     The existing launch ledger remains the sole observation source. Outcome rows
     are excluded, duplicate run IDs count once, malformed/future timestamps are
     ignored, and pre-promo history cannot influence the temporary controller.
+    `records`/`now` let callers that already hold explicit observations and an
+    explicit clock reuse this exact calculation; defaults stay ambient.
     """
     policy = _glm_credit_promo_policy(doc)
     cohort = _routing_cohort(task_class, doc)
     if policy is None or not cohort:
         return 0, 0, 0.0, 0.0
 
-    now = _glm_now()
+    now = _glm_now() if now is None else now
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     start_ts = policy["start"].timestamp()
@@ -1399,7 +1708,7 @@ def _glm_credit_promo_share(doc: Optional[Dict[str, Any]] = None,
     rows: List[Tuple[float, int, dict]] = []
     seen_run_ids: set = set()
 
-    for index, rec in enumerate(_ledger_records()):
+    for index, rec in enumerate(_ledger_records() if records is None else records):
         if rec.get("kind") == "outcome":
             continue
         pool = str(rec.get("pool") or "").strip().lower()
@@ -1451,19 +1760,22 @@ def _promo_target_count(total: int, target_share: float) -> int:
 
 def _promo_balance_glm(tokens: List[str], doc: Optional[Dict[str, Any]] = None,
                        task_class: Optional[str] = None,
-                       needs: Optional[List[str]] = None) -> List[str]:
+                       needs: Optional[List[str]] = None,
+                       records: Optional[List[dict]] = None,
+                       now: Optional[datetime] = None) -> List[str]:
     """Bias toward covered GLM below target; restore a non-GLM lead at/above it."""
     original = list(tokens)
-    if not glm_credit_promo_active(doc):
+    if not glm_credit_promo_active(doc, now=now):
         return original
-    model, _suffix = _selection_model("glm", str(task_class or ""), doc, needs)
-    if not glm_credit_promo_model_eligible(model, doc):
+    model, _suffix = _selection_model("glm", str(task_class or ""), doc, needs, now=now)
+    if not glm_credit_promo_model_eligible(model, doc, now=now):
         return original
 
     policy = _glm_credit_promo_policy(doc)
     if policy is None:
         return original
-    _glm_n, total, share, target = _glm_credit_promo_share(doc, task_class)
+    _glm_n, total, share, target = _glm_credit_promo_share(doc, task_class,
+                                                           records=records, now=now)
     glm_tokens, balance_tokens, fallback_tokens = [], [], []
     for token in original:
         family = pool_family(ROUTING_TOKEN_POOLS.get(token, token))
@@ -1521,7 +1833,8 @@ def floor_demotes(pool: str, task_class: str,
                   records: Optional[List[dict]] = None,
                   doc: Optional[Dict[str, Any]] = None,
                   needs: Optional[List[str]] = None,
-                  model: Optional[str] = None) -> bool:
+                  model: Optional[str] = None,
+                  now: Optional[datetime] = None) -> bool:
     """R22: compare adjudicated quality for the concrete selected model/class.
 
     Transport failures and absent reviews remain visible in reliability stats,
@@ -1535,9 +1848,11 @@ def floor_demotes(pool: str, task_class: str,
             sys.path.insert(0, HERE)
         import pool_ledger
         jobs = pool_ledger.outcome_jobs(recs, pool=pool, task_class=task_class)
-        resolved_model, _ = _selection_model(
-            pool, task_class, doc, needs, model=model
-        )
+        resolved_model = str(model or "").strip()
+        if not resolved_model:
+            resolved_model, _ = _selection_model(
+                pool, task_class, doc, needs, now=now
+            )
         jobs = [j for j in jobs
                 if resolved_model
                 and str(j.get("model") or "").casefold() == resolved_model.casefold()
@@ -1554,13 +1869,14 @@ def floor_demotes(pool: str, task_class: str,
 def _selection_model(pool: str, task_class: str,
                      doc: Optional[Dict[str, Any]] = None,
                      needs: Optional[List[str]] = None,
-                     model: Optional[str] = None) -> Tuple[str, str]:
+                     model: Optional[str] = None,
+                     now: Optional[datetime] = None) -> Tuple[str, str]:
     """Resolve once for both quality assessment and emitted selection."""
     suffix = ""
     if pool == "glm":
         resolved_model = str(model or "").strip()
         if not resolved_model:
-            resolved_model, demoted = _glm_pick_model(task_class, doc)
+            resolved_model, demoted = _glm_pick_model(task_class, doc, now)
         else:
             demoted = False
             model = resolved_model
@@ -1571,14 +1887,18 @@ def _selection_model(pool: str, task_class: str,
             if flash:
                 resolved_model = flash
             suffix += "+needs_vision"
-        if (glm_flash_campaign_active(doc)
+        if (glm_flash_campaign_active(doc, now=now)
                 and resolved_model == _glm_models(doc).get("executor")):
             suffix += "+glm_flash_campaign"
-        if glm_credit_promo_model_eligible(resolved_model, doc):
+        if glm_credit_promo_model_eligible(resolved_model, doc, now=now):
             suffix += "+glm_credit_promo"
         return resolved_model, suffix
     spec = ((doc or load_pools()).get("pools") or {}).get(pool) or {}
-    model = (model if pool == "cursor" and model == "cursor-grok-4.6-high" else None) or spec.get("default_model") or _default_model(pool, task_class)
+    # Preserve the exact caller-authorized Grok Build version. A default
+    # upgrade must never relabel a historical explicitly pinned 4.6 job.
+    pinned = ((pool == "grok" and model in ("grok-4.6", "grok-4.7"))
+              or (pool == "cursor" and model == "cursor-grok-4.6-high"))
+    model = (model if pinned else None) or spec.get("default_model") or _default_model(pool, task_class)
     if pool == "bailian" and task_class.lower() == "review":
         model = spec.get("review_model") or "qwen3.8-max"
     return model, suffix
@@ -1600,10 +1920,13 @@ def _emit(pool: str, reason: str, task_class: str,
                           task_complexity=task_complexity,
                           escalation_reason=escalation_reason)
     if not guard.get("allowed"):
+        _selection_record(pool, "emission", "economic_refused", resolved_model)
         return "NONE reason=" + str(guard.get("reason") or "launch_policy_refused")
-    key = _bailian_key_name() if pool == "bailian" else "-"
+    # Account identity belongs to the incumbent lease broker. The advisory
+    # picker must never print names supplied by an account/credential source,
+    # even when one happens to resemble a harmless label.
     reason += suffix
-    line = f"POOL={pool} KEY={key} MODEL={resolved_model} REASON={reason}"
+    line = f"POOL={pool} KEY=- MODEL={resolved_model} REASON={reason}"
     if is_execute_class(task_class, doc):
         escalate = next_escalate(
             pool, doc, model=resolved_model, task_class=task_class
@@ -1874,19 +2197,25 @@ def format_pick(task_class: str, prefer: Optional[str] = None,
                   required_platforms=required_platforms)
     if excluded_hosts is not None:
         common["excluded_hosts"] = excluded_hosts
-    affinity = (requested_model == "grok-4.6" and canonical_pool(pool) in (None, "grok")) or (
+    affinity = (requested_model in ("grok-4.6", "grok-4.7") and canonical_pool(pool) in (None, "grok")) or (
         canonical_pool(pool) == "grok" and requested_model is None)
     if not affinity:
         return _format_pick_host(task_class, pool=pool, requested_model=requested_model, **common)
-    primary = _format_pick_host(task_class, pool="grok", **common)
-    if primary.startswith("POOL=") or not _grok_exhausted():
+    primary = _format_pick_host(task_class, pool="grok", requested_model=requested_model, **common)
+    # A caller's exact Grok Build version is a model-identity constraint,
+    # not a transferable quality/affinity hint. Cursor's similarly named
+    # model and all other pools are distinct; never substitute for an explicit
+    # requested_model, even when the weekly Grok pool is exhausted. The
+    # existing monthly Cursor failover remains for *unpinned* Grok affinity.
+    if (primary.startswith("POOL=") or not _grok_exhausted()
+            or requested_model in ("grok-4.6", "grok-4.7")):
         return primary
     same = _format_pick_host(task_class, pool="cursor", requested_model="cursor-grok-4.6-high", **common)
     if same.startswith("POOL="):
-        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
+        return same + " AFFINITY=grok QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true"
     other = _format_pick_host(task_class, **common)
     if other.startswith("POOL="):
-        return other + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
+        return other + " AFFINITY=grok QUOTA_FAILOVER=grok-exhausted MODEL_CHANGED=true"
     return other
 
 
@@ -1927,7 +2256,8 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
     if host is not None:
         try:
             glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
-                model=requested_model if requested_model != "cursor-grok-4.6-high" else None)[0]
+                model=(requested_model if requested_model not in
+                       ("cursor-grok-4.6-high", "grok-4.6", "grok-4.7") else None))[0]
             qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
             routes = _eligible_host_routes(
                 host, glm_model=glm_candidate_model,
@@ -1938,6 +2268,11 @@ def _format_pick_host(task_class: str, prefer: Optional[str] = None,
                 **({"excluded_hosts": excluded_hosts} if excluded_hosts is not None else {}),
             )
             modes = {pool: route[1] for pool, route in routes.items()}
+            try:
+                observer = _SELECTION_OBSERVER.get()
+                if observer is not None: observer.routes = dict(routes)
+            except Exception:
+                pass
         except Exception as exc:
             return f"NONE reason=host prerequisite unavailable ({type(exc).__name__})"
         if not modes:
@@ -1984,10 +2319,15 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
     explicit_model = str(requested_model or "").strip().casefold()
     forced = canonical_pool(pool)
     if complexity and complexity not in TASK_COMPLEXITY_CLASSES:
-        return f"NONE reason=unknown_task_complexity ({complexity})"
+        return "NONE reason=unknown_task_complexity"
     # Complexity alone is classification, never permission to upgrade. Only
     # the existing full-GLM C2 build escalation is admitted by this narrow API.
     native_alias = explicit_model == "cursor-grok-4.6-high"
+    grok_pin = explicit_model in ("grok-4.6", "grok-4.7")
+    if grok_pin:
+        if forced not in (None, "grok"):
+            return "NONE reason=exact Grok Build model requires grok pool"
+        forced = "grok"
     if native_alias:
         if forced != "cursor":
             return "NONE reason=exact native alias requires cursor pool"
@@ -2002,29 +2342,42 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         # This exact high-effort alias was observed in the authenticated Cursor
         # catalog. Capability/host, economic, quality and independence gates
         # below are still required; catalog presence is not worker admission.
-    if explicit_model and not native_alias:
-        models = {str(value).casefold() for value in _glm_models(doc).values()}
-        full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
-        if explicit_model not in models:
-            return f"NONE reason=unknown requested_model ({explicit_model})"
-        effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
-        if forced and effective_pool != "glm":
-            return f"NONE reason=requested_model contradicts pool={pool!r}"
-        if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
-            return "NONE reason=requested model/complexity escalation not admitted"
-        guard = launch_policy(
-            "glm", tc, explicit_model, escalation_reason=escalation_reason,
-            doc=doc, task_complexity=complexity,
-        )
-        if not guard.get("allowed"):
-            return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
-        if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
-            return "NONE reason=explicit model held by GLM peak labor policy"
-        forced = "glm"
+    if explicit_model and not native_alias and not grok_pin:
+        # Exact worker pinning is never an arbitrary model promotion. Permit
+        # the current task-qualified default for its explicitly chosen pool;
+        # keep the pre-existing full GLM C2 escalation narrow and witnessed.
+        selected_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
+        glm_models = {str(value).casefold() for value in _glm_models(doc).values()}
+        if explicit_model in glm_models:
+            if selected_pool and selected_pool != "glm":
+                return f"NONE reason=requested_model contradicts pool={pool!r}"
+            normal_model, _ = _selection_model("glm", tc, doc)
+            if not (selected_pool == "glm" and explicit_model == str(normal_model).casefold()):
+                full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
+                if tc != "build" or complexity != "C2_COMPLEX_BOUNDED" or explicit_model != full:
+                    return "NONE reason=requested model/complexity escalation not admitted"
+                guard = launch_policy(
+                    "glm", tc, explicit_model, escalation_reason=escalation_reason,
+                    doc=doc, task_complexity=complexity,
+                )
+                if not guard.get("allowed"):
+                    return f"NONE reason={guard.get('reason') or 'launch_policy_refused'}"
+                if glm_peak_active(doc, model=explicit_model) and _glm_labor_class(tc, doc):
+                    return "NONE reason=explicit model held by GLM peak labor policy"
+            forced = "glm"
+        elif selected_pool:
+            if selected_pool not in (doc.get("pools") or {}):
+                return "NONE reason=unknown forced pool"
+            admitted_default, _ = _selection_model(selected_pool, tc, doc)
+            if not admitted_default or admitted_default.casefold() != explicit_model:
+                return "NONE reason=requested model not admitted for selected pool/task"
+            forced = selected_pool
+        else:
+            return "NONE reason=exact model requires provider pool"
     if forced:
         forced = ROUTING_TOKEN_POOLS.get(forced, forced)
         if forced not in (doc.get("pools") or {}):
-            return f"NONE reason=unknown forced pool={pool!r}"
+            return "NONE reason=unknown forced pool"
     prefer_c = canonical_pool(prefer)
     needs = [n.lower().strip() for n in (needs or []) if n and n.strip()]
 
@@ -2033,7 +2386,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             return "NONE reason=go_short_capability_only_for_c0_c1"
         if host_modes is not None and forced not in host_modes:
             return f"NONE reason=pool {forced} has no eligible mode on requested host"
-        selected_model = (explicit_model or None) if forced == "glm" or native_alias else None
+        selected_model = (explicit_model or None) if forced in ("glm", "grok") or native_alias else None
         ok, reason = policy_allows(forced, tc, doc, model=selected_model)
         if not ok:
             return f"NONE reason={reason}"
@@ -2058,7 +2411,9 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             host_modes=host_modes, task_complexity=complexity, escalation_reason=escalation_reason
         )
 
-    if is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30:
+    # Independent review/audit remain judgment even when legacy execute_classes includes them.
+    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.
+    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
         return _pick_execute(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                              task_complexity=complexity, escalation_reason=escalation_reason,
                              route_key=route_key)
@@ -2082,12 +2437,22 @@ def _minimax_weekly_catchup(doc: Dict[str, Any], task_class: str,
                             subject_pool: Optional[str] = None,
                             escalation_reason: str = "",
                             routine_bailian: bool = False,
-                            prefer: Optional[str] = None) -> bool:
+                            prefer: Optional[str] = None,
+                            window: Optional[Tuple[float, float]] = None,
+                            glm_window: Optional[Tuple[float, float]] = None) -> bool:
     """Bias simple, underused MiniMax labor; do not override imminent GLM resets.
 
     This changes ranking only, not provider admission, quality demotion, slots,
     launch permissions or task identity. A stale/unknown provider quota is inert.
+    `window`/`glm_window` let callers with explicit observations reuse this exact
+    calculation; an invalid explicit pair is inert like an absent one.
     """
+    def _pair(value):
+        if (type(value) in (list, tuple) and len(value) == 2
+                and all(type(part) in (int, float) and not isinstance(part, bool)
+                        and math.isfinite(part) for part in value)):
+            return (float(value[0]), float(value[1]))
+        return None
     cfg = _routing(doc).get("minimax_weekly_catchup")
     if not isinstance(cfg, dict) or cfg.get("enabled") is not True:
         return False
@@ -2107,7 +2472,8 @@ def _minimax_weekly_catchup(doc: Dict[str, Any], task_class: str,
     if (not 0 <= lag_floor <= 100 or not 0 <= min_remaining <= 100
             or not 0 <= protect_glm <= 36):
         return False
-    pair = _minimax_burn_down_window(doc)
+    pair = window if window is not None else _minimax_burn_down_window(doc)
+    pair = _pair(pair)
     if pair is None:
         return False
     hours, remaining = pair
@@ -2117,7 +2483,8 @@ def _minimax_weekly_catchup(doc: Dict[str, Any], task_class: str,
     actual_used_pct = 100.0 - remaining
     if elapsed_pct - actual_used_pct < lag_floor:
         return False
-    glm_pair = _glm_burn_down_window(doc)
+    glm_pair = glm_window if glm_window is not None else _glm_burn_down_window(doc)
+    glm_pair = _pair(glm_pair)
     if (glm_pair is not None and 0 < glm_pair[0] <= protect_glm
             and glm_pair[1] >= _burn_down_cfg(doc)["min_remaining_pct"]):
         return False
@@ -2127,7 +2494,8 @@ def _minimax_weekly_catchup(doc: Dict[str, Any], task_class: str,
 def _bailian_routine_sample(tc: str, doc: Dict[str, Any], route_key: Optional[str],
                             prefer: Optional[str], needs: Optional[List[str]],
                             subject_pool: Optional[str], task_complexity: str,
-                            escalation_reason: str) -> bool:
+                            escalation_reason: str,
+                            windows: Optional[Dict[str, Any]] = None) -> bool:
     """Bounded Qwen exploration for small independent tasks, never extra admission.
 
     The caller's immutable run identity is hashed, not a per-process counter,
@@ -2154,7 +2522,7 @@ def _bailian_routine_sample(tc: str, doc: Dict[str, Any], route_key: Optional[st
         return False
     # R31's provider-authoritative near-reset capacity stays ahead of exploratory
     # routing; an absent/stale provider observation never proves urgency.
-    if burn_down_urgent("minimax", doc):
+    if burn_down_urgent("minimax", doc, windows=windows):
         return False
     # Separate independent task identities rather than sending every picker
     # invocation to a preferred provider when the ledger stays unchanged.
@@ -2177,7 +2545,7 @@ def _cursor_grok_after_quota(tc, *, needs=None, subject_pool=None, host_modes=No
         needs=needs, subject_pool=subject_pool, host_modes=host_modes,
         task_complexity=task_complexity, escalation_reason=escalation_reason)
     if same.startswith("POOL="):
-        return same + " AFFINITY=grok-4.6 QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=false"
+        return same + " AFFINITY=grok QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true"
     return same
 
 
@@ -2301,24 +2669,31 @@ def _pick_scored(tc: str, prefer: Optional[str],
                 if same.startswith("POOL="):
                     return same
             if host_modes is not None and p not in host_modes:
+                _selection_record(p, "host_mode", "host_mode_absent")
                 continue
             ok, reason = policy_allows(p, tc, doc)
             if not ok:
+                _selection_record(p, "policy", "policy_refused")
                 continue
             ok, reason = _needs_ok(p, needs, tc, doc)
             if not ok:
+                _selection_record(p, "needs", "capability_refused")
                 continue
             ok, reason = _subject_ok(p, tc, subject_pool, doc)
             if not ok:
+                _selection_record(p, "subject", "independence_refused")
                 continue
             ok, reason = hard_filter(p, tc, doc, needs)
             if not ok:
+                _selection_hard_rejection(p, reason)
                 continue
             if p == "glm":
                 state = _glm_meter_state()
                 if state == "PARKED":
+                    _selection_record(p, "meter", "meter_parked")
                     continue
                 if state == "SPILL":
+                    _selection_record(p, "meter", "meter_spill")
                     continue
             why = f"judgment_order_{p}"
             if burn_down_urgent(p, doc):
@@ -2414,13 +2789,17 @@ def _economic_witness(value: str) -> str:
     return reason
 
 
-def launch_policy(mode: str, task_class: str, model: str,
-                  escalation_reason: str = "", doc: Optional[Dict[str, Any]] = None,
-                  task_complexity: str = "") -> Dict[str, Any]:
-    """Return the additive economic decision for a prospective launch.
+def _launch_policy_eval(mode: str, task_class: str, model: str,
+                        escalation_reason: str = "", doc: Optional[Dict[str, Any]] = None,
+                        task_complexity: str = "", now: Optional[datetime] = None,
+                        application: bool = False,
+                        grok_exhausted: Optional[bool] = None) -> Dict[str, Any]:
+    """Common economic decision shared by the worker and application seams.
 
-    This does not replace or grant any role, admission, lease, or availability
-    decision: it filters expensive or unclassified models on leaf work.
+    `application=True` separates the worker-specific Go short bearer lifetime
+    check from the shared calculation: an application turn must satisfy its own
+    published grant/step lifetime instead. Worker callers keep the exact
+    incumbent behavior through launch_policy() below.
     """
     normalized_mode = str(mode or "").strip().lower()
     normalized_task = str(task_class or "").strip().lower()
@@ -2447,7 +2826,15 @@ def launch_policy(mode: str, task_class: str, model: str,
         "glm", {}).get("models", {}).get("executor", ""))
     normalized_model = requested_model.strip().lower()
     if normalized_mode == "cursor" and normalized_model == "cursor-grok-4.6-high":
-        if not _cursor_grok_quota_affinity(normalized_model, normalized_task, policy_doc):
+        if application:
+            # Explicit application seam: exhaustion is an owner observation,
+            # never the ambient marker file; class eligibility is unchanged.
+            if (grok_exhausted is not True
+                    or not policy_allows("grok", normalized_task, policy_doc, now=now,
+                                          grok_exhausted=grok_exhausted)[0]):
+                result.update(allowed=False, reason="cursor_grok_quota_affinity_unproven")
+                return result
+        elif not _cursor_grok_quota_affinity(normalized_model, normalized_task, policy_doc):
             result.update(allowed=False, reason="cursor_grok_quota_affinity_unproven")
             return result
     # Live OpenCode Go worker rs_ubuntu3_go_minimax27_20261008a settled
@@ -2462,7 +2849,8 @@ def launch_policy(mode: str, task_class: str, model: str,
     # classified long work must use a long-runtime-capable pool rather than
     # weakening Go capability lifetime or timing out after useful labor.
     if (
-        normalized_mode in {"go", "go-codex"}
+        not application
+        and normalized_mode in {"go", "go-codex"}
         and normalized_complexity in _GO_SHORT_CAPABILITY_BLOCKED_COMPLEXITIES
     ):
         result.update(
@@ -2550,9 +2938,10 @@ def launch_policy(mode: str, task_class: str, model: str,
         result["reason"] = "frontier_witness_recorded"
         return result
 
-    if (normalized_mode == "grok" and normalized_model == "grok-4.6"
+    if (normalized_mode == "grok" and normalized_model in ("grok-4.6", "grok-4.7")
             and model_tier.CLASS_TIER.get(normalized_task) == "leaf-labor"
-            and _grok_priority_active(policy_doc, normalized_task)):
+            and _grok_priority_active(policy_doc, normalized_task, now=now,
+                grok_exhausted=grok_exhausted if application else _GROK_OBSERVATION_UNSET)):
         result.update(reason="grok_expiring_quota_authorization", tier="leaf-labor")
         return result
     tier = model_tier.CLASS_TIER.get(normalized_task)
@@ -2571,6 +2960,19 @@ def launch_policy(mode: str, task_class: str, model: str,
     return result
 
 
+def launch_policy(mode: str, task_class: str, model: str,
+                  escalation_reason: str = "", doc: Optional[Dict[str, Any]] = None,
+                  task_complexity: str = "") -> Dict[str, Any]:
+    """Return the additive economic decision for a prospective launch.
+
+    This does not replace or grant any role, admission, lease, or availability
+    decision: it filters expensive or unclassified models on leaf work.
+    """
+    return _launch_policy_eval(mode, task_class, model,
+                               escalation_reason=escalation_reason, doc=doc,
+                               task_complexity=task_complexity)
+
+
 def pick(task_class: str, prefer: Optional[str] = None,
          host: Optional[str] = None, pool: Optional[str] = None,
          explain: bool = False, needs: Optional[List[str]] = None,
@@ -2587,7 +2989,9 @@ def pick(task_class: str, prefer: Optional[str] = None,
         escalation_reason=escalation_reason, requested_model=requested_model,
         route_key=route_key,
     )
-    print(line)
+    # This is a bounded CLI result, not an application logger. Do not log
+    # arbitrarily supplied model/pool strings or a credential's value.
+    sys.stdout.write(line + "\n")
     if explain:
         print("REASON_CHAIN")
         for reason in _explain_pick(task_class, line, doc):
@@ -2653,6 +3057,705 @@ def _run_launch_policy_cli(args: argparse.Namespace) -> int:
     )
     print(json.dumps(decision, separators=(",", ":"), sort_keys=True))
     return 0 if decision["allowed"] else 78
+
+
+# ── APPLICATION selection (pure candidate seam; no admission or allocation) ──
+#
+# Trusted task context and owner-published catalogue/observations in, one exact
+# selection recipe or typed refusal out. `execution_authorized` is always false
+# and the later atomic admission owner must recheck the returned identity: this
+# seam consumes facts, it never mints bearer authority, parses a competing
+# grant schema, or accepts `qualified=true` from HTTP/config as permission.
+
+_APPLICATION_POOL_ORDER = ("go", "glm", "minimax", "bailian", "grok", "cursor",
+                           "codex-native", "claude-native", "ocfree")
+_APPLICATION_CATALOGUE_SCHEMA = "mastermind.fabric_application_catalogue.v1"
+_APPLICATION_SELECTION_SCHEMA = "mastermind.fabric_application_selection.v1"
+_APPLICATION_TASK_REQUIRED = frozenset({"task_class", "route_key"})
+_APPLICATION_TASK_OPTIONAL = frozenset({"task_complexity", "needs", "subject_pool",
+                                        "escalation_reason", "requested_model"})
+_APPLICATION_OBS_REQUIRED = frozenset({"source", "observed_at", "fresh_s",
+                                       "cooldown", "model_room"})
+_APPLICATION_OBS_OPTIONAL = frozenset({"cooldown_reason", "host", "mode",
+                                       "burn_down_window", "grok_exhausted"})
+_APPLICATION_RECIPE_FIELDS = frozenset({"model", "mode", "protocol", "streaming",
+    "driver", "profile", "source", "capabilities", "order_rank",
+    "max_turn_seconds", "max_steps", "qualification_ref",
+    "application_permission_ref", "grant_ref"})
+_APPLICATION_MODES = frozenset({"grok", "cursor", "glm", "glm-codex", "go",
+                                "go-codex", "qwen", "bailian", "minimax",
+                                "codex-native", "claude-native", "oc-free"})
+_APPLICATION_PROTOCOLS = frozenset({"chat", "messages", "responses", "harness"})
+_APPLICATION_CAPABILITY_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_APPLICATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+_APPLICATION_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_./:-]{0,127}")
+_APPLICATION_REF_MAX = 512
+
+
+class ApplicationPolicyError(ValueError):
+    """Typed refusal of the fixed policy owner; never a cache or path fallback."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__("application policy unavailable: " + code)
+
+
+class ApplicationPolicy:
+    """One issued, immutable policy reading with byte/semantic commitments."""
+
+    __slots__ = ("path", "bytes_sha256", "text_sha256", "parsed_sha256",
+                 "critical_sha256", "_document_bytes", "consumed")
+
+    def __init__(self, path, bytes_sha256, text_sha256, parsed_sha256,
+                 critical_sha256, document):
+        owned = _diagnostic_json(document)
+        for name, value in zip(self.__slots__, (path, bytes_sha256, text_sha256,
+                parsed_sha256, critical_sha256, owned, False)):
+            object.__setattr__(self, name, value)
+
+    @property
+    def document(self):
+        # Expose an independently owned view; neither the caller's input nor a
+        # nested object returned here can change this issued policy's meaning.
+        return json.loads(self._document_bytes)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("issued application policy is immutable")
+
+
+class _ApplicationRecipe:
+    __slots__ = ("model", "mode", "protocol", "streaming", "driver", "profile",
+                 "source", "capabilities", "order_rank", "max_turn_seconds",
+                 "max_steps", "qualification_ref", "application_permission_ref",
+                 "grant_ref")
+
+    def __init__(self, **fields):
+        for name in self.__slots__:
+            object.__setattr__(self, name, fields[name])
+
+    def __setattr__(self, name, value):
+        raise AttributeError("validated application recipe is immutable")
+
+
+def _fabric_policy_parser():
+    """The incumbent snapshot parser is the only accepted policy loader."""
+    try:
+        import fabric_policy_snapshot
+        return fabric_policy_snapshot
+    except ImportError:
+        pass
+    helper = os.path.abspath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), os.pardir, "source"))
+    added = helper not in sys.path
+    if added:
+        sys.path.insert(0, helper)
+    try:
+        import fabric_policy_snapshot
+        return fabric_policy_snapshot
+    except ImportError:
+        return None
+    finally:
+        if added:
+            sys.path.remove(helper)
+
+
+def read_application_policy():
+    """One fresh validated reading of the fixed POOLS_YAML/snapshot owner.
+
+    No caller-selected path, env redirect, cache or load_pools empty-doc
+    fallback: an unreadable or invalid owner refuses typed. Fixtures patch only
+    the fixed pick.POOLS_YAML constant. No admission lock, Broker or credential
+    effect participates.
+    """
+    try:
+        raw = _selection_regular_bytes(POOLS_YAML, 1024 * 1024)
+    except OSError:
+        raise ApplicationPolicyError("policy_source_unavailable") from None
+    except ValueError:
+        raise ApplicationPolicyError("policy_source_changed") from None
+    try:
+        text = io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8").read()
+    except (UnicodeDecodeError, ValueError):
+        raise ApplicationPolicyError("policy_decode_invalid") from None
+    parser = _fabric_policy_parser()
+    if parser is None:
+        raise ApplicationPolicyError("policy_parser_unavailable")
+    try:
+        document = parser.parse_policy(raw)
+    except Exception:
+        raise ApplicationPolicyError("policy_parse_invalid") from None
+    routing = document.get("routing")
+    pools = document.get("pools")
+    if type(routing) is not dict or type(pools) is not dict or not pools:
+        raise ApplicationPolicyError("policy_shape_invalid")
+    try:
+        critical = parser.critical_fingerprint(raw)
+    except Exception:
+        raise ApplicationPolicyError("policy_critical_invalid") from None
+    return ApplicationPolicy(str(POOLS_YAML), hashlib.sha256(raw).hexdigest(),
+        hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        hashlib.sha256(_diagnostic_json(document)).hexdigest(), critical, document)
+
+
+def _application_identifier(value):
+    return (isinstance(value, str)
+            and _APPLICATION_ID_RE.fullmatch(value) is not None)
+
+
+def _application_model_name(value):
+    return (isinstance(value, str)
+            and _APPLICATION_MODEL_RE.fullmatch(value) is not None)
+
+
+def _application_reference(value):
+    return (isinstance(value, str) and 0 < len(value) <= _APPLICATION_REF_MAX
+            and value.strip() == value and not any(ord(c) < 32 for c in value))
+
+
+def _application_recipe(raw):
+    """Validate one owner-published recipe into an immutable fact row.
+
+    This is input-shape validation of the picker's own catalogue view, never
+    grant-schema interpretation: the grant/ref commitment is carried opaquely
+    and matched later by the atomic admission owner.
+    """
+    if not isinstance(raw, dict) or set(raw) != _APPLICATION_RECIPE_FIELDS:
+        return None, "catalogue_entry_invalid"
+    if not _application_model_name(raw["model"]):
+        return None, "catalogue_entry_invalid"
+    if (raw["mode"] not in _APPLICATION_MODES
+            or raw["protocol"] not in _APPLICATION_PROTOCOLS
+            or raw["streaming"] is not False):
+        return None, "catalogue_entry_invalid"
+    for key in ("driver", "profile", "source"):
+        if not _application_identifier(raw[key]):
+            return None, "catalogue_entry_invalid"
+    capabilities = raw["capabilities"]
+    if (not isinstance(capabilities, dict)
+            or any(not isinstance(cap, str)
+                   or _APPLICATION_CAPABILITY_RE.fullmatch(cap) is None
+                   for cap in capabilities)
+            or any(type(value) is not bool for value in capabilities.values())):
+        return None, "catalogue_entry_invalid"
+    rank, turn, steps = raw["order_rank"], raw["max_turn_seconds"], raw["max_steps"]
+    if (type(rank) is not int or not 0 <= rank <= 1_000_000
+            or type(turn) is not int or not 1 <= turn <= 86_400
+            or type(steps) is not int or not 1 <= steps <= 4_096):
+        return None, "catalogue_entry_invalid"
+    for key in ("qualification_ref", "application_permission_ref"):
+        if not _application_reference(raw[key]):
+            return None, "catalogue_entry_invalid"
+    grant = raw["grant_ref"]
+    if (not isinstance(grant, dict) or set(grant) != {"grant_id", "digest"}
+            or not _application_identifier(grant.get("grant_id"))
+            or not isinstance(grant.get("digest"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", grant["digest"]) is None):
+        return None, "catalogue_entry_invalid"
+    fields = dict(raw)
+    fields["grant_ref"] = dict(grant)
+    fields["capabilities"] = dict(capabilities)
+    return _ApplicationRecipe(**fields), None
+
+
+def _application_finite_number(value):
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
+
+
+def _application_observation(raw, now_epoch):
+    """Validate one fresh source-identified observation row; rows reserve nothing."""
+    if (not isinstance(raw, dict)
+            or not _APPLICATION_OBS_REQUIRED.issubset(raw)
+            or not set(raw).issubset(_APPLICATION_OBS_REQUIRED | _APPLICATION_OBS_OPTIONAL)):
+        return None, "observation_invalid"
+    if not _application_identifier(raw["source"]):
+        return None, "observation_invalid"
+    observed_at, fresh_s = raw["observed_at"], raw["fresh_s"]
+    for value in (observed_at, fresh_s):
+        if not _application_finite_number(value) or value <= 0:
+            return None, "observation_invalid"
+    if observed_at > now_epoch or observed_at < now_epoch - fresh_s:
+        return None, "observation_stale"
+    cooldown = raw["cooldown"]
+    if type(cooldown) is not bool:
+        return None, "observation_invalid"
+    if cooldown is True and not _application_identifier(raw.get("cooldown_reason") or ""):
+        return None, "observation_invalid"
+    if "cooldown_reason" in raw and raw["cooldown"] is False \
+            and not _application_identifier(raw["cooldown_reason"]):
+        return None, "observation_invalid"
+    room = raw["model_room"]
+    if (not isinstance(room, dict)
+            or any(not _application_model_name(model) for model in room)
+            or any(type(value) is not int or isinstance(value, bool) or value < 0
+                   for value in room.values())):
+        return None, "observation_invalid"
+    if "host" in raw and not _application_identifier(raw["host"]):
+        return None, "observation_invalid"
+    if "mode" in raw and raw["mode"] not in _APPLICATION_MODES:
+        return None, "observation_invalid"
+    if "grok_exhausted" in raw and type(raw["grok_exhausted"]) is not bool:
+        return None, "observation_invalid"
+    if "burn_down_window" in raw:
+        window = raw["burn_down_window"]
+        if (type(window) is not list or len(window) != 2
+                or any(not _application_finite_number(value) for value in window)
+                or not 0 < window[0] <= 168 or not 0 <= window[1] <= 100):
+            return None, "observation_invalid"
+    row = dict(raw)
+    row["model_room"] = dict(room)
+    return row, None
+
+
+def _application_clock(now):
+    """One qualified UTC clock for both commitments and existing date helpers."""
+    try:
+        if isinstance(now, datetime):
+            if now.tzinfo is None or now.utcoffset() is None:
+                return None
+            instant = now.astimezone(timezone.utc)
+        elif _application_finite_number(now) and now > 0:
+            instant = datetime.fromtimestamp(float(now), timezone.utc)
+        else:
+            return None
+        epoch = instant.timestamp()
+        if not math.isfinite(epoch) or epoch <= 0:
+            return None
+        return epoch, instant
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _application_catalogue(catalogue):
+    """(entries, pool_order, defects) normalized copies, or (None, None, None, reason)."""
+    if (not isinstance(catalogue, dict)
+            or set(catalogue) != {"schema", "pool_order", "pools"}):
+        return None, None, None, "catalogue_invalid"
+    if catalogue["schema"] != _APPLICATION_CATALOGUE_SCHEMA:
+        return None, None, None, "catalogue_schema_unknown"
+    pool_order = catalogue["pool_order"]
+    if (type(pool_order) is not list or not pool_order or len(pool_order) > 9
+            or any(not isinstance(name, str) or canonical_pool(name) != name
+                   or name not in _APPLICATION_POOL_ORDER for name in pool_order)
+            or len(set(pool_order)) != len(pool_order)):
+        return None, None, None, "catalogue_pool_order_invalid"
+    pools_raw = catalogue["pools"]
+    if (not isinstance(pools_raw, dict)
+            or any(not isinstance(name, str) or canonical_pool(name) != name
+                   or name not in _APPLICATION_POOL_ORDER for name in pools_raw)):
+        return None, None, None, "catalogue_pool_unknown"
+    entries, defects = {}, {}
+    for name, entry in pools_raw.items():
+        entries[name] = None
+        if (not isinstance(entry, dict) or set(entry) != {"enabled", "recipes"}
+                or type(entry["enabled"]) is not bool
+                or not isinstance(entry["recipes"], list)):
+            defects[name] = "catalogue_entry_invalid"
+            continue
+        if not 1 <= len(entry["recipes"]) <= 64:
+            defects[name] = "pool_not_offered"
+            continue
+        recipes, defect, seen = [], None, set()
+        for raw_recipe in entry["recipes"]:
+            recipe, reason = _application_recipe(raw_recipe)
+            if recipe is None:
+                defect = defect or reason
+                continue
+            signature = (recipe.model, recipe.mode, recipe.protocol, recipe.driver,
+                         recipe.profile, recipe.source, recipe.grant_ref["digest"])
+            if signature in seen:
+                defect = defect or "catalogue_entry_invalid"
+                continue
+            seen.add(signature)
+            recipes.append(recipe)
+        if not recipes:
+            defects[name] = defect or "pool_not_offered"
+            continue
+        recipes.sort(key=lambda recipe: (recipe.order_rank, recipe.model))
+        entries[name] = {"enabled": entry["enabled"], "recipes": recipes}
+    return entries, list(pool_order), defects, None
+
+
+def _application_candidate_pools(task_class, doc, catalogue_order, *, needs,
+                                 subject, complexity, witness, route_key,
+                                 records, now, windows, minimax_window,
+                                 glm_window, grok_exhausted):
+    """Incumbent class order first, catalogue-qualified pools after; no second
+    ranking table. Route tokens keep their model meaning via _selection_model.
+    Time-sensitive modifiers reuse the incumbent calculations over the caller's
+    explicit observations/records/clock only; their own policy decides whether
+    an optional promotion is active."""
+    tc = task_class.lower()
+    review_urgent = False
+    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
+        order = _promo_balance_glm(execute_order(doc), doc, tc, needs=needs,
+                                   records=records, now=now)
+        routine_bailian = _bailian_routine_sample(
+            tc, doc, route_key, None, needs, subject, complexity, witness,
+            windows=windows)
+        if routine_bailian:
+            order = ["bailian"] + [tok for tok in order
+                                   if ROUTING_TOKEN_POOLS.get(tok, tok) != "bailian"]
+        order = _promote_urgent(order, doc, EXECUTOR_PROMOTABLE_R31, windows=windows,
+                                grok_exhausted=grok_exhausted)
+        # An unobserved pool passes 0 as an explicit no-window fact: the
+        # application seam never falls back to ambient provider reads; its own
+        # policy keeps an unobserved catchup inert.
+        mini_catchup = _minimax_weekly_catchup(
+            doc, tc, task_complexity=complexity, needs=needs, subject_pool=subject,
+            escalation_reason=witness, routine_bailian=routine_bailian, prefer=None,
+            window=minimax_window if minimax_window is not None else 0,
+            glm_window=glm_window if glm_window is not None else 0)
+        if mini_catchup:
+            order = ["minimax"] + [tok for tok in order
+                                   if ROUTING_TOKEN_POOLS.get(tok, tok) != "minimax"]
+        if tc in REVIEW_CLASSES_R33 and burn_down_urgent("grok", doc, windows=windows,
+                                                         grok_exhausted=grok_exhausted) \
+                and policy_allows("grok", tc, doc, now=now,
+                                   grok_exhausted=grok_exhausted)[0]:
+            order = ["grok"] + [tok for tok in order if tok != "grok"]
+        if _grok_priority_active(doc, tc, now=now, grok_exhausted=grok_exhausted):
+            order = ["grok"] + [tok for tok in order if tok != "grok"]
+    elif is_judgment_class(tc, doc):
+        order = _promo_balance_glm(judgment_order(doc), doc, tc, needs=needs,
+                                   records=records, now=now)
+        order = _promote_urgent(order, doc, windows=windows, grok_exhausted=grok_exhausted)
+        if _grok_priority_active(doc, tc, now=now, grok_exhausted=grok_exhausted):
+            order = ["grok"] + [tok for tok in order if tok != "grok"]
+    else:
+        order = ["grok", "cursor", "bailian", "minimax"]
+    ordered, seen, seat_seen = [], set(), False
+    for token in order:
+        pool = canonical_pool(ROUTING_TOKEN_POOLS.get(token, token))
+        if not pool:
+            continue
+        if is_seat_pool(pool):
+            seat_seen = True
+            continue
+        if pool not in seen:
+            seen.add(pool)
+            ordered.append(pool)
+    for pool in catalogue_order:
+        if pool not in seen:
+            seen.add(pool)
+            ordered.append(pool)
+    return ordered, seat_seen
+
+
+def select_application(task, *, policy, catalogue, observations, quality_records,
+                       now, expected_identity=None):
+    """Pure APPLICATION selection; never allocates, grants, reserves or observes.
+
+    `task` is the INTERNAL trusted service/ModelRouter context; unknown context
+    refuses. `catalogue`, `observations` and `quality_records` must already be
+    fresh owner-published facts. The returned selection carries
+    execution_authorized=false and requires_fresh_admission=true: the later
+    atomic admission owner compares authoritative grant/ref/model and
+    policy/driver/profile condition before any account or lease is created.
+    """
+    def refusal(reason, *, coverage=None, identity=None, commitments=None, extra=None):
+        value = {"schema": _APPLICATION_SELECTION_SCHEMA, "ok": False, "reason": reason,
+                 "execution_authorized": False, "requires_fresh_admission": True,
+                 "coverage": coverage or {name: "input_refused"
+                                          for name in _APPLICATION_POOL_ORDER},
+                 "selection": None, "identity": identity, "commitments": commitments}
+        if extra:
+            value.update(extra)
+        return value
+
+    clock = _application_clock(now)
+    if clock is None:
+        return refusal("now_unqualified")
+    now_epoch, now = clock
+    if type(policy) is not ApplicationPolicy:
+        return refusal("policy_input_unqualified")
+    doc = policy.document
+
+    if not isinstance(task, dict) or not _APPLICATION_TASK_REQUIRED.issubset(task):
+        return refusal("task_context_invalid")
+    unknown_fields = sorted(set(task) - _APPLICATION_TASK_REQUIRED - _APPLICATION_TASK_OPTIONAL)
+    if unknown_fields:
+        return refusal("task_context_unknown_field",
+                       extra={"task_fields_unknown": unknown_fields})
+    task_class = task.get("task_class")
+    if not isinstance(task_class, str):
+        return refusal("task_context_invalid")
+    tc = task_class.strip().lower()
+    known = (tc in model_tier.CLASS_TIER or tc in TASK_CLASS_FIT
+             or tc in execute_classes(doc) or tc in operator_classes(doc)
+             or tc in seat_classes(doc) or tc in JUDGMENT_CLASSES_R28
+             or tc in LABOR_CLASSES_R30 or tc in GLM_FLASH_CLASSES
+             or tc in GLM_FULL_CLASSES)
+    if not tc or tc == "unknown" or not known:
+        return refusal("task_class_unqualified")
+    complexity = str(task.get("task_complexity") or "").strip().upper()
+    if complexity and complexity not in TASK_COMPLEXITY_CLASSES:
+        return refusal("unknown_task_complexity")
+    raw_needs = task.get("needs") or []
+    if type(raw_needs) is not list or any(not isinstance(cap, str) for cap in raw_needs):
+        return refusal("task_needs_invalid")
+    needs = [cap.lower().strip() for cap in raw_needs if cap and cap.strip()]
+    subject = task.get("subject_pool")
+    if subject is not None and (not isinstance(subject, str) or not subject.strip()
+                                or len(subject) > 128):
+        return refusal("task_subject_invalid")
+    witness = task.get("escalation_reason")
+    if witness is not None and not isinstance(witness, str):
+        return refusal("task_witness_invalid")
+    witness = str(witness or "")
+    route_key = task.get("route_key")
+    if not _application_identifier(route_key):
+        return refusal("task_route_key_invalid")
+    requested = task.get("requested_model")
+    requested_token = requested
+    requested_pool = None
+    if requested is not None:
+        if not isinstance(requested, str) or not requested.strip():
+            return refusal("task_requested_model_invalid")
+        requested = requested.strip()
+        requested_token = requested
+        token_recipe = ROUTING_TOKEN_RECIPES.get(requested)
+        if token_recipe is not None:
+            requested_pool, requested = token_recipe
+        elif not _application_model_name(requested):
+            return refusal("task_requested_model_invalid")
+
+    if type(quality_records) is not list \
+            or any(type(record) is not dict for record in quality_records):
+        return refusal("quality_history_unavailable")
+
+    entries, catalogue_order, catalogue_defects, reason = _application_catalogue(catalogue)
+    if reason is not None:
+        return refusal(reason)
+
+    observation_state, observation_defects = {}, {}
+    if not isinstance(observations, dict):
+        return refusal("observations_invalid")
+    for name, row in observations.items():
+        if not isinstance(name, str) or canonical_pool(name) != name \
+                or name not in _APPLICATION_POOL_ORDER:
+            return refusal("observation_pool_unknown")
+        validated, defect = _application_observation(row, now_epoch)
+        observation_state[name] = validated
+        if validated is None:
+            observation_defects[name] = defect
+
+    task_identity = {"task_class": tc, "task_complexity": complexity,
+                     "needs": sorted(needs), "subject_pool": subject,
+                     "escalation_reason": witness, "route_key": route_key,
+                     "requested_model": requested_token}
+    commitments = {
+        "policy_bytes_sha256": policy.bytes_sha256,
+        "policy_text_sha256": policy.text_sha256,
+        "policy_parsed_sha256": policy.parsed_sha256,
+        "policy_critical_sha256": policy.critical_sha256,
+        "task_digest": hashlib.sha256(_diagnostic_json(task_identity)).hexdigest(),
+        "observation_sha256": {name: hashlib.sha256(_diagnostic_json(row)).hexdigest()
+                               for name, row in sorted(observation_state.items())
+                               if row is not None},
+        "now_epoch": now_epoch,
+    }
+
+    def pool_defect(name, reason_value, coverage):
+        coverage[name] = reason_value
+        return None
+
+    coverage = {name: "not_ordered_for_class" for name in _APPLICATION_POOL_ORDER}
+    coverage["ocfree"] = "policy_not_ordered"
+    windows = {name: tuple(row["burn_down_window"])
+               for name, row in observation_state.items()
+               if row is not None and "burn_down_window" in row}
+    grok_row = observation_state.get("grok")
+    grok_exhausted = grok_row.get("grok_exhausted") if grok_row else None
+    candidates, seat_seen = _application_candidate_pools(
+        tc, doc, catalogue_order, needs=needs, subject=subject,
+        complexity=complexity, witness=witness, route_key=route_key,
+        records=quality_records, now=now, windows=windows,
+        minimax_window=windows.get("minimax"), glm_window=windows.get("glm"),
+        grok_exhausted=grok_exhausted)
+    if requested_pool is not None:
+        if requested_pool not in candidates and requested_pool not in _APPLICATION_POOL_ORDER:
+            return refusal("task_requested_model_invalid", coverage=coverage)
+        candidates = [requested_pool]
+        for name in _APPLICATION_POOL_ORDER:
+            if name != requested_pool:
+                coverage[name] = "requested_pool_elsewhere"
+
+    for pool in candidates:
+        spec = (doc.get("pools") or {}).get(pool) or {}
+        enabled = spec.get("enabled")
+        if enabled is not True:
+            pool_defect(pool, "pool_disabled" if enabled is False
+                        else "pool_enablement_unresolved", coverage)
+            continue
+        entry = entries.get(pool)
+        if entry is None:
+            pool_defect(pool, catalogue_defects.get(pool) or "pool_not_in_catalogue",
+                        coverage)
+            continue
+        if entry["enabled"] is not True:
+            pool_defect(pool, "pool_disabled", coverage)
+            continue
+        row = observation_state.get(pool)
+        if pool not in observation_state:
+            pool_defect(pool, "observation_missing", coverage)
+            continue
+        if row is None:
+            pool_defect(pool, observation_defects.get(pool) or "observation_invalid",
+                        coverage)
+            continue
+        if row["cooldown"] is True:
+            pool_defect(pool, "cooldown_active", coverage)
+            continue
+        ok, reason = policy_allows(pool, tc, doc, model=None, now=now,
+                                   grok_exhausted=grok_exhausted)
+        if not ok:
+            pool_defect(pool, "policy_refused", coverage)
+            continue
+        ok, reason = _subject_ok(pool, tc, subject, doc)
+        if not ok:
+            pool_defect(pool, "independence_refused", coverage)
+            continue
+        glm_models = frozenset(_glm_models(doc).values()) if pool == "glm" else None
+        if glm_models is not None and not glm_models:
+            pool_defect(pool, "model_unpublished_for_pool", coverage)
+            continue
+        eligible, first_defect = [], None
+        for recipe in entry["recipes"]:
+            defect = None
+            if pool == "go" and recipe.protocol != "chat":
+                defect = "application_transport_unqualified"
+            elif glm_models is not None and recipe.model not in glm_models:
+                defect = "model_unpublished_for_pool"
+            elif recipe.model.casefold() == "minimax-m2.7":
+                defect = "model_protocol_unsupported"
+            if defect is None and needs:
+                ok, reason = _needs_ok(pool, needs, tc, doc, model=recipe.model)
+                if not ok:
+                    defect = ("capability_unknown" if "capability_unknown" in reason
+                              else "capability_absent")
+                else:
+                    for cap in needs:
+                        if cap not in recipe.capabilities:
+                            defect = "capability_transport_unknown"
+                            break
+                        if recipe.capabilities[cap] is not True:
+                            defect = "capability_transport_absent"
+                            break
+            if defect is None and floor_demotes(pool, tc, records=quality_records,
+                                                doc=doc, needs=needs,
+                                                model=recipe.model, now=now):
+                defect = "quality_floor"
+            if defect is None:
+                guard = _launch_policy_eval(recipe.mode, tc, recipe.model,
+                                            escalation_reason=witness, doc=doc,
+                                            task_complexity=complexity, now=now,
+                                            application=True,
+                                            grok_exhausted=grok_exhausted)
+                if not guard.get("allowed"):
+                    defect = str(guard.get("reason") or "launch_policy_refused")
+            if defect is None:
+                room = row["model_room"].get(recipe.model)
+                if room is None:
+                    defect = "model_room_unknown"
+                elif room < 1:
+                    defect = "model_room_exhausted"
+            if defect is None:
+                eligible.append(recipe)
+            elif first_defect is None:
+                first_defect = defect
+        if not eligible:
+            pool_defect(pool, first_defect or "pool_not_offered", coverage)
+            continue
+        pin = None
+        if requested is not None:
+            eligible = [recipe for recipe in eligible if recipe.model == requested]
+            if not eligible:
+                pool_defect(pool, "requested_model_unqualified", coverage)
+                continue
+            pin = eligible[0]
+        policy_model, _suffix = _selection_model(pool, tc, doc, needs, model=None,
+                                                 now=now)
+        chosen, order_source = None, None
+        if requested is not None:
+            chosen, order_source = pin, "requested_model"
+        elif requested_pool is not None:
+            matching = [recipe for recipe in eligible if recipe.model == policy_model]
+            if not matching:
+                pool_defect(pool, "requested_model_unqualified", coverage)
+                continue
+            chosen, order_source = matching[0], "task_default_policy"
+        elif policy_model:
+            matching = [recipe for recipe in eligible if recipe.model == policy_model]
+            if matching:
+                chosen, order_source = matching[0], "task_default_policy"
+        if chosen is None:
+            if len(eligible) > 1 and len({recipe.order_rank for recipe in eligible}) != len(eligible):
+                pool_defect(pool, "model_order_unqualified", coverage)
+                continue
+            chosen = min(eligible, key=lambda recipe: (recipe.order_rank, recipe.model))
+            order_source = "catalogue_order"
+        same_model = [recipe for recipe in eligible if recipe.model == chosen.model]
+        grants = {recipe.grant_ref["digest"] for recipe in same_model}
+        identities = {(recipe.driver, recipe.profile, recipe.protocol, recipe.mode)
+                      for recipe in same_model}
+        if len(grants) > 1:
+            pool_defect(pool, "grant_ref_ambiguous", coverage)
+            continue
+        if len(identities) > 1:
+            pool_defect(pool, "driver_ambiguous", coverage)
+            continue
+        identity = {
+            "pool": pool, "model": chosen.model, "mode": chosen.mode,
+            "protocol": chosen.protocol, "streaming": False,
+            "driver": chosen.driver, "profile": chosen.profile,
+            "source": chosen.source,
+            "capabilities": {cap: chosen.capabilities[cap]
+                             for cap in sorted(chosen.capabilities)},
+            "grant_ref": dict(chosen.grant_ref),
+            "qualification_ref": chosen.qualification_ref,
+            "application_permission_ref": chosen.application_permission_ref,
+            "max_turn_seconds": chosen.max_turn_seconds,
+            "max_steps": chosen.max_steps,
+            "host": row.get("host"), "observation_source": row["source"],
+            "order_source": order_source, "task": dict(task_identity),
+            "policy": {"parsed_sha256": policy.parsed_sha256,
+                       "critical_sha256": policy.critical_sha256},
+        }
+        if expected_identity is not None:
+            if type(expected_identity) is not dict:
+                return refusal("identity_input_invalid", coverage=coverage,
+                               commitments=commitments)
+            unknown = sorted(set(expected_identity) - set(identity))
+            if unknown:
+                return refusal("identity_field_unknown", coverage=coverage,
+                               commitments=commitments,
+                               extra={"identity_fields_unknown": unknown})
+            conflicts = sorted(key for key in sorted(expected_identity)
+                               if expected_identity[key] != identity[key])
+            if conflicts:
+                return refusal("identity_conflict", coverage=coverage,
+                               commitments=commitments, identity=identity,
+                               extra={"identity_conflicts": conflicts})
+        selection = {key: identity[key] for key in (
+            "pool", "model", "mode", "protocol", "streaming", "driver", "profile",
+            "source", "capabilities", "grant_ref", "qualification_ref",
+            "application_permission_ref", "max_turn_seconds", "max_steps", "host")}
+        selection["order_source"] = order_source
+        selection["reason"] = "qualified_application_recipe"
+        coverage[pool] = "selected"
+        return {"schema": _APPLICATION_SELECTION_SCHEMA, "ok": True, "reason": None,
+                "execution_authorized": False, "requires_fresh_admission": True,
+                "coverage": coverage, "selection": selection, "identity": identity,
+                "commitments": commitments}
+    if seat_seen and coverage.get("claude-native") in (None, "not_ordered_for_class"):
+        coverage["claude-native"] = "seat_pool_not_application"
+    return refusal("no_qualified_application_pool", coverage=coverage,
+                   commitments=commitments)
 
 
 if __name__ == "__main__":

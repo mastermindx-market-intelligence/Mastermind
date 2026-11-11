@@ -42,7 +42,7 @@ _COMMIT = re.compile(r'[0-9a-f]{40}')
 _BINDING_FIELDS = frozenset({'root_id','job_id','attempt_id','effective_grant_digest','commission_sha256'})
 _ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-prepare', 'assignment-seal-commit', 'assignment-seal-finalize'})
 _MODIFYING_OPERATIONS = frozenset({'start', 'cancel', 'validate'}) | _ASSIGNMENT_OPERATIONS
-_OPERATIONS = frozenset({'start','status','collect','cancel','validate','attended-secret-canary','service-readiness','native-capacity-observation'}) | _ASSIGNMENT_OPERATIONS
+_OPERATIONS = frozenset({'start','status','collect','cancel','validate','attended-secret-canary','service-quiesce','service-readiness','native-capacity-observation'}) | _ASSIGNMENT_OPERATIONS
 _TRUSTED_CONFIG = object()
 _ERROR_CODES = frozenset({'BrokerProtocolError','PeerAuthorizationError','ConfigTrustError',
     'EFFECT_UNKNOWN','BridgeIdentityError','SocketBindingError','BackendNotConfiguredError',
@@ -621,6 +621,8 @@ class FabricBridgeBroker:
 
     async def execute(self,request,*,peer):
         self._authorize_peer(peer)
+        if self.config.adapter_id != ADAPTER_ID:
+            _refuse('ConfigTrustError','Paid profile requires its concrete paid owner composition')
         _object(request,{'schema_version','request_id','operation','payload'})
         if request['schema_version']!=BROKER_REQUEST_SCHEMA_VERSION:_refuse()
         _identifier(request['request_id'])
@@ -776,7 +778,7 @@ class FabricBridgeBroker:
                 if response is not None:
                     writer.write(_canonical(response)+b'\n')
                     await writer.drain()
-                    if operation == 'service-readiness' and response.get('ok') is True:
+                    if operation in {'service-readiness','service-quiesce'} and response.get('ok') is True:
                         # Keep this authenticated connection alive while Control
                         # captures Darwin's peer audit token after our send.
                         # One fixed-size ACK, bounded wait, no backend dispatch.

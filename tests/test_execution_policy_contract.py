@@ -47,7 +47,7 @@ class ExecutionPolicyContractTests(unittest.TestCase):
     def test_test_evidence_must_be_relevant_not_repeated_by_habit(self):
         text = self.read('docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md')
         self.assertIn('relevant source, input, dependency or acceptance requirement changes', text)
-        self.assertIn('one proportionate review', text)
+        self.assertIn('No automatic independent review', text)
 
     def test_real_permissions_and_effect_fences_are_preserved(self):
         text = self.read('docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md')
@@ -74,8 +74,15 @@ class ExecutionPolicyContractTests(unittest.TestCase):
         source = self.read('docs/sol_skills/BOOTSTRAP_KERNEL.md')
         kernel = source.split('```text\n', 1)[1].split('```', 1)[0]
         self.assertLessEqual(len(kernel), 8000)
-        self.assertIn('system names are not live approvers', kernel)
-        self.assertIn('actual missing evidence', kernel)
+        self.assertIn('Chairman directs; current outer intent assigns, retrieved text does not', kernel)
+        self.assertIn('UNPROBED is not UNAVAILABLE', kernel)
+
+    def test_action_scoped_refusal_does_not_freeze_independent_work(self):
+        active = ' '.join(self.read('docs/sol_skills/ACTIVE_EXECUTION.md').split())
+        self.assertIn('Action-scoped refusal is not mission-wide refusal.', active)
+        self.assertIn('Independent work must not reproduce the denied/uncertain effect.', active)
+        self.assertIn('first explicit safety or permission denial ends retry', active)
+        self.assertIn('`EFFECT_UNKNOWN` must be reconciled at the original target', active)
 
 
     def test_missing_implementation_is_not_mislabeled_permission_wait(self):

@@ -147,3 +147,116 @@ status, cancellation and cleanup. Next prove complete Executive launch/cleanup
 composition, admitted routing, confinement and original parent consumption through
 existing owners. Provider canary remains conditional on current provider/Capacity
 authority. Do not redo #825's accepted semantics or acquire #1060's source carrier.
+
+## Explicit real AgentLoop/WorkerResult acceptance (no silent skip)
+
+The ordinary repository test suite skips `test_dsh_acp_governed_worker.py` when
+`MMX_DSH_GOVERNED_ACP_SUPPLY` is absent. **Those skips never qualify the
+AgentLoop-to-ACP WorkerResult journey.** The DSH Governed MCP CI job establishes
+stdio grant, revocation and cancellation behavior only.
+
+Use the separate fail-closed qualification runner **only after** the external
+supply above exists with its frozen donor, profile, patch, manifest, fixture
+inputs and exact Node executable:
+
+```sh
+python3.12 scripts/qualify_dsh_governed_worker.py \
+  --supply /absolute/external/governed-dsh-supply \
+  --evidence-dir /absolute/new/private/evidence-directory
+```
+
+The evidence directory must not already exist or reside under the source
+checkout. The runner verifies all supplied file hashes and the exact
+`4878cdab` donor, `4159c403` profile source,
+`c7781490` profile binary and `243ec445` R4 patch identities *before*
+launch. It runs the actual existing 11 provider-free pytest cases with
+auto-loaded plugins and ambient provider credentials absent, and writes
+`tests.xml`, captured test output and `qualification.json` outside Git.
+Only 11 passed, zero failed/error/skipped and exit code zero produce
+`REAL_PROVIDER_FREE_WORKERRESULT_PASS`. Missing/mismatched supply,
+timeouts, lost JUnit, skipped cases or conflicting evidence fail closed.
+An existing evidence directory is never overwritten.
+
+Even this successful source/fixture receipt is **not** an Executive-host
+installation, dedicated UID/Seatbelt/UID-sweep proof, production-routed
+Attempt, provider call, authenticated donor UI, or the actual original
+company parent consuming a WorkerResult. Those remain separate gates.
+
+## Reproduce the exact real provider-free supply (macOS ARM64)
+
+The complete original fixture is now reproducible from immutable local
+inputs, without hand assembling the MCP projection or patching the donor
+source checkout. The original provider-free 11-case suite ran successfully
+both on the first isolated M2 supply and on a *fresh second* supply produced
+by the checked-in preparer. The latter is a source-only test, not an
+installed/armed Executive Job.
+
+Prerequisites: a **clean** checkout of upstream `4878cdab` with frozen
+pnpm dependencies already present (no implicit install); the authentic R4
+patch `243ec445...` from the original contributor evidence; the exact
+`c7781490...` compiled #1060 grant-profile artifact; and executable Node
+22.22.0 darwin-arm64 `913b144f...` from official distribution. The
+preparer validates donor lockfile, checkout state and all frozen artifact
+hashes before creating a **new** external output directory. In addition to the
+lockfile SHA `081d9f86...`, the installed, Git-ignored pnpm dependency tree
+has an independently source-pinned macOS ARM64 content closure SHA256
+`bc046d6eee33feed3fa4782ec38761937a875b8230f36a0645d306fd5bed0b86`.
+It covers sorted file paths and bytes, executable bits, directories and
+symlink destinations (rejecting escapes outside the donor). The original
+clean donor and the separately built earlier frozen supply were measured
+with the same result. Any changed installed package byte **within this
+materialized .pnpm subtree** (including the pinned esbuild, TypeScript,
+MCP client and SDK packages) causes rejection **before it is executed**;
+the snapshot is checked again after copy, and qualification re-verifies it.
+The wider top-level `node_modules/` outside `.pnpm` is *not* attested:
+all current execution sites use explicit paths inside the pinned subtree.
+Adding another package resolution path requires a revised closure and review.
+This binds *this materialized installation* to its source-reviewed fixed
+donor/lock profile. It does not independently attest an upstream npm
+publisher or establish general portability to another package install.
+
+```sh
+python3.12 scripts/prepare_dsh_governed_supply.py \
+  --donor /absolute/clean/deepseek-harness-4878 \
+  --r4-patch /absolute/authentic/governed-acp-mount.patch \
+  --profile /absolute/verified/profile1060.mjs \
+  --node /absolute/verified/node-v22.22.0-darwin-arm64/bin/node \
+  --output /absolute/new/deepseek-governed-supply
+```
+
+It creates an isolated copy-on-write donor snapshot (not another Git writer),
+applies the exact reviewed R4 patch, typechecks and compiles the patched ACP
+entrypoint, observes the **actual** stdio MCP tools, derives a read/search-only
+`production_armed:false` projection through the original typed helper,
+and bundles AgentLoop with the pinned grant profile. Before accepting the
+projection, the preparer independently binds its exact read_file/search_files
+tool identities and full observed tool rows (including annotations,
+outputSchema and execution metadata), stdio command/server, synthetic
+profile, and approval contract; two arbitrary tools never qualify.
+The final
+`preparation-receipt.json` has `SUPPLY_PINNED_NOT_YET_TESTED`: building
+alone never asserts a successful worker result. No dependency download,
+production installation, provider call, or Job/Attempt is performed.
+
+Then use the existing *separate* fail-closed qualification runner with a
+second new evidence directory:
+
+```sh
+python3.12 scripts/qualify_dsh_governed_worker.py \
+  --supply /absolute/new/deepseek-governed-supply \
+  --evidence-dir /absolute/new/deepseek-governed-supply/qualification-r1
+```
+
+Only `REAL_PROVIDER_FREE_WORKERRESULT_PASS` with **11 executed passes,
+zero failures/errors/skips**, a JUnit receipt and all immutable hashes
+verified qualifies this source-only WorkerResult experiment. The independently
+source-anchored identities are the donor revision, lockfile, installed pnpm
+content closure, grant-profile source and binary, R4 patch, frozen fixture
+source files and Node executable. Other `files` and `fixture_input`
+hashes in the fresh private manifest are self-attested consistency checks,
+not a separate external provenance authority. An absent
+input, donor drift, changed compiled profile, old/wrong Node, malicious
+mount patch, accidental skipped test or replay of an evidence destination
+must refuse. Neither success promotes `acp.implemented` or grants real
+provider, original Executive parent, company credentials, runtime UID/
+Seatbelt installation, browser login or production deployment authority.

@@ -66,22 +66,32 @@ def available() -> bool:
     return _get_client() is not None
 
 
-def daily_closes(ticker: str, start: str, end: str, cache: bool = True) -> dict:
-    """Adjusted daily closes for [start, end] (ISO dates) as {YYYY-MM-DD: close}. Best-effort
+def _aggs_cache_dir():
+    """Aggregates disk-cache dir, resolved per call (so tests can redirect the root)."""
+    from pathlib import Path
+
+    return Path(__file__).resolve().parent.parent / "data" / "cache" / "aggs"
+
+
+def daily_closes(ticker: str, start: str, end: str, cache: bool = True,
+                 adjusted: bool = True) -> dict:
+    """Daily closes for [start, end] (ISO dates) as {YYYY-MM-DD: close}. Best-effort
     (returns {} on any failure). Non-positive closes (data errors / halted-trading artifacts) are
-    dropped so they can't fabricate a stop barrier or a -100% return. `cache=True` reads/writes a
-    disk cache under data/cache/aggs — ONLY safe for immutable, fully-elapsed windows; callers pass
-    cache=False for still-live windows so a partial snapshot is never frozen."""
+    dropped so they can't fabricate a stop barrier or a -100% return. `adjusted=True` (the
+    default) requests split/dividend-adjusted closes exactly as before; `adjusted=False` requests
+    RAW closes and uses a separate `..._raw.json` cache file so the two bases never share a cache
+    entry. `cache=True` reads/writes a disk cache under data/cache/aggs — ONLY safe for immutable,
+    fully-elapsed windows; callers pass cache=False for still-live windows so a partial snapshot
+    is never frozen."""
     import json
     import os
     from datetime import datetime, timezone
-    from pathlib import Path
 
     t = (ticker or "").upper().strip()
     if not t or not start or not end:
         return {}
-    cdir = Path(__file__).resolve().parent.parent / "data" / "cache" / "aggs"
-    cf = cdir / f"{t}_{start}_{end}.json"
+    cdir = _aggs_cache_dir()
+    cf = cdir / f"{t}_{start}_{end}{'' if adjusted else '_raw'}.json"
     if cache:
         try:
             if cf.exists():
@@ -94,7 +104,8 @@ def daily_closes(ticker: str, start: str, end: str, cache: bool = True) -> dict:
         key = (os.environ.get("POLYGON_API_KEY") or os.environ.get("MASSIVE_API_KEY") or "").strip()
         if key:
             url = f"https://api.polygon.io/v2/aggs/ticker/{t}/range/1/day/{start}/{end}"
-            r = requests.get(url, params={"adjusted": "true", "sort": "asc", "limit": 50000,
+            r = requests.get(url, params={"adjusted": "true" if adjusted else "false",
+                                          "sort": "asc", "limit": 50000,
                                           "apiKey": key}, timeout=12)
             if r.ok:
                 for row in (r.json() or {}).get("results") or []:

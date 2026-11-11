@@ -81,16 +81,59 @@ class RuntimeStageTests(unittest.TestCase):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
             stage.stage("v7", root=self.root, _source_dir=self.source)
 
-    def test_current_v12_reviewed_hash_matches_bridge_source(self):
+    def test_current_v23_reviewed_hash_matches_source_and_preserves_history(self):
         bridge = ROOT / "integrations" / "paper_desktop" / "bridge.py"
         current = load_local(
             "paper_runtime_stage_current_source_pin",
             ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
         )
         self.assertEqual(
-            current.REVIEWED_GENERATIONS["v12"]["bridge.py"],
+            current.REVIEWED_GENERATIONS["v23"]["bridge.py"],
             current._sha256(bridge.read_bytes()),
         )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v22"]["bridge.py"],
+            "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v21"]["bridge.py"],
+            "dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v12"]["bridge.py"],
+            "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v20"]["bridge.py"],
+            "1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced",
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v19"]["bridge.py"],
+            "2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae",
+        )
+        # Staged v17 receipts retain their historical identity; never
+        # silently overwrite them with repaired v18 source.
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v17"]["bridge.py"],
+            "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
+        )
+
+    def test_new_bridge_cannot_relabel_v22_and_drift_cannot_enter_v23(self):
+        current = load_local(
+            "paper_runtime_stage_current_generation_refusal",
+            ROOT / "integrations/paper_desktop/runtime_stage.py",
+        )
+        bridge = (ROOT / "integrations/paper_desktop/bridge.py").read_bytes()
+        for generation, data in (("v22", bridge), ("v23", bridge + b"\n# source drift\n")):
+            with self.subTest(generation=generation):
+                (self.source / "bridge.py").write_bytes(data)
+                with mock.patch.object(current.venv, "EnvBuilder") as builder, \
+                     mock.patch.object(current, "_probe_bridge") as probe:
+                    with self.assertRaisesRegex(current.Refusal, "SOURCE_HASH_MISMATCH"):
+                        current.stage(generation, root=self.root, _source_dir=self.source)
+                    builder.assert_not_called()
+                    probe.assert_not_called()
+                self.assertFalse((self.root / generation).exists())
 
     def test_historical_v11_pin_remains_immutable(self):
         current = load_local(

@@ -19,6 +19,7 @@ Run:  python -m bot.china        (or the APScheduler 'china_daily' job, or POST 
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -47,11 +48,28 @@ ALLOWED_VENUES = set(_registry.venues(PORTFOLIO_ID))   # {"A-share"} — empty s
 # ---------------------------------------------------------------------------
 
 def run_china(asof: str | None = None, *, force: bool = False, armed: bool = True,
-              directive: str | None = None) -> dict:
+               directive: str | None = None, run_id: str | None = None,
+               before_provider_start=None) -> dict:
+    """Recover this book's selected original before mutable work."""
+    from brain import fabric_portfolio
+    handled, result = fabric_portfolio.route(
+        book=PORTFOLIO_ID, asof=asof, force=force, armed=armed, directive=directive,
+        run_id=run_id, runner=_run_china, before_provider_start=before_provider_start)
+    if handled:
+        return result
+    return _run_china(asof, force=force, armed=armed, directive=directive,
+                       _before_provider_start=before_provider_start)
+
+
+def _run_china(asof: str | None = None, *, force: bool = False, armed: bool = True,
+                directive: str | None = None, _fabric_session=None,
+                _before_provider_start=None) -> dict:
     """Run one China turn end-to-end. Best-effort: every step degrades gracefully so a missing
     credential / price never leaves the book in a half-traded state."""
     from portfolio import china_calendar, paper_account
 
+    if _fabric_session is not None and _registry.is_archived(PORTFOLIO_ID):
+        return _registry.archived_run_result(PORTFOLIO_ID, asof)
     asof = asof or date.today().isoformat()
     out: dict = {"portfolio_id": PORTFOLIO_ID, "asof": asof,
                  "ran_at": datetime.now(timezone.utc).isoformat()}
@@ -62,45 +80,68 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
     inaugural = not _has_history() and not (state0.get("positions") or {})
     out["inaugural"] = inaugural
 
-    # 0. FEED-HEALTH GATE (before the Brain). The A-share live feed (Tushare `daily`) is
-    #    all-or-nothing: one bulk call prices the WHOLE market. When it is DOWN, currently-held
-    #    names still mark off the stale vendored snapshot while brand-new candidates return
-    #    priceable=false — an ASYMMETRIC map. On 2026-06-22 that fooled the Brain into parking
-    #    ~48% cash citing a (false) "no investable candidates" constraint. Detect the outage as a
-    #    first-class condition and refuse to transact on it: skip the Brain (it never sees the
-    #    corrupted map) and carry the book unchanged. `force=True` overrides (operator escape hatch).
-    from data_layer import feed_health
-    venue = next(iter(ALLOWED_VENUES), "A-share")
-    out["feed_health"] = feed_health.status(venue, asof)
-    if armed and not force and out["feed_health"]["status"] == "down":
-        log.warning(
-            "China turn %s ABORTED — the %s live feed is unavailable. Held names would price off "
-            "the stale snapshot while fresh candidates return priceable=false (an asymmetric map); "
-            "skipping the Brain and carrying the book unchanged. Re-run with force=True to override.",
-            asof, venue)
-        armed = False
-        out["feed_aborted"] = True
+    if _fabric_session is not None and _fabric_session.recovered:
+        out = copy.deepcopy(_fabric_session.state["entry_context"])
+        inaugural = out["inaugural"]
+        if "local_gate" in _fabric_session.state:
+            armed = False
+    else:
+        # 0. FEED-HEALTH GATE (before the Brain). The A-share live feed (Tushare `daily`) is
+        #    all-or-nothing: one bulk call prices the WHOLE market. When it is DOWN, currently-held
+        #    names still mark off the stale vendored snapshot while brand-new candidates return
+        #    priceable=false — an ASYMMETRIC map. On 2026-06-22 that fooled the Brain into parking
+        #    ~48% cash citing a (false) "no investable candidates" constraint. Detect the outage as a
+        #    first-class condition and refuse to transact on it: skip the Brain (it never sees the
+        #    corrupted map) and carry the book unchanged. `force=True` overrides (operator escape hatch).
+        from data_layer import feed_health
+        venue = next(iter(ALLOWED_VENUES), "A-share")
+        out["feed_health"] = feed_health.status(venue, asof)
+        if armed and not force and out["feed_health"]["status"] == "down":
+            log.warning(
+                "China turn %s ABORTED — the %s live feed is unavailable. Held names would price off "
+                "the stale snapshot while fresh candidates return priceable=false (an asymmetric map); "
+                "skipping the Brain and carrying the book unchanged. Re-run with force=True to override.",
+                asof, venue)
+            armed = False
+            out["feed_aborted"] = True
 
-    # 0b. NIGHTLY COST TRIPWIRE (before the Brain). The armed Opus seat below is the dominant cost
-    #    (~$1+). If this book has already hit the configured per-night USD cap, SKIP the seat and
-    #    carry the book unchanged — same posture as the feed-health abort above. OFF by default
-    #    (cap <= 0 → over_budget always False) so this is a no-op and the run is byte-identical.
-    from brain import cost_guard
-    if armed and cost_guard.over_budget(PORTFOLIO_ID, asof):
-        log.warning("China turn %s — nightly cost cap hit ($%.2f / $%.2f); skipping the Brain and "
-                    "carrying the book unchanged.", asof,
-                    cost_guard.spent(PORTFOLIO_ID, asof), cost_guard.cap())
-        armed = False
-        out["cost_capped"] = True
+        # 0b. NIGHTLY COST TRIPWIRE (before the Brain). The armed Opus seat below is the dominant cost
+        #    (~$1+). If this book has already hit the configured per-night USD cap, SKIP the seat and
+        #    carry the book unchanged — same posture as the feed-health abort above. OFF by default
+        #    (cap <= 0 → over_budget always False) so this is a no-op and the run is byte-identical.
+        from brain import cost_guard
+        _over_budget = cost_guard.fabric_over_budget if _fabric_session is not None else cost_guard.over_budget
+        if armed and _over_budget(PORTFOLIO_ID, asof):
+            log.warning("China turn %s — nightly cost cap hit ($%.2f / $%.2f); skipping the Brain and "
+                        "carrying the book unchanged.", asof,
+                        cost_guard.spent(PORTFOLIO_ID, asof), cost_guard.cap())
+            armed = False
+            out["cost_capped"] = True
+
+        if _fabric_session is not None:
+            _fabric_session.state["entry_context"] = copy.deepcopy(out)
+            if not armed:
+                _fabric_session.stop_locally("feed_down" if out.get("feed_aborted") else "cost_capped")
+            else:
+                _fabric_session.save()
 
     # 1. run the Brain (armed) → it researches and submits a target book with rationales
     from brain import china_mcp
-    china_mcp.clear_submission()                 # never replay yesterday's decision
-    brain: dict = {"ok": False, "skipped": not armed}
+    if _fabric_session is None:
+        china_mcp.clear_submission()                 # never replay yesterday's decision
+    brain: dict = (copy.deepcopy(_fabric_session.state["brain"])
+                   if _fabric_session is not None and "local_gate" in _fabric_session.state
+                   else {"ok": False, "skipped": not armed})
     if armed:
         try:
             # directive is an optional ad-hoc override (overnight reviews) — pass it through only when set
-            brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
+            if _fabric_session is not None:
+                brain = _run_brain(asof, inaugural, directive=directive, _fabric_session=_fabric_session)
+            elif _before_provider_start is not None:
+                brain = _run_brain(asof, inaugural, directive=directive,
+                                   before_provider_start=_before_provider_start)
+            else:
+                brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
         except Exception as e:                   # noqa: BLE001
             brain = {"ok": False, "error": repr(e)[:300]}
             try:
@@ -110,23 +151,37 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
                     brain["run_id"] = _refusal_run_id
             except Exception:
                 pass  # Evidence recovery cannot replace the original error/submission.
-        # record this seat's known cost + token usage against the nightly per-book ledger.
-        _usg = brain.get("usage") or {}
-        cost_guard.record(
-            PORTFOLIO_ID, brain.get("cost_usd"), asof,
-            seat="china_brain",
-            model=str(brain.get("model") or ""),
-            input_tokens=int(_usg.get("input_tokens") or 0),
-            output_tokens=int(_usg.get("output_tokens") or 0),
-            cache_read_tokens=int(_usg.get("cache_read_input_tokens") or 0),
-            cache_creation_tokens=int(_usg.get("cache_creation_input_tokens") or 0),
-        )
+        if _fabric_session is None:
+            # record this seat's known cost + token usage against the nightly per-book ledger.
+            _usg = brain.get("usage") or {}
+            cost_guard.record(
+                PORTFOLIO_ID, brain.get("cost_usd"), asof,
+                seat="china_brain",
+                model=str(brain.get("model") or ""),
+                input_tokens=int(_usg.get("input_tokens") or 0),
+                output_tokens=int(_usg.get("output_tokens") or 0),
+                cache_read_tokens=int(_usg.get("cache_read_input_tokens") or 0),
+                cache_creation_tokens=int(_usg.get("cache_creation_input_tokens") or 0),
+            )
     out["brain"] = {k: brain.get(k) for k in ("ok", "cost_usd", "tools_used", "error", "run_id", "model")}
 
     # 2. read the normalized submitted book.  decision_submission rejects new off-venue adds.
     #    Keep the narrow filter below as defence in depth for malformed/legacy payloads, but never
     #    turn a trusted omission-carry row for an existing legacy position into an implicit sale.
-    submission = china_mcp.read_submission()
+    if _fabric_session is not None:
+        if _fabric_session.persistence_failed:
+            from brain.fabric_portfolio import _held
+            return _held(_fabric_session.state, "fabric_portfolio_persistence_unsettled")
+        if any(effect["state"] == "pending" for effect in _fabric_session.state["tools"]):
+            from brain.fabric_portfolio import _held
+            return _held(_fabric_session.state, "fabric_portfolio_tool_effect_unsettled")
+        submission = _fabric_session.submission()
+        if "frozen" not in _fabric_session.state and "local_gate" not in _fabric_session.state:
+            _fabric_session.stop_unstarted(brain)
+        _fabric_session.state["phase"] = "business"
+        _fabric_session.save()
+    else:
+        submission = china_mcp.read_submission()
     if submission and ALLOWED_VENUES:
         from brain import china_intake as _intake
         all_h = submission.get("holdings") or []
@@ -294,25 +349,31 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
         )
         if carried_unpriceable:
             out["carried_unpriceable_holdings"] = carried_unpriceable
-        res = _settle.execute_or_queue(
-            PORTFOLIO_ID,
-            execution_target,
-            prices,
-            asof,
-            decision_snapshot=submission,
-            queued_projection_locked=lambda accepted_target: _append_decision_log(
+        def _execute_original_settlement():
+            return _settle.execute_or_queue(
+                PORTFOLIO_ID,
+                execution_target,
+                prices,
                 asof,
-                submission,
-                [],
-                skipped,
-                brain,
-                feed_health=out.get("feed_health"),
-                packet_id=(_pgr.packet_id if _pgr else None),
-                target_status="queued",
-                effective_target=accepted_target,
-                _locked=True,
-            ),
-        )
+                decision_snapshot=submission,
+                queued_projection_locked=lambda accepted_target: _append_decision_log(
+                    asof,
+                    submission,
+                    [],
+                    skipped,
+                    brain,
+                    feed_health=out.get("feed_health"),
+                    packet_id=(_pgr.packet_id if _pgr else None),
+                    target_status="queued",
+                    effective_target=accepted_target,
+                    _locked=True,
+                ),
+            )
+        res = (_fabric_session.settle(
+            _execute_original_settlement, target=execution_target, prices=prices,
+            submission=submission, brain=brain, skipped=skipped,
+            packet_id=(_pgr.packet_id if _pgr else None), out=out)
+            if _fabric_session is not None else _execute_original_settlement())
         executed = res.get("executed") or []
         queued = bool(res.get("queued"))
         accepted_target = res.get("accepted_target")
@@ -431,7 +492,8 @@ def run_china(asof: str | None = None, *, force: bool = False, armed: bool = Tru
         )
         try:
             from bridge import build_portfolio
-            out["paths"] = build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID)
+            out["paths"] = (_fabric_session.publish(payload) if _fabric_session is not None
+                            else build_portfolio.write(payload, portfolio_id=PORTFOLIO_ID))
             publish_ok = True
         except Exception as e:                   # noqa: BLE001
             out["write_error"] = repr(e)[:200]
@@ -589,12 +651,35 @@ _PERSONA = (
 )
 
 
-def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict:
+def _run_brain(asof: str, inaugural: bool, directive: str | None = None, *,
+               _fabric_session=None, before_provider_start=None) -> dict:
     from brain import china_mcp, cli_bridge
     from brain import self_mirror, risk_lens   # lazy (package-attr lesson); both flag-gated, byte-identical OFF
-    prompt = _build_prompt(asof, inaugural, directive=directive)
-    persona = self_mirror.inject(_PERSONA, "china", _safe_date(asof))
+    if _fabric_session is not None and _fabric_session.recovered:
+        return copy.deepcopy(_fabric_session.state["brain"])
+    prompt = _build_prompt(asof, inaugural, directive=directive,
+                           **({"typed_application": True} if _fabric_session is not None else {}))
+    persona_source = _PERSONA
+    if _fabric_session is not None:
+        paragraphs = []
+        for paragraph in persona_source.split("\n\n"):
+            if paragraph.startswith("You have two research channels"):
+                paragraph = ("Research through the declared tools for this book and their dated dashboard, "
+                             "Neural Web, technical and company evidence. Form your own view; report "
+                             "missing or stale context explicitly.")
+            elif paragraph.startswith("When independent research would benefit"):
+                paragraph = ("Complete the synthesis with the declared context tools. Record concise "
+                             "evidence, alternatives and decision-relevant conclusions; do not expose "
+                             "hidden chain-of-thought.")
+            paragraphs.append(paragraph)
+        persona_source = "\n\n".join(paragraphs)
+    persona = self_mirror.inject(persona_source, "china", _safe_date(asof))
     persona = risk_lens.govern_persona(persona, "china")        # RISK GOVERNOR mandate; OFF → unchanged
+    if _fabric_session is not None:
+        from portfolio import paper_account
+        return _fabric_session.reason(prompt, persona,
+            prior=paper_account._load_account(PORTFOLIO_ID), inaugural=inaugural,
+            perception_input=None, max_turns=_MAX_TURNS)
     coro = cli_bridge.reason(
         prompt,
         role="deep",                 # opus, per config/agents.yml
@@ -604,11 +689,13 @@ def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict
         allowed_tools=china_mcp.allowed_tools(),
         max_turns=_MAX_TURNS,
         book=PORTFOLIO_ID,           # bot records against cost_guard; skip bridge double-count
+        **({"before_provider_start": before_provider_start} if before_provider_start is not None else {}),
     )
     return _run_coro(coro)
 
 
-def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> str:
+def _build_prompt(asof: str, inaugural: bool, directive: str | None = None, *,
+                  typed_application: bool = False) -> str:
     from portfolio import paper_account
     state = paper_account._load_account(PORTFOLIO_ID)
     cash = float(state.get("cash") or 0.0)
@@ -655,8 +742,9 @@ def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> s
                   f"({', '.join(sorted(positions)) or 'none'}). Call mcp__china__get_my_book for the "
                   "full picture (weights, live CNY P&L, and the rationale you last gave each name).", ""]
     lines += [
-        "Do your research now (the in-house China desks and/or the web — your call), then submit "
-        "your complete target book for today via mcp__china__submit_book, with a one-paragraph "
+        ("Use the declared context tools, then submit " if typed_application else
+         "Do your research now (the in-house China desks and/or the web — your call), then submit ")
+        + "your complete target book for today via mcp__china__submit_book, with a one-paragraph "
         "rationale per holding, ADD/HOLD/TRIM intent, all governance fields, a structured decision memo, and an explicit record "
         "for every exit. Confirm each name is priceable with get_quote first. Search deeper before choosing "
         "high cash; every holding must be a positively verified single-company stock, never an ETF "
@@ -778,6 +866,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "cost_usd": brain.get("cost_usd") if isinstance(brain, dict) else None,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
+        "provider_failure": brain.get("provider_failure") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
         **decision_submission.target_status_fields(target_status),
         **decision_rows.accepted_identity_fields(

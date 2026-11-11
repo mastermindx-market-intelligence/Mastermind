@@ -58,7 +58,17 @@ SOURCE_FILES = PRE_COMMISSION_DEADLINE_SOURCE_FILES | {"commission_deadline.py"}
 # exact new closure. Legacy/default artifact digests retain SOURCE_FILES.
 PHYSICAL_ROOT_SOURCE_FILES = SOURCE_FILES | {"artifact_delivery.py"}
 # Old immutable generations continue to authenticate their exact closures.
-SOURCE_GENERATIONS = (PHYSICAL_ROOT_SOURCE_FILES, SOURCE_FILES, PRE_COMMISSION_DEADLINE_SOURCE_FILES, PRE_NATIVE_BINDING_SOURCE_FILES, PRE_QUOTA_CONTINUITY_SOURCE_FILES, PRE_CPU_SCOPE_SOURCE_FILES, PRE_CPU_STRESS_SOURCE_FILES, POLICY_SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
+PAID_MODEL_SOURCE_FILES = SOURCE_FILES | {"paid_glm_model_client.py", "paid_model_owner.py", "linux_process_identity.py"}
+PAID_MODEL_PHYSICAL_ROOT_SOURCE_FILES = PAID_MODEL_SOURCE_FILES | {"artifact_delivery.py"}
+PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES = PAID_MODEL_SOURCE_FILES | {"paid_provider_entry.py", "paid_initializer.py", "paid_initializer_token_data.py", "paid_initializer_nested_data.py"}
+PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES = PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES | {"artifact_delivery.py"}
+PAID_INITIALIZED_SOURCE_FILES = PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES | {"paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"}
+PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES = PAID_INITIALIZED_SOURCE_FILES | {"artifact_delivery.py"}
+# The APPLICATION carrier extends only the two current plain closures.
+# Historical and paid worker memberships keep their exact admitted sets.
+APPLICATION_SOURCE_FILES = SOURCE_FILES | {"application_native_owner.py"}
+APPLICATION_PHYSICAL_ROOT_SOURCE_FILES = PHYSICAL_ROOT_SOURCE_FILES | {"application_native_owner.py"}
+SOURCE_GENERATIONS = (APPLICATION_PHYSICAL_ROOT_SOURCE_FILES, APPLICATION_SOURCE_FILES, PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES, PAID_INITIALIZED_SOURCE_FILES, PRE_HELD_YAML_PAID_INITIALIZED_PHYSICAL_ROOT_SOURCE_FILES, PRE_HELD_YAML_PAID_INITIALIZED_SOURCE_FILES, PAID_MODEL_PHYSICAL_ROOT_SOURCE_FILES, PAID_MODEL_SOURCE_FILES, PHYSICAL_ROOT_SOURCE_FILES, SOURCE_FILES, PRE_COMMISSION_DEADLINE_SOURCE_FILES, PRE_NATIVE_BINDING_SOURCE_FILES, PRE_QUOTA_CONTINUITY_SOURCE_FILES, PRE_CPU_SCOPE_SOURCE_FILES, PRE_CPU_STRESS_SOURCE_FILES, POLICY_SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
 
 # Fixed symlinks inside ext -> stable_ext/<name>
 _EXT_SYMLINKS = frozenset({
@@ -348,8 +358,15 @@ def _is_retained_settlement_metadata(path):
             os.close(descriptor)
 
 
-def ensure_policy(source, stable_ext, expected_hash):
-    """Refresh live policy only while the EXISTING physical admission lock is idle."""
+def ensure_policy(source, stable_ext, expected_hash, *, expected_current_hash=None, rollback_source=None):
+    """Refresh policy through the original owner; strict callers require CAS.
+
+    The optional path permits only native-fingerprint-compatible changes and
+    retains an independent exact preimage. Historical callers are unchanged.
+    """
+    if expected_current_hash is not None or rollback_source is not None:
+        return _publish_compatible_policy(source, stable_ext, expected_hash,
+            expected_current_hash=expected_current_hash, rollback_source=rollback_source)
     source, stable_ext = Path(source), Path(stable_ext).resolve(strict=True)
     _require_kind(source, stat.S_ISREG)
     _require_kind(stable_ext, stat.S_ISDIR)
@@ -392,15 +409,392 @@ def ensure_policy(source, stable_ext, expected_hash):
             fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
+# Opt-in operator publication remains inside this incumbent policy owner. No
+# generation pointer, account configuration, journal or alternative lock exists.
+NATIVE_POLICY_PUBLICATION_API = 1
+_POLICY_PUBLICATION_SCHEMA = "mastermind.native_policy_publication.v1"
+_POLICY_FILE_LIMIT = 2 * 1024 * 1024
+
+
+class PolicyPublicationRefused(ValueError):
+    """A fixed, non-disclosing pre-publication refusal."""
+
+
+class PolicyPublicationUnknown(PolicyPublicationRefused):
+    """The original target may have changed; observe it without replaying."""
+
+    def __init__(self, candidate_sha256):
+        super().__init__("POLICY_PUBLICATION_UNCERTAIN")
+        self.candidate_sha256 = candidate_sha256
+
+
+def _policy_digest(value):
+    import re
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise PolicyPublicationRefused("POLICY_EXPECTED_DIGEST_INVALID")
+    return value
+
+
+def _policy_file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _policy_read_regular(path, *, dir_fd=None):
+    descriptor = None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                             dir_fd=dir_fd)
+        before = os.fstat(descriptor)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+                or stat.S_IMODE(before.st_mode) & 0o022 or before.st_nlink != 1
+                or not 0 < before.st_size <= _POLICY_FILE_LIMIT):
+            raise PolicyPublicationRefused("POLICY_FILE_INVALID")
+        chunks, size = [], 0
+        while True:
+            chunk = os.read(descriptor, min(65536, _POLICY_FILE_LIMIT + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > _POLICY_FILE_LIMIT:
+                raise PolicyPublicationRefused("POLICY_FILE_OVER_BUDGET")
+        identity = _policy_file_identity(before)
+        if (size != before.st_size or _policy_file_identity(os.fstat(descriptor)) != identity
+                or _policy_file_identity(os.stat(path, dir_fd=dir_fd, follow_symlinks=False)) != identity):
+            raise PolicyPublicationRefused("POLICY_FILE_CHANGED")
+        return b"".join(chunks), identity
+    except PolicyPublicationRefused:
+        raise
+    except (OSError, TypeError, ValueError):
+        raise PolicyPublicationRefused("POLICY_FILE_UNAVAILABLE") from None
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _policy_canonical_path(value):
+    try:
+        path = Path(value).expanduser().absolute()
+        if path.resolve(strict=True) != path:
+            raise PolicyPublicationRefused("POLICY_PATH_NOT_CANONICAL")
+        return path
+    except PolicyPublicationRefused:
+        raise
+    except (OSError, TypeError, ValueError, RuntimeError):
+        raise PolicyPublicationRefused("POLICY_PATH_UNAVAILABLE") from None
+
+
+def _policy_directory_identity(info):
+    return info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid
+
+
+def _policy_handles_current(handles, lock_fd, lock_identity):
+    for path, descriptor, identity in handles:
+        if (_policy_directory_identity(os.fstat(descriptor)) != identity
+                or _policy_directory_identity(path.lstat()) != identity
+                or path.resolve(strict=True) != path):
+            raise PolicyPublicationRefused("POLICY_DIRECTORY_CHANGED")
+    if (_policy_file_identity(os.fstat(lock_fd)) != lock_identity
+            or _policy_file_identity(os.stat(".admission.lock", dir_fd=handles[1][1],
+                                            follow_symlinks=False)) != lock_identity):
+        raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_CHANGED")
+
+
+def _policy_open_scope(stable_ext):
+    """Open and lock the existing owner only; never create a missing installation."""
+    descriptors, handles, lock_fd = [], [], None
+    try:
+        stable = _policy_canonical_path(stable_ext)
+        if stable.name != "ext":
+            raise PolicyPublicationRefused("POLICY_STABLE_ROOT_INVALID")
+        for path in (stable, stable / "active", stable.parent / "orch/fabric"):
+            if _policy_canonical_path(path) != path:
+                raise PolicyPublicationRefused("POLICY_DIRECTORY_CHANGED")
+            descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+            descriptors.append(descriptor)
+            info = os.fstat(descriptor)
+            if info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o022:
+                raise PolicyPublicationRefused("POLICY_DIRECTORY_UNSAFE")
+            handles.append((path, descriptor, _policy_directory_identity(info)))
+        lock_fd = os.open(".admission.lock", os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+                          dir_fd=handles[1][1])
+        descriptors.append(lock_fd)
+        info = os.fstat(lock_fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1 or info.st_size != 0):
+            raise PolicyPublicationRefused("POLICY_ADMISSION_LOCK_INVALID")
+        _acquire_policy_lock(lock_fd)
+        lock_identity = _policy_file_identity(info)
+        _policy_handles_current(handles, lock_fd, lock_identity)
+        return handles, lock_fd, lock_identity
+    except BaseException:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+        raise
+
+
+def _policy_close_scope(handles, lock_fd):
+    failure = None
+    descriptors = ([lock_fd] if lock_fd is not None else []) + [row[1] for row in reversed(handles)]
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except BaseException as exc:
+            # Do not retry a close on a possibly reused descriptor. Still
+            # release the other original handles before reporting uncertainty.
+            if failure is None:
+                failure = exc
+    if failure is not None:
+        raise failure
+
+
+def _policy_public_document(raw, policy_owner):
+    """A bounded public-data envelope, not another routing/admission policy."""
+    import re
+    import yaml
+    sensitive = frozenset({"api_key", "apikey", "authorization", "auth_token",
+        "access_token", "refresh_token", "password", "secret", "credentials", "cookie", "bearer_token"})
+    private = re.compile(r"(?i)(?:\bbearer\s+|xox[baprs]-|xapp-|github_pat_|gh[pousr]_|sk-[A-Za-z0-9_-]{16,})")
+    try:
+        depth = 0
+        for count, event in enumerate(yaml.parse(raw.decode("utf-8"))):
+            if count >= 65536 or isinstance(event, yaml.events.AliasEvent):
+                raise PolicyPublicationRefused("POLICY_PUBLIC_DATA_INVALID")
+            if isinstance(event, (yaml.events.MappingStartEvent, yaml.events.SequenceStartEvent)):
+                depth += 1
+                if depth > 32:
+                    raise PolicyPublicationRefused("POLICY_PUBLIC_DATA_INVALID")
+            elif isinstance(event, (yaml.events.MappingEndEvent, yaml.events.SequenceEndEvent)):
+                depth -= 1
+            elif isinstance(event, yaml.events.ScalarEvent) and (len(event.value) > 65536 or event.value == "<<"):
+                raise PolicyPublicationRefused("POLICY_PUBLIC_DATA_INVALID")
+        document = policy_owner.parse_policy(raw)
+        pending = [document]
+        while pending:
+            value = pending.pop()
+            if type(value) is dict:
+                if any(key.lower().replace("-", "_") in sensitive for key in value):
+                    raise PolicyPublicationRefused("POLICY_CREDENTIAL_MATERIAL_REFUSED")
+                pending.extend(value.keys())
+                pending.extend(value.values())
+            elif type(value) is list:
+                pending.extend(value)
+            elif type(value) is str:
+                value.encode("utf-8", errors="strict")
+                if private.search(value):
+                    raise PolicyPublicationRefused("POLICY_CREDENTIAL_MATERIAL_REFUSED")
+    except PolicyPublicationRefused:
+        raise
+    except Exception:
+        raise PolicyPublicationRefused("POLICY_PUBLIC_DATA_INVALID") from None
+
+
+def _policy_compatible(before, after):
+    # Repository tooling uses the exact source owner; transported native code
+    # uses its existing adjacent member, never an arbitrary caller module.
+    if __package__ == "ops.native_fabric.quota_continuity.candidate":
+        from ops.native_fabric.quota_continuity.source import fabric_policy_snapshot as policy_owner
+    else:
+        import fabric_policy_snapshot as policy_owner
+        if Path(policy_owner.__file__).resolve().parent != Path(__file__).resolve().parent:
+            raise PolicyPublicationRefused("POLICY_VALIDATOR_SOURCE_MISMATCH")
+    _policy_public_document(before, policy_owner)
+    _policy_public_document(after, policy_owner)
+    try:
+        return policy_owner.compatible(before, after)
+    except Exception:
+        raise PolicyPublicationRefused("CRITICAL_CHANGE_REQUIRES_NATIVE_GENERATION") from None
+
+
+def _policy_idle(handles):
+    active = handles[1][0]
+    with os.scandir(handles[1][1]) as entries:
+        for index, entry in enumerate(entries):
+            if index >= 4096 or (entry.name != ".admission.lock"
+                    and not _is_retained_settlement_metadata(active / entry.name)):
+                raise PolicyPublicationRefused("POLICY_ACTIVE_BINDINGS_NOT_CLOSED")
+
+
+def _policy_sync_retained(path, expected_identity):
+    """Confirm the independent rollback file and its directory are durable."""
+    file_fd, parent_fd = None, None
+    try:
+        parent = _policy_canonical_path(path.parent)
+        parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        before = os.fstat(parent_fd)
+        if before.st_uid != os.geteuid() or stat.S_IMODE(before.st_mode) & 0o022:
+            raise PolicyPublicationRefused("POLICY_ROLLBACK_DIRECTORY_UNSAFE")
+        # An owned writable rollback artifact permits a portable fsync; no
+        # bytes are changed. Immutable/read-only inputs must first be retained
+        # by their existing artifact owner, never chmodded here.
+        file_fd = os.open(path.name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent_fd)
+        if _policy_file_identity(os.fstat(file_fd)) != expected_identity:
+            raise PolicyPublicationRefused("POLICY_PREIMAGE_CHANGED")
+        os.fsync(file_fd)
+        os.fsync(parent_fd)
+        if (_policy_file_identity(os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)) != expected_identity
+                or _policy_directory_identity(parent.lstat()) != _policy_directory_identity(before)
+                or parent.resolve(strict=True) != parent):
+            raise PolicyPublicationRefused("POLICY_PREIMAGE_CHANGED")
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        if parent_fd is not None:
+            os.close(parent_fd)
+
+
+def _policy_receipt(state, previous, candidate, observed, *, applied):
+    return {"schema": _POLICY_PUBLICATION_SCHEMA, "state": state,
+            "expected_previous_sha256": previous, "candidate_sha256": candidate,
+            "observed_policy_sha256": observed, "writes_applied": applied,
+            "model_activation_authorized": False, "generation_selected": False,
+            "original_operations_rebound": False, "account_configuration": "NOT_READ",
+            "credential_resolution_performed": False, "retry_authorized": False}
+
+
+def _publish_compatible_policy(source, stable_ext, expected_hash, *, expected_current_hash, rollback_source):
+    """Publish compatible bytes once under the original admission lock + CAS.
+
+    Independent retained preimage bytes are required. Critical routing/model
+    changes must use a qualified native-generation transition instead; this
+    command never creates that authority or moves a code-generation pointer.
+    """
+    candidate_hash = _policy_digest(expected_hash)
+    previous_hash = _policy_digest(expected_current_hash)
+    handles, lock_fd, temporary, temporary_identity = [], None, None, None
+    attempted = False
+    try:
+        source = _policy_canonical_path(source)
+        rollback = _policy_canonical_path(rollback_source)
+        data, source_identity = _policy_read_regular(source)
+        before_copy, rollback_identity = _policy_read_regular(rollback)
+        if _hex64(data) != candidate_hash or _hex64(before_copy) != previous_hash:
+            raise PolicyPublicationRefused("POLICY_ARTIFACT_DIGEST_MISMATCH")
+        handles, lock_fd, lock_identity = _policy_open_scope(stable_ext)
+        parent_fd = handles[2][1]
+        before, original_identity = _policy_read_regular("pools.yaml", dir_fd=parent_fd)
+        if _hex64(before) != previous_hash:
+            raise PolicyPublicationRefused("POLICY_EXPECTED_CURRENT_CHANGED")
+        if (rollback_identity[:2] == original_identity[:2]
+                or source_identity[:2] == original_identity[:2]):
+            raise PolicyPublicationRefused("POLICY_RETAINED_ARTIFACT_REQUIRED")
+        _policy_compatible(before, data)
+        if data == before:
+            _policy_handles_current(handles, lock_fd, lock_identity)
+            if (_policy_read_regular(source) != (data, source_identity)
+                    or _policy_read_regular(rollback) != (before_copy, rollback_identity)
+                    or _policy_read_regular("pools.yaml", dir_fd=parent_fd) != (before, original_identity)):
+                raise PolicyPublicationRefused("POLICY_PREIMAGE_CHANGED")
+            return _policy_receipt("UNCHANGED", previous_hash, candidate_hash, previous_hash, applied=False)
+        _policy_idle(handles)
+        _policy_sync_retained(rollback, rollback_identity)
+        import uuid
+        temporary = ".pools-policy-" + uuid.uuid4().hex
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             0o600, dir_fd=parent_fd)
+        temporary_identity = _policy_file_identity(os.fstat(descriptor))[:2]
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), stat.S_IMODE(original_identity[2]))
+            os.fsync(stream.fileno())
+        _policy_handles_current(handles, lock_fd, lock_identity)
+        _policy_idle(handles)
+        if (_policy_read_regular(source) != (data, source_identity)
+                or _policy_read_regular(rollback) != (before_copy, rollback_identity)
+                or _policy_read_regular("pools.yaml", dir_fd=parent_fd) != (before, original_identity)):
+            raise PolicyPublicationRefused("POLICY_PREIMAGE_CHANGED")
+        staged, staged_identity = _policy_read_regular(temporary, dir_fd=parent_fd)
+        if staged != data or staged_identity[:2] != temporary_identity:
+            raise PolicyPublicationRefused("POLICY_STAGED_BYTES_CHANGED")
+        attempted = True
+        os.replace(temporary, "pools.yaml", src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        os.fsync(parent_fd)
+        _policy_handles_current(handles, lock_fd, lock_identity)
+        after, after_identity = _policy_read_regular("pools.yaml", dir_fd=parent_fd)
+        if after != data or after_identity[:2] != temporary_identity:
+            raise PolicyPublicationRefused("POLICY_POSTIMAGE_CHANGED")
+        if (_policy_read_regular(source) != (data, source_identity)
+                or _policy_read_regular(rollback) != (before_copy, rollback_identity)):
+            raise PolicyPublicationRefused("POLICY_ARTIFACT_CHANGED_AFTER_PUBLICATION")
+        result = _policy_receipt("POLICY_PUBLISHED", previous_hash, candidate_hash, candidate_hash, applied=True)
+        result["directory_synced"] = True
+        return result
+    except BaseException as exc:
+        if attempted:
+            raise PolicyPublicationUnknown(candidate_hash) from None
+        if isinstance(exc, PolicyPublicationRefused):
+            raise
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        raise PolicyPublicationRefused("POLICY_PUBLICATION_PREFLIGHT_REFUSED") from None
+    finally:
+        if temporary is not None and not attempted and handles:
+            try:
+                current = os.stat(temporary, dir_fd=handles[2][1], follow_symlinks=False)
+                if _policy_file_identity(current)[:2] == temporary_identity:
+                    os.unlink(temporary, dir_fd=handles[2][1])
+            except OSError:
+                pass
+        try:
+            _policy_close_scope(handles, lock_fd)
+        except BaseException:
+            if attempted:
+                raise PolicyPublicationUnknown(candidate_hash) from None
+            raise PolicyPublicationRefused("POLICY_PUBLICATION_PREFLIGHT_REFUSED") from None
+
+
+def policy_publication_status(stable_ext, *, expected_current_hash, expected_hash):
+    """Read the same target after loss; never republish or infer a prior effect."""
+    previous_hash, candidate_hash = _policy_digest(expected_current_hash), _policy_digest(expected_hash)
+    handles, lock_fd = [], None
+    try:
+        handles, lock_fd, lock_identity = _policy_open_scope(stable_ext)
+        current, _identity = _policy_read_regular("pools.yaml", dir_fd=handles[2][1])
+        _policy_handles_current(handles, lock_fd, lock_identity)
+        observed = _hex64(current)
+        state = ("CANDIDATE_BYTES_OBSERVED" if observed == candidate_hash else
+                 "PREVIOUS_BYTES_OBSERVED" if observed == previous_hash else "OTHER_POLICY_OBSERVED")
+        public_observed = observed if observed in {previous_hash, candidate_hash} else None
+        result = _policy_receipt(state, previous_hash, candidate_hash, public_observed, applied=False)
+        result["original_publication_proven"] = False
+        return result
+    except PolicyPublicationRefused:
+        raise
+    except Exception:
+        raise PolicyPublicationRefused("POLICY_STATUS_UNAVAILABLE") from None
+    finally:
+        try:
+            _policy_close_scope(handles, lock_fd)
+        except BaseException:
+            raise PolicyPublicationRefused("POLICY_STATUS_UNAVAILABLE") from None
+
+
 def _cli():
     try:
-        if len(sys.argv) == 5 and sys.argv[1] == "--policy":
+        if len(sys.argv) == 7 and sys.argv[1] == "--policy-compatible":
+            print(json.dumps(ensure_policy(sys.argv[2], sys.argv[3], sys.argv[4],
+                expected_current_hash=sys.argv[5], rollback_source=sys.argv[6]), sort_keys=True))
+        elif len(sys.argv) == 5 and sys.argv[1] == "--policy-status":
+            print(json.dumps(policy_publication_status(sys.argv[2],
+                expected_current_hash=sys.argv[3], expected_hash=sys.argv[4]), sort_keys=True))
+        elif len(sys.argv) == 5 and sys.argv[1] == "--policy":
             print(ensure_policy(sys.argv[2], sys.argv[3], sys.argv[4]))
         elif len(sys.argv) == 4:
             print(publish(Path(sys.argv[1]), Path(sys.argv[2]),
                           _load_manifest(Path(sys.argv[3]))))
         else:
             raise ValueError("usage: support_bundle.py <source_dir> <stable_ext> <manifest_json> | --policy <source> <stable_ext> <sha256>")
+    except PolicyPublicationUnknown as exc:
+        print(json.dumps({"schema": _POLICY_PUBLICATION_SCHEMA, "state": "EFFECT_UNKNOWN",
+            "code": "POLICY_PUBLICATION_UNCERTAIN", "candidate_sha256": exc.candidate_sha256,
+            "writes_applied": None, "retry_authorized": False}, sort_keys=True))
+        return 75
+    except PolicyPublicationRefused as exc:
+        print(json.dumps({"schema": _POLICY_PUBLICATION_SCHEMA, "state": "REFUSED",
+            "code": str(exc), "writes_applied": False, "retry_authorized": False}, sort_keys=True))
+        return 2
     except (ValueError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

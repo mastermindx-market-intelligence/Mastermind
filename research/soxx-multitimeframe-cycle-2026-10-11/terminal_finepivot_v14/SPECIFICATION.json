@@ -1,0 +1,96 @@
+{
+  "schema": "mastermind.soxx.terminal_finepivot_study.v14",
+  "mission": "Frozen HTF 2/3/4h MACD exhaustion nested with 15/30/60m price-pivot confirmations; compare true cycle failure exits versus hold",
+  "source": "Existing public Terminal consumer /api/intraday? sym=SOXX, tf=15m and tf=30m, ext=0",
+  "source_basis": "ET-market-local display epoch, explicitly convert to aware ET; no BOATS; original API warns PIT/price adjustment/completeness unverified",
+  "fixed_evaluation_window": [
+    "2025-10-09",
+    "2026-10-08"
+  ],
+  "original_rth_input": "SOXX_Terminal_15m_ext0.json",
+  "source_15m_sha256": "9b475e94fae6a92bb4bddfa0987097ea08dbdb60ec943fafcb100326440cdf71",
+  "source_30m_sha256": "4b5ed22c98cad592d0b09da4d17aff7d8898912bc1d848a9666a57cd9876c481",
+  "raws_hourly_reference": "/private/tmp/soxx_coherent_cycle_20261010_v10/inputs/rth_original.json",
+  "htf_profiles": [
+    "3h_medium",
+    "2h_classic",
+    "4h_fast"
+  ],
+  "comparisons": [
+    [
+      "3h_60fast",
+      "3h_medium",
+      60,
+      "fast"
+    ],
+    [
+      "3h_30fast",
+      "3h_medium",
+      30,
+      "fast"
+    ],
+    [
+      "3h_15fast",
+      "3h_medium",
+      15,
+      "fast"
+    ],
+    [
+      "3h_30duration",
+      "3h_medium",
+      30,
+      "scaled30"
+    ],
+    [
+      "3h_15duration",
+      "3h_medium",
+      15,
+      "scaled15"
+    ],
+    [
+      "2h_30fast",
+      "2h_classic",
+      30,
+      "fast"
+    ],
+    [
+      "2h_15fast",
+      "2h_classic",
+      15,
+      "fast"
+    ],
+    [
+      "4h_30fast",
+      "4h_fast",
+      30,
+      "fast"
+    ],
+    [
+      "4h_15fast",
+      "4h_fast",
+      15,
+      "fast"
+    ]
+  ],
+  "lower_time_horizon_note": "Scaled30/15 MACD/StochRSI approximately preserves lookback wall duration versus 1h fast profile, but the conventional RSI(14) gate remains 14 bars; not full physical equivalence.",
+  "higher_extreme": "Original research_v2 setup_episodes histogram >= 2x prior trailing RMS with recent Stoch RSI <=20; one opportunity per negative histogram episode; 26 observed RTH hour expiry.",
+  "trigger": "Original pivot_turn: confirmed low (2 left, 1 right) + RSI<=45 near pivot + improving MACD histogram + Stoch K>=D + RSI rising",
+  "risk": "Single baseline 1.5% price stop, five basis points modeled cost per side, stop-first same candle; no model-derived position sizing",
+  "exit_policies": [
+    "time52",
+    "finite_guard",
+    "fast_weak_control",
+    "structural_cycle",
+    "momentum_reset"
+  ],
+  "partial": 0.25,
+  "profit_partial_target_pct": 2,
+  "max_hold_observed_RTH_hours": 52,
+  "execution": "Entry at next observed 15-minute opening price after completed lower and parent candle. Sell signal acts at next 15-minute opening bar; stop gaps fill next observed open; intrabar stop-first.",
+  "evaluation": "Same-entry paired returns, hidden/no-fill statuses, non-overlap opportunity accounting, positive winners sacrificed vs losses saved, paired episode matched entry prices, no new model selection as validated",
+  "do_not_optimize": true,
+  "research_only": true,
+  "real_BOATS_data": false,
+  "rights": "Terminal displayed bars are not validated actual historical quote fills, adjustment provenance is not verified, sources mixed stored/live",
+  "prepared_before_outcome": true
+}

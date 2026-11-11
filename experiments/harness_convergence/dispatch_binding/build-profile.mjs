@@ -38,7 +38,7 @@ for (const [file, expected] of Object.entries(agentLoop.files)) {
   record(resolve(here, 'node_modules/@deepseek-ai/dsh-agent-loop', file), expected)
 }
 record(resolve(here, 'agent-loop-manifest.json'))
-for (const file of ['dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs', 'dsh_mcp_grant.mjs']) {
+for (const file of ['dsh_tool_profile.mjs', 'dsh_dispatch_preflight.mjs', 'dsh_mcp_grant.mjs', 'dsh_attempt_overlay.mjs']) {
   record(resolve(here, '../../../integrations/acp_worker', file))
 }
 record(resolve(here, 'package-lock.json'), core.npm_lock_sha256)

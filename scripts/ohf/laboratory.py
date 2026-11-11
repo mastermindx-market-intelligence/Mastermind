@@ -747,9 +747,12 @@ class AppServerClient:
             request_id = self._next_id
             self._next_id += 1
             self._raw_responses[request_id] = response_queue
+        # ThreadTurnsListParams (openai/codex rust-v0.159.2 schema at
+        # ff6aec96948b70d94983af2641a6b67c94faeff5) has no turnId property;
+        # native_turn_id stays a validated local filter applied by the
+        # caller's complete pagination traversal.
         params: dict[str, Any] = {
             "threadId": thread_id,
-            "turnId": native_turn_id,
             "itemsView": "full",
             "limit": 1,
             "sortDirection": "desc",

@@ -126,7 +126,7 @@ def v2_selection(value, operation):
     keys = set(value)
     if operation == "result":
         expected = {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
-    elif operation == "mission_v3":
+    elif operation in ("mission_v3", "result_references"):
         expected = {"work_ref", "root_job_id"}
     else:
         raise ValueError("invalid_input")
@@ -150,7 +150,7 @@ def validate_v2_frame(frame):
     """Validate one frozen v2 frame: schema, operation, selection, principal."""
     if (type(frame) is not dict or set(frame) != {"schema", "operation", "selection", "principal"}
             or frame["schema"] != FRAME_SCHEMA_V2
-            or frame["operation"] not in ("mission_v3", "result")
+            or frame["operation"] not in ("mission_v3", "result", "result_references")
             or type(frame["principal"]) is not dict or set(frame["principal"]) != PRINCIPAL_KEYS
             or frame["principal"]["resource"] != RESOURCE or frame["principal"]["scopes"] != [SCOPE]
             or any(type(frame["principal"][key]) is not str or not 1 <= len(frame["principal"][key]) <= 256
@@ -236,12 +236,13 @@ def response_ceiling_for(operation):
     """Return the frozen response ceiling for the supplied Workspace read operation.
 
     Returns the existing Mission v2 ``MAX_RESPONSE_BYTES`` for unknown or
-    v1 operations and the 16384-byte ceiling for result and admitted-plan reads so the
+    v1 operations and the 16384-byte ceiling for result, result-reference and
+    admitted-plan reads so the
     caller cannot widen an unknown frame to a larger ceiling.
     """
     if operation == "admitted_plan":
         return MAX_PLAN_RESPONSE_BYTES
-    if operation == "result":
+    if operation in ("result", "result_references"):
         return MAX_RESULT_RESPONSE_BYTES
     return MAX_RESPONSE_BYTES
 

@@ -364,22 +364,22 @@ def test_isolated_failure_allows_only_bounded_mode_recovery() -> None:
         "never bypasses a safety/permission denial",
     ):
         assert phrase in law
-    assert "a relevant mode change may be part of that recovery" in skill
-    assert "already heavy/unstable enough that continuing is unsafe" in skill
+    assert 'possibly a justified mode change' in skill
+    assert 'Already heavy/unsafe surface requires `ROTATION_REQUIRED`' in skill
 
 
 def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() -> None:
     kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
-        "human-attended mode fit/stickiness",
+        "ACTIVE_EXECUTION 1B governs attended mode fit/stickiness",
         "Capabilities vary by action/session",
         "Extra High is a recovery candidate, not guaranteed access",
-        "Text cannot self-switch",
-        "No unchanged retry/reconnect loops",
+        "Text cannot switch modes",
+        "Bound unchanged-failure diagnosis",
         "Tool failure is not chat corruption",
-        "HARD_ROTATION after repeated thinking/session failure",
+        "HARD_ROTATION: repeated thinking/session failure",
         "NOT_CANONICALLY_PERSISTED",
-        "MODE_SWITCH/FRESH_CHAT are human-gate reasons, not lifecycle states",
+        "Mode/fresh-chat needs are reasons, not states",
     ):
         assert phrase in kernel
 
@@ -389,8 +389,8 @@ def test_session_reliability_budgets_are_pressure_indicators_not_productivity_ce
     for phrase in (
         "pressure indicators and checkpoint prompts",
         "never hard productivity ceilings",
-        "healthy long turn",
-        "same bounded phase",
+        'Healthy bounded work may exceed soft targets',
+        'current coherent phase',
         "Depth is allowed; breadth is fenced",
     ):
         assert phrase in skill
@@ -416,7 +416,7 @@ def test_session_reliability_preserves_long_mode_specific_work() -> None:
         "Astra Pro",
         "10–20+ minute",
         "30–50m+",
-        "mode stickiness",
+        'Sol stickiness across substantial turns',
         "not a timer law",
         "Do not bounce",
     ):
@@ -427,10 +427,10 @@ def test_compact_kernel_projects_phase_fence_and_mode_stickiness() -> None:
     kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
         "mode fit/stickiness",
-        "Keep DONE_WHEN and allowed surfaces",
+        "Preserve DONE_WHEN/surfaces",
         "Depth allowed; breadth fenced",
-        "same healthy chat",
-        "mission is incomplete",
+        "same healthy turn",
+        "MORE_WORK_EXISTS is incomplete",
         "fresh same-mode chat",
     ):
         assert phrase in kernel
@@ -462,7 +462,7 @@ def _sr_f0_semantic_guard_errors(*, law: str, skill: str, active: str) -> list[s
     suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
     phase = _section_text(
         active,
-        "The reliability invariant is the **recovery gap**, not runtime:",
+        "## Step 7A — Preserve operational continuity before interruption",
         "## Step 8 — Final-response gate",
     )
     law_threshold = "two consecutive terminal generation failures in the exact conversation with no successful intervening turn"
@@ -486,7 +486,7 @@ def test_output_pressure_alone_does_not_force_recovery_or_rotation() -> None:
     active_normalized = " ".join(active.split())
     suspected = _section_text(skill, "### `ROTATION_SUSPECTED`", "### `ROTATION_REQUIRED`")
     assert "cumulative raw output approaching the turn budget;" not in suspected
-    assert "output pressure plus a stale durable frontier or inability to keep further output bounded" in suspected
+    assert 'output pressure with stale frontier/ unbounded retrieval' in suspected
     assert "Output pressure alone does not change `SESSION_HEALTHY`" in skill
     assert "output pressure alone does not require a turn boundary" in active_normalized
 
@@ -503,7 +503,8 @@ def test_persistence_failure_maps_to_existing_truthful_dispositions() -> None:
         "`MORE_WORK_EXISTS`",
     ):
         assert phrase in skill
-    assert "Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN" in kernel
+    assert "Persistence failure: NOT_CANONICALLY_PERSISTED" in kernel
+    assert "fabricated HUMAN_GATE/EFFECT_UNKNOWN" in kernel
 
 
 def test_semantic_mutation_guard_rejects_threshold_and_healthy_phase_reversal() -> None:
@@ -562,20 +563,20 @@ def test_cross_phase_continuation_is_projected_into_session_reliability_and_kern
     kernel_raw = _read("docs/sol_skills/BOOTSTRAP_KERNEL.md")
     kernel = " ".join(kernel_raw.split())
     for phrase in (
-        "Completing a checkpoint, task, or semantic phase does not itself end the turn",
-        "start the next bounded safe critical-path phase in the same healthy turn",
-        "A clean phase boundary is not continuity pressure",
-        "start it rather than yielding merely because the previous phase ended",
+        'A task/checkpoint alone is not a stop',
+        'start the next safe authorized critical-path phase in the same healthy turn',
+        'A clean phase alone is not continuity pressure',
+        'start the next useful authorized phase in the same healthy turn',
     ):
         assert phrase in skill
     for phrase in (
-        "After any task/phase completes, verify/save it, reassess the mission",
-        "WAITING_EXTERNAL/review/CI/messages are lane-local",
-        "`DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return",
-        "Other Step-8 stops still apply",
-        "A clean phase boundary is not a stop",
-        "MORE_WORK_EXISTS means the mission is incomplete: do not finalize while healthy useful work remains",
-        "task/phase/checkpoint completion alone never qualifies",
+        "Verify/save each phase, reassess and start the next safe phase in the same healthy turn",
+        "Block one lane, not independent work",
+        "DURABLE_EXECUTION_RUNNING needs STARTED/RUNNING plus return path",
+        "CHECKPOINTED_CONTINUATION needs real continuity/surface boundary",
+        "Phase completion means save-and-continue",
+        "MORE_WORK_EXISTS is incomplete: continue while healthy useful authorized work remains",
+        "CHECKPOINTED_CONTINUATION needs real continuity/surface boundary",
     ):
         assert phrase in kernel
     project_block = kernel_raw.split("```text\n", 1)[1].split("```", 1)[0]

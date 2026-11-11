@@ -19,6 +19,7 @@ export interface LaunchKeyMaterial {
     readonly git_diff_check?: boolean;
   };
   readonly attempt_limit?: number;
+  readonly frontier_model_alias?: string;
 }
 
 const KEY_PREFIX = "mmos-launch-";
@@ -74,6 +75,9 @@ export function operationKeyForLaunch(input: LaunchKeyMaterial): string {
   }
   if (input.validation !== undefined) {
     body.validation = input.validation;
+  }
+  if (input.frontier_model_alias !== undefined) {
+    body.frontier_model_alias = input.frontier_model_alias;
   }
   if (input.attempt_limit !== undefined) {
     body.attempt_limit = input.attempt_limit;

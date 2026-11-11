@@ -118,17 +118,26 @@ def test_position_log_open_and_closed_shapes(tmp_path):
         assert "exit_reason" in closed[0]
 
 
-def test_position_log_corrupt_file_starts_fresh(tmp_path):
-    """A corrupt ledger file is silently discarded and replaced with a clean ledger."""
+def test_position_log_corrupt_file_is_unavailable_not_fresh(tmp_path):
+    """MIGRATED CONTRACT. This test previously asserted that a corrupt ledger was "silently
+    discarded and replaced with a clean ledger" — which is the defect, not the feature: starting
+    fresh fabricates a new lifecycle over every held name and destroys the bytes needed to repair
+    it, while risk consumers read the result as a flat book. A corrupt ledger is now an explicit
+    unavailable state that writers refuse, leaving the damaged file intact for recovery.
+
+    See tests/test_position_log_integrity.py for the full corruption + concurrency contract."""
+    import pytest
+
     from portfolio import position_log
 
     ledger_path = tmp_path / "positions_ledger.json"
     ledger_path.write_text("{INVALID JSON!!!")
 
     with mock.patch.object(position_log, "_LEDGER_PATH", ledger_path):
-        position_log.update([_make_position("SMH", "leadership", 0.125)], "2026-01-01")
-        ledger = json.loads(ledger_path.read_text())
-        assert "leadership:SMH" in ledger
+        assert position_log.status()["state"] == "unavailable"
+        with pytest.raises(position_log.LedgerUnavailable):
+            position_log.update([_make_position("SMH", "leadership", 0.125)], "2026-01-01")
+        assert ledger_path.read_text() == "{INVALID JSON!!!"
 
 
 # ============================================================

@@ -119,6 +119,78 @@ class Adapter(unittest.TestCase):
         with self.assertRaises(api.FabricTaskError):self.request()
         self.assertEqual(self.calls,[])
 
+    def assert_unverified_original(self, run):
+        status = api.inspect_run(run, owner_ext=self.root)
+        self.assertEqual(status['state'], 'STATUS_UNREADABLE')
+        self.assertEqual(status['acceptance_reason'], 'ARTIFACT_UNVERIFIED')
+        self.assertIsNone(status['root_id'])
+        self.assertIsNone(status['parent_run_id'])
+        self.assertIsNone(status['accepted'])
+        self.assertFalse(status['result_available'])
+        self.assertIsNone(status['result_bytes'])
+        self.assertFalse(status.get('execution_absence_proven', False))
+        self.assertFalse(status.get('same_run_replay_allowed', False))
+        self.assertNotIn('original task', json.dumps(status))
+        self.assertEqual(self.calls, [])
+
+    def test_interrupted_descriptor_preserves_original_uncertainty_without_replay(self):
+        original_write = outcome.write_new
+        def interrupted(path, value):
+            if Path(path) == self.path('actual-request', '.request.json'):
+                raise OSError('fixture interruption after packet fsync')
+            return original_write(path, value)
+        with patch.object(outcome, 'write_new', side_effect=interrupted):
+            with self.assertRaisesRegex(OSError, 'fixture interruption'):
+                self.request()
+        packet = self.path('actual-request', '.request.packet')
+        self.assertEqual(packet.read_bytes(), b'original task\n')
+        self.assertFalse(self.path('actual-request', '.request.json').exists())
+        self.assertFalse(self.path('actual-request', '.log').exists())
+        self.assert_unverified_original('actual-request')
+        with self.assertRaisesRegex(api.FabricTaskError, 'REQUEST_RUN_ALREADY_EXISTS_RECONCILE_ORIGINAL'):
+            self.request()
+        self.assertEqual(packet.read_bytes(), b'original task\n')
+        self.assertEqual(self.calls, [])
+
+    def test_orphan_native_artifacts_are_uncertainty_without_content_reads(self):
+        for location in ('packet', 'result'):
+            for kind in ('empty', 'directory', 'dangling_symlink'):
+                with self.subTest(location=location, kind=kind):
+                    run = 'orphan-' + location + '-' + kind
+                    artifact = (self.path(run, '.request.packet') if location == 'packet'
+                                else self.root/'lanes'/(run + '.remote.stdout'))
+                    artifact.parent.mkdir(parents=True, exist_ok=True)
+                    if kind == 'empty':
+                        artifact.write_bytes(b'')
+                    elif kind == 'directory':
+                        artifact.mkdir()
+                    else:
+                        artifact.symlink_to(artifact.with_name('absent-target'))
+                    with patch.object(api, '_bounded_regular', side_effect=AssertionError('orphan content read')):
+                        self.assert_unverified_original(run)
+                    with self.assertRaisesRegex(api.FabricTaskError, 'REQUEST_RUN_ALREADY_EXISTS_RECONCILE_ORIGINAL'):
+                        self.request(run)
+        self.assertEqual(self.calls, [])
+
+    def test_metadata_failure_cannot_be_reported_as_not_found(self):
+        original_lstat = Path.lstat
+        for suffix in ('.request.json', '.request.packet'):
+            with self.subTest(suffix=suffix):
+                target = self.path('unknown-metadata', suffix)
+                def denied(path, *args, **kwargs):
+                    if path == target:
+                        raise PermissionError('fixture metadata unavailable')
+                    return original_lstat(path, *args, **kwargs)
+                with patch.object(Path, 'lstat', denied):
+                    self.assert_unverified_original('unknown-metadata')
+
+    def test_absence_requires_all_incumbent_request_artifacts_to_be_missing(self):
+        status = api.inspect_run('absent-original', owner_ext=self.root)
+        self.assertEqual(status['state'], 'NOT_FOUND')
+        self.assertFalse(status['result_available'])
+        self.assertIsNone(status['root_id'])
+        self.assertEqual(self.calls, [])
+
     def test_real_transport_arguments_keep_frozen_task_identity_and_deadline(self):
         self.assertEqual(self.request(),0)
         self.assertEqual(len(self.calls),1)

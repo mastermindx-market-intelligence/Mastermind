@@ -50,7 +50,12 @@ class ControlTests(unittest.TestCase):
             self.assertEqual(control.installed_accounts(root), ['chatgpt1', 'chatgpt3'])
 
     def test_installed_status_uses_installed_control_generation(self):
-        with patch.object(control, '_invoke_from', side_effect=[{'running':True}, {'ready':True}]) as invoke:
+        gateway = {'loaded': True, 'running': True}
+        tunnel = {'loaded': True, 'running': True, 'healthy': True,
+                  'ready': True, 'configurationDrift': False,
+                  'tunnelReady': True, 'controlPlanePollReady': True,
+                  'gatewayReady': True, 'managedAliasRunning': False}
+        with patch.object(control, '_invoke_from', side_effect=[gateway, tunnel]) as invoke:
             result = control.installed_status('chatgpt3')
         self.assertTrue(result['ready'])
         self.assertTrue(all(call.args[0] == control.INSTALLED_CONTROL_ROOT for call in invoke.call_args_list))

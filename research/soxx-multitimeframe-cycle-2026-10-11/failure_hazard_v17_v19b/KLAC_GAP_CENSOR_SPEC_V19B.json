@@ -1,0 +1,10 @@
+{
+  "schema": "soxx.klac.gap-censored.addendum.v19b",
+  "set_before_running_trade_outcomes": true,
+  "decision": "No change to v19 3-RTH-hour check, thresholds, fees, emergency stop or 52 RTHh horizon",
+  "data_observation": "KLAC 15m source complete across the original study year; 5m Terminal source missing 7 expected 5m observation slots across 2025 Oct/Dec",
+  "treatment": "Never invent or forward-fill missing 5m candles. Compute all expected 5m timestamps from 15m source; if a candidate trade entry-to-either-possible-exit path intersects ANY source-missing candle, report right/data-censored (unknown) and exclude from resolved paired returns and bootstrap. Retain it in the original opportunity denominator.",
+  "benchmark": "Both branches use same frozen 3H parent turn entry, identical 1.5% hard stop, 25% partial at +2%, 5bp cost each side, 52 RTH-hour expiration; guard at completed three-hour 5m close below entry, exits next 5m open",
+  "validation": "All complete triplets of 5m bars must match the 15m source OHLC; volume differences explicitly recorded. Number of source missing slots, affected outcomes and remaining trades reported unconditionally.",
+  "publication": "Research-only aggregate, no raw historical prices and no adjustment or PIT validation."
+}

@@ -12,6 +12,8 @@ def test_staged_current_and_historical_artifact_observation(tmp_path):
     built = subprocess.run([sys.executable, str(NATIVE / 'rollout/build_review_stage.py'),
                             '--output', str(tmp_path)], capture_output=True, text=True, timeout=30)
     assert built.returncode == 0, built.stdout + built.stderr
+    assert (tmp_path / 'native-code-stage/ext/run_observation_delivery.py').read_bytes() == (
+        NATIVE / 'candidate/run_observation_delivery.py').read_bytes()
     env = {**os.environ, 'PYTHONPATH': str(tmp_path / 'native-code-stage/ext'),
            'PYTHONDONTWRITEBYTECODE': '1'}
     result = subprocess.run([

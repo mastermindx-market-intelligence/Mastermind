@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import BoundedRuntimeReadObservation, Runtime
 from integrations.business_mcp_auth.contracts import VerifiedPrincipal
 from integrations.business_mcp_auth.principal_projection import principal_projection
 from integrations.session_bridge import runtime_return as module
@@ -52,6 +52,24 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setattr(Runtime, "current_harness_binding_source", lambda *a, **k: facts)
     monkeypatch.setattr(module, "_read_current_target", lambda *a: epoch)
     monkeypatch.setattr(module, "_read_dialogue_source", lambda *a: source())
+    # This existing unit fixture supplies legacy claimed Jobs and mocked live
+    # admission facts. Stub only their material-acquisition boundary; keep the
+    # production observation close/receipt and pure comparison checks. These
+    # facts do not qualify SQLite budgets or actual harness admission. The
+    # separate admitted-runtime tests exercise the real fixed live selector.
+    def unit_live_material(observation, *, read_ref):
+        observation._select()
+        event, value = module.stored_continuation_request(runtime, read_ref)
+        return (
+            event, value,
+            runtime.current_harness_binding_source(value["attempt_id"]),
+            module._read_current_target(runtime, value["context"]["operation_key"]),
+            module._read_dialogue_source(runtime, value["root_job_id"]),
+            tuple(runtime.events.list_events(
+                job_id=value["job_id"], attempt_id=value["attempt_id"])),
+        )
+    monkeypatch.setattr(BoundedRuntimeReadObservation,
+                        "read_session_live_writer_bounded", unit_live_material)
     service = Service()
     owner = module.RuntimeSessionReturn(runtime, fabric=fabric, codex=codex,
         socket_path=Path("/private/tmp/runtime-return.sock"), service_call=service)

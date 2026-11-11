@@ -35,6 +35,64 @@ No Socket Mode, Events API subscription, incoming webhook, slash command,
 interactivity surface, user OAuth scope, `chat:write.public`, `channels:read`,
 or workspace-wide channel-management scope is introduced by this migration.
 
+## Separate legacy Mastermind Relay — parked, not retired
+
+The older `Mastermind Agent Relay` Slack app (historical app ID
+`A0BUDHZ137A`) displays as **Mastermind Relay** (bot user
+`U0BTF3QGABF`). It is **not** the shared Executive Relay bot above.
+Its dedicated two-scope manifest at
+`config/slack_agent_relay_app_manifest.yaml` is retained as a precise
+legacy reference, *not* an instruction to install or use it for new A2
+service enrollment.
+
+The October 22, 2026 read-only census found both bots in public
+`#agent-dispatch`; no operating post from the separate bot was found in
+accessible indexed history. The native M2 A2 and C1 enrollment configs both
+named shared bot `U0BT71H4FQE`; neither pointed at the separate bot.
+Prior sampling found the legacy bot in additional channels. These results
+**do not prove the separate app has no live users**: Slack app-admin token
+inventory, Workflow Builder actions, DM/private histories and other-host
+sender credentials were not fully attested. Recent bot channel joins are
+membership activity, not evidence of an actual dialogue writer.
+
+**Disposition: KEEP INSTALLED; BLOCK NEW DEDICATED ENROLLMENT.**
+No unattended remove, token rotation, channel leave or bot substitution is
+admitted by this runbook. The accepted A2 new-enrollment route is only the
+native `enroll-shared` operation. The historical `enroll` subcommand now
+always refuses with `A2_ENROLLMENT_ARGUMENTS_REFUSED` before any TTY,
+credential, host or writer effect, even if W3C is requested. There is **no
+command-line opt-in** capable of reopening dedicated enrollment. A later
+Chairman decision reselecting the dedicated app must be expressed in
+the canonical Agent OS decision and an independently reviewed source change,
+with Slack-admin credential-surface proof, rather than an operator-supplied
+flag or token. Existing dedicated A2 enrollments can still follow their
+original `verify` / `rebind-release` paths without token changes.
+Never reenroll to force convergence.
+
+A later Slack-admin **retirement** must be a separate approved effect, after
+all of these are independently evidenced:
+
+1. Inventory the installed app's exact app/bot IDs, token/connection use
+   metadata (not token values), OAuth scopes, Workflow Builder/Events/
+   webhook/Socket Mode bindings, all relevant channel/DM memberships and
+   message use across the available audit window. Reconcile the observed
+   October 22 additions to `#github-independent-reviews`,
+   `#dotsandgroksecretary` and `#initiatives` with their real inviter
+   and consumer.
+2. Search authorized live hosts, GitHub organization/repository credential
+   *names*, scheduled/CI actions and connected third-party automation owners
+   for dedicated-bot writers, including offline hosts that can return later.
+   Unknown credential bindings mean **KEEP**, not `no dependency`.
+3. Close or migrate every distinct identified consumer under its own owner,
+   and prove the shared C1 and A2 identities and real authorized dialogue
+   send/read/return path. A source merge, bot membership or healthy daemon
+   alone is not a canary.
+4. Record the Chairman/Slack-admin disposition and a recovery plan. Only
+   then can the authorized Slack admin uninstall the **dedicated** app
+   while preserving the shared Executive Relay token and C1/A2 services.
+   Recheck the shared path and record the uninstall receipt. A future
+   reinstall may create a new token/identity; rollback is not presumed.
+
 ## Safe sequencing
 
 1. Install the exact accepted Mastermind release containing both the shared-relay
@@ -184,6 +242,19 @@ both false and true states. It never disables a true enrollment, starts a
 service, authorizes a Runtime writer or proves native delivery. The same file
 CAS, rollback and uncertain-effect rules apply. Do not reenroll or modify the
 pair manually to enable W3C.
+
+The separate reviewed **reverse-rebind-release** is a post-success
+recovery contract for the historical A2 volatile-socket enrollment only.
+It requires a sealed attested previous release, exact previous config/plist
+SHA-256 witnesses saved before cutover, the same shared bot and scope set,
+W3C=false and terminal-return disarmed, and A2 stopped/disabled. It publishes
+through the same metadata-only credential lock and two-file CAS owner as
+forward rebind-release. It is not a token/config backup copier, generic
+release rollback, feature-arm toggle, service launcher or new transport plane.
+Verify original controller/C1/A2 restoration separately and freeze an
+uncertain or mixed generation rather than force-copying an older installed
+pair. This recovery command must itself be in the accepted installed release
+before production use; source tests alone do not qualify an installed caller.
 
 After a successful rebind, use the installed `verify` with the expected bot.
 Supply `--enable-w3c` when the rebound enrollment has W3C enabled; an ordinary

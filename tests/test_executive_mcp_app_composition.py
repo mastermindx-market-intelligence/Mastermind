@@ -809,3 +809,85 @@ def test_native_empty_post_guard_before_auth_and_http_contract(settings, rsa_key
                 assert "www-authenticate" in duplicate.headers
 
     asyncio.run(exercise())
+
+
+# --- WO-07 route_preview: opt-in COO facet (MMOS V1) -------------------------
+#
+# The read-only shared-law preview is a strictly opt-in addition to the COO
+# composition: compositions that do not pass a RoutePreviewSource keep their
+# exact advertised surface, schema digests and inner-App forwarding. The
+# facet is served locally (never forwarded) and reads no Executive OS state.
+
+import inspect
+
+from control_plane.child_execution_contracts import ROUTE_PREVIEW_SCHEMA
+from integrations.executive_mcp.route_preview import (
+    ROUTE_PREVIEW_TOOL_NAME,
+    RoutePreviewSource,
+)
+
+
+def test_coo_route_preview_tool_readback():
+    tool = transport.build_coo_route_preview_tool()
+    assert tool.name == "route_preview"
+    assert tool.annotations.readOnlyHint is True
+    assert tool.annotations.destructiveHint is False
+    assert tool.inputSchema["additionalProperties"] is False
+    assert tool.inputSchema["required"] == ["route_option", "goal"]
+
+
+def test_coo_route_preview_defaults_keep_existing_compositions_unchanged():
+    for builder in (transport.build_coo_mcp_app, transport._build_coo_mcp_app):
+        signature = inspect.signature(builder)
+        assert signature.parameters["route_preview_source"].default is None
+
+
+def test_coo_route_preview_opt_in_wiring_contract():
+    builder_source = inspect.getsource(transport._build_coo_mcp_app)
+    # Opt-in only: the source must be the closed host composition type and
+    # the facet composes on the legacy catalogue only.
+    assert "type(route_preview_source) is not RoutePreviewSource" in builder_source
+    assert 'raise ValueError("route preview composes on the legacy catalogue only")' in builder_source
+    # The descriptor is appended to the legacy catalogue, and only there.
+    assert "tools[context_wire.LEGACY_CATALOGUE] = (" in builder_source
+    assert "descriptors((ROUTE_PREVIEW_TOOL_SPEC,))" in builder_source
+    # The preview is served locally BEFORE the generic COO validation and is
+    # never forwarded to the inner App.
+    dispatch_source = inspect.getsource(transport._build_coo_mcp_app)
+    assert dispatch_source.index("if preview_name is not None and name == preview_name:") \
+        < dispatch_source.index("validated = (validate_coo_context_tool_arguments")
+    assert "/v1/tools/" not in dispatch_source.split("if preview_name is not None and name == preview_name:")[1] \
+        .split("try:\n            validated")[0]
+    # Success answers carry the shared schema and are never protocol errors.
+    assert "preview_schema" in inspect.getsource(transport._build_coo_mcp_app)
+    assert ROUTE_PREVIEW_SCHEMA == "RoutePreview.v1"
+
+
+def test_coo_route_preview_served_payload_is_the_shared_preview_record():
+    # The exact validate->compose pair the COO call_tool branch serves:
+    # a successful answer is the RoutePreview.v1 record with its authority
+    # fixed to NONE_SOURCE_PREVIEW_ONLY and never a launch grant.
+    from integrations.executive_mcp.route_preview import (
+        compose as compose_route_preview, validate_route_preview_tool_arguments,
+    )
+    payload = compose_route_preview(validate_route_preview_tool_arguments(
+        "route_preview", {"route_option": "routine", "goal": "bounded module"}))
+    assert payload["schema"] == "RoutePreview.v1"
+    assert payload["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+    assert payload["production_armed"] is False
+    assert payload["capacity_knowledge"] == "unknown"
+    assert payload["rank_basis"] == "suitability_only"
+    # The response carries no ``ok``-style envelope, so the composition's
+    # result() exemption (preview_schema) is what keeps it a non-error answer.
+    assert "ok" not in payload
+
+
+def test_coo_route_preview_arguments_never_reach_the_inner_app():
+    # The closed input schema admits no path, pool or placement field: the
+    # caller cannot aim the host's observation sources or reserve anything.
+    properties = transport.build_coo_route_preview_tool().inputSchema["properties"]
+    assert set(properties) == {"route_option", "goal", "context", "task_kind",
+                               "risk", "ambiguity", "required_capabilities"}
+    # The legacy five-tool list stays unchanged.
+    legacy_names = {tool.name for tool in transport.build_tools()}
+    assert "route_preview" not in legacy_names

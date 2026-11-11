@@ -1,0 +1,228 @@
+{
+  "actual_builds": [
+    {
+      "all_payloads_exact": true,
+      "files": 116,
+      "inventory_sha256": "4cc0945eb68e97f785fb285eb6e0a215348c4a545eac6b53a4c52e31036bc52d",
+      "manifest_sha256": "75ad0d9aad8361de2b2d11734f90b2f08906f6a731062393f0b10f0eb29a4819",
+      "name": "base",
+      "path": "/private/tmp/mmx-h4-native39-full-transition-20261108/provider-remote-application-build0/base",
+      "payload_bytes": 3529114,
+      "picker": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+      "retained_path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native39-qualified-base"
+    },
+    {
+      "all_payloads_exact": true,
+      "files": 118,
+      "inventory_sha256": "b8cb20e3042cf0a555ae2ef4b5450b9c20de0c03c4b51aa264b6c4a72cfcaef3",
+      "manifest_sha256": "0784394d60fbc858729dd64cd2877826c229cf471d82eaf3631fca51357f3cad",
+      "name": "application",
+      "path": "/private/tmp/mmx-h4-native39-full-transition-20261108/provider-remote-application-build0/application",
+      "payload_bytes": 3772341,
+      "picker": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+      "retained_path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native39-qualified-application"
+    },
+    {
+      "all_payloads_exact": true,
+      "files": 121,
+      "inventory_sha256": "aeb44440f194779e0f40469561b3528426302ea3b2e3145171288f5e835f8608",
+      "manifest_sha256": "be0143144b8da556fc7b83690da1ff68e9bd4e67d9e8f4a16483621be0258cef",
+      "name": "http",
+      "path": "/private/tmp/mmx-h4-native39-full-transition-20261108/provider-remote-application-build0/http",
+      "payload_bytes": 3855516,
+      "picker": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+      "retained_path": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native39-qualified-http"
+    }
+  ],
+  "ci_owners": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/hermes-application-enrollment.yml"
+  ],
+  "complete_transition_suite_includes_focused_37": true,
+  "current_native_observation": {
+    "generation": "774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea",
+    "only_delta_from_sequence38": "ext/pick.py",
+    "picker_sha256": "f6f62ba50502ed337598f21de94606f3a6c51ba1e4942765548bdffbe1edb019",
+    "sequence": 39
+  },
+  "diff_check_returncode": 0,
+  "distinct_complete_suite_counts": [
+    134,
+    348
+  ],
+  "edit_proof": {
+    "builder_after_sha256": "74f6d4af661bca6169f3df9aaa63685d013d0627766b1b25267d06c9d6eb2bfc",
+    "builder_before_sha256": "afe4dce14b2c6f99bce7c2f95f6e02cbab6cb424845e0ab055e111201f57fd7e",
+    "h2_combination": "explicit pre-output refusal; historical H2 paths unchanged",
+    "live_modified": false,
+    "new_flag": "--include-provider-plan-remote-placement",
+    "new_record_sha256": "4b6996bf22917a65cc7d3f4b050e853e6dd4affe5ae08f34c633421b0f7784b8",
+    "old_record_unchanged": true,
+    "original_function_bodies_preserved": true,
+    "original_main_nodes_preserved": true,
+    "protected_profile_blob": "8901ce42303cbea5570018e59a28cb7ced072cf7",
+    "schema": "mastermind.hermes_h4.native39_source_edit.v1",
+    "time": "2026-11-08T07:26:09.852582+00:00"
+  },
+  "limitations": [
+    "Disposable original installer owners; no live service/account/grant admission",
+    "Remote-placement plus H2 flags explicitly unsupported before output",
+    "Install the complete118/121 target through original Go transaction; base116 selection is not a qualified intermediate",
+    "Original J and other retained unknown effects unchanged"
+  ],
+  "new_installation": false,
+  "new_runtime_selection": false,
+  "observed_at": "2026-11-08T07:50:57.987960+00:00",
+  "protected_profile_source": "ee9a15ddd7d65e6faabad07968323988ea0eddfb",
+  "provider_calls": 0,
+  "qualification": [
+    {
+      "command": [
+        "/opt/homebrew/bin/python3.14",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--noconftest",
+        "-o",
+        "addopts=",
+        "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+        "-k",
+        "remote_placement",
+        "--basetemp",
+        "/private/tmp/mmx-h4-native39-focused-20261108",
+        "--junitxml",
+        "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native39-focused.xml"
+      ],
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 37
+      },
+      "failures": [],
+      "junit_sha256": "ede1cbc15fd4c82f586ec224ba5dd7ed2ab85a95094f4afaa96f2d2bf1289245",
+      "live_modified": false,
+      "log_sha256": "1d82dd949481b1d4961dc3cea609eab12c16bfad18bad8628b84f53c7c3574dc",
+      "returncode": 0,
+      "seconds": 32.87,
+      "time": "2026-11-08T07:31:08.222687+00:00"
+    },
+    {
+      "command": [
+        "/opt/homebrew/bin/python3.14",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--noconftest",
+        "-o",
+        "addopts=",
+        "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+        "--basetemp",
+        "/private/tmp/mmx-h4-native39-full-transition-20261108",
+        "--junitxml",
+        "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native39-full-transition.xml"
+      ],
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 134
+      },
+      "failures": [],
+      "junit_sha256": "5785e48c8ee3990f651267a2638bfe08dc227f050cad5c5de9564fdd2fc5f7e6",
+      "live_modified": false,
+      "log_sha256": "f4d5bd4b1de01b6900974f1cfdeaff313699d8f45c310fcdbe0a4f63ee62be47",
+      "returncode": 0,
+      "seconds": 124.54,
+      "time": "2026-11-08T07:40:07.501577+00:00"
+    },
+    {
+      "command": [
+        "/opt/homebrew/bin/python3.14",
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--noconftest",
+        "-o",
+        "addopts=",
+        "ops/native_fabric/quota_continuity/tests/test_go_native_install.py",
+        "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py",
+        "ops/native_fabric/quota_continuity/tests/test_go_native_release.py",
+        "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py",
+        "ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py",
+        "tests/test_provider_plan_remote_mode_boundary.py",
+        "tests/test_provider_plan_auto_routing.py",
+        "tests/test_provider_plan_local_return.py",
+        "--basetemp",
+        "/private/tmp/mmx-h4-native39-regressions-20261108",
+        "--junitxml",
+        "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native39-regressions.xml"
+      ],
+      "counts": {
+        "errors": 0,
+        "failures": 0,
+        "skipped": 0,
+        "tests": 348
+      },
+      "failures": [],
+      "junit_sha256": "aa6fce447941044e7633fdf56aa44894305ba76999cb86f82d9ea892f84aa678",
+      "live_modified": false,
+      "log_sha256": "a49644349c6432a875e0c20bd79e84db03612d587253ab9296295aa727f9775d",
+      "returncode": 0,
+      "seconds": 100.67,
+      "time": "2026-11-08T07:45:09.876669+00:00"
+    }
+  ],
+  "schema": "hermes-h4-native39-application-qualification.v1",
+  "source_files": [
+    {
+      "blob_sha": "29a2a47786ce7668cb9fa47630008e28524188d0",
+      "bytes": 3958,
+      "mode": "100644",
+      "path": "ops/native_fabric/provider_plans/compose.py",
+      "sha256": "caa363ce4028304796506834ea4836a2a35bda15327a317e4a19db8f3d547f8f"
+    },
+    {
+      "blob_sha": "8901ce42303cbea5570018e59a28cb7ced072cf7",
+      "bytes": 24348,
+      "mode": "100644",
+      "path": "ops/native_fabric/provider_plans/remote_placement/profile.json",
+      "sha256": "2c9010cdf653ce7a03b86193e161a7b45522132652b6f596b4c3b27dcf4ac596"
+    },
+    {
+      "blob_sha": "4b4e8ead39968e89cf33d7603ee3cb5a15cae32f",
+      "bytes": 102962,
+      "mode": "100644",
+      "path": "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+      "sha256": "74f6d4af661bca6169f3df9aaa63685d013d0627766b1b25267d06c9d6eb2bfc"
+    },
+    {
+      "blob_sha": "7fb393058417ac13759007b6bf0f726d2c7be26c",
+      "bytes": 1080,
+      "mode": "100644",
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/remote-placement.json",
+      "sha256": "4b6996bf22917a65cc7d3f4b050e853e6dd4affe5ae08f34c633421b0f7784b8"
+    },
+    {
+      "blob_sha": "877ee4c5d26979d40354dd73df58475a6ab4182b",
+      "bytes": 31806,
+      "mode": "100644",
+      "path": "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+      "sha256": "ab7d9c4d9906bdcceab53c158a9bb2b7e16689dfcd75e4088c5d6f57c28f5266"
+    },
+    {
+      "blob_sha": "7488b3bd7810d47b6080852dec11b4e40576528e",
+      "bytes": 11278,
+      "mode": "100644",
+      "path": "ops/native_fabric/quota_continuity/rollout/provider_application/README.md",
+      "sha256": "18df3c052580fda99636b9d109dc595e1999d5ae401d4d2146502f6da0a8e82c"
+    }
+  ],
+  "source_parent": "a12c37d8e027cb632690b615cf316db7f9e46111"
+}

@@ -102,6 +102,16 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
             )
             provider_home = Path(self._provider_home_guard.name)
         self.provider_home = provider_home
+        # macOS temporary roots may assign the wheel group to a new child
+        # despite this test process running with a distinct effective GID.
+        # The sealed-worker law requires the real directory ownership and
+        # the simulated worker OS identity to match. Fix only this private
+        # fixture directory; never weaken the Runtime's identity validator.
+        home_stat = provider_home.lstat()
+        assert home_stat.st_uid == os.geteuid()
+        if home_stat.st_gid != os.getegid():
+            os.chown(provider_home, -1, os.getegid())
+        assert provider_home.lstat().st_gid == os.getegid()
 
     async def start(self, spec):
         ref = await super().start(spec)

@@ -18,6 +18,8 @@ from typing import Any, Mapping, Protocol
 
 from integrations.slack_executive.slack_web_api import _default_ssl_context
 
+from integrations.slack_agent_dialogue.contract import PARENT_DISCRIMINATOR
+from integrations.slack_agent_dialogue.contract_v2 import PARENT_DISCRIMINATOR_V2
 from integrations.slack_agent_dialogue.engine import (
     HistoryPage,
     SlackEffectUnknown,
@@ -29,6 +31,10 @@ SLACK_API_ROOT = "https://slack.com/api/"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 MAX_RESPONSE_BYTES = 64 * 1024
 MAX_HISTORY_PAGES = 100
+# Keep each read-side request small enough for Slack channels carrying large
+# agent packets. Oversized successful GET responses shrink this page size
+# further; mutation-evidence and full-history gates remain unchanged.
+MAX_HISTORY_PAGE_MESSAGES = 8
 MAX_CURSOR_CHARS = 4096
 _ALLOWED_REQUESTS = frozenset(
     {
@@ -40,6 +46,7 @@ _ALLOWED_REQUESTS = frozenset(
 _WORKSPACE_RE = re.compile(r"\AT[A-Z0-9]{8,31}\Z")
 _CHANNEL_RE = re.compile(r"\A[CG][A-Z0-9]{8,31}\Z")
 _USER_RE = re.compile(r"\A[UW][A-Z0-9]{8,31}\Z")
+_BOT_RE = re.compile(r"\AB[A-Z0-9]{8,31}\Z")
 _TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
 _UNAVAILABLE = "SLACK_TRANSPORT_UNAVAILABLE"
 _EFFECT_UNKNOWN = "SLACK_EFFECT_UNKNOWN"
@@ -51,6 +58,10 @@ def _unavailable() -> SlackTransportUnavailable:
 
 def _effect_unknown() -> SlackEffectUnknown:
     return SlackEffectUnknown(_EFFECT_UNKNOWN)
+
+
+class _OversizedHistoryPage(Exception):
+    """One genuine HTTP 200 Slack GET page exceeds the sealed byte budget."""
 
 
 def estimate_replies_append_bytes(*, text: str, thread_ts: str) -> int:
@@ -134,6 +145,7 @@ class _ParsedHistoryPage:
     has_more: bool
     next_cursor: str
     structurally_complete: bool
+    foreign_bot_timestamps: tuple[str, ...] = ()
 
 
 class SlackHttpTransport(Protocol):
@@ -391,7 +403,21 @@ class SlackWebApiDialogueClient:
                 query=query,
                 json_body=None,
             )
+            # An exact-origin successful GET larger than the sealed response
+            # budget can be retried *read-only* with a smaller Slack page.
+            # Bad origins, statuses, transports and malformed JSON are not
+            # recoverable and remain fail-closed.
+            if (
+                isinstance(response, SlackHttpResponse)
+                and response.status_code == 200
+                and response.final_url == expected_url
+                and isinstance(response.body, bytes)
+                and len(response.body) > MAX_RESPONSE_BYTES
+            ):
+                raise _OversizedHistoryPage()
             payload = _decode_response(response, expected_url=expected_url)
+        except _OversizedHistoryPage:
+            raise
         except Exception:
             raise _unavailable() from None
         if payload.get("ok") is not True:
@@ -532,6 +558,50 @@ class SlackWebApiDialogueClient:
             )
         return self._standard_message(raw)
 
+    def _foreign_bot_history_message(self, raw: Any) -> bool:
+        """Ignore only well-formed foreign bot posts, never mutation evidence.
+
+        Shared Slack channels have other apps. They cannot originate a trusted
+        Relay parent or Sol message; their presence must not break reads of
+        eligible messages. The write-receipt bot-identity guard is unchanged.
+        """
+        if not isinstance(raw, Mapping):
+            return False
+        if (
+            raw.get("subtype") in {"message_changed", "message_deleted"}
+            or raw.get("edited") is not None
+        ):
+            return False
+        bot_id = raw.get("bot_id")
+        if bot_id is None:
+            return False
+        if not isinstance(bot_id, str) or _BOT_RE.fullmatch(bot_id) is None:
+            raise ValueError("invalid foreign bot identity")
+        if raw.get("user") == self._bot_user_id:
+            return False
+        if (
+            raw.get("type") != "message"
+            or ("team" in raw and raw.get("team") != self._workspace_id)
+            or not _valid_ts(raw.get("ts"))
+            or not isinstance(raw.get("user"), str)
+            or _USER_RE.fullmatch(raw["user"]) is None
+            or not isinstance(raw.get("text"), str)
+            or (
+                raw.get("thread_ts") is not None
+                and not _valid_ts(raw.get("thread_ts"))
+            )
+        ):
+            raise ValueError("invalid foreign bot message")
+        # Unlike unrelated bot chatter, a protocol-shaped parent from a
+        # non-Relay bot is competing parent evidence. Suppressing it would
+        # bypass the V2 engine's exact/near-context foreign-author conflict
+        # guard, so fail closed before choosing any trusted parent.
+        if raw["text"].startswith(
+            (PARENT_DISCRIMINATOR, PARENT_DISCRIMINATOR_V2)
+        ):
+            raise ValueError("foreign bot parent frame")
+        return True
+
     def _history_page(
         self,
         payload: Mapping[str, Any],
@@ -549,11 +619,19 @@ class SlackWebApiDialogueClient:
         ):
             raise _unavailable()
         messages: list[SlackMessage] = []
+        foreign_bot_timestamps: list[str] = []
         mutation_complete = True
         seen: set[str] = set()
         structurally_complete = len(raw_messages) <= limit
         try:
             for raw in raw_messages[:limit]:
+                if self._foreign_bot_history_message(raw):
+                    ts = raw["ts"]
+                    if ts in seen:
+                        structurally_complete = False
+                    seen.add(ts)
+                    foreign_bot_timestamps.append(ts)
+                    continue
                 parsed, evidence_complete = self._parse_message(raw)
                 if parsed.ts in seen:
                     structurally_complete = False
@@ -569,6 +647,7 @@ class SlackWebApiDialogueClient:
             has_more=has_more,
             next_cursor=metadata["next_cursor"],
             structurally_complete=structurally_complete,
+            foreign_bot_timestamps=tuple(foreign_bot_timestamps),
         )
 
     @staticmethod
@@ -608,6 +687,7 @@ class SlackWebApiDialogueClient:
         response_page_bytes: list[int] = []
         mutation_complete = True
         cursor: str | None = None
+        page_size = MAX_HISTORY_PAGE_MESSAGES
 
         for _page_number in range(MAX_HISTORY_PAGES):
             remaining = limit - len(messages)
@@ -617,18 +697,34 @@ class SlackWebApiDialogueClient:
                     mutation_evidence_complete=mutation_complete,
                     response_page_bytes=response_page_bytes,
                 )
-            query = dict(base_query)
-            query["limit"] = str(remaining)
-            if cursor is not None:
-                query["cursor"] = cursor
-            payload, page_bytes = await self._get(path=path, query=query)
+            request_size = min(remaining, page_size)
+            while True:
+                query = dict(base_query)
+                query["limit"] = str(request_size)
+                if cursor is not None:
+                    query["cursor"] = cursor
+                try:
+                    payload, page_bytes = await self._get(path=path, query=query)
+                    break
+                except _OversizedHistoryPage:
+                    if request_size <= 1:
+                        # An individually oversize Slack message cannot be
+                        # made complete or safe by retrying this cursor.
+                        raise _unavailable() from None
+                    request_size = max(1, request_size // 2)
+                    page_size = request_size
             response_page_bytes.append(page_bytes)
             parsed = self._history_page(payload, limit=remaining)
             mutation_complete = (
                 mutation_complete and parsed.mutation_evidence_complete
             )
+            # Skipped foreign bot messages still consume real Slack cursor
+            # positions: preserve duplicate detection for the entire page.
+            page_timestamps = tuple(message.ts for message in parsed.messages) + (
+                parsed.foreign_bot_timestamps
+            )
             if not parsed.structurally_complete or any(
-                message.ts in seen_timestamps for message in parsed.messages
+                ts in seen_timestamps for ts in page_timestamps
             ):
                 return self._incomplete_history(
                     messages + list(parsed.messages),
@@ -636,7 +732,7 @@ class SlackWebApiDialogueClient:
                     response_page_bytes=response_page_bytes,
                 )
             messages.extend(parsed.messages)
-            seen_timestamps.update(message.ts for message in parsed.messages)
+            seen_timestamps.update(page_timestamps)
 
             terminal = parsed.has_more is False and parsed.next_cursor == ""
             continuation = parsed.has_more is True and self._cursor_is_valid(

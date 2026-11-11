@@ -51,7 +51,9 @@ def receipt_prefix(runtime, selected, monkeypatch, marker_schema=None):
     monkeypatch.setattr(grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=os.getgid()))
     root = runtime / "control/acceptance" / selected["successor_sha"]
     root.parent.chmod(0o700)
+    os.chown(root.parent, -1, os.getgid())
     root.mkdir(mode=0o700)
+    os.chown(root, -1, os.getgid())
     docs = {
         "nonexecutive-launchd-before.json": {"sha256": "1" * 64, "labels_excluded": 2},
         "protected-group-membership.json": group_receipt(),
@@ -59,6 +61,7 @@ def receipt_prefix(runtime, selected, monkeypatch, marker_schema=None):
     for name, doc in docs.items():
         (root / name).write_text(json.dumps(doc))
         (root / name).chmod(0o400)
+        os.chown(root / name, -1, os.getgid())
     m.write_sealed(m.bundle_path(selected["successor_sha"]) / "run-started.json", {
         "schema_version": marker_schema or selected["schema_version"],
         "descriptor_sha256": m.digest(selected),
