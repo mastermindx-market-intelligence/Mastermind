@@ -328,14 +328,62 @@ def op_id(issue_id: str, content: str) -> str:
 
 
 # A child issue created by a teammate's ```paperclip-ask block carries its
-# parent's ask op marker in its description: "Asked by X on MMO-17 [pc-…-ask]".
-ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9-]+-ask)\]")
+# parent's ask op marker at the very END of its description — the carrier
+# writes "Asked by X on MMO-17\n[pc-…-ask]" (children created before
+# 2026-11-11 end with "... on MMO-17 [pc-…-ask]" instead; both end with the
+# marker, which is what the anchored scan reads). A `[pc-…-ask]` token
+# anywhere else in a description is teammate text (R2a finding 3).
+ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9-]+-ask)\]\s*$")
 
 
 def ask_child_op(text: str):
-    """The ask op marker embedded in an issue description, if any."""
-    match = ASK_CHILD_MARKER_RE.search(text or "")
+    """The ask op marker at the very END of an issue description, if any."""
+    match = ASK_CHILD_MARKER_RE.search((text or "").rstrip())
     return match.group(1) if match else None
+
+
+def expected_ask_op(parent):
+    """The ask marker this carrier computes for a child of `parent`: the
+    parent issue's own op with the -ask suffix — exactly what handle_ask
+    writes into the child description."""
+    content = (parent.get("title") or "") + "\n" + (parent.get("description") or "")
+    return f"{op_id(parent['id'], content)}-ask"
+
+
+def is_ask_child_of(row, parent):
+    """True when `row` is an ask child this carrier created under `parent`:
+    parented on it AND ending with exactly the carrier-computed marker.
+    Anything a teammate wrote inside a description cannot satisfy this."""
+    if not parent or row.get("parentId") != parent.get("id"):
+        return False
+    return ask_child_op(row.get("description") or "") == expected_ask_op(parent)
+
+
+def asked_child_of(pc, issue):
+    """The parent issue record when THIS issue is an ask child of it (the
+    structural test of R2a finding 3). None otherwise — including when the
+    parent cannot be read or the parent's content no longer matches the
+    marker, which degrades to a plain task rather than a guess."""
+    parent_id = issue.get("parentId")
+    if not parent_id or not ask_child_op(issue.get("description") or ""):
+        return None
+    try:
+        parent = pc.issue(parent_id)
+    except CarrierError as exc:
+        log(f"parent of {issue.get('identifier')} unreadable ({exc}); "
+            "treating the issue as a plain task")
+        return None
+    if is_ask_child_of(issue, parent):
+        return parent
+    log(f"{issue.get('identifier')} ends with ask-like text but is not the "
+        "carrier's ask child of its parent; plain task")
+    return None
+
+
+def strip_markers(text: str):
+    """Teammate-written text with any complete `[pc-…]` token removed, so
+    what a teammate wrote can never pose as a carrier marker downstream."""
+    return re.sub(r"\[pc-[^\]\n]*\]", "", text or "").strip()
 
 
 def issue_link(template, identifier):
@@ -1075,8 +1123,7 @@ def handle_return(pc, t3, issue, ask_op, opts):
     final answer on the parent like any task."""
     child = None
     for row in pc.children(issue["id"]):
-        if ask_child_op(row.get("description") or "") == ask_op \
-                and row.get("status") == "done":
+        if is_ask_child_of(row, issue) and row.get("status") == "done":
             child = row
             break
     if child is None:
@@ -1136,15 +1183,19 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     me = pc.me()
     child = None
     for row in pc.children(issue["id"]):
-        if ask_op in (row.get("description") or ""):
+        if is_ask_child_of(row, issue):
             child = row
             break
     if child is None:
+        # The teammate's own words are sanitised first (R2a finding 3): no
+        # `[pc-…` text it wrote can ride into the child description.
+        title = strip_markers(ask["title"]) or ask["title"]
+        description = strip_markers(ask["description"])
         child = pc.create_issue(company_id, {
-            "title": ask["title"],
-            "description": (f"{ask['description']}\n\n"
+            "title": title,
+            "description": (f"{description}\n\n"
                             f"Asked by {me.get('name', 'a teammate')} on "
-                            f"{issue.get('identifier')} [{ask_op}]"),
+                            f"{issue.get('identifier')}\n[{ask_op}]"),
             "assigneeAgentId": agent_id,
             "parentId": issue["id"],
             "status": "todo",
@@ -1415,8 +1466,10 @@ def run_carrier(pc, t3_factory, opts):
         f"activeRun={active_run_id(row) or 'none'}")
 
     try:
+        # Structural ask children only (R2a finding 3): parented on this
+        # issue and ending with exactly the marker the carrier computes.
         ask_children = [row for row in pc.children(issue["id"])
-                        if ask_child_op(row.get("description") or "")]
+                        if is_ask_child_of(row, issue)]
         if issue.get("status") == "blocked" and not ask_children:
             # A blocked task with no ask child was blocked while the
             # teammate's turn may still have been in flight (a person or the
@@ -1469,7 +1522,10 @@ def run_carrier(pc, t3_factory, opts):
         thread, msgs = t3.messages()
         state, existing = scan_marker(msgs, op, thread)
         if state is None:
-            asked_child = bool(ask_child_op(issue.get("description") or ""))
+            # The structural test (R2a finding 3): one parent read settles
+            # whether THIS issue is an ask child.
+            ask_parent = asked_child_of(pc, issue)
+            asked_child = ask_parent is not None
             message = build_message(
                 issue.get("identifier"), issue.get("title"),
                 issue.get("description"), op,
@@ -1503,7 +1559,7 @@ def run_carrier(pc, t3_factory, opts):
                               opts.get("roster") or {}):
             return 0
         deliver(pc, issue, reply, op, crash_after,
-                ask_child=bool(ask_child_op(issue.get("description") or "")))
+                ask_child=asked_child_of(pc, issue) is not None)
         job = parse_coding_job_block(reply)
         if job:
             handle_coding_job(pc, issue, reply, job, opts)
