@@ -2424,3 +2424,39 @@ def test_feedback_edge_on_an_ask_child_completes_done():
     assert pc.issues["is-1"]["status"] == "done"   # re-done, not back in_review
     keys = [row["idempotencyKey"] for row in pc.interaction_rows]
     assert keys == [f"{op}-confirm"]        # no new confirmation for the round
+
+
+def test_after_delivery_failure_never_changes_status():
+    # R2a finding 22: the reply WAS delivered (comment + confirmation +
+    # in_review). A later step — here the coding-job note after an
+    # unreachable door — fails. The delivered answer stands: no release, no
+    # status change, one machine note if it can be posted, and the run ends
+    # 0.
+    reply = ("The answer.\n\n```paperclip-coding-job\nkey: coding-job-1\n```")
+    pc = FakePaperclip(issues=one_issue())
+    real_add = pc.add_comment
+    counter = {"n": 0}
+
+    def add_twice_then_fail(issue_id, body):
+        counter["n"] += 1
+        if counter["n"] > 1:
+            raise wc.CarrierError(
+                "POST /api/issues/is-1/comments -> HTTP 503 later failure")
+        return real_add(issue_id, body)
+    pc.add_comment = add_twice_then_fail
+    t3 = FakeT3(replies=[reply])
+    opts = {"coding_job_door": "/nonexistent/door.sock"}
+    assert run(pc, t3, opts) == 0
+    assert pc.issues["is-1"]["status"] == "in_review"   # never moved back
+    assert not any("did not complete" in (c[2] if c[0] == "comment" else "")
+                   for c in pc.calls)
+
+
+def test_output_doc_key_is_ascii_identifier_only():
+    # R2a finding 22: str.isalnum accepts accented letters ("café"); a
+    # document key must be ASCII letters, digits, hyphen and underscore.
+    assert wc.parse_output_block(
+        "```paperclip-output\nkey: café\ntitle: T\nx\n```") is None
+    assert wc.parse_output_block(
+        "```paperclip-output\nkey: good-key_2\ntitle: T\nx\n```"
+    )["key"] == "good-key_2"

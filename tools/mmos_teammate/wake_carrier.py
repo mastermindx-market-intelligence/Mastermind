@@ -313,7 +313,9 @@ def parse_output_block(reply):
         body_lines.append(line)
     if not closed or not key:
         return None
-    if not key.replace("-", "").replace("_", "").isalnum():
+    # R2a finding 22: ASCII only — str.isalnum accepts accented letters,
+    # and a document key is a filename-shaped identifier.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", key):
         return None  # document keys stay safe identifiers
     return {"key": key, "title": title or key,
             "body": "\n".join(body_lines).strip() + "\n"}
@@ -1647,6 +1649,7 @@ def confirmation_verdict(pc, issue_id, op):
 def run_carrier(pc, t3_factory, opts):
     """One wake. Returns an exit code; raises nothing."""
     crash_after = opts.get("crash_after")
+    delivered = False  # R2a finding 22: set once the answer is on the issue
     me = pc.me()
     if me.get("id") != os.environ.get("PAPERCLIP_AGENT_ID"):
         raise CarrierError("run token is for a different agent")
@@ -1801,6 +1804,7 @@ def run_carrier(pc, t3_factory, opts):
             return 0
         deliver(pc, issue, reply, op, crash_after,
                 ask_child=ask_parent is not None)
+        delivered = True  # the answer is on the issue; nothing may undo it
         job = parse_coding_job_block(reply)
         if job:
             handle_coding_job(pc, issue, reply, job, opts)
@@ -1815,6 +1819,17 @@ def run_carrier(pc, t3_factory, opts):
             pass
         raise
     except Exception as exc:  # noqa: BLE001 - ANY failure must release the issue
+        if delivered:
+            # R2a finding 22: the answer is already on the issue in its final
+            # state. A later step failing (a coding-job note, say) must never
+            # release it again or move its status: log, one best-effort
+            # machine note, and the delivered answer stands.
+            log(f"after-delivery step failed on {issue.get('identifier')} "
+                f"({public_error(exc)}); the delivered answer stands")
+            machine_note_once(pc, issue["id"],
+                              "[t2-carrier] a later step failed after this "
+                              "answer was delivered; the answer stands")
+            return 0
         release_issue(pc, issue["id"], public_error(exc))
         raise
 
