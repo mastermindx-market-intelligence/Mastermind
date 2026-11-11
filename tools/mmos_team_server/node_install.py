@@ -489,6 +489,15 @@ def validated_provider_cli(cli, root=None):
     path = os.path.expanduser(str(cli))
     if not path or not os.path.isabs(path):
         raise InstallError(f"provider CLI must be an absolute path: {cli!r}")
+    # MF-MED-REQ-1(b): the record is the FOLDER and the server PATH-resolves
+    # `claude` BY NAME inside it. Any other basename validates a file the
+    # server never executes while the <folder>/claude it does execute goes
+    # unchecked. Fail closed on the name.
+    if os.path.basename(path) != "claude":
+        raise InstallError(
+            f"provider CLI must be named 'claude' (the server PATH-resolves "
+            f"`claude` by name in the recorded folder; a differently named "
+            f"file is never the executed one): {path}")
     try:
         info = os.stat(path)
     except OSError as exc:
@@ -503,13 +512,23 @@ def validated_provider_cli(cli, root=None):
     # file's own write bits, no directory write at all. Both the named path
     # and its resolution target must be owned by root or this user (the
     # trusted_interpreter rule) and carry no group/other write bits.
+    # MF-MED-REQ-1(a): the file the server will actually execute is
+    # <realpath of the recorded folder>/claude and its resolution target —
+    # when the naming folder is a symlink chain those can differ from what
+    # this argument named, so they get the same check, and a missing one is
+    # a clean refusal: never record a folder whose `claude` is not there.
+    folder = os.path.dirname(path)
+    executed = os.path.join(os.path.realpath(folder), "claude")
     for what, target in (("provider CLI", path),
                          ("provider CLI resolution target",
-                          os.path.realpath(path))):
+                          os.path.realpath(path)),
+                         ("provider CLI the server executes", executed),
+                         ("provider CLI the server executes, resolved",
+                          os.path.realpath(executed))):
         try:
             finfo = os.stat(target)
         except OSError as exc:
-            raise InstallError(f"provider CLI not found: {target}") from exc
+            raise InstallError(f"{what} not found: {target}") from exc
         if finfo.st_uid not in (0, os.getuid()):
             raise InstallError(
                 f"{what} belongs to another user (a teammate could rewrite "
@@ -519,7 +538,6 @@ def validated_provider_cli(cli, root=None):
                 f"{what} is writable by group or others (any local user "
                 f"could rewrite the executed bytes in place — no directory "
                 f"write needed): {target} ({stat.filemode(finfo.st_mode)})")
-    folder = os.path.dirname(path)
     _require_teammate_safe_dir(folder, "provider CLI folder")
     _require_teammate_safe_dir(os.path.dirname(os.path.realpath(path)),
                                "provider CLI resolution target")

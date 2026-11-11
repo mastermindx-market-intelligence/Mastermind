@@ -237,6 +237,25 @@ class TestInstallHygiene:
         assert len(probes) == 3, probes
         assert all("--max-time 5" in line for line in probes), probes
 
+    def test_base_wait_window_capped_on_the_wall_clock(self):
+        # MF-MED-C: the base window in wait_ours counts 1 s ITERATIONS, but a
+        # wedged-but-accepting listener stretches each one to ~6.6 s (curl
+        # --max-time 5 + sleep 1), so a count-open base window could run
+        # ~20 min of wall clock while the 900 s cap bounded extensions only.
+        # The base window must also stop on the wall clock, and the stop must
+        # name the port holder via lsof so the operator can act immediately.
+        text = TOOL.read_text()
+        m = re.search(r"^wait_ours\(\) \{.*?^\}", text, re.M | re.S)
+        assert m, "wait_ours not found"
+        body = m.group(0)
+        assert re.search(
+            r'\[ "\$_i" -lt "\$_w" \] && \[ \$\(\( _now - _start \)\) -ge 900 \]',
+            body), "base window lacks the 900s wall cap"
+        assert '"$LSOF" -tP -iTCP:"$_p" -sTCP:LISTEN' in body, \
+            "the wall cap does not name the port holder via lsof"
+        assert "wedged-but-accepting" in body, \
+            "the cap's message does not explain the stretch"
+
     def test_every_unload_fallback_is_env_i_clean(self):
         # Micro-fix round (FU1 completion): every launchd mutation runs
         # env -i'd so a hostile environment cannot steer it — except stop's

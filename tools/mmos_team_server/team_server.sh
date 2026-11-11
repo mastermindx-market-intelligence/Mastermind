@@ -331,6 +331,17 @@ wait_ours() {
     _i=$((_i + 1))
     _now=$(date +%s)
     if [ "$_i" -lt "$_w" ] || [ "$_now" -lt "$_ext_deadline" ]; then
+      # MF-MED-C: the base window counts ITERATIONS, but a wedged-but-
+      # accepting listener stretches each one to ~6.6 s (curl --max-time 5
+      # + sleep 1), so a count-open base window could run ~20 min of wall
+      # clock while the 900 s cap below bounds extensions only. Bound the
+      # base window on the wall clock too: past the cap, name the port
+      # holder and let the failure path speak instead of counting on.
+      if [ "$_i" -lt "$_w" ] && [ $(( _now - _start )) -ge 900 ]; then
+        _holder=$("$LSOF" -tP -iTCP:"$_p" -sTCP:LISTEN 2>/dev/null | head -1)
+        echo "base wait window hit the 900s wall cap after $(( _now - _start ))s (a wedged-but-accepting listener stretches each probe; port $_p holder pid ${_holder:-not identified}); find it: lsof -nP -iTCP:$_p -sTCP:LISTEN" >&2
+        return 1
+      fi
       if [ "$_now" -ge "$_next_note" ]; then
         _sa=$(boot_stage_age); _stage=${_sa%% *}
         echo "waiting for first answer on 127.0.0.1:$_p — $(( _now - _start ))s elapsed, boot stage: ${_stage}" >&2

@@ -1192,7 +1192,12 @@ def test_f3b_provider_cli_resolving_into_a_team_writable_tree_refused(h):
     real_cli.write_text("#!/bin/sh\necho swapped\n")
     os.chmod(real_cli, 0o755)
     os.chmod(target, 0o770)  # teammate-writable resolution target
-    link = h.bindir / "claude-linked"
+    # MF-MED-REQ-1(b): the flag names `claude` itself (a differently named
+    # binary is now refused); the refusal under test stays the unsafe
+    # resolution TREE, so the link needs its own clean folder.
+    linkdir = h.base / "linktree"
+    linkdir.mkdir()
+    link = linkdir / "claude"
     link.symlink_to(real_cli)
     h.seed_root()
     proc = h.run_install("--server-bin", h.fake_server(),
@@ -1241,7 +1246,60 @@ def test_mfh1_write_bits_checked_through_a_symlink_too(h):
     real_cli = target / "real-claude"
     real_cli.write_text("#!/bin/sh\necho swapped\n")
     os.chmod(real_cli, 0o775)   # group-writable FILE, clean folders everywhere
-    link = h.bindir / "claude-linked"
+    # MF-MED-REQ-1(b): name the link `claude` in its own clean folder so the
+    # refusal under test is the WRITE BITS through the symlink, not the name.
+    linkdir = h.base / "linktree-bits"
+    linkdir.mkdir()
+    link = linkdir / "claude"
+    link.symlink_to(real_cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "writable by group or others" in out, out
+    assert str(link) in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_mfreq1b_wrong_basename_refused_even_with_a_clean_shim(h):
+    # MF-MED-REQ-1(b): the record is the FOLDER and the server PATH-resolves
+    # `claude` BY NAME inside it. A binary named anything else used to
+    # validate fine while the <folder>/claude the server actually executes
+    # went unchecked — here 0777, writable by any local user. Fail closed
+    # on the name.
+    folder = h.base / "shimtree"
+    folder.mkdir()
+    shim = folder / "shim"
+    shim.write_text("#!/bin/sh\nexec nowhere\n")
+    os.chmod(shim, 0o755)
+    executed = folder / "claude"
+    executed.write_text("#!/bin/sh\necho rewritten\n")
+    os.chmod(executed, 0o777)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", shim)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "shim" in out, out
+    assert "must be named 'claude'" in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+    assert not h.loaded()
+
+
+def test_mfreq1a_claude_symlink_to_group_writable_target_refused(h):
+    # MF-MED-REQ-1(a) leg from the ruling: <folder>/claude — the right NAME,
+    # the file the server executes — that is itself a symlink to a
+    # group-writable target must be refused: the owner/write-bits check
+    # follows to the file whose bytes actually run.
+    target = h.base / "gwtree" / "v1"
+    target.mkdir(parents=True)
+    real_cli = target / "real-claude"
+    real_cli.write_text("#!/bin/sh\necho swapped\n")
+    os.chmod(real_cli, 0o775)   # group-writable FILE, clean folders everywhere
+    folder = h.base / "linktree-exec"
+    folder.mkdir()
+    link = folder / "claude"
     link.symlink_to(real_cli)
     h.seed_root()
     proc = h.run_install("--server-bin", h.fake_server(),
@@ -1284,7 +1342,11 @@ def test_mf6a_provider_cli_resolving_into_the_root_refused(h):
     cli = inside / "claude"
     cli.write_text("#!/bin/sh\necho rooted\n")
     os.chmod(cli, 0o755)
-    link = h.bindir / "claude-rooted"
+    # MF-MED-REQ-1(b): name the link `claude` in its own clean folder so the
+    # refusal under test is ROOT CONTAINMENT of the resolution target.
+    linkdir = h.base / "linktree-root"
+    linkdir.mkdir()
+    link = linkdir / "claude"
     link.symlink_to(cli)
     h.seed_root()
     proc = h.run_install("--server-bin", h.fake_server(),
