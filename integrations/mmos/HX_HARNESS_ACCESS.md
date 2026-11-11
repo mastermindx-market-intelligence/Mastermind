@@ -22,15 +22,25 @@ evidence files; summary:
 - Rollback: `mv "$F.bak-hx9" "$F"` (or delete the added `permissions.allow`
   entries).
 - Tests: `bash harness/i9-test-readonly-allow.sh` — expects 11 RUN /
-  25 REFUSED / 2 guard refusals + filesystem canaries (38 checks), refusal
+  24 REFUSED / 2 guard refusals + filesystem canaries, refusal
   classified by denial wording, not is_error. Proven live 2026-11-11 with
   glm-5.3 via the gateway (runs A–E + V/W under `~/.mastermind/mmos_dev/hx/i9/`).
 - Adversarial result (deepseek child + HX reproduction): `Bash(git diff:*)`
   let `git diff --output=<any path> HEAD` write outside the working
   directories (canary verified, is_error=false). **git diff is therefore
-  NOT allowlisted.** Without the rule the CLI's own analysis denies the
-  `--output` form (re-verified: "requires approval", no file written) while
-  plain `git diff` reads still run via built-in read-only handling.
+  NOT allowlisted.** Repair 1 (run F) found the same hole in
+  `Bash(git log:*)` (`git log -1 --format=%h --output=<path>` wrote an
+  8-byte file outside the working dirs, is_error=false) — **git log is also
+  NOT allowlisted**; the fragment is 8 prefixes. Without the rules the CLI's
+  own analysis denies the `--output` forms (re-verified: "requires
+  approval", no file written) while plain `git diff`/`git log` reads still
+  run via built-in read-only handling. Remaining prefixes (ls, cat, head,
+  tail, wc, echo, git status, git rev-parse) have no write-out flags;
+  run F additionally proved cat/head/tail are blocked outside the working
+  directories even with `Bash(cat:*)` allowlisted ("For security, Claude
+  Code may only read the working directories") — key files under `~/.t3`,
+  `~/.ssh` etc. stay unreadable without any deny rule; no deny-vs-allow
+  precedence question remains open.
 - Scope honestly stated: the worktree guard's own two refusal families
   (git-in-complex-form) are **not** bypassable by any permission rule, hook
   allow, or skip-permissions (proven live); the fragment restores prompt-free

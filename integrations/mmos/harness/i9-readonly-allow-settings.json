@@ -8,8 +8,7 @@
       "Bash(wc:*)",
       "Bash(echo:*)",
       "Bash(git status:*)",
-      "Bash(git rev-parse:*)",
-      "Bash(git log:*)"
+      "Bash(git rev-parse:*)"
     ]
   }
 }
