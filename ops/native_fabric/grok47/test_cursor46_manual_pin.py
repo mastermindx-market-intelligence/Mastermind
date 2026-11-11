@@ -22,7 +22,12 @@ PICKERS = (
     ROOT / "grok47" / "overlay" / "pick.py",
     SOURCE / "pick.py",
     ROOT / "quota_continuity" / "candidate" / "pick.py",
+    # The AUTO pre-release busy picker is a busy-scoped source; the reviewed
+    # default candidate keeps the pre-busy application picker.
+    ROOT / "quota_continuity" / "candidate" / "broker_busy_2121" / "pick.py",
 )
+BUSY_PICKER = PICKERS[-1]
+APPLICATION_PICKER = ROOT / "quota_continuity" / "candidate" / "pick.py"
 ALIAS = "cursor-grok-4.6-high"
 POLICY = {
     "pools": {
@@ -209,7 +214,9 @@ class Cursor46ExplicitPin(unittest.TestCase):
             qualifier.patched(stale, "0" * 64)
 
     def test_current_application_branch_preserves_explicit_observation_and_no_ambient_read(self):
-        path = PICKERS[-1]
+        self.assertEqual(qualifier.sha(APPLICATION_PICKER.read_bytes()),
+                         qualifier.APPLICATION_PICKER_SHA256)
+        path = BUSY_PICKER
         raw = path.read_bytes()
         self.assertEqual(qualifier.sha(raw), qualifier.BROKER_BUSY_PICKER_SHA256)
         qualified = load(path)
@@ -229,7 +236,7 @@ class Cursor46ExplicitPin(unittest.TestCase):
                                     exhausted=exhausted, application=True))
 
     def test_current_application_qualification_refuses_source_drift_and_sealed_relabel(self):
-        raw = PICKERS[-1].read_bytes()
+        raw = BUSY_PICKER.read_bytes()
         with self.assertRaisesRegex(ValueError, "reviewed_selector_hunk_identity_mismatch"):
             qualifier.apply_reviewed_hunks(raw + b"\n# unqualified change\n")
         for predecessor in qualifier.SEALED_PREDECESSORS:

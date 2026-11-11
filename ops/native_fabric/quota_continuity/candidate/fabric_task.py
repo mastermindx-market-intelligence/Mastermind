@@ -840,14 +840,12 @@ def inspect_run(run_id: str, *, owner_ext: Path | None = None) -> dict[str, Any]
         try:
             request = json.loads(_bounded_regular(prelease.with_name(rid + ".request.json"), 32768))
             root, parent = request.get("root_id"), request.get("parent_run_id")
-            proof = quota_circuit.validate_prelease_refusal(here, rid, root, parent,
-                                                           packet_limit=MAX_RESULT_BYTES)
-            busy = proof["kind"] == "prelease_broker_busy"
+            quota_circuit.validate_prelease_refusal(here, rid, root, parent,
+                                                   packet_limit=MAX_RESULT_BYTES)
             return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
                 **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
-                "state": "TERMINAL_FAILURE", "rc": 75,
-                "signal": "capacity" if busy else "quota",
-                "reason": proof["kind"], "root_id": root, "parent_run_id": parent,
+                "state": "TERMINAL_FAILURE", "rc": 75, "signal": "quota",
+                "reason": "prelease_quota_cooldown", "root_id": root, "parent_run_id": parent,
                 "result_available": False, "result_bytes": None,
                 "execution_absence_proven": True, "request_retained": True,
                 "same_run_replay_allowed": False}
@@ -1146,7 +1144,6 @@ def request(
     request_deadline_ns: int | None = None,
     not_before: str | None = None,
     strict_manual_pin: bool = False,
-    capacity_excluded_pools: list[str] | None = None,
 ) -> int:
     rid = validate_run_id(run_id)
     # Match preview: AUTO is never a literal provider/model pin. Validate
@@ -1154,16 +1151,6 @@ def request(
     pool = _manual_token(pool)
     requested_model = _manual_token(requested_model)
     prefer = _manual_token(prefer)
-    if capacity_excluded_pools is not None:
-        if (type(capacity_excluded_pools) is not list
-                or not 1 <= len(capacity_excluded_pools) < 3
-                or any(type(p) is not str or p not in pick._HOST_POOL_MODES
-                       for p in capacity_excluded_pools)
-                or len(set(capacity_excluded_pools)) != len(capacity_excluded_pools)
-                or request_capacity_preflight is not True
-                or pool is not None or requested_model is not None
-                or prefer is not None or strict_manual_pin):
-            raise FabricTaskError("CAPACITY_EXCLUSION_NOT_QUALIFIED")
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
     if max_turns is not None:
@@ -1273,7 +1260,6 @@ def request(
         else:
             route_options = dict(prefer=prefer, host="auto", pool=pool,
                 **({"excluded_hosts": ["m2"]} if request_deadline_ns is not None else {}),
-                **({"excluded_pools": capacity_excluded_pools} if capacity_excluded_pools else {}),
                 **({"subject_pool": subject_pool} if subject_pool is not None else {}),
                 task_complexity=complexity, escalation_reason=reason,
                 requested_model=requested_model, route_key=rid,

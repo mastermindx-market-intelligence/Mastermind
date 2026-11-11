@@ -97,11 +97,11 @@ def read_current_source_fixture():
 
 
 def current_source_closure():
-    """Bind current candidates separately from immutable historical overlays."""
+    """Bind current busy-epoch members separately from historical overlays."""
     raw = (NATIVE / "rollout/native-manifest.json").read_bytes()
     # Current host-pull successor; historical overlay pins remain independent.
     assert digest(raw) == "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
-    manifest, inventory = read_current_source_fixture().expected_current_source_closure(NATIVE)
+    manifest, inventory = read_current_source_fixture().expected_broker_busy_closure(NATIVE)
     assert len(manifest) == len(inventory["files"]) == 107
     assert set(manifest) == set(inventory["files"])
     for name, sha in manifest.items():
@@ -115,6 +115,7 @@ def current_source_closure():
 
 def test_grok47_merged_source_digest_is_pinned():
     builder = read_builder()
+    fixture = read_current_source_fixture()
     assert set(builder.GROK47_MERGED_SOURCE_DIGESTS) == set(NAMES)
     manifest, inventory = current_source_closure()
     assert len(manifest) == len(inventory["files"]) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
@@ -124,35 +125,37 @@ def test_grok47_merged_source_digest_is_pinned():
         expected = builder.GROK47_MERGED_SOURCE_DIGESTS[name]
         assert digest(path.read_bytes()) == expected
         forward = builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS.get(name)
+        # The six AUTO pre-release members publish from their busy-scoped
+        # directory; every other forward member publishes its candidate/ bytes.
+        source = (("../grok47/overlay/" if forward is None else
+                   (fixture.BROKER_BUSY_SOURCE_DIRECTORY if name in fixture.BUSY_CORE
+                    else "candidate") + "/") + name)
         if forward is not None:
-            current = digest((NATIVE / "candidate" / name).read_bytes())
-            # #2121 busy epoch: converged busy successors of AUTO members are
-            # admitted alongside the seal pin until seal regen.
-            accepted = (manifest["ext/" + name],
-                        builder.BROKER_BUSY_DIGESTS.get(name)) if name in (
-                "pick.py", "remote_sub.sh") else (manifest["ext/" + name],)
-            assert current in accepted
+            # The published source bytes carry exactly the published digest;
+            # the un-converged default candidate keeps the seal pin.
+            assert digest((NATIVE / source).read_bytes()) == manifest["ext/" + name]
         published = manifest["ext/" + name] if forward else expected
-        source = "candidate/" + name if forward else "../grok47/overlay/" + name
         assert manifest["ext/" + name] == published
         assert inventory["files"]["ext/" + name]["sha256"] == published
         assert inventory["files"]["ext/" + name]["source"] == source
     for name in QWEN:
-        blob = (NATIVE / "candidate" / name).read_bytes()
+        source = ((fixture.BROKER_BUSY_SOURCE_DIRECTORY if name in fixture.BUSY_CORE
+                   else "candidate") + "/" + name)
+        blob = (NATIVE / source).read_bytes()
         assert manifest["ext/" + name] == digest(blob)
-        assert inventory["files"]["ext/" + name]["source"] == "candidate/" + name
+        assert inventory["files"]["ext/" + name]["source"] == source
 
 
 def test_rebuild_staged_manifest_is_exact(tmp_path):
     stage = tmp_path / "stage"
     result = subprocess.run(
         [sys.executable, str(NATIVE / "rollout/build_review_stage.py"),
-         "--output", str(stage)],
+         "--output", str(stage), "--broker-busy-epoch"],
         text=True, capture_output=True, timeout=25,
     )
     assert result.returncode == 0, result.stderr
     builder = read_builder()
-    hashes = read_current_source_fixture().verify_current_stage(
+    hashes = read_current_source_fixture().verify_broker_busy_stage(
         stage, NATIVE,
         {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
     assert len(hashes) == len(read_builder().BASE_FILES | read_builder().ADDITIONS) + 1
@@ -333,15 +336,15 @@ def test_builder_refuses_tampered_overlay_base_despite_valid_forward(tmp_path, n
     """A valid forward candidate never excuses a changed accepted overlay base."""
     clone_root, candidate_native = _clone_composition_fixture(tmp_path)
     builder = read_builder()
+    fixture = read_current_source_fixture()
     manifest, _ = current_source_closure()
     for forward in FORWARD_NAMES:
-        current = digest((candidate_native / "candidate" / forward).read_bytes())
-        # The #2121 busy epoch supersedes the six AUTO members; their converged
-        # successors are admitted until seal regen re-pins the seal.
-        accepted = (manifest["ext/" + forward],
-                    builder.BROKER_BUSY_DIGESTS.get(forward)) if forward in (
-            "pick.py", "remote_sub.sh") else (manifest["ext/" + forward],)
-        assert current in accepted
+        # The published epoch source carries exactly the published digest: the
+        # six AUTO members publish from the busy-scoped directory, every other
+        # forward member from candidate/.
+        source = ((fixture.BROKER_BUSY_SOURCE_DIRECTORY if forward in fixture.BUSY_CORE
+                   else "candidate") + "/" + forward)
+        assert digest((candidate_native / source).read_bytes()) == manifest["ext/" + forward]
     changed = clone_root / "grok47/overlay" / name
     changed.write_bytes(changed.read_bytes() + b"\n# tampered accepted overlay base\n")
     stage = tmp_path / "stage"
@@ -404,16 +407,22 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
     assert len(set(PROTECTED_QWEN_SOURCE_DIGESTS.values())) == 4
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(NAMES)
     assert not set(PROTECTED_QWEN_SOURCE_DIGESTS) & set(builder.GROK47_CANDIDATE_COMPOSITION_DIGESTS)
+    fixture = read_current_source_fixture()
     manifest, inventory = current_source_closure()
     assert set(REVIEWED_QWEN_FORWARD_DIGESTS) == {"glm_host_account_source.py", "lease_broker.py"}
     assert builder.BROKER_BUSY_PREIMAGES["lease_broker.py"] == BROKER_BUSY_PREIMAGE_ANCHOR
     assert builder.BROKER_BUSY_DIGESTS["lease_broker.py"] == BROKER_BUSY_LEASE_BROKER_SHA256
-    candidate = digest((NATIVE / "candidate/lease_broker.py").read_bytes())
-    assert candidate == BROKER_BUSY_LEASE_BROKER_SHA256
+    # The busy broker publishes from its busy-scoped source; the default
+    # candidate keeps master's reviewed GLM-composed successor.
+    busy_broker = digest((NATIVE / fixture.BROKER_BUSY_SOURCE_DIRECTORY / "lease_broker.py").read_bytes())
+    assert busy_broker == BROKER_BUSY_LEASE_BROKER_SHA256
+    assert digest((NATIVE / "candidate/lease_broker.py").read_bytes()) == builder.GLM_CORE_DIGESTS["lease_broker.py"]
     for name, original in sorted(PROTECTED_QWEN_SOURCE_DIGESTS.items()):
         expected = REVIEWED_QWEN_FORWARD_DIGESTS.get(name, original)
         assert name in builder.BASE_FILES
-        candidate = NATIVE / "candidate" / name
+        source = ((fixture.BROKER_BUSY_SOURCE_DIRECTORY if name in fixture.BUSY_CORE
+                   else "candidate") + "/" + name)
+        candidate = NATIVE / source
         assert candidate.is_file() and not candidate.is_symlink()
         if name != "lease_broker.py":
             assert manifest["ext/" + name] == expected
@@ -421,7 +430,7 @@ def test_protected_qwen_files_and_exact_context_reader_forward():
         assert digest(candidate.read_bytes()) == current
         row = inventory["files"]["ext/" + name]
         assert row["sha256"] == current
-        assert row["source"] == "candidate/" + name
+        assert row["source"] == source
         assert row["installed_preimage_sha256"]
 
 
@@ -436,7 +445,8 @@ def _current_closure_fixture(root):
         "rollout/native-manifest.json", "rollout/native-source-inventory.json",
         *(fixture.GLM_CORE_SOURCE_DIRECTORY + "/" + name
           for name in fixture.GLM_CORE_PREIMAGE_SOURCES),
-        *("candidate/" + name for name in fixture.BUSY_CORE),
+        *(fixture.BROKER_BUSY_SOURCE_DIRECTORY + "/" + name
+          for name in fixture.BUSY_CORE),
     )
     for relative in relatives:
         target = root / relative
@@ -450,7 +460,7 @@ def test_current_projection_preserves_all_other_historical_rows(tmp_path):
     native = _current_closure_fixture(tmp_path / "source")
     baseline = json.loads((native / "rollout/native-manifest.json").read_bytes())
     baseline_inventory = json.loads((native / "rollout/native-source-inventory.json").read_bytes())
-    manifest, inventory = fixture.expected_current_source_closure(native)
+    manifest, inventory = fixture.expected_broker_busy_closure(native)
     # Only the six busy members advance their digests; the two GLM core
     # members keep their preimage digests but rebind source (and bytes) to
     # the sealed preimage directory.
@@ -468,19 +478,21 @@ def test_current_closure_refuses_changed_baseline_or_candidate(tmp_path):
         "rollout/native-manifest.json", "rollout/native-source-inventory.json",
         *(fixture.GLM_CORE_SOURCE_DIRECTORY + "/" + name
           for name in fixture.GLM_CORE_PREIMAGE_SOURCES),
-        *("candidate/" + name for name in fixture.BUSY_CORE),
+        *(fixture.BROKER_BUSY_SOURCE_DIRECTORY + "/" + name
+          for name in fixture.BUSY_CORE),
     ]
     for index, relative in enumerate(relatives):
         native = _current_closure_fixture(tmp_path / str(index))
         target = native / relative
         target.write_bytes(target.read_bytes() + b"\n# unqualified\n")
         with pytest.raises(AssertionError):
-            fixture.expected_current_source_closure(native)
+            fixture.expected_broker_busy_closure(native)
 
 
 def test_current_closure_refuses_symlinked_core_even_with_exact_bytes(tmp_path):
     fixture = read_current_source_fixture()
-    relatives = {name: "candidate/" + name for name in fixture.BUSY_CORE}
+    relatives = {name: fixture.BROKER_BUSY_SOURCE_DIRECTORY + "/" + name
+                 for name in fixture.BUSY_CORE}
     relatives.update({name: fixture.GLM_CORE_SOURCE_DIRECTORY + "/" + name
                       for name in fixture.GLM_CORE_PREIMAGE_SOURCES})
     for index, (name, relative) in enumerate(sorted(relatives.items())):
@@ -490,13 +502,13 @@ def test_current_closure_refuses_symlinked_core_even_with_exact_bytes(tmp_path):
         target.rename(retained)
         target.symlink_to(retained)
         with pytest.raises(AssertionError, match="not regular"):
-            fixture.expected_current_source_closure(native)
+            fixture.expected_broker_busy_closure(native)
 
 
 def test_current_stage_refuses_changed_emitted_records_before_payload_reads(tmp_path):
     fixture = read_current_source_fixture()
     native = _current_closure_fixture(tmp_path / "source")
-    records = fixture.expected_current_source_closure(native)
+    records = fixture.expected_broker_busy_closure(native)
     names = ("native-manifest.json", "native-source-inventory.json")
     for index, changed in enumerate(names):
         output = tmp_path / ("output-" + str(index))
@@ -506,4 +518,4 @@ def test_current_stage_refuses_changed_emitted_records_before_payload_reads(tmp_
         target = output / changed
         target.write_bytes(target.read_bytes() + b" ")
         with pytest.raises(AssertionError, match="source closure differs"):
-            fixture.verify_current_stage(output, native, set(records[0]))
+            fixture.verify_broker_busy_stage(output, native, set(records[0]))

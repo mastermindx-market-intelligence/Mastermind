@@ -1254,12 +1254,6 @@ if [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
   OPERATOR_CHILD_ARGS=(--operator-child-id "$ID")
 fi
 if [ "${POOL_PRELEASE_HANDOFF:-}" = 1 ]; then
-  # Only an original foreground AUTO commission can use the capacity handoff.
-  # Never let an ungrantable pool consume the ordinary hour-long wait fuse.
-  # The broker itself owns the final no-grant decision; this is a time bound.
-  if awk -v seconds="$LEASE_WAIT_SECS" 'BEGIN { exit !(seconds+0 > 5) }'; then
-    LEASE_WAIT_SECS=5
-  fi
   # The foreground adapter owns the frozen request and the eventual one-shot
   # controller return. Only a broker refusal before ANY grant can use this
   # handoff; it cannot authorize an operator/historical continuation.

@@ -119,15 +119,12 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify all current107 bytes before restoring historical fixtures."""
+    """Qualify all current107 busy-epoch bytes before restoring historical fixtures."""
     import test_native_current_source as current_source
     native = Path(builder.__file__).parent.parent
-    # The busy epoch stages the go_lease pair from the sealed GLM preimage
-    # directory, so the candidate-staged members are a subset of the four
-    # historical application preimage restores below.
-    if not current_source.APPLICATION_MEMBERS <= set(APPLICATION_PREIMAGES):
+    if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
         raise AssertionError("current application source binding differs")
-    return current_source.verify_current_stage(
+    return current_source.verify_broker_busy_stage(
         output, native,
         {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
 
@@ -149,7 +146,8 @@ class PairedLauncherUpgrade(unittest.TestCase):
         try:
             cls.shared = tempfile.TemporaryDirectory(prefix='upgrade-source-')
             cls.built = Path(cls.shared.name).resolve() / 'built'
-            with mock.patch.object(sys, 'argv', ['builder', '--output', str(cls.built)]), \
+            with mock.patch.object(sys, 'argv', ['builder', '--output', str(cls.built),
+                                                 '--broker-busy-epoch']), \
                     contextlib.redirect_stdout(io.StringIO()):
                 builder.main()
             current_manifest = (cls.built / 'native-manifest.json').read_bytes()

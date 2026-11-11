@@ -73,7 +73,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
     'remote_sub_exec.py': '4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281',
-    'pick.py': 'c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057',
+    'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
     'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
@@ -143,6 +143,17 @@ def _glm_historical_core_source(root, name):
     path = Path(root) / GLM_CORE_SOURCE_DIRECTORY / name
     _glm_core_file(path, GLM_CORE_PREIMAGES[name])
     return path
+
+
+def _broker_busy_source(root, name):
+    """Exact busy-scoped stage source for one converged busy member."""
+    path = Path(root) / BROKER_BUSY_SOURCE_DIRECTORY / name
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("broker busy source is not a regular file: " + name)
+    raw = path.read_bytes()
+    if sha(raw) != BROKER_BUSY_DIGESTS[name]:
+        raise ValueError("broker busy source differs: " + name)
+    return path, raw
 
 
 def before_glm_application_core(manifest):
@@ -254,14 +265,15 @@ def go_application_dependencies(root, *, staged_manifest=None):
     if staged_manifest is not None and previous == staged_manifest:
         return dependencies
     # The complete 2121 broker-busy cohort already carries the reviewed broker
-    # bytes; the GLM helper composition is not re-derived over them.
-    if (staged_manifest is not None
+    # bytes; the GLM helper composition is not re-derived over them. This only
+    # fires for a staged busy cohort, i.e. an explicit --broker-busy-epoch build.
+    if (_BROKER_BUSY_EPOCH and staged_manifest is not None
             and all(staged_manifest.get("ext/" + name) == digest
                     for name, digest in BROKER_BUSY_DIGESTS.items())):
-        candidate = Path(root) / "candidate" / "lease_broker.py"
-        raw = candidate.read_bytes()
+        source, raw = _broker_busy_source(root, "lease_broker.py")
         dependencies["lease_broker.py"] = {
-            "sha256": sha(raw), "bytes": len(raw), "source": "candidate/lease_broker.py"}
+            "sha256": sha(raw), "bytes": len(raw),
+            "source": str(source.relative_to(Path(root)))}
         return dependencies
     for name in GO_APPLICATION_DEPENDENCIES:
         prior = dependencies[name]
@@ -568,6 +580,12 @@ BROKER_BUSY_DIGESTS = {
     "pick.py": "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057",
     "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
 }
+# The busy epoch's six converged source members live in their own busy-scoped
+# directory. The default build never reads it: default cohorts stage master's
+# reviewed sources (candidate/ and the sealed GLM preimages) unchanged, and
+# only an explicit --broker-busy-epoch build takes the busy sources.
+BROKER_BUSY_SOURCE_DIRECTORY = "candidate/broker_busy_2121"
+_BROKER_BUSY_EPOCH = False
 
 GO_ORIGINAL_ARTIFACT_ADDITIONS = {
     "original_advertised_artifact.py": "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0",
@@ -2624,18 +2642,14 @@ def application_carrier_candidate_digests(root):
     # named guard, never silently reselect an historical base.
     observed = {}
     for name in APPLICATION_CARRIER_DIGESTS:
-        source = _glm_historical_core_source(root, name)
+        source = (_broker_busy_source(root, name)[0]
+                  if _BROKER_BUSY_EPOCH and name in BROKER_BUSY_DIGESTS
+                  else _glm_historical_core_source(root, name))
         observed[name] = (None if source.is_symlink() or not source.is_file()
                           else sha(source.read_bytes()))
         if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
             accepted = {cohort[name] for cohort in cohorts}
             accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
-            # The 2121 broker-busy epoch composes onto the current carriers:
-            # pick/quota_circuit are the published busy blobs; remote_sub.sh and
-            # fabric_task.py carry the master-side retained lines, so their
-            # converged forward bytes are the busy-cohort digest table's values.
-            if name in BROKER_BUSY_DIGESTS:
-                accepted.add(BROKER_BUSY_DIGESTS[name])
             if observed[name] not in accepted:
                 raise ValueError("accepted Grok forward composition mismatch: " + name)
     if any(observed == cohort for cohort in cohorts):
@@ -2728,7 +2742,11 @@ def main():
                         help="preserve exact selected43 five native members; source-only profile")
     parser.add_argument("--include-application-glm", action="store_true",
                         help="seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go")
+    parser.add_argument("--broker-busy-epoch", action="store_true",
+                        help="stage the six converged AUTO pre-release broker-busy sources from their busy-scoped directory; the default build keeps master's reviewed sources unchanged")
     args = parser.parse_args()
+    global _BROKER_BUSY_EPOCH
+    _BROKER_BUSY_EPOCH = bool(args.broker_busy_epoch)
     if (args.include_provider_plan_fleet_launch_repair
             and not args.include_provider_plan_memory_support):
         parser.error("--include-provider-plan-fleet-launch-repair requires --include-provider-plan-memory-support")
@@ -2765,18 +2783,14 @@ def main():
     files = {}
     application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
-        if name in GLM_CORE_PREIMAGES:
+        if _BROKER_BUSY_EPOCH and name in BROKER_BUSY_DIGESTS:
+            # Busy-scoped staging: only an explicit --broker-busy-epoch build
+            # takes the six converged busy sources. Default cohorts never enter
+            # this path, so master's reviewed 107 build stays byte-exact.
+            source, raw = _broker_busy_source(root, name)
+        elif name in GLM_CORE_PREIMAGES:
             source = _glm_historical_core_source(root, name)
             raw = source.read_bytes()
-            # The 2121 broker-busy epoch advances the broker member itself:
-            # when the reviewed candidate is the busy broker, stage its exact
-            # bytes instead of the frozen GLM preimage. The busy cohort guard
-            # in the manifest normalizers still binds the whole six-member set.
-            if name == "lease_broker.py":
-                candidate = root / "candidate" / name
-                if (candidate.is_file() and not candidate.is_symlink()
-                        and sha(candidate.read_bytes()) == BROKER_BUSY_DIGESTS[name]):
-                    source, raw = candidate, candidate.read_bytes()
         else:
             if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
                 # Carrier successors still authenticate their immutable accepted
@@ -2806,12 +2820,7 @@ def main():
                     if source.is_symlink() or not source.is_file():
                         raise ValueError("accepted Grok forward composition mismatch: " + name)
                     raw = source.read_bytes()
-                    # The broker-busy picker epoch supersedes the previous
-                    # composed candidate; both hash-bound epochs remain named.
-                    accepted_pickers = {GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]}
-                    if name == "pick.py":
-                        accepted_pickers.add(BROKER_BUSY_PICKER_PREIMAGE)
-                    if sha(raw) not in accepted_pickers:
+                    if sha(raw) != GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]:
                         raise ValueError("accepted Grok forward composition mismatch: " + name)
             else:
                 choices = (root / "candidate" / name,)

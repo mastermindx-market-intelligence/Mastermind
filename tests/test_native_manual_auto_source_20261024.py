@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
+# The six converged AUTO pre-release members are busy-scoped sources; the
+# reviewed default candidate/ keeps master's pre-busy bytes.
+BUSY_SOURCE = NATIVE / "candidate/broker_busy_2121"
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
@@ -305,12 +308,14 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     assert sha(FIXTURE) == "75edb2345e90f2f5a758020acef494aa9090b4c97e020bbafb6f3ee5be63c794"
     builder = NATIVE / "rollout/build_review_stage.py"
     built = tmp_path / "built"
-    proc = subprocess.run([sys.executable, str(builder), "--output", str(built)],
+    proc = subprocess.run([sys.executable, str(builder), "--output", str(built),
+                           "--broker-busy-epoch"],
                           cwd=ROOT, capture_output=True, text=True, timeout=55)
     assert proc.returncode == 0, proc.stderr[-2500:]
     stage = built / "native-code-stage"
     for relative, (name, original_sha) in SOURCE.items():
-        source = NATIVE / "candidate" / name
+        source = (BUSY_SOURCE if name in ("pick.py", "fabric_task.py")
+                  else NATIVE / "candidate") / name
         # Current source includes later routing and namespace-bound readers.
         # Reconstruct the exact historical F1 epoch only in this private stage.
         current = source.read_bytes()
@@ -401,8 +406,8 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # The historical F1 regression is preserved; independently verify R28
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
-    assert sha(NATIVE / "candidate/pick.py") == BUSY_PICK_SHA
-    assert sha(NATIVE / "candidate/fabric_task.py") == BUSY_TASK_SHA
+    assert sha(BUSY_SOURCE / "pick.py") == BUSY_PICK_SHA
+    assert sha(BUSY_SOURCE / "fabric_task.py") == BUSY_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
-        NATIVE / "candidate/pick.py").read_bytes()
+        BUSY_SOURCE / "pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.

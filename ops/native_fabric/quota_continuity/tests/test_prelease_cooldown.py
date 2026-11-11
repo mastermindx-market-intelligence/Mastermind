@@ -23,7 +23,10 @@ from unittest.mock import patch
 from test_commission_deadline import PYTHON_FIXTURE
 
 SOURCE = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(SOURCE / "candidate"), str(SOURCE / "source")]
+# The AUTO pre-release broker-busy epoch's six converged members are a
+# busy-scoped source set; the reviewed default candidate/ stays untouched.
+BUSY = SOURCE / "candidate/broker_busy_2121"
+sys.path[:0] = [str(BUSY), str(SOURCE / "candidate"), str(SOURCE / "source")]
 import fabric_continuation
 import lease_broker
 import pool_ledger
@@ -41,7 +44,7 @@ for name in (
     module.KNOWN_RUNS = ()
     historical[name] = module
 spec = importlib.util.spec_from_file_location(
-    "prelease_regression_adapter", SOURCE / "candidate/fabric_task.py")
+    "prelease_regression_adapter", BUSY / "fabric_task.py")
 api = importlib.util.module_from_spec(spec)
 with patch.dict(sys.modules, historical):
     spec.loader.exec_module(api)
@@ -92,7 +95,8 @@ class PreleaseCooldownRace(unittest.TestCase):
             "allowed_modes": ["minimax", "glm"],
         }}))
         for name in ("remote_sub.sh", "commission_deadline.py", "remote_sub_helpers.py"):
-            shutil.copyfile(SOURCE / "candidate" / name, self.root / name)
+            shutil.copyfile((BUSY if name == "remote_sub.sh" else SOURCE / "candidate") / name,
+                            self.root / name)
         interpreter = self.root / "fixture-python"
         interpreter.write_text("#!" + sys.executable + "\n" + PYTHON_FIXTURE)
         interpreter.chmod(0o700)
@@ -129,7 +133,8 @@ class PreleaseCooldownRace(unittest.TestCase):
         clean_env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": os.environ["HOME"], "LC_ALL": "C", "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONPATH": os.pathsep.join((str(SOURCE / "candidate"), str(SOURCE / "source"))),
+            "PYTHONPATH": os.pathsep.join((str(BUSY), str(SOURCE / "candidate"),
+                                           str(SOURCE / "source"))),
             "OFFLINE_REGRESSION_ROOT": str(self.root),
             "REMOTE_SUB_BROKER_CMD": str(self.root / "broker-cli"),
             "REMOTE_SUB_SSH_CMD": str(self.root / "deny-transport"),
@@ -153,7 +158,10 @@ class PreleaseCooldownRace(unittest.TestCase):
                 self.assertFalse(quota_circuit.pool_blocked(self.br, "minimax"))
                 self.selected_before_cooldown = True
                 self.cool_from_settled_other_commission()
-            result = native_run(argv, **kwargs, capture_output=True, timeout=10)
+            # The owned child is bash + fixture python + the broker CLI; the
+            # busy epoch bounds its own lease wait at 5s, so the fixture budget
+            # stays finite while leaving room for interpreter startup.
+            result = native_run(argv, **kwargs, capture_output=True, timeout=30)
             self.native_returns.append(result)
             return result
 

@@ -2190,15 +2190,6 @@ class Broker:
                 )
                 if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
                     return result
-                if capacity_handoff and operator_child_id is None:
-                    import quota_circuit
-                    if last_reason in quota_circuit.PRELEASE_BUSY_REASONS:
-                        # AUTO handoff did not register a waiter or grant a
-                        # lease. Other callers preserve the incumbent queue.
-                        if waiter_id is not None:
-                            return AcquireResult(ok=False, reason="busy_waiter_unverified",
-                                orchestrator_id=orchestrator_id, pool=pool)
-                        return result
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
                 lock.close()
@@ -2559,30 +2550,27 @@ class Broker:
 
         want_surplus = held_n >= share
         if want_surplus and below:
-            if not (capacity_handoff and operator_child_id is None):
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
+            )
             return (
                 AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
                 waiter_id,
                 "lending_blocked",
             )
         if len(active) >= cap:
-            if not (capacity_handoff and operator_child_id is None):
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
+            )
             return (
                 AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
                 waiter_id,
                 "cap_full",
             )
         if not self._front_of_queue(conn, pool, orch, task_class):
-            if not (capacity_handoff and operator_child_id is None):
-                waiter_id = self._register_demand(
-                    conn, waiter_id, orch, pool, account, task_class, host
-                )
+            waiter_id = self._register_demand(
+                conn, waiter_id, orch, pool, account, task_class, host
+            )
             return (
                 AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
                 waiter_id,
@@ -2599,7 +2587,7 @@ class Broker:
             persist = reason not in ("account_parked",) and (
                 not account or account in grantable_names or reason == "accounts_at_cap"
             )
-            if persist and not (capacity_handoff and operator_child_id is None):
+            if persist:
                 waiter_id = self._register_demand(
                     conn, waiter_id, orch, pool, account, task_class, host
                 )
@@ -3977,17 +3965,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                 pool=res.pool, host=args.host, model=args.model, pid=args.pid,
                 request_sha256=args.request_sha256, launch_sha256=args.launch_sha256,
                 controller_sha256=args.controller_sha256, blockade=res.quota_blockade)
-        if (not res.ok and not res.lease_id and args.prelease_receipt):
-            import quota_circuit
-            if res.reason in quota_circuit.PRELEASE_BUSY_REASONS:
-                quota_circuit.write_prelease_busy_refusal(
-                    args.prelease_receipt, run_id=args.run_id, root_id=oid,
-                    parent_run_id=args.parent_run_id, pool=res.pool, host=args.host,
-                    model=args.model, pid=args.pid,
-                    request_sha256=args.request_sha256,
-                    launch_sha256=args.launch_sha256,
-                    controller_sha256=args.controller_sha256,
-                    broker_reason=res.reason)
         print(res.line())
         return 0 if res.ok else 75
 
