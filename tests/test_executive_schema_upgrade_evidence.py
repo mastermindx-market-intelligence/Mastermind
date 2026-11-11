@@ -190,7 +190,10 @@ def _scoped_temp_roots(monkeypatch):
     monkeypatch.setattr(evidence.tempfile, "mkdtemp", _mkdtemp)
 
     def _roots() -> set:
-        return set(Path("/tmp").glob(prefix + "*"))
+        # The glob follows tempfile's actual root: under the CI parallel
+        # placement each worker's TMPDIR is scoped to its own quiet root, so
+        # the created directories land there rather than under /tmp.
+        return set(Path(evidence.tempfile.gettempdir()).glob(prefix + "*"))
 
     return _roots
 

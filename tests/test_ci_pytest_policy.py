@@ -874,6 +874,7 @@ def test_worker_switch_serial_values_keep_the_exact_serial_argv(monkeypatch, swi
         monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     else:
         monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
     modules = ("tests/test_fixture_a.py", "tests/test_fixture_b.py")
     assert cip.pytest_argv(modules) == [
         cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
@@ -884,6 +885,9 @@ def test_worker_switch_serial_values_keep_the_exact_serial_argv(monkeypatch, swi
 @pytest.mark.parametrize("switch", ["2", "4", " 4 "])
 def test_worker_switch_parallel_values_add_loadfile_xdist(monkeypatch, switch):
     monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    # Without RUNNER_TEMP (local runs) the parallel argv is just the xdist
+    # placement flags.
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
     modules = ("tests/test_fixture_a.py",)
     argv = cip.pytest_argv(modules)
     assert argv == [
@@ -892,6 +896,67 @@ def test_worker_switch_parallel_values_add_loadfile_xdist(monkeypatch, switch):
     ]
     # Same module set, only placement of execution changes.
     assert argv[-len(modules):] == list(modules)
+
+
+@pytest.mark.parametrize("runner_temp", ["/home/runner/work/_temp", "  /home/runner/work/_temp  "])
+def test_worker_switch_on_runner_parks_basetemp_in_runner_temp(monkeypatch, runner_temp):
+    # On hosted runners the parallel argv also pins --basetemp into the
+    # runner's quiet per-job area and loads the worker-env plugin: pytest's
+    # default tmp root (/tmp/pytest-of-*) and every other tempfile consumer
+    # sit under the hot /tmp that all four workers churn with transient
+    # entries, and the hold-and-double-stat custody guards cross those
+    # ancestors on their way to / (CI run 42994920108 shard 0 refused with
+    # "retained supersession entry is unsafe", shard 1 with
+    # "changed_during_read"). Serial values never add either.
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.setenv("RUNNER_TEMP", runner_temp)
+    modules = ("tests/test_fixture_a.py",)
+    argv = cip.pytest_argv(modules)
+    assert argv == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
+        "-n", "4", "--dist", "loadfile",
+        "-p", "scripts.ci_pytest_worker_env",
+        "--basetemp", "/home/runner/work/_temp/mmx-pytest-basetemp", *modules,
+    ]
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+    assert cip.pytest_argv(modules) == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
+    ]
+
+
+def test_worker_env_plugin_scopes_tmpdir_per_process(tmp_path, monkeypatch):
+    # The -p plugin applies at import time, before any test asks tempfile for
+    # a directory: every process (each xdist worker) gets its own TMPDIR root
+    # under the runner's quiet per-job area, created at bring-up, so no
+    # sibling ever creates an entry inside another worker's ancestor chain.
+    import importlib
+
+    import scripts.ci_pytest_worker_env as worker_env
+
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.delenv("TMPDIR", raising=False)
+    reloaded = importlib.reload(worker_env)
+    try:
+        root = reloaded._ROOT
+        assert root is not None
+        assert root.is_dir()
+        assert root == (tmp_path / "runner-temp" / "pytest-worker-tmp"
+                        / f"p{cip.os.getpid()}")
+        assert cip.os.environ["TMPDIR"] == str(root)
+        # Serial switch values and missing RUNNER_TEMP never scope, and never
+        # disturb an already-scoped TMPDIR.
+        monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+        assert importlib.reload(worker_env)._ROOT is None
+        monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+        monkeypatch.delenv("RUNNER_TEMP", raising=False)
+        assert importlib.reload(worker_env)._ROOT is None
+        assert cip.os.environ["TMPDIR"] == str(root)
+    finally:
+        # Leave the module inert for later importers in this process.
+        monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+        importlib.reload(worker_env)
 
 
 @pytest.mark.parametrize("switch", ["x", "-1", "1.5", "02x", "0x4", "65", "1000000"])
