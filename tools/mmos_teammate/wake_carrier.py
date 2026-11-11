@@ -261,9 +261,11 @@ def parse_ask_block(reply):
     if start is None:
         return None
     assignee, title, desc_lines, closed = None, None, [], False
-    for line in lines[start + 1:]:
+    close_at = None
+    for off, line in enumerate(lines[start + 1:]):
         if line.strip().startswith("```"):
             closed = True
+            close_at = start + 1 + off
             break
         if assignee is None and line.strip().startswith("assignee:"):
             assignee = line.split(":", 1)[1].strip()
@@ -273,6 +275,11 @@ def parse_ask_block(reply):
             continue
         desc_lines.append(line)
     if not closed or not assignee or not (title or "").strip():
+        return None
+    # R2a finding 18 (the F9 guard): the ask block must END the reply. Words
+    # after the closing fence mean the teammate kept talking past the ask —
+    # a reconsidered or quoted block is not a live ask. Whitespace is fine.
+    if any(line.strip() for line in lines[close_at + 1:]):
         return None
     if title.strip().startswith("<") and title.strip().endswith(">"):
         return None  # the how-to-ask example quoted back, not a real ask

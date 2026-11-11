@@ -225,7 +225,11 @@ def test_ask_help_names_other_teammates_only():
     msg = wc.build_message("MAS-1", "t", "b", "pc-x-1", asking=text)
     # the example quoted back by a teammate is never taken as a real ask
     assert "```paperclip-ask" in msg and wc.parse_ask_block(msg) is None
+    # a REAL ask ends the reply (the help text says so; R2a finding 18's
+    # guard makes the rule hold): take the block up to its closing fence
     real = msg.replace("<short title>", "Check the copy")
+    fence = real.rindex("```paperclip-ask")
+    real = real[:real.index("```", fence + 3) + 3]
     assert wc.parse_ask_block(real)["assignee"] == "Design Lead"
     assert wc.ask_help({"Assurance": "a-1"}, "a-1") is None
     assert wc.ask_help({}, "a-1") is None
@@ -648,6 +652,19 @@ def test_ask_for_unknown_or_foreign_teammate_is_plain_reply():
     kinds = [c[0] for c in pc.calls]
     assert "interaction" in kinds
     assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_ask_block_with_words_after_the_fence_is_not_an_ask():
+    # R2a finding 18: an ask block counts only when it ends the reply. Words
+    # after the closing fence mean the teammate kept talking — a block they
+    # reconsidered or wrapped in prose is not a live ask; the reply is
+    # delivered as a plain answer.
+    block = ("```paperclip-ask\nassignee: Atlas-TEST\n"
+             "title: Count lines\ndescription: please\n```")
+    assert wc.parse_ask_block(
+        block + "\nwait — never mind, I'll do it myself.") is None
+    assert wc.parse_ask_block(block)["assignee"] == "Atlas-TEST"
+    assert wc.parse_ask_block(block + "\n\n")["assignee"] == "Atlas-TEST"
 
 
 def test_malformed_ask_block_is_plain_reply_never_error():
