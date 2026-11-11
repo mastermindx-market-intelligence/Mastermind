@@ -36,9 +36,76 @@ def test_successful_empty_search_remains_available_empty(monkeypatch) -> None:
     from app import web
     from data_layer import polygon
 
-    monkeypatch.setattr(polygon, "search_tickers", lambda _q: [])
+    monkeypatch.setattr(polygon, "search_tickers", lambda _q, *, strict: [])
     payload = _body(web.api_self_directed_search("NOPE"))
     assert payload == {"search_status": "available", "results": []}
+
+
+@pytest.fixture
+def search_provider(monkeypatch):
+    import requests
+    from data_layer import polygon
+
+    monkeypatch.setattr(polygon, "_search_cache", {})
+    monkeypatch.setenv("POLYGON_API_KEY", "fixture-only")
+    monkeypatch.delenv("MASSIVE_API_KEY", raising=False)
+    responses = []
+    calls = []
+
+    def request(*args, **kwargs):
+        calls.append(kwargs["params"]["search"])
+        status, payload = responses.pop(0)
+        response = requests.Response()
+        response.status_code = status
+        response._content = json.dumps(payload).encode()
+        return response
+
+    monkeypatch.setattr(requests, "get", request)
+    return responses, calls
+
+
+@pytest.mark.parametrize(("status", "payload"), [
+    (503, {}), (200, {"status": "ERROR"}), (200, {"status": "OK"}),
+    (200, {"status": "OK", "results": {}}),
+    (200, {"status": "OK", "count": 1, "results": []}),
+    (200, {"status": "OK", "results": [{"name": "ticker missing"}]}),
+])
+def test_search_retries_after_provider_failure_and_caches_recovery(search_provider, status, payload):
+    from app import web
+
+    responses, calls = search_provider
+    responses.extend([(status, payload), (200, {"status": "OK", "results": [
+        {"ticker": "aapl", "name": "Apple", "primary_exchange": "XNAS"}]})])
+    assert _body(web.api_self_directed_search("Apple")) == {
+        "search_status": "unavailable", "results": None, "error": "self_directed_search_unavailable"}
+    expected = {"search_status": "available", "results": [
+        {"ticker": "AAPL", "name": "Apple", "type": "", "exchange": "XNAS"}]}
+    assert _body(web.api_self_directed_search("Apple")) == expected
+    assert _body(web.api_self_directed_search("apple")) == expected
+    assert calls == ["Apple", "Apple"]
+
+
+@pytest.mark.parametrize("empty", [{"results": []}, {"count": 0}])
+def test_real_empty_search_is_cached(search_provider, empty):
+    from app import web
+
+    responses, calls = search_provider
+    responses.append((200, {"status": "OK", **empty}))
+    for _ in range(2):
+        assert _body(web.api_self_directed_search("missing")) == {"search_status": "available", "results": []}
+    assert calls == ["missing"]
+
+
+def test_missing_search_key_preserves_best_effort_interface_without_poisoning_cache(search_provider, monkeypatch):
+    from app import web
+    from data_layer import polygon
+
+    monkeypatch.delenv("POLYGON_API_KEY")
+    assert polygon.search_tickers("Apple") == []
+    assert _body(web.api_self_directed_search("Apple"))["search_status"] == "unavailable"
+    assert _body(web.api_self_directed_search("  ")) == {"search_status": "available", "results": []}
+    assert polygon._search_cache == {}
+    assert search_provider[1] == []
 
 
 def test_quote_failure_is_unavailable_not_no_price(monkeypatch) -> None:

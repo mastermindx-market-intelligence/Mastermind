@@ -2819,7 +2819,7 @@ def api_self_directed_search(q: str = "") -> JSONResponse:
     """Live US-stock search (ticker or company name) for the order ticket."""
     try:
         from data_layer import polygon
-        return JSONResponse({"search_status": "available", "results": polygon.search_tickers(q)})
+        return JSONResponse({"search_status": "available", "results": polygon.search_tickers(q, strict=True)})
     except Exception as exc:  # noqa: BLE001
         _log.warning("self_directed search failed: %s", type(exc).__name__)
         return JSONResponse({

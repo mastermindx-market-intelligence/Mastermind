@@ -169,10 +169,12 @@ def ticker_details(ticker: str) -> Optional[dict]:
 _search_cache: dict[str, tuple[float, list]] = {}
 
 
-def search_tickers(query: str, limit: int = 12) -> list[dict]:
-    """Live US-stock search via Polygon /v3/reference/tickers (`search` matches ticker OR
-    name). Returns [{ticker, name, type, exchange}], active common stocks/ETFs first.
-    Best-effort: [] when unkeyed / offline. Cached `_TTL` seconds per (query, limit)."""
+def search_tickers(query: str, limit: int = 12, *, strict: bool = False) -> list[dict]:
+    """Return live US-stock matches. Strict callers distinguish failure from no matches.
+
+    Successful lookups, including an empty result, share the existing TTL cache.
+    Best-effort callers continue to receive an empty list on provider failure.
+    """
     import os
     q = (query or "").strip()
     if not q:
@@ -182,29 +184,42 @@ def search_tickers(query: str, limit: int = 12) -> list[dict]:
     hit = _search_cache.get(ckey)
     if hit and (now - hit[0]) < _TTL:
         return hit[1]
-    out: list[dict] = []
+
     try:
         import requests
         key = (os.environ.get("POLYGON_API_KEY") or os.environ.get("MASSIVE_API_KEY") or "").strip()
-        if key:
-            r = requests.get(
-                "https://api.polygon.io/v3/reference/tickers",
-                params={"search": q, "market": "stocks", "active": "true",
-                        "limit": max(1, min(int(limit), 50)), "apiKey": key},
-                timeout=6)
-            if r.ok:
-                for res in (r.json() or {}).get("results") or []:
-                    tk = (res.get("ticker") or "").upper()
-                    if not tk:
-                        continue
-                    out.append({
-                        "ticker": tk,
-                        "name": res.get("name") or "",
-                        "type": res.get("type") or "",
-                        "exchange": res.get("primary_exchange") or "",
-                    })
-    except Exception:  # noqa: BLE001 — search is best-effort, never fatal
+        if not key:
+            raise ValueError("missing search key")
+        response = requests.get(
+            "https://api.polygon.io/v3/reference/tickers",
+            params={"search": q, "market": "stocks", "active": "true",
+                    "limit": max(1, min(int(limit), 50)), "apiKey": key},
+            timeout=6,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("status") != "OK":
+            raise ValueError("invalid search response")
+        rows = payload.get("results")
+        if "results" not in payload and type(payload.get("count")) is int and payload["count"] == 0:
+            rows = []
+        if not isinstance(rows, list) or (not rows and payload.get("count", 0) != 0):
+            raise ValueError("invalid search results")
         out = []
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get("ticker"), str) or not row["ticker"].strip():
+                raise ValueError("invalid search ticker")
+            out.append({
+                "ticker": row["ticker"].strip().upper(),
+                "name": row.get("name") or "",
+                "type": row.get("type") or "",
+                "exchange": row.get("primary_exchange") or "",
+            })
+    except Exception:  # HTTP errors may include the credential-bearing request URL.
+        if strict:
+            raise RuntimeError("ticker search unavailable") from None
+        return []
+
     _search_cache[ckey] = (now, out)
     return out
 
