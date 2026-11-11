@@ -1134,3 +1134,86 @@ def test_step4_reconcile_port_constructs_and_refuses_only_the_launch(
     with pytest.raises(T3PortRefusalError, match="reconcile-only"):
         port._launch(SimpleNamespace(), "launch")
     assert "t3_thread_launch" not in calls  # nothing was sent
+
+
+def test_step4_launch_spec_carries_the_attempt_s_own_job(
+        scratch, monkeypatch, tmp_path):
+    """Caught live by the lease-expiry journey (2026-11-11): the door claimed
+    its attempt on the PLACEMENT job (JOB-002) but built the launch spec with
+    the REQUEST job's id (JOB-001).  The engine's receipt-adoption identity
+    check (spec.job_id != attempt.job_id) then refused the door's own durable
+    receipt as a foreign execution — the whole service quarantined at startup
+    and the recovery door died at register-worker.  The spec handed to
+    adapter.start must carry the job the attempt was CLAIMED on, at BOTH
+    launch sites (the first claim and the F1 never-attempted relaunch)."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    import control_plane.t3_execution_adapter as adapter_module
+
+    d = _attack_door(scratch, monkeypatch)
+    door_globals = type(d)._execute.__globals__
+
+    launched = []
+
+    class _RecordingAdapter:
+        async def start(self, spec):
+            launched.append(spec)
+            return SimpleNamespace(provider_session_id="mcp:launch:j")
+
+    monkeypatch.setattr(d, "_compose_adapter",
+                        lambda *a, **k: (_RecordingAdapter(), {}))
+    monkeypatch.setattr(d, "_seal_and_deliver",
+                        lambda *a, **k: None)
+
+    # --- leg 1: the fresh claim.  The intake's request job is JOB-REQ; the
+    # attempt is claimed on the placement job JOB-PLACE.
+    placement = SimpleNamespace(job_id="JOB-PLACE")
+    monkeypatch.setitem(door_globals, "compose_child_execution",
+                        lambda *a, **k: SimpleNamespace(
+                            placement_job=placement))
+    command = d.freeze_issue(_issue_row("iss-spec1"))
+    entry = d.frozen[command]
+    entry["job_id"] = "JOB-REQ"
+
+    def fake_claim_job(job_id, **_kw):
+        assert job_id == "JOB-PLACE"  # the claim is on the placement job
+        return SimpleNamespace(
+            attempt=SimpleNamespace(attempt_id="ATT-SPEC1",
+                                    fence_generation=1),
+            lease_token="lease-1")
+
+    runtime = SimpleNamespace(attempts=SimpleNamespace(
+        claim_job=fake_claim_job))
+    d._execute(runtime, command, entry)
+    assert len(launched) == 1
+    # THE regression: the spec must name the attempt's own job, not the
+    # request job — the engine's receipt-adoption check compares them.
+    assert launched[0].job_id == "JOB-PLACE"
+    assert launched[0].run_id == "ATT-SPEC1"
+
+    # --- leg 2: the F1 relaunch of an attempt whose launch was never
+    # attempted.  The frozen entry still names the request job; the attempt
+    # row (a REAL runtime claim) names the job the engine will compare.
+    real_runtime, real_job_id, _ = _runtime_and_job(tmp_path)
+    lease = real_runtime.broker.claim(real_job_id, lease_owner="t4b-door")
+    attempt_id = lease.attempt.attempt_id
+    assert attempt_id is not None
+    assert real_runtime.attempts.get_attempt(attempt_id).job_id == real_job_id
+
+    monkeypatch.setitem(door_globals, "compose_child_execution",
+                        lambda *a, **k: SimpleNamespace(
+                            placement_job=SimpleNamespace(
+                                job_id=real_job_id)))
+    command2 = d.freeze_issue(_issue_row("iss-spec2"))
+    entry2 = d.frozen[command2]
+    entry2.update({"job_id": "JOB-REQ-2", "attempt_id": attempt_id,
+                   "fence_generation": lease.attempt.fence_generation,
+                   "lease_token": lease.lease_token, "phase": "claimed"})
+    d._save_frozen()
+    # no durable receipt: the F1 lane starts the claimed attempt (its first
+    # and only launch); no launch-attempted flag exists
+    monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
+                        lambda _p: SimpleNamespace(load_run=lambda _r: None))
+    d._execute(real_runtime, command2, entry2)
+    assert len(launched) == 2
+    assert launched[1].job_id == real_job_id  # the ATTEMPT's job
+    assert launched[1].run_id == attempt_id

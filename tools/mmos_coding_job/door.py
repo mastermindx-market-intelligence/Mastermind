@@ -1462,9 +1462,15 @@ class CodingJobDoor:
             _log(f"claimed {attempt_id} on placement "
                  f"{composed.placement_job.job_id}; branch {branch}")
             adapter, _box = self._compose_adapter(request, branch, fresh=True)
-            spec = self._launch_spec(run_id=attempt_id, job_id=job_id,
-                                     prompt=self._worker_prompt(attempt_id,
-                                                                branch))
+            # The spec must name the job the attempt was CLAIMED on (the
+            # placement job), not the request job: the engine's
+            # receipt-adoption identity check compares spec.job_id against
+            # the attempt row's job, and a mismatch refuses the door's own
+            # durable receipt as a foreign execution (caught live by the
+            # lease-expiry journey, 2026-11-11).
+            spec = self._launch_spec(
+                run_id=attempt_id, job_id=composed.placement_job.job_id,
+                prompt=self._worker_prompt(attempt_id, branch))
             entry["spec"] = {
                 "run_id": spec.run_id, "job_id": spec.job_id,
                 "worker_id": spec.worker_id,
@@ -1545,8 +1551,13 @@ class CodingJobDoor:
                 # the attempt's first and only launch.
                 adapter, _box = self._compose_adapter(request, branch,
                                                       fresh=False)
+                # Same law as the first claim: the engine's receipt-adoption
+                # check compares spec.job_id with the ATTEMPT row's job, so
+                # the relaunch names the attempt's own job (the frozen entry
+                # still carries the request job's id).
                 spec = self._launch_spec(
-                    run_id=attempt_id, job_id=job_id,
+                    run_id=attempt_id,
+                    job_id=(getattr(row, "job_id", None) or job_id),
                     prompt=self._worker_prompt(attempt_id, branch))
                 launch_flag.write_text(_now(), encoding="utf-8")
                 _log(f"launch of {attempt_id} was never attempted; starting "
