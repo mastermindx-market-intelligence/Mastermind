@@ -49,3 +49,11 @@ then escalates the disagreement.
     or new, the lane stops and the deputy escalates. Applied first to the server installer
     (delta check 3 at `aec3ff23b`: curl without a time limit, silent node verify, two-walk
     cache race): one micro-fix round of the four listed items plus any item-F findings.
+11. **Returns are sent, not waited for (2026-11-11).** A lane or panel lead can finish
+    without waking whoever sent it the work; seven returns sat unread for up to four hours
+    today. Every send to a lane or panel lead therefore ends with: "As your last action,
+    send line 1 of your return to the deputy thread with `t3_thread_send`, mode `queue`,
+    beginning `RETURN <lane>:`. If that tool is not available to you, say so on line 1."
+    The deputy also reads the status of anything it has waited on for more than 45
+    minutes, and lists under "Needs principal read" what it cannot read. An interim note
+    is never a turn's end.
