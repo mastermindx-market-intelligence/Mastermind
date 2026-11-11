@@ -1,15 +1,16 @@
 "use strict";
 
-// A closed command family on the existing native port. No listener, account,
-// browser launcher, credentials, arbitrary script, or raw CDP endpoint.
+// Existing native port, exact profile/session, optional site grants and scoped CDP.
 (function (root) {
   const SCHEMA = "mastermind.web_sol_browser_request.v1";
   const RECEIPT = "mastermind.web_sol_browser_receipt.v1";
   const IDENTITY = ["adapter_instance_id", "session_id", "operation_key", "nonce", "transport_boot_nonce", "action"];
   const FIELDS = ["schema", ...IDENTITY, "tab_id", "url_fingerprint", "snapshot_id", "ref", "params", "issued_at", "expires_at"];
-  const READ = new Set(["status", "tabs", "snapshot", "screenshot", "diagnostics"]);
+  const CDP = root.MMXBrowserCDP;
+  const READ = new Set(["status", "tabs", "snapshot", "screenshot", "diagnostics", ...(CDP ? CDP.READ : [])]);
   const PAGE = new Set(["click", "fill", "select", "press", "scroll"]);
-  const ACTIONS = new Set([...READ, ...PAGE, "open", "navigate", "reload", "back", "forward", "close", "focus"]);
+  const ACTIONS = new Set([...READ, ...PAGE, "open", "navigate", "reload", "back", "forward", "close", "focus", ...(CDP ? CDP.ACTIONS : [])]);
+  const NO_SNAPSHOT = new Set(["snapshot", ...(CDP ? CDP.NO_SNAPSHOT : [])]);
   const TAB = new Set([...ACTIONS].filter(a => !["status", "tabs", "open"].includes(a)));
   const KEY_CODES = {Enter:13, Tab:9, Escape:27, ArrowUp:38, ArrowDown:40, ArrowLeft:37,
     ArrowRight:39, Home:36, End:35, Backspace:8, Delete:46, Space:32};
@@ -35,11 +36,12 @@
     if (TAB.has(r.action)) {
       if (!Number.isInteger(r.tab_id) || r.tab_id < 0 || r.tab_id > 2147483647 || !hex(r.url_fingerprint)) return false;
     } else if (r.tab_id !== null || r.url_fingerprint !== null) return false;
-    if (TAB.has(r.action) && r.action !== "snapshot") {if (!bounded(r.snapshot_id,16)) return false;}
+    if (TAB.has(r.action) && !NO_SNAPSHOT.has(r.action)) {if (!bounded(r.snapshot_id,16)) return false;}
     else if (r.snapshot_id !== null) return false;
     if (PAGE.has(r.action)) {if (!bounded(r.ref,1,32)) return false;} else if (r.ref !== null) return false;
     const p = r.params;
-    if (["open", "navigate"].includes(r.action)) {if (!exact(p,["url"]) || !url(p.url)) return false;}
+    if (CDP && CDP.ACTIONS.has(r.action)) {if (!CDP.validate(r.action,p)) return false;}
+    else if (["open", "navigate"].includes(r.action)) {if (!exact(p,["url"]) || !url(p.url)) return false;}
     else if (r.action === "fill") {if (!exact(p,["text"]) || typeof p.text !== "string" || p.text.length > 8000 || p.text.includes("\u0000")) return false;}
     else if (r.action === "select") {if (!exact(p,["value"]) || !bounded(p.value,0,512)) return false;}
     else if (r.action === "press") {if (!exact(p,["key"]) || !Object.hasOwn(KEY_CODES,p.key)) return false;}
@@ -55,7 +57,8 @@
     const documents = new Map();
     const nonces = new Map();
     const createdTabs = new Map();
-    let busy = false, debuggerUncertain = false, observedBoot = null;
+    let busy = null, debuggerUncertain = false, observedBoot = null;
+    let cleanupPromise=Promise.resolve([]);
     const liveBoot = connection || (()=>observedBoot);
     function current(r) {
       if (liveBoot() !== r.transport_boot_nonce) throw new Error("CONNECTION_CHANGED");
@@ -64,7 +67,7 @@
     function receipt(r, status, data=null, effect="NOT_APPLIED") {
       const value = {schema: RECEIPT, ...Object.fromEntries(IDENTITY.map(k=>[k,r[k]])), status, effect,
         observed_at: new Date().toISOString(), data};
-      if (new TextEncoder().encode(JSON.stringify(value)).length > 60000) {
+      if (new TextEncoder().encode(JSON.stringify(value)).length > 800000) {
         value.status = "RESULT_TOO_LARGE"; value.data = null;
       }
       return value;
@@ -75,6 +78,7 @@
     }
     async function tabFor(r) {
       current(r);
+      if (advanced && advanced.has(r.tab_id) && !advanced.owned(r.tab_id,r.session_id)) throw new Error("CDP_OWNED_BY_ANOTHER_SESSION");
       let tab;
       try {tab = await chrome.tabs.get(r.tab_id);} catch (_) {throw new Error("TARGET_NOT_FOUND");}
       if (!tab || tab.incognito || !url(tab.url) || tab.pendingUrl || tab.discarded || tab.frozen) throw new Error("TARGET_UNAVAILABLE");
@@ -109,17 +113,20 @@
         loading:tab.status === "loading",discarded:Boolean(tab.discarded),frozen:Boolean(tab.frozen)};
     }
     async function withDebugger(r, fn) {
+      if(advanced)return advanced.withDebugger(r,fn);
       if (debuggerUncertain) throw new Error("DEBUGGER_RECONCILIATION_REQUIRED");
       const tab = await tabFor(r);
       if (!await granted(tab.url,["debugger"])) throw new Error("DEBUGGER_PERMISSION_REQUIRED");
       const target = {tabId:r.tab_id};
+      current(r);
+      const send=async(method,params)=>{current(r);const value=await chrome.debugger.sendCommand(target,method,params);current(r);return value;};
       let attached = false, value, failure;
       try {
         await chrome.debugger.attach(target,"1.3"); attached = true;
         await tabFor(r);
         const verified = await page(r,"validate",{});
         if (!verified.ok) throw new Error(verified.code);
-        value = await fn(target);
+        value = await fn(send);
       } catch (e) {failure = e;}
       finally {
         if (attached) try {await chrome.debugger.detach(target);} catch (_) {
@@ -131,14 +138,21 @@
     }
     async function run(r, boot) {
       if (!valid(r,instanceId,boot)) return null;
-      if (observedBoot !== boot) {documents.clear();observedBoot = boot;}
+      if (observedBoot !== boot) {
+        documents.clear();
+        busy=null;
+        if(observedBoot && advanced)cleanupPromise=advanced.reset();
+        observedBoot = boot;
+      }
+      await cleanupPromise;
+      if(liveBoot()!==r.transport_boot_nonce)return receipt(r,"CONNECTION_CHANGED");
       if (busy) return receipt(r,"BUSY");
       const now = Date.now();
       for (const [nonce,expiry] of nonces) if (expiry <= now) nonces.delete(nonce);
       if (nonces.has(r.nonce)) return receipt(r,"NONCE_REUSED");
       if (nonces.size >= 2048) return receipt(r,"NONCE_LIMIT");
       nonces.set(r.nonce,Date.parse(r.expires_at));
-      busy = true;
+      const running={boot};busy=running;
       let attempted = false;
       try {
         if (r.action === "status") return receipt(r,"OK",{
@@ -146,8 +160,11 @@
           package_version:chrome.runtime.getManifest().version,
           control_enabled:await chrome.permissions.contains({permissions:["tabs","scripting"]}),
           screenshot_enabled:await chrome.permissions.contains({permissions:["tabs","scripting","debugger"]}),
+          advanced_cdp_available:Boolean(advanced), downloads_enabled:await chrome.permissions.contains({permissions:["downloads"]}),
+          upload_file_access_allowed:chrome.extension?.isAllowedFileSchemeAccess?await chrome.extension.isAllowedFileSchemeAccess():null,
           actions:[...ACTIONS].sort(),permissions_url:chrome.runtime.getURL("browser.html"),
-          scope:"this installed browser profile; permitted HTTP/S tabs only",exclusive_control:false});
+          scope:"this installed browser profile; permitted HTTP/S tabs only",exclusive_control:false,
+          cdp_diagnostics:advanced?advanced.diagnostics():null});
         if (r.action === "tabs") {
           if (!await chrome.permissions.contains({permissions:["tabs","scripting"]})) return receipt(r,"BROWSER_PERMISSION_REQUIRED");
           const all = await chrome.tabs.query({});
@@ -170,6 +187,17 @@
           createdTabs.set(tab.id,r.session_id);
           return receipt(r,"ACTION_DISPATCHED",{tab_id:tab.id,refresh_required:true},"APPLIED");
         }
+        if (advanced && CDP.ACTIONS.has(r.action)) {
+          if (!["cdp_status","cdp_detach"].includes(r.action)) await tabFor(r);
+          if (!NO_SNAPSHOT.has(r.action)) {
+            const proof=await page(r,"validate",{});
+            if(!proof.ok)return receipt(r,proof.code);
+            const consumed=await page(r,"consume",{});
+            if(!consumed.ok)return receipt(r,consumed.code);
+          }
+          const outcome=await advanced.execute(r,()=>{attempted=true;});
+          return receipt(r,outcome.status,outcome.data,outcome.effect||"NOT_APPLIED");
+        }
         const tab = await tabFor(r);
         if (r.action === "snapshot" || r.action === "diagnostics") {
           const response = await page(r);
@@ -179,11 +207,11 @@
         const verified = await page(r,"validate",{});
         if (!verified.ok) return receipt(r,verified.code);
         if (r.action === "screenshot") {
-          const data = await withDebugger(r,async target => {
-            const metrics = await chrome.debugger.sendCommand(target,"Page.getLayoutMetrics",{});
+          const data = await withDebugger(r,async send => {
+            const metrics = await send("Page.getLayoutMetrics",{});
             const v = metrics.cssVisualViewport;
             if (!v || ![v.pageX,v.pageY,v.clientWidth,v.clientHeight].every(Number.isFinite) || v.clientWidth <= 0 || v.clientHeight <= 0) throw new Error("SCREENSHOT_UNAVAILABLE");
-            const captured = await chrome.debugger.sendCommand(target,"Page.captureScreenshot",{format:"jpeg",quality:35,fromSurface:true,captureBeyondViewport:false,
+            const captured = await send("Page.captureScreenshot",{format:"jpeg",quality:35,fromSurface:true,captureBeyondViewport:false,
               clip:{x:v.pageX,y:v.pageY,width:v.clientWidth,height:v.clientHeight,scale:Math.min(1,1024/v.clientWidth,768/v.clientHeight)}});
             if (!captured || typeof captured.data !== "string" || captured.data.length > 45000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(captured.data)) throw new Error("SCREENSHOT_TOO_LARGE");
             await tabFor(r);
@@ -194,7 +222,7 @@
           return receipt(r,"OK",data);
         }
         if (r.action === "press") {
-          await withDebugger(r,async target => {
+          await withDebugger(r,async send => {
             const focused = await page(r,"focus_ref",{},()=>{attempted=true;});
             if (!focused.ok) {attempted = focused.effect !== "NOT_APPLIED";throw new Error(focused.code);}
             await tabFor(r);
@@ -203,14 +231,14 @@
             current(r);
             const key = r.params.key === "Space" ? " " : r.params.key;
             const code = r.params.key, keyCode = KEY_CODES[code];
-            await chrome.debugger.sendCommand(target,"Input.dispatchKeyEvent",{type:"keyDown",key,code,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode,...(code === "Enter" ? {text:"\r"} : code === "Space" ? {text:" "} : {})});
-            await chrome.debugger.sendCommand(target,"Input.dispatchKeyEvent",{type:"keyUp",key,code,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode});
+            await send("Input.dispatchKeyEvent",{type:"keyDown",key,code,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode,...(code === "Enter" ? {text:"\r"} : code === "Space" ? {text:" "} : {})});
+            await send("Input.dispatchKeyEvent",{type:"keyUp",key,code,windowsVirtualKeyCode:keyCode,nativeVirtualKeyCode:keyCode});
           });
           return receipt(r,"ACTION_DISPATCHED",{refresh_required:true},"APPLIED");
         }
         if (r.action === "back" || r.action === "forward") {
-          await withDebugger(r,async target => {
-            const history = await chrome.debugger.sendCommand(target,"Page.getNavigationHistory",{});
+          await withDebugger(r,async send => {
+            const history = await send("Page.getNavigationHistory",{});
             if (!history || !Array.isArray(history.entries) || !Number.isInteger(history.currentIndex)) throw new Error("HISTORY_UNAVAILABLE");
             const entry = history.entries[history.currentIndex + (r.action === "back" ? -1 : 1)];
             if (!entry || !Number.isInteger(entry.id) || !url(entry.url)) throw new Error("HISTORY_UNAVAILABLE");
@@ -221,7 +249,7 @@
             if (liveBoot() !== r.transport_boot_nonce || Date.parse(r.expires_at) <= Date.now()) throw new Error("CONNECTION_CHANGED");
             attempted = true;
             documents.delete(tab.id);
-            await chrome.debugger.sendCommand(target,"Page.navigateToHistoryEntry",{entryId:entry.id});
+            await send("Page.navigateToHistoryEntry",{entryId:entry.id});
           });
           return receipt(r,"ACTION_DISPATCHED",{refresh_required:true},"APPLIED");
         }
@@ -244,12 +272,18 @@
         const allowed = new Set(["TARGET_NOT_FOUND","TARGET_UNAVAILABLE","TARGET_CHANGED","SITE_PERMISSION_REQUIRED",
           "BROWSER_PERMISSION_REQUIRED","STALE_SNAPSHOT","DOCUMENT_ID_UNAVAILABLE","PAGE_RESPONSE_INVALID","TAB_LIMIT","CONNECTION_CHANGED","REQUEST_EXPIRED",
           "DEBUGGER_PERMISSION_REQUIRED","DEBUGGER_RECONCILIATION_REQUIRED","SCREENSHOT_UNAVAILABLE","SCREENSHOT_TOO_LARGE","HISTORY_UNAVAILABLE","FOCUS_NOT_CONFIRMED"]);
-        const code = allowed.has(error && error.message) ? error.message : "BROWSER_UNAVAILABLE";
-        return receipt(r,attempted ? "ACTION_EFFECT_UNKNOWN" : code,null,attempted ? "EFFECT_UNKNOWN" : "NOT_APPLIED");
-      } finally {busy = false;}
+        const code = allowed.has(error && error.message) || /^(CDP_|FRAME_|STALE_NODE_|RESPONSE_|RESULT_|UPLOAD_|DOWNLOAD_|PAGE_WORLD_|INPUT_|INVALID_|TARGET_OBSCURED|PDF_)/.test(error?.message||"")
+          ? error.message : "BROWSER_UNAVAILABLE";
+        const possible=attempted&&!error?.knownNotApplied;
+        return receipt(r,possible ? "ACTION_EFFECT_UNKNOWN" : code,
+          {reason:code,...(error?.detail?{detail:error.detail}:{})},possible ? "EFFECT_UNKNOWN" : "NOT_APPLIED");
+      } finally {if(busy===running)busy=null;}
     }
+    const advanced = CDP ? CDP.create(chrome,{current,granted,tabFor,connectionActive:boot=>liveBoot()===boot}) : null;
     if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener(id=>{documents.delete(id);createdTabs.delete(id);});
-    return {run};
+    return {run,uiStatus:()=>advanced?advanced.uiStatus():[],diagnostics:()=>advanced?advanced.diagnostics():null,
+      transportDisconnected:()=>{documents.clear();busy=null;cleanupPromise=advanced?advanced.reset():Promise.resolve([]);return cleanupPromise;},
+      releaseAll:()=>advanced?advanced.releaseAll():Promise.resolve([])};
   }
   const api = {REQUEST_SCHEMA:SCHEMA,createController,valid,publicUrl};
   root.MMXBrowserControl = api;

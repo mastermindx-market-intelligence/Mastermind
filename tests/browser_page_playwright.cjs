@@ -68,3 +68,4 @@ const fixture = `<!doctype html><html><head><title>Browser control fixture</titl
     console.log(JSON.stringify({state:"PASS",proof:"isolated Chromium DOM fixture",cases:["sensitive exclusions","form readback","single-use refs","session separation","changed target","offscreen target","page scroll","focus proof","same-URL reload","bounded snapshot"]}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
+

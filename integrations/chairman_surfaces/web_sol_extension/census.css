@@ -44,4 +44,49 @@ a { color: #b8d9fa; }
 .browser-settings input:focus-visible { outline: 2px solid #b8d9fa; outline-offset: 2px; }
 .browser-settings summary { cursor: pointer; color: #b8d9fa; }
 .browser-settings li { overflow-wrap: anywhere; }
+.browser-settings { width:min(1020px,100%); margin:0 auto; padding:48px 32px; background:radial-gradient(ellipse at 10% 0%,#18302f 0,transparent 42%); }
+.browser-settings .browser-hero { margin-bottom:28px; align-items:flex-start; }
+.browser-settings h1 { font-size:44px; line-height:1.08; letter-spacing:-1.7px; }
+.browser-settings h1 span { color:#a2ddbe; }
+.browser-settings .intro { max-width:520px; font-size:15px; line-height:1.65; margin:18px 0 0; }
+.browser-settings .eyebrow { color:#8fb9a7; letter-spacing:1.8px; }
+.browser-settings .version { border:1px solid #354e47; border-radius:100px; padding:6px 13px; color:#b9d5c9; font-variant-numeric:tabular-nums; }
+.browser-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.browser-settings .browser-card { background:#172127; border:1px solid #2a3a3e; border-radius:16px; padding:24px; margin:16px 0 0; }
+.browser-settings h2 { font-size:20px; letter-spacing:-.4px; margin:10px 0; }
+.browser-settings p { font-size:13px; line-height:1.65; }
+.browser-settings .scope { font-size:12px; color:#91a8ac; }
+.browser-settings .primary { background:#b1e1c7; border-color:#b1e1c7; color:#112c22; font-weight:650; }
+.browser-settings .primary:hover { background:#c9f0da; }
+.browser-settings .status { background:#1c302d; border-color:#39594e; padding:14px 17px; border-radius:10px; color:#c7e7d6; }
+.browser-settings details { margin-top:18px; border-top:1px solid #2b3c40; padding-top:15px; }
+.browser-settings .session-list { list-style:none; padding:0; color:#a9bdc0; }
+.browser-settings .session-list li { padding:8px 0; }
+.browser-settings button:disabled { cursor:default; }
+.browser-settings .privacy { font-family:ui-monospace,monospace; font-size:10px; overflow-wrap:anywhere; }
+.browser-settings .feature-chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:17px; }
+.browser-settings .feature-chips span { padding:5px 9px; border:1px solid #344b4c; border-radius:6px; color:#b9d6cf; font-size:11px; }
+.browser-settings footer { margin-top:26px; padding-top:18px; border-top:1px solid #293d40; }
+.browser-settings footer p { font-size:11px; }
+@media (prefers-color-scheme:light) {
+  .browser-settings { color:#152d28; background:#f0f5f2; color-scheme:light; }
+  .browser-settings .browser-card { background:#fff; border-color:#d6e2db; }
+  .browser-settings h1 span { color:#2d6d52; }
+  .browser-settings p,.browser-settings .session-list { color:#516b63; }
+  .browser-settings .scope,.browser-settings .privacy { color:#62766e; }
+  .browser-settings .eyebrow { color:#47745f; }
+  .browser-settings input { background:#f5f8f6; color:#18382b; border-color:#aec8ba; }
+  .browser-settings .feature-chips span { color:#3c6253; border-color:#c5d9cd; }
+  .browser-settings details,.browser-settings footer { border-color:#d6e2db; }
+  .browser-settings summary { color:#2e614e; }
+  .browser-settings .status { color:#214e3b; background:#e0f0e5; border-color:#b7d8c2; }
+}
+@media (max-width:680px) {
+  .browser-settings { padding:24px 16px; }
+  .browser-settings h1 { font-size:36px; }
+  .browser-grid { grid-template-columns:1fr; gap:0; }
+  .browser-settings .browser-card { padding:20px; }
+  .browser-settings .site-entry { align-items:stretch; }
+  .browser-settings .site-entry input { width:100%; min-width:0; flex-basis:100%; }
+}
 @media (max-width: 600px) { body { padding: 14px; } header { align-items: flex-start; } h1 { font-size: 22px; } .summary { grid-template-columns: repeat(2, 1fr); } th, td { padding: 8px 6px; } }

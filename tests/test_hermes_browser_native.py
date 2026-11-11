@@ -52,7 +52,7 @@ def test_native_invocation_uses_exact_profile_and_existing_registry(tmp_path,mon
     result=json.loads(handler(arguments,session_id="native-session"));assert result["state"]=="RECEIPT"
     argv,kwargs=observed[0];assert argv[:3]==[sys.executable,"-I","-B"]
     assert "SECRET_SENTINEL" not in str(kwargs["env"]) and "PYTHONPATH" not in kwargs["env"]
-    assert not kwargs.get("shell") and kwargs["timeout"]==28
+    assert not kwargs.get("shell") and kwargs["timeout"]==35
     assert json.loads(kwargs["input"])["session_id"]=="native-session"
     assert arguments=={"action":"status","browser_id":"a"*64}
     handle.dispose();assert json.loads(handler(arguments,session_id="native-session"))["reason"]=="NATIVE_REGISTRATION_STALE"
@@ -111,3 +111,4 @@ def test_descriptor_closure_and_profile_collision_fail_closed(tmp_path,monkeypat
     d["source_files"].pop("integrations/chairman_surfaces/web_sol_client.py")
     (where/"_runtime.json").write_text(json.dumps(d))
     with pytest.raises(module.NativeBrowserError,match="NATIVE_DESCRIPTOR_INVALID"):module.load_runtime()
+

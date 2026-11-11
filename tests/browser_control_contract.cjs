@@ -151,3 +151,4 @@ function fixture() {
   }
   console.log("browser controller contract passed");
 })().catch(error=>{console.error(error);process.exitCode=1;});
+

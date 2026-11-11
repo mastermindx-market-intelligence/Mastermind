@@ -292,10 +292,22 @@ def render_bundle(
 ) -> DeploymentBundle:
     """Render one immutable exact-profile artifact bundle without applying it."""
 
+    try:
+        instance_id = wsi.adapter_instance_id(binding)
+    except wsi.WebSolInstanceError as exc:
+        raise WebSolDeploymentError(exc.code) from exc
+    return render_instance_bundle(instance_id, release)
+
+
+def render_instance_bundle(instance_id: str, release: WebSolRelease) -> DeploymentBundle:
+    """Render the same native bridge for an explicitly installed browser profile.
+
+    A general browser deployment does not require a fabricated chat binding.
+    Identity, socket routing and native-host validation retain their existing owner.
+    """
     if not isinstance(release, WebSolRelease):
         raise WebSolDeploymentError("release_invalid")
     try:
-        instance_id = wsi.adapter_instance_id(binding)
         host_name = wsi.native_host_name(instance_id)
     except wsi.WebSolInstanceError as exc:
         raise WebSolDeploymentError(exc.code) from exc
@@ -479,6 +491,7 @@ _CENSUS_SOURCE_KINDS = (
     ("census_core.js", "extension_census_core"),
     ("census.js", "extension_census_controller"),
     ("browser_control.js", "extension_browser_controller"),
+    ("browser_cdp.js", "extension_browser_cdp"),
     ("browser_page.js", "extension_browser_page"),
     ("browser.html", "extension_browser_settings_html"),
     ("browser_settings.js", "extension_browser_settings"),
@@ -498,22 +511,23 @@ def _manifest_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
-    """Qualify the exact 0.3 package; browser grants remain optional in Chrome."""
+    """Qualify the coordinated 0.4 package and Chrome-owned optional grants."""
     import base64
 
     try:
         manifest = json.loads(payload.decode("utf-8"), object_pairs_hook=_manifest_members)
         keys = {"manifest_version", "name", "version", "key", "permissions",
                 "host_permissions", "background", "content_scripts", "action",
-                "optional_permissions", "optional_host_permissions", "options_page"}
+                "optional_permissions", "optional_host_permissions", "options_page", "minimum_chrome_version", "description"}
         if not isinstance(manifest, dict) or set(manifest) != keys:
             raise ValueError("unsupported_manifest")
         origins = ["https://chat.openai.com/*", "https://chatgpt.com/*"]
         if (type(manifest["manifest_version"]) is not int
                 or manifest["manifest_version"] != 3
-                or manifest["version"] != release.package_version
+                or manifest["version"] != wsp.WEB_SOL_EXTENSION_VERSION
                 or manifest["permissions"] != ["nativeMessaging", "alarms", "debugger"]
-                or manifest["optional_permissions"] != ["tabs", "scripting"]
+                or manifest["optional_permissions"] != ["tabs", "scripting", "downloads"]
+                or manifest["minimum_chrome_version"] != "125"
                 or manifest["optional_host_permissions"] != ["http://*/*", "https://*/*"]
                 or manifest["options_page"] != "browser.html"
                 or manifest["host_permissions"] != origins
@@ -545,6 +559,7 @@ def render_census_extension_bundle(
     *,
     source_files: Mapping[str, bytes],
     expected_source_digests: Mapping[str, str],
+    instance_id: str | None = None,
 ) -> DeploymentBundle:
     """Render the complete versioned extension artifacts; perform no installation.
 
@@ -571,7 +586,7 @@ def render_census_extension_bundle(
     if any(_sha256(value) != expected[name] for name, value in accepted.items()):
         raise WebSolDeploymentError("extension_source_digest_mismatch")
     _validate_census_manifest(accepted["manifest.json"], release)
-    generated = render_bundle(binding, release)
+    generated = render_bundle(binding, release) if instance_id is None else render_instance_bundle(instance_id, release)
     extension_root = release.install_root / "extensions" / generated.instance_id[:24]
     source_artifacts = tuple(
         DeploymentArtifact(kind, extension_root / name, accepted[name], 0o600)
@@ -596,3 +611,4 @@ def render_census_extension_bundle(
 
 
 __all__.append("render_census_extension_bundle")
+__all__.append("render_instance_bundle")

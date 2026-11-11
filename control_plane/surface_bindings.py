@@ -651,3 +651,4 @@ def new_binding(
         "observed_at": observed_at,
         "last_verified_at": last_verified_at,
     }
+

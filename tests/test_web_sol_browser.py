@@ -176,3 +176,4 @@ def test_browser_controller_behavior_in_node():
     run=subprocess.run([node,str(ROOT/"tests/browser_control_contract.cjs")],cwd=ROOT,capture_output=True,text=True,timeout=15)
     assert run.returncode==0,run.stdout+run.stderr
     assert "browser controller contract passed" in run.stdout
+

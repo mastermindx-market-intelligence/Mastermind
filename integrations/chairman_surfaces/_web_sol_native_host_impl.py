@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import errno
+import fcntl
 import os
 from pathlib import Path
 import secrets
@@ -31,7 +33,7 @@ from . import web_sol_browser_protocol as browser
 NATIVE_HOST_NAME = "com.mastermind.web_sol_surface"
 EXTENSION_ID = "kmpbpccecbofdnhpcmjogofgmdodpnko"
 ALLOWED_EXTENSION_ORIGIN = f"chrome-extension://{EXTENSION_ID}/"
-MAX_MESSAGE_BYTES = 64 * 1024
+MAX_MESSAGE_BYTES = 900 * 1024
 MAX_UNIX_SOCKET_PATH_BYTES = 103
 _HEADER = struct.Struct("@I")
 _MATCH_FIELDS = (
@@ -60,6 +62,7 @@ _PROBE_KEYS = frozenset(
     }
 )
 _SERVER_SOCKET_IDENTITIES: dict[int, tuple[int, int]] = {}
+_SERVER_LOCKS: dict[int, int] = {}
 _TYPED_REENTRY_NONCES: set[str] = set()
 MAX_TYPED_REENTRY_NONCES = 256
 _BROWSER_NONCES: dict[str, datetime] = {}
@@ -624,6 +627,77 @@ def _private_parent(path: Path, owner_uid: int) -> None:
         raise NativeHostError("socket_parent_unsafe")
 
 
+def _ensure_private_parent(path: Path, owner_uid: int) -> None:
+    """Create the derived native transport root; never repair unsafe metadata."""
+    try:
+        path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError:
+        raise NativeHostError("socket_parent_unsafe") from None
+    _private_parent(path, owner_uid)
+
+
+def _endpoint_lock(destination: Path, owner_uid: int) -> int:
+    """Keep one lock inode for the endpoint's lifetime and across restarts."""
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(str(destination) + ".lock", flags, 0o600)
+    except OSError:
+        raise NativeHostError("socket_lock_unsafe") from None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid or info.st_mode & 0o077 or info.st_size > 4096:
+            raise NativeHostError("socket_lock_unsafe")
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise NativeHostError("socket_owner_live") from None
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _recover_qualified_dead_endpoint(destination: Path, owner_uid: int, lock_fd: int) -> None:
+    if not os.path.lexists(destination):
+        return
+    info = destination.lstat()
+    if not stat.S_ISSOCK(info.st_mode) or info.st_uid != owner_uid or info.st_mode & 0o077:
+        raise NativeHostError("socket_path_unsafe")
+    identity = (info.st_dev, info.st_ino)
+    try:
+        os.lseek(lock_fd, 0, os.SEEK_SET)
+        prior = json.loads(os.read(lock_fd, 4097))
+        if (prior.get("schema") != "mastermind.native_socket_owner.v1"
+                or prior.get("socket") != list(identity) or type(prior.get("pid")) is not int or prior["pid"] < 1):
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError, OSError):
+        # A legacy owner might be between bind and listen without holding our
+        # lock. Its endpoint is not eligible for automatic reclamation.
+        raise NativeHostError("socket_legacy_owner_unreconciled") from None
+    try:
+        os.kill(prior["pid"], 0)
+    except ProcessLookupError:
+        pass
+    except OSError:
+        raise NativeHostError("socket_owner_unreconciled") from None
+    else:
+        raise NativeHostError("socket_owner_live")
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    probe.settimeout(0.2)
+    try:
+        probe.connect(str(destination))
+    except OSError as error:
+        if error.errno != errno.ECONNREFUSED:
+            raise NativeHostError("socket_owner_unreconciled") from None
+    else:
+        raise NativeHostError("socket_owner_live")
+    finally:
+        probe.close()
+    _unlink_exact_owned_socket(destination, owner_uid=owner_uid, identity=identity)
+    if os.path.lexists(destination):
+        raise NativeHostError("socket_owner_unreconciled")
+
+
 def _socket_identity(path: Path) -> tuple[int, int] | None:
     try:
         info = path.lstat()
@@ -695,19 +769,24 @@ def open_private_server(
     """Bind one derived user-private AF_UNIX transport endpoint."""
 
     destination = Path(path)
-    _private_parent(destination.parent, owner_uid)
+    _ensure_private_parent(destination.parent, owner_uid)
     if len(os.fsencode(destination)) > MAX_UNIX_SOCKET_PATH_BYTES:
         raise NativeHostError("socket_path_too_long")
-    if os.path.lexists(destination):
-        raise NativeHostError("socket_path_unsafe")
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    lock_fd = _endpoint_lock(destination, owner_uid)
+    try:
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except BaseException:
+        os.close(lock_fd)
+        raise
     identity: tuple[int, int] | None = None
     try:
+        _recover_qualified_dead_endpoint(destination, owner_uid, lock_fd)
         server.bind(os.fspath(destination))
         identity = _socket_identity(destination)
         if identity is None:
             raise NativeHostError("socket_path_unsafe")
         _SERVER_SOCKET_IDENTITIES[id(server)] = identity
+        _SERVER_LOCKS[id(server)] = lock_fd
         os.chmod(destination, 0o600)
         info = destination.lstat()
         if (
@@ -717,17 +796,22 @@ def open_private_server(
             or (info.st_dev, info.st_ino) != identity
         ):
             raise NativeHostError("socket_path_unsafe")
+        owner = json.dumps({"schema": "mastermind.native_socket_owner.v1", "pid": os.getpid(), "socket": list(identity)}).encode()
+        os.lseek(lock_fd, 0, os.SEEK_SET)
+        os.ftruncate(lock_fd, 0)
+        os.write(lock_fd, owner)
+        os.fsync(lock_fd)
         server.listen(1)
         return server
     except Exception:
         _SERVER_SOCKET_IDENTITIES.pop(id(server), None)
+        _SERVER_LOCKS.pop(id(server), None)
         server.close()
-        _unlink_exact_owned_socket(
-            destination,
-            owner_uid=owner_uid,
-            identity=identity,
-            require_private_mode=False,
-        )
+        try:
+            _unlink_exact_owned_socket(destination, owner_uid=owner_uid,
+                identity=identity, require_private_mode=False)
+        finally:
+            os.close(lock_fd)
         raise
 
 
@@ -739,15 +823,16 @@ def close_private_server(
 ) -> None:
     destination = Path(path)
     identity = _SERVER_SOCKET_IDENTITIES.pop(id(server), None)
+    lock_fd = _SERVER_LOCKS.pop(id(server), None)
     try:
         server.close()
     except OSError:
         pass
-    _unlink_exact_owned_socket(
-        destination,
-        owner_uid=owner_uid,
-        identity=identity,
-    )
+    try:
+        _unlink_exact_owned_socket(destination, owner_uid=owner_uid, identity=identity)
+    finally:
+        if lock_fd is not None:
+            os.close(lock_fd)
 
 
 def _read_chrome_with_timeout(
@@ -1027,6 +1112,13 @@ def run_native_host(
                 if not action_gate.acquire(blocking=False):
                     continue
                 try:
+                    # The action worker may have consumed the receipt after
+                    # select() returned but before this lock was acquired.
+                    # Recheck under the single-reader gate; a stale readiness
+                    # observation must not start a blocking unsolicited read.
+                    ready_now, _, _ = select.select([chrome_in], [], [], 0)
+                    if not ready_now:
+                        continue
                     try:
                         unsolicited_deadline = Deadline(
                             ends_at=time.monotonic() + timeout

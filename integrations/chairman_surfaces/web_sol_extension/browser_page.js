@@ -7,7 +7,7 @@
   const MAX_ELEMENTS = 120;
   const MAX_NODES = 2000;
   const MAX_TEXT = 10000;
-  const ACTIONS = new Set(["snapshot", "validate", "validate_focus", "focus_ref", "click", "fill",
+  const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
     "select", "scroll", "diagnostics"]);
   const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
   const SELECTOR = "a[href],button,input,textarea,select,[role],[contenteditable='true'],[tabindex]";
@@ -157,6 +157,7 @@
         const {action, session_id: session, params} = request;
         if (action === "snapshot") return snapshot(session);
         if (action === "validate") return result(true, "OK", {snapshot_id: current.id});
+        if (action === "consume") {current=null;prepared=null;return result(true,"OK");}
         if (action === "validate_focus") return result(true, "OK");
         if (action === "diagnostics") return diagnostics();
         const target = current.refs.get(request.ref);

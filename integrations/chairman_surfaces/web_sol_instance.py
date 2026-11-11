@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,8 @@ from control_plane import surface_bindings as sb
 
 
 ADAPTER_INSTANCE_SCHEMA = "mastermind.web_sol_adapter_instance.v1"
-DEFAULT_SOCKET_ROOT = "~/Library/Application Support/Mastermind/wsx"
+DEFAULT_SOCKET_ROOT = ("~/Library/Application Support/Mastermind/wsx" if sys.platform == "darwin"
+                       else "~/.local/share/mastermind/wsx")
 SHORT_SOCKET_ROOT_PREFIX = "mmx-wsx"
 SOCKET_LEAF_HEX = 32
 NATIVE_HOST_LEAF_HEX = 24
@@ -96,6 +98,22 @@ def validate_instance_id(value: Any) -> str:
     ):
         raise WebSolInstanceError("invalid_instance_id")
     return value
+
+
+def local_browser_instance_id(data_directory: Path, profile_directory: str) -> str:
+    """Derive routing for an explicit local Chrome installation coordinate.
+
+    This is installation metadata only. It grants no browser access and does
+    not invent a managed-chat binding for a general-purpose browser profile.
+    """
+    if (not isinstance(data_directory, Path) or not data_directory.is_absolute()
+            or data_directory.is_symlink() or ".." in data_directory.parts
+            or not isinstance(profile_directory, str) or not profile_directory
+            or any(c in profile_directory for c in ("/", "\\", "\x00", "\n", "\r"))):
+        raise WebSolInstanceError("local_browser_coordinate_invalid")
+    document = {"schema": ADAPTER_INSTANCE_SCHEMA, "env_manager": "chrome",
+                "data_directory": str(data_directory.resolve()), "profile_directory": profile_directory}
+    return hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def socket_leaf(instance_id: str) -> str:

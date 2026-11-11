@@ -195,3 +195,4 @@ capture, credential entry and cross-host browser routing are not implemented.
 
 The implementation is original Mastermind code. These references inform the
 workflow; no proprietary extension code, assets or data are copied.
+

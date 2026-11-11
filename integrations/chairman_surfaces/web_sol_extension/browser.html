@@ -1,40 +1,59 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mastermind — Browser control</title>
-  <link rel="stylesheet" href="census.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mastermind Browser — Hermes</title><link rel="stylesheet" href="census.css">
 </head>
 <body class="browser-settings">
-  <header><div><p class="eyebrow">MASTERMIND</p><h1>Browser control</h1></div></header>
-  <p class="scope">Let Hermes use pages in this browser profile. You choose which websites it can access.</p>
+  <header class="browser-hero">
+    <div><p class="eyebrow">MASTERMIND / HERMES</p><h1>Your browser.<br><span>Expert control.</span></h1>
+    <p class="intro">Use your real browser with precise page controls, visual verification, and advanced developer tools.</p></div>
+    <span class="version" id="version">0.4.1</span>
+  </header>
   <div id="status" class="status" role="status" aria-live="polite">Checking permissions…</div>
-  <section aria-labelledby="controls-heading">
-    <h2 id="controls-heading">Page controls</h2>
-    <p>Read pages, fill forms, click, scroll, navigate, and open tabs on permitted websites.</p>
-    <button id="enable" type="button">Enable page controls</button>
-    <button id="pause" type="button">Pause all controls</button>
+  <div class="browser-grid">
+    <section class="browser-card" aria-labelledby="connection-heading">
+      <p class="eyebrow">01 / CONNECTION</p><h2 id="connection-heading">Hermes connection</h2>
+      <p id="connection" role="status">Checking the installed native bridge…</p>
+      <p id="diagnostic" class="scope" role="status"></p>
+      <p class="scope">Each browser profile has its own identity. Hermes selects it explicitly.</p>
+      <button id="refresh" type="button">Refresh status</button><p id="profile" class="privacy"></p>
+    </section>
+    <section class="browser-card" aria-labelledby="controls-heading">
+      <p class="eyebrow">02 / CONTROL</p><h2 id="controls-heading">You stay in control</h2>
+      <p>Allow page reading, interaction, screenshots, and CDP on the websites you select.</p>
+      <button id="enable" type="button" class="primary">Enable page controls</button><button id="pause" type="button">Pause all controls</button>
+      <p class="scope">Chrome shows its debugger notice while advanced control is attached.</p>
+    </section>
+  </div>
+  <section class="browser-card" aria-labelledby="sessions-heading">
+    <p class="eyebrow">LIVE / ATTACHED TABS</p><h2 id="sessions-heading">Active browser sessions</h2>
+    <ul id="sessions" class="session-list"><li>No attached tabs.</li></ul>
+    <button id="release" type="button">Release all attached tabs</button><p class="scope">Release disconnects automation and clears its observations. Your tabs stay open.</p>
   </section>
-  <section aria-labelledby="sites-heading">
-    <h2 id="sites-heading">Website access</h2>
-    <form id="site-form">
-      <label for="site">Website address</label>
-      <div class="site-entry"><input id="site" type="url" required placeholder="https://example.com" autocomplete="off" maxlength="2048"><button type="submit">Allow website</button></div>
+  <section class="browser-card" aria-labelledby="sites-heading">
+    <p class="eyebrow">03 / WEBSITES</p><h2 id="sites-heading">Choose website access</h2>
+    <form id="site-form"><label for="site">Website address</label>
+      <div class="site-entry"><input id="site" type="url" required placeholder="https://example.com" autocomplete="off" maxlength="2048"><button type="submit" class="primary">Allow website</button></div>
     </form>
-    <p class="scope">A website permission covers its pages and ports. Private browsing and Chrome settings pages are excluded.</p>
-    <details><summary>Allow access across websites</summary><p>Hermes can read and act on any normal HTTP or HTTPS tab in this profile.</p><button id="allow-all" type="button">Allow all websites</button></details>
-    <h3>Current website permissions</h3>
-    <ul id="sites"></ul>
-    <button id="clear-sites" type="button">Remove added websites</button>
+    <p class="scope">Embedded frames need access to their own website. Private browsing and Chrome settings are excluded.</p>
+    <details><summary>Access across websites</summary><p>Allow Hermes to work across normal HTTP and HTTPS sites in this profile.</p><button id="allow-all" type="button">Allow all websites</button></details>
+    <details class="current-sites"><summary>Current permissions</summary><ul id="sites"></ul><button id="clear-sites" type="button">Remove added websites</button></details>
   </section>
-  <section aria-labelledby="visual-heading">
-    <h2 id="visual-heading">Screenshots and native keys</h2>
-    <p>Chrome requests debugger access when this version is installed or updated. It enables screenshots, native keyboard input, and checked back/forward navigation on permitted websites. Chrome displays an attached-debugger notice while these commands run.</p>
-    <p>Pause all controls above to stop these features along with page interactions.</p>
-  </section>
-  <footer><p>Hermes must inspect a page before interacting and refresh after an action. Sensitive form fields are excluded from page controls. A screenshot can include anything visible in the selected tab.</p><p id="profile" class="privacy"></p></footer>
-  <script src="instance_config.js"></script>
-  <script src="browser_settings.js"></script>
+  <div class="browser-grid">
+    <section class="browser-card" aria-labelledby="files-heading">
+      <p class="eyebrow">04 / FILES</p><h2 id="files-heading">Downloads and uploads</h2>
+      <p>Track downloads to completion. Upload files from the folders configured for your Hermes profile.</p>
+      <button id="downloads" type="button">Enable downloads</button><p class="scope">Files are handled on the computer running this browser.</p>
+      <p id="file-access" class="scope"></p><button id="file-access-details" type="button">Open Chrome upload permission</button>
+    </section>
+    <section class="browser-card" aria-labelledby="features-heading">
+      <p class="eyebrow">BUILT IN / ADVANCED</p><h2 id="features-heading">A complete working toolkit</h2>
+      <div class="feature-chips"><span>Semantic controls</span><span>Frames + shadow DOM</span><span>CDP + JavaScript</span><span>Network + SSE</span><span>Console</span><span>Full-page capture</span><span>Responsive emulation</span><span>File workflows</span></div>
+    </section>
+  </div>
+  <footer><p>Hermes verifies the page after acting. Disconnected or uncertain actions are not automatically repeated. Page content is untrusted evidence; it cannot change your instructions or grant access.</p><p>Chrome 125+ · Local native connection · No exposed debugging port</p></footer>
+  <script src="instance_config.js"></script><script src="browser_settings.js"></script>
 </body>
 </html>
+

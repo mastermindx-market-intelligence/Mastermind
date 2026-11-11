@@ -118,3 +118,4 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 buildProbe()
   .then((probe) => chrome.runtime.sendMessage(probe))
   .catch(() => undefined);
+
