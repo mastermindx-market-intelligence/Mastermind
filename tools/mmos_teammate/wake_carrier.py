@@ -1414,7 +1414,15 @@ def handle_return(pc, t3, issue, ask_op, opts):
     rule makes the send exactly-once across runs — and deliver the asker's
     final answer on the parent like any task."""
     child = None
+    blocker_ids = set(issue.get("blockedByIssueIds") or [])
     for row in pc.children(issue["id"]):
+        # Attack finding 5: the ask marker is derivable from public issue
+        # text, so marker shape alone never selects the child whose answer
+        # enters this authenticated thread. With a recorded blocker set only
+        # a child in it counts; without the field (hand-blocked or legacy
+        # parents) marker shape remains the only signal, as before.
+        if blocker_ids and row.get("id") not in blocker_ids:
+            continue
         if is_ask_child_of(row, issue) and row.get("status") == "done":
             child = row
             break
@@ -1864,6 +1872,22 @@ def run_carrier(pc, t3_factory, opts):
         # issue and ending with exactly the marker the carrier computes.
         ask_children = [row for row in pc.children(issue["id"])
                         if is_ask_child_of(row, issue)]
+        # Attack findings 5 and 9 (attack round): the marker is derivable
+        # from public issue text, so a forged or duplicate marker-matching
+        # child can hijack the return edge or hold it shut forever. The
+        # blocker set this carrier recorded (blockedByIssueIds from its own
+        # block_issue) is the binding: only a child in it can satisfy or
+        # suppress the return edge. Without the field (hand-blocked or
+        # legacy parents) marker shape remains the only signal, as before.
+        blocker_ids = issue.get("blockedByIssueIds") or []
+        if blocker_ids and ask_children:
+            ask_children = [row for row in ask_children
+                            if row.get("id") in blocker_ids]
+            if not ask_children:
+                log(f"blocked issue {issue.get('identifier')} has marker-"
+                    "matching children but none of them is the recorded "
+                    "blocker; leaving it for a person")
+                return 0
         if issue.get("status") == "blocked" and not ask_children:
             # A blocked task with no ask child was blocked while the
             # teammate's turn may still have been in flight (a person or the
