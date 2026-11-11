@@ -1217,3 +1217,45 @@ def test_step4_launch_spec_carries_the_attempt_s_own_job(
     assert len(launched) == 2
     assert launched[1].job_id == real_job_id  # the ATTEMPT's job
     assert launched[1].run_id == attempt_id
+
+
+def test_step4_a_terminal_placement_frees_the_admission_ready_slot(
+        scratch, monkeypatch, tmp_path):
+    """Caught live by the wait-frees journey (2026-11-11): the admission-
+    ledger Job is a record of WHO ASKED (compose_child_execution's own
+    docstring) and the runtime's ready count is `QUEUED, never claimed` —
+    nothing ever took a DELIVERED request's admission Job out of that
+    queue, so fleet capacity never freed and the second task WAITed
+    forever.  Finishing a sealed entry must retire its admission Job
+    (the runtime's own typed cancel seam), idempotently."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_execution_composition import (
+        compose_child_execution)
+
+    runtime, _placement_job, _attempt = _runtime_and_job(tmp_path)
+    d = _attack_door(scratch, monkeypatch)
+    command = d.freeze_issue(_issue_row("iss-l2"))
+    entry = d.frozen[command]
+    request = ChildExecutionRequest.from_dict(dict(entry["envelope"]))
+    composed = compose_child_execution(
+        runtime, request=request, spec=d._spec(request),
+        branch="t3/mmos-t4b-job-l2", worktree=str(scratch / "ws"))
+    admission_job_id = composed.admission.job_id
+    assert admission_job_id  # the admission record exists, QUEUED, no attempt
+    entry.update({"job_id": admission_job_id, "attempt_id": "ATT-SEALED",
+                  "phase": "sealed", "envelope": entry["envelope"]})
+    d._save_frozen()
+    # no delivery receipt exists and the seam re-drive is a no-op: the
+    # finish path reports the honest refusal — the admission retirement
+    # must still happen (the placement is terminal either way)
+    monkeypatch.setattr(d, "_redrive_return_seam", lambda *a, **k: None)
+    d._finish_sealed(runtime, entry)
+    job = runtime.jobs.get_job(admission_job_id)
+    status = getattr(job.status, "value", str(job.status))
+    assert status == "CANCELLED"  # out of the ready queue
+    # idempotent: replaying the finish path (a crash between seal and
+    # finish, recovered twice) errors nothing and stays retired
+    d._finish_sealed(runtime, entry)
+    job2 = runtime.jobs.get_job(admission_job_id)
+    assert getattr(job2.status, "value", str(job2.status)) == "CANCELLED"

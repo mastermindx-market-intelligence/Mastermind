@@ -1765,6 +1765,43 @@ class CodingJobDoor:
             self._release_thread(job_role)
         _log(f"sealed {attempt_id}: delivery "
              f"{entry['delivery'].get('state')}")
+        self._retire_admission_job(runtime, entry)
+
+    def _retire_admission_job(self, runtime, entry) -> None:
+        """L2 (wait-frees journey, 2026-11-11): the admission-ledger Job is
+        a record of WHO ASKED (``compose_child_execution``'s own docstring)
+        and the runtime's ready count is ``QUEUED, never claimed`` — nothing
+        took a finished request's admission Job out of that queue, so fleet
+        capacity never freed and the next task WAITed forever.  The
+        placement is terminal here; the admission Job leaves the queue
+        through the runtime's own typed cancel seam.  Idempotent: a Job
+        already out of QUEUED (a replayed finish path) is left alone."""
+        job_id = entry.get("job_id")
+        if not job_id:
+            return
+        try:
+            job = runtime.jobs.get_job(job_id)
+        except Exception:  # noqa: BLE001 - a missing runtime store ends this
+            return
+        if job is None or getattr(job, "current_attempt_id", None):
+            return
+        status = getattr(getattr(job, "status", None), "value", "")
+        if status != "QUEUED":
+            return
+        from control_plane.executive_runtime import StateConflict
+        try:
+            runtime.jobs.cancel_job(job_id)
+        except StateConflict:
+            # a concurrent finisher may have moved it first; verify the
+            # queue actually emptied before treating this as an error
+            fresh = runtime.jobs.get_job(job_id)
+            fresh_status = (getattr(getattr(fresh, "status", None), "value", "")
+                            if fresh is not None else "")
+            if fresh_status == "QUEUED":
+                raise
+            return
+        _log(f"admission job {job_id} left the ready queue "
+             "(its placement is terminal)")
 
     def _redrive_return_seam(self, runtime, entry) -> None:
         """F3 (R4b review): re-install the execution-return seam with THIS
