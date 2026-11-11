@@ -1,8 +1,8 @@
 #!/bin/sh
-# window_config.sh — write, inspect or clear the fixed per-user window config
-# that the Mastermind OS window reads when no MM_SHELL_URL / MM_SHELL_URL_FILE
-# environment variable is set (lane T8: the app a person opens from Finder or
-# the Dock has no environment).
+# window_config.sh — write, inspect, check or clear the fixed per-user window
+# config that the Mastermind OS window reads when no MM_SHELL_URL /
+# MM_SHELL_URL_FILE environment variable is set (lane T8: the app a person
+# opens from Finder or the Dock has no environment).
 #
 # The window maps bundle identifiers to config directories exactly like
 # shell_mode.rs::fixed_config_dir:
@@ -13,27 +13,54 @@
 # Files inside: `shell-url` (one line, the loopback thread address; never a
 # pairing token) and `pair-helper` (one line, absolute path to
 # window_pair_helper.sh or a wrapper). Both must be mode 0600 and owned by
-# the user, or the window refuses them.
+# the user, inside a mode-0700 non-symlink directory, or the window refuses
+# them.
 #
 # Usage:
-#   window_config.sh write --bundle release|dev|t8 --url URL [--pair-helper PATH]
+#   window_config.sh write --bundle release|dev|t8 --url URL [--pair-helper PATH] [--keep-pair-helper]
+#   window_config.sh check --bundle release|dev|t8 --app <path to the app binary>
 #   window_config.sh show   --bundle release|dev|t8
 #   window_config.sh clear  --bundle release|dev|t8
-# Secret handling (attack review 2026-11-10): a URL that carries a `token=`
-# parameter is refused outright, and anything this script echoes about a URL
-# is redacted first, so a rejection message can never become a token's log
-# line. The pair helper must itself be a regular non-group-writable file in
-# a non-group-writable directory — the window runs it, so a path anyone else
-# can rewrite is not a credential the config may name.
+#
+# `write` without --pair-helper removes an existing pair-helper (the window
+# must not keep minting pairing addresses a config edit meant to withdraw);
+# pass --keep-pair-helper to preserve one. Address and helper are staged in
+# mode-0600 temporaries under umask 077 — a trap removes them on any exit —
+# and committed helper-first, so a crash between the two renames never
+# leaves a fresh address beside a stale helper.
+#
+# `check` is one judge (panel repair M): it runs the app binary itself in
+# `--check-window-config` mode, which uses exactly the loader a real launch
+# uses (address file, helper file, helper trust walk, config-folder check)
+# and prints one `ok`/`refused <code>` line per item. `show` prints only
+# the scheme, host, port and path of a stored address (panel repair L); a
+# line carrying userinfo, a query or a fragment is never echoed, and
+# refusals name the reason only, never the value.
+#
+# Address shape (panel repair F/M): exactly scheme `http`, host
+# `127.0.0.1`, an all-digit port 1..65535, no userinfo, no query, no
+# fragment, no control character or newline, and a path that is not the
+# server root, not `/pair` and not under it. The pair helper must itself be
+# a regular non-group-writable file in a non-group-writable directory — the
+# window runs it, so a path anyone else can rewrite is not a credential the
+# config may name.
 set -eu
 
-redact() { printf '%s\n' "$1" | sed -E 's/(token=)[^&[:space:]]+/\1<redacted>/g'; }
-
-usage() { sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() {
+  cat >&2 <<'EOF'
+usage: window_config.sh write --bundle release|dev|t8 --url URL [--pair-helper PATH] [--keep-pair-helper]
+       window_config.sh check --bundle release|dev|t8 --app <path to the app binary>
+       window_config.sh show   --bundle release|dev|t8
+       window_config.sh clear  --bundle release|dev|t8
+EOF
+  exit 2
+}
 
 BUNDLE=""
 URL=""
 HELPER=""
+KEEP_HELPER=""
+APP=""
 CMD="${1:-}"
 [ $# -ge 1 ] && shift
 while [ $# -gt 0 ]; do
@@ -41,6 +68,8 @@ while [ $# -gt 0 ]; do
     --bundle) [ $# -ge 2 ] || usage; BUNDLE="$2"; shift 2 ;;
     --url) [ $# -ge 2 ] || usage; URL="$2"; shift 2 ;;
     --pair-helper) [ $# -ge 2 ] || usage; HELPER="$2"; shift 2 ;;
+    --keep-pair-helper) KEEP_HELPER=yes; shift ;;
+    --app) [ $# -ge 2 ] || usage; APP="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -53,37 +82,74 @@ case "$BUNDLE" in
   *) echo "window_config: unknown bundle '$BUNDLE' (release|dev|t8)" >&2; exit 2 ;;
 esac
 
-write_one() { # file content
-  tmp="$1.tmp.$$"
-  printf '%s\n' "$2" > "$tmp"
-  chmod 600 "$tmp"
-  mv "$tmp" "$1"
+refuse() { # reason (panel repair L: the reason only, never the value)
+  echo "window_config: refusing the address: $1" >&2
+  exit 1
 }
 
 case "$CMD" in
   write)
     [ -n "$URL" ] || { echo "window_config: --url is required for write" >&2; exit 2; }
-    # The address must be loopback http with a real path (the server root '/'
-    # opens a new empty thread), and must never carry a fragment or a token
-    # parameter: pairing tokens do not belong in the config file.
+    # Panel repair M: exact checks, not globs. Every refusal names the
+    # reason only (panel repair L).
     case "$URL" in
-      http://127.0.0.1:*/?*|http://127.0.0.1/?*|http://localhost:*/?*|http://localhost/?*) ;;
-      *) echo "window_config: refusing '$(redact "$URL")': must be http://127.0.0.1:<port>/<thread-path>" >&2; exit 1 ;;
+      *[[:cntrl:]]*) refuse "a control character or newline is never part of an address" ;;
     esac
     case "$URL" in
-      *#*) echo "window_config: refusing a URL with a fragment (pairing tokens never belong in the config)" >&2; exit 1 ;;
+      *@*) refuse "userinfo never belongs in the config" ;;
     esac
     case "$URL" in
-      *token=*) echo "window_config: refusing a URL that carries a token parameter (pairing tokens never belong in the config)" >&2; exit 1 ;;
+      *token=*) refuse "a token parameter never belongs in the config" ;;
+    esac
+    case "$URL" in
+      *\?*) refuse "a query never belongs in the config" ;;
+    esac
+    case "$URL" in
+      *#*) refuse "a fragment (pairing tokens) never belongs in the config" ;;
+    esac
+    # Scheme exactly http, host exactly 127.0.0.1 (`localhost` is refused:
+    # the server prints its address as 127.0.0.1 and the spellings must not
+    # diverge), port all digits, path present and extracted exactly.
+    rest=$(printf '%s\n' "$URL" | sed -n 's|^http://127\.0\.0\.1:\([0-9][0-9]*\)\(/.*\)$|\1 \2|p')
+    if [ -z "$rest" ]; then
+      case "$URL" in
+        http://localhost:*|http://LOCALHOST:*)
+          refuse "use the 127.0.0.1 literal (the server prints its address as 127.0.0.1)" ;;
+        *) refuse "must be exactly http://127.0.0.1:<port>/<thread-path>" ;;
+      esac
+    fi
+    port=${rest%% *}
+    addr_path=${rest#* }
+    port_num=$(printf '%s\n' "$port" | sed 's/^0*//')
+    [ -n "$port_num" ] || port_num=0
+    # Attack round: bound the length before any numeric test so an oversized
+    # port gets the named refusal instead of a shell arithmetic error.
+    if [ "${#port_num}" -gt 5 ] || [ "$port_num" -lt 1 ] || [ "$port_num" -gt 65535 ]; then
+      refuse "the port must be between 1 and 65535"
+    fi
+    # Attack round: compare a lowercased copy so `/PAIR` disguises fail, and
+    # refuse dot segments (raw or percent-encoded, either case) outright —
+    # the app's url parser normalizes them, so `/a/../pair` would otherwise
+    # open the pairing page as the configured "thread". A leading empty
+    # segment (`//pair`) is refused for the same reason.
+    low_path=$(printf '%s\n' "$addr_path" | tr 'A-Z' 'a-z')
+    case "$low_path" in
+      *..*|*%2e*)
+        refuse "dot segments never belong in the config path" ;;
+      //*|/|/pair|/pair/*)
+        refuse "the server root and /pair belong to the pairing flow, never to the config" ;;
     esac
     if [ -n "$HELPER" ]; then
       case "$HELPER" in
         /*) ;;
         *) echo "window_config: --pair-helper must be an absolute path" >&2; exit 2 ;;
       esac
-      [ -f "$HELPER" ] || { echo "window_config: pair helper is not a regular file: $HELPER" >&2; exit 1; }
-      [ ! -L "$HELPER" ] || { echo "window_config: refusing a symlinked pair helper: $HELPER" >&2; exit 1; }
-      [ -x "$HELPER" ] || { echo "window_config: pair helper is not executable: $HELPER" >&2; exit 1; }
+      case "$HELPER" in
+        *..*) echo "window_config: refusing a pair-helper path with '..' in it" >&2; exit 1 ;;
+      esac
+      [ -f "$HELPER" ] || { echo "window_config: pair helper is not a regular file" >&2; exit 1; }
+      [ ! -L "$HELPER" ] || { echo "window_config: refusing a symlinked pair helper" >&2; exit 1; }
+      [ -x "$HELPER" ] || { echo "window_config: pair helper is not executable" >&2; exit 1; }
       helper_mode=$(stat -f '%Lp' "$HELPER")
       g=${helper_mode#?}; g=${g%?}
       o=${helper_mode#??}
@@ -97,24 +163,83 @@ case "$CMD" in
         *[2367]*) echo "window_config: refusing a pair helper in a group- or other-writable directory (mode $parent_mode)" >&2; exit 1 ;;
       esac
     fi
+    # Panel repair N: never write into a symlinked folder. The refusal runs
+    # before mkdir/chmod so a planted symlink never has its target touched
+    # (attack-round ordering fix); the post-chmod check stays for the race.
+    [ ! -L "$DIR" ] || { echo "window_config: refusing to write into a symlinked config directory" >&2; exit 1; }
     mkdir -p "$DIR"
     chmod 700 "$DIR"
-    write_one "$DIR/shell-url" "$URL"
+    [ ! -L "$DIR" ] || { echo "window_config: refusing to write into a symlinked config directory" >&2; exit 1; }
+    # Panel repair F: stage both files first (umask 077, trap removes the
+    # temporaries on any exit), then commit. A write without --pair-helper
+    # removes an existing helper *before* committing the address, so a
+    # window reading the config mid-write can never pair a new address
+    # through a helper the edit meant to withdraw; --keep-pair-helper
+    # preserves it. The helper rename lands before the address rename: a
+    # crash between the two leaves at most the old address beside the new
+    # helper, which only ever mints a fresh one-time address — never the
+    # dangerous converse.
+    umask 077
+    url_tmp="$DIR/shell-url.tmp.$$"
+    helper_tmp="$DIR/pair-helper.tmp.$$"
+    trap 'rm -f "$url_tmp" "$helper_tmp"' EXIT HUP INT TERM
+    printf '%s\n' "$URL" > "$url_tmp"
     if [ -n "$HELPER" ]; then
-      write_one "$DIR/pair-helper" "$HELPER"
+      printf '%s\n' "$HELPER" > "$helper_tmp"
     fi
-    # With no --pair-helper given, an existing pair-helper file is kept.
+    if [ -z "$HELPER" ] && [ "$KEEP_HELPER" != yes ] && [ -f "$DIR/pair-helper" ]; then
+      rm -f "$DIR/pair-helper"
+      removed_helper=yes
+    fi
+    if [ -n "$HELPER" ]; then
+      mv "$helper_tmp" "$DIR/pair-helper"
+    fi
+    mv "$url_tmp" "$DIR/shell-url"
+    trap - EXIT HUP INT TERM
     echo "wrote $DIR/shell-url (mode 0600)"
-    if [ -f "$DIR/pair-helper" ]; then
+    if [ "${removed_helper:-}" = yes ]; then
+      echo "removed $DIR/pair-helper (no --pair-helper; pass --keep-pair-helper to keep one)"
+    elif [ -f "$DIR/pair-helper" ]; then
       echo "pair helper: $DIR/pair-helper (mode 0600)"
     fi
     ;;
+  check)
+    # Panel repair M: the app binary is the one judge; it prints one line
+    # per item and exits 0 only when all pass. This tool adds nothing.
+    [ -n "$APP" ] || { echo "window_config: --app <path to the app binary> is required for check" >&2; exit 2; }
+    [ -x "$APP" ] || { echo "window_config: app binary is not executable: run it as the same user who owns the config" >&2; exit 2; }
+    exec "$APP" --check-window-config
+    ;;
   show)
     if [ ! -d "$DIR" ]; then echo "no config directory: $DIR"; exit 1; fi
+    # Attack round: a symlinked config directory is never followed, not even
+    # to display.
+    if [ -L "$DIR" ]; then echo "window_config: refusing to show a symlinked config directory" >&2; exit 1; fi
+    # Panel round 2: the case patterns below match across newlines, so a
+    # hand-edited multi-line file must be caught before them — no part of a
+    # multi-line config is ever echoed.
+    nl='
+'
     for name in shell-url pair-helper; do
       f="$DIR/$name"
       if [ -f "$f" ]; then
-        printf '%s mode=%s owner=%s -> %s\n' "$f" "$(stat -f '%Lp' "$f")" "$(stat -f '%u' "$f")" "$(redact "$(cat "$f")")"
+        printf '%s mode=%s owner=%s' "$f" "$(stat -f '%Lp' "$f")" "$(stat -f '%u' "$f")"
+        line=$(cat "$f")
+        # Panel repair L: print scheme, host, port and path only; anything
+        # carrying userinfo, a query or a fragment is never echoed. One
+        # port digit is as valid as five (attack-round fix).
+        case "$line" in
+          *"$nl"*)
+            printf ' -> (not shown: not a single line)\n' ;;
+          *@*|*\?*|*\#*)
+            printf ' -> (not shown: carries a query, fragment or userinfo)\n' ;;
+          http://127.0.0.1:[0-9]*/*)
+            printf ' -> %s\n' "$line" ;;
+          /*)
+            printf ' -> %s\n' "$line" ;;
+          *)
+            printf ' -> (not shown: unrecognized line)\n' ;;
+        esac
       else
         printf '%s (absent)\n' "$f"
       fi
@@ -122,6 +247,8 @@ case "$CMD" in
     ;;
   clear)
     [ -d "$DIR" ] || { echo "no config directory: $DIR"; exit 0; }
+    # Attack round: never delete through a symlinked config directory.
+    if [ -L "$DIR" ]; then echo "window_config: refusing to clear a symlinked config directory" >&2; exit 1; fi
     rm -f "$DIR/shell-url" "$DIR/pair-helper"
     echo "cleared $DIR"
     ;;

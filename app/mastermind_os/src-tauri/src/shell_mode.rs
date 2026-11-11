@@ -6,8 +6,9 @@
 //! then treated exactly like unset, so a bad environment never blocks launch.
 //!
 //! Safety notes:
-//! - Only `http://127.0.0.1` and `http://localhost` are accepted, so the window can
-//!   never be steered at a remote origin by the environment variable at startup.
+//! - Only `http://127.0.0.1` is accepted, and the line carries no query, no
+//!   fragment and no pairing-flow path, so the window can never be steered at
+//!   a remote origin — or at the pairing flow — by its address at startup.
 //!   Navigation after load is observed by the dev bundle's event log (item 3); it is
 //!   not re-gated here, and remote origins keep no IPC either way.
 //! - Refusals never carry the raw input: a URL can embed credentials in its
@@ -34,8 +35,19 @@ pub enum ShellUrlRefusal {
     MissingHost,
     /// The URL carries userinfo (`user:pass@`), which can hold a secret.
     UserInfo,
-    /// Host was not exactly `127.0.0.1` or `localhost`.
+    /// Host was not exactly `127.0.0.1` in the writers' spelling — a
+    /// lookalike domain, an IPv4 shorthand or a trailing dot.
     HostNotLoopback,
+    /// The address carries no explicit port; both writers always write one
+    /// (panel round 2, writer parity).
+    MissingPort,
+    /// The URL carries a query, which never belongs in a saved config line.
+    Query,
+    /// The URL carries a fragment (pairing tokens travel in one).
+    Fragment,
+    /// The path is the server root or the pairing flow (`/pair` or under
+    /// it, after the url parser's dot-segment normalization).
+    ReservedPath,
 }
 
 impl ShellUrlRefusal {
@@ -47,6 +59,10 @@ impl ShellUrlRefusal {
             ShellUrlRefusal::MissingHost => "missing_host",
             ShellUrlRefusal::UserInfo => "userinfo",
             ShellUrlRefusal::HostNotLoopback => "host_not_loopback",
+            ShellUrlRefusal::MissingPort => "missing_port",
+            ShellUrlRefusal::Query => "query",
+            ShellUrlRefusal::Fragment => "fragment",
+            ShellUrlRefusal::ReservedPath => "reserved_path",
         }
     }
 
@@ -57,7 +73,13 @@ impl ShellUrlRefusal {
             ShellUrlRefusal::WrongScheme => "scheme must be http",
             ShellUrlRefusal::MissingHost => "URL has no host",
             ShellUrlRefusal::UserInfo => "URL must not carry userinfo",
-            ShellUrlRefusal::HostNotLoopback => "host must be exactly 127.0.0.1 or localhost",
+            ShellUrlRefusal::HostNotLoopback => "host must be exactly 127.0.0.1",
+            ShellUrlRefusal::MissingPort => "the address must carry an explicit port",
+            ShellUrlRefusal::Query => "a query never belongs in the config",
+            ShellUrlRefusal::Fragment => "a fragment never belongs in the config",
+            ShellUrlRefusal::ReservedPath => {
+                "the server root and /pair belong to the pairing flow, never to the config"
+            }
         }
     }
 
@@ -73,11 +95,12 @@ impl ShellUrlRefusal {
     }
 }
 
-/// Parse and validate a `MM_SHELL_URL` value. No network access, ever.
-///
-/// Accepted: scheme exactly `http` (ASCII case-insensitive, normalised by `url`),
-/// host exactly `127.0.0.1` or `localhost` (ASCII case-insensitive), any port.
-pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
+/// The loopback-http structure shared by every address the app accepts:
+/// scheme exactly `http`, no userinfo, host exactly `127.0.0.1`. The config
+/// line adds its own shape rules on top ([`parse_shell_url`]; attack round,
+/// finding 3); a minted pairing address is checked separately because its
+/// shape is `/pair#token=...` by design (panel repair D).
+pub fn parse_loopback_http(input: &str) -> Result<Url, ShellUrlRefusal> {
     let parsed = Url::parse(input).map_err(|_| ShellUrlRefusal::Unparseable)?;
     // Userinfo is checked before anything else so credential-bearing inputs are
     // refused without further inspection.
@@ -88,11 +111,49 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
         return Err(ShellUrlRefusal::WrongScheme);
     }
     let host = parsed.host_str().ok_or(ShellUrlRefusal::MissingHost)?;
-    if host.eq_ignore_ascii_case("127.0.0.1") || host.eq_ignore_ascii_case("localhost") {
-        Ok(parsed)
-    } else {
-        Err(ShellUrlRefusal::HostNotLoopback)
+    if !host.eq_ignore_ascii_case("127.0.0.1") {
+        return Err(ShellUrlRefusal::HostNotLoopback);
     }
+    Ok(parsed)
+}
+
+/// Parse and validate a `MM_SHELL_URL` value. No network access, ever.
+///
+/// Accepted: the [`parse_loopback_http`] structure plus the writers' exact
+/// rule (attack round, finding 3): no query, no fragment, and a path that —
+/// after the url parser's dot-segment normalization — is neither the server
+/// root nor `/pair` nor under it. The `--check-window-config` judge and the
+/// real launch must not accept an address `window_config.sh` refuses to
+/// write.
+pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
+    let parsed = parse_loopback_http(input)?;
+    // Writer parity (panel round 2): both writers spell the address exactly
+    // `http://127.0.0.1:<port>` — lowercase scheme, the host spelled out,
+    // an explicit port. The url parser normalizes IPv4 shorthands
+    // (`127.1`, `2130706433`, `0x7f000001`, `127.000.000.001`), a trailing
+    // dot and an uppercase scheme to the same host and scheme, so without
+    // this check a hand-edited config could carry an address neither
+    // writer writes.
+    if !input.starts_with("http://127.0.0.1:") {
+        return Err(if input.starts_with("http://127.0.0.1/") || input == "http://127.0.0.1" {
+            ShellUrlRefusal::MissingPort
+        } else if input.as_bytes().get(..7) == Some(b"http://") {
+            ShellUrlRefusal::HostNotLoopback
+        } else {
+            ShellUrlRefusal::WrongScheme
+        });
+    }
+    if parsed.query().is_some() {
+        return Err(ShellUrlRefusal::Query);
+    }
+    if parsed.fragment().is_some() {
+        return Err(ShellUrlRefusal::Fragment);
+    }
+    let path = parsed.path();
+    if path == "/" || path == "/pair" || path.starts_with("/pair/") {
+        return Err(ShellUrlRefusal::ReservedPath);
+    }
+    Ok(parsed)
 }
 
 /// Read the one-time shell URL from a user-private file (the T3 pairing-file path).
@@ -176,6 +237,12 @@ pub enum ShellUrlFileRefusal {
     WrongPermissions,
     InvalidContents,
     Url(ShellUrlRefusal),
+    /// Panel repair N: the containing config directory itself is not a real,
+    /// user-owned, mode-0700 directory. Reported for both files alike.
+    ConfigDirSymlink,
+    ConfigDirNotDirectory,
+    ConfigDirWrongOwner,
+    ConfigDirWrongPermissions,
 }
 
 impl ShellUrlFileRefusal {
@@ -188,8 +255,45 @@ impl ShellUrlFileRefusal {
             Self::WrongPermissions => "wrong_permissions".into(),
             Self::InvalidContents => "invalid_contents".into(),
             Self::Url(refusal) => format!("url.{}", refusal.subcode()),
+            Self::ConfigDirSymlink => "config_dir_symlink".into(),
+            Self::ConfigDirNotDirectory => "config_dir_not_directory".into(),
+            Self::ConfigDirWrongOwner => "config_dir_wrong_owner".into(),
+            Self::ConfigDirWrongPermissions => "config_dir_wrong_permissions".into(),
         }
     }
+}
+
+/// Panel repair N: the config directory itself must be a real directory (no
+/// symlink), owned by this user, mode exactly 0700. `None` means the check
+/// passed; a missing directory maps to [`ShellUrlFileRefusal::Missing`] so a
+/// wholly absent config stays the normal no-error case.
+pub fn config_dir_refusal(dir: &std::path::Path) -> Option<ShellUrlFileRefusal> {
+    config_dir_refusal_for_uid(dir, unsafe { libc::getuid() })
+}
+
+#[cfg(unix)]
+fn config_dir_refusal_for_uid(
+    dir: &std::path::Path,
+    current_uid: libc::uid_t,
+) -> Option<ShellUrlFileRefusal> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let metadata = match std::fs::symlink_metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(_) => return Some(ShellUrlFileRefusal::Missing),
+    };
+    if metadata.file_type().is_symlink() {
+        return Some(ShellUrlFileRefusal::ConfigDirSymlink);
+    }
+    if !metadata.is_dir() {
+        return Some(ShellUrlFileRefusal::ConfigDirNotDirectory);
+    }
+    if metadata.uid() != current_uid {
+        return Some(ShellUrlFileRefusal::ConfigDirWrongOwner);
+    }
+    if metadata.permissions().mode() & 0o777 != 0o700 {
+        return Some(ShellUrlFileRefusal::ConfigDirWrongPermissions);
+    }
+    None
 }
 
 /// Log a fixed refusal code only; never the setting path or file contents.
@@ -261,10 +365,27 @@ pub struct ShellConfig {
 /// configured and the window behaves exactly as it did before.
 pub fn read_pair_helper_file(path: &std::path::Path) -> Result<PathBuf, ShellUrlFileRefusal> {
     let value = read_single_line_config_file(path)?;
+    parse_pair_helper_line(&value)
+}
+
+/// The helper line's own shape: one absolute path with no `..` component.
+pub fn parse_pair_helper_line(value: &str) -> Result<PathBuf, ShellUrlFileRefusal> {
     if !value.starts_with('/') || value.contains("..") {
         return Err(ShellUrlFileRefusal::InvalidContents);
     }
     Ok(PathBuf::from(value))
+}
+
+/// Panel repair N: read one config file only after the containing directory
+/// passes the folder check (real directory, user-owned, mode 0700), so both
+/// files refuse a symlinked or loosened config folder with the folder's own
+/// code. An absent folder is the normal missing case. Also the reader the
+/// `--check-window-config` judge uses, so there is exactly one loader.
+pub fn read_config_line(dir: &std::path::Path, name: &str) -> Result<String, ShellUrlFileRefusal> {
+    if let Some(refusal) = config_dir_refusal(dir) {
+        return Err(refusal);
+    }
+    read_single_line_config_file(&dir.join(name))
 }
 
 /// Resolve the shell settings for one bundle identifier from the environment
@@ -300,7 +421,9 @@ pub fn resolve_shell_settings(identifier: &str) -> (Option<Url>, ShellConfig) {
     }
     let config = helper_config(identifier);
     let url = config.dir.as_ref().map(|dir| {
-        match read_shell_url_file(&dir.join(SHELL_URL_CONFIG_NAME)) {
+        match read_config_line(dir, SHELL_URL_CONFIG_NAME)
+            .and_then(|line| parse_shell_url(&line).map_err(ShellUrlFileRefusal::Url))
+        {
             Ok(url) => Some(url),
             Err(ShellUrlFileRefusal::Missing) => None,
             Err(refusal) => {
@@ -322,7 +445,9 @@ fn helper_config(identifier: &str) -> ShellConfig {
     let Some(dir) = fixed_config_dir(identifier, &home) else {
         return ShellConfig { dir: None, pair_helper: None };
     };
-    let pair_helper = match read_pair_helper_file(&dir.join(PAIR_HELPER_CONFIG_NAME)) {
+    let pair_helper = match read_config_line(&dir, PAIR_HELPER_CONFIG_NAME)
+        .and_then(|line| parse_pair_helper_line(&line))
+    {
         Ok(path) => Some(path),
         // Missing is normal: pairing is simply not configured.
         Err(ShellUrlFileRefusal::Missing) => None,
@@ -514,15 +639,122 @@ mod tests {
     #[test]
     fn accepts_loopback_http_urls() {
         for value in [
-            "http://127.0.0.1:3100/",
-            "http://localhost:5173/path?x=1",
-            "http://localhost/",
-            "HTTP://LOCALHOST:8080",
+            "http://127.0.0.1:3100/env-1/thread-1",
+            "http://127.0.0.1:8080/env-1/thread-1",
         ] {
             let parsed = parse_shell_url(value)
                 .unwrap_or_else(|refusal| panic!("case refused as {}", refusal.subcode()));
             assert_eq!(parsed.scheme(), "http");
         }
+    }
+
+    /// Attack round (finding 3): the config line follows the writers' exact
+    /// rule, so the `--check-window-config` judge cannot certify an address
+    /// `window_config.sh` refuses to write — and a hand-edited config cannot
+    /// smuggle one past the loader.
+    #[test]
+    fn config_lines_follow_the_writers_exact_rule() {
+        for (value, expected) in [
+            ("http://127.0.0.1:3780/env-1/thread-1", None),
+            ("http://127.0.0.1:3780/env-1/../env-2/thread-1", None),
+            ("http://localhost:3780/env-1/t", Some(ShellUrlRefusal::HostNotLoopback)),
+            ("http://LOCALHOST:3780/env-1/t", Some(ShellUrlRefusal::HostNotLoopback)),
+            (
+                "http://127.0.0.1:3780/env-1/t?x=1",
+                Some(ShellUrlRefusal::Query),
+            ),
+            (
+                "http://127.0.0.1:3780/env-1/t#f",
+                Some(ShellUrlRefusal::Fragment),
+            ),
+            ("http://127.0.0.1:3780/", Some(ShellUrlRefusal::ReservedPath)),
+            ("http://127.0.0.1:3780/pair", Some(ShellUrlRefusal::ReservedPath)),
+            (
+                "http://127.0.0.1:3780/pair/x",
+                Some(ShellUrlRefusal::ReservedPath),
+            ),
+            // Dot segments are normalized before the path rule, so the
+            // disguise the shell tools must refuse literally is refused
+            // here after normalization.
+            (
+                "http://127.0.0.1:3780/a/../pair",
+                Some(ShellUrlRefusal::ReservedPath),
+            ),
+            // `/pair/../env-1/t` normalizes to `/env-1/t` before the rule,
+            // so the loader accepts what it lands on; the shell writers
+            // refuse any `..` outright, so this spelling cannot be written.
+            ("http://127.0.0.1:3780/pair/../env-1/t", None),
+        ] {
+            assert_eq!(
+                parse_shell_url(value).map(|_| ()).err(),
+                expected,
+                "{value}"
+            );
+        }
+    }
+
+    /// Panel repair N: the config folder itself must be a real, user-owned,
+    /// mode-0700 directory, and both files refuse a folder that is not —
+    /// each with the folder's own refusal code.
+    #[test]
+    fn config_folder_itself_is_checked_for_both_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = unique_temp_dir();
+        let config = root.join("window-dev-t8");
+        fs::create_dir(&config).unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+        for (name, contents) in [
+            (SHELL_URL_CONFIG_NAME, "http://127.0.0.1:3780/env-1/thread-1"),
+            (PAIR_HELPER_CONFIG_NAME, "/usr/bin/true"),
+        ] {
+            fs::write(config.join(name), format!("{contents}\n")).unwrap();
+            fs::set_permissions(config.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(config_dir_refusal(&config), None);
+        assert!(read_config_line(&config, SHELL_URL_CONFIG_NAME).is_ok());
+        assert!(read_config_line(&config, PAIR_HELPER_CONFIG_NAME).is_ok());
+
+        // A loosened folder refuses both files with the folder code.
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            config_dir_refusal(&config),
+            Some(ShellUrlFileRefusal::ConfigDirWrongPermissions)
+        );
+        for name in [SHELL_URL_CONFIG_NAME, PAIR_HELPER_CONFIG_NAME] {
+            assert_eq!(
+                read_config_line(&config, name),
+                Err(ShellUrlFileRefusal::ConfigDirWrongPermissions)
+            );
+        }
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+
+        // A symlinked folder (even to a valid one) refuses both files.
+        let linked = root.join("window-dev-linked");
+        std::os::unix::fs::symlink(&config, &linked).unwrap();
+        assert_eq!(
+            config_dir_refusal(&linked),
+            Some(ShellUrlFileRefusal::ConfigDirSymlink)
+        );
+        for name in [SHELL_URL_CONFIG_NAME, PAIR_HELPER_CONFIG_NAME] {
+            assert_eq!(
+                read_config_line(&linked, name),
+                Err(ShellUrlFileRefusal::ConfigDirSymlink)
+            );
+        }
+
+        // An absent folder is the normal missing case for both files.
+        assert_eq!(
+            config_dir_refusal(&root.join("absent")),
+            Some(ShellUrlFileRefusal::Missing)
+        );
+        assert_eq!(
+            read_config_line(&root.join("absent"), SHELL_URL_CONFIG_NAME),
+            Err(ShellUrlFileRefusal::Missing)
+        );
+
+        let _ = fs::remove_file(&linked);
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]
@@ -562,6 +794,7 @@ mod tests {
 
     #[test]
     fn refusal_logging_writes_one_parseable_record_without_the_input() {
+        let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let dir = unique_temp_dir();
         let previous = std::env::var_os("MMOS_DEV_ROOT");
         std::env::set_var("MMOS_DEV_ROOT", &dir);
@@ -631,11 +864,33 @@ mod tests {
     /// S1 attack finding 1 fix: the capability scan must also cover capabilities
     /// declared inline in the merged configs (`app.security.capabilities` resolves
     /// through the same ACL as capabilities/*.json).
+    ///
+    /// Panel repair I: the scan globs every `tauri.conf*.json` in the manifest
+    /// directory instead of a fixed list, so a future variant config (like
+    /// `tauri.conf.t8.json`) cannot silently escape it. A file that matches
+    /// the glob but fails to parse fails the test rather than being skipped.
     #[test]
     fn merged_config_declares_no_inline_remote_capability() {
-        for name in ["tauri.conf.json", "tauri.conf.dev.json"] {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
-            let text = fs::read_to_string(&path).expect(name);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut scanned = 0;
+        let mut names: Vec<String> = Vec::new();
+        for entry in fs::read_dir(dir).expect("manifest directory") {
+            let path = entry.expect("manifest entry").path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.starts_with("tauri.conf") || !name.ends_with(".json") {
+                continue;
+            }
+            names.push(name.to_string());
+        }
+        names.sort();
+        assert!(
+            names.contains(&"tauri.conf.json".to_string()),
+            "the release config must exist"
+        );
+        for name in &names {
+            let text = fs::read_to_string(dir.join(name)).expect(name);
             let value: serde_json::Value = serde_json::from_str(&text).expect(name);
             let caps = &value["app"]["security"]["capabilities"];
             if let Some(entries) = caps.as_array() {
@@ -646,25 +901,21 @@ mod tests {
                     );
                 }
             }
+            scanned += 1;
         }
+        assert_eq!(scanned, names.len());
+        assert!(scanned >= 3, "expected release, dev and t8 configs, saw {names:?}");
     }
 
     /// S1 attack finding 2 fix: exotic loopback spellings and lookalikes.
-    /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 (still loopback,
-    /// so accepted); lookalike domains, userinfo tricks and IPv6 forms are refused.
+    /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 — still
+    /// loopback, and since the attack round every accepted spelling carries
+    /// a real thread path. Since panel round 2 the shorthand and
+    /// trailing-dot spellings are refused too: no writer writes them
+    /// (see `gate_refuses_spellings_no_writer_writes`). Lookalike domains,
+    /// userinfo tricks and IPv6 forms are refused.
     #[test]
     fn gate_handles_exotic_loopback_spellings() {
-        for accepted in [
-            "http://127.1",
-            "http://127.0.0.1.",
-            "http://2130706433",
-            "http://0x7f000001",
-            "http://127.000.000.001",
-        ] {
-            let parsed = parse_shell_url(accepted)
-                .unwrap_or_else(|r| panic!("{accepted} refused as {}", r.subcode()));
-            assert_eq!(parsed.host_str(), Some("127.0.0.1"), "{accepted}");
-        }
         for refused in [
             "http://127.0.0.1.evil.com",
             "http://127.1.evil.com",
@@ -683,6 +934,50 @@ mod tests {
                 "{refused} must be refused"
             );
         }
+    }
+
+    /// Panel round 2 (writer parity): both writers spell the address exactly
+    /// `http://127.0.0.1:<port>` — lowercase scheme, the host spelled out,
+    /// an explicit port. The url parser normalizes IPv4 shorthands
+    /// (`127.1`, `2130706433`, `0x7f000001`, `127.000.000.001`), a trailing
+    /// dot and an uppercase scheme to the same host and scheme, so without
+    /// an exact-spelling check a hand-edited config could carry an address
+    /// no writer refuses to write but none ever writes. The loader refuses
+    /// every such spelling.
+    #[test]
+    fn gate_refuses_spellings_no_writer_writes() {
+        for (refused, expected) in [
+            ("http://127.1/env-1/t", ShellUrlRefusal::HostNotLoopback),
+            ("http://127.0.0.1./env-1/t", ShellUrlRefusal::HostNotLoopback),
+            (
+                "http://127.0.0.1.:3790/env-1/t",
+                ShellUrlRefusal::HostNotLoopback,
+            ),
+            ("http://2130706433/env-1/t", ShellUrlRefusal::HostNotLoopback),
+            ("http://0x7f000001/env-1/t", ShellUrlRefusal::HostNotLoopback),
+            (
+                "http://127.000.000.001/env-1/t",
+                ShellUrlRefusal::HostNotLoopback,
+            ),
+            ("http://127.0.0.1/env-1/t", ShellUrlRefusal::MissingPort),
+            ("http://127.0.0.1", ShellUrlRefusal::MissingPort),
+            (
+                "HTTP://127.0.0.1:8080/env-1/t",
+                ShellUrlRefusal::WrongScheme,
+            ),
+        ] {
+            assert_eq!(
+                parse_shell_url(refused),
+                Err(expected),
+                "{refused} must be refused as {}",
+                expected.subcode()
+            );
+        }
+        // The spelling both writers write is accepted.
+        let parsed =
+            parse_shell_url("http://127.0.0.1:3790/env-1/t").expect("writer spelling accepted");
+        assert_eq!(parsed.host_str(), Some("127.0.0.1"));
+        assert_eq!(parsed.port(), Some(3790));
     }
 
     #[test]
@@ -718,20 +1013,41 @@ mod tests {
             unsafe { libc::getuid() }
         }
 
+        /// A config file never carries a minted pairing address (attack
+        /// round: the loader follows the writers' exact rule now) — the
+        /// fragment, query and pairing-path shapes each carry their code,
+        /// and a clean thread address is accepted with its shape intact.
         #[test]
-        fn accepts_a_private_loopback_url_file_and_keeps_path_query_fragment() {
+        fn url_file_follows_the_writers_exact_rule() {
             let dir = unique_temp_dir();
-            let path = write_file(
-                &dir,
-                "url.txt",
-                "http://127.0.0.1:3796/pair#token=synthetic0123456789\n",
-                0o600,
-            );
-            let url = read_shell_url_file(&path).expect("accepted");
+            for (contents, expected) in [
+                (
+                    "http://127.0.0.1:3796/pair#token=synthetic0123456789\n",
+                    Some(ShellUrlRefusal::Fragment),
+                ),
+                (
+                    "http://127.0.0.1:3796/env-1/t?x=1\n",
+                    Some(ShellUrlRefusal::Query),
+                ),
+                (
+                    "http://127.0.0.1:3796/pair\n",
+                    Some(ShellUrlRefusal::ReservedPath),
+                ),
+                ("http://localhost:3796/env-1/t\n", Some(ShellUrlRefusal::HostNotLoopback)),
+            ] {
+                let path = write_file(&dir, "url.txt", contents, 0o600);
+                assert_eq!(
+                    read_shell_url_file(&path).map(|_| ()).err(),
+                    expected.map(ShellUrlFileRefusal::Url),
+                    "{contents}"
+                );
+            }
+            let path = write_file(&dir, "url.txt", "http://127.0.0.1:3796/env-1/t\n", 0o600);
+            let url = read_shell_url_file(&path).expect("clean thread address accepted");
             assert_eq!(url.host_str(), Some("127.0.0.1"));
             assert_eq!(url.port(), Some(3796));
-            assert_eq!(url.path(), "/pair");
-            assert_eq!(url.fragment(), Some("token=synthetic0123456789"));
+            assert_eq!(url.path(), "/env-1/t");
+            assert!(url.query().is_none() && url.fragment().is_none());
             fs::remove_dir_all(&dir).ok();
         }
 
@@ -892,10 +1208,20 @@ mod tests {
         /// and environment settings must keep winning over the fixed file.
         #[test]
         fn resolve_prefers_environment_then_fixed_file() {
+            let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             let dir = unique_temp_dir();
-            // Mirror the real layout the release/dev mapping produces.
+            // Mirror the real layout the release/dev mapping produces —
+            // including the repair-N folder contract (real, 0700).
             let config_dir = dir.join(".mastermind").join("mmos_dev").join("window-dev");
             fs::create_dir_all(&config_dir).expect("config dir");
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(
+                    &config_dir,
+                    fs::Permissions::from_mode(0o700),
+                )
+                .expect("config dir mode");
+            }
             write_file(
                 &config_dir,
                 SHELL_URL_CONFIG_NAME,
@@ -941,12 +1267,12 @@ mod tests {
             std::env::remove_var("MM_SHELL_URL");
 
             // MM_SHELL_URL_FILE wins over everything.
-            let env_file = write_file(&dir, "env-url.txt", "http://localhost:5000/", 0o600);
+            let env_file = write_file(&dir, "env-url.txt", "http://127.0.0.1:5000/env-1/t", 0o600);
             std::env::set_var("MM_SHELL_URL_FILE", &env_file);
             let (url, _) = resolve_shell_settings(identifier);
             assert_eq!(
                 url.as_ref().map(|u| u.to_string()),
-                Some("http://localhost:5000/".to_string())
+                Some("http://127.0.0.1:5000/env-1/t".to_string())
             );
             std::env::remove_var("MM_SHELL_URL_FILE");
 

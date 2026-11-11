@@ -42,6 +42,13 @@ pub fn next_zoom(current: f64, step: ZoomStep) -> f64 {
 /// magnification, and this is also the single place it is reset from.
 pub struct ZoomState(pub std::sync::Mutex<f64>);
 
+/// The configured shell origin (panel repair A): the View > Go to Server
+/// item navigates the window back to this address, so a person stranded on
+/// the pairing failure page — or anywhere else the allowlist permits — has
+/// one native way back to their conversation. Managed only in shell mode;
+/// the item is disabled when it is absent.
+pub struct ShellAddress(pub url::Url);
+
 impl Default for ZoomState {
     fn default() -> Self {
         // The webview starts unzoomed; a Mutex<f64> would default to 0.0.
@@ -100,22 +107,34 @@ pub fn install(app: &tauri::AppHandle) -> tauri::Result<()> {
         MenuItem::with_id(app, "shell-zoom-actual", "Actual Size", true, Some("CmdOrCtrl+0"))?;
     let back = MenuItem::with_id(app, "shell-back", "Back", true, Some("CmdOrCtrl+["))?;
     let fullscreen = PredefinedMenuItem::fullscreen(app, None)?;
+    // Enabled only when the configured shell origin is managed (shell mode).
+    let has_shell_address = app.try_state::<ShellAddress>().is_some();
+    let go_server = MenuItem::with_id(
+        app,
+        "shell-go-server",
+        "Go to Server",
+        has_shell_address,
+        None::<&str>,
+    )?;
     let sep_view_1 = PredefinedMenuItem::separator(app)?;
     let sep_view_2 = PredefinedMenuItem::separator(app)?;
     let sep_view_3 = PredefinedMenuItem::separator(app)?;
+    let sep_view_4 = PredefinedMenuItem::separator(app)?;
     let view_menu = Submenu::with_items(
         app,
         "View",
         true,
         &[
-            &reload,
+            &go_server,
             &sep_view_1,
+            &reload,
+            &sep_view_2,
             &zoom_in,
             &zoom_out,
             &zoom_actual,
-            &sep_view_2,
-            &back,
             &sep_view_3,
+            &back,
+            &sep_view_4,
             &fullscreen,
         ],
     )?;
@@ -153,6 +172,19 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
         }
         "shell-back" => {
             let _ = window.eval("history.back()");
+        }
+        "shell-go-server" => {
+            // Panel repair A: the way back to the person's conversation after
+            // a pairing failure page (or from anywhere the allowlist permits).
+            // `location.replace` keeps the page being left out of the back
+            // list (repair E), and the address is the configured origin, so
+            // the navigation allowlist always permits it.
+            if let Some(address) = app.try_state::<ShellAddress>() {
+                let Ok(target) = serde_json::to_string(address.0.as_str()) else {
+                    return;
+                };
+                let _ = window.eval(&format!("location.replace({target})"));
+            }
         }
         "shell-zoom-in" | "shell-zoom-out" | "shell-zoom-actual" => {
             let step = match id {

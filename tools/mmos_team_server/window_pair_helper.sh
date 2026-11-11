@@ -14,7 +14,11 @@
 # secret into the caller.
 #
 # Defaults target the installed team server (127.0.0.1:3780). A dev server
-# overrides with WINDOW_PAIR_T3_BIN / WINDOW_PAIR_T3_HOME.
+# overrides with WINDOW_PAIR_T3_BIN / WINDOW_PAIR_T3_HOME. The window clears
+# the environment when it runs this helper from the fixed config, so those
+# variables only reach a helper that is run directly (a wrapper script named
+# in the config is the supported way to aim the window at a dev server; see
+# open_team_window.sh and the runbook).
 set -eu
 
 T3_BIN="${WINDOW_PAIR_T3_BIN:-$HOME/.mastermind/t3-team-server/bin/t3}"
@@ -36,5 +40,12 @@ fi
 # short-lived (the window consumes it within seconds); --label marks the
 # connection in the server's list. stderr of the minting command is dropped
 # so only the URL line ever leaves this script.
-T3CODE_HOME="$T3_HOME" "$T3_BIN" pair --base-dir "$T3_HOME" --ttl 2m --label 'Mastermind OS window' 2>/dev/null |
-  sed -n 's/^Pairing URL: //p' | head -n 1
+#
+# Panel repair C: the minting command's own exit status must become this
+# script's exit status. The output is captured first (under `set -eu` a
+# failing command substitution fails the assignment, and nothing is printed
+# on that path), and only a successful mint's output is filtered to the one
+# URL line — a pipeline would otherwise mask the failure with sed's exit
+# status and the window would read an empty "success" from a dead server.
+pair_output=$(T3CODE_HOME="$T3_HOME" "$T3_BIN" pair --base-dir "$T3_HOME" --ttl 2m --label 'Mastermind OS window' 2>/dev/null)
+printf '%s\n' "$pair_output" | sed -n 's/^Pairing URL: //p' | head -n 1
