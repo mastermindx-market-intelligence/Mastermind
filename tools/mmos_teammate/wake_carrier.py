@@ -1502,9 +1502,11 @@ def last_result_comment(pc, child):
     if assignee:
         for row in reversed(rows):
             body = (row.get("body") or "").strip()
-            author = row.get("author") or {}
+            # The served comment row carries authorAgentId — the board
+            # serves no nested author object and no authorId (fixture
+            # comments.json / child_comments.json).
             if (body and row.get("authorType") == "agent"
-                    and (author.get("id") or row.get("authorId")) == assignee
+                    and row.get("authorAgentId") == assignee
                     and not is_machine_comment(body)):
                 return body
     for row in reversed(rows):
@@ -1526,6 +1528,30 @@ def _return_op(ask_op, child, single):
     return f"{ask_op}-{child.get('id')}-ret"
 
 
+def recorded_blocker_ids(issue):
+    """The blocker relation the board records for this parent, as a GET
+    serves it. The installed board never serves ``blockedByIssueIds`` on
+    GET /api/issues/:id — the relation arrives as ``blockedBy`` summaries
+    (one projected row per blocker, each with the blocker's ``id``; fixture
+    parent_2ad0bf92…). ``blockedByIssueIds`` is still read when a surface
+    serves it (a PATCH response of a build that echoes the field), but it
+    is never the primary signal again: code that depended on it alone was
+    defending with a field that is always empty in production."""
+    ids = []
+    for row in (issue.get("blockedBy") or []):
+        if isinstance(row, dict) and row.get("id"):
+            ids.append(row["id"])
+    ids.extend(iid for iid in (issue.get("blockedByIssueIds") or [])
+               if isinstance(iid, str))
+    seen = set()
+    out = []
+    for iid in ids:
+        if iid not in seen:
+            seen.add(iid)
+            out.append(iid)
+    return out
+
+
 def handle_return(pc, t3, issue, ask_op, opts):
     """The issue_blockers_resolved return edge: this teammate's ask came back.
 
@@ -1540,7 +1566,7 @@ def handle_return(pc, t3, issue, ask_op, opts):
     children list serves them oldest first), and the parent's final delivery
     happens only when no ask child is open; the asker's newest answer is the
     one delivered."""
-    blocker_ids = set(issue.get("blockedByIssueIds") or [])
+    blocker_ids = set(recorded_blocker_ids(issue))
     family = []
     for row in pc.children(issue["id"]):
         # Attack finding 5: the ask marker is derivable from public issue
@@ -2068,11 +2094,19 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         # Attack findings 5 and 9 (attack round): the marker is derivable
         # from public issue text, so a forged or duplicate marker-matching
         # child can hijack the return edge or hold it shut forever. The
-        # blocker set this carrier recorded (blockedByIssueIds from its own
-        # block_issue) is the binding: only a child in it can satisfy or
-        # suppress the return edge. Without the field (hand-blocked or
-        # legacy parents) marker shape remains the only signal, as before.
-        blocker_ids = issue.get("blockedByIssueIds") or []
+        # blocker relation the board records (the served blockedBy
+        # summaries) is the binding: only a child in it can satisfy or
+        # suppress the return edge. And a marker-matching family with NO
+        # recorded relation is not a family the board knows — every parent
+        # this carrier asked on records one (block_issue writes it before
+        # the child is ever visible) — so that shape is a forged child: the
+        # answer never enters this authenticated thread; a person decides.
+        blocker_ids = recorded_blocker_ids(issue)
+        if ask_children and not blocker_ids:
+            log(f"issue {issue.get('identifier')} has marker-matching "
+                "children but no recorded blocker relation; leaving it "
+                "for a person")
+            return 0
         if blocker_ids and ask_children:
             ask_children = [row for row in ask_children
                             if row.get("id") in blocker_ids]

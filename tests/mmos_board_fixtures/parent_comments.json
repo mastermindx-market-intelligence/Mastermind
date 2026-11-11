@@ -1,0 +1,88 @@
+[
+ {
+  "authorAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-11T02:15:35.688Z",
+  "createdByRunId": "97ab28f1-133e-4399-adba-23a52ac26a40",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "fe56a6bb-5a50-481a-8d87-a8482a08c684",
+  "issueId": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+  "metadata": {
+   "authorizationReason": "allow_self",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-11T02:15:35.688Z"
+ },
+ {
+  "authorAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-11T02:14:51.062Z",
+  "createdByRunId": "a8f44dda-c867-4ff5-b65f-57fa00496947",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "c94585be-381c-48bb-af29-a5ce5e2556ee",
+  "issueId": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+  "metadata": {
+   "authorizationReason": "allow_self",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-11T02:14:51.062Z"
+ }
+]

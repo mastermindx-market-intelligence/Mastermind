@@ -1,0 +1,301 @@
+{
+ "activeRecoveryAction": null,
+ "ancestors": [],
+ "assigneeAdapterOverrides": null,
+ "assigneeAgentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+ "assigneeUserId": null,
+ "billingCode": null,
+ "blockedBy": [
+  {
+   "activeRecoveryAction": null,
+   "assigneeAgentId": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+   "assigneeUserId": null,
+   "id": "e3791e36-6bbd-4e6e-a153-473a2f5b48da",
+   "identifier": "MAS-8",
+   "priority": "medium",
+   "scheduledRetry": null,
+   "status": "done",
+   "title": "<placeholder>"
+  }
+ ],
+ "blockedOwnerNotifiedAt": "2026-11-10T20:47:25.225Z",
+ "blockedTransitionAt": "2026-11-10T20:47:25.175Z",
+ "blockerAttention": {
+  "attentionBlockerCount": 0,
+  "blockingTreeLive": false,
+  "coveredBlockerCount": 0,
+  "directBlockerIssueId": null,
+  "pendingFinalizeBlockerIssueIds": [],
+  "reason": null,
+  "sampleBlockerIdentifier": null,
+  "sampleStalledBlockerIdentifier": null,
+  "stalledBlockerCount": 0,
+  "state": "none",
+  "terminalBlocker": null,
+  "terminalBlockerIssueId": null,
+  "unresolvedBlockerCount": 0
+ },
+ "blocks": [],
+ "cancelledAt": null,
+ "checkoutRunId": null,
+ "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+ "completedAt": "2026-11-11T01:00:39.124Z",
+ "continuationIdentityContextId": "9c09ace4-90d4-489b-a42c-90b6424bdd44",
+ "conversationAgentId": null,
+ "conversationBoundaryCommentId": null,
+ "conversationSessionGeneration": 0,
+ "conversationState": null,
+ "conversationUserId": null,
+ "createdAt": "2026-11-10T20:46:17.768Z",
+ "createdByAgentId": null,
+ "createdByUserId": "local-board",
+ "createdFrom": null,
+ "currentExecutionWorkspace": {
+  "baseRef": null,
+  "branchName": null,
+  "cleanupEligibleAt": null,
+  "cleanupReason": null,
+  "closedAt": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "config": {
+   "cleanupCommand": null,
+   "desiredState": null,
+   "environmentId": "7addd6ae-551a-4193-977a-753501c54b77",
+   "provisionCommand": null,
+   "runtimeProvisionCommand": null,
+   "serviceStates": null,
+   "teardownCommand": null,
+   "workspaceRuntime": null
+  },
+  "createdAt": "2026-11-10T20:46:20.357Z",
+  "cwd": "/Users/chriswong/.mastermind/t3-team/teammates/design-lead",
+  "deliveryState": "unknown",
+  "derivedFromExecutionWorkspaceId": null,
+  "id": "4dac91d1-1b6d-4e48-9f7e-bf9bca41dfc3",
+  "lastUsedAt": "2026-11-10T20:48:01.582Z",
+  "metadata": null,
+  "mode": "shared_workspace",
+  "name": "<placeholder>",
+  "openedAt": "2026-11-10T20:46:20.357Z",
+  "projectId": null,
+  "projectWorkspaceId": null,
+  "providerRef": null,
+  "providerType": "local_fs",
+  "repoUrl": null,
+  "runtimeServices": [],
+  "sourceIssueId": "7897297c-42e6-4afd-b671-edb5b41ec2b3",
+  "status": "active",
+  "strategyType": "project_primary",
+  "updatedAt": "2026-11-10T20:48:01.602Z"
+ },
+ "description": "<placeholder>",
+ "documentSummaries": [
+  {
+   "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+   "createdAt": "2026-11-10T20:48:56.610Z",
+   "createdByAgentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+   "createdByUserId": null,
+   "format": "markdown",
+   "id": "a53df236-f25a-4ee4-a65e-670c4c237dd9",
+   "issueId": "7897297c-42e6-4afd-b671-edb5b41ec2b3",
+   "key": "team-list-names",
+   "latestRevisionId": "1a4b95bf-34cf-46f3-957e-665fbd7ffbee",
+   "latestRevisionNumber": 1,
+   "lockedAt": null,
+   "lockedByAgentId": null,
+   "lockedByUserId": null,
+   "sourceTrust": null,
+   "title": "<placeholder>",
+   "updatedAt": "2026-11-10T20:48:56.610Z",
+   "updatedByAgentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+   "updatedByUserId": null
+  }
+ ],
+ "executionAgentNameKey": null,
+ "executionBlocker": null,
+ "executionLockedAt": null,
+ "executionPolicy": null,
+ "executionRunId": null,
+ "executionState": null,
+ "executionWorkspaceId": "4dac91d1-1b6d-4e48-9f7e-bf9bca41dfc3",
+ "executionWorkspacePreference": "reuse_existing",
+ "executionWorkspaceSettings": {
+  "mode": "shared_workspace"
+ },
+ "externalChannelBinding": null,
+ "externalConversationState": null,
+ "goal": null,
+ "goalId": null,
+ "harnessKind": null,
+ "hiddenAt": null,
+ "id": "7897297c-42e6-4afd-b671-edb5b41ec2b3",
+ "identifier": "MAS-7",
+ "interruption": {
+  "canRetry": false,
+  "intentId": null,
+  "nextRetryAt": null,
+  "observedRunId": "07b6f44b-a00a-41aa-9bd1-7af73b025831",
+  "responsibility": "system",
+  "sourceRunIds": [
+   "07b6f44b-a00a-41aa-9bd1-7af73b025831"
+  ],
+  "state": "resolved",
+  "userAction": null
+ },
+ "issueNumber": 7,
+ "labelIds": [],
+ "labels": [],
+ "lastStatusDecisionId": null,
+ "legacyPlanDocument": null,
+ "mentionedProjects": [],
+ "monitorAttemptCount": 0,
+ "monitorLastTriggeredAt": null,
+ "monitorNextCheckAt": null,
+ "monitorNotes": null,
+ "monitorScheduledBy": null,
+ "monitorWakeRequestedAt": null,
+ "originFingerprint": "default",
+ "originId": null,
+ "originIdentityContextId": null,
+ "originKind": "manual",
+ "originRunId": null,
+ "parentId": null,
+ "planDocument": null,
+ "priority": "medium",
+ "privacyParentIssueId": null,
+ "privacyRootIssueId": null,
+ "project": null,
+ "projectId": null,
+ "projectWorkspaceId": null,
+ "referencedIssueIdentifiers": [
+  "MAS-8"
+ ],
+ "relatedWork": {
+  "inbound": [
+   {
+    "issue": {
+     "assigneeAgentId": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+     "assigneeUserId": null,
+     "id": "a73fb59c-aec2-40cb-aa8a-97ca392320d6",
+     "identifier": "MAS-9",
+     "priority": "low",
+     "status": "done",
+     "title": "<placeholder>"
+    },
+    "mentionCount": 3,
+    "sources": [
+     {
+      "kind": "description",
+      "label": "<placeholder>",
+      "matchedText": "MAS-7",
+      "sourceRecordId": null
+     },
+     {
+      "kind": "comment",
+      "label": "<placeholder>",
+      "matchedText": "MAS-7",
+      "sourceRecordId": "23804cc3-d45a-4dde-8298-d1e0e074f9bb"
+     },
+     {
+      "kind": "comment",
+      "label": "<placeholder>",
+      "matchedText": "MAS-7",
+      "sourceRecordId": "f97e1d89-629c-4b6c-86dc-35906a807b83"
+     }
+    ]
+   },
+   {
+    "issue": {
+     "assigneeAgentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+     "assigneeUserId": null,
+     "id": "1acb93ff-adb9-48ab-82c0-961febf94cac",
+     "identifier": "MAS-13",
+     "priority": "medium",
+     "status": "done",
+     "title": "<placeholder>"
+    },
+    "mentionCount": 1,
+    "sources": [
+     {
+      "kind": "comment",
+      "label": "<placeholder>",
+      "matchedText": "MAS-7",
+      "sourceRecordId": "f8ffaea2-5415-4689-a552-ed689b131dc3"
+     }
+    ]
+   },
+   {
+    "issue": {
+     "assigneeAgentId": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+     "assigneeUserId": null,
+     "id": "e3791e36-6bbd-4e6e-a153-473a2f5b48da",
+     "identifier": "MAS-8",
+     "priority": "medium",
+     "status": "done",
+     "title": "<placeholder>"
+    },
+    "mentionCount": 1,
+    "sources": [
+     {
+      "kind": "description",
+      "label": "<placeholder>",
+      "matchedText": "MAS-7",
+      "sourceRecordId": null
+     }
+    ]
+   }
+  ],
+  "outbound": [
+   {
+    "issue": {
+     "assigneeAgentId": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
+     "assigneeUserId": null,
+     "id": "e3791e36-6bbd-4e6e-a153-473a2f5b48da",
+     "identifier": "MAS-8",
+     "priority": "medium",
+     "status": "done",
+     "title": "<placeholder>"
+    },
+    "mentionCount": 1,
+    "sources": [
+     {
+      "kind": "document",
+      "label": "<placeholder>",
+      "matchedText": "MAS-8",
+      "sourceRecordId": "a53df236-f25a-4ee4-a65e-670c4c237dd9"
+     }
+    ]
+   }
+  ]
+ },
+ "requestDepth": 0,
+ "responsibleUserId": "local-board",
+ "reviewAttention": {
+  "paths": [],
+  "reason": null,
+  "state": "none"
+ },
+ "reviewPolicy": null,
+ "scheduledRetry": null,
+ "sourceTrust": null,
+ "startedAt": "2026-11-10T20:48:01.882Z",
+ "status": "done",
+ "statusVersion": 5,
+ "successfulRunHandoff": null,
+ "title": "<placeholder>",
+ "titleNeedsGeneration": false,
+ "unblockDescriptor": {
+  "action": "<placeholder>",
+  "owner": {
+   "agentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30"
+  }
+ },
+ "updatedAt": "2026-11-11T01:00:39.124Z",
+ "visibility": "open",
+ "watchdog": null,
+ "workMode": "standard",
+ "workProducts": [],
+ "workspaceBindingRevision": 1,
+ "workspacePendingSelection": null,
+ "workspaceSelection": null
+}
