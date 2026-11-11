@@ -2576,7 +2576,15 @@ class T3ExecutionAdapter:
             git_manifest={},
             usage={},
             provider_session_id=original.provider_session_id,
-            exit_code=None,
+            # L8 (lease-expiry journey, 2026-11-11): a provider-managed run
+            # has no OS process, so there is no OS exit code to read — the
+            # durable provider verdict IS the exit evidence.  Map it to the
+            # engine-uniform exit code exactly as the paid wire's reviewed
+            # law does (SUCCEEDED -> 0, every failure verdict nonzero); the
+            # richer truth stays in ``status``.  A None here made the
+            # supervisor's recovered-run finisher refuse ("no truthful
+            # durable OS exit code") and quarantine the whole service.
+            exit_code=(0 if state is WorkerRunStatus.SUCCEEDED else 1),
             started_at=read.started_at,
             finished_at=read.finished_at or self._now_iso(),
             error=read.error,

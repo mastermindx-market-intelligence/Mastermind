@@ -684,6 +684,38 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
             await adapter.collect_result(ref)
         self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
 
+    async def test_collect_maps_the_provider_verdict_to_the_engine_uniform_exit_code(
+        self,
+    ) -> None:
+        """L8 (lease-expiry journey, 2026-11-11): the engine's recovered-run
+        finisher terminalizes on ``receipt.result.exit_code``.  The paid
+        wire's reviewed law maps its provider verdict to the engine-uniform
+        exit code (SUCCEEDED -> 0); the t3 adapter's receipt hardcoded
+        ``None``, so the service's own recovered finisher refused ("recovered
+        local worker has no truthful durable OS exit code") and quarantined
+        the whole Executive service at startup — the recovery door then died
+        at ``register-worker``.  A provider-managed run has no OS process;
+        its durable terminal verdict IS the exit evidence, and the richer
+        truth stays in ``result.status``."""
+        adapter, port, _ = _t3_adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        port.status_by_thread[ref.provider_session_id] = "succeeded"
+        receipt = await adapter.collect_result(ref)
+        self.assertEqual(receipt.result.status, WorkerRunStatus.SUCCEEDED)
+        self.assertEqual(receipt.result.exit_code, 0)
+        # every failure verdict is nonzero — never a success-shaped None
+        for native, expected in (
+            ("failed", WorkerRunStatus.FAILED),
+            ("cancelled", WorkerRunStatus.CANCELLED),
+        ):
+            adapter, port, _ = _t3_adapter(binding=_binding())
+            ref = await adapter.start(_launch_spec())
+            port.status_by_thread[ref.provider_session_id] = native
+            receipt = await adapter.collect_result(ref)
+            self.assertEqual(receipt.result.status, expected)
+            self.assertNotEqual(receipt.result.exit_code, 0)
+            self.assertIsNotNone(receipt.result.exit_code)
+
 
 # =============================================================================
 # cancel
