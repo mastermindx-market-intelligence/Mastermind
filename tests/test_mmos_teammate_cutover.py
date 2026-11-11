@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools",
                                 "mmos_teammate"))
 import cutover_installed as co  # noqa: E402
+import setup_teammate as st  # noqa: E402
 
 AID, CID = "agent-1", "company-1"
 
@@ -76,6 +77,25 @@ def wired(tmp_path, monkeypatch):
     spec, http = make_spec(tmp_path), FakeHttp(old_agent())
     monkeypatch.setattr(co, "Http", lambda base: http)
     return spec, http
+
+
+def test_paperclip_base_must_be_plain_loopback_http():
+    # R2a finding 29: Http pins the base by the urlsplit law, not string
+    # splits. The board actor header rides every call this client makes, so
+    # the base must be scheme http, a loopback host, no userinfo, a port,
+    # and no path/query/fragment.
+    for bad in ("http://user:pass@127.0.0.1:3100",   # userinfo: another origin
+                "http://127.0.0.1.evil.example:3100",  # loopback-looking name
+                "https://127.0.0.1:3100",             # scheme was unchecked
+                "http://127.0.0.1",                   # no port
+                "http://127.0.0.1:3100/proxy",        # a path rides into calls
+                "http://127.0.0.1:3100?x=1",          # query
+                "http://127.0.0.1:3100:80"):          # malformed port
+        with pytest.raises(SystemExit):
+            st.Http(bad)
+    for ok in ("http://127.0.0.1:3100", "http://localhost:3100",
+               "http://[::1]:3100", "http://127.0.0.1:3100/"):
+        assert st.Http(ok).base.rstrip("/") == ok.rstrip("/")
 
 
 def test_blockers_name_every_unsafe_state(tmp_path):

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -43,9 +44,25 @@ class Http:
     """Dev-instance Paperclip client (board actor via local_trusted header)."""
 
     def __init__(self, base):
-        host = base.split("//")[-1].split(":")[0]
-        if host not in ("127.0.0.1", "localhost", "::1"):
-            die(f"refusing non-loopback Paperclip base {base}")
+        # R2a finding 29: the base is pinned by the urlsplit law, not string
+        # splits — the local_trusted header rides every call this client
+        # makes, so the base must be a plain loopback http origin with a
+        # port: scheme http, host 127.0.0.1/localhost/::1, no username or
+        # password, a real port, and no path, query or fragment. This is the
+        # same law the carrier's loopback_base_error holds for
+        # carrier.json's paperclip_base (R2a finding 13).
+        parts = urllib.parse.urlsplit(base)
+        try:
+            port = parts.port
+        except ValueError:
+            port = None
+        host = (parts.hostname or "").lower()
+        if (parts.scheme != "http" or host not in ("127.0.0.1", "localhost",
+                                                   "::1")
+                or parts.username or parts.password or port is None
+                or parts.path not in ("", "/") or parts.query or parts.fragment):
+            die(f"refusing Paperclip base {base!r}: it must be plain "
+                "loopback http with a port, like http://127.0.0.1:3100")
         self.base = base.rstrip("/")
 
     def call(self, method, path, body=None):
