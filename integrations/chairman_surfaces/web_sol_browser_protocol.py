@@ -23,7 +23,7 @@ ADVANCED_READ = frozenset({"cdp_status", "frames", "accessibility", "dom", "loca
     "events", "network", "response_body", "result", "downloads", "capture", "pdf"})
 ADVANCED_ACTIONS = ADVANCED_READ | {"cdp_attach", "cdp_detach", "cdp", "evaluate", "interact",
     "upload", "download", "dialog", "emulate", "route"}
-NO_SNAPSHOT = ADVANCED_READ | {"snapshot", "cdp_detach", "dialog"}
+NO_SNAPSHOT = ADVANCED_READ | {"snapshot", "diagnostics", "cdp_detach", "dialog"}
 READ_ACTIONS = frozenset({"status", "tabs", "snapshot", "screenshot", "diagnostics"}) | ADVANCED_READ
 PAGE_ACTIONS = frozenset({"click", "fill", "select", "press", "scroll"})
 TAB_ACTIONS = PAGE_ACTIONS | {"snapshot", "screenshot", "diagnostics", "navigate",
@@ -191,6 +191,10 @@ def validate_request(value):
         _require(value["tab_id"] is None and value["url_fingerprint"] is None)
     if action in TAB_ACTIONS - NO_SNAPSHOT:
         _require(_text(value["snapshot_id"], 16, 128))
+    elif action == "diagnostics":
+        # diagnostics is the snapshot-free recovery read: it accepts the last
+        # observation's id when one exists, and None when none does.
+        _require(value["snapshot_id"] is None or _text(value["snapshot_id"], 16, 128))
     else:
         _require(value["snapshot_id"] is None)
     if action in PAGE_ACTIONS:

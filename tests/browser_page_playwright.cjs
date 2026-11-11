@@ -60,6 +60,12 @@ const fixture = `<!doctype html><html><head><title>Browser control fixture</titl
     assert.equal((await send("validate_focus",s.snapshot_id,name.ref,{token:prepared.data.focus_token})).ok,true);
     await page.locator("#choice").focus();assert.equal((await send("validate_focus",s.snapshot_id,name.ref,{token:prepared.data.focus_token})).code,"FOCUS_NOT_CONFIRMED");
     await page.reload();await install();assert.equal((await send("validate_focus",s.snapshot_id,name.ref,{token:prepared.data.focus_token})).ok,false);
+    // diagnostics is a snapshot-independent read: with no snapshot observed yet,
+    // with a live snapshot present, and with the matching id, it must answer.
+    const d0=await send("diagnostics",null);assert.equal(d0.ok,true,`no-snapshot diagnostics: ${JSON.stringify(d0)}`);
+    s=await snapshot();
+    const d1=await send("diagnostics",null);assert.equal(d1.ok,true,`live-snapshot null-id diagnostics: ${JSON.stringify(d1)}`);
+    const d2=await send("diagnostics",s.snapshot_id);assert.equal(d2.ok,true);
     s=await snapshot();name=s.elements.find(e=>e.name==="Name");await page.locator("#name").evaluate(e=>e.remove());
     assert.equal((await send("fill",s.snapshot_id,name.ref,{text:"must not apply"})).code,"TARGET_CHANGED");
     await page.evaluate(()=>{for(let i=0;i<3000;i++){const b=document.createElement("button");b.textContent="Item "+i;document.body.append(b);}});

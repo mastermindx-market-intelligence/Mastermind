@@ -137,6 +137,9 @@
           Date.parse(request.expires_at)<=Date.now()) return "REQUEST_EXPIRED";
       if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) return "INVALID_REQUEST";
       if (request.action === "snapshot") return Object.keys(request.params).length ? "INVALID_REQUEST" : null;
+      // diagnostics is a read-only health probe; it never mutates and must
+      // stay callable when no snapshot exists — that is its whole purpose.
+      if (request.action === "diagnostics") return Object.keys(request.params).length ? "INVALID_REQUEST" : null;
       if (request.action === "validate_focus") {
         if (!prepared || Object.keys(request.params).join() !== "token" || request.params.token !== prepared.token ||
             request.session_id !== prepared.session || request.snapshot_id !== prepared.snapshot ||
@@ -225,12 +228,23 @@
   }
   if (typeof module !== "undefined" && module.exports) module.exports = {createPage, KIND};
   root.MMXBrowserPageFactory = createPage;
-  if (typeof chrome !== "undefined" && chrome.runtime && !root.__MMX_BROWSER_PAGE_V1__) {
-    const page = createPage(root);
-    root.__MMX_BROWSER_PAGE_V1__ = page;
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (!request || request.kind !== KIND || !sender || sender.id !== chrome.runtime.id) return;
-      sendResponse(page.dispatch(request));
-    });
+  // Registration must survive any later injection into the same document: a
+  // first pass whose factory threw (or whose listener was later lost) otherwise
+  // leaves the document permanently unreachable, because the old single guard
+  // made every later injection skip registration entirely.
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+    if (!root.__MMX_BROWSER_PAGE_V1__) {
+      try { root.__MMX_BROWSER_PAGE_V1__ = createPage(root); }
+      catch (e) { root.MMXBrowserPageError = String(e && e.message || e).slice(0, 180); }
+    }
+    if (!root.__MMX_BROWSER_PAGE_LISTENING__) {
+      root.__MMX_BROWSER_PAGE_LISTENING__ = true;
+      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (!request || request.kind !== KIND || !sender || sender.id !== chrome.runtime.id) return false;
+        if (!root.__MMX_BROWSER_PAGE_V1__) return false;
+        sendResponse(root.__MMX_BROWSER_PAGE_V1__.dispatch(request));
+        return true;
+      });
+    }
   }
 })(globalThis);

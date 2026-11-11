@@ -63,6 +63,16 @@ def _refusal(reason, request_ref=None, unknown=False):
             "request_ref": request_ref, "retry_allowed": False}
 
 
+def _argument_refusal(request_ref=None, missing=(), unexpected=(), note=None):
+    """INVALID_ARGUMENTS names the argument names that were wrong — never values."""
+    parts = []
+    if missing: parts.append("missing=" + ",".join(sorted(missing)))
+    if unexpected: parts.append("unexpected=" + ",".join(sorted(unexpected)))
+    if note: parts.append(note)
+    return {"state": "REFUSED", "reason": "INVALID_ARGUMENTS", "detail": " ".join(parts) or "shape",
+            "request_ref": request_ref, "retry_allowed": False}
+
+
 def inventory(bindings_path: Path):
     """Project existing validated coordinates; do not infer installed/live state."""
     # Direct browser deployments have installation metadata, not fake ChatGPT
@@ -109,10 +119,14 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
     request_ref = None
     try:
         protocol.bounded(arguments)
-        if (type(arguments) is not dict or set(arguments) - ARGUMENT_FIELDS
+        if type(arguments) is not dict:
+            return _argument_refusal(note="arguments must be an object")
+        unexpected_fields = set(arguments) - ARGUMENT_FIELDS
+        if (unexpected_fields
                 or type(arguments.get("action")) is not str
                 or arguments["action"] not in protocol.ACTIONS | LOCAL_ACTIONS):
-            return _refusal("INVALID_ARGUMENTS")
+            return _argument_refusal(unexpected=unexpected_fields,
+                note=None if unexpected_fields else "action must be a known action name")
         if (type(native_session_id) is not str or not 1 <= len(native_session_id) <= 256
                 or type(profile_ref) is not str or not 1 <= len(profile_ref) <= 4096):
             return _refusal("NATIVE_SESSION_UNBOUND")
@@ -121,7 +135,7 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
         action = arguments["action"]
         host_ref = arguments.get("host_ref")
         if host_ref is not None and (type(host_ref) is not str or not routes.HOST_RE.fullmatch(host_ref)):
-            return _refusal("INVALID_ARGUMENTS")
+            return _argument_refusal(note="host_ref must be a registered host reference name")
         operation = operation_key if operation_key is not None else "hermes-browser-" + secrets.token_hex(16)
         nonce = nonce if nonce is not None else secrets.token_hex(24)
         request_ref = {"browser_id": arguments.get("browser_id"), "host_ref": host_ref,
@@ -141,7 +155,9 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
         if action == "browsers":
             options = arguments.get("options", {})
             if set(arguments) - {"action","host_ref","options"} or type(options) is not dict or set(options) - {"probe"} or type(options.get("probe",False)) is not bool:
-                return _refusal("INVALID_ARGUMENTS")
+                return _argument_refusal(unexpected=set(arguments) - {"action","host_ref","options"},
+                    note=None if set(arguments) - {"action","host_ref","options"}
+                        else "options must be an object whose only key is the boolean probe")
             if host_ref is not None:
                 if document is None or host_ref not in {h["host_ref"] for h in document["hosts"]}:
                     return _refusal("HOST_NOT_REGISTERED")
@@ -184,8 +200,10 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
         elif host_ref is not None:
             return _refusal("FLEET_INVENTORY_REQUIRED")
         if action == "launch":
-            if row is None or set(arguments) - {"action","browser_id","host_ref"}:
-                return _refusal("INVALID_ARGUMENTS")
+            if row is None:
+                return _argument_refusal(note="launch requires a fleet host route")
+            if set(arguments) - {"action","browser_id","host_ref"}:
+                return _argument_refusal(unexpected=set(arguments) - {"action","browser_id","host_ref"})
             current = execute({"action":"status","browser_id":browser_id,"host_ref":row["host_ref"]},
                 native_session_id=native_session_id,profile_ref=profile_ref,bindings_path=bindings_path,exchange=exchange,local_only=local_only)
             if current.get("receipt",{}).get("status") == "OK":
@@ -201,6 +219,9 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
             required.update({"tab_id", "url_fingerprint"})
         if action in protocol.TAB_ACTIONS - protocol.NO_SNAPSHOT:
             required.add("snapshot_id")
+        if action == "diagnostics" and type(arguments.get("snapshot_id")) is str:
+            # diagnostics also accepts the last observation's id when held.
+            required.add("snapshot_id")
         if action in protocol.PAGE_ACTIONS:
             required.add("ref")
         params = {}
@@ -210,9 +231,11 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
         if action in protocol.ADVANCED_ACTIONS:
             required.add("options")
         if set(arguments) != required:
-            return _refusal("INVALID_ARGUMENTS")
+            return _argument_refusal(request_ref, missing=required - set(arguments),
+                unexpected=set(arguments) - required)
         if action in protocol.ADVANCED_ACTIONS:
-            if type(arguments["options"]) is not dict:return _refusal("INVALID_ARGUMENTS",request_ref)
+            if type(arguments["options"]) is not dict:
+                return _argument_refusal(request_ref, note="options must be an object")
             params = dict(arguments["options"])
         else:
             params.update((k, arguments[k]) for k in payload_fields)
