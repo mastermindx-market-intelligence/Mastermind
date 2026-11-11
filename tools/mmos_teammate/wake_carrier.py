@@ -1175,10 +1175,20 @@ def stay_with_question(pc, t3, issue, op, opts, message=None):
             if reply is None:
                 raise NeedsHuman(_thread_id(t3))
             return reply
+        # The send's own pre-check first (send_once's rule, inlined so the
+        # flag can tell the two apart): a question that landed in the window
+        # between the clear poll and now means NOTHING was sent — R2a
+        # finding 24: sent_here is armed only as the send itself issues.
+        thread = t3.messages(1)[0]
+        if _pending_requests(thread) > 0:
+            log("a question landed again just before the send; staying "
+                "with it")
+            continue
         try:
             log(f"question answered; sending {op} now")
-            sent_here = True  # even a send that stops on a question landed
-            result = send_once(t3, message)
+            sent_here = True  # the send itself is issuing now — even a send
+            # whose turn stops on a question landed (NeedsHuman below)
+            result = t3.send(message)
             return result.get("reply") or ""
         except NeedsHuman:
             continue  # this fresh turn stopped on a question too: stay again

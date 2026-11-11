@@ -1884,6 +1884,54 @@ def test_question_wait_fails_after_three_reads_in_a_row():
     assert t3.failed_reads == 3  # exactly three strikes, not fewer
 
 
+class RacingT3(FakeT3):
+    """Finding 24's race window: each read serves the next scripted snapshot
+    (per CALL, not per nap), so a fresh question can land between the clear
+    poll and the send's own pre-check."""
+
+    def __init__(self, script, replies):
+        super().__init__(replies=replies)
+        self.script, self.i = script, 0
+        self.thread_id = "th-1"
+
+    def messages(self, count=60):
+        thread, msgs = self.script[min(self.i, len(self.script) - 1)]
+        self.i += 1
+        return dict(thread), [tuple(m) for m in msgs]
+
+    def nap(self, seconds):
+        pass  # reads are scripted per call, not per nap
+
+
+def test_a_send_that_never_issued_is_not_sent_here():
+    # R2a finding 24: sent_here must be set only when the send was actually
+    # issued. A fresh question can land between the clear poll and the send's
+    # own pre-check; send_once then raises NeedsHuman WITHOUT sending. The
+    # old code had already set sent_here, so the stay concluded "sent but not
+    # visible" and waited on a marker that was never sent, giving up at the
+    # deadline with the message undelivered. The stay must keep waiting for
+    # the question to clear and send exactly once.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    script = [
+        (th(pending=1), []),   # the waiting question, marker absent
+        (th(pending=0), []),   # cleared for the poll
+        (th(pending=0), []),   # re-read: marker still absent
+        (th(pending=1), []),   # a fresh question lands; the send's own check
+                               # raises NeedsHuman — NOTHING WAS SENT
+        (th(pending=1), []),   # the loop reads again: still a question
+        (th(pending=0), []),   # clear poll
+        (th(pending=0), []),   # re-read: marker absent
+        (th(pending=0), []),   # the send's own check passes now
+    ]
+    t3 = RacingT3(script, replies=["fresh answer"])
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3)
+    msg = f"[{op}]\n\nthe task"
+    assert wc.stay_with_question(pc, t3, pc.issue("is-1"), op, opts,
+                                 message=msg) == "fresh answer"
+    assert t3.sends == [msg]  # exactly one send, and only when it issued
+
+
 def test_run_budget_caps_wait_for_reply_too():
     # The slow-turn wait ends at the earlier of pending_timeout_sec and the
     # run budget: here 50s of budget against a 600s timeout.
