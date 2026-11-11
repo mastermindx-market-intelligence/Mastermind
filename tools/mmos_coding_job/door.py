@@ -1401,8 +1401,8 @@ class CodingJobDoor:
         box["composition"] = composition
         return composition.adapter, box
 
-    def _wait_terminal(self, adapter, ref, *, deadline_s: float = 1800.0,
-                       interval_s: float = 15.0):
+    def _wait_terminal(self, adapter, ref, *, runtime=None, entry=None,
+                       deadline_s: float = 1800.0, interval_s: float = 15.0):
         from control_plane.worker_execution_contract import WorkerRunStatus
         terminal = frozenset({
             WorkerRunStatus.SUCCEEDED, WorkerRunStatus.FAILED,
@@ -1414,6 +1414,13 @@ class CodingJobDoor:
             status = WorkerRunStatus.STARTING
             deadline = time.monotonic() + deadline_s
             while time.monotonic() < deadline:
+                # L5 (crash journey, 2026-11-11): a live owner extends its
+                # lease while its execution runs — a wait longer than the
+                # lease made complete_attempt refuse with the result in
+                # hand.  The renewal happens BEFORE each poll, so the lease
+                # never lapses while this door is honestly waiting.
+                if runtime is not None and entry is not None:
+                    self._heartbeat_lease(runtime, entry)
                 status = await adapter.status(ref)
                 if not statuses or statuses[-1] != status.value:
                     statuses.append(status.value)
@@ -1423,6 +1430,32 @@ class CodingJobDoor:
             return statuses, status
 
         return asyncio.run(_run())
+
+    def _heartbeat_lease(self, runtime, entry) -> None:
+        """Extend the entry's lease through the runtime's typed seam.
+
+        The engine adopts a recovered attempt with a FRESH lease (the
+        canary's is short); this door then waits for the native run to
+        finish.  Renewing while the run is live keeps the seal's
+        ``complete_attempt`` on current credentials.  A refusal (the lease
+        already lapsed, or another owner fenced it) propagates: this door
+        no longer holds the attempt and must not seal it — the engine's
+        re-adoption owns the next attempt."""
+        attempt_id = entry.get("attempt_id")
+        fence = entry.get("fence_generation")
+        token = entry.get("lease_token")
+        if not attempt_id or fence is None or not token:
+            return
+        extend = max(int(self.config.lease_seconds or 0), 90)
+        try:
+            runtime.attempts.heartbeat_attempt(
+                attempt_id, fence_generation=fence, lease_token=token,
+                extend_seconds=extend)
+        except Exception as exc:
+            raise RuntimeError(
+                f"lease renewal for {attempt_id} was refused ({exc}); this "
+                "door no longer holds the attempt and must not seal it"
+            ) from exc
 
     def _execute(self, runtime, command, entry):
         request = ChildExecutionRequest.from_dict(dict(entry["envelope"]))
@@ -1698,7 +1731,8 @@ class CodingJobDoor:
                           branch) -> None:
         """The shared tail: wait terminal, collect, seal through the
         execution-return seam, then read the delivery receipt honestly."""
-        statuses, final = self._wait_terminal(adapter, ref)
+        statuses, final = self._wait_terminal(
+            adapter, ref, runtime=runtime, entry=entry)
         _log(f"attempt {attempt_id} terminal: {final.value} "
              f"({statuses})")
 
@@ -1726,6 +1760,10 @@ class CodingJobDoor:
                 repository=self.config.repository, port=GhCliEvidencePort()),
             t3_adapter=adapter)
 
+        # L5 (crash journey, 2026-11-11): the collect/seam tail can outlast
+        # the lease too — renew once more so the seal commits on current
+        # credentials (same typed seam, same refusal law as the wait loop).
+        self._heartbeat_lease(runtime, entry)
         sealed = runtime.attempts.complete_attempt(
             attempt_id, fence_generation=entry["fence_generation"],
             lease_token=entry["lease_token"],

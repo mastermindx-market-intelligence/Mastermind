@@ -1056,6 +1056,9 @@ def test_step4_after_seal_crash_window_leaves_a_committed_seal_behind(
     sealed_calls = []
 
     class _Attempts:
+        def heartbeat_attempt(self, _attempt_id, **_kwargs):
+            return None  # the L5 renewal seam (no-op in this fake)
+
         def complete_attempt(self, attempt_id, **kwargs):
             sealed_calls.append((attempt_id, kwargs))
             return SimpleNamespace(status=SimpleNamespace(value="succeeded"))
@@ -1382,3 +1385,66 @@ def test_step4_a_recovered_run_seals_through_the_durable_neutral_ref(
     assert sealed == [neutral]  # no second seal
     assert entry_b["phase"] == "reconcile-quarantined"
     assert entry_b["blocker"]["code"] == "RECOVERED_REF_UNREADABLE"
+
+
+def test_step5_a_wait_longer_than_the_lease_still_seals(scratch, monkeypatch,
+                                                        tmp_path):
+    """Caught live by the round-4 crash journey (2026-11-11, L5): the engine
+    adopts the recovered attempt with a FRESH lease, then the door honestly
+    WAITS for the native run to finish — a wait longer than the lease made
+    ``complete_attempt`` refuse (``StateConflict: attempt … lease has
+    expired``) with the result in hand, and the entry froze execute-failed.
+    A live owner extends its lease while its execution runs: the door
+    heartbeats through the wait (the runtime's own typed seam), so the seal
+    commits on credentials that are still current."""
+    import time as _time
+    from tests.test_executive_supervisor import _runtime_and_job
+    from control_plane.worker_execution_contract import WorkerRunStatus
+
+    runtime, job_id, _ = _runtime_and_job(tmp_path, lease_seconds=1)
+    lease = runtime.broker.claim(job_id, lease_owner="t4b-door")
+    attempt_id = lease.attempt.attempt_id
+
+    d = _attack_door(scratch, monkeypatch)
+    door_globals = type(d)._seal_and_deliver.__globals__
+    command = d.freeze_issue(_issue_row("iss-l5"))
+    entry = d.frozen[command]
+    entry.update({"job_id": job_id, "attempt_id": attempt_id,
+                  "fence_generation": lease.attempt.fence_generation,
+                  "lease_token": lease.lease_token, "phase": "reattached",
+                  "envelope": entry["envelope"]})
+    d._save_frozen()
+
+    class _SlowAdapter:
+        async def status(self, _ref):
+            # longer than the 1s lease: without a renewal during the wait,
+            # complete_attempt must refuse
+            _time.sleep(2.5)
+            return WorkerRunStatus.SUCCEEDED
+
+        async def collect_result(self, _ref):
+            return SimpleNamespace(result=SimpleNamespace(
+                structured_output={"text": "done",
+                                   "artifacts": ["branch:b"]}))
+
+    ref = SimpleNamespace(provider_session_id="mcp:launch:l5")
+    monkeypatch.setitem(door_globals, "ResultDeliveryRegistry",
+                        lambda: SimpleNamespace(
+                            register=lambda *a, **k: None))
+    monkeypatch.setitem(door_globals, "install_execution_return_seam",
+                        lambda *a, **k: None)
+    monkeypatch.setitem(door_globals, "GitHubEvidenceSource",
+                        lambda **k: None)
+    finished = []
+    monkeypatch.setattr(d, "_finish_sealed",
+                        lambda *a, **k: finished.append(True))
+
+    d._seal_and_deliver(runtime, entry, attempt_id, _SlowAdapter(), ref,
+                        "t3/mmos-t4b-job-l5")
+    # the seal committed on renewed credentials (an unrenewed 1s lease
+    # would have expired 1.5s before complete_attempt)
+    assert finished == [True]
+    assert entry["phase"] == "sealed"
+    assert entry["final_status"] == "COMPLETED"
+    row = runtime.attempts.get_attempt(attempt_id)
+    assert getattr(getattr(row, "status", None), "value", "") == "COMPLETED"

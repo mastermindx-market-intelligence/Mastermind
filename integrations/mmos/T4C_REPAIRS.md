@@ -29,6 +29,7 @@ attack finding F8 from `T4B_ATTACK_FINDINGS.md`. Base commit `676786c71`
 | L2 (live, wait-frees journey) | the admission-ledger Job (a record of WHO ASKED) never left the runtime's ready count (`QUEUED`, never claimed) after its placement delivered, so fleet capacity never freed — the second task WAITed forever with the door faithfully re-asking every 30s | CLOSED (finishing a sealed entry retires its admission Job through the runtime's typed cancel seam, idempotently) | `…door_t4c.py::test_step4_a_terminal_placement_frees_the_admission_ready_slot` | this step |
 | L3 (live, crash journey) | the launch spec carried NO authorities while `compose_child_execution`'s placement Job carries the runtime's default `["READ"]`; the receipt-adoption contract check refused ("launch contract differs from the durable Job") and the recovery looped `LIVE_QUARANTINED` forever | CLOSED (the launch spec carries the placement Job's own authority set) | `…door_t4c.py::test_step4_launch_spec_carries_the_attempt_s_own_job` (authorities leg) | this step |
 | L4 (live, crash journey) | the engine's supervisor-boundary projection returns the recovered `ActiveRun` in the TWIN ref shape (pid/pgid/start-identity/boot-session None — the runtime's provider-managed recording shape), but the door seals through its own INNER adapter whose retained-ref check demands the DURABLE NEUTRAL ref (pid=0): `_require_run_state` refused the door's own recovered run ("ref does not match the retained original ref"), the entry froze at execute-failed and reconcile spun `ALREADY_RECOVERED` forever | CLOSED (the seal runs on the adapter's own durable ref, read through its fail-closed `retained_original_ref` accessor; an unreadable ref parks typed `RECOVERED_REF_UNREADABLE`, never a translated guess) | `…door_t4c.py::test_step4_a_recovered_run_seals_through_the_durable_neutral_ref` | this step |
+| L5 (live, crash journey round 4) | the engine adopts the recovered attempt with a FRESH short lease, then the door honestly WAITS for the native run to finish — a wait longer than the lease made `complete_attempt` refuse (`StateConflict: attempt … lease has expired`) with the result in hand; the entry froze execute-failed | CLOSED (a live owner extends its lease while its execution runs: the door heartbeats through the terminal wait — before each poll and once more before the seal — through the runtime's typed `heartbeat_attempt` seam; a refusal propagates, the door no longer holds the attempt and must not seal it) | `…door_t4c.py::test_step5_a_wait_longer_than_the_lease_still_seals` | this step |
 
 ## Step-4 proof (dev instances)
 
@@ -43,7 +44,7 @@ task shows.
 | scenario | proves | result |
 |---|---|---|
 | `default` | one task → one job → sealed → result comment on the same task | PASS (1 launch); PASS again on `5b3efef6f` (round 3) |
-| `crash` | exit 90 at the receipt; fresh door recovers the SAME attempt through the engine's defer-then-adopt cadence | engine lane PASS live (defer → `RECEIPT_RECOVERED` → same run under fence 2, ONE native launch); seal refused by L4 — re-running on the L4 fix |
+| `crash` | exit 90 at the receipt; fresh door recovers the SAME attempt through the engine's defer-then-adopt cadence | engine lane PASS live (defer → `RECEIPT_RECOVERED` → same run under fence 2, ONE native launch); seal refused by L4, then the seal's commit refused by L5 — re-running on the L4+L5 fixes |
 | `crash-seal` | exit 91 after the seal commit; fresh door finishes the job, result comment EXACTLY once | PASS on `d222e9d80`; PASS on `5b3efef6f` (round 3) |
 | `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1; re-running on the fixed tree |
 | `wait` | fleet full: second task WAITs with the precise blocker | PASS |
@@ -106,6 +107,21 @@ live in the T4c evidence ledger's `step4-journeys/` folder.)
   parks typed `RECOVERED_REF_UNREADABLE` instead of sealing a translated
   or guessed ref.  The engine's projection and its twin checks stay
   exactly as reviewed.
+- **L5 (crash round 4, 2026-11-11):** on the L4-fixed tree the recovered
+  run sealed through the durable neutral ref, the native run went
+  terminal `SUCCEEDED`, the result was collected — and then
+  `complete_attempt` refused: `StateConflict: attempt … lease has
+  expired`.  The engine adopts a recovered attempt with a FRESH lease
+  (the canary's is 20s); the door's terminal wait then outlasted it.
+  `_current_row` refuses every mutation at `timestamp >=
+  lease_expires_at_ms` and an expired lease is unrenewable (only
+  `adopt_attempt(adopt_expired_lease=True)` may take it).  A live owner
+  extends its lease while its execution runs: the door now heartbeats
+  through the wait (before each poll) and once more before the seal,
+  through the runtime's own typed `heartbeat_attempt` seam (expiry =
+  `max(existing, now+duration)`, monotonic forward).  A renewal refusal
+  propagates — that door no longer holds the attempt and must not seal
+  it; the engine's re-adoption owns the next one.
 
 ## Attack round (Step 5)
 
