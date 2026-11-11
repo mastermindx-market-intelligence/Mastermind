@@ -222,6 +222,147 @@ class TestToolLimitsCredentials:
         assert not any(d.startswith(f"Read(/{root}/**") for d in deny)
 
 
+class TestAtomicWrites:
+    """Review R2a finding 11: the server watches settings.json and reloads it
+    about 100 ms after a change, and a teammate process reads tool-limits.json
+    and CHARTER.md when it starts. A write that truncates the destination in
+    place can be read half-written. Every file another process reads while
+    running must be swapped in with os.replace from a same-directory temporary
+    that is 0600 from creation and fsynced first."""
+
+    def replace_probe(self, monkeypatch, targets):
+        """Capture the temp file's directory, mode and full text at the moment
+        os.replace is called, for each destination in ``targets``."""
+        seen = {t: [] for t in targets}
+        real_replace = os.replace
+
+        def replace(src, dst):
+            for target in targets:
+                if os.path.abspath(dst) == os.path.abspath(target):
+                    st = os.stat(src)
+                    with open(src) as fh:
+                        seen[target].append({
+                            "same_dir": os.path.dirname(
+                                os.path.abspath(src)) ==
+                            os.path.dirname(os.path.abspath(target)),
+                            "mode": stat.S_IMODE(st.st_mode),
+                            "text": fh.read()})
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(team_roster.os, "replace", replace)
+        return seen
+
+    def test_settings_json_replaced_atomically(self, tmp_path, monkeypatch):
+        home, path = fake_home(tmp_path)
+        spec = load(tmp_path, make_spec(tmp_path, home=str(home)))
+        seen = self.replace_probe(monkeypatch, [str(path)])
+        team_roster.ensure_instances(spec)
+        assert seen[str(path)], "settings.json was not written via os.replace"
+        probe = seen[str(path)][0]
+        assert probe["same_dir"], "temp file must live in the same directory"
+        assert probe["mode"] == 0o600, "temp must be 0600 from creation"
+        assert json.loads(probe["text"]), "replaced file must be complete"
+        # nothing half-visible: the destination is the temp, moved in one step
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_home_assets_replaced_atomically(self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        team_roster.write_file_assets(spec, mate)  # first write
+        mate["charter"] = "# changed charter\n"
+        targets = [os.path.join(home, "CHARTER.md"),
+                   os.path.join(home, "tool-limits.json")]
+        seen = self.replace_probe(monkeypatch, targets)
+        wrote = team_roster.write_file_assets(spec, mate)
+        assert wrote == ["CHARTER.md"]
+        charter = targets[0]
+        assert seen[charter], "CHARTER.md was not written via os.replace"
+        assert seen[charter][0]["same_dir"]
+        assert seen[charter][0]["mode"] == 0o600
+        # tool-limits.json was identical, so apply correctly wrote nothing;
+        # a first creation (file missing) is atomic too
+        assert seen[targets[1]] == []
+        os.unlink(targets[1])
+        seen2 = self.replace_probe(monkeypatch, [targets[1]])
+        team_roster.write_file_assets(spec, mate)
+        assert seen2[targets[1]]
+        assert seen2[targets[1]][0]["mode"] == 0o600
+
+    def test_state_and_urls_files_replaced_atomically(
+            self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        root = team_roster.expand(spec["server"]["root"])
+        home = team_roster.expand(spec["server"]["home"])
+        os.makedirs(os.path.join(home, "userdata"), exist_ok=True)
+        open(os.path.join(home, "userdata", "environment-id"),
+             "w").write("env-1")
+        state_path = os.path.join(root, "run", "team_roster_state.json")
+        urls_path = os.path.join(root, "run", "team_urls.json")
+        spec["state_file"] = state_path
+        spec["urls_file"] = urls_path
+        seen = self.replace_probe(monkeypatch, [state_path, urls_path])
+        team_roster.save_state(spec, {"teammates": {}}, state_path)
+        threads = {m["name"]: {"threadId": f"t-{m['slug']}", "title": "x"}
+                   for m in spec["teammates"]}
+        team_roster.write_urls_file(spec, threads)
+        for target in (state_path, urls_path):
+            assert seen[target], f"{target} was not written via os.replace"
+            assert seen[target][0]["same_dir"]
+            assert seen[target][0]["mode"] == 0o600
+            assert json.loads(seen[target][0]["text"])
+
+    def test_temp_is_fsynced_before_replace(self, tmp_path, monkeypatch):
+        home, path = fake_home(tmp_path)
+        spec = load(tmp_path, make_spec(tmp_path, home=str(home)))
+        fsynced = []
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            fsynced.append(fd)
+            return real_fsync(fd)
+
+        monkeypatch.setattr(team_roster.os, "fsync", fsync)
+        monkeypatch.setattr(team_roster.os, "replace",
+                            lambda s, d: fsynced.append("replace"))
+        team_roster.ensure_instances(spec)
+        assert "replace" in fsynced, "os.replace ran without a prior fsync"
+        assert any(isinstance(f, int) for f in fsynced)
+
+    def test_no_temp_files_left_behind(self, tmp_path):
+        home, path = fake_home(tmp_path)
+        spec = load(tmp_path, make_spec(tmp_path, home=str(home)))
+        team_roster.ensure_instances(spec)
+        leftovers = [p.name for p in Path(path).parent.iterdir()
+                     if ".tmp" in p.name]
+        assert leftovers == []
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        leftovers = [p.name for p in Path(
+            team_roster.teammate_home(spec, mate)).iterdir()
+            if ".tmp" in p.name]
+        assert leftovers == []
+
+    def test_failed_write_leaves_destination_untouched(
+            self, tmp_path, monkeypatch):
+        home, path = fake_home(tmp_path)
+        spec = load(tmp_path, make_spec(tmp_path, home=str(home)))
+        team_roster.ensure_instances(spec)
+        before = path.read_text()
+
+        def boom(src, dst):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(team_roster.os, "replace", boom)
+        spec["teammates"][0]["accent_color"] = "#123456"
+        with pytest.raises(OSError):
+            team_roster.ensure_instances(spec)
+        assert path.read_text() == before
+        leftovers = [p.name for p in Path(path).parent.iterdir()
+                     if ".tmp" in p.name]
+        assert leftovers == [], "a failed write must clean up its temp file"
+
+
 class TestFileAssets:
     def test_write_and_rewrite_home(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))

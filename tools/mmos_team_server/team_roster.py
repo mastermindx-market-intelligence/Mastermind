@@ -257,13 +257,54 @@ def teammate_home(spec, mate):
                         mate["slug"])
 
 
+def atomic_write(path, text, mode):
+    """Replace ``path`` with ``text`` atomically (review R2a, finding 11).
+
+    The running server watches settings.json and reloads it about 100 ms
+    after a change, and a teammate process reads tool-limits.json and
+    CHARTER.md when it starts; a truncate-then-write in place can be read
+    half-written. The replacement is a same-directory temporary (so
+    os.replace never crosses a filesystem), created 0600 and fsynced before
+    it is moved into place. A failure leaves the destination untouched and
+    removes the temporary.
+    """
+    path = os.path.abspath(path)
+    directory = os.path.dirname(path)
+    tmp = os.path.join(directory, f".{os.path.basename(path)}.tmp."
+                       f"{os.getpid()}")
+    fd = None
+    for attempt in (0, 1):
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            break
+        except FileExistsError:
+            if attempt:  # stale temp from a crashed run of this same pid slot
+                raise
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_if_changed(path, text, mode):
     changed = True
     if os.path.exists(path) and open(path).read() == text:
         changed = False
     else:
-        with open(path, "w") as fh:
-            fh.write(text)
+        atomic_write(path, text, mode)
     os.chmod(path, mode)
     return changed
 
@@ -424,9 +465,7 @@ def ensure_instances(spec):
             instances[mate["instance"]] = want
             changed.append(mate["instance"])
     if changed:
-        with open(settings_path(spec), "w") as fh:
-            json.dump(settings, fh, indent=2)
-        os.chmod(settings_path(spec), 0o600)
+        atomic_write(settings_path(spec), json.dumps(settings, indent=2), 0o600)
         log(f"provider instances written: {', '.join(changed)} "
             "(settings.json is watched live by the running server)")
     else:
@@ -445,11 +484,7 @@ def load_state(spec):
 
 def save_state(spec, state, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(state, fh, indent=2)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    atomic_write(path, json.dumps(state, indent=2), 0o600)
 
 
 def environment_id(spec):
@@ -682,11 +717,7 @@ def write_urls_file(spec, threads):
     path = expand(spec.get("urls_file") or
                   os.path.join(spec["server"]["root"], "run", "team_urls.json"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as fh:
-        json.dump(out, fh, indent=2)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    atomic_write(path, json.dumps(out, indent=2), 0o600)
     return path
 
 
