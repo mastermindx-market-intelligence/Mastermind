@@ -71,6 +71,12 @@ def log(msg):
     print(f"[team_roster] {msg}", flush=True)
 
 
+def log_warn(msg):
+    """Progress notes on stdout; warnings on stderr so ``status`` JSON on
+    stdout stays parseable when load_spec emits a long-title warning."""
+    print(f"[team_roster] {msg}", file=sys.stderr, flush=True)
+
+
 def expand(path):
     return os.path.abspath(os.path.expanduser(path))
 
@@ -136,9 +142,9 @@ def load_spec(path):
         title = teammate_title(mate)
         if len(title) > TITLE_MAX:
             if allow_long:
-                log(f"{where}: title {title!r} is {len(title)} characters; "
-                    f"the sidebar fits {TITLE_MAX} and will ellipsize it "
-                    f"(allow_long_titles)")
+                log_warn(f"{where}: title {title!r} is {len(title)} characters; "
+                         f"the sidebar fits {TITLE_MAX} and will ellipsize it "
+                         f"(allow_long_titles)")
             else:
                 die(f"{where} title {title!r} is {len(title)} characters; the "
                     f"sidebar fits at most {TITLE_MAX}")

@@ -202,7 +202,9 @@ class TestLongTitleRegime:
         spec["teammates"][0]["role_line"] = "quality & security challenger"
         loaded = load(tmp_path, spec)  # must not SystemExit
         assert len(team_roster.teammate_title(loaded["teammates"][0])) > 24
-        assert "sidebar" in capsys.readouterr().out
+        captured = capsys.readouterr()
+        assert "sidebar" in captured.err
+        assert captured.out == ""  # status JSON on stdout stays parseable
 
     @pytest.mark.parametrize("bad", ["quality — challenger", " padded ",
                                      "", "line one\nline two"])
