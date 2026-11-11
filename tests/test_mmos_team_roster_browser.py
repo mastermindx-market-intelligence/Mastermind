@@ -16,8 +16,9 @@ DRIVER = REPO / "tools" / "mmos_team_server" / "roster_browser.js"
 
 class TestRosterBrowserDriver:
     def test_no_browser_only_globals_in_node_context(self):
-        src = DRIVER.read_text()
-        assert "CSS.escape" not in src, (
+        code = "\n".join(line.split("//")[0] for line in DRIVER.read_text()
+                         .splitlines())
+        assert "CSS.escape" not in code, (
             "CSS.escape is a browser global; in Node it throws "
             "'CSS is not defined' and every rename fails (seen live on the "
             "TSR dev server). Escape attribute values in Node instead."
