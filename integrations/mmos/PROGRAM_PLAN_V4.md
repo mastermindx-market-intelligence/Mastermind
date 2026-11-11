@@ -1346,3 +1346,39 @@ scores it before install 4.
 
 **Routing, by the Chairman (15:15 UTC).** The Opus pool is spent. Opus is for the hardest
 tasks and deputy roles only; `gpt-6.1-sol` may be used where Opus would have been.
+
+## 33. Amendment, 2026-11-11 15:35 UTC: an operating deputy, the bridge release, the GitHub-link paste route
+
+**Operating deputy adopted.** The Sector Intelligence COO forwarded the pattern at the
+Chairman's request, and the Chairman ruled that Opus is for the hardest tasks and deputy
+roles. This programme has eight lanes returning with repairs and trade-offs, which is the
+case the pattern is for. One long-lived Opus deputy thread (`mmos-v4-deputy-20261111-a`)
+now runs the control loop: it steers lanes, starts panels and delta checks, sorts findings,
+merges reviewed branches into the trunk and records each decision. Its standing brief is
+`integrations/mmos/deputy/BRIEF.md`, the principal's rulings are
+`integrations/mmos/deputy/RULINGS.md`, and its state file is
+`~/.mastermind/mmos_evidence/deputy/STATE.md`. Reserved to the principal: every install or
+change on a real root, scope and limit changes, accepting a known HIGH or MED, admin-password
+and human steps, messages to other programmes and the Chairman, uncertain effects and
+refusals, and starting Opus, `gpt-6.1-sol` or Kimi children. The principal reads the named
+evidence itself before any install. Measure: principal turns per accepted outcome; if
+escalations pass a quarter of the deputy's runs, its rights are widened with one ruling.
+
+**Lane RF repair 3** returned at `42b0ffe1d` (ten of ten required findings, seven extras,
+`paperclip_base` required and loopback only). Its third delta check is running.
+
+**Lane BR round 3.** The live fill limit is 8,000 characters (the pinned bridge protocol),
+with a 32,768-byte envelope cap in the MCP server, and ChatGPT's composer flattens line
+breaks on the live build. The staged change at `8f14c2604` raises the limit to 30,000 and
+inserts real paragraphs; its delta check asks whether paragraph insertion can send the
+message in an Enter-to-send editor.
+
+**Bridge release.** The Chairman gave his word (15:25 UTC): "yes to bridge release as
+needed". The install stays the principal's act, after the delta check, by the steps in
+`br-20261111/mcp_bridge_install.md`; going back is re-pinning `5aa30969…`. The extension half
+still needs one Load unpacked round by the Chairman, asked once, batched.
+
+**GitHub-link paste route (the Chairman's).** For a ChatGPT prompt longer than the fill
+limit, a subagent posts the text as a GitHub issue or comment and the operator fills only
+the link and one line of instruction. Sent to Sector Intelligence as an addition to harness
+item 3. Not yet checked: that each ChatGPT account's GitHub connector can open the link.
