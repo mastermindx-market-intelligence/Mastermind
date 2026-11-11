@@ -112,3 +112,18 @@ def test_untrusted_scope_values_do_not_crash_or_claim_readiness():
     assert output["status"] == "BLOCKED"
     assert "COO_SCOPE_CONTRACT_INVALID" in output["problems"]
     assert "LOCAL_MCP_ROLE_SCOPES_INVALID" in output["problems"]
+
+
+def test_foreign_https_authorize_host_is_not_approved():
+    args = list(good())
+    args[5]["json"]["authorization_endpoint"] = "https://foreign.example.test/authorize"
+    output = result(args)
+    assert "BROWSER_AUTHORIZATION_ENDPOINT_UNTRUSTED_HOST" in output["problems"]
+    assert output["status"] == "BLOCKED"
+
+
+def test_probe_does_not_fetch_arbitrary_targets():
+    from scripts.claude_executive_auth_preflight import _loopback_probe
+    import pytest
+    with pytest.raises(ValueError, match="fixed loopback allowlist"):
+        _loopback_probe("https://evil.example.test/steal")
