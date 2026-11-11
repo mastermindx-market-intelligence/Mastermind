@@ -959,6 +959,33 @@ def test_duplicate_child_outside_the_blockers_cannot_hold_the_return_edge():
     assert pc.issues["is-1"]["status"] == "in_review"
 
 
+def test_return_reply_with_an_ask_block_round_trips_the_ask_path():
+    # Attack finding 12: the asker's post-return reply was never parsed for
+    # an ask block — it was delivered raw with a confirmation and the parent
+    # went in_review, so a teammate could never ask a second question after
+    # a return, even inside the cap. The reply now runs the same ask path:
+    # the child is created, the parent stays blocked on it, no confirmation.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
+    ask_back = ("I need Vega for the review.\n\n"
+                "```paperclip-ask\n"
+                "assignee: Vega-TEST\n"
+                "title: Review it\n"
+                "description: read it and say if it is right.\n"
+                "```\n")
+    t3 = FakeT3(replies=[ask_back])
+    assert run_with_roster(pc, t3, {"Vega-TEST": "ag-vega"}) == 0
+    assert any(k["assigneeAgentId"] == "ag-vega"
+               for k in pc.child_rows["is-1"])
+    assert pc.issues["is-1"]["status"] == "blocked"
+    kinds = [c[0] for c in pc.calls]
+    assert "interaction" not in kinds  # no confirmation, not in_review
+
+
 def test_return_replay_never_resends_or_duplicates():
     issues, ask_op, child = blocked_parent_with_done_child()
     ret_op = f"{ask_op}-ret"

@@ -1490,10 +1490,21 @@ def handle_return(pc, t3, issue, ask_op, opts):
         reply = existing
     if not reply.strip():
         raise CarrierError("thread reply was empty")
+    # Attack finding 12: the asker's post-return reply was never parsed for
+    # an ask block — it was delivered raw with a confirmation and the parent
+    # went in_review, so a teammate could never ask a second question after
+    # a return, even inside the cap. The same ask path runs here first (and
+    # depth one holds: an asked child's return never asks again).
+    is_ask_child = asked_child_of(pc, issue) is not None
+    ask = None if is_ask_child else parse_ask_block(reply)
+    if ask:
+        parent_op = op_id(issue["id"], (issue.get("title") or "")
+                          + "\n" + (issue.get("description") or ""))
+        if handle_ask(pc, issue, reply, ask, parent_op, opts):
+            return 0
     # R2a finding 5: when the asker is ITSELF an ask child, this delivery
     # completes with done like any asked child — no board gate above it.
-    deliver(pc, issue, reply, ret_op,
-            ask_child=asked_child_of(pc, issue) is not None)
+    deliver(pc, issue, reply, ret_op, ask_child=is_ask_child)
     return 0
 
 
