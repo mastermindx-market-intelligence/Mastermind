@@ -1739,7 +1739,7 @@ def recorded_blocker_ids(issue):
     return out
 
 
-def handle_return(pc, t3, issue, ask_op, opts):
+def handle_return(pc, t3, issue, ask_op, opts, me_id):
     """The issue_blockers_resolved return edge: this teammate's ask came back.
 
     The blocked parent was woken because every blocker (the ask child) reached
@@ -1762,7 +1762,12 @@ def handle_return(pc, t3, issue, ask_op, opts):
         # enters this authenticated thread. With a recorded blocker set only
         # a child in it counts; without the field (hand-blocked or legacy
         # parents) marker shape remains the only signal, as before.
+        # Delta-3 N9: neither the marker nor a recorded relation speaks for
+        # a child someone else created — only a child THIS carrier created
+        # (createdByAgentId == me) can carry a turn into this thread.
         if blocker_ids and row.get("id") not in blocker_ids:
+            continue
+        if row.get("createdByAgentId") != me_id:
             continue
         if is_ask_child_of(row, issue):
             family.append(row)
@@ -1957,8 +1962,11 @@ def handle_ask(pc, issue, reply, ask, op, opts):
         # it re-blocked the parent on a DONE blocker — the return edge
         # re-delivered the old answer and the new ask never happened. Only
         # an OPEN child of this same ask is reusable; otherwise the ask is
-        # new work and gets a new child.
-        if (is_ask_child_of(row, issue)
+        # new work and gets a new child. Delta-3 N9: reuse trusts the same
+        # identity law as the return edge — a marker-matching child someone
+        # else created is never adopted as this carrier's ask child.
+        if (row.get("createdByAgentId") == me.get("id")
+                and is_ask_child_of(row, issue)
                 and row.get("status") not in ("done", "cancelled")
                 and row.get("assigneeAgentId") == agent_id
                 and (row.get("title") or "") == want_title):
@@ -2457,51 +2465,43 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         f"activeRun={active_run_id(row) or 'none'}")
 
     try:
-        # Structural ask children only (R2a finding 3): parented on this
-        # issue and ending with exactly the marker the carrier computes.
+        # Structural ask children only (R2a finding 3) — and delta-3 N9: the
+        # marker is derivable from public issue text, so anyone who can
+        # create an issue can plant a marker-matching child under an
+        # assigned task, and the old gate (a family it did not create, no
+        # recorded relation, exit 0) let that bystander freeze the task
+        # every wake. A family child is one THIS carrier created
+        # (createdByAgentId, served on list and full rows alike); author
+        # identity decides, not text.
         ask_children = [row for row in untruncated_children(pc, issue["id"])
-                        if is_ask_child_of(row, issue)]
+                        if row.get("createdByAgentId") == me.get("id")
+                        and is_ask_child_of(row, issue)]
         # Attack findings 5 and 9 (attack round): the marker is derivable
         # from public issue text, so a forged or duplicate marker-matching
         # child can hijack the return edge or hold it shut forever. The
         # blocker relation the board records (the served blockedBy
         # summaries) is the binding: only a child in it can satisfy or
-        # suppress the return edge. And a marker-matching family with NO
-        # recorded relation is not a family the board knows — every parent
-        # this carrier asked on records one (block_issue writes it before
-        # the child is ever visible) — so that shape is a forged child: the
-        # answer never enters this authenticated thread; a person decides.
+        # suppress the return edge.
         blocker_ids = recorded_blocker_ids(issue)
         if ask_children and not blocker_ids:
-            # Panel-2 M2: "no relation" is two different worlds. A child the
-            # board says THIS carrier created (createdByAgentId, served on
-            # list and full rows alike) with no recorded relation is a block
-            # PATCH that failed after the create — recoverable, and parking
-            # it "for a person" stranded the family forever (every wake hit
-            # this branch again). Retry the block; if it fails again the run
-            # fails loudly and the next wake retries. A family with any
-            # marker-matching child this carrier did NOT create is still the
-            # board's to sort out.
-            mine = [row for row in ask_children
-                    if row.get("createdByAgentId") == me.get("id")]
-            if len(mine) == len(ask_children) and mine:
-                roster = opts.get("roster") or {}
-                for row in mine:
-                    who = next((name for name, aid in roster.items()
-                                if aid == row.get("assigneeAgentId")), None)
-                    action = (f"{who or 'the assignee'} completes "
-                              f"{row.get('identifier')}: "
-                              f"{row.get('title') or 'the asked work'}")
-                    pc.block_issue(issue["id"], [row["id"]],
-                                   me.get("id"), action)
-                log(f"issue {issue.get('identifier')} had carrier-issued "
-                    "children with no recorded relation; block retried")
-                blocker_ids = [row["id"] for row in mine]
-            else:
-                log(f"issue {issue.get('identifier')} has marker-matching "
-                    "children this carrier did not create and no recorded "
-                    "blocker relation; leaving it for a person")
-                return 0
+            # Panel-2 M2: the create can succeed while the block PATCH fails
+            # — the child is visible, the relation is not — and parking the
+            # family "for a person" stranded it forever (every wake hit this
+            # branch again). Retry the block; if it fails again the run
+            # fails loudly and the next wake retries. Delta-3 N9: every
+            # child here is one this carrier created by construction.
+            roster = opts.get("roster") or {}
+            for row in ask_children:
+                who = next((name for name, aid in roster.items()
+                            if aid == row.get("assigneeAgentId")), None)
+                action = (f"{who or 'the assignee'} completes "
+                          f"{row.get('identifier')}: "
+                          f"{row.get('title') or 'the asked work'}")
+                pc.block_issue(issue["id"], [row["id"]],
+                               me.get("id"), action)
+            log(f"issue {issue.get('identifier')} had carrier-issued "
+                "children with no recorded relation; block retried")
+            blocker_ids = [row["id"] for row in ask_children]
         if blocker_ids and ask_children:
             ask_children = [row for row in ask_children
                             if row.get("id") in blocker_ids]
@@ -2563,7 +2563,7 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
             return handle_return(pc, t3, issue,
                                  ask_child_op(ask_children[0]
                                               .get("description") or ""),
-                                 opts)
+                                 opts, me.get("id"))
         # The board sent a rejected answer back (often resuming the issue to
         # todo, which the inbox serves): one revision round, not a resend.
         if board_feedback(pc, issue) is not None:

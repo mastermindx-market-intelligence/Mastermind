@@ -106,7 +106,13 @@ def served_parent(**over):
 
 
 def served_child(**over):
+    """A child row as the children list serves it. Delta-3 N9 realism: a
+    child THIS carrier created carries its createdByAgentId — the fake
+    carrier's agent id (ag-1) replaces the captured author by default
+    (the captured CHILD row's author is another agent); tests forging a
+    foreign child override createdByAgentId explicitly."""
     row = copy.deepcopy(CHILD)
+    row["createdByAgentId"] = "ag-1"
     row.update(over)
     return row
 
