@@ -165,7 +165,7 @@
     // payload: either the applied receipt with the fired normalizations, or a
     // FILL_MISMATCH (never APPLIED) with both lengths and the first differing
     // offset of the normalized comparison.
-    function fillReceipt(node, asked, path) {
+    function fillReceipt(node, asked, path, preFill) {
       const channel = channelFor(node, path);
       const raw = channel.read(node);
       const fired = new Set();
@@ -178,7 +178,13 @@
       if (firstDiff(askedNormalized, boxNormalized) !== -1) {
         const offset = firstDiff(askedNormalized, boxNormalized);
         const excerpt = raw.slice(Math.max(0, offset - 16), Math.max(0, offset - 16) + 40);
+        // mismatch_kind names what the mismatch is: box-unchanged means the
+        // box still holds exactly what it held before the fill — the write
+        // never took (a model-owning editor reverted it); content-differs
+        // means the box holds something else again.
         return result(false, "FILL_MISMATCH", {...common, first_diff_offset: offset,
+          mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
+          prefill_characters: preFill.length,
           box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
       }
       return result(true, "OK", {...common, snapshot_consumed: true, refresh_required: true}, "APPLIED");
@@ -266,6 +272,14 @@
         }
         if (action === "fill") {
           node.focus();
+          // The pre-fill reading through both editable channels, captured
+          // before anything is written, so the receipt can name a reverted
+          // write (box still exactly as before) after the path is known.
+          const preEditable = node.isContentEditable ? {
+            innerText: String(typeof node.innerText === "string" ? node.innerText : node.textContent || ""),
+            textContent: String(node.textContent || "")
+          } : null;
+          const preValue = node.isContentEditable ? null : String(node.value || "");
           let insertionPath = "editor";
           if (node.isContentEditable) {
             // A raw textContent write loses line breaks in editors that own
@@ -309,7 +323,8 @@
           // provably normalizes (listed in the receipt). A mismatch is a typed
           // FILL_MISMATCH with both lengths and the first differing offset —
           // never APPLIED.
-          return fillReceipt(node, params.text, insertionPath);
+          return fillReceipt(node, params.text, insertionPath,
+            preEditable ? preEditable[insertionPath === "fallback" ? "textContent" : "innerText"] : preValue);
         }
         if (action === "select") {
           node.value = params.value;
