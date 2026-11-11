@@ -149,13 +149,19 @@ class NativeAppSmokeTests(unittest.TestCase):
     def test_fake_app_without_mount_is_not_accepted(self) -> None:
         self._set_mode("bad")
         result = self._run()
-        self.assertEqual(result["status"], "INVALID_WEB_RESPONSE", result)
+        # Controlled-clock cases below prove the exact observed-HTML refusal.
+        # A delayed fixture may instead exhaust the announcement window.
+        self.assertIn(result["status"],
+                      ("INVALID_WEB_RESPONSE", "STARTUP_NO_LOOPBACK_URL"), result)
         self.assertTrue(result["owned_process_stopped"])
 
     def test_exited_process_is_not_web_ready(self) -> None:
         self._set_mode("exit")
         result = self._run()
-        self.assertEqual(result["status"], "STARTUP_EXITED", result)
+        # Observed exit is classified exactly in the controlled-clock case.
+        # The real child need not reach exit within this bounded probe window.
+        self.assertIn(result["status"],
+                      ("STARTUP_EXITED", "STARTUP_NO_LOOPBACK_URL"), result)
         self.assertTrue(result["owned_process_stopped"])
 
     def test_hung_process_times_out_and_is_reaped(self) -> None:
@@ -331,6 +337,54 @@ class OriginBoundaryTests(unittest.TestCase):
         for port in ports:
             lines.put(f"http://127.0.0.1:{port}/?token={self.TOKEN}")
         return lines
+
+    def test_observed_process_exit_refuses_before_queue_or_http(self):
+        process = Mock(poll=Mock(return_value=15))
+        lines = Mock()
+        lines.get.side_effect = AssertionError("exited process must not consume announcements")
+        with patch.object(smoke.time, "monotonic", side_effect=[0.0, 2.0]), \
+                patch.object(smoke, "build_opener") as build:
+            with self.assertRaises(smoke.Refused) as caught:
+                smoke.wait_for_web(process, lines, 1.0)
+        self.assertEqual(caught.exception.status, "STARTUP_EXITED")
+        process.poll.assert_called_once_with()
+        lines.get.assert_not_called()
+        build.assert_not_called()
+
+    def test_observed_html_requires_root_and_script_markers(self):
+        cases = (
+            (b'<html><body>Missing app mount</body></html>', False),
+            (b'<html><script></script></html>', False),
+            (b'<html><div id="root"></div></html>', False),
+            (b'<html><div id="root"></div><script></script></html>', True),
+        )
+        for html, valid in cases:
+            with self.subTest(html=html):
+                headers = Message()
+                headers["Content-Type"] = "text/html"
+                response = MagicMock()
+                response.__enter__.return_value = response
+                response.status = 200
+                response.headers = headers
+                response.geturl.return_value = f"http://127.0.0.1:{self.PORT}/"
+                response.read.return_value = html
+                opener = Mock()
+                opener.open.return_value = response
+                process = Mock(poll=Mock(return_value=None))
+                with patch.object(smoke.time, "monotonic", side_effect=[0.0, 0.0, 2.0]), \
+                        patch.object(smoke, "build_opener", return_value=opener):
+                    if valid:
+                        result = smoke.wait_for_web(process, self._lines(self.PORT), 1.0)
+                        self.assertEqual(result["status"], "WEB_HTML_READ")
+                        self.assertTrue(result["root_mount_present"])
+                        self.assertTrue(result["script_tag_present"])
+                    else:
+                        with self.assertRaises(smoke.Refused) as caught:
+                            smoke.wait_for_web(process, self._lines(self.PORT), 1.0)
+                        self.assertEqual(caught.exception.status, "INVALID_WEB_RESPONSE")
+                process.poll.assert_called_once_with()
+                opener.open.assert_called_once()
+                response.read.assert_called_once_with(smoke.MAX_RESPONSE_BYTES + 1)
 
     def test_redirect_handler_refuses_foreign_and_malformed_origins_before_dispatch(self):
         handler = smoke.OriginBoundRedirectHandler(self.PORT)

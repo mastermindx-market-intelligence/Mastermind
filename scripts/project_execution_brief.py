@@ -7,6 +7,9 @@ runtime permissions, provider defaults, active tasks or source leases.
 Default mode is preview. Applying requires the exact target preimage and backup.
 The caller must exclude concurrent writers. Preimage checks plus atomic rename
 are not a filesystem compare-and-swap transaction or an execution-lease grant.
+A target that does not exist yet is created only through the explicit
+--create-target flag; verified absence is that write's preimage, so no backup
+bytes exist and no placeholder is ever installed silently.
 """
 from __future__ import annotations
 
@@ -212,6 +215,38 @@ def apply(path: Path, new_text: str, expected_sha256: str, backup_dir: Path) -> 
             'backup': str(backup)}
 
 
+def apply_creation(path: Path, new_text: str) -> dict:
+    """Explicitly create a missing target; verified absence is the preimage."""
+    path = path.expanduser()
+    parent = path.parent
+    if parent.is_symlink() or not parent.is_dir():
+        raise ValueError('Creation target parent must be an existing real directory')
+    new = new_text.encode('utf-8')
+    fd, name = tempfile.mkstemp(prefix='.execution-brief-', dir=parent)
+    temp = Path(name)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(new)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp.chmod(0o600)
+        if path.is_symlink() or path.exists():
+            raise ValueError('Target appeared during preparation; no write performed')
+        try:
+            # Hard-link publication is atomic creation: it fails if any file or
+            # symlink took the name in the checking gap, instead of clobbering it.
+            os.link(temp, path)
+        except FileExistsError:
+            raise ValueError('Target appeared during preparation; no write performed') from None
+    finally:
+        temp.unlink(missing_ok=True)
+    after = digest(path.read_bytes())
+    if after != digest(new):
+        raise RuntimeError('Post-write readback differs; reconcile target before further edits')
+    return {'path': str(path), 'changed': True, 'created': True, 'before_sha256': None,
+            'after_sha256': after, 'before_bytes': 0, 'after_bytes': len(new), 'backup': None}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--path', type=Path, required=True)
@@ -220,9 +255,34 @@ def main() -> int:
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--expected-sha256')
     parser.add_argument('--backup-dir', type=Path)
+    parser.add_argument('--create-target', action='store_true',
+                        help='Explicitly create the named target when it does not exist yet '
+                             '(codex/claude profiles only; the parent directory must already '
+                             'exist; no effect when the target already exists)')
     args = parser.parse_args()
     if args.path.suffix.lower() != '.md' or args.path.is_symlink():
         parser.error('Only explicit non-symlink Markdown targets are supported')
+    if not args.path.exists():
+        if not args.create_target:
+            parser.error('Target does not exist; pass --create-target to create it explicitly')
+        if args.profile == 'memory':
+            parser.error('--create-target supports the codex and claude profiles only')
+        if args.expected_sha256:
+            parser.error('Creation has no byte preimage; omit --expected-sha256')
+        if not args.path.parent.is_dir() or args.path.parent.is_symlink():
+            parser.error('Creation target parent must be an existing real directory')
+        brief_path = args.brief or Path(__file__).resolve().parents[1] / 'docs/NATIVE_EXECUTION_BRIEF.md'
+        brief = brief_path.read_text(encoding='utf-8')
+        text = project('', brief, args.profile)
+        if args.apply:
+            result = apply_creation(args.path, text)
+        else:
+            result = {'path': str(args.path), 'preview_only': True, 'target_exists': False,
+                      'would_create': True, 'before_sha256': None, 'before_bytes': 0,
+                      'after_sha256': digest(text.encode()), 'after_bytes': len(text.encode()),
+                      'changed': True}
+        print(json.dumps(result, sort_keys=True))
+        return 0
     original = args.path.read_bytes()
     # Memory uses its existing built-in notice; no unrelated account brief read.
     brief_path = args.brief or Path(__file__).resolve().parents[1] / 'docs/NATIVE_EXECUTION_BRIEF.md'

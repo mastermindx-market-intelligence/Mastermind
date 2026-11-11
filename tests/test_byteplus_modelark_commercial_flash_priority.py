@@ -13,9 +13,18 @@ import pytest
 
 from control_plane import capacity_economics_projection
 from control_plane.capacity_economics_projection import (
+    BYTEPLUS_MODEL_ALIAS_NOT_PINNED,
+    BYTEPLUS_MODEL_PIN_MISMATCH,
+    BYTEPLUS_PROVIDER_AUTONOMY_NOT_ALLOWED,
+    BYTEPLUS_PROVIDER_DISABLED,
+    BYTEPLUS_REALM_NOT_REVIEWED,
+    BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER,
+    BYTEPLUS_ROUTE_REVIEWED_COMMERCIAL,
+    BYTEPLUS_ROUTER_NOT_REVIEWED,
     BYTEPLUS_COMMERCIAL_FLASH_MODELS,
     CapacityEconomicsProjectionError,
     QuotaPreviewFreshness,
+    evaluate_byteplus_route_eligibility,
     project_quota_preference,
 )
 from control_plane.codex_provider_realm import (
@@ -133,11 +142,74 @@ def test_catalog_has_two_exact_commercial_model_ids_and_remains_offline():
 
 def test_unreviewed_commercial_flash_cannot_be_selected_from_preview():
     doc = preview(selected="byteplus-glm")
-    with pytest.raises(CapacityEconomicsProjectionError, match="unreviewed commercial"):
+    with pytest.raises(CapacityEconomicsProjectionError) as excinfo:
         project_quota_preference(TIERS, doc)
+    message = str(excinfo.value)
+    assert "unreviewed commercial" in message
+    assert "BYTEPLUS_ROUTER_NOT_REVIEWED" in message
     baseline = project_quota_preference(TIERS, preview())
     assert baseline.provider == "glm"
     assert baseline.selection_is_commitment is False
+
+
+def test_reviewed_commercial_route_verdict_is_fully_typed(monkeypatch):
+    router = projected_test_router(monkeypatch)
+    verdict = evaluate_byteplus_route_eligibility(
+        "byteplus-modelark", GLM, first_tier_id=TIER,
+        first_tier_aliases=(ZAI, GLM, DEEPSEEK), reviewed_router=router,
+    )
+    assert verdict.gate_applies is True
+    assert verdict.eligible is True
+    assert verdict.reason_code == BYTEPLUS_ROUTE_REVIEWED_COMMERCIAL
+    assert verdict.auth_route == "modelark-commercial-api-key"
+    assert verdict.pool_id == "byteplus"
+    assert verdict.provider == "byteplus-modelark"
+    assert verdict.model_alias == GLM
+
+
+@pytest.mark.parametrize("variation,expected_code", [
+    ("provider_disabled", BYTEPLUS_PROVIDER_DISABLED),
+    ("autonomy_disabled", BYTEPLUS_PROVIDER_AUTONOMY_NOT_ALLOWED),
+    ("unreviewed_realm", BYTEPLUS_REALM_NOT_REVIEWED),
+    ("unknown_model", BYTEPLUS_MODEL_PIN_MISMATCH),
+    ("different_first_tier", BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER),
+])
+def test_reviewed_path_refusals_carry_specific_codes(monkeypatch, variation, expected_code):
+    router = projected_test_router(monkeypatch)
+    if variation == "provider_disabled":
+        router.providers["byteplus-modelark"] = replace(
+            router.providers["byteplus-modelark"], enabled=False)
+    elif variation == "autonomy_disabled":
+        router.providers["byteplus-modelark"] = replace(
+            router.providers["byteplus-modelark"], autonomous_allowed=False)
+    elif variation == "unreviewed_realm":
+        monkeypatch.delitem(
+            REVIEWED_CODEX_PROVIDER_REALMS, BYTEPLUS_MODELARK_COMMERCIAL.realm_id)
+    elif variation == "unknown_model":
+        router.model_aliases[GLM] = replace(
+            router.model_aliases[GLM], model="not-an-approved-commercial-model")
+    elif variation == "different_first_tier":
+        router.routes["research"]["routine"] = (
+            SuitabilityTier("research.routine.fallback", (ZAI, GLM, DEEPSEEK)),)
+    verdict = evaluate_byteplus_route_eligibility(
+        "byteplus-modelark", GLM, first_tier_id=TIER,
+        first_tier_aliases=(ZAI, GLM, DEEPSEEK), reviewed_router=router,
+    )
+    assert verdict.eligible is False
+    assert verdict.reason_code == expected_code
+    assert "unreviewed commercial" in verdict.detail
+
+
+def test_unpinned_alias_on_commercial_provider_is_typed_separately(monkeypatch):
+    router = projected_test_router(monkeypatch)
+    verdict = evaluate_byteplus_route_eligibility(
+        "byteplus-modelark", "byteplus-modelark.experimental-fm",
+        first_tier_id=TIER, first_tier_aliases=(ZAI, GLM, DEEPSEEK),
+        reviewed_router=router,
+    )
+    assert verdict.eligible is False
+    assert verdict.reason_code == BYTEPLUS_MODEL_ALIAS_NOT_PINNED
+    assert verdict.auth_route == "modelark-commercial-api-key"
 
 
 def test_prefer_available_commercial_flash_over_zai_flash_in_first_tier(monkeypatch):

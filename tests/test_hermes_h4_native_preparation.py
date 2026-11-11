@@ -95,13 +95,24 @@ class RefusalContractTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_successful_preview_contract_is_preserved(self):
+        # WO-07 OQ-10 re-point: the legacy owner answer (pool/model/state and
+        # the proof) is preserved exactly, and the shared-law RoutePreview.v1
+        # composition now rides along as the routing answer.
         selected = {"pool": "minimax", "model": "qualified-model",
                     "state": "PREVIEW", "reserved": False}
         response, calls = self.call("SECRET_SENTINEL", 0, json.dumps(selected))
         self.assertFalse(response["result"]["isError"])
         result = json.loads(response["result"]["content"][0]["text"])
         self.assertEqual(result, {**selected,
-            "proof": "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH"})
+            "proof": "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH",
+            "authority": "NONE_SOURCE_PREVIEW_ONLY",
+            "route_preview": result["route_preview"]})
+        record = result["route_preview"]
+        self.assertEqual(record["schema"], "RoutePreview.v1")
+        self.assertEqual(record["authority"], "NONE_SOURCE_PREVIEW_ONLY")
+        self.assertIs(record["production_armed"], False)
+        self.assertEqual(record["requested_complexity"], "C1_ROUTINE_BOUNDED")
+        self.assertEqual(record["effective_complexity"], "C1_ROUTINE_BOUNDED")
         self.assertNotIn("SECRET_SENTINEL", json.dumps(response))
         self.assertEqual(len(calls), 1)
 

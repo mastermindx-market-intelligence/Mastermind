@@ -207,6 +207,22 @@ The effective limit is the smaller of this request ceiling and the existing
 model/complexity/operator profile. An omitted value preserves existing behavior.
 A turn is not a tool-call count, token allowance or dollar budget.
 
+For complex implementation or audits, **omit `max_turns` unless a deliberately
+tighter ceiling is required**. Do not copy a small smoke-test ceiling into a
+multi-step C2/C3 assignment. Incident #2090 retained explicit 64-turn requests;
+the workers performed real edits and then exhausted that caller ceiling. The
+installed wrapper's qualified defaults remain its own authority. Explicit caps
+are never silently raised, and a larger requested value cannot raise a tighter
+operator limit.
+
+For C2/C3 requests with an explicit ceiling, the MCP controller receipt exposes
+`EXPLICIT_COMPLEX_TASK_TURN_CEILING`. This is an advisory, not another
+admission/refusal gate. `effective_max_turns=null` means the facade has not
+observed the actual wrapper limit; it must not invent one. The equivalent
+native launch diagnostic ships only with the next sealed native generation
+(its source composition is identity-bound); this release carries the advisory
+at the MCP boundary alone.
+
 Before creating a controller, the facade verifies that the native request help
 advertises `--max-turns`. An older adapter returns
 `ADAPTER_TURN_LIMIT_UNAVAILABLE` rather than silently discarding the constraint.
@@ -221,6 +237,16 @@ and deadline, and still requires its original pre-task rejection proof. Reaching
 the turn limit is not a capacity rejection and does not authorize another attempt.
 A returned controller receipt reports the requested value, not proven worker START
 or acceptance. Inspect the actual terminal result and retain partial work.
+
+A corroborated `turn_limit/error_max_turns/max_turns` result leads with that
+verified cause, not the SDK's nonfatal `unrecognized_model` catalog notice.
+The failure explicitly reports `workspace_changes=NOT_INSPECTED`: no accepted
+result is **not** evidence that no source files were written. The original
+owner must reconcile its existing workspace and effects before recovery.
+Never reset/recreate the workspace, accept unfinished changes, or replay a
+failed run merely because its final report lacks a patch. The closed-field
+status diagnostic follows the original owner namespace and withholds itself
+on unsafe, mismatched or changed provider/process receipts.
 
 Roll out the complete protected native generation before the same-account facade
 release. Until both are qualified, the new opt-in must fail closed. Existing
