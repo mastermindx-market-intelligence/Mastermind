@@ -24,6 +24,12 @@ FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.
 # The six converged AUTO pre-release members are busy-scoped sources; the
 # reviewed default candidate/ keeps master's pre-busy bytes.
 BUSY_SOURCE = NATIVE / "candidate/broker_busy_2121"
+
+# The 2121 converge composes the AUTO prelease busy fallback onto the exact
+# current epoch: applying the busy inverses below to the busy source must land
+# on CURRENT_TASK_SHA. The busy task is the converged candidate fabric_task.
+BUSY_TASK_SHA = "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66"
+BUSY_PICK_SHA = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
@@ -32,11 +38,6 @@ PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a
 PRE_REFUSAL_DIAGNOSTICS_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
 PRE_ADMISSION_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 CURRENT_TASK_SHA = "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
-# The 2121 converge composes the AUTO prelease busy fallback onto the exact
-# current epoch: applying the busy inverses below to the busy source must land
-# on CURRENT_TASK_SHA. The busy task is the converged candidate fabric_task.
-BUSY_TASK_SHA = "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66"
-BUSY_PICK_SHA = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -124,6 +125,21 @@ def _pre_refusal_diagnostics_task(value: bytes) -> bytes:
     assert hashlib.sha256(value).hexdigest() == PRE_REFUSAL_DIAGNOSTICS_TASK_SHA
     return value
 
+
+def _pre_ubuntu4_task(value: bytes) -> bytes:
+    """Undo only the three Ubuntu4 hunks before the frozen F1 inverse."""
+    pairs = (
+        (b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}',
+         b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}'),
+        (b'host=(?P<host>ubuntu[0-4])', b'host=(?P<host>ubuntu[0-3])'),
+        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)',
+         b'(Grok on Mac, MiniMax on M1 or Ubuntu4)'),
+    )
+    for newer, older in pairs:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
+    return value
 
 
 def _pre_busy_task(value: bytes) -> bytes:
@@ -220,20 +236,28 @@ def _inverse_busy_picker(value: bytes) -> bytes:
     assert hashlib.sha256(value).hexdigest() == COMPOSED_PICK
     return value
 
-def _pre_ubuntu4_task(value: bytes) -> bytes:
-    """Undo only the three Ubuntu4 hunks before the frozen F1 inverse."""
-    pairs = (
-        (b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3", "ubuntu4"}',
-         b'{"ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"}'),
-        (b'host=(?P<host>ubuntu[0-4])', b'host=(?P<host>ubuntu[0-3])'),
-        (b'(Grok on Mac or Ubuntu4, MiniMax on M1 or Ubuntu4)',
-         b'(Grok on Mac, MiniMax on M1 or Ubuntu4)'),
-    )
-    for newer, older in pairs:
-        assert value.count(newer) == 1
-        value = value.replace(newer, older, 1)
-    assert hashlib.sha256(value).hexdigest() == "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
-    return value
+
+def _busy_member_to_current(stage, relative, source, current):
+    """Invert one busy-scoped member to its pre-busy bytes in this private
+    stage (converge 2121). Default candidate/ members pass through unchanged;
+    the busy picker is inverted and materialized; the busy task is materialized
+    as the staged pre-busy bytes, so the returned pair carries
+    CURRENT_TASK_SHA forward."""
+    if relative == "ext/pick.py":
+        assert sha(source) == BUSY_PICK_SHA
+        pre_busy = _inverse_busy_picker(current)
+        assert hashlib.sha256(pre_busy).hexdigest() == COMPOSED_PICK
+        staged = stage / relative
+        staged.write_bytes(pre_busy)
+        return staged, pre_busy
+    if relative == "ext/fabric_task.py":
+        assert sha(source) == BUSY_TASK_SHA
+        current = _pre_busy_task(current)
+        assert hashlib.sha256(current).hexdigest() == CURRENT_TASK_SHA
+        staged = stage / relative
+        staged.write_bytes(current)
+        return staged, current
+    return source, current
 
 
 def _inverse_manual_member(value: bytes, member: str) -> bytes:
@@ -320,21 +344,16 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
         # Reconstruct the exact historical F1 epoch only in this private stage.
         current = source.read_bytes()
         assert (stage / relative).read_bytes() == current
+        # Converge 2121: busy-scoped members are inverted to their pre-busy
+        # bytes (materialized inside this private stage) before the frozen
+        # epoch chain below runs; source/current then both carry the
+        # pre-busy epoch forward.
+        source, current = _busy_member_to_current(stage, relative, source, current)
         if relative == "ext/pick.py":
-            # The converged candidate picker is the busy-fallback composition;
-            # its pre-busy predecessor is the exact composed pick above.
-            assert sha(source) == BUSY_PICK_SHA
-            pre_busy = _inverse_busy_picker(current)
-            assert hashlib.sha256(pre_busy).hexdigest() == COMPOSED_PICK
+            assert sha(source) == COMPOSED_PICK
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
-            # Undo only the exact busy fallback additions in disposable bytes
-            # before the older epoch inverses; the staged copy keeps the
-            # historical hashes frozen.
-            assert sha(source) == BUSY_TASK_SHA
-            current = _pre_busy_task(current)
-            assert hashlib.sha256(current).hexdigest() == CURRENT_TASK_SHA
-            (stage / relative).write_bytes(current)
+            assert sha(source) == CURRENT_TASK_SHA
             # Undo only the exact forward repair in this private stage, then
             # retain every historical inverse and fixture at its original hash.
             admission_patch = ROOT / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
