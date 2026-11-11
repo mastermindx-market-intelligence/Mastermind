@@ -761,6 +761,80 @@ def test_ask_block_with_words_after_the_fence_is_not_an_ask():
     assert wc.parse_ask_block(block + "\n\n")["assignee"] == "Atlas-TEST"
 
 
+def test_ask_title_that_is_only_a_marker_gets_a_plain_title():
+    # Attack finding 14: a title consisting only of a marker token stripped
+    # to "" and the `or` fallback restored the very text the sanitiser had
+    # removed into the child's title. The fallback is a plain label, never
+    # the unsanitised ask.
+    roster = {"Atlas-TEST": "ag-atlas"}
+    ask = ("```paperclip-ask\nassignee: Atlas-TEST\n"
+           "title: [pc-x-1-ask]\ndescription: do it\n```")
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[ask])
+    assert run_with_roster(pc, t3, roster) == 0
+    child = pc.child_rows["is-1"][0]
+    assert child["title"] == "Asked work"
+    assert "[pc-" not in child["title"]
+
+
+def test_a_revised_ask_to_another_teammate_creates_its_own_child():
+    # Attack finding 16: the marker is the PARENT's content, so two different
+    # asks on one parent share it; reuse keyed on the marker alone swallowed a
+    # revised ask (other assignee, other title) into the earlier child and the
+    # second teammate was never woken. Reuse only the child that matches THIS
+    # ask; a different ask gets its own child.
+    roster = {"Atlas-TEST": "ag-atlas", "Vega-TEST": "ag-vega"}
+    ask2 = ("I need Vega for the review.\n\n"
+            "```paperclip-ask\n"
+            "assignee: Vega-TEST\n"
+            "title: Review the summary\n"
+            "description: Read the summary and say if it is right.\n"
+            "```\n")
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc, t3, roster) == 0
+    assert pc.child_rows["is-1"][0]["assigneeAgentId"] == "ag-atlas"
+    # the ask round leaves the parent blocked on the child; the board later
+    # resumes it (todo) and the asker asks a DIFFERENT teammate
+    child_ident = pc.child_rows["is-1"][0]["identifier"]
+    pc.issues["is-1"].update({
+        "status": "todo",
+        "unblockDescriptor": {"owner": {"agentId": "ag-1"},
+                              "action": f"Atlas-TEST completes {child_ident}"},
+    })
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    t3.messages_store = [("user", "r1", f"[{op}]\n\ntask"),
+                         ("assistant", "r1", ask2)]
+    t3.replies = [ask2]
+    assert run_with_roster(pc, t3, roster) == 0
+    kids = pc.child_rows["is-1"]
+    assert len(kids) == 2
+    vega = [k for k in kids if k["assigneeAgentId"] == "ag-vega"]
+    assert vega and vega[0]["title"] == "Review the summary"
+
+
+def test_ask_cap_zero_and_bad_values_never_loosen_or_kill_the_reply():
+    # Attack finding 15: cap 0 fell back to 3 (a loosening), a non-numeric cap
+    # raised mid-handle and cost the delivered reply its run, and -1 refused
+    # every ask with a confusing note. A cap below 1 now refuses asks — that
+    # is what its author wrote — and a non-numeric value keeps the default 3;
+    # neither ever costs the reply.
+    roster = {"Atlas-TEST": "ag-atlas"}
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc, t3, roster, {"max_asks_per_issue": 0}) == 0
+    assert [c for c in pc.calls if c[0] == "create_issue"] == []  # zero asks
+    assert any("cap (0)" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)
+    assert pc.issues["is-1"]["status"] == "in_review"  # the reply stands
+    pc2 = FakePaperclip(issues=one_issue())
+    t3b = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc2, t3b, roster,
+                           {"max_asks_per_issue": "junk"}) == 0
+    assert len(pc2.child_rows["is-1"]) == 1  # default 3 governs; ask proceeds
+    assert pc2.issues["is-1"]["status"] == "blocked"
+
+
 def test_malformed_ask_block_is_plain_reply_never_error():
     roster = {"Atlas-TEST": "ag-atlas"}
     for bad in ("```paperclip-ask\nno assignee\n```\n",
@@ -1109,6 +1183,10 @@ def test_blocked_parent_with_pending_child_reconciles_ask_not_return():
     ask_op = f"{real_op}-ask"  # the marker handle_ask actually matches
     child["status"] = "todo"  # the teammate has not finished yet
     child["description"] = f"Run wc -l.\n\nAsked by Mira on MMO-1 [{ask_op}]"
+    # Attack finding 16: the reuse scan matches the ask itself — this child
+    # is the one THIS ask created, so it carries the ask's sanitised title
+    # (the shared fixture's short title is a placeholder).
+    child["title"] = "Count lines in t45_alpha.txt"
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
     # the ask reply is already in the thread (marker rule reconciles it)

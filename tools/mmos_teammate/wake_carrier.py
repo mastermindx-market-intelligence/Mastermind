@@ -427,6 +427,17 @@ def is_issued_ask_child(row, issue):
         marker) is not None
 
 
+def _ask_cap(raw):
+    """The per-issue ask cap as one coerced int (attack finding 15): a
+    non-numeric value keeps the default 3; a value below 1 is taken literally
+    as zero asks rather than silently loosening to the default."""
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return max(cap, 0)
+
+
 def issue_link(template, identifier):
     """A labelled link to the issue page for the conversation, or None.
 
@@ -1513,14 +1524,26 @@ def handle_ask(pc, issue, reply, ask, op, opts):
         log(f"ask {ask_op} refused: {ask['assignee']} is the asker itself")
         return False
     child = None
+    # Attack finding 16: the marker is the PARENT's content, so two different
+    # asks on one parent share it. Reuse only the child that matches THIS ask
+    # (same assignee, same sanitised title) — a revised ask to another
+    # teammate gets its own child instead of being swallowed by the earlier
+    # one, which left the second teammate never woken.
+    want_title = strip_markers(ask["title"])
     for row in pc.children(issue["id"]):
-        if is_ask_child_of(row, issue):
+        if (is_ask_child_of(row, issue)
+                and row.get("assigneeAgentId") == agent_id
+                and (row.get("title") or "") == want_title):
             child = row
             break
     if child is None:
         issued = [row for row in pc.children(issue["id"])
                   if is_issued_ask_child(row, issue)]
-        cap = int((opts or {}).get("max_asks_per_issue", 3) or 3)
+        # Attack finding 15: the cap comes from config; a non-numeric value
+        # keeps the default (never a mid-handle crash that costs the run its
+        # delivered reply), and a value below 1 is taken literally — zero
+        # asks — instead of silently loosening to the default 3.
+        cap = _ask_cap((opts or {}).get("max_asks_per_issue", 3))
         if len(issued) >= cap:
             machine_note_once(pc, issue["id"],
                               f"[t2-carrier] ask {ask_op} for "
@@ -1531,7 +1554,9 @@ def handle_ask(pc, issue, reply, ask, op, opts):
             return False
         # The teammate's own words are sanitised first (R2a finding 3): no
         # `[pc-…` text it wrote can ride into the child description.
-        title = strip_markers(ask["title"]) or ask["title"]
+        # Attack finding 14: a title that is ONLY a marker strips to "" — the
+        # fallback is a plain label, never the unsanitised ask text back.
+        title = strip_markers(ask["title"]) or "Asked work"
         description = strip_markers(ask["description"])
         try:
             child = pc.create_issue(company_id, {
@@ -2141,8 +2166,10 @@ def build_opts(cfg, environ, now):
         # naming anyone else resolves to nothing (plain reply, no child issue).
         "roster": cfg.get("teammates") or {},
         # R2a finding 4: the per-issue ask cap; asks beyond it are refused
-        # with one plain line and the reply stands as the answer.
-        "max_asks_per_issue": cfg.get("max_asks_per_issue", 3),
+        # with one plain line and the reply stands as the answer. Attack
+        # finding 15: coerced once here — a non-numeric value keeps the
+        # default, a value below 1 is zero asks (never a silent loosening).
+        "max_asks_per_issue": _ask_cap(cfg.get("max_asks_per_issue", 3)),
         # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
         "issue_url_template": cfg.get("issue_url_template"),
         # Optional, same law: "http://127.0.0.1:<port>/<PREFIX>/{thread}".
