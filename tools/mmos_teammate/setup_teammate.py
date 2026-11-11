@@ -40,6 +40,15 @@ def expand(path):
     return os.path.abspath(os.path.expanduser(path))
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A 3xx answer would carry this client's local_trusted header to
+    whatever origin the Location names. Redirects are refused, not
+    followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class Http:
     """Dev-instance Paperclip client (board actor via local_trusted header)."""
 
@@ -64,6 +73,7 @@ class Http:
             die(f"refusing Paperclip base {base!r}: it must be plain "
                 "loopback http with a port, like http://127.0.0.1:3100")
         self.base = base.rstrip("/")
+        self._opener = urllib.request.build_opener(_NoRedirect)
 
     def call(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -73,12 +83,14 @@ class Http:
         req = urllib.request.Request(f"{self.base}{path}", data=data,
                                      method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with self._opener.open(req, timeout=30) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:400]
-            die(f"{method} {path} -> HTTP {exc.code}: {detail}")
+            # The status is the fact. An error body can quote secrets,
+            # tokens or a person's text, and the failure line goes to a
+            # terminal someone reads — bodies never make it there.
+            die(f"{method} {path} -> HTTP {exc.code}")
 
     def get(self, path):
         return self.call("GET", path)
@@ -122,6 +134,42 @@ def config_revisions(http, agent_id):
     return rows
 
 
+OPEN_WORK_STATES = ("todo", "in_progress", "in_review", "blocked")
+MAX_LIST_PAGES = 10
+
+
+def open_assigned_issues(http, company_id, agent_id,
+                         states=OPEN_WORK_STATES, limit=50):
+    """The agent's open issues across every open state, walking pages.
+
+    The board caps a list page at `limit` rows; a single fixed read of an
+    agent with more open work than one page silently drops the rest (the
+    cutover's read_state and the rotate guard both decide from this list).
+    Pages walk by offset until a short page comes back, bounded so a server
+    that always answers a full page cannot loop the reader."""
+    out = []
+    for state in states:
+        for page_no in range(1, MAX_LIST_PAGES + 1):
+            offset = (page_no - 1) * limit
+            rows = http.get(
+                f"/api/companies/{company_id}/issues"
+                f"?assigneeAgentId={agent_id}&status={state}"
+                f"&limit={limit}&offset={offset}")
+            if isinstance(rows, dict):
+                for key in ("items", "issues", "rows"):
+                    if isinstance(rows.get(key), list):
+                        rows = rows[key]
+                        break
+            if not isinstance(rows, list):
+                # An unrecognised shape is NOT an empty result.
+                die(f"issue list for status {state} came back in an "
+                    "unrecognised shape")
+            out += rows
+            if len(rows) < limit or page_no == MAX_LIST_PAGES:
+                break
+    return out
+
+
 def t3_cli(spec, args, stdin_text=None):
     t3 = spec["t3"]
     env = dict(os.environ)
@@ -153,8 +201,15 @@ def ensure_t3_instance(spec):
         try:
             os.kill(int(pid), 0)
             die("dev T3 server is running; stop it before editing settings.json")
-        except (ValueError, ProcessLookupError, PermissionError):
-            pass
+        except ValueError:
+            pass  # the file does not hold a pid number
+        except ProcessLookupError:
+            pass  # a stale pid file: no such process
+        except PermissionError:
+            # EPERM means the process EXISTS under another user — treat it
+            # as running, never as "safe to edit under".
+            die(f"a process holds pid {pid} that this user cannot signal; "
+                "treat the dev T3 server as running and stop it first")
     settings_path = os.path.join(home, "userdata", "settings.json")
     settings = json.load(open(settings_path))
     source = settings["providerInstances"].get("capacity_fabric") or \
@@ -337,6 +392,15 @@ def cmd_rotate(spec_path, title, message):
     agent_dir = expand(spec["agent_dir"])
     result = json.load(open(os.path.join(agent_dir, "setup_result.json")))
     agent_id = result["agentId"]
+    # The mint is the irreversible step (a live thread, a revision bump):
+    # it must not start while the agent still holds open work — those
+    # issues would keep waking a carrier whose home just moved under it.
+    open_issues = open_assigned_issues(http, spec["company_id"], agent_id)
+    if open_issues:
+        names = ", ".join(str(row.get("identifier") or row.get("id"))
+                          for row in open_issues[:5])
+        die(f"agent {agent_id} still holds {len(open_issues)} open "
+            f"issue(s) ({names}); finish or reassign them before rotating")
     t3 = dict(spec["t3"])
     rotate_spec = dict(spec)
     rotate_spec["primary_thread"] = {"title": title,

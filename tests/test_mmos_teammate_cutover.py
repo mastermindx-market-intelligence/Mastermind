@@ -597,3 +597,33 @@ def test_rollback_marks_the_result_file(wired, tmp_path):
                                          "cutover-result.json")))
     assert result.get("rolledBackAt")
     assert result.get("movedAt")     # the history is kept, not erased
+
+
+def test_read_state_walks_past_the_first_page_of_open_issues():
+    # The board caps a list page at 50 rows. With 53 open issues in one
+    # state, the single fixed-limit read saw only the first 50: the move
+    # believed 3 assigned issues did not exist. The read walks pages until
+    # a short page comes back.
+    from urllib.parse import parse_qs, urlsplit
+
+    rows = [{"id": f"is-{i}", "status": "todo"} for i in range(53)]
+    walked = []
+
+    class PagedHttp(FakeHttp):
+        def get(self, path):
+            if "/issues?" in path:
+                q = parse_qs(urlsplit(path).query)
+                state = q["status"][0]
+                offset = int(q.get("offset", ["0"])[0])
+                limit = int(q.get("limit", ["50"])[0])
+                page = [i for i in self.issues
+                        if i["status"] == state][offset:offset + limit]
+                walked.append((state, offset, len(page)))
+                return page
+            return super().get(path)
+
+    http = PagedHttp(old_agent(), issues=rows)
+    agent, open_issues, live = co.read_state(http, {"company_id": CID,
+                                                    "agent_id": AID})
+    assert len(open_issues) == 53
+    assert any(offset > 0 for _, offset, _ in walked)

@@ -57,3 +57,117 @@ def test_settings_write_is_atomic_private_and_never_partial(tmp_path,
     assert "--append-system-prompt-file" in instance["config"]["launchArgs"]
     assert (os.stat(settings_path).st_mode & 0o777) == 0o600
     assert not [p for p in os.listdir(settings_path.parent) if ".new-" in p]
+
+
+# --- the dev-instance client refuses what it must not transport -------------
+
+def _loopback_server(status, body=b"", location=None):
+    """A throwaway loopback origin that answers every request alike."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def _answer(self):
+            self.send_response(status)
+            if location:
+                self.send_header("Location", location)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+
+        do_GET = do_POST = do_PATCH = _answer
+
+        def log_message(self, *args):
+            pass
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def test_http_dies_on_a_redirect_instead_of_following_it():
+    # Every call this client makes carries the dev actor's local_trusted
+    # header. A 3xx answer would carry that header to whatever origin the
+    # Location names — the client must die on the spot, not follow.
+    srv = _loopback_server(302, b"{}", location="http://127.0.0.1:9/leak")
+    try:
+        http = st.Http(f"http://127.0.0.1:{srv.server_port}")
+        with pytest.raises(SystemExit):
+            http.get("/api/agents/ag-1")
+    finally:
+        srv.shutdown()
+
+
+def test_http_error_message_prints_status_only_never_the_body(capsys):
+    # An error body can quote secrets, tokens or a person's text, and the
+    # failure line goes to a terminal someone reads. The law for refused
+    # HTTP: the type and the status, never bodies.
+    srv = _loopback_server(400, b'{"error":{"message":"SECRET-VALUE"}}')
+    try:
+        http = st.Http(f"http://127.0.0.1:{srv.server_port}")
+        with pytest.raises(SystemExit):
+            http.get("/api/issues/is-1")
+    finally:
+        srv.shutdown()
+    err = capsys.readouterr().err
+    assert "400" in err
+    assert "SECRET-VALUE" not in err
+
+
+def test_an_unsignalable_pid_means_the_server_is_running(tmp_path,
+                                                          monkeypatch):
+    # kill(pid, 0) raising PermissionError says the process EXISTS under
+    # another user. Swallowing that as "not running" edits settings.json
+    # while a live dev server watches the file and reloads it.
+    spec, settings_path = make_home(tmp_path)
+    run_dir = os.path.join(st.expand(spec["t3"]["dev_root"]), "run")
+    os.makedirs(run_dir)
+    with open(os.path.join(run_dir, "server.pid"), "w") as fh:
+        fh.write("4242")
+
+    def eperm(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "kill", eperm)
+    with pytest.raises(SystemExit):
+        st.ensure_t3_instance(spec)
+
+
+def test_rotate_refuses_while_the_agent_still_holds_open_work(tmp_path,
+                                                              monkeypatch):
+    # cmd_rotate minted a fresh primary thread and rewrote the binding
+    # without looking at the board: issues still assigned to this agent
+    # would keep waking a carrier whose thread home just moved under it.
+    # The mint is the irreversible step — it must not start while the agent
+    # still holds open work.
+    agent_dir = tmp_path / "agent"
+    agent_dir.mkdir()
+    result = {"agentId": "ag-1",
+              "binding": {"environmentId": "e", "projectId": "p",
+                          "providerInstanceId": "i",
+                          "primaryThreadId": "th-1"}}
+    (agent_dir / "setup_result.json").write_text(json.dumps(result))
+    spec = {"paperclip_base": "http://127.0.0.1:3100", "company_id": "co-1",
+            "agent_dir": str(agent_dir), "t3": {}}
+
+    class BoardWithOpenWork:
+        def __init__(self, base):
+            self.gets = []
+
+        def get(self, path):
+            self.gets.append(path)
+            if "status=todo" in path:
+                return [{"id": "is-9", "status": "todo"}]
+            return []
+
+    minted = []
+    monkeypatch.setattr(st, "Http", BoardWithOpenWork)
+    monkeypatch.setattr(st, "start_primary_thread",
+                        lambda spec_: minted.append(spec_) or {"threadId": "th-2"})
+    monkeypatch.setattr(st, "write_binding", lambda *a, **k: {})
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    with pytest.raises(SystemExit):
+        st.cmd_rotate(str(spec_path), "new home", None)
+    assert not minted  # the thread was never minted

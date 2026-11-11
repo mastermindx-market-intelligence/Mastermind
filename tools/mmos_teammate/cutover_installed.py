@@ -25,7 +25,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from setup_teammate import Http, die, expand, log, write_binding  # noqa: E402
+from setup_teammate import (Http, die, expand, log, write_binding,  # noqa: E402
+                            open_assigned_issues)
 
 OPEN_STATES = ("todo", "in_progress", "in_review", "blocked")
 PREIMAGE_KEYS = ("adapterType", "adapterConfig", "runtimeConfig", "metadata")
@@ -140,13 +141,11 @@ def adapter_patch(spec, carrier_path, config_path):
 
 def read_state(http, spec):
     agent = http.get(f"/api/agents/{spec['agent_id']}")
-    cid = spec["company_id"]
-    open_issues = []
-    for state in OPEN_STATES:
-        open_issues += rows_of(http.get(
-            f"/api/companies/{cid}/issues?assigneeAgentId={spec['agent_id']}"
-            f"&status={state}&limit=50"))
-    live = rows_of(http.get(f"/api/companies/{cid}/live-runs"))
+    # walks pages: an agent with more open work than one 50-row page is
+    # still fully seen (setup_teammate.open_assigned_issues)
+    open_issues = open_assigned_issues(http, spec["company_id"],
+                                       spec["agent_id"], states=OPEN_STATES)
+    live = rows_of(http.get(f"/api/companies/{spec['company_id']}/live-runs"))
     return agent, open_issues, live
 
 
