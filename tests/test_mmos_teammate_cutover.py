@@ -90,6 +90,26 @@ def test_blockers_name_every_unsafe_state(tmp_path):
         assert needle in text
 
 
+def test_carrier_config_passes_the_question_wait_keys_and_template(tmp_path):
+    # Defaults fit the 1500s process limit; the thread link is optional and
+    # only written when the spec carries it.
+    cfg = co.carrier_config(make_spec(tmp_path))
+    assert cfg["question_wait_sec"] == 900
+    assert cfg["run_budget_sec"] == 1320
+    assert cfg["question_poll_interval_sec"] == 10
+    assert "thread_url_template" not in cfg
+    spec = make_spec(tmp_path)
+    spec["question_wait_sec"] = 600
+    spec["run_budget_sec"] = 1400
+    spec["question_poll_interval_sec"] = 7
+    spec["thread_url_template"] = "http://127.0.0.1:3774/thread/{thread}"
+    cfg = co.carrier_config(spec)
+    assert cfg["question_wait_sec"] == 600
+    assert cfg["run_budget_sec"] == 1400
+    assert cfg["question_poll_interval_sec"] == 7
+    assert cfg["thread_url_template"] == "http://127.0.0.1:3774/thread/{thread}"
+
+
 def test_apply_moves_the_agent_and_saves_the_old_setup(wired, tmp_path, capsys):
     spec, http = wired
     assert co.cmd_apply(spec) == 0
