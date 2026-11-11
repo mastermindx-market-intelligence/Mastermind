@@ -2,6 +2,11 @@
 
 - Repair heads: failing tests `519a1e89c`, fixes `f8c98a65d` on `t3/mmos-v4-gbl`
   (reviewed base `5063b46cb`, panel A + panel B rows H1/H3/M1/M2).
+- Round 2 (delta 1): failing tests `3498fe38f`, fixes on the same branch —
+  the M8 residue (settled-before-re-arm), exact-bool `trusted` stamps,
+  trusted-only seq derivation, the `reconcile` party check, and edge
+  fullmatch parity. The round-2 contract rules are folded into §1.2/§3
+  below; GBL-4 implements the same laws.
 - Written: 2026-11-11 (GBL lane repair round 1). Everything here is the
   GblAskStore contract GBL-4's Paperclip client must implement in its own
   round. `integrations/gbl/paperclip_client.py` was NOT touched.
@@ -40,11 +45,17 @@ Every event the STORE appends is stamped by the store itself:
 ```
 
 - `seq`: a per-record STRICTLY INCREASING integer, assigned by the store at
-  append time. Derive it from `comment_order` (your paginated, offset-honoured
-  field) or an internal counter — either is fine; the law is monotonicity per
-  ask record.
-- `trusted`: `true` on the store's own appends; `false` on any event-shaped
-  comment the store did not append itself.
+  append time. **Derive the next `seq` ONLY from the store's own trusted
+  appends — `max(seq over events with trusted === true) + 1` (0 when none).
+  A foreign or untrusted row NEVER moves the counter** (round-2 law): a
+  trailing foreign comment that carries no store seq must not reset the
+  sequence and brick the record. Deriving from `comment_order` is fine as
+  long as untrusted rows are excluded from the max the same way.
+- `trusted`: exactly `true` on the store's own appends; exactly `false` on
+  any event-shaped comment the store did not append itself. **The stamp must
+  be a JSON bool and nothing else** — a truthy `1`, a `"true"` string, a
+  null or an object is surfaced as-is and the bridge refuses it typed
+  (`EVENT_TRUST_INVALID`); it is never treated as authoritative-without-seq.
 - Bridge law (already shipped): events with `trusted: false` are ignored
   entirely — they never advance state, never answer, never burn nudge budget.
   `seq` monotonicity is validated across trusted events; an equal or
@@ -103,21 +114,31 @@ adds no new provider capability, and forging requires the host-held key.
   event (`type: "answer"`); the ANSWERED state is inferred by replay from the
   trusted answer event. Old two-append records repair themselves on read;
   do not "fix" records on your side.
-- **New wire op `reconcile`** (`{ask_id}` → `reconcile_nudge`): settles the
-  last nudge attempt by observation; it never sends. Ops are now
-  `{ask, answer, result, question, status, reconcile}`.
+- **New wire op `reconcile`** (`{principal, ask_id}` → `reconcile_nudge`,
+  round-2: it now carries the same creator-or-addressee party check as every
+  other mutating op): settles the last nudge attempt by observation; it never
+  sends. Ops are now `{ask, answer, result, question, status, reconcile}`.
 - **Wire argument validation:** the bridge door now enforces per-op key sets.
   `answer` is exactly the contract's `ANSWER_ARGUMENT_KEYS`
   `{"principal","ask_id","answer","idempotency_key"}`; `ask` requires
   `{principal,kind,target,title,body,idempotency_key}` and optionally accepts
-  `{correlation,asker}`; `question`/`result`/`status` are `{principal,ask_id}`;
-  `reconcile` is `{ask_id}`.
+  `{correlation,asker}`; `question`/`result`/`status`/`reconcile` are
+  `{principal,ask_id}`.
 - **`ask_status`** now reports `EXPIRED` and carries `expires_at` (L4).
-- **Nudge law (M7/M8):** a `nudge_attempt` event is persisted BEFORE the
-  send; cooldown counts `nudge` + `nudge_attempt` markers; budget counts
-  delivered `nudge` events only. Receipt outcomes: ACCEPTED/DELIVERED →
-  RENUDGED; TARGET_UNAVAILABLE/FAILED → `NUDGE_NOT_DELIVERED` (no budget);
-  effect-unknown → `NUDGE_EFFECT_UNKNOWN` (settle via `reconcile`).
+- **Nudge law (M7/M8 + round 2):** a `nudge_attempt` event is persisted
+  BEFORE the send; budget counts delivered `nudge` events only. A new
+  `nudge_settled` event `{type, outcome: "NOT_DELIVERED", state, at}` marks
+  an attempt that is definitively NOT delivered (pre-submit refusal,
+  TARGET_UNAVAILABLE/FAILED — appended immediately by the receipt, or by
+  `reconcile`). An attempt is SETTLED only by a `nudge` or `nudge_settled`
+  event appended after it; an UNSETTLED attempt blocks re-nudge forever
+  with typed `NUDGE_ATTEMPT_UNSETTLED` — the cooldown never re-arms an
+  effect-unknown send; only `reconcile` settles it. Cooldown spacing counts
+  `nudge` + `nudge_attempt` + `nudge_settled` markers.
+- **Edge/bridge pattern parity (round 2):** the edge validates advertised
+  patterns with `re.fullmatch`, exactly like the bridge — a value that only
+  passes a `$`-anchored pattern because of a trailing newline is refused at
+  the door.
 - **One answer cap (M1):** `MAX_ANSWER_CHARS = BODY_MAX_CHARS = 4096`.
 - **team.answer public argument** is `answer` (was `text`); the edge schema
   digest is re-pinned
@@ -129,10 +150,10 @@ All suites one file per invocation,
 `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q -p no:cacheprovider <file>`:
 
 - `tests/common/gbl_contract_test.py` — 79 passed
-- `tests/test_gbl_bridge_service.py` — 57 passed
+- `tests/test_gbl_bridge_service.py` — 64 passed (round 2: +7)
 - `tests/test_gbl_nudge.py` — 12 passed
 - `tests/test_gbl_message_send.py` — 27 passed
-- `tests/test_gbl_mcp_server.py` — 27 passed
+- `tests/test_gbl_mcp_server.py` — 28 passed (round 2: +1)
 - `tests/test_gbl_admission.py` — 23 passed
 
 No server was run against any real port; no request to any real service.
