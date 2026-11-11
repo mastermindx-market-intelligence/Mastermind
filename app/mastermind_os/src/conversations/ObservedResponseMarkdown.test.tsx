@@ -42,6 +42,9 @@ describe("demand-driven observed response formatting", () => {
   it("loads only the exact intersecting response and disconnects its observer", async () => {
     const { container } = render(<Harness count={3} />);
     intersect(observers[1]);
+    // Settle only the real demand-triggered lazy import before checking its
+    // DOM. The test budget stays unchanged; offscreen rows remain deferred.
+    await act(async () => { await vi.dynamicImportSettled(); });
     await screen.findByRole("heading", { name: "Original response" });
     expect(container.querySelectorAll(".source-markdown")).toHaveLength(1);
     expect(container.querySelectorAll('[data-format="deferred"]')).toHaveLength(2);

@@ -1006,3 +1006,66 @@ def test_real_producer_reader_rejects_nonstr_event_timestamp_without_exception(
     assert _accepted(document)
     document["data"]["job"]["updated_at"] = bad
     assert not _accepted(document)
+
+
+
+def test_legacy_queued_lost_launch_is_bounded_only_for_historical_read(tmp_path):
+    """Legacy LOST launch evidence remains visible but cannot become a start seal."""
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, _lost = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    raw = copy.deepcopy(document["data"])
+    synthetic_metadata = {
+        "schema_version": "mastermind.executive_process_launch/v1",
+        "launch_attestation": {
+            "schema_version": "mastermind.executive_launch_attestation/v1",
+            "synthetic_inert_blob": "x" * 2400,
+        },
+        "launch_attestation_sha256": "a" * 64,
+        "launch_attestation_path": "/synthetic/no-real-launch",
+        "authority_policy_hash": "a" * 64,
+        "authorities": [],
+        "quota_class": "synthetic",
+        "routing": {"synthetic": True},
+        "worker_recovery_binding": {},
+    }
+    raw["attempts"][0]["launch_metadata"] = copy.deepcopy(synthetic_metadata)
+    raw["latest_attempt"]["launch_metadata"] = copy.deepcopy(synthetic_metadata)
+    assert not WebCeoV2CeoIngressReadGateway._valid_job_data(
+        raw, arguments={"job_id": job.job_id}, bounded=(),
+    )
+    before = copy.deepcopy(raw)
+    bounded, receipts = bound_job_document(raw)
+    assert raw == before  # Source Registry values never changed
+    assert {item["field"] for item in receipts} == {
+        "attempts[0].launch_metadata", "latest_attempt.launch_metadata",
+    }
+    assert all(item["original_bytes"] > item["returned_bytes"] for item in receipts)
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        bounded, arguments={"job_id": job.job_id}, bounded=receipts,
+    )
+    for field in ("status", "current_attempt_id", "assigned_worker_id",
+                  "assigned_quota_class", "attempt_count", "attempt_limit"):
+        assert bounded["job"][field] == raw["job"][field]
+    assert bounded["attempts"][0]["status"] == raw["attempts"][0]["status"] == "LOST"
+
+    # Scope excludes current claims, terminal Jobs, unrecognized metadata, and
+    # RUNNING Attempts; don't use bounding to launder start authority.
+    for variant in ("live_claim", "terminal_job", "active_attempt", "foreign_shape"):
+        altered = copy.deepcopy(raw)
+        if variant == "live_claim":
+            altered["job"]["current_attempt_id"] = "ATT-foreign"
+        elif variant == "terminal_job":
+            altered["job"]["status"] = "COMPLETED"
+        elif variant == "active_attempt":
+            altered["attempts"][0]["status"] = "RUNNING"
+            altered["latest_attempt"]["status"] = "RUNNING"
+        else:
+            altered["attempts"][0]["launch_metadata"]["unreviewed"] = True
+            altered["latest_attempt"]["launch_metadata"]["unreviewed"] = True
+        projection, receipts = bound_job_document(altered)
+        assert receipts == [], variant
+        assert projection["attempts"][0]["launch_metadata"] == (
+            altered["attempts"][0]["launch_metadata"]
+        )

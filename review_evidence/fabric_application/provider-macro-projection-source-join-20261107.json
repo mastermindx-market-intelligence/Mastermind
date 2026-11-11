@@ -1,0 +1,94 @@
+{
+  "acceptance": {
+    "hosted_current_head_ci": "pending publication",
+    "live_primary_tool_continuation": false,
+    "measured_availability": false,
+    "native_installation": false,
+    "source_projection_joined": true
+  },
+  "composition": {
+    "combined_ci": "exact a3d4 workflow plus the existing three provider/H2 test invocations",
+    "merge_conflicts": [],
+    "native_runtime_source_roots_unchanged_from_0a": [
+      "integrations/hermes_attended_fabric",
+      "integrations/hermes_application_fabric/hermes_core",
+      "integrations/studio_direct_mcp/fabric-backend.mjs"
+    ],
+    "normal_merges": true,
+    "original_current_and_historical_fixtures": "exact stricter a3d4/5f05 postimages; no production guard relaxation",
+    "projection_paths_exact_incoming_except_combined_ci": 15,
+    "protected_observation_registry_record_retained": true,
+    "provider_and_quota_source_roots_unchanged_from_0a": [
+      "ops/native_fabric/quota_continuity",
+      "ops/native_fabric/provider_plans",
+      "ops/native_fabric/grok47/quota_billing",
+      "ops/native_fabric/experiential53",
+      "ops/native_fabric/experiential_native_bridge",
+      "control_plane/codex_provider_realm.py",
+      "control_plane/experiential_plan_policy.py",
+      "control_plane/fs_security.py"
+    ]
+  },
+  "current_head_proof": "Run the changed current/historical fixture modules and D8 guard after committing this exact join; return their exact resulting-head receipt through existing carriers.",
+  "custody": {
+    "active_2225_protected_ad2484_composition_untouched": true,
+    "h4_activation_untouched": true,
+    "original_J_replayed": false,
+    "original_release": 2175,
+    "original_release_ref_mutated": false,
+    "root_contribution": 2232
+  },
+  "governing_pin_reused": "66780ab7e3e9fdbfd40713bb5791fb1888529f7c",
+  "inherited_provider_proof": {
+    "actual_provider_consumer_cases": 27,
+    "path": "review_evidence/fabric_application/provider-quota-joined-composition-20261107.json",
+    "pytest_cases": 379,
+    "sha256": "a84cb8d6d6cb5e3500e0d005c0bc5e077c32e218e8e1ba9487aeca40091b3d57",
+    "source_commit": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c",
+    "subtests": 18,
+    "tested_source_bytes_unchanged": true
+  },
+  "projection": {
+    "archive_sha256": "339d60f79025005f580decb69d81f47cfe49c8bf3aea48bb2c1ab1803042a08e",
+    "archive_size": 75634300,
+    "commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+    "material_manifest_sha256": "0ba76aacfe1c86e524b883ca0a9465d74e2832a105760ea68c8f3b0ac15d87eb",
+    "projection": "engine-lib-config/v1",
+    "repository": "mastermindx-market-intelligence/macro",
+    "schema": "mastermind.hermes_attended_source_projection/v1",
+    "tree": "c2a4d629c87dec9381460560a31dffa4e2550917"
+  },
+  "projection_source_proof": {
+    "archive_rebuild_and_source_materialization": true,
+    "attributed_to": "a3d4da4d79a5a0e7fe4a51d938a132f74f07c574",
+    "new_build_or_live_install_claimed_by_this_join": false,
+    "offline_two_home_and_installed_configuration_fixture": true,
+    "path": "review_evidence/hermes_primary/attended-original-source-composition-20261107.json",
+    "sha256": "da30c6d0850d92e10baa725a670d0e3fdc657fd78bb98b28c5c21f4a1de8c801"
+  },
+  "schema": "mastermind.provider-macro-projection-source-join.v1",
+  "source_parents": {
+    "local_before_projection": "bbfdd6f3612a2e33cdb97286503a90316e8fe121",
+    "original_protected_source": "bf46d822dbce3ac2226df69da7f94e37101df986",
+    "projection_source": "a3d4da4d79a5a0e7fe4a51d938a132f74f07c574",
+    "qualified_provider_h2_source": "0a6d33bfa3280e397c1c3d32a8a6bbcae014c17c"
+  },
+  "source_sha256": {
+    ".github/workflows/ci.yml": "c4ed2cab4fe78dcc6dabc95884d26805f7044d99966aecb84f5a515984db796b",
+    ".github/workflows/hermes-application-inference.yml": "5540692acd75587bdf0f9dc7755164a852043a8b130c05c359fc1e14ce7dd154",
+    "integrations/hermes_application_fabric/ATTENDED_INSTALLATION.md": "3977f30c4cf9af425a672397f67e077cc8b330c4b5a450b0adfe2f9c5e1182eb",
+    "integrations/hermes_application_fabric/RELEASE_INPUTS.md": "df6f14c18b7fc1868b16ef0295a974b1ee057f567149038ee2e90c65104a3e39",
+    "integrations/hermes_application_fabric/macro-source.json": "dfd647529cd1e78478fade0a6f37d0542937fe6f57fd84157479a205d2b4da3a",
+    "integrations/hermes_application_fabric/qualification/application_owner_support/README.md": "bbea78036b23aec3b3fec5d74cd59b2cc74a3803275221ba27fa4bb7196242c1",
+    "integrations/hermes_application_fabric/qualification/application_owner_support/attended-auto-current.json": "af4aef376f0f5f76505848d8d93569bddb1b08966f302d8c4b7c1ebba9f3ae79",
+    "integrations/hermes_application_fabric/qualification/owner_source_support.py": "7eb6729ae5957c131d20d48165e5634b89ed8d145a6d4f296335a6aa255e08e1",
+    "integrations/hermes_application_fabric/qualification/qualify_gateway.py": "6a8fc7b345de625b5a582838d8cda9ea637a8f567070cf0e2b07488450e9587c",
+    "integrations/hermes_application_fabric/qualification/qualify_installed.py": "c3029e89361c2fe0635ad55bc4c93fd5181b1119084ed61878b7429c7d82d910",
+    "integrations/hermes_application_fabric/qualification/qualify_offline.py": "86221a847dd0f1263c364394fb418169623d140b8fc80bc4d1ad89599af20c94",
+    "review_evidence/hermes_primary/attended-installation-frontier-20261107.md": "a0d1d4f7333d503abd44171e2fe3a6609f2fce2a10e55228f0676b7ca030708d",
+    "review_evidence/hermes_primary/attended-original-source-composition-20261107.json": "da30c6d0850d92e10baa725a670d0e3fdc657fd78bb98b28c5c21f4a1de8c801",
+    "review_evidence/hermes_primary/historical-shadow-fixture-repair-20261107.json": "e03599a40797f6d8591e4ea56b8b3712d9b49d5ff58b3767960c0034cffbd532",
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": "587d5740a380a79ab1673a08d5ac461cccdae49c9a39eebf61a96055ede5e07e",
+    "tests/test_native_pool_policy_publication.py": "d3a3a2df38583e0afc64a61c13ae6715e45cd42fa0573aaae1c3a6e219c918e7"
+  }
+}

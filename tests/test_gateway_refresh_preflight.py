@@ -105,6 +105,75 @@ def test_semantic_config_accepts_distinct_additional_and_os_resources():
     assert preflight._semantic_config(value, SHA) == value
 
 
+PUBLIC_MCP_RESOURCE = "https://mcp.mastermind-x.com/mcp"
+OS_EXECUTIVE_RESOURCE = "https://mcp.mastermind-x.com/os/executive"
+
+
+def test_semantic_config_accepts_the_exact_public_mcp_resource():
+    tunnel = (
+        "https://tunnel-service.gateway.unified-0.internal.api.openai.org/"
+        "v1/mcp/tunnel_" + "5" * 32
+    )
+    value = _config()
+    value.update(
+        public_mcp_resource=PUBLIC_MCP_RESOURCE,
+        os_executive_transport=True,
+        os_executive_resource=OS_EXECUTIVE_RESOURCE,
+        os_commission_port=45025,
+        executive_additional_resources=[tunnel],
+    )
+
+    assert preflight._semantic_config(value, SHA) == value
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value.update(public_mcp_resource=PUBLIC_MCP_RESOURCE + "/"),
+        lambda value: value.update(public_mcp_resource=PUBLIC_MCP_RESOURCE + "/x"),
+        lambda value: value.update(
+            public_mcp_resource="http://mcp.mastermind-x.com/mcp"
+        ),
+        lambda value: value.update(public_mcp_resource=OS_EXECUTIVE_RESOURCE),
+        lambda value: value.update(
+            public_mcp_resource="https://foreign.example.test/mcp"
+        ),
+        lambda value: value.update(public_mcp_resource=None),
+        lambda value: value.update(executive_mcp_profile="web_ceo_v2"),
+        lambda value: value.update(principal_ruling_target={}),
+        lambda value: value.update(coo={}),
+        # A primary resource that already is the public audience would make
+        # the public variant a duplicate of the connector resource.
+        lambda value: value["policies"]["read"].update(
+            resource=PUBLIC_MCP_RESOURCE
+        ),
+        lambda value: value["policies"]["submit"].update(
+            resource=PUBLIC_MCP_RESOURCE
+        ),
+    ],
+)
+def test_semantic_config_refuses_an_invalid_public_mcp_composition(mutate):
+    value = _config()
+    value["public_mcp_resource"] = PUBLIC_MCP_RESOURCE
+    mutate(value)
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight._semantic_config(value, SHA)
+
+
+def test_semantic_config_refuses_public_resource_as_os_resource():
+    value = _config()
+    value.update(
+        public_mcp_resource=PUBLIC_MCP_RESOURCE,
+        os_executive_transport=True,
+        os_executive_resource=PUBLIC_MCP_RESOURCE,
+        os_commission_port=45025,
+    )
+
+    with pytest.raises(preflight.GatewayRefreshPreflightError):
+        preflight._semantic_config(value, SHA)
+
+
 @pytest.mark.parametrize(
     "mutate",
     [

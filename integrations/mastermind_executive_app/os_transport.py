@@ -250,6 +250,7 @@ async def _drive_inner(
     inner_app: Any,
     inner_scope: Mapping[str, Any],
     replay_body: bytes,
+    *, timeout_seconds: float = 5.0,
 ) -> tuple[dict[str, Any], bytes]:
     """Drive ``inner_app`` once with a replayed ``http.request`` body and
     collect exactly one ``start`` and the body frames.
@@ -271,7 +272,12 @@ async def _drive_inner(
         if not replayed:
             replayed = True
             return {"type": "http.request", "body": replay_body, "more_body": False}
-        return {"type": "http.disconnect"}
+        # Exhausting the replayed body is not a real caller disconnect. Inner
+        # middleware may observe receive concurrently; a synthetic disconnect
+        # cancels the legitimate handler before it can finish. The existing
+        # bounded drive owns cancellation of this wait and its inner task.
+        await asyncio.Future()
+        raise AssertionError("unreachable replay receive")
 
     async def collect(event: Mapping[str, Any]) -> None:
         nonlocal start, body, total, complete
@@ -305,7 +311,7 @@ async def _drive_inner(
             raise _CollectError("trailers not permitted")
         raise _CollectError("unrecognised response event")
 
-    await asyncio.wait_for(inner_app(inner_scope, replay_receive, collect), timeout=5.0)
+    await asyncio.wait_for(inner_app(inner_scope, replay_receive, collect), timeout=timeout_seconds)
     if start is None or not complete:
         raise _CollectError("inner response did not complete")
     return start, bytes(body)
@@ -356,10 +362,20 @@ class OsExecutiveTransportApp:
 
     ROUTES: tuple[str, ...] = (
         "/os/executive/context",
+        "/os/executive/company-priorities",
         "/os/executive/submit",
         "/os/executive/status",
         "/os/executive/direct-native/result",
         "/os/executive/direct-native/consume",
+        "/os/executive/direct-native/correction",
+        "/os/executive/project-execution/preview",
+        "/os/executive/project-execution/submit",
+        "/os/executive/project-execution/status",
+        "/os/executive/project-planning/submit",
+        "/os/executive/project-planning/status",
+        "/os/executive/project-planning/result",
+        "/os/executive/project-planning/consume",
+        "/os/executive/project-planning/prepare_proposal",
     )
 
     def __init__(
@@ -371,6 +387,9 @@ class OsExecutiveTransportApp:
         clock: Callable[[], int],
         commission_preparer: Any | None = None,
         direct_result_client: Any | None = None,
+        foreground_submissions: bool = False,
+        workspace_app: Any | None = None,
+        company_read_pair: tuple | None = None,
     ) -> None:
         verifiers = submit_verifier if isinstance(submit_verifier, tuple) else (submit_verifier,)
         if not verifiers or any(type(v) is not MastermindTokenVerifier for v in verifiers):
@@ -392,6 +411,13 @@ class OsExecutiveTransportApp:
         self._submit_verifiers = verifiers
         self._submit_authenticators = authenticators
         self._clock = clock
+        self._company_read = None
+        if company_read_pair is not None:
+            from integrations.mastermind_executive_app.company_priorities_transport import CompanyPrioritiesTransport
+            if len(verifiers) != 1:
+                raise ValueError("one current company-read resource required")
+            self._company_read = CompanyPrioritiesTransport(inner_app,
+                read_pair=company_read_pair, submit_pair=(verifiers[0], authenticators[0]), clock=clock)
         from integrations.mastermind_executive_app.os_commission_client import StudioCommissionClient
         if commission_preparer is not None and type(commission_preparer) is not StudioCommissionClient:
             raise TypeError("installed Studio commission client required")
@@ -400,6 +426,13 @@ class OsExecutiveTransportApp:
         if direct_result_client is not None and type(direct_result_client) is not DirectNativeResultClient:
             raise TypeError("fixed direct-native client required")
         self._direct_result_client = direct_result_client
+        if type(foreground_submissions) is not bool:
+            raise TypeError("compiled foreground selection must be boolean")
+        self._foreground_submissions = foreground_submissions
+        from integrations.executive_mcp.server import AuditedWorkspaceApp
+        if workspace_app is not None and type(workspace_app) is not AuditedWorkspaceApp:
+            raise TypeError('project planning requires the incumbent audited Workspace owner')
+        self._project_planning_workspace_app=workspace_app
 
     # ---------------------------------------------------------------- ASGI
 
@@ -428,7 +461,18 @@ class OsExecutiveTransportApp:
             await Response(status_code=HTTPStatus.NOT_FOUND, headers=_OS_HTTP_HEADERS)(scope, receive, send)
             return
 
+        if path == "/os/executive/company-priorities":
+            if self._company_read is None:
+                await Response(status_code=503, headers=_OS_HTTP_HEADERS)(scope, receive, send)
+            else:
+                await self._company_read(scope, receive, send)
+            return
         headers = scope.get("headers") or ()
+        from integrations.mastermind_executive_app.project_planning_transport import HEADER,ROUTES
+        from integrations.mastermind_executive_app.project_execution_transport import ROUTES as EXECUTION_ROUTES
+        if any(key.lower()==HEADER for key,_ in headers) and path not in (ROUTES | EXECUTION_ROUTES):
+            await Response(status_code=HTTPStatus.FORBIDDEN,headers=_OS_HTTP_HEADERS)(scope,receive,send)
+            return
         hosts = [v for k, v in headers if k.lower() == b"host"]
         origins = [v for k, v in headers if k.lower() == b"origin"]
         authorizations = [v for k, v in headers if k.lower() == b"authorization"]
@@ -497,7 +541,7 @@ class OsExecutiveTransportApp:
 
         if (path == "/os/executive/context" and body_obj) or (
             path not in {"/os/executive/context", "/os/executive/direct-native/result",
-                         "/os/executive/direct-native/consume"} and set(body_obj) != {"arguments"}
+                         "/os/executive/direct-native/consume", "/os/executive/direct-native/correction"} and set(body_obj) != {"arguments"}
         ):
             await JSONResponse({"ok": False, "error": {"code": "invalid_input", "message": "fixed request body required"}},
                                status_code=HTTPStatus.BAD_REQUEST, headers=_OS_HTTP_HEADERS)(scope, receive, send)
@@ -506,7 +550,7 @@ class OsExecutiveTransportApp:
         # Revalidate the original bearer after each awaited operation before
         # releasing identity or effect evidence to the caller.
         try:
-            response = await self._dispatch(path, scope, body_obj, principal)
+            response = await self._dispatch(path, scope, body_obj, principal, receive=receive)
         except _CollectError:
             response = JSONResponse(
                 {"ok": False, "error": {"code": "backend_unavailable",
@@ -558,7 +602,11 @@ class OsExecutiveTransportApp:
         scope: Mapping[str, Any],
         body_obj: dict[str, Any],
         principal: VerifiedPrincipal,
+        *, receive=None,
     ) -> Response:
+        if path == '/os/executive/direct-native/correction':
+            from integrations.mastermind_executive_app.direct_native import dispatch_direct_correction
+            return await dispatch_direct_correction(self,scope,body_obj,principal)
         if path in {"/os/executive/direct-native/result", "/os/executive/direct-native/consume"}:
             from integrations.mastermind_executive_app.direct_native import dispatch_direct_native
             return await dispatch_direct_native(self, scope, body_obj, principal,
@@ -569,7 +617,13 @@ class OsExecutiveTransportApp:
             return JSONResponse(_context_payload(principal), status_code=HTTPStatus.OK,
                                 headers=_OS_HTTP_HEADERS)
         if path == "/os/executive/submit":
-            return await self._dispatch_submit(scope, body_obj, principal)
+            return await self._dispatch_submit(scope, body_obj, principal, receive=receive)
+        from integrations.mastermind_executive_app.project_execution_transport import ROUTES as EXECUTION_ROUTES,dispatch as dispatch_execution
+        if path in EXECUTION_ROUTES:
+            return await dispatch_execution(self,scope,body_obj,principal,operation=EXECUTION_ROUTES[path],receive=receive)
+        from integrations.mastermind_executive_app.project_planning_transport import ROUTES,dispatch
+        if path in ROUTES:
+            return await dispatch(self,scope,body_obj,principal,operation=ROUTES[path],receive=receive)
         return await self._dispatch_status(scope, body_obj, principal)
 
     async def _dispatch_submit(
@@ -577,6 +631,7 @@ class OsExecutiveTransportApp:
         scope: Mapping[str, Any],
         body_obj: dict[str, Any],
         principal: VerifiedPrincipal,
+        *, receive=None,
     ) -> Response:
         from control_plane.ceo_request import app_request_ref, automated_intent_id
         from integrations.executive_mcp.schemas import ERROR_CODES
@@ -642,7 +697,20 @@ class OsExecutiveTransportApp:
             {"arguments": validated}, allow_nan=False, separators=(",", ":")
         ).encode("utf-8")
         try:
-            start, body = await _drive_inner(self._inner_app, inner_scope, replay_body)
+            if self._foreground_submissions and validated.get("execution_profile") == "research_only":
+                # Only this fixed App composition owns the real upstream
+                # lifetime. The inner App still independently authenticates
+                # the original bearer before binding this nominal source.
+                from integrations.session_bridge.http_foreground import (
+                    MAX_FOREGROUND_SECONDS, owned_request,
+                )
+                if not callable(receive):
+                    raise _CollectError("originating request source unavailable")
+                async with owned_request(inner_scope, receive) as current:
+                    start, body = await _drive_inner(self._inner_app, current, replay_body,
+                        timeout_seconds=MAX_FOREGROUND_SECONDS + 1.0)
+            else:
+                start, body = await _drive_inner(self._inner_app, inner_scope, replay_body)
         except Exception:
             return JSONResponse(_unknown_outcome(request_ref), status_code=HTTPStatus.ACCEPTED,
                                 headers=_OS_HTTP_HEADERS)

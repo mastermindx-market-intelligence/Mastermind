@@ -1,0 +1,1346 @@
+{
+  "kind": "D23_saved_membership_to_Monitor_native_design_and_source_evidence",
+  "recorded_at_utc": "2026-11-08T20:37:53Z",
+  "governing_procedure": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "authority": "Chairman continuing Paper architecture, feature and clarity audit; owned new page with original references preserved.",
+  "status": "NATIVE_DESIGN_IMPLEMENTED_SOURCE_BOUND_PROPOSAL_NOT_RUNTIME_ACCEPTANCE",
+  "paper": {
+    "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+    "page_id": "p-2-0",
+    "page_name": "Proposed · Saved item to exact watchlist",
+    "url": "https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0",
+    "artboards": [
+      {
+        "key": "flow",
+        "id": "1IC-0"
+      },
+      {
+        "key": "states",
+        "id": "1S5-0"
+      },
+      {
+        "key": "context",
+        "id": "22L-0"
+      },
+      {
+        "key": "contract",
+        "id": "2D4-0"
+      }
+    ],
+    "finished_owned_artboards": true,
+    "operations": [
+      {
+        "key": "create-page",
+        "id": "paper-watchlist-20261108-d23-create-page-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "create_page",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Proposed · Saved item to exact watchlist",
+          "icon": "design"
+        },
+        "expected_snapshot": "14306dfca9bce0aa525758f6ff59e680fcdeaf1fab5f3ce696c7206180d01990"
+      },
+      {
+        "key": "duplicate-flow",
+        "id": "paper-watchlist-20261108-d23-duplicate-flow-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "duplicate_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "nodes": [
+            {
+              "id": "1-0",
+              "parentId": "root_node_p-2-0"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "rename-flow",
+        "id": "paper-watchlist-20261108-d23-rename-flow-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "rename_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "1IC-0",
+              "name": "PROPOSED · Saved item to watchlist · EN"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "flow-rail",
+        "id": "paper-watchlist-20261108-d23-flow-rail-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1OC-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"D23 proposal navigation\" style=\"display:flex;flex-direction:column;gap:24px;width:216px;height:900px;flex-shrink:0;padding:28px 20px;box-sizing:border-box;background:var(--mx-dark-panel);border-right:1px solid var(--mx-dark-line);font-family:var(--font-ui);\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">PROPOSED · D23</div><div style=\"font-size:24px;line-height:31px;font-weight:600;color:var(--mx-dark-text);\">Saved item →\nexact watchlist</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">A bounded handoff study</div><div style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:var(--mx-dark-panel2);\"><div style=\"font-size:13px;line-height:20px;font-weight:600;color:var(--mx-dark-text);\">01  Find what you saved</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">02  Read changed membership</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">03  Keep the right context</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">04  Build and verify</div></div></div><div style=\"flex-grow:1;\"></div><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">08 NOV 2026</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Editable design specimens.\nNo connected account.\nExact-selection behavior is proposed.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "flow-shell",
+        "id": "paper-watchlist-20261108-d23-flow-shell-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1ID-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"Saved item destination study\" style=\"display:flex;flex-direction:column;gap:22px;width:1224px;height:900px;flex-shrink:0;padding:32px;box-sizing:border-box;background:var(--mx-dark-bg);font-family:var(--font-ui);color:var(--mx-dark-text);\"><div layer-name=\"Study heading\" style=\"display:flex;flex-direction:column;gap:8px;\"><div style=\"font-size:30px;line-height:39px;font-weight:600;color:var(--mx-dark-text);\">Find what you just saved</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">A confirmed membership opens a specific list and symbol. This proposal reuses the current Company save and Monitor owners.</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "flow-panels",
+        "id": "paper-watchlist-20261108-d23-flow-panels-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1QJ-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Receipt to current list\" style=\"display:flex;gap:24px;width:1160px;align-items:stretch;height:610px;\"><div layer-name=\"Confirmed receipt column\" style=\"display:flex;flex-direction:column;gap:12px;width:360px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">01 · CONFIRMED COMPANY SAVE</div></div><div layer-name=\"Exact Monitor destination column\" style=\"display:flex;flex-direction:column;gap:12px;width:776px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">02 · EXACT DESTINATION · PROPOSED</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "confirmed-receipt",
+        "id": "paper-watchlist-20261108-d23-confirmed-receipt-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1QP-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Confirmed membership receipt\" style=\"display:flex;flex-direction:column;gap:20px;padding:24px;width:360px;box-sizing:border-box;background:var(--mx-dark-panel);border:1px solid var(--mx-dark-line);border-radius:14px;\"><div style=\"font-size:12px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">COMPANY · NVDA</div><div style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-up);\">MEMBERSHIP CONFIRMED</div><div style=\"font-size:28px;line-height:36px;font-weight:600;color:var(--mx-dark-text);\">NVDA is in\\nAI research</div></div><div style=\"font-size:15px;line-height:24px;font-weight:400;color:var(--mx-dark-muted);\">Open the saved list to review this symbol.</div><div style=\"display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--mx-dark-line);border-radius:10px;\"><div style=\"font-size:16px;line-height:24px;font-weight:600;color:var(--mx-dark-text);\">NVDA · NVIDIA</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-dark-muted);\">AI research · 3 symbols</div></div><div style=\"display:flex;flex-direction:column;gap:10px;\"><div layer-name=\"Action · View AI research\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-text);color:var(--mx-dark-bg);font-size:14px;line-height:22px;font-weight:600;\">View AI research</div><div layer-name=\"Action · Continue reading\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Continue reading</div></div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Watchlist membership only. No alert or position was created.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "exact-destination",
+        "id": "paper-watchlist-20261108-d23-exact-destination-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1QR-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Monitor exact membership\" style=\"display:flex;flex-direction:column;gap:18px;width:776px;padding:24px;box-sizing:border-box;background:var(--mx-dark-panel);border:1px solid var(--mx-dark-line);border-radius:14px;\"><div style=\"display:flex;justify-content:space-between;align-items:center;gap:20px;\"><div style=\"font-size:26px;line-height:34px;font-weight:600;color:var(--mx-dark-text);\">Monitor</div><div style=\"font-size:13px;line-height:22px;font-weight:500;color:var(--mx-dark-muted);\">Your watchlists</div></div><div style=\"font-size:13px;line-height:21px;font-weight:500;color:var(--mx-dark-link);\">Opened from your saved item</div><div layer-name=\"Exact list expanded\" style=\"display:flex;flex-direction:column;gap:14px;\"><div style=\"display:flex;justify-content:space-between;align-items:center;\"><div style=\"font-size:20px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">AI research</div><div style=\"font-size:13px;line-height:22px;font-weight:500;color:var(--mx-dark-muted);\">3 symbols  ▾</div></div><div layer-name=\"Selected membership NVDA\" style=\"display:flex;flex-direction:column;gap:12px;padding:18px;border:1px solid var(--mx-dark-info);border-radius:10px;background:var(--mx-dark-info-soft);\"><div style=\"display:flex;justify-content:space-between;gap:16px;\"><div style=\"font-size:20px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">NVDA</div><div style=\"font-size:12px;line-height:20px;font-weight:600;color:var(--mx-dark-up);\">In this list now</div></div><div style=\"display:flex;gap:10px;\"><div layer-name=\"Action · Open company\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Open company</div><div layer-name=\"Action · Open current chart\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Open current chart</div><div layer-name=\"Action · Check event evidence\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Check event evidence</div></div></div><div layer-name=\"MSFT membership\" style=\"display:flex;align-items:center;min-height:52px;padding:12px 18px;border-bottom:1px solid var(--mx-dark-line);\"><div style=\"font-size:15px;line-height:24px;font-weight:500;color:var(--mx-dark-text);\">MSFT</div></div><div layer-name=\"AMD membership\" style=\"display:flex;align-items:center;min-height:52px;padding:12px 18px;border-bottom:1px solid var(--mx-dark-line);\"><div style=\"font-size:15px;line-height:24px;font-weight:500;color:var(--mx-dark-text);\">AMD</div></div></div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Current list contents · 3 memberships · 3 distinct symbols</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-dark-muted);\">Open a company, chart or event check when you are ready.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "flow-qualification",
+        "id": "paper-watchlist-20261108-d23-flow-qualification-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1QJ-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Flow implementation boundary\" style=\"display:flex;flex-direction:column;gap:6px;padding-top:14px;border-top:1px solid var(--mx-dark-line);\"><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">Illustrative account and list contents. Exact expansion and row focus are proposed; the current Monitor opens its list inventory without an incoming saved-item resolver.</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">Keep the receipt’s account, list ID and normalized symbol. Navigation reads the current inventory and never resubmits Save or creates an alert.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "receipt-linebreak",
+        "id": "paper-watchlist-20261108-d23-receipt-linebreak-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "set_text_content",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "1QY-0",
+              "html": "NVDA is in\nAI research"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "duplicate-states",
+        "id": "paper-watchlist-20261108-d23-duplicate-states-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "duplicate_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "nodes": [
+            {
+              "id": "1-0",
+              "parentId": "root_node_p-2-0"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "rename-states",
+        "id": "paper-watchlist-20261108-d23-rename-states-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "rename_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "1S5-0",
+              "name": "PROPOSED · Current watchlist state · EN/ZH"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "states-rail",
+        "id": "paper-watchlist-20261108-d23-states-rail-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1Y5-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"D23 proposal navigation\" style=\"display:flex;flex-direction:column;gap:24px;width:216px;height:900px;flex-shrink:0;padding:28px 20px;box-sizing:border-box;background:var(--mx-dark-panel);border-right:1px solid var(--mx-dark-line);font-family:var(--font-ui);\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">PROPOSED · D23</div><div style=\"font-size:24px;line-height:31px;font-weight:600;color:var(--mx-dark-text);\">Saved item →\nexact watchlist</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">A bounded handoff study</div><div style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">01  Find what you saved</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:var(--mx-dark-panel2);\"><div style=\"font-size:13px;line-height:20px;font-weight:600;color:var(--mx-dark-text);\">02  Read changed membership</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">03  Keep the right context</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">04  Build and verify</div></div></div><div style=\"flex-grow:1;\"></div><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">08 NOV 2026</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Editable design specimens.\nNo connected account.\nExact-selection behavior is proposed.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "states-shell",
+        "id": "paper-watchlist-20261108-d23-states-shell-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "1S6-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"Changed membership specimens\" style=\"display:flex;flex-direction:column;gap:22px;width:1224px;height:900px;flex-shrink:0;padding:32px;box-sizing:border-box;background:var(--mx-dark-bg);font-family:var(--font-ui);color:var(--mx-dark-text);\"><div layer-name=\"Study heading\" style=\"display:flex;flex-direction:column;gap:8px;\"><div style=\"font-size:30px;line-height:39px;font-weight:600;color:var(--mx-dark-text);\">Read what is there now</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">An earlier confirmation and the current list can differ. Keep a missing member, a failed read and a missing list visibly distinct.</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "states-columns",
+        "id": "paper-watchlist-20261108-d23-states-columns-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20C-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Current-state phone row\" style=\"display:flex;gap:30px;align-items:flex-start;width:1160px;\"><div layer-name=\"Missing membership column\" style=\"display:flex;flex-direction:column;gap:12px;width:390px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">390 · SAME LIST / MEMBER ABSENT</div></div><div layer-name=\"Read unavailable column\" style=\"display:flex;flex-direction:column;gap:12px;width:390px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">390 · READ UNAVAILABLE / NOT EMPTY</div></div><div layer-name=\"Missing list column\" style=\"display:flex;flex-direction:column;gap:12px;width:320px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">320 · LIST ID ABSENT / 中文</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "missing-phone",
+        "id": "paper-watchlist-20261108-d23-missing-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20I-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Current list without saved symbol\" style=\"display:flex;flex-direction:column;gap:18px;width:390px;height:610px;padding:22px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:16px;background:var(--mx-dark-panel);font-family:var(--font-ui);\"><div style=\"display:flex;justify-content:space-between;align-items:center;min-height:28px;\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">Monitor</div><div style=\"font-size:12px;line-height:20px;font-weight:500;color:var(--mx-dark-muted);\">Watchlists</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "unavailable-phone",
+        "id": "paper-watchlist-20261108-d23-unavailable-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20K-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Current list read unavailable\" style=\"display:flex;flex-direction:column;gap:18px;width:390px;height:610px;padding:22px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:16px;background:var(--mx-dark-panel);font-family:var(--font-ui);\"><div style=\"display:flex;justify-content:space-between;align-items:center;min-height:28px;\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">Monitor</div><div style=\"font-size:12px;line-height:20px;font-weight:500;color:var(--mx-dark-muted);\">Watchlists</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "absent-phone",
+        "id": "paper-watchlist-20261108-d23-absent-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20M-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Saved list not in owned inventory ZH\" style=\"display:flex;flex-direction:column;gap:18px;width:320px;height:610px;padding:22px;box-sizing:border-box;border:1px solid var(--mx-light-line);border-radius:16px;background:var(--mx-light-panel);font-family:var(--font-ui);\"><div style=\"display:flex;justify-content:space-between;align-items:center;min-height:28px;\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-light-text);\">监控</div><div style=\"font-size:12px;line-height:20px;font-weight:500;color:var(--mx-light-muted);\">观察列表</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "missing-notice",
+        "id": "paper-watchlist-20261108-d23-missing-notice-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20P-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Membership no longer present notice\" style=\"display:flex;flex-direction:column;gap:10px;padding:16px;background:var(--mx-dark-warn-soft);border:1px solid var(--mx-dark-line);border-radius:10px;\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">CURRENT MEMBERSHIP</div><div style=\"font-size:24px;line-height:32px;font-weight:600;color:var(--mx-dark-text);\">NVDA isn’t in\\nthis list now</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">The list is available. Its contents have changed since the earlier confirmation.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "missing-current-rows",
+        "id": "paper-watchlist-20261108-d23-missing-current-rows-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20P-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Verified current members\" style=\"display:flex;flex-direction:column;gap:12px;\"><div style=\"font-size:17px;line-height:26px;font-weight:600;color:var(--mx-dark-text);\">AI research · 2 symbols</div><div style=\"display:flex;align-items:center;min-height:44px;border-bottom:1px solid var(--mx-dark-line);\"><div style=\"font-size:15px;line-height:23px;font-weight:500;color:var(--mx-dark-text);\">MSFT</div></div><div style=\"display:flex;align-items:center;min-height:44px;border-bottom:1px solid var(--mx-dark-line);\"><div style=\"font-size:15px;line-height:23px;font-weight:500;color:var(--mx-dark-text);\">AMD</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "missing-actions",
+        "id": "paper-watchlist-20261108-d23-missing-actions-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20P-0",
+          "mode": "insert-children",
+          "html": "<div style=\"display:flex;flex-direction:column;gap:10px;\"><div layer-name=\"Action · View your watchlists\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">View your watchlists</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">Opening this view does not add NVDA again.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "unavailable-notice",
+        "id": "paper-watchlist-20261108-d23-unavailable-notice-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20U-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Read unavailable notice\" style=\"display:flex;flex-direction:column;gap:12px;\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">READ UNAVAILABLE</div><div style=\"font-size:24px;line-height:32px;font-weight:600;color:var(--mx-dark-text);\">We couldn’t check\\nyour watchlists</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">Try reading them again. This check cannot tell whether the list or symbol was removed.</div><div style=\"display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--mx-dark-line);border-radius:10px;\"><div style=\"font-size:11px;line-height:18px;font-weight:500;color:var(--mx-dark-muted);\">From your earlier confirmed item</div><div style=\"font-size:16px;line-height:24px;font-weight:600;color:var(--mx-dark-text);\">NVDA · AI research</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Last confirmed label · current contents not loaded</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "unavailable-actions",
+        "id": "paper-watchlist-20261108-d23-unavailable-actions-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20U-0",
+          "mode": "insert-children",
+          "html": "<div style=\"display:flex;flex-direction:column;gap:10px;\"><div layer-name=\"Action · Retry list read\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-text);color:var(--mx-dark-bg);font-size:14px;line-height:22px;font-weight:600;\">Retry list read</div><div layer-name=\"Action · Dismiss saved-item request\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Dismiss saved-item request</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">Your save has not been resubmitted.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "absent-notice",
+        "id": "paper-watchlist-20261108-d23-absent-notice-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20Z-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Exact list missing notice ZH\" style=\"display:flex;flex-direction:column;gap:12px;\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-light-ink-warn);\">列表已读取</div><div style=\"font-size:24px;line-height:33px;font-weight:600;color:var(--mx-light-text);\">找不到原观察列表</div><div style=\"font-size:14px;line-height:23px;font-weight:400;color:var(--mx-light-muted);\">当前账户的自有列表中没有这个列表。名称相同的列表不会自动替代它。</div><div style=\"display:flex;flex-direction:column;gap:6px;padding:16px;border:1px solid var(--mx-light-line);border-radius:10px;\"><div style=\"font-size:11px;line-height:18px;font-weight:500;color:var(--mx-light-muted);\">原目标</div><div style=\"font-size:16px;line-height:24px;font-weight:600;color:var(--mx-light-text);\">AI research · NVDA</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-light-muted);\">保留原确认信息，\\n不推断列表已被删除。</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "absent-actions",
+        "id": "paper-watchlist-20261108-d23-absent-actions-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20Z-0",
+          "mode": "insert-children",
+          "html": "<div style=\"display:flex;flex-direction:column;gap:10px;\"><div layer-name=\"Action · 查看我的观察列表\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-light-line);background:var(--mx-light-text);color:var(--mx-light-panel);font-size:14px;line-height:22px;font-weight:600;\">查看我的观察列表</div><div layer-name=\"Action · 关闭此请求\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-light-line);background:var(--mx-light-panel);color:var(--mx-light-text);font-size:14px;line-height:22px;font-weight:600;\">关闭此请求</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-light-muted);\">不会自动选择名称相同的其他列表。</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "states-qualification",
+        "id": "paper-watchlist-20261108-d23-states-qualification-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "20C-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Current state qualification\" style=\"display:flex;flex-direction:column;gap:6px;padding-top:14px;border-top:1px solid var(--mx-dark-line);\"><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">Same verified account in these specimens. Successful owned-inventory absence differs from failed, restricted or malformed reads. A missing ID does not prove deletion.</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">The destination reads current membership; it does not replace the earlier confirmation, replay Save or silently select a different list.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "duplicate-context",
+        "id": "paper-watchlist-20261108-d23-duplicate-context-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "duplicate_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "nodes": [
+            {
+              "id": "1-0",
+              "parentId": "root_node_p-2-0"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "rename-context",
+        "id": "paper-watchlist-20261108-d23-rename-context-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "rename_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "22L-0",
+              "name": "PROPOSED · Watchlist context changes · EN/ZH"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "context-rail",
+        "id": "paper-watchlist-20261108-d23-context-rail-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "28L-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"D23 proposal navigation\" style=\"display:flex;flex-direction:column;gap:24px;width:216px;height:900px;flex-shrink:0;padding:28px 20px;box-sizing:border-box;background:var(--mx-dark-panel);border-right:1px solid var(--mx-dark-line);font-family:var(--font-ui);\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">PROPOSED · D23</div><div style=\"font-size:24px;line-height:31px;font-weight:600;color:var(--mx-dark-text);\">Saved item →\nexact watchlist</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">A bounded handoff study</div><div style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">01  Find what you saved</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">02  Read changed membership</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:var(--mx-dark-panel2);\"><div style=\"font-size:13px;line-height:20px;font-weight:600;color:var(--mx-dark-text);\">03  Keep the right context</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">04  Build and verify</div></div></div><div style=\"flex-grow:1;\"></div><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">08 NOV 2026</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Editable design specimens.\nNo connected account.\nExact-selection behavior is proposed.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "context-shell",
+        "id": "paper-watchlist-20261108-d23-context-shell-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "22M-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"Watchlist context transition specimens\" style=\"display:flex;flex-direction:column;gap:22px;width:1224px;height:900px;flex-shrink:0;padding:32px;box-sizing:border-box;background:var(--mx-dark-bg);font-family:var(--font-ui);color:var(--mx-dark-text);\"><div layer-name=\"Study heading\" style=\"display:flex;flex-direction:column;gap:8px;\"><div style=\"font-size:30px;line-height:39px;font-weight:600;color:var(--mx-dark-text);\">Keep the destination’s identity</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">A changed chooser, a renamed list and a different account have different consequences. A label is never the destination key.</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "context-columns",
+        "id": "paper-watchlist-20261108-d23-context-columns-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2AS-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Context transition phone row\" style=\"display:flex;gap:30px;align-items:flex-start;width:1160px;\"><div layer-name=\"Changed chooser column\" style=\"display:flex;flex-direction:column;gap:12px;width:390px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">390 · CHOOSER CHANGED AFTER SAVE</div></div><div layer-name=\"Renamed exact list column\" style=\"display:flex;flex-direction:column;gap:12px;width:390px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">390 · SAME LIST ID / NEW NAME · 中文</div></div><div layer-name=\"Changed account column\" style=\"display:flex;flex-direction:column;gap:12px;width:320px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">320 · DIFFERENT ACCOUNT · 中文</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "chooser-phone",
+        "id": "paper-watchlist-20261108-d23-chooser-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2AY-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Changed chooser preserves receipt destination\" style=\"display:flex;flex-direction:column;gap:18px;width:390px;height:610px;padding:22px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:16px;background:var(--mx-dark-panel);font-family:var(--font-ui);\"><div style=\"display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:28px;\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">Company · NVDA</div><div style=\"font-size:12px;line-height:20px;font-weight:500;color:var(--mx-dark-muted);\">Watchlists</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "renamed-phone",
+        "id": "paper-watchlist-20261108-d23-renamed-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2B0-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Renamed list with same identity ZH\" style=\"display:flex;flex-direction:column;gap:18px;width:390px;height:610px;padding:22px;box-sizing:border-box;border:1px solid var(--mx-light-line);border-radius:16px;background:var(--mx-light-panel);font-family:var(--font-ui);\"><div style=\"display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:28px;\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-light-text);\">监控</div><div style=\"font-size:12px;line-height:20px;font-weight:500;color:var(--mx-light-muted);\">观察列表</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "account-phone",
+        "id": "paper-watchlist-20261108-d23-account-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2B2-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Different account hides prior private target ZH\" style=\"display:flex;flex-direction:column;gap:18px;width:320px;height:610px;padding:22px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:16px;background:var(--mx-dark-panel);font-family:var(--font-ui);\"><div style=\"display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:28px;\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">监控</div><div style=\"font-size:12px;line-height:20px;font-weight:500;color:var(--mx-dark-muted);\">账户</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "chooser-current",
+        "id": "paper-watchlist-20261108-d23-chooser-current-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2B5-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Current save chooser\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:12px;line-height:19px;font-weight:500;color:var(--mx-dark-muted);\">Save to watchlist</div><div style=\"display:flex;align-items:center;justify-content:space-between;min-height:44px;padding:10px 14px;border:1px solid var(--mx-dark-line);border-radius:8px;background:var(--mx-dark-panel2);\"><div style=\"font-size:15px;line-height:22px;font-weight:500;color:var(--mx-dark-text);\">Chip makers</div><div style=\"font-size:14px;line-height:22px;font-weight:500;color:var(--mx-dark-muted);\">▾</div></div><div layer-name=\"Action · Save\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Save</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "chooser-confirmed",
+        "id": "paper-watchlist-20261108-d23-chooser-confirmed-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2B5-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Prior confirmed item retains original list\" style=\"display:flex;flex-direction:column;gap:12px;padding-top:18px;border-top:1px solid var(--mx-dark-line);\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-up);\">EARLIER MEMBERSHIP CONFIRMED</div><div style=\"font-size:24px;line-height:32px;font-weight:600;color:var(--mx-dark-text);\">NVDA is in\nAI research</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">Your confirmed item is available to review.</div><div layer-name=\"Action · View AI research\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-text);color:var(--mx-dark-bg);font-size:14px;line-height:22px;font-weight:600;\">View AI research</div><div layer-name=\"Action · Continue reading\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Continue reading</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "chooser-footnote",
+        "id": "paper-watchlist-20261108-d23-chooser-footnote-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2B5-0",
+          "mode": "insert-children",
+          "html": "<div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Membership confirmation does not create an alert or a position.</div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "renamed-current",
+        "id": "paper-watchlist-20261108-d23-renamed-current-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2BA-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Same exact list current name\" style=\"display:flex;flex-direction:column;gap:12px;\"><div style=\"font-size:12px;line-height:20px;font-weight:600;color:var(--mx-light-link);\">从已保存项目打开</div><div style=\"font-size:26px;line-height:34px;font-weight:600;color:var(--mx-light-text);\">Core AI</div><div style=\"display:flex;flex-direction:column;gap:6px;padding:14px;border:1px solid var(--mx-light-line);border-radius:10px;background:var(--mx-light-panel2);\"><div style=\"font-size:15px;line-height:24px;font-weight:600;color:var(--mx-light-text);\">此列表现名为 Core AI</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-light-muted);\">确认时名称：AI research</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "renamed-membership",
+        "id": "paper-watchlist-20261108-d23-renamed-membership-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2BA-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Renamed list verified NVDA member\" style=\"display:flex;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--mx-light-info);border-radius:10px;background:var(--mx-light-info-soft);\"><div style=\"font-size:22px;line-height:30px;font-weight:600;color:var(--mx-light-text);\">NVDA</div><div style=\"font-size:13px;line-height:21px;font-weight:600;color:var(--mx-light-ink-up);\">当前仍在此列表中</div><div layer-name=\"Action · 打开公司页\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-light-line);background:var(--mx-light-panel);color:var(--mx-light-text);font-size:14px;line-height:22px;font-weight:600;\">打开公司页</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "renamed-other-members",
+        "id": "paper-watchlist-20261108-d23-renamed-other-members-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2BA-0",
+          "mode": "insert-children",
+          "html": "<div style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:15px;line-height:24px;font-weight:500;color:var(--mx-light-text);\">MSFT</div><div style=\"font-size:15px;line-height:24px;font-weight:500;color:var(--mx-light-text);\">AMD</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-light-muted);\">当前列表 · 3 个证券\n名称变化不影响原列表的身份。</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "account-notice",
+        "id": "paper-watchlist-20261108-d23-account-notice-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2BF-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Changed account private target cleared\" style=\"display:flex;flex-direction:column;gap:14px;\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">账户已变更</div><div style=\"font-size:24px;line-height:33px;font-weight:600;color:var(--mx-dark-text);\">请查看当前\n账户的列表</div><div style=\"font-size:14px;line-height:23px;font-weight:400;color:var(--mx-dark-muted);\">原账户的保存目标已隐藏。不会将它带入当前账户。</div><div style=\"display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--mx-dark-line);border-radius:10px;\"><div style=\"font-size:15px;line-height:24px;font-weight:600;color:var(--mx-dark-text);\">当前账户</div><div style=\"font-size:13px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">仅显示此账户已验证的内容。</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "account-actions",
+        "id": "paper-watchlist-20261108-d23-account-actions-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2BF-0",
+          "mode": "insert-children",
+          "html": "<div style=\"display:flex;flex-direction:column;gap:10px;\"><div layer-name=\"Action · 查看当前账户的列表\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-text);color:var(--mx-dark-bg);font-size:14px;line-height:22px;font-weight:600;\">查看当前账户的列表</div><div layer-name=\"Action · 关闭此请求\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">关闭此请求</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">不会自动切回原账户，\n也不会提交新的保存请求。</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "context-qualification",
+        "id": "paper-watchlist-20261108-d23-context-qualification-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2AS-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Context owner qualification\" style=\"display:flex;flex-direction:column;gap:6px;padding-top:14px;border-top:1px solid var(--mx-dark-line);\"><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">Chooser changes affect the next explicit Save; the earlier confirmed target keeps its own list ID. A rename updates its label after exact-ID readback.</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">On account/access invalidation, retire the incoming target, hide prior private labels and reject late reads. An account-unknown state must verify identity before any private view.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "duplicate-contract",
+        "id": "paper-watchlist-20261108-d23-duplicate-contract-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "duplicate_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "nodes": [
+            {
+              "id": "1-0",
+              "parentId": "root_node_p-2-0"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "rename-contract",
+        "id": "paper-watchlist-20261108-d23-rename-contract-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "rename_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "2D4-0",
+              "name": "D23 · Saved item handoff · Source & builder map"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-rail",
+        "id": "paper-watchlist-20261108-d23-contract-rail-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2J4-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"D23 proposal navigation\" style=\"display:flex;flex-direction:column;gap:24px;width:216px;height:900px;flex-shrink:0;padding:28px 20px;box-sizing:border-box;background:var(--mx-dark-panel);border-right:1px solid var(--mx-dark-line);font-family:var(--font-ui);\"><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-warn);\">PROPOSED · D23</div><div style=\"font-size:24px;line-height:31px;font-weight:600;color:var(--mx-dark-text);\">Saved item →\nexact watchlist</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">A bounded handoff study</div><div style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">01  Find what you saved</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">02  Read changed membership</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:transparent;\"><div style=\"font-size:13px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">03  Keep the right context</div></div><div style=\"display:flex;min-height:44px;align-items:center;padding:9px 10px;border-radius:8px;background:var(--mx-dark-panel2);\"><div style=\"font-size:13px;line-height:20px;font-weight:600;color:var(--mx-dark-text);\">04  Build and verify</div></div></div><div style=\"flex-grow:1;\"></div><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">08 NOV 2026</div><div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Editable design specimens.\nNo connected account.\nExact-selection behavior is proposed.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-shell",
+        "id": "paper-watchlist-20261108-d23-contract-shell-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2D5-0",
+          "mode": "replace",
+          "html": "<div layer-name=\"Watchlist handoff source contract\" style=\"display:flex;flex-direction:column;gap:22px;width:1224px;height:900px;flex-shrink:0;padding:32px;box-sizing:border-box;background:var(--mx-dark-bg);font-family:var(--font-ui);color:var(--mx-dark-text);\"><div layer-name=\"Study heading\" style=\"display:flex;flex-direction:column;gap:8px;\"><div style=\"font-size:30px;line-height:39px;font-weight:600;color:var(--mx-dark-text);\">Extend the existing save and Monitor owners</div><div style=\"font-size:14px;line-height:22px;font-weight:400;color:var(--mx-dark-muted);\">Bind the new destination to the current identity, inventory and navigation contracts. This page is a bounded proposal, not a complete D23 return.</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-columns",
+        "id": "paper-watchlist-20261108-d23-contract-columns-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LB-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Contract and unbound behavior\" style=\"display:flex;gap:24px;width:1160px;align-items:flex-start;\"><div layer-name=\"Existing owner contract\" style=\"display:flex;flex-direction:column;gap:14px;width:746px;flex-shrink:0;\"></div><div layer-name=\"Unbound selection fallback\" style=\"display:flex;flex-direction:column;gap:12px;width:390px;flex-shrink:0;\"><div style=\"font-size:11px;line-height:18px;font-weight:600;color:var(--mx-dark-muted);\">390 · EXACT DESTINATION NOT YET BOUND</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-rule-1",
+        "id": "paper-watchlist-20261108-d23-contract-rule-1-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LH-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Existing save owner\" style=\"display:flex;flex-direction:column;gap:7px;padding:16px 18px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:10px;background:var(--mx-dark-panel);\"><div style=\"font-size:15px;line-height:23px;font-weight:600;color:var(--mx-dark-text);\">Existing save owner</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-dark-muted);\">CompanyWatchSave retains the subject, local operation ID, exact list ID and normalized symbol. An accepted response remains pending until a same-owner inventory read started after the response or timeout confirms the membership.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-rule-2",
+        "id": "paper-watchlist-20261108-d23-contract-rule-2-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LH-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Proposed destination resolver\" style=\"display:flex;flex-direction:column;gap:7px;padding:16px 18px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:10px;background:var(--mx-dark-panel);\"><div style=\"font-size:15px;line-height:23px;font-weight:600;color:var(--mx-dark-text);\">Proposed destination resolver</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-dark-muted);\">Reuse /monitor and its current owned inventory. Resolve the captured list ID and symbol under the verified account; use the current list name, then open the list and identify the row. URL naming and focus behavior require implementation proof.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-rule-3",
+        "id": "paper-watchlist-20261108-d23-contract-rule-3-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LH-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Confirmation is not insertion ownership\" style=\"display:flex;flex-direction:column;gap:7px;padding:16px 18px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:10px;background:var(--mx-dark-panel);\"><div style=\"font-size:15px;line-height:23px;font-weight:600;color:var(--mx-dark-text);\">Confirmation is not insertion ownership</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-dark-muted);\">The add response and membership readback do not prove which request inserted the row. The current remove owner deletes by list ID and symbol. This study adds no Undo based on that evidence; original recovery references remain separate.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-rule-4",
+        "id": "paper-watchlist-20261108-d23-contract-rule-4-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LH-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Continue under the same lifecycle\" style=\"display:flex;flex-direction:column;gap:7px;padding:16px 18px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:10px;background:var(--mx-dark-panel);\"><div style=\"font-size:15px;line-height:23px;font-weight:600;color:var(--mx-dark-text);\">Continue under the same lifecycle</div><div style=\"font-size:13px;line-height:21px;font-weight:400;color:var(--mx-dark-muted);\">Reuse the existing subject, abort and generation fences. Retire a target on dismissal or account/access invalidation; late reads cannot reopen it. A destination read does not resubmit Save, set the preferred list or run an event check.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "unbound-phone",
+        "id": "paper-watchlist-20261108-d23-unbound-phone-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LI-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Unbound exact destination generic Monitor\" style=\"display:flex;flex-direction:column;gap:20px;width:390px;padding:24px;box-sizing:border-box;border:1px solid var(--mx-dark-line);border-radius:16px;background:var(--mx-dark-panel);\"><div style=\"font-size:19px;line-height:28px;font-weight:600;color:var(--mx-dark-text);\">Company · NVDA</div><div style=\"font-size:11px;line-height:18px;font-weight:700;color:var(--mx-dark-up);\">MEMBERSHIP CONFIRMED</div><div style=\"font-size:26px;line-height:34px;font-weight:600;color:var(--mx-dark-text);\">NVDA saved\nto watchlist</div><div style=\"font-size:15px;line-height:24px;font-weight:400;color:var(--mx-dark-muted);\">View your lists in Monitor. The saved item won’t be opened automatically.</div><div layer-name=\"Unbound actions\" style=\"display:flex;flex-direction:column;gap:10px;\"><div layer-name=\"Action · Open Monitor\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-text);color:var(--mx-dark-bg);font-size:14px;line-height:22px;font-weight:600;\">Open Monitor</div><div layer-name=\"Action · Continue reading\" style=\"display:flex;align-items:center;justify-content:center;min-height:44px;padding:10px 16px;box-sizing:border-box;border-radius:8px;border:1px solid var(--mx-dark-line);background:var(--mx-dark-panel2);color:var(--mx-dark-text);font-size:14px;line-height:22px;font-weight:600;\">Continue reading</div></div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "unbound-boundary",
+        "id": "paper-watchlist-20261108-d23-unbound-boundary-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LI-0",
+          "mode": "insert-children",
+          "html": "<div style=\"font-size:12px;line-height:20px;font-weight:400;color:var(--mx-dark-muted);\">Use the generic destination until exact selection is qualified. Do not borrow a list identity from a different chooser, name, account or Macro WatchStore context.</div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "contract-source",
+        "id": "paper-watchlist-20261108-d23-contract-source-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "write_html",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "targetNodeId": "2LB-0",
+          "mode": "insert-children",
+          "html": "<div layer-name=\"Exact source and next proof\" style=\"display:flex;flex-direction:column;gap:6px;padding-top:14px;border-top:1px solid var(--mx-dark-line);\"><div style=\"font-size:12px;line-height:19px;font-weight:600;color:var(--mx-dark-muted);\">SOURCE · mastermind-terminal @ b38d93c2cc8d05f9f5c29598a3691304330ffee6</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">CompanyWatchSave · sharedShellMonitor · watchlists + /api/watchlist · MonitorWorkspace · sharedShellNavigation. Owned lists and sharedWithMe remain distinct. This is source inspection; no account endpoint was called.</div><div style=\"font-size:12px;line-height:19px;font-weight:400;color:var(--mx-dark-muted);\">NEXT PROOF · Existing-owner binding, fresh owned reads, no save replay, account/late-read fencing, wrong-ID/rename/missing cases, keyboard/touch and 320 px layout in the real consumer. Automatic expansion and focus remain proposed.</div></div>"
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "copy-linebreaks-and-rename-clarity",
+        "id": "paper-watchlist-20261108-d23-copy-linebreaks-and-rename-clarity-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "set_text_content",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "216-0",
+              "html": "NVDA isn’t in\nthis list now"
+            },
+            {
+              "nodeId": "21N-0",
+              "html": "We couldn’t check\nyour watchlists"
+            },
+            {
+              "nodeId": "228-0",
+              "html": "这是上次确认的列表名称。"
+            },
+            {
+              "nodeId": "2CJ-0",
+              "html": "当前列表 · 3 个证券\n这是改名后的同一个列表。"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "number-study-boards",
+        "id": "paper-watchlist-20261108-d23-number-study-boards-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "rename_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "updates": [
+            {
+              "nodeId": "1IC-0",
+              "name": "01 · PROPOSED · Saved item to exact watchlist"
+            },
+            {
+              "nodeId": "1S5-0",
+              "name": "02 · PROPOSED · Watchlist read states · EN/ZH"
+            },
+            {
+              "nodeId": "22L-0",
+              "name": "03 · PROPOSED · Watchlist context · EN/ZH"
+            },
+            {
+              "nodeId": "2D4-0",
+              "name": "04 · D23 · Source contract & unbound destination"
+            }
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      },
+      {
+        "key": "finish-owned-study",
+        "id": "paper-watchlist-20261108-d23-finish-owned-study-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "finish_working_on_nodes",
+        "arguments": {
+          "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "nodeIds": [
+            "1IC-0",
+            "1S5-0",
+            "22L-0",
+            "2D4-0"
+          ]
+        },
+        "expected_snapshot": "4b4a7273f542af5281434468736b43d1718ecd24be451ce29dd2d1975d06aa42"
+      }
+    ],
+    "operation_count": 58,
+    "distinct_operation_ids": 58,
+    "all_APPLIED_RESPONSE_OBSERVED": true,
+    "unknown_effect_count": 0,
+    "guard_qualification": "A snapshot is a drift guard, not a document revision, permission or writer lease.",
+    "cloned_base": "p-1-0 / 1-0",
+    "original_page": {
+      "page_id": "p-1-0",
+      "artboard_count": 22,
+      "node_count": 1956,
+      "metadata_exact": true,
+      "all_22_visible_jsx_exact": true
+    },
+    "monitor_reference": {
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "page_id": "p-2-0",
+      "board_id": "1O0-0",
+      "visible_jsx_exact": true
+    },
+    "new_page_node_count": 295,
+    "overlap_pairs": []
+  },
+  "source": {
+    "repository": "mastermindx-market-intelligence/mastermind-terminal",
+    "ref": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+    "files": [
+      {
+        "path": "terminal/lib/watchlists.ts",
+        "sha": "4b4832866251f142ffc682fc3c051478bb0bf138"
+      },
+      {
+        "path": "terminal/app/api/watchlist/route.ts",
+        "sha": "62c93e10f25dfd22a046c30528ef6ed3c04234e6"
+      },
+      {
+        "path": "terminal/lib/sharedShellMonitor.ts",
+        "sha": "15310ac9e912d86c6d252153d0adecbc0371afcd"
+      },
+      {
+        "path": "terminal/components/workspaces/MonitorWorkspace.tsx",
+        "sha": "62dee7b67d53d3f29cee5bc6184c7726524372f6"
+      },
+      {
+        "path": "terminal/app/(shell)/monitor/page.tsx",
+        "sha": "b73bd801cded5968168d35c883082bb67cb1fc9f"
+      },
+      {
+        "path": "terminal/components/mounts/MonitorWorkspaceMount.tsx",
+        "sha": "759fc14b177dccc6925843cd7e9cb2f2296eb1d7"
+      },
+      {
+        "path": "terminal/components/fin/CompanyWatchSave.tsx",
+        "sha": "7dab903014873180aae2e50be4a05fb1618c7801"
+      },
+      {
+        "path": "terminal/lib/sharedShellNavigation.ts",
+        "sha": "f9d857ddded83ec13d82b1d8e69be943bb5078a7"
+      },
+      {
+        "path": "terminal/lib/sharedShellContracts.ts",
+        "sha": "b2d19bc0f90c6d7382e9f669b9be254c4ff683ba"
+      },
+      {
+        "path": "terminal/components/chrome/AppShell.tsx",
+        "sha": "fad76e11e24f02510854768878ef7ce7e0a063bf"
+      },
+      {
+        "path": "terminal/lib/resourceGrants.ts",
+        "sha": "273cc7a90f8700ec38d7705484f138fba0ef2ee5"
+      }
+    ],
+    "caller": "terminal/components/fin/CompanyWatchSave.tsx",
+    "destination": "terminal/components/workspaces/MonitorWorkspace.tsx",
+    "navigation": "terminal/lib/sharedShellNavigation.ts",
+    "existing_route": "/monitor",
+    "scope": "Terminal Company save to owned Monitor inventory. Macro WatchStore and the earlier Stocks & Setups fixture do not provide this caller's identity contract."
+  },
+  "verification": {
+    "mobile_specimens": [
+      {
+        "key": "missing",
+        "id": "20P-0",
+        "width": "390px",
+        "height": "610px"
+      },
+      {
+        "key": "unavailable",
+        "id": "20U-0",
+        "width": "390px",
+        "height": "610px"
+      },
+      {
+        "key": "absent",
+        "id": "20Z-0",
+        "width": "320px",
+        "height": "610px"
+      },
+      {
+        "key": "chooser",
+        "id": "2B5-0",
+        "width": "390px",
+        "height": "610px"
+      },
+      {
+        "key": "renamed",
+        "id": "2BA-0",
+        "width": "390px",
+        "height": "610px"
+      },
+      {
+        "key": "account",
+        "id": "2BF-0",
+        "width": "320px",
+        "height": "610px"
+      },
+      {
+        "key": "unbound",
+        "id": "2M1-0",
+        "width": "390px",
+        "height": "fit content"
+      }
+    ],
+    "action_min_height_checks": [
+      {
+        "id": "1R4-0",
+        "name": "Action · View AI research",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "1R6-0",
+        "name": "Action · Continue reading",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "1RO-0",
+        "name": "Action · Open company",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "1RQ-0",
+        "name": "Action · Open current chart",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "1RS-0",
+        "name": "Action · Check event evidence",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "21H-0",
+        "name": "Action · View your watchlists",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "21V-0",
+        "name": "Action · Retry list read",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "21X-0",
+        "name": "Action · Dismiss saved-item request",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "22B-0",
+        "name": "Action · 查看我的观察列表",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "22D-0",
+        "name": "Action · 关闭此请求",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2BP-0",
+        "name": "Action · Save",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2BW-0",
+        "name": "Action · View AI research",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2BY-0",
+        "name": "Action · Continue reading",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2CD-0",
+        "name": "Action · 打开公司页",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2CU-0",
+        "name": "Action · 查看当前账户的列表",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2CW-0",
+        "name": "Action · 关闭此请求",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2M7-0",
+        "name": "Action · Open Monitor",
+        "minHeight": "44px",
+        "pass": true
+      },
+      {
+        "id": "2M9-0",
+        "name": "Action · Continue reading",
+        "minHeight": "44px",
+        "pass": true
+      }
+    ],
+    "account_change_hides_prior_fixture_names": true,
+    "source_exports": [
+      {
+        "id": "1-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 60814
+      },
+      {
+        "id": "7R-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 71131
+      },
+      {
+        "id": "GT-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 13633
+      },
+      {
+        "id": "IH-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 9912
+      },
+      {
+        "id": "JN-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 11784
+      },
+      {
+        "id": "L3-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 68343
+      },
+      {
+        "id": "TP-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 9861
+      },
+      {
+        "id": "US-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10213
+      },
+      {
+        "id": "VV-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10504
+      },
+      {
+        "id": "WY-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 67628
+      },
+      {
+        "id": "15F-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10329
+      },
+      {
+        "id": "16J-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10682
+      },
+      {
+        "id": "17N-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10883
+      },
+      {
+        "id": "18R-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 9786
+      },
+      {
+        "id": "19T-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10134
+      },
+      {
+        "id": "1AV-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10412
+      },
+      {
+        "id": "1BX-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 9980
+      },
+      {
+        "id": "1D0-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10284
+      },
+      {
+        "id": "1E3-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10460
+      },
+      {
+        "id": "1F6-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 9827
+      },
+      {
+        "id": "1G8-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10140
+      },
+      {
+        "id": "1HA-0",
+        "kind": "original",
+        "exact": true,
+        "chars": 10312
+      },
+      {
+        "id": "1IC-0",
+        "kind": "owned",
+        "chars": 17136,
+        "leaves": 37,
+        "no_literal_newline": true,
+        "mobile390": 0,
+        "mobile320": 0
+      },
+      {
+        "id": "1S5-0",
+        "kind": "owned",
+        "chars": 20692,
+        "leaves": 46,
+        "no_literal_newline": true,
+        "mobile390": 4,
+        "mobile320": 2
+      },
+      {
+        "id": "22L-0",
+        "kind": "owned",
+        "chars": 21357,
+        "leaves": 49,
+        "no_literal_newline": true,
+        "mobile390": 4,
+        "mobile320": 2
+      },
+      {
+        "id": "2D4-0",
+        "kind": "owned",
+        "chars": 13992,
+        "leaves": 30,
+        "no_literal_newline": true,
+        "mobile390": 2,
+        "mobile320": 0
+      }
+    ],
+    "root_visual_review": "All four final 1440x900 native captures inspected, including five 390px and two 320px specimens. Literal newline artifacts and over-technical Chinese wording were corrected and re-read.",
+    "advisory_review": "Bounded non-author reasoning review found no must-fix; all four JSX exports and two state/context captures were inspected. Its other two image reads were blocked by exec-server transport closure. Root had visually inspected all four captures. Review was not a mandatory delivery gate.",
+    "local_environment_boundary": "The local file environment disconnected after native completion and byte-hash preparation for eleven artifacts. A pending scratch-only evidence materialization was terminated; no native or GitHub mutation was pending. The canonical package continues on the existing GitHub carrier from retained exact tool data.",
+    "scope_limits": "Native visual/source checks are not browser, input, screen-reader, full native backup or runtime acceptance."
+  },
+  "contracts": {
+    "identity": [
+      "verified active subject",
+      "captured list ID",
+      "normalized symbol"
+    ],
+    "confirmation": "Accepted response stays pending. The caller starts a tagged same-owner inventory read after the response or timeout. Present membership confirms a postcondition. The operation ID is local coordination, not a server-issued insertion receipt.",
+    "destination": "Exact incoming selection, expansion, row identification and focus remain proposed. Generic Open Monitor is explicit until exact selection is bound.",
+    "rename": "Match the original ID and show its current name; a reused name is not the original list.",
+    "missing": "Distinguish current ready inventory with missing membership, current ready inventory with missing list, failed/restricted/malformed reads, and changed or unknown account.",
+    "unknown_save": "The new exact-destination path concerns confirmed membership. Unknown-save recovery stays with the existing save owner; no replay is authorized.",
+    "undo": "Current add/readback evidence does not establish insertion ownership; removeSymbols has no operation-owner predicate. No new Undo is enabled on that evidence.",
+    "late_reads": "Reuse subject, abort and generation fences; retire the incoming target on dismissal, account/access invalidation or obsolete navigation. Late reads cannot reopen it.",
+    "effects": "Proposed destination navigation does not submit Save, set active/default list or run event attention. The inspected owned watchlist persistence path uses SELECT; authentication and full runtime no-effect behavior are not claimed."
+  },
+  "remaining_proof": [
+    "Exact destination binding and consumer wiring; URL/transport contract not invented here.",
+    "Fresh owned reads, current-account access, late-response suppression and no replay in the real consumer.",
+    "Keyboard/touch, visible focus, screen-reader announcements and responsive behavior.",
+    "No account endpoint, membership mutation, alert, position, trade or runtime navigation was executed.",
+    "GET payload does not itself witness subjectId/operationId; client binding needs consumer proof.",
+    "Visible JSX equality does not establish hidden properties, comments or full native backup/restore.",
+    "No RIG acceptance, complete D23 return, foundation release, writer lease, deployment or held PR control change."
+  ],
+  "assets": [
+    {
+      "path": "before-confirmed-save.jpg",
+      "bytes": 168047,
+      "sha256": "68b2f5f14d2732af8bd9a30fac0c197965631e3bfe3af739cc53cb33ea65efda",
+      "git_blob_sha": "ce55ef02f01c1a38885c3096c3019be94c4882be"
+    },
+    {
+      "path": "before-monitor-reference.jpg",
+      "bytes": 135402,
+      "sha256": "f0528b417d8cfacfc2dd0f6b9443eaa1aa94e05aa7fef911a8d8894507fcf88d",
+      "git_blob_sha": "d10fda2db355887d604855a53d468cc5232dc6d8"
+    },
+    {
+      "path": "context-transitions.jpg",
+      "bytes": 144845,
+      "sha256": "970a8e5e5e87be20dbb0624c5e5cd82871095c92ee88d3a946d4f1215d1d4bd1",
+      "git_blob_sha": "4848ea234edf8b84512fc3398b184449712869cf"
+    },
+    {
+      "path": "context-transitions.jsx",
+      "bytes": 21685,
+      "sha256": "167a6d6e3807c59befa0c07ea519eae85632aabc7242dfa43e730c6c784f0bab",
+      "git_blob_sha": "20c0846392bd447aafb4c96b12e02a3451fe65ae"
+    },
+    {
+      "path": "current-membership-states.jpg",
+      "bytes": 150464,
+      "sha256": "af0fb78e6778e34676497f4b5b39b2f5af78a2c0d7945786fa12611819d5ccc7",
+      "git_blob_sha": "c9abd180d227e4752d0783d6f6ccc5ea37d9ae73"
+    },
+    {
+      "path": "current-membership-states.jsx",
+      "bytes": 20900,
+      "sha256": "7b411390bafed89e449e6c895d07e9bd6440b41a9a1fe26bec7af8048976ef6f",
+      "git_blob_sha": "3ebe0421ed501363e54da7a3c7816b97c5647b4d"
+    },
+    {
+      "path": "preserved-native-references.json",
+      "bytes": 503269,
+      "sha256": "fb854e96d2ae8e164d37e039a460f21b7b5accaf265cae7789b5167f7f2c499a",
+      "git_blob_sha": "31392cd1133944f41088c5a2874e9f7f6acc4456"
+    },
+    {
+      "path": "saved-item-flow.jpg",
+      "bytes": 122285,
+      "sha256": "155b47145d07f5fa9998e58fb6a750942bf15a52acc6256197d43df219432ffa",
+      "git_blob_sha": "1d0d7baa3aa000afd136c9bdfc3c0b266b888321"
+    },
+    {
+      "path": "saved-item-flow.jsx",
+      "bytes": 17151,
+      "sha256": "fc9e0a6cbbb7d925509edb609931f0461a07927eb10e58543ac12620f9c068b1",
+      "git_blob_sha": "be5656e9b237f136c31372000c826ffe6507560c"
+    },
+    {
+      "path": "source-builder-map.jpg",
+      "bytes": 181913,
+      "sha256": "5ea022899d56bc0e973244d0e5769ad0a57844e8f7caa6565f4a4a2d965cfa23",
+      "git_blob_sha": "055a760631bbd48c7e161596d40415dfa1b9ff3a"
+    },
+    {
+      "path": "source-builder-map.jsx",
+      "bytes": 14005,
+      "sha256": "ab53a43afe1e17c838b1633bc911add0e49ddbe8fffd0513f3afd76c4b8f67dd",
+      "git_blob_sha": "43446c1dc75be71b4e7b72c0dad5201743af5348"
+    }
+  ]
+}

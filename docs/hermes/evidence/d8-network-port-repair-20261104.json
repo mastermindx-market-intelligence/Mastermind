@@ -1,0 +1,89 @@
+{
+  "change": "Extend existing test-only full-source-hash/exact-token mechanism; no generic 443 or port-line exemption. Production code and generic scanner remain unchanged.",
+  "failed_ci": 41752095182,
+  "failed_job": 126319381277,
+  "failure_comment": 6620240185,
+  "kind": "source-test-repair-evidence",
+  "limits": [
+    "No hosted new-head CI result at source preparation.",
+    "No merge, enqueue, Ready, draft, label, credential, provider, runtime, installation or production action."
+  ],
+  "modified_test_sha256": {
+    "tests/executive_fabric_release_identity_review.py": "0e43bf20648c7cc809acda2825b7b6376b3a61a0a4f4e5c7fee7fbd5b6671cac",
+    "tests/test_ceo_submit_armed_composition.py": "55b02eb37ebd500a6aa999e3bf2188cad5ca4107c665fe0fc171b62ee42d8439"
+  },
+  "negative_controls": [
+    "missing full postimage",
+    "wrong source path",
+    "false diff/postimage pair",
+    "HTTPS port numeric mutation",
+    "port changed to identity field",
+    "neighboring numeric branch and tuple mutations",
+    "duplicate 443 token",
+    "changed trusted hostname",
+    "appended UID/GID/reserved account",
+    "unrelated source-byte drift"
+  ],
+  "parent_checkpoint": "Mastermind#1956/comment6598147964 (unchanged)",
+  "pr": 1917,
+  "preimage_head": "63d184218e8d6a2b7da48f98045a2e67f504f5aa",
+  "preservation": {
+    "downstream_1963_1966_worktrees_changed": false,
+    "held_release_controls_changed": false,
+    "macro_child": "qualify-macro10596-9c8-7056-20261103 remains EFFECT_UNKNOWN; no retry/result consumption",
+    "original_codeql_repair_changed": false,
+    "predecessor_checkpoint_rewrite_replayed": false,
+    "production_source_changed": false,
+    "secretary_child": "original thread1793755068.737709 STOP_ACK/TERMINAL_STOP; not reopened"
+  },
+  "procedure_pin": "9bbd4ca7f6d8859f28accf76e11d534478dc80e3",
+  "recorded_at": "2026-11-04T05:22:47.104309+00:00",
+  "review_policy": "No new independent-review job or blanket prerequisite. Preserve unaffected prior source review; no self-approval. Native required test and merge-queue rules unchanged.",
+  "root": "web-github-release-triage-20261102",
+  "source_witness": {
+    "bytes": 1945,
+    "path": "integrations/hermes_secretary/tab_sweep.py",
+    "prior_source_review": 5761933327,
+    "sha256": "12d2c8f059f941eb908cc9d7ec3651763f8102832e05435118ce8e1385d5fd46",
+    "sites": [
+      [
+        19,
+        77,
+        80,
+        "int",
+        "443"
+      ]
+    ]
+  },
+  "test_command": "python3.12 -m pytest -q tests/test_ceo_submit_armed_composition.py (isolated HOME and TMPDIR; explicit existing dependency path)",
+  "tests": {
+    "post_repair_d8": {
+      "errors": 0,
+      "failures": 0,
+      "junit_sha256": "3c3a7898d796133da83408a5205114cc97934c5fb3b6e67c8c49779b2e52fd0e",
+      "log_sha256": "60f779c13530bc308134bed747f82e5f55a3e992dd45b72303e8e18c426a0708",
+      "seconds": 22.321,
+      "skipped": 0,
+      "tests": 243
+    },
+    "post_repair_full_module": {
+      "errors": 0,
+      "failures": 0,
+      "junit_sha256": "f3d50be1bbadc3170820b138023bb66e4014f3b395231b0b67376bd1b74266f9",
+      "log_sha256": "07079b599945360868a01e8935fd30d1f98026f8f782c51330b5b576bb99d782",
+      "seconds": 33.745,
+      "skipped": 0,
+      "tests": 266
+    },
+    "pre_repair_targeted_red": {
+      "errors": 0,
+      "failures": 2,
+      "junit_sha256": "1f36c842413ca4b8f104b59289c4c829683a8c6b683a908931620baadcdb7cf0",
+      "log_sha256": "6edeb145459d949cadc73d5f079bbe28133ee74756c8ee7b54c88327fa0aed0e",
+      "seconds": 13.567,
+      "skipped": 0,
+      "tests": 16
+    }
+  },
+  "workspace_operation": "hermes-1917-codeql-source-repair-20261103-sol-001"
+}

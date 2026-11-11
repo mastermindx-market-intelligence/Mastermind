@@ -497,3 +497,85 @@ def test_historical_fabric_source_hashes_are_explicitly_pinned():
             capture_output=True, check=True, timeout=10,
         ).stdout
         assert hashlib.sha256(payload).hexdigest() == digest
+
+
+# Additive tests for tests/test_project_atlas.py; existing imports suffice.
+def _fenced_headings(source):
+    return index_blob(blob_sha="d" * 40, language="markdown", content=source)["headings"]
+
+
+def test_markdown_fence_keeps_real_heading_range_and_code_literal():
+    assert _fenced_headings("# Guide\n\n```bash\n# command\necho ready\n```\n\n## Next\nbody\n") == [
+        {"level": 1, "text": "Guide", "line": 1, "end_line": 9},
+        {"level": 2, "text": "Next", "line": 8, "end_line": 9},
+    ]
+
+
+def test_markdown_tilde_fence_is_literal():
+    assert _fenced_headings("~~~python\n# not a heading\n~~~\n# Real\n") == [
+        {"level": 1, "text": "Real", "line": 4, "end_line": 4},
+    ]
+
+
+def test_markdown_fence_allows_zero_to_three_spaces():
+    for indent in range(4):
+        pad = " " * indent
+        assert _fenced_headings(pad + "```\n# hidden\n" + pad + "```\n# Real") == [
+            {"level": 1, "text": "Real", "line": 4, "end_line": 4},
+        ]
+
+
+def test_markdown_shorter_or_other_character_fence_does_not_close():
+    assert _fenced_headings("````\n```\n# hidden one\n~~~~\n# hidden two\n````\n# Real") == [
+        {"level": 1, "text": "Real", "line": 7, "end_line": 7},
+    ]
+
+
+def test_markdown_longer_closing_fence_and_trailing_space():
+    assert _fenced_headings("~~~\n# hidden\n ~~~~ \t\n# Real") == [
+        {"level": 1, "text": "Real", "line": 4, "end_line": 4},
+    ]
+
+
+def test_markdown_closing_fence_with_text_does_not_close():
+    assert _fenced_headings("```\n```not-a-close\n# hidden\n```\n# Real") == [
+        {"level": 1, "text": "Real", "line": 5, "end_line": 5},
+    ]
+
+
+def test_markdown_unclosed_fence_extends_to_end():
+    assert _fenced_headings("# Real\n```\n# hidden\n## also hidden") == [
+        {"level": 1, "text": "Real", "line": 1, "end_line": 4},
+    ]
+
+
+def test_markdown_backtick_in_backtick_info_is_not_opener():
+    assert _fenced_headings("```bad`info\n# Real") == [
+        {"level": 1, "text": "Real", "line": 2, "end_line": 2},
+    ]
+
+
+def test_markdown_short_fence_and_four_space_fence_preserve_prior_heading_behavior():
+    for opener in ("``", "~~", "    ```", "    ~~~"):
+        assert _fenced_headings(opener + "\n# Real") == [
+            {"level": 1, "text": "Real", "line": 2, "end_line": 2},
+        ]
+
+
+def test_markdown_fence_does_not_change_reference_index_policy():
+    record = index_blob(blob_sha="e" * 40, language="markdown",
+                        content="```\n# MAS-42 PR #1207\n```\n# Real")
+    assert record["references"] == ["MAS-42", "PR #1207"]
+    assert [row["text"] for row in record["headings"]] == ["Real"]
+
+
+def test_pre_fence_parser_cache_is_invalidated():
+    record = index_blob(blob_sha="f" * 40, language="markdown", content="# Real")
+    record["parser_version"] = "atlas-parser-1"
+    entry = {"record": record, "record_digest": record_digest(record)}
+    try:
+        validate_cached_record(entry, blob_sha="f" * 40, language="markdown")
+    except ProjectAtlasError as exc:
+        assert "parser version" in str(exc)
+    else:
+        raise AssertionError("pre-fence cache was reused")

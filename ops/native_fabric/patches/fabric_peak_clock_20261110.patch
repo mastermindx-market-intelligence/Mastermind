@@ -1,0 +1,56 @@
+--- a/peak_router.sh
++++ b/peak_router.sh
+@@ -4,2 +4,2 @@
+-# Peak window: 01:00-05:00 America/New_York (== 22:00-02:00 America/Los_Angeles;
+-# both zones shift with DST so the 3h offset holds year-round).
++# Peak window: Monday-Friday 14:00-18:00 Asia/Singapore (UTC+8).
++# New York daylight saving and the host timezone do not change this window.
+@@ -16,3 +16,3 @@
+-# launchd invokes it at 22:00 and 02:00 local (Pacific) and at load; it always
+-# derives the correct state from the current New York time, so a reboot or
+-# missed firing self-corrects on the next run.
++# The same existing LaunchAgent is checked once per minute, plus RunAtLoad.
++# Do not pair this predicate with a host-local twice-daily calendar schedule.
++# Clock correction does not authorize reload, installation or active-session migration.
+@@ -28,5 +28,13 @@
+-# Desired state: peak if 01:00 <= ET time-of-day < 05:00 (forced by $1 override).
+-ET_NOW=$(TZ=America/New_York date +%H%M)
+-if [[ "${1:-}" == "on" ]]; then WANT=peak
+-elif [[ "${1:-}" == "off" ]]; then WANT=offpeak
+-elif (( ET_NOW >= 100 && ET_NOW < 500 )); then WANT=peak
++# Desired state follows the reviewed provider clock, never the host/US clock.
++# https://docs.z.ai/devpack/overview (reviewed 2026-11-10): Mon-Fri 14:00-18:00 UTC+8.
++SGT_NOW=$(TZ=Asia/Singapore date '+%u %H%M') || { log "provider clock unavailable"; exit 1; }
++SGT_DAY=${SGT_NOW%% *}
++SGT_HHMM=${SGT_NOW#* }
++case "$SGT_DAY:$SGT_HHMM" in
++  [1-7]:[0-2][0-9][0-5][0-9]) ;;
++  *) log "provider clock malformed"; exit 1 ;;
++esac
++[ "$SGT_HHMM" -lt 2400 ] || { log "provider clock malformed"; exit 1; }
++if [ "${1:-}" = "on" ]; then WANT=peak
++elif [ "${1:-}" = "off" ]; then WANT=offpeak
++elif [ "$SGT_DAY" -le 5 ] && [ "$SGT_HHMM" -ge 1400 ] && [ "$SGT_HHMM" -lt 1800 ]; then WANT=peak
+@@ -35 +43 @@
+-log "run (ET now $ET_NOW) -> $WANT"
++log "run (provider clock $SGT_NOW UTC+8) -> $WANT"
+--- a/ai.mastermind.fabric-peak-router.plist
++++ b/ai.mastermind.fabric-peak-router.plist
+@@ -19,15 +19,2 @@
+-	<key>StartCalendarInterval</key>
+-	<array>
+-		<dict>
+-			<key>Hour</key>
+-			<integer>22</integer>
+-			<key>Minute</key>
+-			<integer>0</integer>
+-		</dict>
+-		<dict>
+-			<key>Hour</key>
+-			<integer>2</integer>
+-			<key>Minute</key>
+-			<integer>0</integer>
+-		</dict>
+-	</array>
++	<key>StartInterval</key>
++	<integer>60</integer>

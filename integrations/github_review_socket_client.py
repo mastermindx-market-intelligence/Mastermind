@@ -13,8 +13,10 @@ import re
 import socket
 from pathlib import Path
 
-from control_plane.github_review_intent import COMMAND_ID_RE, ReviewIntentDecision
-from control_plane.github_review_intent_ingress import ReviewIngressUnavailable
+from control_plane.github_review_intent import COMMAND_ID_RE, ReviewIntentDecision, ReviewIntentError
+from control_plane.github_review_intent_ingress import (
+    ReviewIngressUnavailable, ReviewAdmissionReceipt, ExistingReviewDecisionUnavailable,
+)
 from control_plane.github_review_socket_contract import (
     FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES, MAX_RESPONSE_BYTES,
 )
@@ -122,6 +124,44 @@ class ExecutiveReviewSocketClient:
                 or set(result) != {"schema", "state", "job_id"}):
             raise ReviewAdmissionUnavailable("REVIEW_SOCKET_ADMISSION_RESULT_INVALID")
         return job_id
+
+    def admit_or_join_review_intent(
+        self, *, decision: ReviewIntentDecision, objective: str,
+    ) -> ReviewAdmissionReceipt:
+        if not isinstance(decision, ReviewIntentDecision) or not decision.admitted:
+            raise ReviewAdmissionUnavailable("REVIEW_SOCKET_DECISION_INVALID")
+        if type(objective) is not str or not objective:
+            raise ReviewAdmissionUnavailable("REVIEW_SOCKET_OBJECTIVE_INVALID")
+        result = self._call({
+            "schema": FRAME_SCHEMA, "action": "admit_or_join",
+            "decision": decision.to_dict(), "objective": objective,
+        })
+        if result.get("state") == "EXISTS_WITHOUT_DECISION":
+            if set(result) != {"schema", "state", "job_id", "command_id", "repository", "pull_number", "frozen_head_sha"}:
+                raise ReviewAdmissionUnavailable("REVIEW_SOCKET_ADMISSION_RESULT_INVALID")
+            existing = ExistingReviewDecisionUnavailable(**{
+                key: result[key] for key in ("job_id", "command_id", "repository", "pull_number", "frozen_head_sha")
+            })
+            if not existing.matches(decision):
+                raise ReviewAdmissionUnavailable("REVIEW_SOCKET_ADMISSION_RESULT_INVALID")
+            raise existing
+        try:
+            original = ReviewIntentDecision.from_admitted_dict(result.get("decision"))
+            if (set(result) != {"schema", "state", "job_id", "decision"}
+                    or result.get("state") not in {"ADMITTED", "ALREADY_ADMITTED"}
+                    or type(result.get("job_id")) is not str
+                    or re.fullmatch(r"JOB-[0-9]+", result["job_id"]) is None
+                    or original.command_id != decision.command_id
+                    or original.repository != decision.repository
+                    or original.pull_number != decision.pull_number
+                    or original.frozen_head_sha != decision.frozen_head_sha
+                    or (result["state"] == "ADMITTED" and original != decision)):
+                raise ValueError("receipt mismatch")
+            return ReviewAdmissionReceipt(
+                job_id=result["job_id"], decision=original, created=result["state"] == "ADMITTED",
+            )
+        except (ReviewIntentError, ValueError, TypeError):
+            raise ReviewAdmissionUnavailable("REVIEW_SOCKET_ADMISSION_RESULT_INVALID") from None
 
     def reserve_parent_send(
         self, *, decision: ReviewIntentDecision, job_id: str

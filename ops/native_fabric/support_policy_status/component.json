@@ -1,0 +1,35 @@
+{
+  "schema": "mastermind.support_policy_status_component.v1",
+  "source_base": "8731fca29dd36d1083d424f14a956d9819acb205",
+  "native_current_baseline": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+  "baseline_purpose": "component/API qualification only; never a whole-cohort replacement for prospective Memory118",
+  "patches": {
+    "ext/fabric_task.py": {
+      "before": "5c46ef84cd3c97d74d296f5c12369a178e5f0641a7b9f80a002ebae6b8767b28",
+      "after": "0d733df50c8d3279df7e5ae39cab25a8bf063a22f3afd631e18e8cd03c7b71e3",
+      "patch": "patches/fabric_task.py.forward.patch",
+      "patch_sha256": "439fc28856c98bacd1225feea77fe0dc7a61b0b4d48269fa524768acc680d835"
+    },
+    "ext/artifact_delivery.py": {
+      "before": "6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d",
+      "after": "5400a69e1f012efeb87e098364c52957f14979ce78d2388edb981f46fc9667de",
+      "patch": "patches/artifact_delivery.py.forward.patch",
+      "patch_sha256": "72e6675778c4def44a34193dad899eae0fab8b07f39504827960cc7928e5d2dd"
+    }
+  },
+  "new_module": {
+    "path": "ext/support_policy_status.py",
+    "source": "ops/native_fabric/support_policy_status/reader.py",
+    "sha256": "463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058"
+  },
+  "runtime_effects": false,
+  "final_cohort": "Root combines actual Memory118/helper postimages before selection. No old116 native-manifest/publisher/selector is emitted by this component.",
+  "reviewed_reader_closure": {
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "lane_runtime.py": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
+    "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
+    "artifact_delivery.py": "5400a69e1f012efeb87e098364c52957f14979ce78d2388edb981f46fc9667de",
+    "support_policy_status.py": "463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058"
+  }
+}

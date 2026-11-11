@@ -1,0 +1,95 @@
+{
+  "actual_privileged_install": false,
+  "enrollment_export": {
+    "actual_export_to_capsule_validation_cases": 2,
+    "actual_original_enrollment_owner": true,
+    "cases": 8,
+    "failures": 0
+  },
+  "files": {
+    "control_plane/executive_control_observation.py": "530fd0bdef12ea7c9d919e845d6a793c4cd97c1a671ad6b45cfbf9c78f0a8a2e",
+    "integrations/hermes_application_fabric/qualification/qualify_attended_configuration.py": "96dbbd9572b9323e2f1da20882b2170b21932e119d4768925ca030d50399bf92",
+    "integrations/hermes_application_fabric/source_context.py": "887799a569cc04d5e0327e2c2732ee389064929e241c060328dcbecedcab3597",
+    "ops/executive_os/capacity_host_artifacts.py": "1bd9de555edb45f9972f0ddc7c3dab9b304114c9d4e8f2eff7e306ab48960fc3",
+    "ops/executive_os/hermes_attended_configuration.py": "13c2748d7821a265a5d0ec4e9a3ec671793295501afd8a983bf9d5eb71cd73f2",
+    "ops/native_fabric/quota_continuity/rollout/export_application_consumer.py": "3be01c9fd4795a809be53b3a7133fa866f162d4888c9073365b426fee3593c5d",
+    "scripts/executive_os_phase1c.py": "bf4fdf9b2bff42d9c04304ee4dbedb35eb6089d66f7954c91646e9ba6755c549"
+  },
+  "final_carriers": [
+    "Mastermind#2175",
+    "macro#10740"
+  ],
+  "governing_pin": "de6966ce1524c01ab6ac06af5461370aa79f3994",
+  "identity_tests": {
+    "failures": 0,
+    "passed": 230
+  },
+  "installed_configuration": {
+    "archive_sha256": "9380af04320616d210b45eb26168c20dee6967ce267153c6de521d70d2b0b99b",
+    "canonical_factory": true,
+    "canonical_imports": [
+      "engine",
+      "engine.fabric_inference_client",
+      "engine.neuralweb",
+      "engine.neuralweb.capability_broker",
+      "engine.provider_health",
+      "engine.provider_production_modes",
+      "engine.provider_workload_policy",
+      "lib",
+      "lib.ai_costs"
+    ],
+    "eligibility": "finite_observation_fixture",
+    "fixed_auto_exact_selection": true,
+    "frozen_original_configuration": true,
+    "installed_acceptance": false,
+    "live_provider_acceptance": false,
+    "macro_commit": "fff0025e10de394c6a297c7878518513f1dbe633",
+    "material_files": 2531,
+    "namespace_cleanup": true,
+    "network_calls": 0,
+    "package_sha256": "7307c43984fe15297706af9b289c0d5aed7c665f3cfee12cbff33f29a0c68376",
+    "project_checkout_on_sys_path": false,
+    "projection_bytecode_files": 0,
+    "real_source_and_capsule_stagers": true,
+    "rehashed_tampering_refused": [
+      "fixed:foreign_source",
+      "fixed:injected_file",
+      "fixed:altered_capability",
+      "auto:foreign_source",
+      "auto:injected_file",
+      "auto:altered_capability"
+    ],
+    "revocation_refuses_new_selection": true,
+    "root_ownership_control_publication_and_acl": "explicit_fixture_doubles",
+    "same_canonical_factory_identity": true,
+    "same_release_renewal": true,
+    "schema": "mastermind.hermes_installed_configuration_qualification.v1",
+    "sealed_release_unchanged": true
+  },
+  "installer_sha256": "6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2",
+  "live_provider_acceptance": false,
+  "original_native_application_qualification": {
+    "cases": 27,
+    "errors": 0,
+    "failures": 0,
+    "hermes_commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+    "macro_commit": "fff0025e10de394c6a297c7878518513f1dbe633",
+    "mastermind_commit": "76cb21520f0aa987ae0f16c005d415e1f76a838c",
+    "provider_is_fixture": true
+  },
+  "publication_and_installer_tests": {
+    "failures": 0,
+    "passed": 197
+  },
+  "remaining": [
+    "Original protected carrier composition and required CI",
+    "Native evidence checker strict read-only effective-config repair",
+    "Original native installation/profile/reload custody",
+    "Current qualified APPLICATION grants and real account/model/tool/usage/settlement journeys",
+    "Original J collection and settlement recovery without replay"
+  ],
+  "role_publication_11_file_digest": "c801409819ce3cbc2e95414d685ccc7663753bd992e81158448488fd4ac06be2",
+  "runtime_enrollment": false,
+  "schema": "mastermind.hermes_attended_configuration_source_qualification.v1",
+  "source_parent": "76cb21520f0aa987ae0f16c005d415e1f76a838c"
+}

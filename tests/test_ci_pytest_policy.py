@@ -220,6 +220,7 @@ jobs:
     comments_only = """
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   push:
@@ -256,6 +257,7 @@ def _valid_on_block() -> str:
     return (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -299,6 +301,7 @@ def test_validate_workflow_rejects_missing_event():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  push:\n"
         "    branches:\n"
         "      - master\n"
@@ -338,6 +341,7 @@ def test_validate_workflow_rejects_wrong_merge_group_types():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested, labeled]\n"
         "  push:\n"
@@ -353,6 +357,7 @@ def test_validate_workflow_rejects_wrong_push_branches():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -398,6 +403,7 @@ def test_validate_workflow_rejects_empty_merge_group():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group: {}\n"
         "  push:\n"
         "    branches:\n"
@@ -412,6 +418,7 @@ def test_validate_workflow_rejects_filtered_workflow_dispatch():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -463,6 +470,7 @@ def test_validate_workflow_rejects_merge_key_in_on_block():
         "on:\n"
         "  <<: *hidden_defaults\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -528,6 +536,7 @@ def test_validate_workflow_rejects_duplicate_unquoted_on():
         "name: CI\n"
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -550,6 +559,7 @@ def test_validate_workflow_rejects_duplicate_quoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         '"on":\n'
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -572,6 +582,7 @@ def test_validate_workflow_rejects_quoted_and_unquoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -640,6 +651,7 @@ def test_validate_workflow_rejects_unhashable_event_level_key():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -831,6 +843,7 @@ def test_validate_workflow_rejects_mixed_type_extra_keys():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -866,7 +879,7 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """Keep a finite, adequate 60-minute shard window with fail-closed fan-in."""
+    """Keep a finite, adequate 75-minute shard window with fail-closed fan-in."""
     import yaml
 
     workflow = yaml.load(
@@ -877,7 +890,8 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     shards = jobs["pytest_shards"]
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert shards["timeout-minutes"] == 60
+    assert shards["permissions"] == {"contents": "read", "actions": "read"}
+    assert shards["timeout-minutes"] == 75
     assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
     assert shards["strategy"]["fail-fast"] is False
@@ -893,18 +907,29 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     ]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
+        "umask 022\n"
         "python -m scripts.ci_parallel_shard --jobs 6 --index "
-        "${{ matrix.index }}"
+        "${{ matrix.index }}\n"
     )
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
+    # CI Lightning F3: the five qualification gates moved verbatim out of
+    # shard zero into the parallel qualification job; they must no longer
+    # appear inside any shard. The web application typecheck joined that job
+    # later and is owned by it in full mode the same way.
     for name in (
         "Verify Paper direct pinned MCP SDK",
+        "Verify Paper Studio prepare guard",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source",
         "Validate shell scripts",
+        "Typecheck web application",
     ):
-        steps = [step for step in shard_steps if step.get("name") == name]
-        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
+        assert not [step for step in shard_steps if step.get("name") == name]
+        qual = [
+            step for step in workflow["jobs"]["qualification"]["steps"]
+            if step.get("name") == name
+        ]
+        assert len(qual) == 1 and qual[0].get("if") is None
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
@@ -915,13 +940,14 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
-    assert job["name"] == "test"
+    from scripts import ci_parallel_shard as fan
+    assert job["name"] == fan._REQUIRED_GATE_NAME
     assert job["runs-on"] == "ubuntu-latest"
-    assert job["if"] == "${{ always() }}"
-    assert job["needs"] == ["pytest_shards"]
+    assert job["if"] == fan._REQUIRED_GATE_IF
+    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -929,7 +955,14 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
-    assert 'if [ "$SHARDS_STATUS" != success ]; then' in gate["run"]
+    assert gate["env"]["GUARDS_STATUS"] == "${{ needs.pin_guards.result }}"
+    assert '[ "$GUARDS_STATUS" != success ]' in gate["run"]
+    assert gate["env"]["QUAL_STATUS"] == "${{ needs.qualification.result }}"
+    assert '[ "$QUAL_STATUS" != success ]' in gate["run"]
+    assert '[ "$QUAL_STATUS" != skipped ]' in gate["run"]
+    assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
+    assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
+    assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
     assert "exit 1" in gate["run"]
     assert "python scripts/ci_pytest.py --plan-only --jobs 6" in gate["run"]
     assert all(step.get("continue-on-error", False) is False for step in job["steps"])

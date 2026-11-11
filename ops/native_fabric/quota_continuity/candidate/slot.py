@@ -183,7 +183,7 @@ try:
 except (TypeError, ValueError):
     LEASE_TTL_S = float("nan")
 DEFAULT_CHILD_TIMEOUT_S = 7200.0
-MAX_CHILD_TIMEOUT_S = 7200.0
+MAX_CHILD_TIMEOUT_S = 14400.0
 
 
 def _child_runtime_limit():
@@ -1107,7 +1107,7 @@ def _heartbeat_loop(lease_id, stop, interval, lease_lost):
     # A NaN/Infinity TTL defeats the unknown-heartbeat expiry comparison and
     # could leave a provider running after lease custody becomes unprovable.
     # Reject invalid local grace even when this helper is called directly.
-    if not math.isfinite(ttl) or not 0.01 <= ttl <= 7500:
+    if not math.isfinite(ttl) or not 0.01 <= ttl <= 15000:
         lease_lost.reason = "lease_ttl_invalid"
         lease_lost.set()
         return
@@ -1125,8 +1125,8 @@ def _heartbeat_loop(lease_id, stop, interval, lease_lost):
             if result.ttl is not None:
                 # Do not let a malformed or implausibly long broker TTL
                 # expand the lease-unknown grace beyond the worker's maximum
-                # 7200s deadline plus 300s settlement allowance.
-                if not math.isfinite(result.ttl) or not 0.01 <= result.ttl <= 7500:
+                # 14400s deadline plus 300s settlement allowance.
+                if not math.isfinite(result.ttl) or not 0.01 <= result.ttl <= 15000:
                     lease_lost.reason = "broker_ttl_invalid"
                     lease_lost.set()
                     return
@@ -1343,7 +1343,7 @@ def main(argv=None):
     # A NaN/Infinity/oversized TTL would make broker uncertainty effectively
     # unbounded. Validate before any host/provider lease admission.
     if os.environ.get("LANE_LEASED") != "1" and (
-        not math.isfinite(LEASE_TTL_S) or not 0.01 <= LEASE_TTL_S <= 7500
+        not math.isfinite(LEASE_TTL_S) or not 0.01 <= LEASE_TTL_S <= 15000
     ):
         print("slot.py: admission_denied reason=lease_ttl_invalid", file=sys.stderr)
         return 78

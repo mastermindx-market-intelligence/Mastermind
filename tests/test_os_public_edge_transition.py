@@ -9,7 +9,14 @@ import pytest
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os import os_public_edge_transition as module
 from ops.executive_os.os_public_edge import (
-    GET_ROUTES, HOST, POST_ROUTES, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, asset_routes,
+    COMPLETE_MCP_METADATA_ROUTES, COMPLETE_MCP_ROUTES, GET_ROUTES, HOST, LEGACY_GET_ROUTES,
+    LEGACY_POST_ROUTES, MCP_COO_METADATA_ROUTE, MCP_COO_ROUTE, MCP_MAX_BODY, MCP_METADATA_ROUTE,
+    MCP_METADATA_ROUTES, MCP_ROUTES, POST_ROUTES, asset_routes,
+    INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_LEGACY_GET_ROUTES,
+    CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES, COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES,
+    SOURCE_CONTEXT_GET_ROUTES, SOURCE_POST_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES,
+    PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES, DIRECT_NATIVE_POST_ROUTES,
+    PRE_AUTHORIZATION_IDENTITY_GET_ROUTES,
 )
 from ops.executive_os.os_public_edge_transition import (
     FINAL_NAME, PLAN_NAME, PREPARE_NAME, final_config, plan, prepare_config,
@@ -48,12 +55,48 @@ def host_route(get_paths, port=49152, hosts=None):
         "match": [{"host": [HOST] if hosts is None else hosts}],
         "handle": [{"handler": "subroute", "routes": [
             {"match": [{"method": ["GET"], "path": list(get_paths)}], "handle": [proxy(port)]},
-            {"match": [{"method": ["POST"], "path": list(POST_ROUTES)}],
+            {"match": [{"method": ["POST"], "path": list(PRE_INSTRUCTION_ADMISSION_POST_ROUTES)}],
              "handle": [{"handler": "request_body", "max_size": 64000}, proxy(port)]},
             {"handle": [{"handler": "static_response", "abort": True}]},
         ]}],
         "terminal": True,
     }
+
+
+def source_branch(port=49152, group=None):
+    # Independent expected dedicated branch; do not use the production builder.
+    handler = proxy(port)
+    handler.pop("transport")  # Caddy's default HTTP proxy representation.
+    value = {"match": [{"method": ["POST"], "path": list(SOURCE_POST_ROUTES)}],
+             "handle": [{"handler": "request_body", "max_size": 98304}, handler]}
+    if group is not None:
+        value["group"] = group
+    return value
+
+
+def expect_source_upgrade(branches):
+    branches.insert(2, source_branch(group=branches[1].get("group")))
+
+
+def expect_complete_mcp(branches):
+    """Give the public-MCP matchers the complete CEO+COO path lists.
+
+    Only the two fixed path lists change; every handler, Host, header list and
+    body cap on those branches is preserved.
+    """
+    found = 0
+    for branch in branches:
+        match = branch.get("match")
+        if not match or type(match[0]) is not dict:
+            continue
+        method, paths = match[0].get("method"), match[0].get("path")
+        if method == ["GET"] and paths and paths[0].startswith("/.well-known/"):
+            match[0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+            found += 1
+        elif method == ["POST"] and paths and paths[0] == "/mcp":
+            match[0]["path"] = list(COMPLETE_MCP_ROUTES)
+            found += 1
+    assert found == 2, "the public-MCP pair must be present exactly once"
 
 
 def other_site(host="workspace.mastermind-x.com"):
@@ -64,7 +107,7 @@ def other_site(host="workspace.mastermind-x.com"):
 
 
 def fullconfig(old=OLD, port=49152, site=None, routes=None):
-    get_paths = sorted(list(GET_ROUTES) + list(asset_routes(old)))
+    get_paths = sorted(list(SOURCE_CONTEXT_GET_ROUTES) + list(asset_routes(old)))
     site = host_route(get_paths, port) if site is None else site
     servers = {"srv0": {"listen": [":443"],
                         "routes": [site, other_site()] if routes is None else routes}}
@@ -98,14 +141,34 @@ def test_legacy_get_profile_is_the_exact_historical_eight():
     )
 
 
-@pytest.mark.parametrize("fixed", [LEGACY_GET_ROUTES, GET_ROUTES])
+# Spell out representative historical and complete current pairs independently of the table.
+ADMITTED_ROUTE_PAIRS = (
+    (LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
+    (LEGACY_GET_ROUTES, INCUMBENT_POST_ROUTES),
+    (INCUMBENT_GET_ROUTES, LEGACY_POST_ROUTES),
+    (INCUMBENT_GET_ROUTES, INCUMBENT_POST_ROUTES),
+    (CONTROL_ROOM_LEGACY_GET_ROUTES, LEGACY_POST_ROUTES),
+    (CONTROL_ROOM_GET_ROUTES, CONTROL_ROOM_POST_ROUTES),
+    (COMPOSED_GET_ROUTES, PRE_PROJECT_ADMISSION_POST_ROUTES),
+    (SOURCE_CONTEXT_GET_ROUTES, PRE_INSTRUCTION_ADMISSION_POST_ROUTES),
+    (PRE_DIRECT_NATIVE_GET_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES),
+    (PRE_AUTHORIZATION_IDENTITY_GET_ROUTES, POST_ROUTES),
+    (GET_ROUTES, POST_ROUTES),
+)
+
+
+@pytest.mark.parametrize("fixed,posts", ADMITTED_ROUTE_PAIRS)
 @pytest.mark.parametrize("index_overlap", [False, True])
-@pytest.mark.parametrize("posts", [LEGACY_POST_ROUTES, POST_ROUTES])
-def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, posts):
+@pytest.mark.parametrize("with_mcp", [False, True])
+def test_complete_profiles_upgrade_paths_and_only_the_dedicated_source_branch(fixed, index_overlap, posts, with_mcp):
     paths = (sorted(list(fixed) + list(asset_routes(OLD))) if index_overlap
              else sorted(set(fixed) | set(asset_routes(OLD))))
-    live = fullconfig(site=host_route(paths))
+    live = mcp_fullconfig() if with_mcp else fullconfig()
+    get_paths_of(live)[:] = paths
     post_paths_of(live)[:] = list(posts)
+    has_source = "/workspace/source-operation/operation" in fixed
+    if has_source:
+        expect_source_upgrade(inner_of(live))
     before = copy.deepcopy(live)
     planned, prepared, final = transition_values(live)
     assert live == before
@@ -116,9 +179,105 @@ def test_complete_get_profiles_upgrade_only_os_path_lists(fixed, index_overlap, 
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
         post_paths_of(expected)[:] = list(POST_ROUTES)
+        if not has_source:
+            expect_source_upgrade(inner_of(expected))
+        if with_mcp:
+            expect_complete_mcp(inner_of(expected))
         assert value == expected
+        assert len(inner_of(value)) == (6 if with_mcp else 4)
+        if with_mcp:
+            # The public-MCP branches keep every handler and gain exactly the
+            # one COO path in their two fixed path lists.
+            observed = inner_of(before)[3:5] if has_source else inner_of(before)[2:4]
+            result_branches = inner_of(value)[3:5]
+            for seen, result in zip(observed, result_branches):
+                assert result["handle"] == seen["handle"]
+                assert result.get("group") == seen.get("group")
+                assert result["match"][0]["method"] == seen["match"][0]["method"]
+                assert result["match"][0]["path"] == (
+                    list(COMPLETE_MCP_METADATA_ROUTES)
+                    if seen["match"][0]["method"] == ["GET"] else list(COMPLETE_MCP_ROUTES))
+        else:
+            assert inner_of(value)[3:] == inner_of(before)[3 if has_source else 2:]
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
     assert planned["bindings"]["observed_fullconfig_sha256"] == module._sha256(before)
+
+
+HISTORICAL_INCOMPATIBLE_ROUTE_PAIRS = tuple(
+    (fixed, posts)
+    for fixed in (LEGACY_GET_ROUTES, INCUMBENT_GET_ROUTES,
+                  CONTROL_ROOM_LEGACY_GET_ROUTES, CONTROL_ROOM_GET_ROUTES,
+                  COMPOSED_GET_ROUTES, PRE_AUTHORIZATION_IDENTITY_GET_ROUTES)
+    for posts in (LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_POST_ROUTES,
+                  PRE_PROJECT_ADMISSION_POST_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES, POST_ROUTES)
+    if (fixed, posts) not in ADMITTED_ROUTE_PAIRS
+)
+
+
+# Keep the exact old27 refusal pairs; the new identity pair is admitted only
+# with its complete current POST profile, never with five older POST tails.
+CURRENT_IDENTITY_INCOMPATIBLE_PAIRS = tuple(
+    (GET_ROUTES, posts) for posts in (
+        LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES, CONTROL_ROOM_POST_ROUTES,
+        PRE_PROJECT_ADMISSION_POST_ROUTES, PRE_DIRECT_NATIVE_POST_ROUTES)
+)
+INCOMPATIBLE_ROUTE_PAIRS = HISTORICAL_INCOMPATIBLE_ROUTE_PAIRS + CURRENT_IDENTITY_INCOMPATIBLE_PAIRS
+
+
+@pytest.mark.parametrize("fixed,posts", INCOMPATIBLE_ROUTE_PAIRS)
+@pytest.mark.parametrize("with_mcp", [False, True])
+def test_complete_but_incompatible_os_profiles_refuse(fixed, posts, with_mcp):
+    assert len(HISTORICAL_INCOMPATIBLE_ROUTE_PAIRS) == 27
+    assert len(CURRENT_IDENTITY_INCOMPATIBLE_PAIRS) == 5
+    assert all(fixed == GET_ROUTES and posts != POST_ROUTES
+               for fixed, posts in CURRENT_IDENTITY_INCOMPATIBLE_PAIRS)
+    live = mcp_fullconfig() if with_mcp else fullconfig()
+    get_paths_of(live)[:] = sorted(set(fixed) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(posts)
+    with pytest.raises(ValueError, match="mixed or incomplete route profile"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("mask", range(1, 7))
+@pytest.mark.parametrize("with_mcp", [False, True])
+def test_partial_native_post_upgrade_is_not_an_admitted_historical_profile(mask, with_mcp):
+    live = mcp_fullconfig() if with_mcp else fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    post_paths_of(live)[:] = list(PRE_DIRECT_NATIVE_POST_ROUTES) + [
+        path for bit, path in enumerate(DIRECT_NATIVE_POST_ROUTES) if mask & (1 << bit)
+    ]
+    with pytest.raises(ValueError, match="observed POST route differs"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("path", [
+    "/os/executive/direct-native/result", "/os/executive/direct-native/consume",
+    "/os/executive/direct-native/correction",
+])
+def test_native_post_routes_cannot_be_added_to_get_profile(path):
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    get_paths_of(live).append(path)
+    with pytest.raises(ValueError, match="observed GET routes differ"):
+        transition_values(live)
+
+
+@pytest.mark.parametrize("path", [
+    "/os/executive/direct-native/*", "/os/executive/direct-native/result/",
+    "/os/executive/direct-native/arbitrary", "/os/executive/direct-native/submit",
+])
+def test_native_upgrade_does_not_admit_wildcards_aliases_or_other_operations(path):
+    live = fullconfig()
+    get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    post_paths_of(live)[:] = list(POST_ROUTES)
+    expect_source_upgrade(inner_of(live))
+    post_paths_of(live).append(path)
+    with pytest.raises(ValueError, match="observed POST route differs"):
+        transition_values(live)
 
 
 @pytest.mark.parametrize("mask", range(1, 7))
@@ -128,7 +287,8 @@ def test_partial_new_get_profiles_refuse(mask):
     paths = set(LEGACY_GET_ROUTES) | set(asset_routes(OLD))
     paths.update(path for bit, path in enumerate(additions) if mask & (1 << bit))
     live = fullconfig(site=host_route(sorted(paths)))
-    with pytest.raises(ValueError, match="observed GET routes differ"):
+    post_paths_of(live)[:] = list(INCUMBENT_POST_ROUTES)
+    with pytest.raises(ValueError, match="observed GET routes differ|mixed or incomplete route profile"):
         transition_values(live)
 
 
@@ -166,6 +326,7 @@ def test_retained_legacy_get_wrappers_upgrade_without_masking_the_profile():
         target = site_of(expected)["handle"][0]["routes"][0]["handle"][0]["routes"]
         target[0]["match"][0]["path"] = expected_get
         target[1]["match"][0]["path"] = list(POST_ROUTES)
+        expect_source_upgrade(target)
         assert value == expected
     assert planned["get_routes"]["fixed"] == list(GET_ROUTES)
 
@@ -188,6 +349,7 @@ def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
     paths = (sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(old))) if index_overlap
              else sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(old))))
     live = fullconfig(site=host_route(paths))
+    post_paths_of(live)[:] = list(INCUMBENT_POST_ROUTES)
     before = copy.deepcopy(live)
     prepared = prepare_config(fullconfig=live, current_manifest=old,
                               candidate_manifest=new, relay_port=49152)
@@ -200,12 +362,15 @@ def test_legacy_get_profile_with_retained_nine_asset_names(index_overlap):
     ):
         expected = copy.deepcopy(before)
         get_paths_of(expected)[:] = expected_get
+        post_paths_of(expected)[:] = list(POST_ROUTES)
+        expect_source_upgrade(inner_of(expected))
         assert value == expected
 
 
 def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
-    for old_posts in (LEGACY_POST_ROUTES, POST_ROUTES):
+    for old_posts in (LEGACY_POST_ROUTES, INCUMBENT_POST_ROUTES):
         observed = fullconfig()
+        get_paths_of(observed)[:] = sorted(set(INCUMBENT_GET_ROUTES) | set(asset_routes(OLD)))
         post_paths_of(observed)[:] = list(old_posts)
         before = copy.deepcopy(observed)
         planned, prepare, final = transition_values(observed)
@@ -217,14 +382,14 @@ def test_only_sealed_legacy_or_read_expanded_public_posts_upgrade():
         assert planned["post_routes"] == list(POST_ROUTES)
         assert planned["bindings"]["prepare_fullconfig_sha256"] == module._sha256(prepare)
         assert planned["bindings"]["final_fullconfig_sha256"] == module._sha256(final)
-        assert "/os/executive/session/send" not in post_paths_of(prepare)
+        assert post_paths_of(prepare).count("/os/executive/session/send") == 1
         assert get_paths_of(prepare) == sorted(set(GET_ROUTES) | set(asset_routes(OLD)) | set(asset_routes(NEW)))
 
 
 @pytest.mark.parametrize("bad", [
     list(LEGACY_POST_ROUTES) + ["/os/executive/session/send"],
     list(POST_ROUTES) + ["/os/executive/session/send"],
-    list(POST_ROUTES[:-1]),
+    list(POST_ROUTES[:-2]),
     list(POST_ROUTES) + [POST_ROUTES[0]],
     ["/os/executive/session/context"],
 ])
@@ -258,6 +423,59 @@ def sealed(tmp_path):
     os.chmod(parent, 0o700)
     yield parent
     os.chmod(parent, 0o700)
+
+
+
+def incumbent_public_edge():
+    """Old deployed Caddy profile, not a second publication authority."""
+    config = fullconfig()
+    inner = inner_of(config)
+    inner[0]["match"][0]["path"] = sorted(set(CONTROL_ROOM_LEGACY_GET_ROUTES) | set(asset_routes(OLD)))
+    inner[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+    return config
+
+
+def test_exact_incumbent_edge_gains_only_qualified_control_room_routes():
+    observed = incumbent_public_edge()
+    before = copy.deepcopy(observed)
+    args = dict(fullconfig=observed, current_manifest=OLD,
+                candidate_manifest=NEW, relay_port=49152)
+    receipt = plan(old_source=OLD_SHA, new_source=NEW_SHA, **args)
+    prepared, finished = prepare_config(**args), final_config(**args)
+    assert observed == before  # pure plan; no update to installed Caddy
+    assert receipt["get_routes"]["fixed"] == list(GET_ROUTES)
+    assert receipt["post_routes"] == list(POST_ROUTES)
+    for config in (prepared, finished):
+        get, post, source, terminal = inner_of(config)
+        assert source == source_branch()
+        paths = get["match"][0]["path"]
+        assert set(GET_ROUTES) <= set(paths)
+        assert post["match"][0] == {"method": ["POST"], "path": list(POST_ROUTES)}
+        assert post["handle"][0] == {"handler": "request_body", "max_size": 64000}
+        assert terminal == {"handle": [{"handler": "static_response", "abort": True}]}
+        assert "/workspace/control-room/delete-all" not in paths
+        assert "/workspace/control-room/delete-all" not in post["match"][0]["path"]
+    assert set(asset_routes(OLD)) <= set(inner_of(prepared)[0]["match"][0]["path"])
+    assert set(asset_routes(OLD)) - set(asset_routes(NEW)) <= (
+        set(inner_of(prepared)[0]["match"][0]["path"]) -
+        set(inner_of(finished)[0]["match"][0]["path"]))
+
+
+@pytest.mark.parametrize("damage", ["new_get_old_post", "old_get_new_post", "foreign_get", "foreign_post"])
+def test_incumbent_edge_refuses_mixed_or_widened_profiles(damage):
+    observed = incumbent_public_edge()
+    get, post, _ = inner_of(observed)
+    if damage == "new_get_old_post":
+        get["match"][0]["path"] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+    elif damage == "old_get_new_post":
+        post["match"][0]["path"] = list(POST_ROUTES)
+    elif damage == "foreign_get":
+        get["match"][0]["path"].append("/workspace/control-room/owner-admin")
+    else:
+        post["match"][0]["path"].append("/workspace/control-room/owner-admin")
+    with pytest.raises(ValueError, match="(profile|routes differ|route differs)"):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=observed,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
 
 
 def test_plan_binds_exact_routes_and_flags():
@@ -369,17 +587,21 @@ def test_prepare_covers_both_and_final_removes_only_retired():
 
 
 @pytest.mark.parametrize("maker", [prepare_config, final_config])
-def test_only_the_get_path_list_differs(maker):
+def test_only_get_paths_and_dedicated_source_branch_differ(maker):
     live = fullconfig()
     changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
                     relay_port=49152)
     stripped = copy.deepcopy(changed)
+    assert inner_of(stripped).pop(2) == source_branch()
     stripped["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
     original = copy.deepcopy(live)
     original["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = None
+    post_paths_of(original)[:] = list(POST_ROUTES)
     assert stripped == original
-    assert inner_of(changed)[1] == inner_of(live)[1]
-    assert inner_of(changed)[2] == inner_of(live)[2]
+    expected_post = copy.deepcopy(inner_of(live)[1])
+    expected_post["match"][0]["path"] = list(POST_ROUTES)
+    assert inner_of(changed)[1] == expected_post
+    assert inner_of(changed)[3] == inner_of(live)[2]
     assert changed["apps"]["tls"] == live["apps"]["tls"]
     assert changed["admin"] == live["admin"]
     assert site_of(changed, index=1) == site_of(live, index=1)
@@ -646,7 +868,7 @@ def test_retained_caddy_adapter_topology_is_accepted():
     route = copy.deepcopy(RETAINED_CADDY_ROUTE)
     # Retain the real adapter wrappers, groups, headers and 64KB body limit;
     # substitute only the manifest paths for this deterministic fixture.
-    route["handle"][0]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = sorted(list(GET_ROUTES) + list(asset_routes(OLD)))
+    route["handle"][0]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"] = sorted(list(LEGACY_GET_ROUTES) + list(asset_routes(OLD)))
     live = fullconfig(site=route)
     planned = prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
     assert planned != live
@@ -713,3 +935,452 @@ def test_two_get_proxies_cannot_replace_the_post_proxy():
     inner_of(live)[0]["handle"].append(inner_of(live)[1]["handle"].pop())
     with pytest.raises(ValueError):
         plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+# --- Public MCP entrypoint (#1656): the five-branch shape ------------------------
+# GET / POST / MCP-metadata-GET / MCP-POST / abort. Only the first branch's path
+# list is ever rewritten; the two MCP branches are observed and must stay exact.
+
+def mcp_proxy(port=49152, host="127.0.0.1"):
+    value = proxy(port)
+    value["headers"]["request"]["set"]["Host"] = [host]
+    return value
+
+
+def mcp_branches(port=49152):
+    return [
+        {"match": [{"method": ["GET"], "path": [MCP_METADATA_ROUTE]}], "handle": [proxy(port)]},
+        {"match": [{"method": ["POST"], "path": list(MCP_ROUTES)}],
+         "handle": [{"handler": "request_body", "max_size": MCP_MAX_BODY}, mcp_proxy(port)]},
+    ]
+
+
+def mcp_fullconfig(old=OLD, port=49152):
+    get_paths = sorted(list(SOURCE_CONTEXT_GET_ROUTES) + list(asset_routes(old)))
+    site = host_route(get_paths, port)
+    site["handle"][0]["routes"][2:2] = mcp_branches(port)
+    return fullconfig(old=old, port=port, site=site)
+
+
+@pytest.mark.parametrize("maker", [prepare_config, final_config])
+def test_mcp_shape_changes_only_get_paths_and_dedicated_source_branch(maker):
+    live = mcp_fullconfig()
+    changed = maker(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert len(inner_of(changed)) == 6
+    stripped = copy.deepcopy(changed)
+    assert inner_of(stripped).pop(2) == source_branch()
+    inner_of(stripped)[0]["match"][0]["path"] = None
+    original = copy.deepcopy(live)
+    inner_of(original)[0]["match"][0]["path"] = None
+    post_paths_of(original)[:] = list(POST_ROUTES)
+    # The two public-MCP matchers carry the complete CEO+COO path lists.
+    expect_complete_mcp(inner_of(original))
+    assert stripped == original
+    expected_post = copy.deepcopy(inner_of(live)[1])
+    expected_post["match"][0]["path"] = list(POST_ROUTES)
+    assert inner_of(changed)[1] == expected_post
+    # Only the two fixed public-MCP path lists change inside those branches.
+    for seen, result in zip(inner_of(live)[2:4], inner_of(changed)[3:5]):
+        assert result["handle"] == seen["handle"]
+        assert result.get("group") == seen.get("group")
+        assert result["match"][0]["method"] == seen["match"][0]["method"]
+        assert result["match"][0]["path"] == (
+            list(COMPLETE_MCP_METADATA_ROUTES)
+            if seen["match"][0]["method"] == ["GET"] else list(COMPLETE_MCP_ROUTES))
+    assert changed["apps"]["tls"] == live["apps"]["tls"]
+    assert site_of(changed, index=1) == site_of(live, index=1)
+
+
+def test_mcp_shape_plans_the_same_route_sets_as_the_legacy_shape():
+    legacy_plan, legacy_prepare, legacy_final = transition_values()
+    mcp_plan, mcp_prepare, mcp_final = transition_values(mcp_fullconfig())
+    assert mcp_plan["get_routes"] == legacy_plan["get_routes"]
+    assert mcp_plan["post_routes"] == legacy_plan["post_routes"]
+    assert get_paths_of(mcp_prepare) == get_paths_of(legacy_prepare)
+    assert get_paths_of(mcp_final) == get_paths_of(legacy_final)
+    assert mcp_plan["bindings"]["observed_fullconfig_sha256"] != legacy_plan["bindings"]["observed_fullconfig_sha256"]
+    assert mcp_plan["bindings"]["prepare_fullconfig_sha256"] == module._sha256(mcp_prepare)
+    assert mcp_plan["bindings"]["final_fullconfig_sha256"] == module._sha256(mcp_final)
+    assert mcp_plan["installed"] is False and mcp_plan["published"] is False
+    assert preparation_complete(observed=mcp_prepare, prepared=copy.deepcopy(mcp_prepare))["prepared_observed_exactly"]
+
+
+def other_route():
+    return {"match": [{"method": ["GET"], "path": ["/extra"]}], "handle": [proxy()]}
+
+
+@pytest.mark.parametrize("mangle", [
+    pytest.param(lambda c: inner_of(c)[2]["handle"][0]["upstreams"][0].__setitem__(
+        "dial", "127.0.0.1:8443"), id="metadata-wrong-upstream"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][1]["upstreams"][0].__setitem__(
+        "dial", "10.0.0.5:49152"), id="mcp-non-loopback-upstream"),
+    pytest.param(lambda c: inner_of(c)[2]["match"][0].__setitem__(
+        "path", [MCP_METADATA_ROUTE, "/.well-known/oauth-authorization-server"]), id="metadata-extra-path"),
+    pytest.param(lambda c: inner_of(c)[2]["match"][0].__setitem__(
+        "path", ["/.well-known/oauth-protected-resource"]), id="metadata-wrong-path"),
+    pytest.param(lambda c: inner_of(c)[2]["match"][0].__setitem__("method", ["POST"]), id="metadata-wrong-method"),
+    pytest.param(lambda c: inner_of(c)[2]["handle"].append(proxy()), id="metadata-extra-proxy"),
+    pytest.param(lambda c: inner_of(c)[3]["match"][0].__setitem__("path", ["/mcp", "/mcp/"]), id="mcp-extra-path"),
+    pytest.param(lambda c: inner_of(c)[3]["match"][0].__setitem__("path", ["/mcp/*"]), id="mcp-wildcard-path"),
+    pytest.param(lambda c: inner_of(c)[3]["match"][0].__setitem__("method", ["GET"]), id="mcp-wrong-method"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][0].__setitem__("max_size", 1048576), id="mcp-larger-body"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][0].__setitem__("max_size", 64000.0), id="mcp-float-body"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"][0].__setitem__("max_size", True), id="mcp-bool-body"),
+    pytest.param(lambda c: inner_of(c)[3]["handle"].pop(0), id="mcp-no-body-limit"),
+    pytest.param(lambda c: inner_of(c).pop(2), id="metadata-branch-missing"),
+    pytest.param(lambda c: inner_of(c).pop(3), id="mcp-branch-missing"),
+    pytest.param(lambda c: inner_of(c).pop(), id="terminal-abort-missing"),
+    pytest.param(lambda c: inner_of(c).insert(2, inner_of(c).pop(3)), id="mcp-branches-reordered"),
+    pytest.param(lambda c: inner_of(c).insert(4, copy.deepcopy(inner_of(c)[3])), id="mcp-post-duplicated"),
+    pytest.param(lambda c: inner_of(c).insert(2, other_route()), id="six-branches-extra-route"),
+    pytest.param(lambda c: inner_of(c).__setitem__(2, copy.deepcopy(inner_of(c)[0])), id="metadata-replaced-by-get-clone"),
+    pytest.param(lambda c: inner_of(c).__setitem__(3, copy.deepcopy(inner_of(c)[1])), id="mcp-replaced-by-os-post-clone"),
+    pytest.param(lambda c: inner_of(c).__setitem__(
+        4, {"handle": [{"handler": "static_response", "body": "open"}]}), id="terminal-not-abort"),
+    pytest.param(lambda c: inner_of(c).append(
+        {"handle": [{"handler": "static_response", "abort": True}]}), id="two-terminal-aborts"),
+])
+def test_mcp_shape_mutations_refuse(mangle):
+    live = mcp_fullconfig()
+    mangle(live)
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+@pytest.mark.parametrize("count", [1, 2, 4, 6, 7])
+def test_wrong_counts_or_unrecognized_extra_branches_refuse(count):
+    live = fullconfig()
+    routes = inner_of(live)
+    abort = routes[-1]
+    head = routes[:2]
+    del routes[:]
+    routes.extend(head + [other_route() for _ in range(count - 3)] + [abort])
+    routes[:] = routes[:count - 1] + [abort] if count < 3 else routes
+    assert len(routes) == count
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+# Real `caddy adapt` (v2.11.4) output for the owner template rendered with the
+# three-file manifest; all five branches share one group, so they stay mutually
+# exclusive. The /mcp POST branch alone presents the loopback Host.
+RETAINED_MCP_CADDY_ROUTE = {'match': [{'host': ['mcp.mastermind-x.com']}], 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'subroute', 'routes': [{'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['mcp.mastermind-x.com'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['GET'], 'path': ['/os/', '/os/auth/callback', '/workspace/programs/current', '/workspace/work/current', '/workspace/mission/current', '/workspace/mission/v3/current', '/workspace/result/current', '/workspace/plan/current', '/workspace/operator/activity/current', '/workspace/window/current', '/os/', '/os/assets/index-a.css', '/os/assets/index-b.js']}]}, {'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'request_body', 'max_size': 64000}, {'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['mcp.mastermind-x.com'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['POST'], 'path': ['/os/executive/context', '/os/executive/submit', '/os/executive/status']}]}, {'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['mcp.mastermind-x.com'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['GET'], 'path': ['/.well-known/oauth-protected-resource/mcp']}]}, {'group': 'group4', 'handle': [{'handler': 'subroute', 'routes': [{'handle': [{'handler': 'request_body', 'max_size': 64000}, {'handler': 'reverse_proxy', 'headers': {'request': {'delete': ['Forwarded', 'X-Forwarded-Host', 'X-Forwarded-Port', 'X-Real-IP', 'CF-Connecting-IP', 'EO-Connecting-IP', 'EO-Client-IP'], 'set': {'Host': ['127.0.0.1'], 'X-Forwarded-For': ['127.0.0.1'], 'X-Forwarded-Proto': ['https']}}}, 'upstreams': [{'dial': '127.0.0.1:49152'}]}]}]}], 'match': [{'method': ['POST'], 'path': ['/mcp']}]}, {'handle': [{'abort': True, 'handler': 'static_response'}]}]}]}]}], 'terminal': True}
+
+
+def test_retained_caddy_adapter_topology_with_mcp_is_accepted():
+    route = copy.deepcopy(RETAINED_MCP_CADDY_ROUTE)
+    # Keep the real adapter wrappers, shared group, headers and 64KB body limits;
+    # substitute only the manifest paths for this deterministic fixture.
+    wrapper = route["handle"][0]["routes"][0]["handle"][0]["routes"]
+    assert len(wrapper) == 5 and {item.get("group") for item in wrapper[:4]} == {"group4"}
+    wrapper[0]["match"][0]["path"] = sorted(list(CONTROL_ROOM_LEGACY_GET_ROUTES) + list(asset_routes(OLD)))
+    assert wrapper[2]["match"][0] == {"method": ["GET"], "path": [MCP_METADATA_ROUTE]}
+    assert wrapper[3]["match"][0] == {"method": ["POST"], "path": list(MCP_ROUTES)}
+    hosts = [branch["handle"][0]["routes"][0]["handle"][-1]["headers"]["request"]["set"]["Host"] for branch in wrapper[:4]]
+    assert hosts == [[HOST], [HOST], [HOST], ["127.0.0.1"]]
+    live = fullconfig(site=route)
+    planned = prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert planned != live
+    assert preparation_complete(observed=planned, prepared=copy.deepcopy(planned))["prepared_observed_exactly"]
+    finalized = final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    final_wrapper = site_of(finalized)["handle"][0]["routes"][0]["handle"][0]["routes"]
+    # Preserve the retained OS POST group, handlers, body cap and proxy while
+    # updating its exact path list and inserting only the dedicated source branch.
+    expected_post = copy.deepcopy(wrapper[1])
+    assert expected_post["match"][0]["path"] == list(LEGACY_POST_ROUTES)
+    expected_post["match"][0]["path"] = list(POST_ROUTES)
+    assert final_wrapper[1] == expected_post
+    assert final_wrapper[2] == source_branch(group="group4")
+    # The retained adapter wrappers, group, headers and body caps survive; only
+    # the two fixed public-MCP path lists gain their exact COO path.
+    for index, (seen, result) in enumerate(zip(wrapper[2:4], final_wrapper[3:5])):
+        assert result["handle"] == seen["handle"], index
+        assert result.get("group") == seen.get("group"), index
+        assert result["match"][0]["method"] == seen["match"][0]["method"], index
+        assert result["match"][0]["path"] == (
+            list(COMPLETE_MCP_METADATA_ROUTES) if index == 0 else list(COMPLETE_MCP_ROUTES))
+    assert final_wrapper[5] == wrapper[4]
+    assert final_wrapper[0]["match"][0]["path"] == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
+
+
+# --- Proxy handler equality on every branch (#1656 independent review, finding 2) ---
+# Matching only the upstream let a changed Host, header-strip list, rewrite or
+# transport through the planner. The whole reverse_proxy handler must equal the
+# rendered one; only /mcp presents the gateway's loopback Host.
+
+def branch_proxy(config, index):
+    return inner_of(config)[index]["handle"][-1]
+
+
+PROXY_MUTATIONS = {
+    "host-changed": lambda p: p["headers"]["request"]["set"].__setitem__("Host", ["attacker.example"]),
+    "host-doubled": lambda p: p["headers"]["request"]["set"].__setitem__("Host", [HOST, "127.0.0.1"]),
+    "forwarded-for-changed": lambda p: p["headers"]["request"]["set"].__setitem__("X-Forwarded-For", ["203.0.113.9"]),
+    "forwarded-proto-changed": lambda p: p["headers"]["request"]["set"].__setitem__("X-Forwarded-Proto", ["http"]),
+    "extra-set-header": lambda p: p["headers"]["request"]["set"].__setitem__("X-Admin", ["1"]),
+    "strip-list-trimmed": lambda p: p["headers"]["request"]["delete"].remove("CF-Connecting-IP"),
+    "strip-list-emptied": lambda p: p["headers"]["request"].__setitem__("delete", []),
+    "headers-missing": lambda p: p.pop("headers"),
+    "response-headers-added": lambda p: p["headers"].__setitem__("response", {"set": {"X-Open": ["1"]}}),
+    "rewrite-added": lambda p: p.__setitem__("rewrite", {"uri": "/os/executive/submit"}),
+    "tls-transport": lambda p: p.__setitem__("transport", {"protocol": "http", "tls": {"insecure_skip_verify": True}}),
+    "other-transport": lambda p: p.__setitem__("transport", {"protocol": "fastcgi"}),
+    "handle-response-added": lambda p: p.__setitem__("handle_response", [{"routes": []}]),
+    "load-balancing-added": lambda p: p.__setitem__("load_balancing", {"retries": 3}),
+    "upstream-option-added": lambda p: p["upstreams"][0].__setitem__("max_requests", 1),
+    "second-upstream": lambda p: p["upstreams"].append({"dial": "127.0.0.1:8443"}),
+}
+
+
+@pytest.mark.parametrize("shape,index", [
+    ("legacy", 0), ("legacy", 1), ("mcp", 0), ("mcp", 1), ("mcp", 2), ("mcp", 3),
+    ("source", 2),
+])
+@pytest.mark.parametrize("mutation", sorted(PROXY_MUTATIONS))
+def test_every_branch_proxy_must_equal_the_rendered_handler(shape, index, mutation):
+    live = mcp_fullconfig() if shape == "mcp" else fullconfig()
+    if shape == "source":
+        get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+        expect_source_upgrade(inner_of(live))
+    PROXY_MUTATIONS[mutation](branch_proxy(live, index))
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+@pytest.mark.parametrize("index,wrong_host", [(2, "127.0.0.1"), (3, HOST), (0, "127.0.0.1"), (1, "127.0.0.1")])
+def test_each_branch_presents_only_its_own_upstream_host(index, wrong_host):
+    live = mcp_fullconfig()
+    branch_proxy(live, index)["headers"]["request"]["set"]["Host"] = [wrong_host]
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+def test_proxy_equality_accepts_the_adapter_shape_without_a_transport():
+    live = mcp_fullconfig()
+    for index in range(4):
+        branch_proxy(live, index).pop("transport", None)
+    value = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+                 current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert value["relay_port"] == 49152
+
+
+def test_a_proxy_for_another_relay_port_is_refused_on_every_branch():
+    live = mcp_fullconfig(port=49153)
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+# --- Public COO route pair (#2120) ------------------------------------------------
+# The public edge gains exactly one COO metadata path and one COO transport path.
+# They extend the same two exact method branches the CEO pair already uses, so
+# the two coherent profiles are the CEO-only pair and the complete CEO+COO pair.
+
+def mcp_matcher_branches(config):
+    """The two public-MCP matcher branches, keyed by their role."""
+    found = {}
+    for branch in inner_of(config):
+        match = branch.get("match")
+        if not match or type(match[0]) is not dict:
+            continue
+        method, paths = match[0].get("method"), match[0].get("path")
+        if method == ["GET"] and paths and paths[0].startswith("/.well-known/"):
+            found["metadata"] = branch
+        elif method == ["POST"] and paths and paths[0] == "/mcp":
+            found["transport"] = branch
+    return found
+
+
+def mcp_matcher_paths(config):
+    """The observed public-MCP path lists, keyed by their role."""
+    return {role: list(branch["match"][0]["path"])
+            for role, branch in mcp_matcher_branches(config).items()}
+
+
+def observed_public_edge(with_source=False):
+    """An observed public edge carrying the CEO-only public-MCP pair."""
+    live = mcp_fullconfig()
+    if with_source:
+        get_paths_of(live)[:] = sorted(set(GET_ROUTES) | set(asset_routes(OLD)))
+        post_paths_of(live)[:] = list(POST_ROUTES)
+        expect_source_upgrade(inner_of(live))
+    return live
+
+
+@pytest.mark.parametrize("with_source", [False, True])
+def test_public_mcp_pair_upgrades_ceo_only_to_complete_in_place(with_source):
+    live = observed_public_edge(with_source)
+    assert mcp_matcher_paths(live) == {"metadata": list(MCP_METADATA_ROUTES),
+                                       "transport": list(MCP_ROUTES)}
+    before = copy.deepcopy(live)
+    prepared = prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                              relay_port=49152)
+    finalized = final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                             relay_port=49152)
+    assert live == before  # pure planning; the observed config is never mutated
+    for value in (prepared, finalized):
+        assert mcp_matcher_paths(value) == {
+            "metadata": list(COMPLETE_MCP_METADATA_ROUTES),
+            "transport": list(COMPLETE_MCP_ROUTES)}
+        branches = mcp_matcher_branches(value)
+        # Metadata keeps the public Host; the transport keeps the gateway's
+        # loopback Host, its stripped forwarding headers and its 64000-byte cap.
+        assert branches["metadata"]["handle"][-1]["headers"]["request"]["set"]["Host"] == [HOST]
+        assert branches["transport"]["handle"][-1]["headers"]["request"]["set"]["Host"] == ["127.0.0.1"]
+        assert branches["transport"]["handle"][0] == {"handler": "request_body",
+                                                       "max_size": MCP_MAX_BODY}
+        assert branches["metadata"]["handle"][-1]["headers"]["request"]["delete"] == list(
+            module._STRIPPED_REQUEST_HEADERS)
+        # The unrelated host route and the TLS policy are untouched.
+        assert site_of(value, index=1) == site_of(live, index=1)
+        assert value["apps"]["tls"] == live["apps"]["tls"]
+    # The source-operation branch keeps its own cap and public Host.
+    source = [b for b in inner_of(prepared) if b.get("match", [{}])[0].get("path") == list(SOURCE_POST_ROUTES)]
+    assert len(source) == 1
+    assert source[0]["handle"][0] == {"handler": "request_body", "max_size": module.SOURCE_MAX_BODY}
+    assert source[0]["handle"][-1]["headers"]["request"]["set"]["Host"] == [HOST]
+
+
+def test_complete_public_mcp_pair_is_idempotent():
+    live = observed_public_edge(True)
+    expect_complete_mcp(inner_of(live))
+    finalized = final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                             relay_port=49152)
+    assert mcp_matcher_paths(finalized) == {"metadata": list(COMPLETE_MCP_METADATA_ROUTES),
+                                            "transport": list(COMPLETE_MCP_ROUTES)}
+    # Planning the already-complete configuration again is a fixed point.
+    again = prepare_config(fullconfig=finalized, current_manifest=NEW, candidate_manifest=NEW,
+                           relay_port=49152)
+    assert again == finalized
+    assert mcp_matcher_paths(again) == {"metadata": list(COMPLETE_MCP_METADATA_ROUTES),
+                                        "transport": list(COMPLETE_MCP_ROUTES)}
+
+
+def test_legacy_no_mcp_topology_never_gains_a_public_mcp_family():
+    live = fullconfig()  # the legacy three-branch topology, no public-MCP family
+    assert mcp_matcher_paths(live) == {}
+    prepared = prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                              relay_port=49152)
+    finalized = final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                             relay_port=49152)
+    for value in (prepared, finalized):
+        paths = [path for branch in inner_of(value) if branch.get("match")
+                 for path in branch["match"][0]["path"]]
+        assert "/mcp" not in paths and "/mcp/coo" not in paths
+        assert not any(path.startswith("/.well-known/") for path in paths)
+        assert mcp_matcher_paths(value) == {}
+
+
+@pytest.mark.parametrize("upgraded", ["metadata", "transport"])
+def test_mixed_public_mcp_profiles_refuse(upgraded):
+    live = observed_public_edge(False)
+    branches = mcp_matcher_branches(live)
+    if upgraded == "metadata":
+        branches["metadata"]["match"][0]["path"] = list(COMPLETE_MCP_METADATA_ROUTES)
+    else:
+        branches["transport"]["match"][0]["path"] = list(COMPLETE_MCP_ROUTES)
+    with pytest.raises(ValueError, match="mixed or incomplete MCP profile"):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError, match="mixed or incomplete MCP profile"):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError, match="mixed or incomplete MCP profile"):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+@pytest.mark.parametrize("mangle", [
+    pytest.param(lambda c: mcp_matcher_branches(c)["metadata"]["match"][0].__setitem__(
+        "path", list(COMPLETE_MCP_METADATA_ROUTES) + [MCP_METADATA_ROUTE]),
+        id="metadata-duplicate"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["metadata"]["match"][0].__setitem__(
+        "path", ["/.well-known/oauth-protected-resource/*"]), id="metadata-wildcard"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["metadata"]["match"][0].__setitem__(
+        "path", list(COMPLETE_MCP_METADATA_ROUTES) + [
+            "/.well-known/oauth-protected-resource/mcp/extra"]), id="metadata-extra"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["metadata"]["match"][0].__setitem__(
+        "method", ["POST"]), id="metadata-wrong-method"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["match"][0].__setitem__(
+        "path", list(COMPLETE_MCP_ROUTES) + ["/mcp"]), id="transport-duplicate"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["match"][0].__setitem__(
+        "path", ["/mcp/*"]), id="transport-wildcard"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["match"][0].__setitem__(
+        "path", list(COMPLETE_MCP_ROUTES) + ["/mcp/extra"]), id="transport-extra"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["match"][0].__setitem__(
+        "method", ["GET"]), id="transport-wrong-method"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["handle"][0].__setitem__(
+        "max_size", 65536), id="transport-larger-body"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["handle"][0].__setitem__(
+        "max_size", 64000.0), id="transport-float-body"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["handle"][0].__setitem__(
+        "max_size", True), id="transport-bool-body"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["handle"].pop(0),
+                 id="transport-no-body-limit"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["metadata"]["handle"][-1]["headers"]
+                 ["request"]["set"].__setitem__("Host", ["127.0.0.1"]),
+                 id="metadata-loopback-host"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["transport"]["handle"][-1]["headers"]
+                 ["request"]["set"].__setitem__("Host", [HOST]),
+                 id="transport-public-host"),
+    pytest.param(lambda c: mcp_matcher_branches(c)["metadata"]["handle"][-1]["headers"]
+                 ["request"]["delete"].remove("CF-Connecting-IP"),
+                 id="metadata-trimmed-strip-list"),
+    pytest.param(lambda c: inner_of(c).remove(mcp_matcher_branches(c)["metadata"]),
+                 id="metadata-branch-removed"),
+    pytest.param(lambda c: inner_of(c).remove(mcp_matcher_branches(c)["transport"]),
+                 id="transport-branch-removed"),
+    pytest.param(lambda c: inner_of(c).insert(2, inner_of(c).pop(3)),
+                 id="mcp-branches-reordered"),
+])
+def test_public_mcp_profile_mutations_refuse(mangle):
+    live = observed_public_edge(False)
+    mangle(live)
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+def test_plan_records_the_public_mcp_route_matrix():
+    complete = {"metadata": list(COMPLETE_MCP_METADATA_ROUTES),
+                "transport": list(COMPLETE_MCP_ROUTES)}
+    ceo_only = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=observed_public_edge(False),
+                     current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert ceo_only["mcp_routes"] == {"observed_profile": "ceo_only", **complete}
+    live = observed_public_edge(False)
+    expect_complete_mcp(inner_of(live))
+    already = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+                   current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert already["mcp_routes"] == {"observed_profile": "complete", **complete}
+    absent = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=fullconfig(),
+                  current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert absent["mcp_routes"] == {"observed_profile": "absent",
+                                    "metadata": [], "transport": []}
+    # The plan still binds both planned configurations by their exact bytes.
+    for value in (ceo_only, already, absent):
+        assert value["bindings"]["prepare_fullconfig_sha256"] == module._sha256(
+            prepare_config(fullconfig=(observed_public_edge(False) if value is ceo_only else
+                                       (live if value is already else fullconfig())),
+                           current_manifest=OLD, candidate_manifest=NEW, relay_port=49152))

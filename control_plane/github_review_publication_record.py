@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+import time
 from collections.abc import Callable
 
 from control_plane.executive_runtime import Runtime
@@ -21,16 +23,20 @@ from control_plane.github_review_intent_ingress import (
     ExternalCommentAdvisory,
     FinalPullRequestCheck,
     PublicationEffectUnknown,
+    PublicationPreflightUnavailable,
+    PUBLICATION_PREFLIGHT_SECONDS,
     PullRequestReadPort,
     ReconcilingReviewPublication,
     ReviewTransportPort,
     ReviewVerificationRefused,
+    published_review_is_valid,
     publication_command_id as expected_publication_command_id,
 )
 
 _RESERVE = "GITHUB_REVIEW_PUBLICATION_RESERVED"
 _COMMIT = "GITHUB_REVIEW_PUBLICATION_CONFIRMED"
-_SCHEMA = "mastermind.github_review_publication_event.v1"
+_LEGACY_SCHEMA = "mastermind.github_review_publication_event.v1"
+_SCHEMA = "mastermind.github_review_publication_event.v2"
 _COMMAND_RE = re.compile(r"gh-review-publish:[0-9a-f]{32}\Z")
 _REVIEW_ID_RE = re.compile(r"[A-Za-z0-9:._-]{1,128}\Z")
 
@@ -47,6 +53,7 @@ class ExecutiveReviewPublicationRecord:
         decision: ReviewIntentDecision,
         pull_requests: PullRequestReadPort,
         publication_guard: Callable[[], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("canonical Executive Runtime required")
@@ -67,6 +74,7 @@ class ExecutiveReviewPublicationRecord:
         self._decision = decision
         self._pull_requests = pull_requests
         self._guard = publication_guard
+        self._clock = clock
         self._advisory: ExternalCommentAdvisory | None = None
 
     def publishing_principal(self) -> ExpectedReviewPublisher:
@@ -94,9 +102,8 @@ class ExecutiveReviewPublicationRecord:
         if value is not None:
             raise ReviewVerificationRefused("GITHUB_REVIEW_PUBLICATION_NOT_AUTHORIZED")
 
-    @staticmethod
     def _identity(
-        *, command_id: str, repository: str, pull_number: int,
+        self, *, command_id: str, repository: str, pull_number: int,
         head_sha: str, event: str, body: str, job_id: str,
     ) -> dict:
         if not isinstance(command_id, str) or _COMMAND_RE.fullmatch(command_id) is None:
@@ -115,6 +122,8 @@ class ExecutiveReviewPublicationRecord:
             "repository": repository, "pull_number": pull_number,
             "head_sha": head_sha, "event": event,
             "body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "publisher_user_id": self._expected_publisher.user_id,
+            "publisher_login": self._expected_publisher.login.casefold(),
         }
 
     def published_command_ids(self) -> frozenset[str]:
@@ -123,34 +132,118 @@ class ExecutiveReviewPublicationRecord:
         )
         completed = set()
         for e in events:
-            if e.event_type != _COMMIT or e.payload.get("schema") != _SCHEMA:
+            if e.event_type != _COMMIT or e.payload.get("schema") not in {_SCHEMA, _LEGACY_SCHEMA}:
                 continue
             command_id = e.payload.get("original_command_id")
             if isinstance(command_id, str) and _COMMAND_RE.fullmatch(command_id):
                 completed.add(command_id)
         return frozenset(completed)
 
+    def reconcile_existing_publication(
+        self, *, publication_command_id: str, repository: str,
+        pull_number: int, head_sha: str, job_id: str,
+    ) -> str | None:
+        """Indexed recovery of the ORIGINAL effect, never permission for POST.
+
+        Run before current-head/result eligibility: a historical review may
+        already exist after an ACK loss even though the PR has since changed.
+        Only the stored body digest and original publisher can settle it.
+        Legacy confirmed receipts remain historical facts. An unconfirmed v1
+        claim lacks original publisher provenance and cannot be reconstructed.
+        """
+        if (job_id != self._job_id
+                or repository != self._decision.repository
+                or pull_number != self._decision.pull_number
+                or head_sha != self._decision.frozen_head_sha
+                or publication_command_id != expected_publication_command_id(
+                    repository=repository, pull_number=pull_number,
+                    head_sha=head_sha, job_id=job_id)):
+            raise ReviewVerificationRefused("GITHUB_PUBLICATION_IDENTITY_DRIFT")
+        stored = self._runtime.store.get_event_by_command_id(publication_command_id)
+        if stored is None:
+            if self._runtime.store.get_event_by_command_id(publication_command_id + ":confirmed") is not None:
+                raise ReviewVerificationRefused("GITHUB_REVIEW_CONFIRMATION_WITHOUT_RESERVATION")
+            return None
+        identity = stored.payload
+        legacy = identity.get("schema") == _LEGACY_SCHEMA
+        keys = {"schema", "job_id", "repository", "pull_number", "head_sha", "event", "body_sha256"}
+        if not legacy:
+            keys |= {"publisher_user_id", "publisher_login"}
+        if (set(identity) != keys or identity.get("schema") not in {_SCHEMA, _LEGACY_SCHEMA}
+                or identity.get("job_id") != job_id
+                or identity.get("repository") != repository
+                or identity.get("pull_number") != pull_number
+                or identity.get("head_sha") != head_sha
+                or identity.get("event") not in {"COMMENT", "REQUEST_CHANGES"}
+                or not isinstance(identity.get("body_sha256"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", identity["body_sha256"]) is None):
+            raise ReviewVerificationRefused("GITHUB_REVIEW_RESERVATION_CONFLICT")
+        original_publisher = None
+        if not legacy:
+            try:
+                original_publisher = ExpectedReviewPublisher(
+                    user_id=identity["publisher_user_id"], login=identity["publisher_login"],
+                )
+            except Exception:
+                raise ReviewVerificationRefused("GITHUB_REVIEW_RESERVATION_CONFLICT") from None
+        status, confirmed = self._observe(publication_command_id, identity)
+        if status == "CONFIRMED":
+            return confirmed
+        if original_publisher is None:
+            raise PublicationEffectUnknown("GITHUB_REVIEW_ORIGINAL_PUBLISHER_UNAVAILABLE")
+        self._authorize()
+        try:
+            reviews = self._transport.read_reviews(
+                repository=repository, pull_number=pull_number, commit_id=head_sha,
+            )
+            if type(reviews) is not tuple:
+                raise ValueError("incomplete readback")
+            matches = [review.review_id for review in reviews
+                       if published_review_is_valid(review)
+                       and review.commit_id == head_sha
+                       and review.event == identity["event"]
+                       and review.author_user_id == original_publisher.user_id
+                       and review.author_login.casefold() == original_publisher.login.casefold()
+                       and hashlib.sha256(review.body.encode("utf-8")).hexdigest() == identity["body_sha256"]]
+            if len(matches) != 1:
+                raise ValueError("no unique positive readback")
+            self._confirm(publication_command_id, identity, matches[0])
+        except Exception:
+            raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
+        return matches[0]
+
     def _observe(self, command_id: str, identity: dict) -> tuple[str, str | None]:
         """Return ABSENT / RESERVED / CONFIRMED from incumbent EventStore."""
         stored = self._runtime.store.get_event_by_command_id(command_id)
         if stored is None:
+            if self._runtime.store.get_event_by_command_id(command_id + ":confirmed") is not None:
+                raise ReviewVerificationRefused("GITHUB_REVIEW_CONFIRMATION_WITHOUT_RESERVATION")
             return "ABSENT", None
-        if stored.event_type != _RESERVE or stored.payload != identity:
+        if (stored.event_type != _RESERVE or stored.payload != identity
+                or stored.aggregate_type != "github_review_publication"
+                or stored.aggregate_id != command_id):
             raise ReviewVerificationRefused("GITHUB_REVIEW_RESERVATION_CONFLICT")
         committed = self._runtime.store.get_event_by_command_id(command_id + ":confirmed")
         if committed is None:
             return "RESERVED", None
         if (
             committed.event_type != _COMMIT
+            or committed.aggregate_type != "github_review_publication"
+            or committed.aggregate_id != command_id
+            or committed.payload.get("schema") != identity["schema"]
             or committed.payload.get("original_command_id") != command_id
             or committed.payload.get("identity") != identity
             or not isinstance(committed.payload.get("review_id"), str)
             or _REVIEW_ID_RE.fullmatch(committed.payload["review_id"]) is None
+            or committed.payload != {
+                **identity, "identity": identity,
+                "original_command_id": command_id, "review_id": committed.payload.get("review_id"),
+            }
         ):
             raise ReviewVerificationRefused("GITHUB_REVIEW_CONFIRMATION_CONFLICT")
         return "CONFIRMED", committed.payload["review_id"]
 
-    def _reserve(self, command_id: str, identity: dict) -> str:
+    def _reserve(self, command_id: str, identity: dict, *, preflight_deadline: float) -> str:
         self._authorize()
         with self._runtime.store.transaction() as conn:
             self._authorize()
@@ -158,6 +251,11 @@ class ExecutiveReviewPublicationRecord:
                 command_id, connection=conn
             )
             if existing is None:
+                now = self._clock()
+                if (type(preflight_deadline) not in {int, float}
+                        or not math.isfinite(preflight_deadline)
+                        or not now < preflight_deadline <= now + PUBLICATION_PREFLIGHT_SECONDS):
+                    raise PublicationPreflightUnavailable("PUBLICATION_PREFLIGHT_EXPIRED")
                 self._runtime.store.append_event(
                     conn, aggregate_type="github_review_publication",
                     aggregate_id=command_id, event_type=_RESERVE,
@@ -201,6 +299,7 @@ class ExecutiveReviewPublicationRecord:
     def reserve_publication(
         self, *, publication_command_id: str, repository: str,
         pull_number: int, head_sha: str, event: str, body: str,
+        preflight_deadline: float,
     ) -> bool:
         """Commit one incumbent UNIQUE claim. True only for the first writer."""
 
@@ -209,7 +308,20 @@ class ExecutiveReviewPublicationRecord:
             pull_number=pull_number, head_sha=head_sha, event=event,
             body=body, job_id=self._job_id,
         )
-        return self._reserve(publication_command_id, identity) == "CREATED"
+        return self._reserve(
+            publication_command_id, identity, preflight_deadline=preflight_deadline,
+        ) == "CREATED"
+
+    def has_publication_claim(
+        self, *, publication_command_id: str, repository: str,
+        pull_number: int, head_sha: str, event: str, body: str,
+    ) -> bool:
+        identity = self._identity(
+            command_id=publication_command_id, repository=repository,
+            pull_number=pull_number, head_sha=head_sha, event=event,
+            body=body, job_id=self._job_id,
+        )
+        return self._observe(publication_command_id, identity)[0] != "ABSENT"
 
     def confirm_publication(
         self, *, publication_command_id: str, repository: str,
@@ -245,10 +357,31 @@ class ExecutiveReviewPublicationRecord:
             pull_number=pull_number, head_sha=head_sha, event=event,
             body=body, job_id=self._job_id,
         )
+        stored = self._runtime.store.get_event_by_command_id(publication_command_id)
+        if stored is not None and stored.payload.get("schema") == _LEGACY_SCHEMA:
+            common = {key: value for key, value in identity.items()
+                      if key not in {"publisher_user_id", "publisher_login"}}
+            common["schema"] = _LEGACY_SCHEMA
+            if stored.payload != common:
+                raise ReviewVerificationRefused("GITHUB_REVIEW_RESERVATION_CONFLICT")
+            historical = self.reconcile_existing_publication(
+                publication_command_id=publication_command_id, repository=repository,
+                pull_number=pull_number, head_sha=head_sha, job_id=self._job_id,
+            )
+            assert historical is not None
+            return historical
         status, review_id = self._observe(publication_command_id, identity)
         if status == "CONFIRMED":
             assert review_id is not None
             return review_id
+        if status == "RESERVED":
+            recovered = self.reconcile_existing_publication(
+                publication_command_id=publication_command_id, repository=repository,
+                pull_number=pull_number, head_sha=head_sha, job_id=self._job_id,
+            )
+            assert recovered is not None
+            return recovered
+        self._authorize()
         # One bridge owns the single reserve, the reviews GET, the typed final
         # check, and the POST. A second reserve here would turn the first
         # writer into EFFECT_UNKNOWN and suppress the publication.
@@ -257,6 +390,7 @@ class ExecutiveReviewPublicationRecord:
             published=self,
             expected_publisher=self._expected_publisher,
             before_post=self._final_check(event),
+            clock=self._clock,
         )
         return bridge.publish_review(
             publication_command_id=publication_command_id,

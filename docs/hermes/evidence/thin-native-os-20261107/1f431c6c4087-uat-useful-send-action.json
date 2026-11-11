@@ -1,0 +1,15 @@
+{
+  "sourceHead": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "sessionId": "local-1fb461715a98699c3b536f523edff78784ebd84f6a5d131b4e2318ec38db02fb",
+  "observation": {
+    "before": {
+      "at": "2026-11-07T08:59:13.688Z",
+      "pid": 80261,
+      "draft": "Turn these Hermes integration acceptance requirements into a concise five-bullet internal checklist: use the existing local runtime and original conversation; recover an original request without automatic resend; reopen saved history; clear the displayed conversation on logout and reconnect safely; keep public Apple signing, notarization and updater distribution on hold until separately qualified. Mark these as requirements, not proven results. Do not use tools.",
+      "sendName": "Check and send message",
+      "sendEnabled": true
+    },
+    "pressedAt": "2026-11-07T08:59:13.851Z",
+    "action": "One explicit useful send in original conversation"
+  }
+}

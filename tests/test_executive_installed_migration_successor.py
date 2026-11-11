@@ -119,7 +119,7 @@ def test_installed_preparation_refuses_before_target_or_marker(tmp_path,monkeypa
     if fault in {'config','privileged','macro','socket','arms'}:
         value=dict(f.config)
         key,change={'config':('cost_class','foreign'), 'privileged':('privileged_readiness_armed',False),
-                    'macro':('ceo_ingress_app_macro_root','/foreign/macro'),
+                    'macro':('ceo_ingress_app_macro_root','foreign/macro'),
                     'socket':('terminal_return_socket_path','/foreign/relay.sock'),
                     'arms':('coo_autonomy_armed',True)}[fault]
         value[key]=change;_rewrite(m.SYSTEM_ROOT/'config/control.json',(json.dumps(value,sort_keys=True,indent=2)+'\n').encode())

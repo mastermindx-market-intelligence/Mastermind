@@ -1,0 +1,421 @@
+{
+  "recorded_at_utc": "2026-10-31T06:22:59.593538+00:00",
+  "proof_limit": "Bounded exact-head GitHub check-run observations; not product tests, causality attribution or all-repository CI census",
+  "capture_time_note": "File mtime is the local acquisition marker only, never a historical source-availability clock",
+  "pull_requests": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1859,
+      "head": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+      "local_capture_file_mtime_utc": "2026-10-31T06:09:39.865154+00:00",
+      "total_count": 11,
+      "checks": [
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144702324/job/121031402513",
+          "name": "test",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/runs/121023543647",
+          "name": "CodeQL",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144702324/job/121023448035",
+          "name": "pytest shard 0",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144702324/job/121023448002",
+          "name": "pytest shard 2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144702325/job/121023447992",
+          "name": "frontend",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144702324/job/121023447909",
+          "name": "pytest shard 1",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144702325/job/121023447898",
+          "name": "native-macos",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144700582/job/121023445314",
+          "name": "Analyze (python)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144700582/job/121023444641",
+          "name": "Analyze (rust)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144700582/job/121023444565",
+          "name": "Analyze (actions)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "abcb8f8ccca350491a5eefb0e0ccb7b510a7b7eb",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40144700582/job/121023444464",
+          "name": "Analyze (javascript-typescript)",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1861,
+      "head": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+      "local_capture_file_mtime_utc": "2026-10-31T06:09:40.406136+00:00",
+      "total_count": 6,
+      "checks": [
+        {
+          "conclusion": "failure",
+          "head_sha": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120880/job/124390616402",
+          "name": "test",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120880/job/124378335406",
+          "name": "pytest shard 1",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120880/job/124378335287",
+          "name": "pytest shard 0",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120880/job/124378335237",
+          "name": "pytest shard 2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120912/job/124377905156",
+          "name": "frontend",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120912/job/124377904851",
+          "name": "native-macos",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1875,
+      "head": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+      "local_capture_file_mtime_utc": "2026-10-31T06:09:42.406879+00:00",
+      "total_count": 13,
+      "checks": [
+        {
+          "conclusion": "failure",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286903/job/121228026870",
+          "name": "test",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286903/job/121220247242",
+          "name": "pytest shard 1",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286903/job/121220246937",
+          "name": "pytest shard 2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286903/job/121220246710",
+          "name": "pytest shard 0",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286988/job/121219858369",
+          "name": "Hermes runtime acceptance (3.13)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286988/job/121219858138",
+          "name": "Hermes runtime acceptance (3.12)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286910/job/121219857851",
+          "name": "Hermes offline policy and negative tests (3.12)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286946/job/121219857844",
+          "name": "Hermes harness offline stack (3.12)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286910/job/121219857746",
+          "name": "Hermes offline policy and negative tests (3.13)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286910/job/121219857737",
+          "name": "Hermes steward read bridge negatives (3.12)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286970/job/121219857706",
+          "name": "Secretary shadow unit tests",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286946/job/121219857606",
+          "name": "Hermes harness offline stack (3.13)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "395f4a54010f809641aa7a977e5dc4b7580b7366",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/40210286910/job/121219857534",
+          "name": "Hermes steward read bridge negatives (3.13)",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1885,
+      "head": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+      "local_capture_file_mtime_utc": "2026-10-31T06:09:42.969675+00:00",
+      "total_count": 8,
+      "checks": [
+        {
+          "conclusion": "failure",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424163/job/123901794794",
+          "name": "test",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424218/job/123889657078",
+          "name": "Hermes runtime acceptance (3.12)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424195/job/123889656955",
+          "name": "Hermes harness offline stack (3.13)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424218/job/123889656934",
+          "name": "Hermes runtime acceptance (3.13)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424163/job/123889656915",
+          "name": "pytest shard 1",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424163/job/123889656874",
+          "name": "pytest shard 2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424195/job/123889656748",
+          "name": "Hermes harness offline stack (3.12)",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "bedc2a8fcef5c1722217403f789f2cb06c298b2a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41002424163/job/123889656580",
+          "name": "pytest shard 0",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1889,
+      "head": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+      "local_capture_file_mtime_utc": "2026-10-31T06:09:40.898452+00:00",
+      "total_count": 6,
+      "checks": [
+        {
+          "conclusion": "failure",
+          "head_sha": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41138275481/job/124358353640",
+          "name": "test",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41138275481/job/124346470012",
+          "name": "pytest shard 2",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41138275481/job/124346469951",
+          "name": "pytest shard 0",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41138275481/job/124346469685",
+          "name": "pytest shard 1",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41138275624/job/124346031979",
+          "name": "frontend",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "9e3f8da111cb615610b62b61632268d512f6cb3f",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41138275624/job/124346031477",
+          "name": "native-macos",
+          "status": "completed"
+        }
+      ]
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr_number": 1891,
+      "head": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+      "local_capture_file_mtime_utc": "2026-10-31T06:09:41.418502+00:00",
+      "total_count": 6,
+      "checks": [
+        {
+          "conclusion": "failure",
+          "head_sha": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41139134211/job/124361253370",
+          "name": "test",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41139134310/job/124348824298",
+          "name": "frontend",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41139134211/job/124348824061",
+          "name": "pytest shard 1",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41139134211/job/124348824019",
+          "name": "pytest shard 0",
+          "status": "completed"
+        },
+        {
+          "conclusion": "success",
+          "head_sha": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41139134310/job/124348823908",
+          "name": "native-macos",
+          "status": "completed"
+        },
+        {
+          "conclusion": "failure",
+          "head_sha": "9b08f7482c3632fd1aaffa335efebf672ef22c0a",
+          "html_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41139134211/job/124348823628",
+          "name": "pytest shard 2",
+          "status": "completed"
+        }
+      ]
+    }
+  ],
+  "bounded_failure_diagnostic": {
+    "pr_number": 1861,
+    "head": "85a601fec9fe5f7b4ead6835edf17ebab6b406f7",
+    "run_id": 41148120880,
+    "job_id": 124378335406,
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/41148120880/job/124378335406",
+    "observed_error": "KeyError: scheduler during teardown of tests/test_health_readiness.py::test_health_stays_http_200_in_every_state",
+    "scope": "One retained job log inspected; no attribution to Office changes or extrapolation to other shards",
+    "log_sha256": "bc3bd52b915ce4e76dad91c592340242c6cf9c7bd4e39704b76450f7c2f30b8f"
+  }
+}

@@ -58,13 +58,18 @@ def test_minimax_first_worker_suite_runs_whenever_qualified_lane_is_present() ->
 def test_terminal_poll_margin_suite_runs_for_both_distinct_launchers() -> None:
     candidate = (NATIVE / "candidate/remote_sub.sh").read_text(encoding="utf-8")
     grok = GROK_OVERLAY.read_text(encoding="utf-8")
-    marker = 'if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then'
-    # Both distinct launchers must reserve the margin without overwriting
-    # the Grok-only content; never assert complete file byte equality.
-    in_candidate = marker in candidate
-    in_grok = marker in grok
-    assert in_candidate == in_grok, (
-        "terminal polling margin is applied to only one launcher"
+    old_margin = 'if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then'
+    observed_margin = (
+        'actual_observation_poll="$POLL_SECS"' in candidate
+        and '[ "$actual_observation_poll" -le 30 ] || actual_observation_poll=30' in candidate
+        and 'if [ "$MAX_SECS" -gt $((2 * actual_observation_poll)) ]; then' in candidate
     )
-    if in_candidate:
-        _suite("test_terminal_poll_margin", minimum_cases=6)
+    # Different launchers intentionally keep different *observation*
+    # policies, but BOTH must retain the finite two-observation cleanup
+    # margin. The newer adaptive controller uses its ACTUAL <=30s cadence;
+    # the Grok overlay still uses its old configured interval unchanged.
+    assert (old_margin in grok), "Grok launcher lost its finite cleanup margin"
+    assert (old_margin in candidate or observed_margin), (
+        "native controller lost its finite cleanup margin"
+    )
+    _suite("test_terminal_poll_margin", minimum_cases=6)

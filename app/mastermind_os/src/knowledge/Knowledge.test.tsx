@@ -37,7 +37,8 @@ describe("Knowledge owner-reference view", () => {
     expect(screen.getByRole("region", { name: "Knowledge source" }).textContent).toContain(state);
     expect(!!screen.queryByRole("button", { name: "Inspect Program · review" })).toBe(["CURRENT", "STALE"].includes(state));
     if (!["CURRENT", "STALE"].includes(state)) expect(document.body.textContent).not.toContain("example/repo");
-    expect(screen.getByText(/Company-wide coverage is not established/)).toBeTruthy();
+    expect(screen.getByText("References from the selected work only. Other records may not appear here.")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Knowledge source" }).querySelector("details")?.textContent).toContain(state);
   });
   it("keeps partial or missing reference provenance UNKNOWN even with a current Mission", () => {
     const i = input(); i.mission!.value!.program.evidence[0].source_revision = null;
@@ -126,6 +127,9 @@ describe("Knowledge owner-reference view", () => {
     await user.click(trigger);
     const search = screen.getByRole("searchbox", { name: "Search supplied knowledge" });
     await user.type(search, "absent"); expect(trigger.isConnected).toBe(false);
+    // The two new source-details disclosures remain in natural keyboard order.
+    await user.tab(); expect(document.activeElement?.tagName).toBe("SUMMARY");
+    await user.tab(); expect(document.activeElement?.tagName).toBe("SUMMARY");
     await user.tab();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close source context" }));
     await user.keyboard("{Escape}");
@@ -154,4 +158,13 @@ describe("Knowledge owner-reference view", () => {
     expect(document.body.textContent).not.toContain("example/repo");
     expect(screen.getByRole<HTMLInputElement>("searchbox", { name: "Search supplied knowledge" }).value).toBe("");
   });
+});
+
+
+it.each(["en", "zh-CN"] as const)("shows the unavailable coverage label in %s without inventing a SourceState", locale => {
+  const i=input(); i.mission=null;
+  render(<Knowledge projection={projectOffice(i,context)} locale={locale}/>);
+  const region=screen.getByRole("region",{name:locale==="en"?"Knowledge source":"知识来源"});
+  expect(region.querySelector("span")?.textContent).toBe(locale==="en"?"Not available here":"此处暂不可用");
+  expect(region.querySelector("details")?.textContent).toContain("UNAVAILABLE · NOT_PROJECTED");
 });

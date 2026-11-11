@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ctypes
 import errno
+from functools import lru_cache
 import grp
 import hmac
 import os
@@ -24,7 +25,14 @@ class FilesystemSecurityError(RuntimeError):
     """A filesystem security observation could not be completed."""
 
 
-def _bind_macos_acl_functions() -> tuple[Any, Any, Any, Any]:
+@lru_cache(maxsize=1)
+def _bind_macos_acl_functions() -> tuple[Any, Any, Any]:
+    """Reuse native call signatures only; every ACL observation stays fresh.
+
+    Binding is lazy so unsupported hosts keep their existing behavior. Failed
+    lookups are not cached. Each caller still invokes libc with its current
+    descriptor/ACL handle and owns that observation's errno and cleanup.
+    """
     libc = ctypes.CDLL(None, use_errno=True)
     try:
         acl_get_fd = libc.acl_get_fd

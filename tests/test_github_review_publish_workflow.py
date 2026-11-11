@@ -22,8 +22,10 @@ class Tokens:
         return "bounded-test-token"
 
 
-def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False, draft=False):
-    state = {"posts": [], "reviews": [], "source_reads": 0}
+def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False, draft=False,
+            readback_unavailable_after_post=False):
+    state = {"posts": [], "reviews": [], "source_reads": 0, "moved_head": moved_head,
+             "readback_unavailable_after_post": readback_unavailable_after_post}
 
     def handler(req):
         assert req.url.host == "api.github.com"
@@ -37,12 +39,14 @@ def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False, dr
             return httpx.Response(200, json={
                 "number": 42, "state": "open", "draft": draft,
                 "user": {"login": "alice", "id": current_submitter_id},
-                "head": {"sha": ("b" if moved_head else "a") * 40,
+                "head": {"sha": ("b" if state["moved_head"] else "a") * 40,
                          "repo": {"full_name": REPO}},
                 "base": {"sha": "c" * 40, "repo": {"full_name": REPO}},
                 "title": "Reviewed source", "body": "Separate worker review.",
             })
         if req.method == "GET" and req.url.path.endswith("/pulls/42/reviews"):
+            if state["posts"] and state["readback_unavailable_after_post"]:
+                raise httpx.ReadTimeout("readback temporarily unavailable", request=req)
             return httpx.Response(200, json=state["reviews"])
         if req.method == "POST" and req.url.path.endswith("/pulls/42/reviews"):
             body = __import__("json").loads(req.content)

@@ -1,7 +1,11 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { MissionSelection } from "../mission";
 import type { OperationPointer } from "../orchestration/operation-controller";
-import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
+import {
+  qualifiedAnswerVariant,
+  type HermesNativePublicResult,
+  type QualifiedSessionAnswerValue,
+} from "../orchestration/executive-session-command-port";
 import type { MountedExecutiveSessionBinding } from "../orchestration/os-executive-session-host";
 
 type Row = Readonly<{
@@ -12,7 +16,8 @@ type Row = Readonly<{
 }>;
 const SHA = /^[0-9a-f]{64}$/;
 const KEY = /^session-continue-[0-9a-f]{64}$/;
-const TARGET = /^fabric_attempt:[0-9a-f]{64}$/;
+/** The closed canonical target-prefix union: a mixed page stays readable. */
+const TARGET = /^(?:fabric_attempt|hermes_secretary|hermes_meta):[0-9a-f]{64}$/;
 const READ = /^session-reply-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
 // Each Runtime page reads at most 256 event metadata rows. Never let an
@@ -139,7 +144,9 @@ export function HistoricalOriginalAnswers({
   const [rows, setRows] = useState<Row[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [watermark, setWatermark] = useState<number | null>(null);
-  const [selected, setSelected] = useState<{ row: Row; answer: QualifiedSessionAnswer } | null>(null);
+  const [selected, setSelected] = useState<{
+    row: Row; answer: QualifiedSessionAnswerValue; nativeResult: HermesNativePublicResult | null;
+  } | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "unavailable">("idle");
   const epoch = useRef(0);
   const controller = useRef<AbortController | null>(null);
@@ -213,12 +220,33 @@ export function HistoricalOriginalAnswers({
     void qualified(pointer,c.signal).then(read => {
       if (c.signal.aborted || epoch.current !== e) return;
       if (read.receipt.disposition !== "accepted" || !read.answer ||
-          read.answer.parentConsumed !== false || read.answer.readRef !== row.read_ref) {
+          read.answer.parentConsumed !== false || read.answer.readRef !== row.read_ref ||
+          read.receipt.operationKey !== row.operation_key ||
+          read.receipt.targetKey !== row.target_ref) {
         setState("unavailable"); return;
       }
-      setSelected({row,answer:read.answer}); setState("idle");
+      const nativeResult = read.nativeResult ?? null;
+      // A native answer must still join the row's original target, operation
+      // key, read reference, request reference and request revision.
+      if (nativeResult &&
+          (nativeResult.target_ref !== row.target_ref ||
+            nativeResult.operation_key !== row.operation_key ||
+            nativeResult.read_ref !== row.read_ref ||
+            nativeResult.request_ref !== row.request_ref ||
+            nativeResult.request_revision !== row.request_revision)) {
+        setState("unavailable"); return;
+      }
+      setSelected({row, answer: read.answer, nativeResult}); setState("idle");
     }).catch(() => { if (!c.signal.aborted && epoch.current === e) setState("unavailable"); });
   };
+
+  const selectedNative = selected && qualifiedAnswerVariant(selected.answer) !== "fabric_attempt";
+  const selectedNextStep = selected && !selectedNative
+    ? (selected.answer as { readonly nextStep: string }).nextStep
+    : null;
+  const selectedSuccessful = selectedNative
+    ? (selected.answer as { readonly successful: boolean }).successful
+    : null;
 
   if (!renderIsQualified || !binding || !selection || !principalScope || !generation || !reading || !qualified) return null;
   return <section className="conversation-result" aria-label="Original answer references">
@@ -229,7 +257,10 @@ export function HistoricalOriginalAnswers({
       onClick={() => open(row)}>Open original request · {row.requested_at}</button>)}
     {selected && selected.row.read_ref !== activeReadRef && <div aria-label="Historical original answer">
       <p>{selected.answer.text}</p>
-      <p>Next step: {selected.answer.nextStep}</p>
+      {selectedNextStep ? <p>Next step: {selectedNextStep}</p> : null}
+      {selectedSuccessful !== null ? (
+        <p>{selectedSuccessful ? "Reply available." : "Unsuccessful native result available."}</p>
+      ) : null}
       <code>{selected.answer.readRef}</code>
     </div>}
     {cursor && rows.length < 128 && <button type="button" disabled={state === "loading"} onClick={loadMore}>More original requests</button>}

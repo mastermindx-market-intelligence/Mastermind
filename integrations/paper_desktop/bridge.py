@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -29,13 +29,11 @@ DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
 SUPPORTED_SERVER = ("paper-desktop", None)
 SUPPORTED_CATALOG_SHA256 = "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db"
-# Independently reviewed Paper Desktop 0.5.15 catalog: same 37 tools,
-# only get_jsx's format-default description and enum ordering changed.
-# Keep exact full-catalog fingerprint admission, not schema-subset matching.
-# The observed 0.5.18 41-tool catalog is preserved byte-for-byte in
-# tests/fixtures/paper_desktop/16e6b_full_catalog.json. Four new resource
-# commands remain blocked; changed set_text_content requires rich HTML.
-# A descriptor change other than these exact reviewed digests must fail closed.
+# Retain historic full-catalog hashes as provenance and as the private
+# exact-pin test seam. Production admission now checks reviewed *individual*
+# tool input contracts, rather than comparing the entire vendor catalog.
+# The observed 0.5.18 41-tool catalog remains in the immutable test fixture;
+# four new resource commands are still blocked by the tool-name allowlists.
 PAPER_RICH_TEXT_CATALOG_SHA256 = "16e6b93f0c51a1574ba8acee4df732052898707a04731d3817530971a88fdefd"
 # Paper Desktop 0.5.16 on M1 is a *distinct*, independently observed
 # 37-tool full catalog. Exactly six existing descriptors differ from the
@@ -61,6 +59,576 @@ EDIT_TOOLS = frozenset({
     "arrange_pages", "update_pages",
 })
 FILE_MANAGE_TOOLS = frozenset({"create_file", "rename_resource"})
+
+# Version-independent tool capability contract. Reviewed references come from
+# accepted full catalogs or exact observed tool descriptors retained in fixtures.
+# Admission tests each current tool *independently*. Presentation strings and
+# unrelated vendor tools never disable a usable tool. The shapes and safety annotations
+# remain source-reviewed. Do not turn this into a trust-all version fallback.
+REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'order': {'items': {'anyOf': [{'type': 'string'},
+                                                                                 {'additionalProperties': False,
+                                                                                  'properties': {'type': {'const': 'divider',
+                                                                                                          'type': 'string'}},
+                                                                                  'required': ['type'],
+                                                                                  'type': 'object'}]},
+                                                             'type': 'array'},
+                                                   'removeDividerIds': {'items': {'type': 'string'},
+                                                                        'type': 'array'}},
+                                    'required': ['fileId', 'order'],
+                                    'type': 'object'}}],
+ 'create_artboard': [{'annotations': {'destructiveHint': True},
+                      'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                      'additionalProperties': False,
+                                      'properties': {'fileId': {'type': 'string'},
+                                                     'name': {'type': 'string'},
+                                                     'pageId': {'type': 'string'},
+                                                     'styles': {'additionalProperties': {'anyOf': [{'type': 'string'},
+                                                                                                   {'type': 'number'}]},
+                                                                'properties': {'height': {'type': 'string'},
+                                                                               'width': {'type': 'string'}},
+                                                                'required': ['height', 'width'],
+                                                                'type': 'object'}},
+                                      'required': ['fileId', 'name', 'styles'],
+                                      'type': 'object'}}],
+ 'create_file': [{'annotations': {'destructiveHint': True},
+                  'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                  'additionalProperties': False,
+                                  'properties': {'cloneFileId': {'type': 'string'},
+                                                 'name': {'type': 'string'},
+                                                 'parentId': {'type': 'string'}},
+                                  'type': 'object'}},
+                 {'annotations': {'destructiveHint': True},
+                  'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                  'additionalProperties': False,
+                                  'properties': {'cloneFileId': {'type': 'string'},
+                                                 'name': {'type': 'string'}},
+                                  'type': 'object'}}],
+ 'create_page': [{'annotations': {'destructiveHint': True},
+                  'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                  'additionalProperties': False,
+                                  'properties': {'fileId': {'type': 'string'},
+                                                 'icon': {'enum': ['arrow',
+                                                                   'bar-chart',
+                                                                   'blueprint',
+                                                                   'check',
+                                                                   'cross',
+                                                                   'design',
+                                                                   'images',
+                                                                   'info',
+                                                                   'line-chart',
+                                                                   'padlock',
+                                                                   'paper',
+                                                                   'pie-chart',
+                                                                   'presentation',
+                                                                   'question',
+                                                                   'swatches',
+                                                                   'table',
+                                                                   'vector'],
+                                                          'type': 'string'},
+                                                 'name': {'type': 'string'}},
+                                  'required': ['fileId'],
+                                  'type': 'object'}}],
+ 'create_tokens': [{'annotations': {'destructiveHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'tokens': {'items': {'additionalProperties': False,
+                                                                        'properties': {'description': {'maxLength': 1024,
+                                                                                                       'type': 'string'},
+                                                                                       'name': {'pattern': '^--[a-zA-Z0-9_-]+$',
+                                                                                                'type': 'string'},
+                                                                                       'type': {'enum': ['breakpoint',
+                                                                                                         'color',
+                                                                                                         'container',
+                                                                                                         'fontFamily',
+                                                                                                         'fontSize',
+                                                                                                         'fontWeight',
+                                                                                                         'letterSpacing',
+                                                                                                         'lineHeight',
+                                                                                                         'opacity',
+                                                                                                         'radius',
+                                                                                                         'spacing'],
+                                                                                                'type': 'string'},
+                                                                                       'value': {'anyOf': [{'type': 'string'},
+                                                                                                           {'type': 'number'}]}},
+                                                                        'required': ['name',
+                                                                                     'type',
+                                                                                     'value'],
+                                                                        'type': 'object'},
+                                                              'minItems': 1,
+                                                              'type': 'array'}},
+                                    'required': ['fileId', 'tokens'],
+                                    'type': 'object'}}],
+ 'duplicate_nodes': [{'annotations': {'destructiveHint': True},
+                      'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                      'additionalProperties': False,
+                                      'properties': {'fileId': {'type': 'string'},
+                                                     'nodes': {'items': {'additionalProperties': False,
+                                                                         'properties': {'id': {'type': 'string'},
+                                                                                        'parentId': {'type': 'string'}},
+                                                                         'required': ['id'],
+                                                                         'type': 'object'},
+                                                               'type': 'array'}},
+                                      'required': ['fileId', 'nodes'],
+                                      'type': 'object'}}],
+ 'find_nodes': [{'annotations': {'readOnlyHint': True},
+                 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                 'additionalProperties': False,
+                                 'properties': {'fileId': {'type': 'string'},
+                                                'filters': {'items': {'additionalProperties': False,
+                                                                      'properties': {'styleName': {'type': 'string'},
+                                                                                     'styleValue': {'type': 'string'}},
+                                                                      'type': 'object'},
+                                                            'minItems': 1,
+                                                            'type': 'array'},
+                                                'nodeId': {'type': 'string'},
+                                                'pageId': {'type': 'string'},
+                                                'textValue': {'type': 'string'}},
+                                 'required': ['fileId'],
+                                 'type': 'object'}}],
+ 'finish_working_on_nodes': [{'annotations': {'readOnlyHint': True},
+                              'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                              'additionalProperties': False,
+                                              'properties': {'fileId': {'type': 'string'},
+                                                             'nodeIds': {'items': {'type': 'string'},
+                                                                         'type': 'array'}},
+                                              'required': ['fileId'],
+                                              'type': 'object'}}],
+ 'get_basic_info': [{'annotations': {'readOnlyHint': True},
+                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                     'additionalProperties': False,
+                                     'properties': {'fileId': {'type': 'string'},
+                                                    'pageId': {'type': 'string'}},
+                                     'type': 'object'}}],
+ 'get_children': [{'annotations': {'readOnlyHint': True},
+                   'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                   'additionalProperties': False,
+                                   'properties': {'fileId': {'type': 'string'},
+                                                  'nodeId': {'type': 'string'}},
+                                   'required': ['fileId', 'nodeId'],
+                                   'type': 'object'}}],
+ 'get_comment_thread': [{'annotations': {'readOnlyHint': True},
+                         'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                         'additionalProperties': False,
+                                         'properties': {'commentThreadId': {'minLength': 1,
+                                                                            'type': 'string'},
+                                                        'fileId': {'type': 'string'}},
+                                         'required': ['commentThreadId', 'fileId'],
+                                         'type': 'object'}}],
+ 'get_computed_styles': [{'annotations': {'readOnlyHint': True},
+                          'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                          'additionalProperties': False,
+                                          'properties': {'fileId': {'type': 'string'},
+                                                         'nodeIds': {'items': {'type': 'string'},
+                                                                     'type': 'array'}},
+                                          'required': ['fileId', 'nodeIds'],
+                                          'type': 'object'}}],
+ 'get_fill_image': [{'annotations': {'readOnlyHint': True},
+                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                     'additionalProperties': False,
+                                     'properties': {'fileId': {'type': 'string'},
+                                                    'nodeId': {'type': 'string'}},
+                                     'required': ['fileId', 'nodeId'],
+                                     'type': 'object'}}],
+ 'get_font_family_info': [{'annotations': {'readOnlyHint': True},
+                           'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                           'additionalProperties': False,
+                                           'properties': {'familyNames': {'items': {'type': 'string'},
+                                                                          'type': 'array'},
+                                                          'fileId': {'type': 'string'}},
+                                           'required': ['familyNames', 'fileId'],
+                                           'type': 'object'}}],
+ 'get_guide': [{'annotations': {'readOnlyHint': True},
+                'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                'additionalProperties': False,
+                                'properties': {'topic': {'type': 'string'}},
+                                'required': ['topic'],
+                                'type': 'object'}}],
+ 'get_jsx': [{'annotations': {'readOnlyHint': True},
+              'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                              'additionalProperties': False,
+                              'properties': {'fileId': {'type': 'string'},
+                                             'format': {'enum': ['inline-styles', 'tailwind'],
+                                                        'type': 'string'},
+                                             'includeNodeIds': {'type': 'boolean'},
+                                             'includeRootPositioning': {'type': 'boolean'},
+                                             'nodeId': {'type': 'string'}},
+                              'required': ['fileId', 'nodeId'],
+                              'type': 'object'}}],
+ 'get_node_info': [{'annotations': {'readOnlyHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'nodeId': {'type': 'string'}},
+                                    'required': ['fileId', 'nodeId'],
+                                    'type': 'object'}}],
+ 'get_screenshot': [{'annotations': {'readOnlyHint': True},
+                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                     'additionalProperties': False,
+                                     'properties': {'fileId': {'type': 'string'},
+                                                    'nodeId': {'type': 'string'},
+                                                    'scale': {'type': 'number'}},
+                                     'required': ['fileId', 'nodeId'],
+                                     'type': 'object'}}],
+ 'get_selection': [{'annotations': {'readOnlyHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'}},
+                                    'type': 'object'}}],
+ 'get_tokens': [{'annotations': {'readOnlyHint': True},
+                 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                 'additionalProperties': False,
+                                 'properties': {'fileId': {'type': 'string'},
+                                                'format': {'enum': ['css', 'json', 'tailwind'],
+                                                           'type': 'string'},
+                                                'namePattern': {'type': 'string'},
+                                                'types': {'items': {'enum': ['breakpoint',
+                                                                             'color',
+                                                                             'container',
+                                                                             'fontFamily',
+                                                                             'fontSize',
+                                                                             'fontWeight',
+                                                                             'letterSpacing',
+                                                                             'lineHeight',
+                                                                             'opacity',
+                                                                             'radius',
+                                                                             'spacing'],
+                                                                    'type': 'string'},
+                                                          'type': 'array'}},
+                                 'required': ['fileId'],
+                                 'type': 'object'}}],
+ 'get_tree_summary': [{'annotations': {'readOnlyHint': True},
+                       'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                       'additionalProperties': False,
+                                       'properties': {'depth': {'type': 'number'},
+                                                      'fileId': {'type': 'string'},
+                                                      'nodeId': {'type': 'string'}},
+                                       'required': ['fileId', 'nodeId'],
+                                       'type': 'object'}}],
+ 'list_comment_thread_authors': [{'annotations': {'readOnlyHint': True},
+                                  'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                                  'additionalProperties': False,
+                                                  'properties': {'fileId': {'type': 'string'},
+                                                                 'pageId': {'type': 'string'}},
+                                                  'required': ['fileId'],
+                                                  'type': 'object'}}],
+ 'list_comment_threads': [{'annotations': {'readOnlyHint': True},
+                           'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                           'additionalProperties': False,
+                                           'properties': {'currentPageOnly': {'type': 'boolean'},
+                                                          'fileId': {'type': 'string'},
+                                                          'limit': {'maximum': 200,
+                                                                    'minimum': 1,
+                                                                    'type': 'integer'},
+                                                          'nodeId': {'type': 'string'},
+                                                          'offset': {'maximum': 9007199254740991,
+                                                                     'minimum': 0,
+                                                                     'type': 'integer'},
+                                                          'pageId': {'type': 'string'},
+                                                          'participantUserId': {'type': 'string'},
+                                                          'previewLength': {'maximum': 1000,
+                                                                            'minimum': 20,
+                                                                            'type': 'integer'},
+                                                          'search': {'type': 'string'},
+                                                          'searchScope': {'enum': ['all-messages',
+                                                                                   'first-message'],
+                                                                          'type': 'string'},
+                                                          'sortDirection': {'enum': ['asc', 'desc'],
+                                                                            'type': 'string'},
+                                                          'sortField': {'enum': ['createdAt',
+                                                                                 'page',
+                                                                                 'updatedAt'],
+                                                                        'type': 'string'},
+                                                          'status': {'enum': ['all', 'open', 'resolved'],
+                                                                     'type': 'string'},
+                                                          'threadAuthorUserId': {'type': 'string'}},
+                                           'required': ['fileId'],
+                                           'type': 'object'}}],
+ 'list_resources': [{'annotations': {'readOnlyHint': True},
+                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                     'additionalProperties': False,
+                                     'properties': {'includeArchived': {'type': 'boolean'},
+                                                    'limit': {'maximum': 200,
+                                                              'minimum': 1,
+                                                              'type': 'integer'},
+                                                    'parentId': {'type': 'string'}},
+                                     'type': 'object'}},
+                    {'annotations': {'readOnlyHint': True},
+                     'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                     'additionalProperties': False,
+                                     'properties': {'limit': {'maximum': 200,
+                                                              'minimum': 1,
+                                                              'type': 'integer'}},
+                                     'type': 'object'}}],
+ 'move_nodes': [{'annotations': {'destructiveHint': True},
+                 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                 'additionalProperties': False,
+                                 'properties': {'fileId': {'type': 'string'},
+                                                'moves': {'items': {'anyOf': [{'additionalProperties': False,
+                                                                               'properties': {'before': {'type': 'string'},
+                                                                                              'nodeId': {'type': 'string'}},
+                                                                               'required': ['before',
+                                                                                            'nodeId'],
+                                                                               'type': 'object'},
+                                                                              {'additionalProperties': False,
+                                                                               'properties': {'after': {'type': 'string'},
+                                                                                              'nodeId': {'type': 'string'}},
+                                                                               'required': ['after',
+                                                                                            'nodeId'],
+                                                                               'type': 'object'},
+                                                                              {'additionalProperties': False,
+                                                                               'properties': {'index': {'maximum': 9007199254740991,
+                                                                                                        'minimum': 0,
+                                                                                                        'type': 'integer'},
+                                                                                              'nodeId': {'type': 'string'},
+                                                                                              'parentId': {'type': 'string'}},
+                                                                               'required': ['nodeId',
+                                                                                            'parentId'],
+                                                                               'type': 'object'}]},
+                                                          'minItems': 1,
+                                                          'type': 'array'}},
+                                 'required': ['fileId', 'moves'],
+                                 'type': 'object'}}],
+ 'rename_nodes': [{'annotations': {'destructiveHint': True},
+                   'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                   'additionalProperties': False,
+                                   'properties': {'fileId': {'type': 'string'},
+                                                  'updates': {'items': {'additionalProperties': False,
+                                                                        'properties': {'name': {'type': 'string'},
+                                                                                       'nodeId': {'type': 'string'}},
+                                                                        'required': ['name', 'nodeId'],
+                                                                        'type': 'object'},
+                                                              'type': 'array'}},
+                                   'required': ['fileId', 'updates'],
+                                   'type': 'object'}}],
+ 'rename_resource': [{'annotations': {'destructiveHint': True},
+                      'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                      'additionalProperties': False,
+                                      'properties': {'name': {'type': 'string'},
+                                                     'resourceId': {'type': 'string'}},
+                                      'required': ['name', 'resourceId'],
+                                      'type': 'object'}}],
+ 'set_comment_thread_status': [{'annotations': {'destructiveHint': True},
+                                'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                                'additionalProperties': False,
+                                                'properties': {'commentThreadId': {'minLength': 1,
+                                                                                   'type': 'string'},
+                                                               'fileId': {'type': 'string'},
+                                                               'status': {'enum': ['open', 'resolved'],
+                                                                          'type': 'string'}},
+                                                'required': ['commentThreadId', 'fileId', 'status'],
+                                                'type': 'object'}}],
+ 'set_text_content': [{'annotations': {'destructiveHint': True},
+                       'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                       'additionalProperties': False,
+                                       'properties': {'fileId': {'type': 'string'},
+                                                      'updates': {'items': {'additionalProperties': False,
+                                                                            'properties': {'html': {'type': 'string'},
+                                                                                           'nodeId': {'type': 'string'}},
+                                                                            'required': ['html', 'nodeId'],
+                                                                            'type': 'object'},
+                                                                  'type': 'array'}},
+                                       'required': ['fileId', 'updates'],
+                                       'type': 'object'}},
+                      {'annotations': {'destructiveHint': True},
+                       'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                       'additionalProperties': False,
+                                       'properties': {'fileId': {'type': 'string'},
+                                                      'updates': {'items': {'additionalProperties': False,
+                                                                            'properties': {'nodeId': {'type': 'string'},
+                                                                                           'textContent': {'type': 'string'}},
+                                                                            'required': ['nodeId',
+                                                                                         'textContent'],
+                                                                            'type': 'object'},
+                                                                  'type': 'array'}},
+                                       'required': ['fileId', 'updates'],
+                                       'type': 'object'}}],
+ 'set_tokens': [{'annotations': {'destructiveHint': True},
+                 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                 'additionalProperties': False,
+                                 'properties': {'fileId': {'type': 'string'},
+                                                'tokens': {'items': {'additionalProperties': False,
+                                                                     'properties': {'delete': {'type': 'boolean'},
+                                                                                    'description': {'maxLength': 1024,
+                                                                                                    'type': 'string'},
+                                                                                    'name': {'pattern': '^--[a-zA-Z0-9_-]+$',
+                                                                                             'type': 'string'},
+                                                                                    'newName': {'pattern': '^--[a-zA-Z0-9_-]+$',
+                                                                                                'type': 'string'},
+                                                                                    'value': {'anyOf': [{'type': 'string'},
+                                                                                                        {'type': 'number'}]}},
+                                                                     'required': ['name'],
+                                                                     'type': 'object'},
+                                                           'minItems': 1,
+                                                           'type': 'array'}},
+                                 'required': ['fileId', 'tokens'],
+                                 'type': 'object'}}],
+ 'update_pages': [{'annotations': {'destructiveHint': True},
+                   'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                   'additionalProperties': False,
+                                   'properties': {'fileId': {'type': 'string'},
+                                                  'updates': {'items': {'additionalProperties': False,
+                                                                        'properties': {'icon': {'anyOf': [{'enum': ['arrow',
+                                                                                                                    'bar-chart',
+                                                                                                                    'blueprint',
+                                                                                                                    'check',
+                                                                                                                    'cross',
+                                                                                                                    'design',
+                                                                                                                    'images',
+                                                                                                                    'info',
+                                                                                                                    'line-chart',
+                                                                                                                    'padlock',
+                                                                                                                    'paper',
+                                                                                                                    'pie-chart',
+                                                                                                                    'presentation',
+                                                                                                                    'question',
+                                                                                                                    'swatches',
+                                                                                                                    'table',
+                                                                                                                    'vector'],
+                                                                                                           'type': 'string'},
+                                                                                                          {'type': 'null'}]},
+                                                                                       'name': {'type': 'string'},
+                                                                                       'pageId': {'type': 'string'}},
+                                                                        'required': ['pageId'],
+                                                                        'type': 'object'},
+                                                              'type': 'array'}},
+                                   'required': ['fileId', 'updates'],
+                                   'type': 'object'}}],
+ # The second style profile is the exact f200 tool-only descriptor fixture;
+ # primitive-union equivalence is not generalized to other tools or schemas.
+ 'update_styles': [{'annotations': {'destructiveHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'updates': {'items': {'additionalProperties': False,
+                                                                         'properties': {'nodeIds': {'items': {'type': 'string'},
+                                                                                                    'type': 'array'},
+                                                                                        'styles': {'additionalProperties': {'anyOf': [{'type': 'string'},
+                                                                                                                                      {'type': 'number'}]},
+                                                                                                   'propertyNames': {'type': 'string'},
+                                                                                                   'type': 'object'}},
+                                                                         'required': ['nodeIds', 'styles'],
+                                                                         'type': 'object'},
+                                                               'type': 'array'}},
+                                    'required': ['fileId', 'updates'],
+                                    'type': 'object'}},
+                   {'annotations': {'destructiveHint': True},
+                    'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                    'additionalProperties': False,
+                                    'properties': {'fileId': {'type': 'string'},
+                                                   'updates': {'items': {'additionalProperties': False,
+                                                                         'properties': {'nodeIds': {'items': {'type': 'string'},
+                                                                                                    'type': 'array'},
+                                                                                        'styles': {'additionalProperties': {'type': ['string', 'number']},
+                                                                                                   'propertyNames': {'type': 'string'},
+                                                                                                   'type': 'object'}},
+                                                                         'required': ['nodeIds', 'styles'],
+                                                                         'type': 'object'},
+                                                               'type': 'array'}},
+                                    'required': ['fileId', 'updates'],
+                                    'type': 'object'}}],
+ 'write_html': [{'annotations': {'destructiveHint': True},
+                 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                                 'additionalProperties': False,
+                                 'properties': {'fileId': {'type': 'string'},
+                                                'html': {'type': 'string'},
+                                                'mode': {'enum': ['insert-children', 'replace'],
+                                                         'type': 'string'},
+                                                'targetNodeId': {'type': 'string'}},
+                                 'required': ['fileId', 'html', 'mode', 'targetNodeId'],
+                                 'type': 'object'}}]}
+
+SCHEMA_PRESENTATION_KEYS = frozenset({"description", "title", "examples", "$comment"})
+
+
+def semantic_schema(value, *, _named_fields=False):
+    """Normalize schema prose while preserving legitimate input property names.
+
+    The key 'description' is presentation metadata in a schema node but is an
+    actual user-data field inside a 'properties' dictionary. Never discard
+    those named fields (including names like 'title' and '$comment').
+    Also preserve '$schema': it identifies JSON-Schema draft semantics, not
+    harmless presentation text.
+    """
+    if isinstance(value, dict):
+        normalized = {
+            key: semantic_schema(item, _named_fields=(
+                key in {"properties", "patternProperties", "$defs", "definitions"}))
+            for key, item in value.items()
+            if _named_fields or key not in SCHEMA_PRESENTATION_KEYS
+        }
+        if not _named_fields:
+            # Ordering is not part of JSON Schema required/enum semantics.
+            for key in ("required", "enum"):
+                if isinstance(normalized.get(key), list):
+                    normalized[key] = sorted(normalized[key], key=lambda item: encode(item))
+        return normalized
+    if isinstance(value, list):
+        return [semantic_schema(item) for item in value]
+    return value
+
+
+def _same_reviewed_json(left, right):
+    """JSON values are type-sensitive: safety true is not numeric 1.
+
+    Python dict equality aliases bool and int; canonical JSON bytes do not.
+    Invalid/nonserializable vendor inputs fail closed, never match a review.
+    """
+    try:
+        return encode(left) == encode(right)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        return False
+
+
+def compatible_tool_contract(tool_name, descriptor):
+    """Return reviewed profile and safe extra root-field names, or None.
+
+    A vendor may add optional top-level inputs, but we will NOT forward those
+    unreviewed inputs. Required inputs, nested shape, defaults, semantics-
+    bearing annotations and the original fields must stay reviewed.
+    """
+    if not isinstance(descriptor, dict) or descriptor.get("name") != tool_name:
+        return None
+    schema = descriptor.get("inputSchema")
+    if not isinstance(schema, dict) or not isinstance(schema.get("properties"), dict):
+        return None
+    actual = semantic_schema(schema)
+    annotations = semantic_schema(descriptor.get("annotations", {}))
+    if not isinstance(annotations, dict):
+        return None
+    for reviewed in REVIEWED_TOOL_CONTRACTS.get(tool_name, ()):
+        if not _same_reviewed_json(annotations, reviewed["annotations"]):
+            continue
+        known = semantic_schema(reviewed["inputSchema"])
+        if _same_reviewed_json(actual, known):
+            return {"profile": reviewed, "optional_new_inputs": []}
+        new_fields = set(actual.get("properties", {})) - set(known.get("properties", {}))
+        if not new_fields or not isinstance(actual.get("required", []), list):
+            continue
+        if any(key in actual.get("required", []) for key in new_fields):
+            continue
+        if any(not isinstance(actual["properties"][key], dict)
+               or "default" in actual["properties"][key] for key in new_fields):
+            continue
+        restricted = dict(actual, properties={
+            key: value for key, value in actual["properties"].items() if key not in new_fields})
+        if _same_reviewed_json(restricted, known):
+            return {"profile": reviewed, "optional_new_inputs": sorted(new_fields)}
+    return None
+
+
+def scoped_tool_compatibility(catalog):
+    """Read-only classification of each approved operation for this vendor run."""
+    if not isinstance(catalog, dict):
+        return {}
+    return {name: compatible_tool_contract(name, catalog.get(name))
+            for name in sorted(READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS)}
+
+
 PAPER_FILE_ID_RE = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
 # Native export, node deletion and undocumented page deletion remain unavailable.
 # File management is a separate explicitly guarded write action, not a hidden read.
@@ -431,21 +999,79 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
     expected_name = server_pin[0] if server_pin else None
     expected_version = server_pin[1] if server_pin and len(server_pin) > 1 else None
     server_name_ok = expected_name is None or actual["server_name"] == expected_name
-    # Paper's release version is diagnostic metadata, not a write-compatibility
-    # boundary. Exact reviewed tool schemas remain the fail-closed write gate.
     server_version_ok = expected_version is None or actual["server_version"] == expected_version
-    catalog_ok = (catalog_pin is None or actual["catalog_sha256"] == catalog_pin
-                  or (catalog_pin == SUPPORTED_CATALOG_SHA256
-                      and actual["catalog_sha256"] in REVIEWED_CATALOG_SHA256_ALTERNATES))
-    return {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
+
+    known_full = (actual["catalog_sha256"] == SUPPORTED_CATALOG_SHA256
+                  or actual["catalog_sha256"] in REVIEWED_CATALOG_SHA256_ALTERNATES)
+    # The test-only explicit pin stays exact and never inherits tolerant mode.
+    # Production always uses the default value and still checks every tool.
+    custom_pin = catalog_pin != SUPPORTED_CATALOG_SHA256
+    pin_ok = (not custom_pin or catalog_pin is None
+              or actual["catalog_sha256"] == catalog_pin)
+    classified = scoped_tool_compatibility(catalog)
+    # Preserve the existing exact-catalog test seam: passing a non-default
+    # digest still requires a byte-for-byte catalog match, never loose matching.
+    # No MCP or CLI input can select this internal-only _catalog_pin parameter.
+    critical_ok = ((pin_ok and "get_basic_info" in catalog) if custom_pin
+                   else classified.get("get_basic_info") is not None)
+    if custom_pin:
+        eligible = sorted(name for name in EDIT_TOOLS | FILE_MANAGE_TOOLS
+                          if name in catalog and pin_ok)
+    else:
+        eligible = sorted(name for name in EDIT_TOOLS | FILE_MANAGE_TOOLS
+                          if classified.get(name) is not None)
+    incompatible = sorted(name for name in EDIT_TOOLS | FILE_MANAGE_TOOLS
+                          if name not in eligible)
+    unrestricted = [name for name, profile in classified.items()
+                    if profile and profile["optional_new_inputs"]]
+    ok = bool(server_name_ok and server_version_ok and pin_ok and critical_ok and eligible)
+    return {**actual, "accepted_for_write": ok,
             "expected_server": [expected_name, expected_version] if server_pin else None,
             "server_name_compatible": server_name_ok,
             "server_version_compatible": server_version_ok,
             "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
-            "catalog_compatible": catalog_ok,
+            "catalog_compatible": bool(pin_ok and critical_ok and eligible),
+            "catalog_policy": "TOOL_SCOPED_CONTRACT_V1" if not custom_pin else "EXACT_CUSTOM_PIN",
+            "full_catalog_known": known_full,
             "expected_catalog_sha256": catalog_pin,
             "additional_reviewed_catalog_sha256": sorted(REVIEWED_CATALOG_SHA256_ALTERNATES)
-            if catalog_pin == SUPPORTED_CATALOG_SHA256 else []}
+                if not custom_pin else [],
+            "snapshot_tool_compatible": critical_ok,
+            "compatible_write_tools": eligible if ok else [],
+            "incompatible_write_tools": incompatible,
+            "optional_vendor_inputs_ignored": unrestricted}
+
+
+
+def qualify_call_arguments(tool, arguments, catalog, *, action, custom_exact_pin):
+    """Validate one requested call against its current reviewed tool profile."""
+    if tool not in catalog:
+        raise Refusal("TOOL_NOT_AVAILABLE")
+    if custom_exact_pin:
+        return
+    qualified = compatible_tool_contract(tool, catalog[tool])
+    if qualified is None:
+        raise Refusal("TOOL_SCHEMA_CHANGED",
+                      "Only this tool is unavailable; other compatible Paper operations remain active.")
+    # Benign optional vendor extensions remain unusable by bridge callers.
+    known_inputs = set(qualified["profile"]["inputSchema"].get("properties", {}))
+    upstream_keys = set(arguments) - ({"sourceFileId"} if action == "file_manage" else set())
+    if upstream_keys - known_inputs:
+        raise Refusal("UNREVIEWED_TOOL_ARGUMENTS")
+    if action in {"edit", "file_manage"} and tool == "set_text_content":
+        # Both text formats are reviewed; use the profile for this exact call.
+        fields = qualified["profile"]["inputSchema"]["properties"]["updates"]["items"]["properties"]
+        item_key = "html" if "html" in fields else "textContent"
+        updates = arguments.get("updates")
+        if not isinstance(updates, list) or not updates or any(
+            not isinstance(item, dict)
+            or set(item) != {"nodeId", item_key}
+            or not isinstance(item["nodeId"], str) or not item["nodeId"]
+            or not isinstance(item[item_key], str)
+            for item in updates
+        ):
+            raise Refusal("PAPER_RICH_TEXT_SCHEMA_REQUIRED"
+                          if item_key == "html" else "PAPER_LEGACY_TEXT_SCHEMA_REQUIRED")
 
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
@@ -484,36 +1110,51 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
     with desktop_lock(lock_root):
         client.initialize()
         if action == "status":
+            # Status calls get_basic_info implicitly. Qualify its live read
+            # annotations/input schema *before* any Paper tool is dispatched.
+            # A private exact-pin unit fixture retains its historical seam;
+            # MCP/CLI callers cannot override the default production pin.
+            status_catalog = client.catalog()
+            status_schema = schema_receipt(
+                client, status_catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
+            if _catalog_pin == SUPPORTED_CATALOG_SHA256:
+                if (not status_schema["server_name_compatible"]
+                        or not status_schema["server_version_compatible"]
+                        or not status_schema["snapshot_tool_compatible"]):
+                    raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             return {"state": "CONNECTED", "server": client.server, "endpoint": ENDPOINT,
                     "document": snapshot(client, execution_binding=execution_binding),
+                    "write_schema": status_schema,
                     "quota_remaining": None, "plan": "UNKNOWN"}
         catalog = client.catalog()
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
         if action == "catalog":
-            return {"server": client.server, "tools": [dict(catalog[n], bridge_access=("read" if n in READ_TOOLS else "edit"))
-                    for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
+            return {"server": client.server, "tools": [
+                        dict(catalog[n], bridge_access=(
+                            ("read" if compatible_tool_contract(n, catalog[n]) is not None
+                             else "read_held_schema") if n in READ_TOOLS else
+                            "edit" if n in schema["compatible_write_tools"] else "edit_held_schema"))
+                        for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS - FILE_MANAGE_TOOLS),
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
-        if (editing and schema["catalog_sha256"] in {
-                PAPER_RICH_TEXT_CATALOG_SHA256,
-                PAPER_M1_RICH_TEXT_CATALOG_SHA256
-        } and tool == "set_text_content"):
-            # Paper 0.5.16/0.5.18 require html, not legacy textContent.
-            # Refuse legacy payloads BEFORE dispatch so an ordinary schema
-            # error cannot become an ambiguous or wrong-content edit.
-            updates = arguments.get("updates")
-            if not isinstance(updates, list) or not updates or any(
-                not isinstance(item, dict)
-                or set(item) != {"nodeId", "html"}
-                or not isinstance(item["nodeId"], str) or not item["nodeId"]
-                or not isinstance(item["html"], str)
-                for item in updates
-            ):
-                raise Refusal("PAPER_RICH_TEXT_SCHEMA_REQUIRED")
         if editing and not schema["accepted_for_write"]:
-            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server identity or catalog schema changed; inspect read-only and review compatibility before editing.")
-        if tool not in catalog:
-            raise Refusal("TOOL_NOT_AVAILABLE")
+            raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED",
+                          "Paper identity, critical snapshot schema, or requested full-catalog pin is incompatible.")
+        # Explicit non-default exact pin remains a private test seam. Normal
+        # callers cannot select it and always use the tool-scoped contracts.
+        custom_exact_pin = (_catalog_pin != SUPPORTED_CATALOG_SHA256
+                            and (_catalog_pin is None or schema["catalog_sha256"] == _catalog_pin))
+        if action == "read" and not custom_exact_pin:
+            # An explicit guarded read also invokes the snapshot getter.
+            # Refuse altered/unsafe implicit getter contracts before either
+            # the guard read or the requested tool can reach Paper.
+            if (not schema["server_name_compatible"]
+                    or not schema["server_version_compatible"]
+                    or (expected_snapshot is not None
+                        and not schema["snapshot_tool_compatible"])):
+                raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
+        qualify_call_arguments(tool, arguments, catalog, action=action,
+                               custom_exact_pin=custom_exact_pin)
         if action == "file_manage":
             if tool == "create_file":
                 supplied_file = arguments.get("cloneFileId") or arguments.get("sourceFileId")
@@ -550,6 +1191,20 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             updates = arguments.get("tokens")
             if isinstance(updates, list) and any(isinstance(item, dict) and item.get("delete") is True for item in updates):
                 raise Refusal("TOKEN_DELETE_NOT_ALLOWED", "Delete tokens only through an explicitly reviewed destructive workflow.")
+        if before is not None and not custom_exact_pin:
+            # The guard getter is itself a vendor RPC. Requalify after it so
+            # material mid-operation drift cannot dispatch an obsolete call.
+            # This is pre-dispatch: refusal must not claim EFFECT_UNKNOWN.
+            catalog = client.catalog()
+            schema = schema_receipt(client, catalog, server_pin=_server_pin,
+                                    catalog_pin=_catalog_pin)
+            if (not schema["server_name_compatible"]
+                    or not schema["server_version_compatible"]
+                    or not schema["snapshot_tool_compatible"]
+                    or (editing and not schema["accepted_for_write"])):
+                raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
+            qualify_call_arguments(tool, arguments, catalog, action=action,
+                                   custom_exact_pin=False)
         # Paper validates its current input schema. A dispatched tool error may be partial.
         try:
             upstream_arguments = dict(arguments)
@@ -568,9 +1223,19 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
                 # default active-file context. Never infer a target from a name.
                 if not same_document({"kind": "file-id", "id": supplied_file}, basic_object(result)):
                     raise Refusal("FILE_ID_MISMATCH", "Paper target read did not return the requested file.")
-                # Keep page-specific content in result, but obtain the guard
-                # from the same file-only snapshot constructor used by edits.
-                # Installed host/runtime provenance and the mutex are retained.
+                # A page-specific result cannot mint the file-only snapshot
+                # used by edits. We must read the file-only getter again, but
+                # only after requalifying its *current* schema/annotations.
+                # The first getter may itself have changed the live catalog.
+                # No unreviewed second getter may reach the vendor.
+                if not custom_exact_pin:
+                    live_snapshot_schema = schema_receipt(
+                        client, client.catalog(), server_pin=_server_pin,
+                        catalog_pin=_catalog_pin)
+                    if (not live_snapshot_schema["server_name_compatible"]
+                            or not live_snapshot_schema["server_version_compatible"]
+                            or not live_snapshot_schema["snapshot_tool_compatible"]):
+                        raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
                 observed["document"] = snapshot(client, supplied_file, execution_binding=execution_binding)
                 observed["write_schema"] = schema
             return observed
@@ -578,6 +1243,15 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             return {"state": "EFFECT_UNKNOWN", "operation_id": operation_id, "tool": tool,
                     "result": result, "before": before, "retry_allowed": False, "reason": "UPSTREAM_TOOL_ERROR_MAY_BE_PARTIAL"}
         try:
+            # A write has already been dispatched. A newly unqualified getter
+            # is not a safe verification path: retain EFFECT_UNKNOWN/no replay.
+            if not custom_exact_pin:
+                after_schema = schema_receipt(client, client.catalog(), server_pin=_server_pin,
+                                              catalog_pin=_catalog_pin)
+                if (not after_schema["server_name_compatible"]
+                        or not after_schema["server_version_compatible"]
+                        or not after_schema["snapshot_tool_compatible"]):
+                    raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED")
             after = snapshot(client, supplied_file, execution_binding=execution_binding)
             matched = same_document(before["identity"], after["basic_info"])
             if action == "file_manage" and tool == "rename_resource":
@@ -658,3 +1332,4 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

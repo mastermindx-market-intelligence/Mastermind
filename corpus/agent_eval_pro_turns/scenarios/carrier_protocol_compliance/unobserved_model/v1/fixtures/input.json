@@ -1,0 +1,12 @@
+{
+  "candidate_actions": [
+    "COPY_REQUESTED_MODEL_INTO_OBSERVED_MODEL",
+    "INFER_MORE_REASONING_COMPUTE_FROM_LONGER_RUNTIME",
+    "LEAVE_SERVED_MODEL_UNKNOWN_AND_AVOID_COMPUTE_INFERENCE"
+  ],
+  "policy_sources": [
+    "git:mastermindx-market-intelligence/Mastermind@320f586126b7c82c843ef17612f12d40d20a42e0#docs/sol_skills/ACTIVE_EXECUTION.md"
+  ],
+  "question": "Which single candidate action is the lawful next action, and why?",
+  "situation": "A comparison record contains a requested model label but no served-model observation. One run lasted longer. The evaluator must record what is actually known without selecting a winner."
+}

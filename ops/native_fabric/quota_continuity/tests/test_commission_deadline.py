@@ -142,10 +142,15 @@ elif name == 'ssh':
         if case == 'launch_timeout': time.sleep(10); raise SystemExit(0)
         raise SystemExit(0)
     if '__REMOTE_SUB_PENDING__' in command:
-        record('poll'); print('0' if case == 'plain_ok' else '75'); raise SystemExit(0)
+        record('poll')
+        if case in ('poll_255_then_ok', 'poll_255_pending') and count('poll') == 1:
+            raise SystemExit(255)
+        if case == 'poll_255_pending':
+            print('__REMOTE_SUB_PENDING__'); raise SystemExit(0)
+        print('0' if case in ('plain_ok', 'poll_255_then_ok') else '75'); raise SystemExit(0)
     if 'tail -c 4096' in command:
         record('admission_read')
-        if case == 'admission_expiry': time.sleep(10)
+        if case == 'admission_expiry': time.sleep(35)
         print('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}')
         raise SystemExit(0)
     if 'support_bundle.py' in command:
@@ -162,7 +167,9 @@ elif name == 'ssh':
         raise SystemExit(0)
     if 'mkdir -p ~/lanes/tmp ' in command:
         record('setup')
-        if case == 'slow_setup': time.sleep(10)
+        # Exceed both real setup-expiry commissions (8s and 12s). The
+        # original controller deadline, not host overhead, must end this stall.
+        if case == 'slow_setup': time.sleep(20)
         raise SystemExit(0)
     if 'mkdir ' in command:
         record('support_mkdir'); raise SystemExit(0)
@@ -172,7 +179,7 @@ elif name == 'ssh':
         record('remote_cleanup'); raise SystemExit(0)
 elif name == 'scp':
     record('scp')
-    if case == 'slow_scp': time.sleep(10)
+    if case == 'slow_scp': time.sleep(20)
     if case == 'retry_ambiguous' and count('scp')==1: time.sleep(1.2)
     raise SystemExit(0)
 elif name == 'rsync':
@@ -277,7 +284,7 @@ class DeadlineValues(unittest.TestCase):
         for value in ('', '0', '01', '+1', ' 1', '1.0', True, 1.0, -1, 2**63):
             with self.subTest(value=value), self.assertRaises(deadline.CommissionDeadlineInvalid):
                 deadline.validate_deadline_ns(value)
-        for value in (-1, math.inf, math.nan, True, '1', 7201):
+        for value in (-1, math.inf, math.nan, True, '1', 14401):
             with self.subTest(value=value), self.assertRaises(deadline.CommissionDeadlineInvalid):
                 deadline.narrow_deadline_ns(None,value,now_ns=1_000_000_000)
 
@@ -362,6 +369,30 @@ class ControllerDeadline(unittest.TestCase):
         return dict(returncode=proc.returncode,stdout=stdout,stderr=stderr,events=events,
                     elapsed=time.monotonic()-started,budget=budget,origin=origin,receipts=receipts)
 
+    def test_normal_ssh_poll255_keeps_actual_receipt_and_allows_original_completion(self):
+        result = self.run_controller('poll_255_then_ok', budget=30, harness_timeout=40)
+        polls = [row for row in result['receipts'] if row['label'] == 'commission-poll']
+        self.assertEqual([row['returncode'] for row in polls], [255, 0], result)
+        self.assertTrue(all(row['cleanup']['reason'] == 'normal_completion' for row in polls))
+        self.assertEqual(sum(row['stage'] == 'launch' for row in result['events']), 1)
+        self.assertIn('POLL_TRANSPORT_FAILED rc=1 poll=1', result['stderr'])
+        self.assertIn('DONE rc=0 signal=ok', result['stderr'])
+        self.assertNotIn('CONTROLLER_PROCESS_UNPROVEN', result['stderr'])
+        self.assertNotIn('LEASE_PRESERVED effect_unknown=1', result['stderr'])
+        self.assertEqual(result['returncode'], 0, result)
+
+    def test_normal_poll255_without_remote_completion_remains_uncertain(self):
+        # Allow the real setup/custody phases to reach the first poll. The
+        # original finite controller deadline must still retain the live effect.
+        result = self.run_controller('poll_255_pending', budget=30, harness_timeout=45)
+        polls = [row for row in result['receipts'] if row['label'] == 'commission-poll']
+        self.assertTrue(polls, result)
+        self.assertEqual(polls[0]['returncode'], 255, result)
+        self.assertIn('POLL_TRANSPORT_FAILED rc=1 poll=1', result['stderr'])
+        self.assertNotIn('DONE rc=0 signal=ok', result['stderr'])
+        self.assertIn('LEASE_PRESERVED effect_unknown=1', result['stderr'])
+        self.assertEqual(sum(row['stage'] == 'launch' for row in result['events']), 1)
+
     def test_real_bash_passes_origin_and_bounds_capacity_wait(self):
         result=self.run_controller('deny')
         self.assertEqual(result['returncode'],75,result['stderr'])
@@ -374,30 +405,81 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_REFUSED rc=75',result['stderr'])
 
     def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
-        result=self.run_controller('slow_setup',budget=3)
+        # Reach granted-lease setup before its finite twenty-second stall.
+        result=self.run_controller('slow_setup',budget=14)
+        self.assertIn('setup',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-setup')
         self.assertNotIn('scp',[row['stage'] for row in result['events']])
 
     def test_owned_support_transfer_expiry_never_launches_worker(self):
-        result=self.run_controller('slow_scp',budget=3)
+        # Reach packet upload before a 20-second fixture stall beyond the 14s commission.
+        result=self.run_controller('slow_scp',budget=14)
+        self.assertIn('scp',[row['stage'] for row in result['events']],result)
         self.check_prelaunch_expiry(result,'commission-packet-upload')
 
     def check_prelaunch_expiry(self,result,label):
         self.assertEqual(result['returncode'],75,result['stderr'])
         stages=[row['stage'] for row in result['events']]
         self.assertIn('granted',stages);self.assertIn('release',stages);self.assertNotIn('launch',stages)
-        self.assertLess(result['elapsed'],result['budget']+2,result)
-        receipt=next(row for row in result['receipts'] if row['label']==label)
+        self.assertLess(result['elapsed'],result['budget']+8,result)
+        receipts=[row for row in result['receipts'] if row['label']==label]
+        self.assertEqual(len(receipts),1,result)
+        receipt=receipts[0]
         self.assertTrue(receipt['timed_out'])
         self.assertTrue(receipt['cleanup']['census_proven'])
         self.assertEqual(receipt['cleanup']['residual_count'],0)
 
+    def test_each_launch_refresh_recomputes_remaining_duration_deterministically(self):
+        # Execute the existing exact Bash policy seam. This is duration
+        # derivation coverage, not a claim that full setup reached two launches.
+        spec=importlib.util.spec_from_file_location('deadline_observation_policy',
+            ROOT/'tests/test_launch_observation_reserve.py')
+        policy=importlib.util.module_from_spec(spec);spec.loader.exec_module(policy)
+        states=self.root/'refresh-state.json'
+        helper=self.bin/'remaining-reader'
+        write(helper, '#!'+sys.executable+'\n'+textwrap.dedent(f"""
+            import json,sys
+            from pathlib import Path
+            path=Path({str(states)!r})
+            calls=json.loads(path.read_text()) if path.exists() else []
+            assert sys.argv[2]=='deadline-seconds'
+            calls.append(int(sys.argv[3]));path.write_text(json.dumps(calls))
+            print([9,6,5,4][len(calls)-1])
+        """),executable=True)
+        script=('log() {{ printf "%s\\n" "$*" >&2; }}; '
+            'COMMISSION_ACTIVE=1; MAX_SECS=12; POLL_SECS=1; RC=0; '
+            'REMOTE_SUB_PYTHON="{helper}"; HERE="{ext}";\n').format(helper=helper,ext=self.ext)
+        script+=policy._policy()+\
+            '\nfor attempt in 1 2 3; do commission_refresh_runtime launch || exit $?; printf "%s,%s\\n" "$MAX_SECS" "$CHILD_TIMEOUT"; done\n'+\
+            'commission_refresh_runtime launch; printf "refused=%s\\n" "$?"\n'
+        result=subprocess.run(['/bin/bash','-c',script],capture_output=True,text=True,timeout=5)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.splitlines(),['9,7','6,4','5,3','refused=75'])
+        self.assertEqual(json.loads(states.read_text()),[12,9,6,5])
+        self.assertIn('observation_reserve=5',result.stderr)
+
+    def test_original_twelve_second_controller_expiry_stays_prelaunch(self):
+        # Full real-clock setup remains charged to the original12s budget.
+        # The inert setup stall exceeds the entire commission even on a fast
+        # host; verify actual owned setup timeout, not a later-stage refusal.
+        result=self.run_controller('slow_setup',budget=12,broker_delay=1)
+        self.check_prelaunch_expiry(result,'commission-setup')
+        self.assertNotIn('scp',[row['stage'] for row in result['events']])
+        self.assertNotIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
+        self.assertTrue(result['receipts'])
+        for receipt in result['receipts']:
+            self.assertTrue(receipt['cleanup']['census_proven'])
+            self.assertEqual(receipt['cleanup']['residual_count'],0)
+
     def test_each_actual_launch_recomputes_duration_and_keeps_ambiguous_lease(self):
-        result=self.run_controller('retry_ambiguous',budget=12,broker_delay=1)
+        # This positive case must reach two launches; short-budget expiry
+        # remains covered by the separate finite negative fixtures.
+        result=self.run_controller('retry_ambiguous',budget=30,broker_delay=1,
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],255,result['stderr'])
         launches=[row for row in result['events'] if row['stage']=='launch']
         self.assertEqual(len(launches),2,result['stderr'])
-        self.assertLess(launches[0]['child_timeout'],10)
+        self.assertLess(launches[0]['child_timeout'],result['budget']-2)
         self.assertLess(launches[1]['child_timeout'],launches[0]['child_timeout'])
         for row in launches:
             self.assertEqual(row['remote_budget'],row['child_timeout'])
@@ -407,11 +489,13 @@ class ControllerDeadline(unittest.TestCase):
         self.assertIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
 
     def test_expired_admission_retry_keeps_terminal_and_collects_after_deadline(self):
-        # Leave room for real prelaunch preparation; the finite 10-second
-        # admission-read stall still exceeds the entire original budget.
-        result=self.run_controller('admission_expiry',budget=8)
+        # Reach the first observed terminal before the finite 35-second
+        # admission-read stall exceeds the same original 30-second budget.
+        result=self.run_controller('admission_expiry',budget=30,
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],75,result['stderr'])
         stages=[row['stage'] for row in result['events']]
+        self.assertIn('admission_read',stages)
         self.assertEqual(stages.count('launch'),1,result['stderr'])
         self.assertIn('collect',stages);self.assertIn('release',stages)
         collection=next(row for row in result['events'] if row['stage']=='collect')
@@ -519,8 +603,9 @@ class ControllerDeadline(unittest.TestCase):
         self.assertEqual(before,(retained.read_bytes(),retained.stat().st_ino,retained.stat().st_mtime_ns))
 
     def test_replaced_transport_observation_refuses_before_worker_launch(self):
-        result=self.run_controller('transport_observation_replaced',budget=8,
-                                   mode='qwen',model='qwen3.8-flash')
+        result=self.run_controller('transport_observation_replaced',budget=30,
+                                   mode='qwen',model='qwen3.8-flash',
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],78,result['stderr'])
         self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])
         stages=[row['stage'] for row in result['events']]
@@ -530,8 +615,9 @@ class ControllerDeadline(unittest.TestCase):
                           /'offline-transport_observation_replaced.transport-verified.json').exists())
 
     def test_mutated_remote_packet_refuses_launch_and_binding(self):
-        result=self.run_controller('transport_mutated_packet',budget=8,
-                                   mode='qwen',model='qwen3.8-flash')
+        result=self.run_controller('transport_mutated_packet',budget=30,
+                                   mode='qwen',model='qwen3.8-flash',
+                                   harness_timeout=40)
         self.assertEqual(result['returncode'],78,result['stderr'])
         self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])
         stages=[row['stage'] for row in result['events']]
@@ -661,6 +747,7 @@ class FullCliDeadline(unittest.TestCase):
         original=importlib.util.module_from_spec(spec);spec.loader.exec_module(original)
         with tempfile.TemporaryDirectory(prefix='full-cli-',dir=ROOT/'tests') as tmp:
             root=Path(tmp);source=root/'source';source.mkdir()
+            diagnostics=root/'diagnostics';diagnostics.mkdir(mode=0o700)
             names=(*original.SOURCE_SHA256,'remote_sub_helpers.py','commission_deadline.py',
                    'lane_runtime.py','quota_circuit.py','lease_broker.py')
             for name in names:
@@ -684,7 +771,7 @@ class FullCliDeadline(unittest.TestCase):
                     for path in (fixture_root/'ext/state/remote_sub').glob('*.json*'):
                         if path.is_file() and path.stat().st_size<=65536:
                             stages[path.name]=path.read_text()
-                    (ROOT/'tests/last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
+                    (diagnostics/'last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
                     return result
                 proc.communicate=communicate_and_retain
                 return proc
@@ -695,15 +782,17 @@ class FullCliDeadline(unittest.TestCase):
                 case.test_original_budget_bounds_real_cli_broker_wait_before_task_start()
             finally:
                 if (root/'last-run.json').exists():
-                    shutil.copyfile(root/'last-run.json',ROOT/'tests/last-full-cli-attempt.json')
+                    shutil.copyfile(root/'last-run.json',diagnostics/'last-full-cli-attempt.json')
                 if (root/'last-controller.stderr').exists():
-                    shutil.copyfile(root/'last-controller.stderr',ROOT/'tests/last-full-cli-attempt.stderr')
+                    shutil.copyfile(root/'last-controller.stderr',diagnostics/'last-full-cli-attempt.stderr')
             evidence=json.loads((root/'last-run.json').read_text())
             self.assertEqual(evidence['transport_or_task_invocation_count'],0)
             self.assertFalse(evidence['launch_log_present'])
             self.assertEqual(evidence['continuation_finished']['reason'],'commission_time_exhausted')
-            (ROOT/'tests/last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
-            (ROOT/'tests/last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+            (diagnostics/'last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
+            (diagnostics/'last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+            self.assertEqual(json.loads((diagnostics/'last-full-cli-green.json').read_text()),evidence)
+            self.assertTrue((diagnostics/'last-full-cli-request-stages.json').is_file())
 
 
 if __name__=='__main__':

@@ -52,10 +52,13 @@ class M1CatalogCompatibility(unittest.TestCase):
         self.assertTrue(bridge.schema_receipt(c,M1)["accepted_for_write"])
         altered=copy.deepcopy(M1)
         altered["get_jsx"]["description"] += " drift"
-        self.assertFalse(bridge.schema_receipt(c,altered)["accepted_for_write"])
+        self.assertTrue(bridge.schema_receipt(c,altered)["accepted_for_write"])
         altered=copy.deepcopy(M1)
         altered["set_text_content"]["inputSchema"]["properties"]["updates"]["items"]["properties"]["html"]["type"]="number"
-        self.assertFalse(bridge.schema_receipt(c,altered)["accepted_for_write"])
+        receipt=bridge.schema_receipt(c,altered)
+        self.assertTrue(receipt["accepted_for_write"])
+        self.assertNotIn("set_text_content",receipt["compatible_write_tools"])
+        self.assertIn("create_artboard",receipt["compatible_write_tools"])
         self.assertFalse(bridge.schema_receipt(c,M1,catalog_pin="0"*64)["accepted_for_write"])
         c.server["name"]="wrong-paper-server"
         self.assertFalse(bridge.schema_receipt(c,M1)["accepted_for_write"])

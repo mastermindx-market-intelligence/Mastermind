@@ -1,0 +1,65 @@
+/* The existing shared theme owns colors, typography and surfaces. */
+#portfolio-scenario-lab { min-width: 0; grid-column: span 12; width: 100%; }
+#portfolio-scenario-lab .scenario-panel {
+  background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--card-shadow);
+}
+#portfolio-scenario-lab summary { cursor: pointer; font-size: var(--fs-body); font-weight: 650; }
+#portfolio-scenario-lab p { margin: var(--space-3) 0; overflow-wrap: anywhere; }
+#portfolio-scenario-lab .scenario-muted { color: var(--muted); font-size: var(--fs-sm); }
+#portfolio-scenario-lab .scenario-note { border-left: 3px solid var(--info); padding-left: var(--space-3); font-size: var(--fs-sm); }
+#portfolio-scenario-lab .scenario-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); margin-top: var(--space-5); }
+#portfolio-scenario-lab .scenario-field { min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+#portfolio-scenario-lab label { display: block; font-size: var(--fs-sm); color: var(--muted); }
+#portfolio-scenario-lab :is(input, select, button) {
+  max-width: 100%; min-width: 0; font: inherit; color: var(--text); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: var(--space-2) var(--space-3);
+}
+#portfolio-scenario-lab :is(input, select) { width: 100%; }
+#portfolio-scenario-lab input[type="file"] { font-size: var(--fs-sm); }
+#portfolio-scenario-lab input::file-selector-button {
+  font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); margin-right: var(--space-2);
+}
+#portfolio-scenario-lab :is(summary, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--focus-ring); outline-offset: 3px;
+}
+#portfolio-scenario-lab .scenario-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-4) 0; }
+#portfolio-scenario-lab button { cursor: pointer; min-height: 44px; }
+#portfolio-scenario-lab button:disabled { opacity: .55; cursor: not-allowed; }
+#portfolio-scenario-lab #scenario-run:not(:disabled) { border-color: var(--info); }
+#portfolio-scenario-lab .scenario-input-summary { font-family: var(--font-mono); font-size: var(--fs-sm); }
+#portfolio-scenario-lab .scenario-pick { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
+#portfolio-scenario-lab .scenario-pick select { width: auto; flex: 1; }
+#portfolio-scenario-lab .scenario-baseline { font-size: var(--fs-body); font-weight: 600; }
+#portfolio-scenario-lab .scenario-warning { color: var(--warn); }
+#portfolio-scenario-lab .scenario-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+#portfolio-scenario-lab table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+#portfolio-scenario-lab :is(th, td) { padding: var(--space-3); vertical-align: top; border-bottom: 1px solid var(--line); text-align: right; }
+#portfolio-scenario-lab th { font-weight: 600; }
+#portfolio-scenario-lab th:first-child, #portfolio-scenario-lab td:last-child { text-align: left; }
+#portfolio-scenario-lab tbody th { max-width: 190px; overflow-wrap: anywhere; }
+#portfolio-scenario-lab td:not(:last-child) { white-space: nowrap; }
+#portfolio-scenario-lab td:last-child { min-width: 140px; max-width: 300px; overflow-wrap: anywhere; }
+#portfolio-scenario-lab small { display: block; color: var(--muted); margin-top: var(--space-1); overflow-wrap: anywhere; }
+#portfolio-scenario-lab .scenario-ineligible td:last-child { color: var(--warn); font-weight: 600; }
+#portfolio-scenario-lab #scenario-status { font-size: var(--fs-sm); }
+@media (max-width: 640px) {
+  #portfolio-scenario-lab .scenario-panel { padding: var(--space-4); }
+  #portfolio-scenario-lab .scenario-form { grid-template-columns: minmax(0, 1fr); }
+  #portfolio-scenario-lab .scenario-pick { align-items: stretch; flex-direction: column; gap: var(--space-2); }
+  #portfolio-scenario-lab .scenario-pick select { width: 100%; }
+}
+
+/* On phones each alternative is a readable result card. The mandate warning is
+   visible without horizontally scrolling away from its return. */
+@media (max-width: 640px) {
+  #portfolio-scenario-lab .scenario-table-wrap { overflow: visible; border: 0; }
+  #portfolio-scenario-lab table, #portfolio-scenario-lab tbody { display: block; width: 100%; }
+  #portfolio-scenario-lab thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #portfolio-scenario-lab tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: var(--space-3); }
+  #portfolio-scenario-lab tbody th { grid-column: 1 / -1; max-width: none; text-align: left; font-family: var(--font-sans); font-size: var(--fs-body); text-transform: none; letter-spacing: normal; }
+  #portfolio-scenario-lab tbody td { display: block; min-width: 0; max-width: none; text-align: left; white-space: normal; }
+  #portfolio-scenario-lab tbody td::before { content: attr(data-label); display: block; font-weight: 400; color: var(--muted); font-size: var(--fs-sm); margin-bottom: var(--space-1); }
+  #portfolio-scenario-lab tbody td:last-child { grid-column: 1 / -1; min-width: 0; max-width: none; border-bottom: 0; }
+}

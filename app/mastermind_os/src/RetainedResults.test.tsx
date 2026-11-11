@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RetainedResults } from "./RetainedResults";
@@ -467,6 +468,7 @@ describe("epoch races, including A-B-A", () => {
     );
     await show();
     fireEvent.click(screen.getByRole("button", { name: "Open retained result — JOB-002" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to retained results" }));
     fireEvent.click(screen.getByRole("button", { name: "Open retained result — JOB-003" }));
     await screen.findByText("EXACT_RESULT_CARD:work:JOB-003");
     expect(resultSignals[0].aborted).toBe(true);
@@ -550,4 +552,93 @@ it("opens a retained result when the catalogue as-of is known but source freshne
   await screen.findByText("EXACT_RESULT_CARD:work:JOB-002");
   expect(readResult).toHaveBeenCalledTimes(1);
   expect(renderResult).toHaveBeenCalledTimes(1);
+});
+
+// An external Search request is a request to re-qualify this exact tuple,
+// never permission to bypass the current independently decoded owner index.
+const requestedExact: ResultSelection = {
+  workRef: "WS:ONE", rootJobId: INDEX.refs[1].root_job_id,
+  jobId: INDEX.refs[1].job_id, attemptId: INDEX.refs[1].attempt_id,
+  resultEnvelopeDigest: INDEX.refs[1].result_envelope_digest,
+};
+function requestedProps() {
+  return {
+    selection: {workRef: "WS:ONE", rootJobId: "JOB-001"}, requestedResult: requestedExact,
+    authGeneration: 1, hostGeneration: 2, locale: "en" as const, missionState: "CURRENT",
+    readReferences: vi.fn(async (_request: {workRef: string; rootJobId: string; signal: AbortSignal}): Promise<unknown> => availableBody()),
+    readResult: vi.fn(async (request: ResultSelection & {signal: AbortSignal}): Promise<unknown> => resultBody(request)),
+    renderResult: (selection: ResultSelection) => <div>REQUESTED_SOURCE:{selection.jobId}</div>,
+  };
+}
+describe("exact requested-result index join", () => {
+  it("restarts the aborted StrictMode setup without duplicate source reads", async () => {
+    const props = requestedProps();
+    render(<StrictMode><RetainedResults {...props} /></StrictMode>);
+    await screen.findByText("REQUESTED_SOURCE:JOB-003");
+    expect(props.readReferences.mock.calls[0][0].signal.aborted).toBe(true);
+    expect(props.readResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the owner index, then opens the exact second tuple rather than the first row", async () => {
+    const held = deferred(), props = requestedProps();
+    props.readReferences.mockImplementation(() => held.promise);
+    render(<RetainedResults {...props} />);
+    expect(props.readReferences).toHaveBeenCalledExactlyOnceWith({workRef: "WS:ONE", rootJobId: "JOB-001", signal: expect.any(AbortSignal)});
+    expect(props.readResult).not.toHaveBeenCalled();
+    held.resolve(availableBody());
+    await screen.findByText("REQUESTED_SOURCE:JOB-003");
+    expect(props.readResult).toHaveBeenCalledExactlyOnceWith({...requestedExact, signal: expect.any(AbortSignal)});
+    fireEvent.click(screen.getByRole("button", {name: "Back to retained results"}));
+    fireEvent.click(screen.getByRole("button", {name: "Refresh retained results"}));
+    await waitFor(() => expect(props.readReferences).toHaveBeenCalledTimes(2));
+    await flush();
+    expect(props.readResult).toHaveBeenCalledTimes(1);
+  });
+  it.each(["root", "work", "invalid"])("rejects a %s request before any index or detail read", async kind => {
+    const props = requestedProps();
+    const requestedResult = {...requestedExact};
+    if (kind === "root") requestedResult.rootJobId = "JOB-999";
+    if (kind === "work") requestedResult.workRef = "WS:OTHER";
+    if (kind === "invalid") requestedResult.resultEnvelopeDigest = "not-a-digest";
+    render(<RetainedResults {...props} requestedResult={requestedResult} />);
+    expect(screen.getByText(/invalid or outside the current project scope/)).toBeTruthy();
+    await flush();
+    expect(props.readReferences).not.toHaveBeenCalled();
+    expect(props.readResult).not.toHaveBeenCalled();
+  });
+  it("does not substitute another attempt or digest absent from the current index", async () => {
+    const props = requestedProps();
+    render(<RetainedResults {...props} requestedResult={{...requestedExact, resultEnvelopeDigest: HEX("9")}} />);
+    await screen.findByText("The requested exact result is not in this retained index.");
+    expect(props.readResult).not.toHaveBeenCalled();
+  });
+  it("never opens a detail after source-changed, malformed or unavailable index reads", async () => {
+    for (const body of [unavailableBody("SOURCE_CHANGED"), unavailableBody("SOURCE_UNAVAILABLE"), {}]) {
+      const props = requestedProps(); props.readReferences.mockResolvedValue(body);
+      const view = render(<RetainedResults {...props} />);
+      await waitFor(() => expect(props.readReferences).toHaveBeenCalledTimes(1));
+      await flush();
+      expect(props.readResult).not.toHaveBeenCalled();
+      view.unmount();
+    }
+  });
+  it("accepts an exact member of a qualified PARTIAL index", async () => {
+    const props = requestedProps(); props.readReferences.mockResolvedValue(availableBody("WS:ONE", {availability: "PARTIAL"}));
+    render(<RetainedResults {...props} />);
+    await screen.findByText("REQUESTED_SOURCE:JOB-003");
+    expect(props.readResult).toHaveBeenCalledTimes(1);
+  });
+  it("aborts an old auth read and denies its late index even when its tuple matches", async () => {
+    const old = deferred(), current = deferred(), props = requestedProps();
+    props.readReferences.mockImplementationOnce(() => old.promise).mockImplementationOnce(() => current.promise);
+    const view = render(<RetainedResults {...props} />);
+    const signal = props.readReferences.mock.calls[0][0].signal;
+    view.rerender(<RetainedResults {...props} authGeneration={2} />);
+    expect(signal.aborted).toBe(true);
+    old.resolve(availableBody()); await flush();
+    expect(props.readResult).not.toHaveBeenCalled();
+    current.resolve(availableBody());
+    await screen.findByText("REQUESTED_SOURCE:JOB-003");
+    expect(props.readResult).toHaveBeenCalledTimes(1);
+  });
 });

@@ -26,10 +26,20 @@ from tests.test_paid_authenticated_launch_producer import (
 
 rsa_key=auth.rsa_key
 short_socket_root=auth.short_socket_root
+# Execute the current composed controller (source recovery def1/7ab included).
+# Its accepted instruction_pause addition changes only the two closed kind lists;
+# the actual original Launch submit/GET recovery below must remain unchanged.
+# Accepted closed conversation kinds and canonical DATA readers extend the
+# imported modules; the original Launch/recovery behavior remains qualified below.
 EXTRA_PINS={
- 'orchestration/operation-controller.ts':'9f21d8b2231be09048b38c5c696e14d9c2a53d0a47d75387e4cd8f544fb444fd',
- 'mission.ts':'20bf1a35c5be760c8418930972ad9adaab23bbde36a3e8b88a2caa72b42b67bb',
- 'workspace-contract.ts':'14992cfc81dbc577cf50ba7198285b21652bb25eb5cc6c0efc53954e33ef11b1',
+ # Accepted AT24 ec343 observer retains original receipt provenance only;
+ # begin/recover/receipt validation and all original-effect guards are unchanged.
+ 'orchestration/operation-controller.ts':'a85991493f7b0073772401a547f10c871f22791d2255f4512581d13b59b59b9a',
+ 'mission.ts':'07e7ed5815788ee839aa2becdbd806443923f2249172de7997cae3770deb1c44',
+ 'workspace-contract.ts':'dece354a0c3744af41cf36e435cd8edee1f2247a0f7b07cef1974cc47d2990d5',
+ 'project-discovery.ts':'a4d539f729a9918585499c4c23fc169ed13439f102bf6554d5a2bcc284788742',
+ 'knowledge/library/project-data-observation.ts':'f2a1bb24330f5afc85c585b4746acc81b218a9e7cc4e675e9ec856cb0955b281',
+ 'knowledge/library/project-discovery-correction.ts':'6f02f16c2a5e3f07597e478cf5fd7ce62cb2289dbdbe25d750b67577191d79e0',
 }
 
 
@@ -38,14 +48,27 @@ def _compile_controller(tmp_path,scope):
     for name,digest in EXTRA_PINS.items():
         assert hashlib.sha256((ROOT/'app/mastermind_os/src'/name).read_bytes()).hexdigest()==digest
     script=r'''
-import fs from 'node:fs';import path from 'node:path';import {stripTypeScriptTypes} from 'node:module';
+import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';
 const i=JSON.parse(fs.readFileSync(0,'utf8'));
-for(const [name,file,oldPath,newPath] of [
- ['operation-controller','orchestration/operation-controller.ts','"../mission"','"./mission.mjs"'],
- ['mission','mission.ts','"./workspace-contract"','"./workspace-contract.mjs"'],
- ['workspace-contract','workspace-contract.ts',null,null]]){
- let code=stripTypeScriptTypes(fs.readFileSync(path.join(i.source,file),'utf8'),{mode:'transform'});
- if(oldPath){if(!code.includes(oldPath))throw Error('dependency drift');code=code.replace(oldPath,newPath);}
+const {sourceTransformer}=await import(pathToFileURL(path.resolve(i.source,'../../../tests/typescript_transform.mjs')));
+const transformSource=await sourceTransformer(i.source);
+for(const [name,file,replacements] of [
+ ['operation-controller','orchestration/operation-controller.ts',[['../mission','./mission.mjs']]],
+ ['mission','mission.ts',[['./workspace-contract','./workspace-contract.mjs']]],
+ ['workspace-contract','workspace-contract.ts',[['./project-discovery','./project-discovery.mjs']]],
+ ['project-discovery','project-discovery.ts',[
+   ['./orchestration/operation-key','./operation-key.mjs'],
+   ['./knowledge/library/project-data-observation','./project-data-observation.mjs']]],
+ ['project-data-observation','knowledge/library/project-data-observation.ts',[
+   ['./project-discovery-correction','./project-discovery-correction.mjs']]],
+ ['project-discovery-correction','knowledge/library/project-discovery-correction.ts',[
+   ['../../orchestration/operation-key','./operation-key.mjs']]]]){
+ let code=transformSource(file,fs.readFileSync(path.join(i.source,file),'utf8'));
+ for(const [oldPath,newPath] of replacements){
+  const quoted=[JSON.stringify(oldPath),"'"+oldPath+"'"].filter(value=>code.includes(value));
+  if(quoted.length!==1||code.split(quoted[0]).length!==2)throw Error('dependency drift');
+  code=code.replace(quoted[0],JSON.stringify(newPath));
+ }
  fs.writeFileSync(path.join(i.scratch,name+'.mjs'),code);
 }
 '''

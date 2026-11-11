@@ -1,0 +1,169 @@
+{
+  "schema": "fabric-original-package-return-qualification.v1",
+  "original_root_id": "fabric-application-integration-20261104-sol",
+  "original_run_id": "fabric-app-j-native-cohort-20261107-01",
+  "adapter_response_bytes": 16860,
+  "adapter_response_sha256": "14499ef9285da444b5801a50ded0615a4c114ff71750ae39a09bc4ed800f03df",
+  "patch_bytes": 24161,
+  "patch_sha256": "a71bac2d11eefbc5b56b4b72dab432279d7e2c6de860bfbc0bf83443aaf0c307",
+  "patch_git_blob": "cd3e8d25ecf8ea25775f2e6ce254342528e8a4ff",
+  "qualification": {
+    "source": "2cf01336ba7f7e5bc2011f50c0319892ddebb292",
+    "root": "/tmp/mmx-j-native-return-qualification-x_4595s_",
+    "original_source_archive_paths": [
+      "ops",
+      "control_plane",
+      "integrations",
+      "scripts",
+      "tests",
+      "config",
+      "common",
+      "brain",
+      "bot",
+      "bridge",
+      "data_layer",
+      "portfolio",
+      "pyproject.toml"
+    ],
+    "added_required_input": {
+      "path": "requirements/research-producer-macos-arm64-py312.lock",
+      "sha256": "0c43d2132a6afaba75e5b5720c234d1b565679b650d7c04c024a1a12d711206a"
+    },
+    "initial_export_failure": {
+      "missing": "requirements/research-producer-macos-arm64-py312.lock",
+      "log_sha256": "e47657f580f46cd0e5eaf97459a6d84e6cc431b83385b391e4d26bdac97c68a5"
+    },
+    "patch_blob": "cd3e8d25ecf8ea25775f2e6ce254342528e8a4ff",
+    "patch_sha256": "a71bac2d11eefbc5b56b4b72dab432279d7e2c6de860bfbc0bf83443aaf0c307",
+    "patch_bytes": 24161,
+    "preimage_postimage_blobs_verified": {
+      "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": [
+        "534781f3f3b2b24da054d5cf078fa8e6370c2809",
+        "5dbf9d7256c02739464ef5b1f9bb00718b97c5a6"
+      ],
+      "ops/native_fabric/quota_continuity/rollout/native-manifest.json": [
+        "dadf4a221cd49ee11e9e8c2cc2cf6a8d3b846e96",
+        "f861a31f777cf1ee4012972d965247e21d429fbf"
+      ],
+      "ops/native_fabric/quota_continuity/rollout/native-source-inventory.json": [
+        "6483174612dd59a12ae3f8f0084de91296b5656c",
+        "30c5d2883a1d38d426a590c30522dc8356efee98"
+      ],
+      "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py": [
+        "6d0f25296bdc43bb689e7073f79a61510d3fbcf4",
+        "8c06c4a3a57048088668565317e5e95132b6281d"
+      ]
+    },
+    "builds": [
+      {
+        "variant": "base",
+        "native_files": 107,
+        "total_bytes": 3233076,
+        "manifest_sha256": "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459",
+        "source_inventory_sha256": "8ea3e85095428833c78ce08309ca1a2db748a92e69f3023f03679df54298bc5f"
+      },
+      {
+        "variant": "go",
+        "native_files": 109,
+        "total_bytes": 3470233,
+        "manifest_sha256": "8c16dfb5a797fc135d77f4969199bb07f85987f4ef6d46860f4baa822f1a0458",
+        "source_inventory_sha256": "88d45742c7c537dadba69eb8a59b109ccabe7db73ae2a640d74cd75bda571c08"
+      },
+      {
+        "variant": "http",
+        "native_files": 112,
+        "total_bytes": 3553408,
+        "manifest_sha256": "4d2f717cd2b9c18d0d1ffa004757b26c5fa1a2b537882d38b0e10d561bdc7b4f",
+        "source_inventory_sha256": "8860516dcdac08c98c579621c8a6b26e91010a3682822252da71fe9cc6f02c69"
+      }
+    ],
+    "stage_totals": {
+      "tests": 148,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "records": [
+      {
+        "name": "before-complete-inputs",
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--include-go-application",
+          "--include-application-http",
+          "--output",
+          "/tmp/mmx-j-native-return-qualification-x_4595s_/baseline-complete-inputs"
+        ],
+        "exit": 1,
+        "seconds": 0.184,
+        "log_sha256": "9be02521f83c8f78ce760894b76069ab112b5f48365f17eeca0e2e692b391eb2",
+        "tail": "Traceback (most recent call last):\n  File \"/private/tmp/mmx-j-native-return-qualification-x_4595s_/ops/native_fabric/quota_continuity/rollout/build_review_stage.py\", line 769, in <module>\n    main()\n    ~~~~^^\n  File \"/private/tmp/mmx-j-native-return-qualification-x_4595s_/ops/native_fabric/quota_continuity/rollout/build_review_stage.py\", line 739, in main\n    normalize_application_carrier_base_manifest(manifest)\n    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^\n  File \"/private/tmp/mmx-j-native-return-qualification-x_4595s_/ops/native_fabric/quota_continuity/rollout/build_review_stage.py\", line 626, in normalize_application_carrier_base_manifest\n    manifest = before_application_pool_composition(manifest)\n  File \"/private/tmp/mmx-j-native-return-qualification-x_4595s_/ops/native_fabric/quota_continuity/rollout/build_review_stage.py\", line 594, in before_application_pool_composition\n    raise ValueError(\"application pool composition parent closure differs\")\nValueError: application pool composition parent closure differs\n"
+      },
+      {
+        "name": "base",
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--output",
+          "/tmp/mmx-j-native-return-qualification-x_4595s_/build-base"
+        ],
+        "exit": 0,
+        "seconds": 0.126,
+        "log_sha256": "f6f6031f40f7848ffc1ec091dee5567c21b02f6d036b2bfb7835df6223912533",
+        "tail": "{\"native_files\": 107, \"total_bytes\": 3233076, \"manifest_sha256\": \"c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459\", \"source_inventory_sha256\": \"8ea3e85095428833c78ce08309ca1a2db748a92e69f3023f03679df54298bc5f\"}\n"
+      },
+      {
+        "name": "go",
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--include-go-application",
+          "--output",
+          "/tmp/mmx-j-native-return-qualification-x_4595s_/build-go"
+        ],
+        "exit": 0,
+        "seconds": 0.124,
+        "log_sha256": "c63464909677730edf89956b23b70a5ad3c789353bd11a87fb16d828cdc7cb9a",
+        "tail": "{\"native_files\": 109, \"total_bytes\": 3470233, \"manifest_sha256\": \"8c16dfb5a797fc135d77f4969199bb07f85987f4ef6d46860f4baa822f1a0458\", \"source_inventory_sha256\": \"88d45742c7c537dadba69eb8a59b109ccabe7db73ae2a640d74cd75bda571c08\"}\n"
+      },
+      {
+        "name": "http",
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "ops/native_fabric/quota_continuity/rollout/build_review_stage.py",
+          "--include-go-application",
+          "--include-application-http",
+          "--output",
+          "/tmp/mmx-j-native-return-qualification-x_4595s_/build-http"
+        ],
+        "exit": 0,
+        "seconds": 0.128,
+        "log_sha256": "b430df9160d6394cc00443cf90d7f34a64e2eb006771d8dee2754c97859c45a1",
+        "tail": "{\"native_files\": 112, \"total_bytes\": 3553408, \"manifest_sha256\": \"4d2f717cd2b9c18d0d1ffa004757b26c5fa1a2b537882d38b0e10d561bdc7b4f\", \"source_inventory_sha256\": \"8860516dcdac08c98c579621c8a6b26e91010a3682822252da71fe9cc6f02c69\"}\n"
+      },
+      {
+        "name": "stage",
+        "command": [
+          "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+          "-m",
+          "pytest",
+          "-q",
+          "-p",
+          "no:cacheprovider",
+          "--basetemp",
+          "/tmp/mmx-j-native-return-qualification-x_4595s_/pytest",
+          "--junitxml=/tmp/mmx-j-native-return-stage.xml",
+          "ops/native_fabric/quota_continuity/tests/test_go_native_stage.py"
+        ],
+        "exit": 0,
+        "seconds": 1.256,
+        "log_sha256": "3a6d448bdce293ffbdd016e453d77f9295000170a2bc6267acf3e81622ae358a",
+        "tail": "........................................................................ [ 48%]\n........................................................................ [ 97%]\n....                                                                     [100%]\n"
+      }
+    ],
+    "junit_sha256": "09e530624ceab2c7f62c9d813d6cc12ab4fc81bda61fb63a0cb6b7a800c9c9c0",
+    "runtime_effects": "NONE; original artifact read, inert source exports and synthetic test fixtures only",
+    "application_sparse_composition": "Not yet qualified; this is the original worker source against its exact2cf pin."
+  },
+  "claim": "Exact original four-path source artifact reproduced on its commissioned base; no runtime installation or worker replay."
+}

@@ -1,17 +1,22 @@
 """Real host composition: signed GitHub event → App JWT/token → PR/actor → Runtime Job → Slack."""
 import asyncio
+import dataclasses
 import datetime
 import json
+import threading
 import time
 
 import httpx
+import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_host_config import ReviewHostSettings
 from control_plane.github_review_intent import sign_webhook_body
-from integrations.github_review_host_composition import compose_github_review_host
+from integrations.github_review_host_composition import (
+    GitHubReviewHostCompositionUnavailable, compose_github_review_host,
+)
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
 from integrations.slack_agent_dialogue.engine import SlackMessage
 
@@ -45,7 +50,7 @@ def _settings(enabled=True):
     )
 
 
-def _run(app):
+async def _deliver(app):
     body = json.dumps({
         "action": "labeled", "installation": {"id": 4242},
         "repository": {"full_name": REPO}, "number": 42,
@@ -64,11 +69,15 @@ def _run(app):
         return {"type": "http.request", "body": body, "more_body": False}
     async def send(event):
         events.append(event)
-    asyncio.run(app({
+    await app({
         "type": "http", "method": "POST", "path": app._settings.delivery_path,
         "query_string": b"", "scheme": "https", "headers": headers,
-    }, receive, send))
+    }, receive, send)
     return events[0]["status"], json.loads(events[1]["body"])
+
+
+def _run(app):
+    return asyncio.run(_deliver(app))
 
 
 def test_composition_proves_job_and_no_duplicate_with_real_app_jwt(tmp_path):
@@ -110,7 +119,11 @@ def test_composition_proves_job_and_no_duplicate_with_real_app_jwt(tmp_path):
         channel_id="C0CAUK8P8S3", bot_user_id="U0BT71H4FQE",
     )
     sent = []
+    post_started = threading.Event()
+    release_post = threading.Event()
     async def fake_post(*, channel_id, text):
+        post_started.set()
+        assert release_post.wait(timeout=5), "test loop closed before releasing Slack projection"
         sent.append(text)
         return SlackMessage(
             ts="1792699000.000001", author_user_id="U0BT71H4FQE", text=text,
@@ -127,8 +140,20 @@ def test_composition_proves_job_and_no_duplicate_with_real_app_jwt(tmp_path):
         app_token_http_client=httpx.Client(transport=httpx.MockTransport(token_http)),
         github_http_client=httpx.Client(transport=httpx.MockTransport(github_http)),
     )
-    assert _run(app)[0] == 202
-    assert _run(app)[1]["status"] == "ALREADY_ADMITTED"
+    async def exercise():
+        from test_github_review_receiver_capacity import drain
+        try:
+            assert (await _deliver(app))[0] == 202
+            assert await asyncio.to_thread(post_started.wait, 3)
+            # The same persistent host loop accepts/deduplicates while Slack
+            # is still blocked, then remains alive to settle that projection.
+            assert sent == []
+            assert (await _deliver(app))[1]["status"] == "ALREADY_ADMITTED"
+            assert len(runtime.jobs.list_jobs()) == 1
+        finally:
+            release_post.set()
+            await asyncio.wait_for(drain(app), timeout=5)
+    asyncio.run(exercise())
     assert len(runtime.jobs.list_jobs()) == 1
     assert len(sent) == 1
     assert all(REPO not in item for item in sent)
@@ -158,3 +183,22 @@ def test_disabled_composition_touches_neither_credentials_nor_runtime(tmp_path):
     assert _run(app)[0] == 404
     assert calls == []
     assert runtime.jobs.list_jobs() == []
+
+
+@pytest.mark.parametrize("repositories", [frozenset(), frozenset({REPO, "example/other"})])
+def test_composition_refuses_non_singleton_binding_before_constructing_ports(monkeypatch, repositories):
+    calls = []
+    def forbidden(*args, **kwargs):
+        calls.append("port")
+        raise AssertionError("unbound repository must not construct a credential or API port")
+    monkeypatch.setattr(
+        "integrations.github_review_host_composition.GitHubAppInstallationTokens", forbidden,
+    )
+    monkeypatch.setattr("integrations.github_review_host_composition.GitHubReviewAPI", forbidden)
+    with pytest.raises(GitHubReviewHostCompositionUnavailable, match="REVIEW_REPOSITORY_BINDING_INVALID"):
+        compose_github_review_host(
+            settings=dataclasses.replace(_settings(), repositories=repositories),
+            app_id=123, private_key_source=forbidden, webhook_secret_source=Hook(),
+            relay_client=None, publisher_login="reviewer-bot[bot]", publisher_user_id=9001,
+        )
+    assert calls == []

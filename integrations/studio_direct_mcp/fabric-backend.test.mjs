@@ -66,9 +66,43 @@ test('cross-root or substituted successor envelopes cannot supply results',async
 });
 function facade(e) { assert.ok(api?.createFabricFacade, 'the Fabric-only MCP facade must exist');return api.createFabricFacade(e,{ adapterPath:'/host/fabric_task.py', python:'python3', workerCwd:'~' }); }
 
+test('delayed capability probe completes through bounded reads of its original PID',async()=>{
+ const e=engine([pending(741),pending(741),captured('usage: request status result accept')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.equal(out.adapter_available,true);
+ assert.equal(out.worker_start,'UNPROBED');
+ assert.equal(e.calls.length,3);
+ assert.equal(e.calls[0].name,'start_process');
+ assert.deepEqual(e.calls.slice(1).map(x=>x.name),['read_process_output','read_process_output']);
+ assert.deepEqual(e.calls.slice(1).map(x=>x.arguments.pid),[741,741]);
+ assert.deepEqual(e.calls.slice(1).map(x=>x.arguments.timeout_ms),[3000,3000]);
+});
+
+test('incomplete capability probe has a finite same-handle read budget and never dispatches',async()=>{
+ const e=engine([pending(741),...Array.from({length:4},()=>pending(741))]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.equal(out.error,'OBSERVATION_INCOMPLETE');
+ assert.equal(out.failure_diagnosis.classification,'TECHNICAL_INTERFACE_OR_TRANSPORT');
+ assert.equal(out.failure_diagnosis.policy_denial_evidence,'NOT_ESTABLISHED');
+ assert.equal(out.controller_pid,741);
+ assert.equal(out.execution_absence_proven,false);
+ assert.equal(out.retry_allowed,false);
+ assert.equal(e.calls.length,5);
+ assert.deepEqual(e.calls.map(x=>x.name),['start_process',...Array(4).fill('read_process_output')]);
+ assert.ok(e.calls.slice(1).every(x=>x.arguments.pid===741));
+});
+
+test('a failed original-PID read does not launch another adapter command',async()=>{
+ const e=engine([pending(741),new Error('transport unavailable')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.equal(out.error,'ADAPTER_OBSERVATION_UNAVAILABLE');
+ assert.equal(out.retry_allowed,false);
+ assert.deepEqual(e.calls.map(x=>x.name),['start_process','read_process_output']);
+});
+
 test('closed, correctly annotated catalog with no generic command tools',()=>{
  assert.ok(api?.FABRIC_TOOLS, 'the Fabric-only tool catalog must exist');
- assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_status','fabric_wait'].sort());
+ assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_result_page','fabric_status','fabric_wait'].sort());
  for(const t of api.FABRIC_TOOLS){assert.equal(t.inputSchema.additionalProperties,false);assert.equal(t.annotations.readOnlyHint,!['fabric_request','fabric_accept'].includes(t.name));}
 });
 test('rejects unknown tool and caller-selected shell, host, unsupported model, or cwd before engine access',async()=>{
@@ -87,6 +121,25 @@ test('request preflights exact ID and starts only the incumbent adapter, with ex
  assert.equal(e.calls.length,2);assert.match(e.calls[0].arguments.command,/'status' 'web-fabric-001'/);assert.match(e.calls[1].arguments.command,/'request' '--id' 'web-fabric-001'/);assert.match(e.calls[1].arguments.command,/'--root' 'mission-001' '--parent' 'mission-001'/);
  assert.ok(!e.calls[1].arguments.command.includes('ssh '));assert.ok(!e.calls[1].arguments.command.includes('spawn_agent'));
 });
+test('abbreviated brief refs remain presentation-only; full machine refs and authorized key text pass unchanged',async()=>{
+ const spec=api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.work_packet;
+ assert.match(spec.description,/12 hex/);
+ assert.match(spec.description,/machine-verification/);
+ const fullFileHash='a'.repeat(64),fullCommit='b'.repeat(40);
+ const payload=`Prose: file hash ${fullFileHash.slice(0,12)}, commit ${fullCommit.slice(0,12)}.
+MACHINE_SHA256=${fullFileHash}
+GIT_CHECKOUT_SHA=${fullCommit}
+KEY=synthetic-fixture-key`;
+ const e=engine([capturedJSON(absent),pending()]);
+ const out=unwrap(await facade(e).call('fabric_request',{...packet,work_packet:payload}));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');
+ const transmitted=e.calls[1].arguments.command;
+ assert.ok(transmitted.includes(payload));
+ assert.ok(transmitted.includes(fullFileHash));
+ assert.ok(transmitted.includes(fullCommit));
+ assert.ok(transmitted.includes('KEY=synthetic-fixture-key'));
+});
+
 test('packet metacharacters remain literal stdin, never interpolated arguments',async()=>{
  const e=engine([capturedJSON(absent),pending()]);const f=facade(e);
  const malicious="$(touch /tmp/not-authorized)\n' ; echo not-a-command\nWORK_PACKET\n`id`";
@@ -510,6 +563,151 @@ test('strict manual request cannot dispatch if native pin flag is unavailable',a
  assert.equal(e.calls.length,1);assert.match(e.calls[0].arguments.command,/'request' '--help'/);
 });
 
+
+test('native C2 manual preview refusal explains the policy hold without a worker or replay',async()=>{
+  const native='bounded_complexity_requires_escalation';
+  const previewFailed=finished(JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,
+    stdout_sha256:digest(''),native_reason:native}));
+  const e=engine([manualHelp,capturedJSON(absent),previewFailed]);
+  const req={...manualPinned,pool:'glm',model:'auto'};
+  const out=unwrap(await facade(e).call('fabric_request',req));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
+  assert.equal(out.required_field,'escalation_reason');
+  assert.equal(out.retry_allowed,false);
+  assert.equal(out.execution_absence_proven,false);
+  assert.equal(e.calls.length,3);
+  assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+  assert.equal(e.calls.filter(x=>x.arguments?.command?.includes("'request' '--id'")).length,0);
+});
+
+test('native manual preview reports a bounded no-host reason without inventing escalation instructions',async()=>{
+  const native='no_eligible_host';
+  const refused=finished(JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,
+    stdout_sha256:digest(''),native_reason:native}));
+  const e=engine([manualHelp,capturedJSON(absent),refused]);
+  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'no_eligible_host');
+  assert.equal(Object.hasOwn(out,'required_field'),false);
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3);
+});
+
+test('untrusted or ambiguous native preview stdout remains unavailable with no raw reason echo',async()=>{
+  for(const native of ['NONE reason=bad;do_something\n','NONE reason=bounded_complexity_requires_escalation\nANOTHER LINE',
+    '{"state":"PREVIEW_ONLY"}','NONE reason=bad-with-dash\n']) {
+    const refused=finished(JSON.stringify({exit_code:75,stdout_base64:Buffer.from(native).toString('base64'),
+      stdout_bytes:Buffer.byteLength(native),stdout_sha256:digest(native)}));
+    const e=engine([manualHelp,capturedJSON(absent),refused]);
+    const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+    assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+    assert.equal(Object.hasOwn(out,'native_reason'),false);
+    assert.equal(out.retry_allowed,false);
+    assert.equal(e.calls.length,3);
+  }
+});
+
+test('legitimate C2 GLM escalation remains a strict original-route request with no substitution',async()=>{
+  const justification='Independent security review of Browser Link native host bridge';
+  const req={...manualPinned,pool:'glm',model:'glm-5.3',escalation_reason:justification};
+  const preview={...manualPreview,pool:'glm',model:'glm-5.3',mode:'glm',host:'ubuntu0'};
+  const e=engine([manualHelp,capturedJSON(absent),capturedJSON(preview),pending()]);
+  const out=unwrap(await continuingFacade(e).call('fabric_request',req));
+  assert.equal(out.delivery,'CONTROLLER_CREATED');
+  assert.equal(out.worker_start_proven,false);
+  assert.equal(out.requested_pool,'glm');
+  assert.equal(out.requested_model,'glm-5.3');
+  assert.equal(e.calls.length,4);
+  assert.match(e.calls[2].arguments.command,/'--escalation-reason'/);
+  assert.match(e.calls[3].arguments.command,/'--strict-manual-pin'/);
+  assert.match(e.calls[3].arguments.command,/'--escalation-reason'/);
+  assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
+
+test('real subprocess captures the exact native C2 policy refusal from STDERR, without a worker',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'mmx-fabric-native-stderr-'));
+ try {
+  const fixture=join(dir,'native-preview.py');
+  await writeFile(fixture,[
+   'import json,sys',
+   'cmd=sys.argv[1]',
+   'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
+   'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
+   'elif cmd=="preview": sys.stderr.write("NONE reason=bounded_complexity_requires_escalation"+chr(10)); sys.exit(75)',
+   'else: sys.exit(66)',
+   ''
+  ].join('\n'));
+  const e=await makeRealSubprocessEngine(dir,fixture);
+  const req={...manualPinned,pool:'glm',model:'auto'};
+  const out=unwrap(await api.createFabricFacade(e,{adapterPath:fixture,python:'python3',workerCwd:'~'}).call('fabric_request',req));
+  assert.equal(out.error,'MANUAL_ROUTE_PREFLIGHT_REFUSED');
+  assert.equal(out.native_reason,'bounded_complexity_requires_escalation');
+  assert.equal(out.required_field,'escalation_reason');
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3,'help, NOT_FOUND and one preview only');
+  assert.equal(e.calls.filter(x=>x.arguments.command.includes("'request' '--id'")).length,0);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('exact native no-host stderr maps to closed refusal without request dispatch',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');
+ const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'mmx-fabric-nohost-stderr-'));
+ try {
+  const fixture=join(dir,'native-preview.py');
+  const cases=[
+   ['NONE reason=pool grok has no eligible mode on requested host\n','MANUAL_ROUTE_PREFLIGHT_REFUSED'],
+   ['NONE reason=pool unknown has no eligible mode on requested host\n','MANUAL_ROUTE_UNAVAILABLE'],
+   ['NONE reason=pool grok has no eligible mode on requested host\nOTHER_LINE','MANUAL_ROUTE_UNAVAILABLE'],
+   ['NONE reason=pool grok has no eligible mode on requested host;extra\n','MANUAL_ROUTE_UNAVAILABLE'],
+  ];
+  for(const [line,expected] of cases) {
+   await writeFile(fixture,[
+    'import json,sys',
+    'cmd=sys.argv[1]',
+    'if cmd=="request" and "--help" in sys.argv: print("usage: request --strict-manual-pin")',
+    'elif cmd=="status": print(json.dumps({"schema":"mastermind.fabric_task_status.v1","run_id":"web-fabric-001","root_id":None,"parent_run_id":None,"state":"NOT_FOUND","result_available":False,"accepted":None}))',
+    'elif cmd=="preview": sys.stderr.write('+JSON.stringify(line)+'); sys.exit(75)',
+    'else: sys.exit(66)',
+    ''
+   ].join('\n'));
+   const e=await makeRealSubprocessEngine(dir,fixture);
+   const result=unwrap(await api.createFabricFacade(e,{adapterPath:fixture,python:'python3',workerCwd:'~'}).call('fabric_request',manualPinned));
+   assert.equal(result.error,expected);
+   assert.equal(result.retry_allowed,false);
+   assert.equal(result.execution_absence_proven,false);
+   assert.equal(Object.hasOwn(result,'native_reason'),expected==='MANUAL_ROUTE_PREFLIGHT_REFUSED');
+   if(expected==='MANUAL_ROUTE_PREFLIGHT_REFUSED') assert.equal(result.native_reason,'no_eligible_host');
+   assert.equal(e.calls.length,3,'help, missing original run, one preview');
+   assert.equal(e.calls.filter(c=>c.arguments.command.includes("'request' '--id'")).length,0);
+  }
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('extra unverified native refusal fields cannot pass the capture boundary',async()=>{
+ for(const reason of ['bad-hyphen','x'.repeat(81),'<malicious>']){
+  const raw=JSON.stringify({exit_code:75,stdout_base64:'',stdout_bytes:0,stdout_sha256:digest(''),native_reason:reason});
+  const e=engine([manualHelp,capturedJSON(absent),finished(raw)]);
+  const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+  assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+  assert.equal(Object.hasOwn(out,'native_reason'),false);
+  assert.equal(out.retry_allowed,false);
+  assert.equal(e.calls.length,3);
+ }
+ const raw=JSON.stringify({exit_code:0,stdout_base64:Buffer.from(JSON.stringify(absent)).toString('base64'),
+  stdout_bytes:Buffer.byteLength(JSON.stringify(absent)),stdout_sha256:digest(JSON.stringify(absent)),
+  native_reason:'bounded_complexity_requires_escalation'});
+ const e=engine([finished(raw)]);
+ const out=unwrap(await facade(e).call('fabric_status',id));
+ assert.equal(out.error,'CAPTURE_INVALID');
+ assert.equal(e.calls.length,1);
+});
+
 test('native preview failure or mismatch refuses before controller creation',async()=>{
  for(const value of [
    'not-json',JSON.stringify({...manualPreview,model:'grok-4.6'}),
@@ -569,6 +767,113 @@ test('manual request max-turn ceiling permits only admitted GLM/MiniMax modes',a
  const e3=engine([manualHelp,capturedJSON(absent),capturedJSON({...preview,mode:'glm-codex'})]);
  assert.equal(unwrap(await facade(e3).call('fabric_request',req)).error,'MANUAL_ROUTE_UNAVAILABLE');
  assert.equal(e3.calls.length,3);
+});
+
+// Experiential uncensored pool: manual exact pin, three explicit disclosure gates.
+// Native owns an independent worker-side recheck, not a metadata-only ACK.
+const experientialPinned={...packet,task_class:'mechanical',task_complexity:'C0_MECHANICAL',
+  pool:'experiential',model:'glm-5.3-uncensored',retention_opt_in:true,
+  sensitive_data_opt_in:true,code_exposure_opt_in:true};
+const experientialHelp=captured('usage: request --strict-manual-pin --experiential-retention-acknowledged --experiential-sensitive-data-opt-in --experiential-proprietary-code --experiential-code-exposure-opt-in');
+const experientialPreview={state:'PREVIEW_ONLY',reserved:false,selection_rechecked_at_request:true,
+  strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'experiential',
+  model:'glm-5.3-uncensored',host:'ubuntu1',mode:'experiential'};
+
+test('experiential preserves exact legacy model and requires complete explicit consents',async()=>{
+ assert.deepEqual(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.pool.enum,
+  ['grok','glm','minimax','bailian','cursor','ocfree','go','byteplus','experiential']);
+ for(const consent of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties[consent].type,'boolean');
+ const e=engine(),f=facade(e);
+ const noModel={...experientialPinned};delete noModel.model;
+ const variant=change=>({...experientialPinned,...change});
+ for(const args of [variant({model:'auto'}),variant({model:'deepseek-v4.1-flash:free'}),
+   variant({model:'GLM-5.3-Uncensored'}),variant({model:'glm-5.3'}),variant({retention_opt_in:false}),
+   variant({retention_opt_in:'yes'}),variant({sensitive_data_opt_in:false}),
+   variant({sensitive_data_opt_in:'yes'}),variant({code_exposure_opt_in:false}),
+   variant({code_exposure_opt_in:'yes'}),
+   variant({pool:'glm',model:'glm-5.3',retention_opt_in:true}),
+   variant({pool:'experiential',max_turns:12}),variant({task_class:'review'}),
+   variant({task_class:'audit'}),variant({task_class:'census'})]) {
+   const out=unwrap(await f.call('fabric_request',args));
+   assert.equal(out.error,'INVALID_ARGUMENT');assert.equal(out.retry_allowed,false);
+ }
+ // Partial consents without a response-only AUTO declaration remain invalid.
+ for(const field of ['retention_opt_in','sensitive_data_opt_in','code_exposure_opt_in'])
+   assert.equal(unwrap(await f.call('fabric_request',{...packet,[field]:true})).error,'INVALID_ARGUMENT');
+ const missingDisclosure={...experientialPinned};delete missingDisclosure.sensitive_data_opt_in;
+ const missingCodeConsent={...experientialPinned};delete missingCodeConsent.code_exposure_opt_in;
+ for(const request of [missingDisclosure,missingCodeConsent])
+   assert.equal(unwrap(await f.call('fabric_request',request)).error,'INVALID_ARGUMENT');
+ assert.equal(e.calls.length,0,'every experiential rejection must precede any native or engine call');
+});
+
+test('experiential request refuses a native adapter without a qualified route before dispatch',async()=>{
+ const unqualified=(exit_code,body)=>finished(JSON.stringify({exit_code,
+   stdout_base64:Buffer.from(body).toString('base64'),
+   stdout_bytes:Buffer.byteLength(body),stdout_sha256:digest(body)}));
+ for(const refusal of [
+   // Nonzero native preview exit: no qualified Experiential route exists.
+   unqualified(3,'no experiential route qualified'),
+   captured('not-json'),
+   capturedJSON({...experientialPreview,state:'ROUTE_REFUSED'}),
+   capturedJSON({...experientialPreview,model:'glm-5.3-flash-uncensored'}),
+   capturedJSON({...experientialPreview,model:'GLM-5.3-UNCENSORED'}),
+   capturedJSON({...experientialPreview,pool:'glm'}),
+   capturedJSON({...experientialPreview,mode:'glm'}),
+   capturedJSON({...experientialPreview,mode:null}),
+   capturedJSON({...experientialPreview,host:''}),
+   capturedJSON({...experientialPreview,host:'host/invalid'}),
+   capturedJSON({...experientialPreview,selection_rechecked_at_request:false}),
+   capturedJSON({...experientialPreview,strict_pin_enforced_at_request:false}),
+   capturedJSON({...experientialPreview,reserved:true}),
+   capturedJSON({...experientialPreview,run_id:'another-run'}),
+ ]) {
+   const e=engine([experientialHelp,capturedJSON(absent),refusal]);
+   const out=unwrap(await facade(e).call('fabric_request',experientialPinned));
+   assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
+   assert.equal(out.controller_pid,undefined);assert.equal(e.calls.length,3,'preview refusal cannot create a controller');
+   assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001' '--class' 'mechanical' '--pool' 'experiential' '--model' 'glm-5.3-uncensored'/);
+   assert.doesNotMatch(e.calls[2].arguments.command,/'--max-turns'/);
+ }
+});
+
+test('native missing independent consent flags refuses before any status or dispatch',async()=>{
+ for(const help of ['usage: request --strict-manual-pin',
+   'usage: request --strict-manual-pin --experiential-retention-acknowledged',
+   'usage: request --strict-manual-pin --experiential-retention-acknowledged --experiential-sensitive-data-opt-in --experiential-proprietary-code']) {
+   const e=engine([captured(help)]);
+   const out=unwrap(await facade(e).call('fabric_request',experientialPinned));
+   assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');
+   assert.equal(out.retry_allowed,false);
+   assert.equal(e.calls.length,1,'native consent support is preflighted before any effect');
+ }
+});
+
+test('synthetic exact experiential preview gates a strict manual request with no fallback or turns',async()=>{
+ const e=engine([experientialHelp,capturedJSON(absent),capturedJSON(experientialPreview),pending()]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',experientialPinned));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(out.worker_started,null);
+ assert.equal(out.worker_start_proven,false);assert.equal(out.requested_pool,'experiential');
+ assert.equal(out.requested_model,'glm-5.3-uncensored');assert.equal(out.strict_manual_pin,true);
+ assert.equal(out.retention_opt_in,true);assert.equal(out.sensitive_data_opt_in,true);
+ assert.equal(out.code_exposure_opt_in,true);assert.equal(out.execution_absence_proven,false);
+ assert.equal(e.calls.length,4);
+ assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+ assert.match(e.calls[2].arguments.command,/'--pool' 'experiential' '--model' 'glm-5.3-uncensored'/);
+ assert.match(e.calls[3].arguments.command,/'--pool' 'experiential' '--strict-manual-pin' '--experiential-retention-acknowledged' '--experiential-sensitive-data-opt-in' '--experiential-proprietary-code' '--experiential-code-exposure-opt-in' '--model' 'glm-5.3-uncensored'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--max-turns'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/flash/);
+});
+
+test('AUTO routing stays identical with no pool, model or retention field',async()=>{
+ const e=engine([capturedJSON(absent),pending()]);const out=unwrap(await facade(e).call('fabric_request',packet));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(e.calls.length,2);
+ assert.equal(out.requested_pool,undefined);assert.equal(out.retention_opt_in,undefined);
+ assert.doesNotMatch(e.calls[1].arguments.command,/'--pool'/);
+ assert.doesNotMatch(e.calls[1].arguments.command,/'--strict-manual-pin'/);
+ assert.doesNotMatch(e.calls[1].arguments.command,/'--model'/);
 });
 
 test('advertise manual routing only with native preview AND strict request support',async()=>{
@@ -706,5 +1011,136 @@ test('parent attention: malformed or contradictory claims stay untrusted',()=>{
  assert.equal(api.projectFabricParentRecovery({...s,acceptance_state:'ACCEPTED'},'other-root').disposition,'VERIFY_ORIGINAL_LINEAGE');
  for(const bad of [null,{}, {...s,schema:'fake'}, {...s,run_id:'../escape'}]){
   assert.throws(()=>api.projectFabricParentRecovery(bad,id.root_id),/FABRIC_PARENT_RECOVERY_STATUS_INVALID/);
+ }
+});
+
+test('fresh backend generations cannot redispatch an original run with orphan evidence',async()=>{
+ const orphan={...absent,state:'STATUS_UNREADABLE',rc:null,signal:null,result_bytes:null,
+   accepted_by:null,acceptance_state:'UNVERIFIED',acceptance_reason:'ARTIFACT_UNVERIFIED'};
+ for(const generation of [1,2]){
+   const e=engine([capturedJSON(orphan)]);
+   const out=unwrap(await facade(e).call('fabric_request',packet));
+   assert.equal(out.error,'RUN_EXISTS','generation '+generation);
+   assert.equal(e.calls.length,1);
+   assert.match(e.calls[0].arguments.command,/'status'/);
+   assert.doesNotMatch(e.calls[0].arguments.command,/'request'/);
+ }
+});
+
+const nativeScope={home:'/fixture/hermes-home',source:'/fixture/hermes-source',python:'/fixture/python',
+ revision:'f'.repeat(40),packageSha256:'a'.repeat(64)};
+const nativeOrigin={schema:'mastermind.hermes_native_origin.v1',kind:'hermes_attended_session',
+ profile_id:'default',origin_session_id:'native-origin',session_id:'native-session',
+ generation:'a'.repeat(64),turn_id:'turn',tool_call_id:'call',task_key:'task',
+ tool_action:'submit',arguments_digest:'b'.repeat(64),lease_holder_digest:'c'.repeat(64),
+ enrollment_generation:'d'.repeat(64)};
+
+test('native channel cannot omit origin to regain operator request or read authority',async()=>{
+ const e=engine();
+ const f=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope});
+ for(const [name,args] of [['fabric_request',packet],['fabric_status',id],['fabric_result',id]]){
+  assert.equal(unwrap(await f.call(name,args)).error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ }
+ assert.equal(e.calls.length,0);
+});
+
+test('native channel rejects operator lifecycle actions before engine access',async()=>{
+ const e=engine();
+ const f=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope});
+ const out=unwrap(await f.call('fabric_wait',{...id,native_origin:nativeOrigin,timeout_seconds:1}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(e.calls.length,0);
+});
+
+test('ordinary operator facade cannot treat supplied native metadata as enrollment',async()=>{
+ const e=engine();
+ const out=unwrap(await facade(e).call('fabric_request',{...packet,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(e.calls.length,0);
+});
+
+test('native channel requires a complete absolute host-selected configuration',()=>{
+ const e=engine();
+ for(const hermesNative of [{home:'/fixture/home'}, {...nativeScope,python:'python3'},
+   {...nativeScope,extra:'unrecognized'}, {...nativeScope,home:'/fixture/\0bad'}]){
+  assert.throws(()=>api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative}),TypeError);
+ }
+ assert.equal(e.calls.length,0);
+});
+
+test('ordinary capabilities explicitly report native origin disabled',async()=>{
+ const e=engine([captured('request status result accept')]);
+ const out=unwrap(await facade(e).call('fabric_capabilities',{}));
+ assert.deepEqual(out.hermes_native_origin,{schema:'mastermind.hermes_native_enrollment.v1',enabled:false});
+});
+
+async function nativePackageFixture(t) {
+ const fs=await import('node:fs');
+ const os=await import('node:os');
+ const path=await import('node:path');
+ const child=await import('node:child_process');
+ const home=fs.mkdtempSync(path.join(os.tmpdir(),'mmx-native-release-'));
+ t.after(()=>fs.rmSync(home,{recursive:true,force:true}));
+ const root=path.join(home,'plugins','mastermind-fabric-worker');
+ fs.mkdirSync(root,{recursive:true});
+ const source=new URL('../hermes_attended_fabric/',import.meta.url);
+ const names=fs.readdirSync(source).filter(n=>n.endsWith('.py') || n==='plugin.yaml').sort();
+ for(const name of names)fs.copyFileSync(new URL(name,source),path.join(root,name));
+ const fingerprint=()=>digest(JSON.stringify(names.map(name=>[
+   name,digest(fs.readFileSync(path.join(root,name)))])));
+ const record=path.join(home,'plugins','.install-metadata.json');
+ const revision='f'.repeat(40);
+ const metadata={'mastermind-fabric-worker':{
+   source:'https://github.com/mastermindx-market-intelligence/Mastermind.git#integrations/hermes_attended_fabric',
+   revision,pinned:true}};
+ fs.writeFileSync(record,JSON.stringify(metadata));
+ const config={home,source:home,python:process.execPath,revision,packageSha256:fingerprint()};
+ const marker=path.join(home,'checker-ran');
+ const helper=path.join(root,'enrollment_check.py');
+ // Positive control: if invoked, this bounded fixture visibly runs. It does
+ // not call a provider, native runtime, or the Fabric command engine.
+ fs.writeFileSync(helper,"require('node:fs').writeFileSync("+JSON.stringify(marker)+",'executed');");
+ const control=child.spawnSync(process.execPath,[helper],{encoding:'utf8'});
+ assert.equal(control.status,0,control.stderr);
+ assert.equal(fs.readFileSync(marker,'utf8'),'executed');
+ fs.unlinkSync(marker);
+ return {fs,record,metadata,config,marker,fingerprint};
+}
+
+test('native backend refuses changed helper bytes before executing installed code',async t=>{
+ const f=await nativePackageFixture(t),e=engine();
+ const facade=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:f.config});
+ const out=unwrap(await facade.call('fabric_status',{...id,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(f.fs.existsSync(f.marker),false);
+ assert.equal(e.calls.length,0);
+});
+
+test('native backend requires the selected native installer revision before helper execution',async t=>{
+ const f=await nativePackageFixture(t),e=engine();
+ f.config.packageSha256=f.fingerprint();
+ f.metadata['mastermind-fabric-worker'].revision='e'.repeat(40);
+ f.fs.writeFileSync(f.record,JSON.stringify(f.metadata));
+ const facade=api.createFabricFacade(e,{adapterPath:'/fixture/fabric_task.py',hermesNative:f.config});
+ const out=unwrap(await facade.call('fabric_status',{...id,native_origin:nativeOrigin}));
+ assert.equal(out.error,'HERMES_NATIVE_ORIGIN_REFUSED');
+ assert.equal(f.fs.existsSync(f.marker),false);
+ assert.equal(e.calls.length,0);
+});
+
+test('native enrollment refuses inherited operator or canonical paid identity without clearing it',()=>{
+ for(const [name,value] of [['FABRIC_OPERATOR_CHILD_ID','some-existing-child'],
+   ['POOL_OPERATOR_CHILD_BUDGET','1'],['FABRIC_CANONICAL_PAID_MODE','sealed-model-only-v1']]){
+  const original=process.env[name];
+  try{
+   process.env[name]=value;
+   const e=engine();
+   assert.throws(()=>api.createFabricFacade(e,{
+     adapterPath:'/fixture/fabric_task.py',hermesNative:nativeScope}),/ordinary worker context/);
+   assert.equal(process.env[name],value);
+   assert.equal(e.calls.length,0);
+  }finally{
+   if(original===undefined)delete process.env[name];else process.env[name]=original;
+  }
  }
 });

@@ -117,7 +117,7 @@ def test_fresh_sdk_terminal_diagnostics_reach_mounted_accepted_decision(
     assert outcome["decision_effective"] is True and outcome["executed"] == []
     assert not outcome.get("decision_log_error")
     assert len(submitted) == len(h.providers) == len(entries) == 1
-    assert classifications == ["sdk_terminal_error"]
+    assert classifications == []
     assert h.classifications == h.cooling == h.sessions == []
 
     run_id = outcome["brain"]["run_id"]

@@ -135,5 +135,45 @@ class InstructionAuditCheckTests(unittest.TestCase):
         self.assertTrue(report['completeness']['complete'])
 
 
+    def test_fallback_container_types_are_input_errors(self):
+        for value in ['"RULES"', '""', 'false', 'true', '0', '3', '0.0',
+                      '{ "RULES.md" = true }', '{}']:
+            with self.subTest(value=value):
+                self.put(self.home / 'config.toml',
+                         'project_doc_fallback_filenames = ' + value + '\n')
+                self.put(self.repo / 'RULES.md', 'Fixture guidance.')
+                self.put(self.repo / 'R', 'Single-letter fixture.')
+                before = {p: (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest())
+                          for p in self.base.rglob('*') if p.is_file()}
+                result = self.invoke('--check')
+                after = {p: (p.stat().st_mtime_ns, hashlib.sha256(p.read_bytes()).hexdigest())
+                         for p in self.base.rglob('*') if p.is_file()}
+                self.assertEqual(before, after)
+                self.assertEqual(result.returncode, 2, result.stdout)
+                self.assertEqual(result.stdout, '')
+                self.assertIn('fallback filenames must be a list', result.stderr)
+
+    def test_valid_fallback_arrays_preserve_selection(self):
+        self.put(self.repo / 'RULES.md', 'Fixture guidance.')
+        for value, expected in [('[]', []), ('["RULES.md"]', ['RULES.md']),
+                                ('["RULES.md", "RULES.md"]', ['RULES.md'])]:
+            with self.subTest(value=value):
+                self.put(self.home / 'config.toml',
+                         'project_doc_fallback_filenames = ' + value + '\n')
+                result = self.invoke('--check')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual([Path(row['path']).name for row in report['chain']], expected)
+                self.assertFalse(report['runtime_verified'])
+                self.assertEqual(report['effect'], 'READ_ONLY')
+
+    def test_invalid_fallback_array_members_remain_input_errors(self):
+        for value in ['[1]', '[false]', '["../RULES.md"]', '[""]']:
+            with self.subTest(value=value):
+                self.put(self.home / 'config.toml',
+                         'project_doc_fallback_filenames = ' + value + '\n')
+                self.assertEqual(self.invoke('--check').returncode, 2)
+
+
 if __name__ == '__main__':
     unittest.main()

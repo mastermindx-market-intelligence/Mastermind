@@ -1,0 +1,46 @@
+{
+  "all_nine_provider_members": [
+    "ext/byteplus_coding_plan.py",
+    "ext/codex_provider_realm.py",
+    "ext/experiential_bridge.py",
+    "ext/experiential_host_context.py",
+    "ext/experiential_pin.py",
+    "ext/experiential_plan_policy.py",
+    "ext/experiential_transport.py",
+    "ext/fs_security.py",
+    "ext/native_plan_worker.py"
+  ],
+  "application_additions": [
+    "ext/application_http_realm_projection.py",
+    "ext/application_http_realms.v1.json",
+    "ext/application_http_transports.py",
+    "ext/go_application_handler.py",
+    "ext/native_go_entry.py"
+  ],
+  "changed_selected_member_paths": [
+    "ext/fabric_task.py",
+    "ext/go_lease_gateway.py",
+    "ext/host_pull.sh",
+    "ext/host_pull_backend.py",
+    "ext/host_pull_daemon.sh",
+    "ext/lane_runtime.py",
+    "ext/lease_broker.py",
+    "ext/original_delivery_collector.py",
+    "ext/remote_sub_exec.py",
+    "ext/support_bundle.py"
+  ],
+  "current": {
+    "generation": "9c557397a9fbbcb88fa300b20063d6982c82fe5e768da951c74fa14a298d27b4",
+    "previous": "205b8321c22858b568fe37b7f11b861ee9aeed9c6615bd47847d986b14dfea08",
+    "schema": "native-code-selection.v1",
+    "sequence": 37
+  },
+  "dropped_members": [],
+  "expanded_count": 121,
+  "minimum_count": 116,
+  "runtime_selected": false,
+  "selected_byteplus_sha256": "4a359b5a534524623c436d0ac801651084308c11c7c10525ae177f9da73fa6d4",
+  "selected_count": 116,
+  "source_only": true,
+  "state": "SELECTED_PROVIDER_MEMBERSHIP_PRESERVED"
+}

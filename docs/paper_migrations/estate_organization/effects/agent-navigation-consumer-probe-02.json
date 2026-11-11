@@ -1,0 +1,143 @@
+{
+  "schema": "paper.estate.navigation_probe.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "date": "2026-11-09",
+  "method": "Separate read-only consumer reasoning; 16 paper_read calls; prior catalog reused. No mutation, UI export, runtime or release acceptance.",
+  "cases": [
+    {
+      "task": "Saved house output then source-vintage comparison",
+      "routes": [
+        {
+          "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+          "guide_page": "p-3-0",
+          "product_page": "p-1-0",
+          "product_board": "1-0",
+          "contract_page": "p-2-0",
+          "contract_board": "GK-0",
+          "qualification": "Saved-output fixtures and exact-case/cutoff/return; implementation/browser acceptance remains pending."
+        },
+        {
+          "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+          "guide_page": "p-5-0",
+          "product_page": "p-1-0",
+          "product_board": "1-0",
+          "contract_page": "p-3-0",
+          "contract_board": "V1-0",
+          "qualification": "Source-vintage preview and proposed exact-record comparison; receipt/operand basis/consumer qualification remains owed."
+        }
+      ],
+      "outcome": "Complementary workflows selected without merging saved-output identity with source-vintage evidence."
+    },
+    {
+      "task": "News search and ranking",
+      "start_file": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "guide_page": "p-6-0",
+      "selected": {
+        "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+        "page_id": "p-1-0",
+        "board_id": "1-0",
+        "guide_page": "p-2-0"
+      },
+      "qualification": "Full-desk search/ranking/corrections scope retained; adoption relative to rail remains an open product choice.",
+      "next_unfollowed": "Estate source-selection p-6-0; identified, not asserted dead."
+    },
+    {
+      "task": "Canonical scope and product export target selection",
+      "file_id": "01M312VSDSZFVT45674GDVJVZN",
+      "guide_page": "p-9-0",
+      "scope_board": "47Q-0",
+      "selected": {
+        "page_id": "p-6-0",
+        "board_id": "4PO-0",
+        "companion": "4YD-0"
+      },
+      "qualification": "Named F02 Candidate 2 compositions verified in returned page list; joint F01/F02 acceptance and original response custody remain separate.",
+      "outcome": "Guide/build/law boards excluded; no actual export or pixel inspection."
+    }
+  ],
+  "finding": "All followed targets resolved. Every guide explicitly excludes itself from product UI. Earlier immutable scope links could be mistaken for current estate head.",
+  "correction": "Local footers now explicitly distinguish dated scope snapshots from current organization checkpoint on AI START. Rollout repair is recorded under separate exact operations.",
+  "read_ledger": [
+    [
+      "get_basic_info",
+      "Memory",
+      "file page list"
+    ],
+    [
+      "get_basic_info",
+      "Revision",
+      "file page list"
+    ],
+    [
+      "get_basic_info",
+      "News working",
+      "file page list"
+    ],
+    [
+      "get_basic_info",
+      "Canonical",
+      "file page list"
+    ],
+    [
+      "find_nodes",
+      "Memory",
+      "p-3-0"
+    ],
+    [
+      "find_nodes",
+      "Revision",
+      "p-5-0"
+    ],
+    [
+      "find_nodes",
+      "News working",
+      "p-6-0"
+    ],
+    [
+      "find_nodes",
+      "Canonical",
+      "p-9-0"
+    ],
+    [
+      "find_nodes",
+      "Memory",
+      "1-0"
+    ],
+    [
+      "find_nodes",
+      "Memory",
+      "GK-0"
+    ],
+    [
+      "find_nodes",
+      "Revision",
+      "1-0"
+    ],
+    [
+      "find_nodes",
+      "Revision",
+      "V1-0"
+    ],
+    [
+      "get_basic_info",
+      "News September",
+      "p-1-0"
+    ],
+    [
+      "get_basic_info",
+      "Canonical",
+      "p-6-0"
+    ],
+    [
+      "find_nodes",
+      "News September",
+      "p-2-0"
+    ],
+    [
+      "find_nodes",
+      "News September",
+      "1-0"
+    ]
+  ],
+  "limitations": "Scoped source-navigation proof, not a weaker-model benchmark, rendered export verification, full-estate parity or product acceptance."
+}

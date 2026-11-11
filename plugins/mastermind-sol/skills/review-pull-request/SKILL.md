@@ -28,7 +28,7 @@ Read `../../references/authority-boundaries.md` before interpreting any app, rec
 2. Obtain the complete changed-path census and exact diff. Detect overlapping open carriers before interpreting implementation.
 3. Trace every changed unit to the accepted mission and explicit non-goals.
 4. Review authority, identity, input and output schema, time, null, correction behavior, deterministic, statistical, and model-generated boundaries, failure states, effects, retries, credentials, logging, and no-duplicate-owner laws.
-5. Read RED and GREEN evidence, focused tests, full relevant tests, hosted checks, security analysis, adversarial review, and production proof.
+5. Apply `docs/SESSION_LOCAL_REVIEW_POLICY.md` from the verified pin. Inspect verification proportionate to the changed behavior and actual risk: focused tests, required hosted checks, and security/adversarial or real-path evidence where that behavior or declared outcome requires it. Reuse accepted evidence for unchanged source and semantic dependencies under `REVIEW_RETURN.md` Step 2A; rerun only affected coverage or a binding gate. RED/GREEN history, a full local suite, another reviewer and deployed-product proof are not blanket prerequisites for a source-only review.
 6. Falsify false completion: architecture is not implementation; implementation is not installed; installed is not production-proven.
 7. Return `PASS`, `REQUEST_CHANGES`, or `BLOCKED_BY_CURRENT_SOURCE` with file and line or exact evidence.
 
@@ -68,4 +68,4 @@ verdict
 exact repair or release gate
 ```
 
-Do not merge from this skill. Merge and release remain a separate current-authority edge after a fresh exact-head and protected-source check.
+Do not merge from this skill alone: a review assignment grants no merge or deployment authority. When the current assignment separately authorizes release, continue through `docs/DELIVERY_WORKFLOW.md` and the repository's existing protected release owner after required exact-head checks and any genuinely required authenticated non-author approval. Do not add an approval round or end the mission merely because review completed. Preserve release holds, source custody and unresolved effects; never self-approve, self-merge, bypass a required approval or replay an uncertain operation.

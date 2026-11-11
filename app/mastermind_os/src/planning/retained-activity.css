@@ -1,4 +1,4 @@
-.mm-retained { margin: 9px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--line, rgba(120,130,150,.24)); font-size: .76rem; min-width: 0; overflow-wrap: anywhere; }
+.mm-retained { margin: 9px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--line, rgba(120,130,150,.24)); font-size: 14px; line-height: 1.5; min-width: 0; overflow-wrap: anywhere; }
 .mm-retained button { color: inherit; background: transparent; border: 1px solid var(--line, rgba(120,130,150,.4)); border-radius: 7px; padding: 6px 9px; cursor: pointer; font: inherit; }
 .mm-retained button:disabled { opacity: .5; cursor: not-allowed; }
 .mm-retained [role=status] { margin-left: 8px; color: var(--muted, #89919f); }
@@ -7,3 +7,13 @@
 .mm-retained__details ol { list-style: none; margin: 8px 0; padding: 0; }
 .mm-retained__details li { margin: 0; padding: 6px 0; border-top: 1px solid var(--line, rgba(120,130,150,.2)); }
 .mm-retained__footnote { opacity: .9; font-size: .72rem; }
+
+.mm-retained details > summary { box-sizing:border-box; min-height:44px; padding-block:12px; cursor:pointer; }
+.mm-retained summary:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
+.mm-retained pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; overflow-x:auto; }
+.mm-retained:lang(zh-CN) strong, .mm-retained:lang(zh-CN) summary { text-transform:none; letter-spacing:normal; }
+
+.mm-retained__details strong, .mm-retained__details li > span { font-size:16px; line-height:24px; }
+
+.mm-project-activity details > summary, .mm-activity-source-gaps > summary, .workspace-qualification.mm-activity-source-status > summary { box-sizing:border-box; min-height:44px; padding-block:12px; display:list-item; list-style-position:inside; cursor:pointer; }
+.mm-project-activity summary:focus-visible, .mm-activity-source-gaps > summary:focus-visible, .mm-activity-source-status > summary:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }

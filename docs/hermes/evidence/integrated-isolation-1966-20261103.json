@@ -1,0 +1,61 @@
+{
+  "authenticated_provider_and_slack": "NOT_PROVEN",
+  "common_base": "dfb3ef71374c9ccaa0203a3993bf2e0b996b448a",
+  "composed_tree_before_evidence": "a249007c8c7e3de750c8b3e0139ea6552712d2ba",
+  "effects": {
+    "account_or_service_changes": false,
+    "credentials_read": false,
+    "merge_or_queue": false,
+    "provider_called": false,
+    "source_only": true
+  },
+  "existing_linux_component_proof": {
+    "failed": 0,
+    "head": "c8a54436f875fd83d991a20d1f1dc901acc5f28e",
+    "real_kernel_case": "Own-alias wildcard EACCES, exact-port allowed, exec inheritance PASS; unchanged runtime production blobs in this composition.",
+    "runtime_job": 126314518978,
+    "runtime_run": 41750620848,
+    "runtime_tests": 87,
+    "skipped": 0
+  },
+  "focused_macOS": {
+    "failed": 0,
+    "log_sha256": "40939cb16fbdce369e4a1d1083a9fdef584b48452f7bd1156a0ce302ea2ce72b",
+    "passed": 107,
+    "skipped": 1,
+    "total": 108
+  },
+  "independent_review": "NOT_PROVEN",
+  "new_composite_linux_ci": "NOT_PROVEN_YET",
+  "next": "Publish this composition on original #1966, consume exact-head Linux/CodeQL/general CI, obtain genuine non-author review on the current stack, then legitimate protected release and authorized real-host/provider/Slack acceptance.",
+  "old_head": "c8a54436f875fd83d991a20d1f1dc901acc5f28e",
+  "operation": "hermes-1966-isolation-repair-20261103-sol-001",
+  "outside_owned_changes": [],
+  "owned_paths": 27,
+  "parent_program": "meta-ceo-open-harness-convergence-20261024-sol-001",
+  "procedure_pin": "910803421beca53ca25145392725ab2d84c7a8e9",
+  "profile_composition": "Exact existing role-alias assertion patch applied to the corrected private/unique fixture source; no lost negative scenarios.",
+  "protected_release": "NOT_PROVEN",
+  "reason": "Material upstream CodeQL/public-output/fixture repairs and reviewed Squid B1/B2 fixes now included in the same immutable source, not an unrelated protected-tip alignment.",
+  "recorded_at": "2026-11-04T01:20:58.984991+00:00",
+  "reviewed_squid_subtree": "Exact upstream d488 / original approved7a924 bytes and modes retained.",
+  "schema": "mastermind.hermes_integrated_isolation_evidence.v1",
+  "sole_composed_owned_path": "integrations/hermes_runtime/tests/test_profile_pin.py",
+  "ubuntu1_installed_context": "NOT_PROVEN",
+  "unchanged_owned_blob_mode_paths": 26,
+  "upstream": "d488b54f41cff33cf8d795b8821a8845cbe6f61e",
+  "upstream_1917": "63d184218e8d6a2b7da48f98045a2e67f504f5aa",
+  "upstream_codeql": {
+    "head": "63d184218e8d6a2b7da48f98045a2e67f504f5aa",
+    "original_alerts_fixed": [
+      203,
+      204,
+      205,
+      206,
+      207
+    ],
+    "python_analysis": 2091096079,
+    "results": 0,
+    "rules": 43
+  }
+}

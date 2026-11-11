@@ -11,6 +11,7 @@ import {
 import {
   decodeResultEnvelope,
   normalizeResultSelection,
+  selectionsEqual,
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
@@ -19,6 +20,8 @@ import {
 // mission state and result material stay verbatim.
 const STATIC_ZH: Record<string, string> = {
   "Retained results": "保留的结果",
+  "This requested result is invalid or outside the current project scope.": "所请求的结果无效或不在当前项目范围内。",
+  "The requested exact result is not in this retained index.": "此保留索引中没有所请求的精确结果。",
   "Retained result list": "保留结果列表",
   "Browse retained results for this project.":
     "浏览此项目保留的结果。",
@@ -76,6 +79,8 @@ export interface RetainedResultsProps {
   /** Normalized (workRef, rootJobId) pair. Job, attempt and digest never
    * enter the list request; they only come back inside the returned index. */
   selection: ResultReferencesSelection;
+  /** Optional exact source request; independently re-qualified against a newly read owner index. */
+  requestedResult?: ResultSelection;
   authGeneration: string | number;
   hostGeneration: string | number;
   locale: "en" | "zh-CN";
@@ -109,6 +114,7 @@ type DetailState =
   | { kind: "idle" }
   | { kind: "loading"; selection: ResultSelection }
   | { kind: "read"; selection: ResultSelection; decoded: ResultEnvelopeDigestShape }
+  | { kind: "not-listed" }
   | { kind: "unqualified" }
   | { kind: "invalid" }
   | { kind: "error" };
@@ -126,6 +132,7 @@ function unavailableText(reason: string): string {
  * CURRENT or promotes anything to accepted. */
 export function RetainedResults({
   selection,
+  requestedResult,
   authGeneration,
   hostGeneration,
   locale,
@@ -143,12 +150,12 @@ export function RetainedResults({
   const listAbort = useRef<AbortController | null>(null);
   const detailAbort = useRef<AbortController | null>(null);
   const listBusy = useRef(false);
-  const identity = [
-    String(authGeneration),
-    String(hostGeneration),
-    selection.workRef,
-    selection.rootJobId,
-  ].join("\u0000");
+  const requested = requestedResult === undefined ? null : normalizeResultSelection(requestedResult);
+  const requestedMatches = requested !== null && requested.workRef === selection.workRef && requested.rootJobId === selection.rootJobId;
+  const requestInvalid = requestedResult !== undefined && !requestedMatches;
+  const identity = JSON.stringify([authGeneration, hostGeneration, selection.workRef, selection.rootJobId,
+    requestedResult === undefined ? null : requested ?? "invalid"]);
+  const autoDetailOpened = useRef<string | null>(null);
   const identityRef = useRef(identity);
   const navigated = useRef(false);
   const region = useRef<HTMLElement>(null);
@@ -166,6 +173,7 @@ export function RetainedResults({
     detailAbort.current = null;
     listBusy.current = false;
     navigated.current = false;
+    autoDetailOpened.current = null;
     setOpen(false);
     setView("list");
     setList({ kind: "idle" });
@@ -176,6 +184,9 @@ export function RetainedResults({
     () => () => {
       listAbort.current?.abort();
       detailAbort.current?.abort();
+      listAbort.current = null;
+      detailAbort.current = null;
+      listBusy.current = false;
     },
     [],
   );
@@ -193,7 +204,7 @@ export function RetainedResults({
   };
 
   const loadList = () => {
-    if (listBusy.current) return;
+    if (listBusy.current || requestInvalid) return;
     const normalized = normalizeResultReferencesSelection(selection);
     if (!normalized) {
       setList({ kind: "invalid" });
@@ -220,6 +231,17 @@ export function RetainedResults({
           return;
         }
         setList({ kind: "read", document });
+        if (requestedMatches && requested && autoDetailOpened.current !== identity) {
+          autoDetailOpened.current = identity;
+          const member = document.availability === "AVAILABLE" ? document.index?.refs.find(ref => {
+            const exact = referenceSelection(ref, normalized);
+            return exact !== null && selectionsEqual(exact, requested);
+          }) : undefined;
+          if (member) openReference(member);
+          else if (document.availability === "AVAILABLE") {
+            setDetail({ kind: "not-listed" }); setView("detail"); navigated.current = true;
+          }
+        }
       } catch {
         if (!controller.signal.aborted && listAbort.current === controller)
           setList({ kind: "error" });
@@ -288,6 +310,15 @@ export function RetainedResults({
     })();
   };
 
+  // Only this explicit request opens automatically. StrictMode's first read
+  // may be aborted by cleanup; the second setup starts a fresh bounded read.
+  // Back/refresh do not change the identity and never trigger an auto-loop.
+  useEffect(() => {
+    if (!requestedMatches) return;
+    setOpen(true);
+    loadList();
+  }, [identity]);
+
   const backToResults = () => {
     detailAbort.current?.abort();
     detailAbort.current = null;
@@ -329,7 +360,7 @@ export function RetainedResults({
   );
   return (
     <section
-      className="card"
+      className="card retained-results-reader"
       ref={region}
       tabIndex={-1}
       onKeyDown={onKeyDown}
@@ -344,11 +375,14 @@ export function RetainedResults({
         aria-expanded={open}
         aria-controls="retained-results-panel"
         onClick={toggle}
+        disabled={requestInvalid}
       >
         {open ? t("Hide retained results") : t("Show retained results")}
       </button>
+      {requestInvalid ? <p className="muted" role="status">{t("This requested result is invalid or outside the current project scope.")}</p> : null}
       {open ? (
         <div id="retained-results-panel">
+          <div hidden={view !== "list"}>
           <h3 className="section-title" ref={listHeading} tabIndex={-1}>
             {t("Retained result list")}
           </h3>
@@ -429,6 +463,7 @@ export function RetainedResults({
               </dl>
             </details>
           ) : null}
+          </div>
           {view === "detail" ? (
             <div>
               <button ref={back} className="button" onClick={backToResults}>
@@ -444,6 +479,7 @@ export function RetainedResults({
                   {t("This exact result could not be read.")}
                 </p>
               ) : null}
+              {detail.kind === "not-listed" ? <p className="muted" role="status">{t("The requested exact result is not in this retained index.")}</p> : null}
               {detail.kind === "unqualified" ? (
                 <p className="muted" role="status">
                   {t("This reference cannot be opened as an exact result.")}

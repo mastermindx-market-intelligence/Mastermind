@@ -1,0 +1,485 @@
+{
+  "purpose": "Local source and case-conservation proof for physical Trend test partition",
+  "qualification": "Local standalone invocations; native Linux timing and whole-workflow benefit remain unproved",
+  "source": {
+    "published_baseline": "d26440aac2c45b960d7175836121b885d94f9301",
+    "fixture_seed_commit": "2c433be85c03db48b92b779b1e26f512fd5533d5",
+    "before_partition_local_head": "dc4f4aa699a3bb1d285073d34a9652fe445dcbec",
+    "partition_local_commit": "e888d046d3dbe6d0d2fa566a06b2ffbf897acaf3",
+    "partition_tree": "a7a0d7b2375f66b12b7715e9c0a880f87c9fb98e",
+    "publication_at_capture": "LOCAL_COMMITTED_NOT_PUBLISHED",
+    "feature_blobs": {
+      "tests/test_trend_persistence_walkforward.py": "4bfc6a21aa66f9b29c1dac0acce8fe900e3d3408",
+      "tests/test_trend_persistence_walkforward_reference.py": "0c915f7220a34b3d11b35d65c737466c63f59185",
+      "tests/test_trend_persistence_walkforward_run_contract.py": "5da1d98cdded41993bb031897e6aa97394835e5c"
+    }
+  },
+  "environment": {
+    "host": "M2 local",
+    "python": "CPython 3.12.13",
+    "pytest": "9.2.0",
+    "native_linux": false
+  },
+  "transformation": {
+    "test_functions": 42,
+    "cases": 44,
+    "unchanged_test_asts": true,
+    "unchanged_non_test_asts": true,
+    "support_imports": {
+      "tests/test_trend_persistence_walkforward_reference.py": [
+        "MDD",
+        "_fake_runs",
+        "_holdout_like",
+        "_k5",
+        "_panel",
+        "_q2",
+        "_reference",
+        "_summary",
+        "pinned"
+      ],
+      "tests/test_trend_persistence_walkforward_run_contract.py": [
+        "_holdout_like",
+        "_panel",
+        "_reference",
+        "pinned",
+        "staged"
+      ]
+    },
+    "unrelated_placement_unchanged": true,
+    "before_included": 2335,
+    "after_included": 2337,
+    "excluded": 0,
+    "placements": {
+      "tests/test_trend_persistence_walkforward.py": [
+        3,
+        0
+      ],
+      "tests/test_trend_persistence_walkforward_reference.py": [
+        3,
+        1
+      ],
+      "tests/test_trend_persistence_walkforward_run_contract.py": [
+        4,
+        0
+      ]
+    }
+  },
+  "steps": [
+    {
+      "name": "selectors",
+      "exit": 0,
+      "counts": {
+        "tests": 138,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "controller_seconds": 47.812,
+      "module_receipts": [
+        {
+          "cases_finished": 93,
+          "cases_started": 93,
+          "event": "summary",
+          "module": "tests/test_ci_pytest_policy.py",
+          "reported_seconds": 1.762129
+        },
+        {
+          "cases_finished": 45,
+          "cases_started": 45,
+          "event": "summary",
+          "module": "tests/test_ci_prepartition.py",
+          "reported_seconds": 44.92814
+        },
+        {
+          "case_invocations": 93,
+          "collected": 93,
+          "collected_sha256": "349b80f58ae7ec61b65d3ae38c7e0b2593f773f7bb3ccfff45236b4908765dcc",
+          "collection_complete": true,
+          "collection_reports": 1,
+          "collection_sha256": "0b27ac59169c6497fd00f9e7af40f335d6f7a148f28b53ac2491f91a84b38cfc",
+          "complete": true,
+          "deselected": 0,
+          "deselected_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "errors": [],
+          "event": "case_evidence",
+          "finished": 93,
+          "finished_sha256": "349b80f58ae7ec61b65d3ae38c7e0b2593f773f7bb3ccfff45236b4908765dcc",
+          "module": "tests/test_ci_pytest_policy.py",
+          "outcomes_sha256": "da8338eb1d0c88efc36854dbb3d643e611e5f8f3e39edb2a10883b5a8553d305",
+          "phase_reports": 279,
+          "schema": "ci.module-case-evidence.v1"
+        },
+        {
+          "case_invocations": 45,
+          "collected": 45,
+          "collected_sha256": "1bacd0ecdc4f3e7585af5413bf28f243fb85c09da087073e7a73e8ce9895d1d9",
+          "collection_complete": true,
+          "collection_reports": 1,
+          "collection_sha256": "f9a9ee08f3be0fcb9c2cc8c2a3fbee19d2f1df26e1ae55f51ee83d5c5dcd5a12",
+          "complete": true,
+          "deselected": 0,
+          "deselected_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "errors": [],
+          "event": "case_evidence",
+          "finished": 45,
+          "finished_sha256": "1bacd0ecdc4f3e7585af5413bf28f243fb85c09da087073e7a73e8ce9895d1d9",
+          "module": "tests/test_ci_prepartition.py",
+          "outcomes_sha256": "f352d8f90f969554b4c88ab474aab3a8574997e778d01f8fc5427cd3e6e1bad9",
+          "phase_reports": 135,
+          "schema": "ci.module-case-evidence.v1"
+        }
+      ]
+    },
+    {
+      "name": "core",
+      "exit": 0,
+      "counts": {
+        "tests": 17,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "controller_seconds": 31.563,
+      "module_receipts": [
+        {
+          "cases_finished": 17,
+          "cases_started": 17,
+          "event": "summary",
+          "module": "tests/test_trend_persistence_walkforward.py",
+          "reported_seconds": 29.702951
+        },
+        {
+          "case_invocations": 17,
+          "collected": 17,
+          "collected_sha256": "71a4ba43cf61724ba1c36b0b9ba2b6b321c3e88264eed0ce63ff977e0e5b17b5",
+          "collection_complete": true,
+          "collection_reports": 1,
+          "collection_sha256": "fd7def4babdb5b617b0f41a7732f6865b1b8bf18682eac2c6d2b71de2c06b318",
+          "complete": true,
+          "deselected": 0,
+          "deselected_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "errors": [],
+          "event": "case_evidence",
+          "finished": 17,
+          "finished_sha256": "71a4ba43cf61724ba1c36b0b9ba2b6b321c3e88264eed0ce63ff977e0e5b17b5",
+          "module": "tests/test_trend_persistence_walkforward.py",
+          "outcomes_sha256": "b6b3100100a58362ccc2e467a1048e6e22037158a4880abadabfc1b3152d58ba",
+          "phase_reports": 51,
+          "schema": "ci.module-case-evidence.v1"
+        }
+      ]
+    },
+    {
+      "name": "reference",
+      "exit": 0,
+      "counts": {
+        "tests": 16,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "controller_seconds": 27.06,
+      "module_receipts": [
+        {
+          "cases_finished": 16,
+          "cases_started": 16,
+          "event": "summary",
+          "module": "tests/test_trend_persistence_walkforward_reference.py",
+          "reported_seconds": 25.654133
+        },
+        {
+          "case_invocations": 16,
+          "collected": 16,
+          "collected_sha256": "4d89dd018b8bc54cfee1849572541bf1f1ca9c60fdb3cd95dea6aa751df8afd8",
+          "collection_complete": true,
+          "collection_reports": 1,
+          "collection_sha256": "185fc39511b63f42d63db3057d15e4806aa7e2ebd83ab63e24ad94e6caccdb29",
+          "complete": true,
+          "deselected": 0,
+          "deselected_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "errors": [],
+          "event": "case_evidence",
+          "finished": 16,
+          "finished_sha256": "4d89dd018b8bc54cfee1849572541bf1f1ca9c60fdb3cd95dea6aa751df8afd8",
+          "module": "tests/test_trend_persistence_walkforward_reference.py",
+          "outcomes_sha256": "d7d00228f0e954e8d263854c79890d5b76dc5b1f440c5ad2979f2263841e5514",
+          "phase_reports": 48,
+          "schema": "ci.module-case-evidence.v1"
+        }
+      ]
+    },
+    {
+      "name": "run_contract",
+      "exit": 0,
+      "counts": {
+        "tests": 11,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "controller_seconds": 24.585,
+      "module_receipts": [
+        {
+          "cases_finished": 11,
+          "cases_started": 11,
+          "event": "summary",
+          "module": "tests/test_trend_persistence_walkforward_run_contract.py",
+          "reported_seconds": 23.451856
+        },
+        {
+          "case_invocations": 11,
+          "collected": 11,
+          "collected_sha256": "67e373d5539f3146e92944d750580d5c06c1eeb13c05eb95b53a0833d92cbda9",
+          "collection_complete": true,
+          "collection_reports": 1,
+          "collection_sha256": "533905c2b8e5f29dd42e2a64fa8a420db2283f0f19ebc4112a6add30b873d11a",
+          "complete": true,
+          "deselected": 0,
+          "deselected_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "errors": [],
+          "event": "case_evidence",
+          "finished": 11,
+          "finished_sha256": "67e373d5539f3146e92944d750580d5c06c1eeb13c05eb95b53a0833d92cbda9",
+          "module": "tests/test_trend_persistence_walkforward_run_contract.py",
+          "outcomes_sha256": "d6af87ce9f0f768eb0f4d6db0194aad7194be9aad822d71aeebf0042a747592c",
+          "phase_reports": 33,
+          "schema": "ci.module-case-evidence.v1"
+        }
+      ]
+    }
+  ],
+  "case_identity": {
+    "unchanged_nodeids": 17,
+    "module_prefix_only_changes": 27,
+    "case_suffixes_and_outcomes_unchanged": true,
+    "mapping_sha256": "433a1fb6c8b4a8ed74f09e7467e2c7f6f1999fbeab767ab7e1bb2e944b0b8ce7",
+    "mapping": [
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_block_is_scored_by_models_that_never_saw_it",
+        "after": "tests/test_trend_persistence_walkforward.py::test_a_block_is_scored_by_models_that_never_saw_it",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_complete_case_without_a_descriptor_stops_the_instrument",
+        "after": "tests/test_trend_persistence_walkforward.py::test_a_complete_case_without_a_descriptor_stops_the_instrument",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_feature_that_only_tracks_the_label_windows_volatility_carries_nothing_more",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_a_feature_that_only_tracks_the_label_windows_volatility_carries_nothing_more",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_leftover_against_the_development_sign_is_not_credited",
+        "after": "tests/test_trend_persistence_walkforward.py::test_a_leftover_against_the_development_sign_is_not_credited",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_panel_off_the_v2_design_is_refused",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_a_panel_off_the_v2_design_is_refused",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_planted_incremental_signal_is_measured_and_calibrated",
+        "after": "tests/test_trend_persistence_walkforward.py::test_a_planted_incremental_signal_is_measured_and_calibrated",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_a_reference_run_is_reproducible_and_reads_no_prices",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_a_reference_run_is_reproducible_and_reads_no_prices",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_an_attempt_that_left_no_result_needs_a_stated_reason",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_an_attempt_that_left_no_result_needs_a_stated_reason",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_assembled_rows_are_complete_cases_in_date_order",
+        "after": "tests/test_trend_persistence_walkforward.py::test_assembled_rows_are_complete_cases_in_date_order",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_b2_stops_if_v2s_holdout_statistic_does_not_reproduce",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_b2_stops_if_v2s_holdout_statistic_does_not_reproduce",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_beyond_simulated_volatility_needs_every_gate_against_every_specification",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_beyond_simulated_volatility_needs_every_gate_against_every_specification",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_confirmed_features_are_the_committed_holdout_result",
+        "after": "tests/test_trend_persistence_walkforward.py::test_confirmed_features_are_the_committed_holdout_result",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_descriptors_match_their_definitions_and_need_a_fully_quoted_window",
+        "after": "tests/test_trend_persistence_walkforward.py::test_descriptors_match_their_definitions_and_need_a_fully_quoted_window",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_false_discovery_control_is_the_step_up_rule",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_false_discovery_control_is_the_step_up_rule",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_gates_and_decision_follow_the_preregistered_rule",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_gates_and_decision_follow_the_preregistered_rule",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_inputs_refuse_prices_from_another_calendar",
+        "after": "tests/test_trend_persistence_walkforward.py::test_inputs_refuse_prices_from_another_calendar",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_label_window_volatility_covers_exactly_the_label_window",
+        "after": "tests/test_trend_persistence_walkforward.py::test_label_window_volatility_covers_exactly_the_label_window",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_logistic_fit_recovers_known_coefficients_from_any_start",
+        "after": "tests/test_trend_persistence_walkforward.py::test_logistic_fit_recovers_known_coefficients_from_any_start",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_models_nest_and_the_augmented_model_adds_only_confirmed_features[20]",
+        "after": "tests/test_trend_persistence_walkforward.py::test_models_nest_and_the_augmented_model_adds_only_confirmed_features[20]",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_models_nest_and_the_augmented_model_adds_only_confirmed_features[5]",
+        "after": "tests/test_trend_persistence_walkforward.py::test_models_nest_and_the_augmented_model_adds_only_confirmed_features[5]",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_models_nest_and_the_augmented_model_adds_only_confirmed_features[60]",
+        "after": "tests/test_trend_persistence_walkforward.py::test_models_nest_and_the_augmented_model_adds_only_confirmed_features[60]",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_no_signal_gives_no_model_value",
+        "after": "tests/test_trend_persistence_walkforward.py::test_no_signal_gives_no_model_value",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_nothing_is_scored_without_the_pinned_preregistration",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_nothing_is_scored_without_the_pinned_preregistration",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_ranks_are_centred_and_bounded",
+        "after": "tests/test_trend_persistence_walkforward.py::test_ranks_are_centred_and_bounded",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_real_data_is_not_scored_without_the_pinned_reference",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_real_data_is_not_scored_without_the_pinned_reference",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_simulated_ranges_span_the_run_means",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_simulated_ranges_span_the_run_means",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_student_t_tail_matches_tabulated_critical_values",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_student_t_tail_matches_tabulated_critical_values",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_code_hash_covers_the_instrument_and_ignores_only_its_two_pins",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_the_code_hash_covers_the_instrument_and_ignores_only_its_two_pins",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_committed_result_was_produced_once_under_the_pinned_files",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_the_committed_result_was_produced_once_under_the_pinned_files",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_cosine_terms_follow_the_overlap_of_the_labels",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_cosine_terms_follow_the_overlap_of_the_labels",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_event_is_exactly_the_deepest_tenth_of_a_date",
+        "after": "tests/test_trend_persistence_walkforward.py::test_the_event_is_exactly_the_deepest_tenth_of_a_date",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_holdout_result_b2_reads_is_the_pinned_file",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_the_holdout_result_b2_reads_is_the_pinned_file",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_pins_match_the_committed_files_and_the_reference_says_what_the_prereg_says",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_pins_match_the_committed_files_and_the_reference_says_what_the_prereg_says",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_real_run_takes_no_output_path",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_the_real_run_takes_no_output_path",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_reference_is_assembled_from_every_specification_and_seed",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_reference_is_assembled_from_every_specification_and_seed",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_reported_v2_statistic_is_the_engines_and_the_series_summary_is_unrounded",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_reported_v2_statistic_is_the_engines_and_the_series_summary_is_unrounded",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_run_refuses_an_uncommitted_tree_and_any_other_panel",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_the_run_refuses_an_uncommitted_tree_and_any_other_panel",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_run_writes_one_result_and_is_never_made_again",
+        "after": "tests/test_trend_persistence_walkforward_run_contract.py::test_the_run_writes_one_result_and_is_never_made_again",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_simulated_spread_is_taken_to_the_series_own_number_of_dates",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_simulated_spread_is_taken_to_the_series_own_number_of_dates",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_simulated_threshold_is_the_largest_leave_one_out_excess_few_runs_reach",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_simulated_threshold_is_the_largest_leave_one_out_excess_few_runs_reach",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_test_of_a_mean_holds_its_size_where_v2s_rule_does_not",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_test_of_a_mean_holds_its_size_where_v2s_rule_does_not",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_v2_statistic_inside_b2_is_the_committed_one",
+        "after": "tests/test_trend_persistence_walkforward.py::test_the_v2_statistic_inside_b2_is_the_committed_one",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_the_window_volatility_control_is_a_rank_and_twenty_equal_bins",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_the_window_volatility_control_is_a_rank_and_twenty_equal_bins",
+        "outcome": "passed"
+      },
+      {
+        "before": "tests/test_trend_persistence_walkforward.py::test_what_a_volatility_descriptor_explains_is_credited_to_the_baseline",
+        "after": "tests/test_trend_persistence_walkforward_reference.py::test_what_a_volatility_descriptor_explains_is_credited_to_the_baseline",
+        "outcome": "passed"
+      }
+    ]
+  },
+  "limits": [
+    "No scheduler, workflow, lock-profile or runtime observer change.",
+    "Independent reproducibility runs and all scientific assertions remain.",
+    "No old H1 settlement or release hold is cleared.",
+    "No ninety-second native limit or five-minute p95 is established."
+  ]
+}
