@@ -46,13 +46,7 @@ class GLMClaudeCustomModelRegistrationTest(unittest.TestCase):
             "LANE_REMOTE_HOST": "admitted-test-host",
             "LANE_LEASED": "1",
             "ANTHROPIC_BASE_URL": "https://example.invalid/anthropic",
-            "ANTHROPIC_CUSTOM_MODEL_OPTION": "inherited-other-model",
-            "ANTHROPIC_MODEL": "inherited-other-model",
-            "ANTHROPIC_DEFAULT_OPUS_MODEL": "inherited-other-model",
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": "inherited-other-model",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL": "inherited-other-model",
-            "ANTHROPIC_DEFAULT_FABLE_MODEL": "inherited-other-model",
-            "CLAUDE_CODE_SUBAGENT_MODEL": "inherited-other-model",
+            **{key: "inherited-other-model" for key in MODEL_ENV_KEYS},
             "GLM_SHIM_TOKEN": "inherited-not-for-claude",
         }
         fake_keys = types.ModuleType("glm_keys")
@@ -92,6 +86,13 @@ class GLMClaudeCustomModelRegistrationTest(unittest.TestCase):
                 self.assertEqual(scoped["ANTHROPIC_BASE_URL"], original["ANTHROPIC_BASE_URL"])
                 self.assertNotIn("GLM_SHIM_TOKEN", scoped)
                 self.assertEqual(self.base_env, original, "parent environment must not change")
+
+    def test_missing_model_aliases_are_populated(self):
+        env = {key: value for key, value in self.base_env.items() if key not in MODEL_ENV_KEYS}
+        _, scoped = self.launch("glm-5.3", environ=env, exec_fn=lambda argv, values: (argv, values))
+        for key in MODEL_ENV_KEYS:
+            self.assertEqual(scoped[key], "glm-5.3", key)
+            self.assertNotIn(key, env)
 
     def test_unrecognized_model_refused_before_exec(self):
         exec_fn = mock.Mock()
