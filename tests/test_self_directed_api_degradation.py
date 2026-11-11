@@ -245,7 +245,7 @@ def test_ui_distinguishes_unavailable_no_data_and_effect_unknown() -> None:
     cancel = html[cancel_start:cancel_end]
     assert "if (!d || !d.ok)" in cancel
     assert "sd.cancel_failed" in cancel
-    assert cancel.index("if (!d || !d.ok)") < cancel.index("return refreshSelf()")
+    assert cancel.index("if (!d || !d.ok)") < cancel.index("return refreshConfirmedSelf(")
 
 
 def test_order_ticket_uses_current_quote_and_preserves_effect_certainty():
@@ -318,5 +318,69 @@ const flush = ()=>new Promise(resolve=>setImmediate(resolve));
     assert.equal(orders.length,before+1);
   }
 })().catch(err=>{console.error(err);process.exitCode=1;});
+"""
+    subprocess.run(["node", "-e", script], check=True, timeout=20)
+
+
+def test_confirmed_mutations_discard_stale_book_and_history_after_refresh_failure():
+    import subprocess
+
+    html = (Path(__file__).parents[1] / "app/static/index.html").read_text()
+
+    def source(start, end):
+        pos = html.index(start)
+        return html[pos:html.index(end, pos)]
+
+    functions = "".join([
+        source("function refreshSelf()", "function _heldShares"),
+        source("function _selfBookState(", "// D-ACCT-1 on the Self-Directed"),
+        source("window.placeSelfOrder = function", "window.saveSelfThesis"),
+        source("window.cancelSelfOrder = function", "// close the search dropdown"),
+    ])
+    script = r"""
+const assert = require('node:assert/strict');
+const window = globalThis;
+let _self = {cash: 5000, nav: 5000}, _selfHist = {history: []};
+let _selfSettled = true, _selfHistSettled = true, _selfBusy = false;
+let _selfOrderEffectUnknown = false, _selfUnit = 'shares', _selfSel = {ticker: 'AAPL', price: 100};
+let message, writes = 0, bookOffline = true, historyOffline = true;
+function _selfMsg(_, text){message = text;}
+function E(){return {value:'1'};}
+function t(key){return key;}
+function selfUpdateEst(){}
+function renderSelf(){}
+async function fetch(url, opts){
+  if (opts) {
+    writes++;
+    return {ok: true, json: async () => ({ok: true, status:'pending'})};
+  }
+  if (url.endsWith('/history')) {
+    if (historyOffline) throw new Error('history offline');
+    return {ok: true, json: async () => ({history: []})};
+  }
+  return {ok: !bookOffline, json: async () => ({cash: 1000, nav: 1000})};
+}
+const flush = () => new Promise(resolve => setImmediate(resolve));
+""" + functions + r"""
+(async () => {
+  placeSelfOrder('buy');
+  await flush();
+  assert.equal(message, 'sd.order_refresh_failed');
+  assert.equal(_selfOrderEffectUnknown, false);
+  assert.equal(_selfBookState(_self, _selfSettled), 'unavailable');
+  assert.equal(_selfHistState(_selfHist, _selfHistSettled), 'unavailable');
+  placeSelfOrder('buy');
+  assert.equal(writes, 1);
+
+  bookOffline = false;
+  cancelSelfOrder('queued-1');
+  await flush();
+  assert.equal(message, 'sd.cancel_refresh_failed');
+  assert.equal(_self.cash, 1000);
+  assert.equal(_selfHistState(_selfHist, _selfHistSettled), 'unavailable');
+  historyOffline = false;
+  await refreshSelf();
+  assert.equal(_selfHistState(_selfHist, _selfHistSettled), 'ok');
+})().catch(err => {console.error(err); process.exitCode = 1;});
 """
     subprocess.run(["node", "-e", script], check=True, timeout=20)

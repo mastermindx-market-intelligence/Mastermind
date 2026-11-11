@@ -3658,7 +3658,7 @@ var I18N = {
   'sd.order_failed':      { en: 'Order rejected', zh: '订单被拒绝' },
   'sd.order_unavail':     { en: 'Order service unavailable.', zh: '下单服务暂不可用。' },
   'sd.order_unknown':     { en: 'Order status is uncertain after a failed response. Reload and verify Pending Orders / Trade History before submitting another order.', zh: '订单响应失败后状态不确定。请重新加载并核对待成交订单 / 交易历史后再提交新订单。' },
-  'sd.order_refresh_failed': { en: 'Order confirmed. The book could not refresh. Check Pending Orders or Trade History.', zh: '订单已确认，但账户刷新失败。请核对待成交订单或交易历史。' },
+  'sd.order_refresh_failed': { en: 'Order confirmed. Some account data could not refresh.', zh: '订单已确认，但部分账户数据未能刷新。' },
   'sd.busy_retry':        { en: 'Book is busy with another update. Try again after it finishes.', zh: '组合正在处理另一项更新，请稍后重试。' },
   'sd.at':                { en: 'at', zh: '价格' },
   'sd.alloc_cash':        { en: 'Cash', zh: '现金' },
@@ -3687,6 +3687,7 @@ var I18N = {
   'sd.quick_lbl':         { en: 'Quick trade', zh: '快速交易' },
   'sd.pending_h':         { en: 'Pending orders', zh: '待成交订单' },
   'sd.cancel':            { en: 'cancel', zh: '取消' },
+  'sd.cancel_refresh_failed': { en: 'Order cancelled. Some account data could not refresh.', zh: '订单已取消，但部分账户数据未能刷新。' },
   'sd.cancel_failed':     { en: 'Cancel did not complete.', zh: '取消操作未完成。' },
   'sd.cancel_not_found':  { en: 'Order is no longer pending.', zh: '该订单已不在待成交队列中。' },
   'sd.hist_empty':        { en: 'No trades yet — your buys and sells appear here.', zh: '暂无交易 —— 你的买卖记录将显示在此。' },
@@ -6688,10 +6689,11 @@ function refreshSelf() {
     fetch('/api/self_directed').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
     fetch('/api/self_directed/history').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
   ]).then(function(res) {
-    if (res[0].status === 'fulfilled' && res[0].value) _self = res[0].value;
-    if (res[1].status === 'fulfilled' && res[1].value) _selfHist = res[1].value;
+    _self = res[0].status === 'fulfilled' ? res[0].value : null;
+    _selfHist = res[1].status === 'fulfilled' ? res[1].value : null;
     _selfSettled = true; _selfHistSettled = true;
     renderSelf();
+    return _selfBookState(_self, true) !== 'unavailable' && _selfHistState(_selfHist, true) === 'ok';
   });
 }
 
@@ -7212,15 +7214,19 @@ window.placeSelfOrder = function(side, tickerOverride) {
       } else if (d.status === 'pending') { _selfMsg('pend', t('sd.queued')); }
       if (!tickerOverride) { var sh = E('sd-shares'); if (sh) sh.value = ''; }
       else { var q = E('sd-qty-' + ticker); if (q) q.value = ''; }
-      return Promise.resolve().then(refreshSelf).catch(function(){
-        _selfMsg('pend', t('sd.order_refresh_failed'));
-      });
+      return refreshConfirmedSelf('sd.order_refresh_failed');
     }, function(){
       _selfOrderEffectUnknown = true;
       _selfMsg('err', t('sd.order_unknown'));
     })
     .finally(function(){ _selfBusy = false; selfUpdateEst(); });
 };
+
+function refreshConfirmedSelf(failedMessage) {
+  return Promise.resolve().then(refreshSelf).catch(function(){ return false; }).then(function(fresh) {
+    if (fresh === false) _selfMsg('pend', t(failedMessage));
+  });
+}
 
 window.saveSelfThesis = function(ticker) {
   ticker = (ticker || '').toUpperCase();
@@ -7251,7 +7257,7 @@ window.cancelSelfOrder = function(orderId) {
           : ((d && d.error === 'self_directed_busy_retry') ? t('sd.busy_retry') : t('sd.cancel_failed'));
         _selfMsg('err', msg); return;
       }
-      return refreshSelf();
+      return refreshConfirmedSelf('sd.cancel_refresh_failed');
     })
     .catch(function(){ _selfMsg('err', t('sd.cancel_failed')); });
 };
