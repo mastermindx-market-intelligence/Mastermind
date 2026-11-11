@@ -3643,7 +3643,8 @@ var I18N = {
   'sd.sell_open':         { en: 'Sell at next open', zh: '开盘卖出' },
   'sd.search_none':       { en: 'No matching US stocks.', zh: '未找到匹配的美股。' },
   'sd.search_hint':       { en: 'Type a ticker or company name…', zh: '输入代码或公司名称…' },
-  'sd.search_unavail':    { en: 'Live search needs a Polygon API key.', zh: '实时搜索需要 Polygon API 密钥。' },
+  'sd.search_unavail':    { en: 'Live search is unavailable right now.', zh: '实时搜索暂不可用。' },
+  'sd.quote_unavail':     { en: 'Quote unavailable', zh: '行情暂不可用' },
   'sd.select_prompt':     { en: 'Search and select a stock to trade.', zh: '搜索并选择一只股票进行交易。' },
   'sd.no_price':          { en: 'price unavailable', zh: '价格不可用' },
   'sd.est_cost':          { en: 'Est. cost', zh: '预计成本' },
@@ -3655,6 +3656,10 @@ var I18N = {
   'sd.filled':            { en: 'Filled', zh: '已成交' },
   'sd.queued':            { en: 'Queued — fills at the next market open.', zh: '已排队 —— 将于下次开盘成交。' },
   'sd.order_failed':      { en: 'Order rejected', zh: '订单被拒绝' },
+  'sd.order_unavail':     { en: 'Order service unavailable.', zh: '下单服务暂不可用。' },
+  'sd.order_unknown':     { en: 'Order status is uncertain after a failed response. Reload and verify Pending Orders / Trade History before submitting another order.', zh: '订单响应失败后状态不确定。请重新加载并核对待成交订单 / 交易历史后再提交新订单。' },
+  'sd.order_refresh_failed': { en: 'Order confirmed. Some account data could not refresh.', zh: '订单已确认，但部分账户数据未能刷新。' },
+  'sd.busy_retry':        { en: 'Book is busy with another update. Try again after it finishes.', zh: '组合正在处理另一项更新，请稍后重试。' },
   'sd.at':                { en: 'at', zh: '价格' },
   'sd.alloc_cash':        { en: 'Cash', zh: '现金' },
   'sd.alloc_npos':        { en: 'Holdings', zh: '持仓数' },
@@ -3674,6 +3679,7 @@ var I18N = {
   'sd.thesis_saved':      { en: 'Saved', zh: '已保存' },
   'sd.thesis_cleared':    { en: 'Thesis cleared', zh: '论点已清除' },
   'sd.thesis_none':       { en: 'No thesis yet.', zh: '尚无论点。' },
+  'sd.thesis_failed':     { en: 'Thesis save failed — your draft is unchanged.', zh: '论点保存失败 —— 草稿未改变。' },
   'sd.queued_fill':       { en: 'filled from a queued order', zh: '由排队订单成交' },
   'sd.has_thesis':        { en: 'thesis', zh: '有论点' },
   'sd.quick_buy':         { en: 'Buy', zh: '买入' },
@@ -3681,6 +3687,9 @@ var I18N = {
   'sd.quick_lbl':         { en: 'Quick trade', zh: '快速交易' },
   'sd.pending_h':         { en: 'Pending orders', zh: '待成交订单' },
   'sd.cancel':            { en: 'cancel', zh: '取消' },
+  'sd.cancel_refresh_failed': { en: 'Order cancelled. Some account data could not refresh.', zh: '订单已取消，但部分账户数据未能刷新。' },
+  'sd.cancel_failed':     { en: 'Cancel did not complete.', zh: '取消操作未完成。' },
+  'sd.cancel_not_found':  { en: 'Order is no longer pending.', zh: '该订单已不在待成交队列中。' },
   'sd.hist_empty':        { en: 'No trades yet — your buys and sells appear here.', zh: '暂无交易 —— 你的买卖记录将显示在此。' },
   'sd.pending_note':      { en: 'queued — fills at next open', zh: '排队中 —— 下次开盘成交' },
   'sd.unavailable':       { en: 'Unavailable', zh: '不可用' },
@@ -6666,6 +6675,7 @@ var _selfSel = null;       // selected order-ticket name {ticker, price, name}
 var _selfSearchTimer = null, _selfActiveIdx = -1, _selfResults = [];
 var _selfExpanded = null;  // ticker whose thesis / quick-trade row is open
 var _selfBusy = false;     // guard against double-submit
+var _selfOrderEffectUnknown = false; // response loss/internal failure may follow an order effect; block blind resubmit
 var _SD_PALETTE = ['var(--q1)','var(--up)','var(--q4)','var(--info)','var(--warn)','var(--q3)','var(--act)','var(--q2)'];
 
 var fmtShares = function(n) {
@@ -6679,10 +6689,11 @@ function refreshSelf() {
     fetch('/api/self_directed').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
     fetch('/api/self_directed/history').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
   ]).then(function(res) {
-    if (res[0].status === 'fulfilled' && res[0].value) _self = res[0].value;
-    if (res[1].status === 'fulfilled' && res[1].value) _selfHist = res[1].value;
+    _self = res[0].status === 'fulfilled' ? res[0].value : null;
+    _selfHist = res[1].status === 'fulfilled' ? res[1].value : null;
     _selfSettled = true; _selfHistSettled = true;
     renderSelf();
+    return _selfBookState(_self, true) !== 'unavailable' && _selfHistState(_selfHist, true) === 'ok';
   });
 }
 
@@ -7014,12 +7025,28 @@ function renderSelfHistory() {
 window.selfSearch = function() {
   var q = ((E('sd-search') || {}).value || '').trim();
   if (_selfSearchTimer) clearTimeout(_selfSearchTimer);
+  _selfSearchTimer = null;
+  _selfActiveIdx = -1;
+  _selfResults = [];
+  if (_selfSel && q.toUpperCase() !== _selfSel.ticker) {
+    _selfSel = null; renderSelfSelected(false); selfUpdateEst();
+  }
   if (!q) { _selfResults = []; renderSelfResults([], ''); return; }
-  _selfSearchTimer = setTimeout(function() {
+  var timer = _selfSearchTimer = setTimeout(function() {
     fetch('/api/self_directed/search?q=' + encodeURIComponent(q))
       .then(function(r){ return r.ok ? r.json() : null; })
-      .then(function(d){ _selfResults = (d && d.results) || []; _selfActiveIdx = -1; renderSelfResults(_selfResults, (d && d.error) ? 'err' : ''); })
-      .catch(function(){ renderSelfResults([], ''); });
+      .then(function(d){
+        if (_selfSearchTimer !== timer) return;
+        if (!d || d.search_status !== 'available' || !Array.isArray(d.results)) {
+          _selfResults = []; _selfActiveIdx = -1; renderSelfResults([], 'err'); return;
+        }
+        _selfResults = d.results;
+        _selfActiveIdx = -1; renderSelfResults(_selfResults, '');
+      })
+      .catch(function(){
+        if (_selfSearchTimer !== timer) return;
+        _selfResults = []; _selfActiveIdx = -1; renderSelfResults([], 'err');
+      });
   }, 220);
 };
 
@@ -7058,14 +7085,28 @@ window.selfSearchKey = function(e) {
 window.selectSelfTicker = function(ticker) {
   ticker = (ticker || '').toUpperCase();
   if (!ticker) return;
+  clearTimeout(_selfSearchTimer); _selfSearchTimer = null;
   _selfResults = []; renderSelfResults([], '');
   var inp = E('sd-search'); if (inp) inp.value = ticker;
-  _selfSel = { ticker: ticker, price: null, name: '' };
-  renderSelfSelected(true);
+  var selection = _selfSel = { ticker: ticker, price: null, name: '', quote_status: 'loading' };
+  renderSelfSelected(true); selfUpdateEst();
   fetch('/api/self_directed/quote?ticker=' + encodeURIComponent(ticker))
     .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ if (d) _selfSel = { ticker: d.ticker || ticker, price: d.price, name: d.name || '' }; renderSelfSelected(false); selfUpdateEst(); })
-    .catch(function(){ renderSelfSelected(false); });
+    .then(function(d){
+      if (_selfSel !== selection) return;
+      if (!d || d.quote_status !== 'available' || d.ticker !== ticker ||
+          (d.price !== null && !Number.isFinite(d.price))) {
+        _selfSel = { ticker: ticker, price: null, name: '', quote_status: 'unavailable' };
+      } else {
+        _selfSel = { ticker: ticker, price: d.price, name: d.name || '', quote_status: 'available' };
+      }
+      renderSelfSelected(false); selfUpdateEst();
+    })
+    .catch(function(){
+      if (_selfSel !== selection) return;
+      _selfSel = { ticker: ticker, price: null, name: '', quote_status: 'unavailable' };
+      renderSelfSelected(false); selfUpdateEst();
+    });
 };
 
 function renderSelfSelected(loading) {
@@ -7076,7 +7117,9 @@ function renderSelfSelected(loading) {
     return;
   }
   var s = _selfSel;
-  var px = s.price != null ? ('$' + Number(s.price).toFixed(2)) : (loading ? '…' : t('sd.no_price'));
+  var quoteUnavailable = s.quote_status === 'unavailable';
+  var px = quoteUnavailable ? t('sd.quote_unavail')
+    : (s.price != null ? ('$' + Number(s.price).toFixed(2)) : (loading ? '…' : t('sd.no_price')));
   el.className = 'mm-sd-sel';
   el.innerHTML = '<div class="mm-sd-sel-top"><span class="mm-sd-sel-tk">' + esc(s.ticker) + '</span>' +
     (s.name ? '<span class="mm-sd-sel-nm">' + esc(s.name) + '</span>' : '') +
@@ -7117,25 +7160,28 @@ window.selfUpdateEst = function() {
   parts.push(t('sd.buying_power') + ' ' + (cashKnown ? fmtNav(rawCash) : t('sd.unavailable')));
   if (held > 0) parts.push(t('sd.you_hold') + ' ' + fmtShares(held) + ' ' + t('sd.shares_unit'));
   est.textContent = parts.join(' · ');
-  var canBuy = px != null && amt > 0, canSell = px != null && amt > 0 && held > 0;
+  var canBuy = px != null && amt > 0 && cashKnown, canSell = px != null && amt > 0 && held > 0;
   // An account we cannot read must not trade blind: the ticket stays inert until it settles
   // readable ('ok'), so the pending window before the first read is inert too.
-  if (buy) buy.disabled = bookNotOk || !canBuy || _selfBusy;
-  if (sell) sell.disabled = bookNotOk || !canSell || _selfBusy;
+  if (buy) buy.disabled = bookNotOk || !canBuy || _selfBusy || _selfOrderEffectUnknown;
+  if (sell) sell.disabled = bookNotOk || !canSell || _selfBusy || _selfOrderEffectUnknown;
 };
 
 function _selfMsg(cls, txt) { var el = E('sd-msg'); if (el) { el.className = 'mm-sd-msg ' + cls; el.innerHTML = txt; } }
 
 window.placeSelfOrder = function(side, tickerOverride) {
-  if (_selfBusy) return;
-  if (_selfBookState(_self, _selfSettled) !== 'ok') {
+  if (_selfBusy || _selfOrderEffectUnknown) {
+    if (_selfOrderEffectUnknown) _selfMsg('err', t('sd.order_unknown'));
+    return;
+  }
+  if (_selfBookState(_self, _selfSettled) !== 'ok' || (side === 'buy' && !Number.isFinite(_self.cash))) {
     _selfMsg('err', t('sd.orders_paused'));
     selfUpdateEst();
     return;
   }
   var ticker, amt, dollars;
   if (tickerOverride) { ticker = tickerOverride.toUpperCase(); amt = parseFloat((E('sd-qty-' + ticker) || {}).value); dollars = false; }
-  else { if (!_selfSel) return; ticker = _selfSel.ticker; amt = parseFloat((E('sd-shares') || {}).value); dollars = (_selfUnit === 'dollars'); }
+  else { if (!_selfSel || !Number.isFinite(_selfSel.price) || _selfSel.price <= 0) return; ticker = _selfSel.ticker; amt = parseFloat((E('sd-shares') || {}).value); dollars = (_selfUnit === 'dollars'); }
   if (!ticker || !(amt > 0)) { _selfMsg('err', t('sd.order_failed') + ' — ' + (dollars ? t('sd.amount') : t('sd.col_shares'))); return; }
   _selfBusy = true;
   if (E('sd-buy')) E('sd-buy').disabled = true;
@@ -7143,20 +7189,44 @@ window.placeSelfOrder = function(side, tickerOverride) {
   var body = dollars ? { ticker: ticker, side: side, notional: amt } : { ticker: ticker, side: side, shares: amt };
   fetch('/api/self_directed/order', { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body) })
-    .then(function(r){ return r.json(); })
+    .then(function(r){
+      return r.json().then(function(d){
+        if (d && d.ok === false && d.error === 'self_directed_busy_retry') return d;
+        if (!r.ok || !d || typeof d.ok !== 'boolean' ||
+            (d.ok && d.status !== 'filled' && d.status !== 'pending') ||
+            (!d.ok && (typeof d.error !== 'string' || !d.error.trim() ||
+                       d.error === 'self_directed_order_unavailable'))) {
+          throw new Error('Unconfirmed order response');
+        }
+        return d;
+      });
+    })
     .then(function(d) {
-      if (!d || !d.ok) { _selfMsg('err', t('sd.order_failed') + (d && d.error ? ': ' + esc(d.error) : '')); return; }
+      if (!d.ok) {
+        if (d.error === 'self_directed_busy_retry') { _selfMsg('err', t('sd.busy_retry')); return; }
+        var detail = !String(d.error).startsWith('self_directed_') ? ': ' + esc(d.error) : '';
+        _selfMsg('err', detail ? (t('sd.order_failed') + detail) : t('sd.order_unavail'));
+        return;
+      }
       if (d.status === 'filled') {
         var f = d.fill || {};
         _selfMsg('ok', t('sd.filled') + ': ' + (side === 'buy' ? t('sd.buy') : t('sd.sell')) + ' ' + fmtShares(f.shares) + ' ' + esc(ticker) + ' ' + t('sd.at') + ' ' + (f.price != null && !isNaN(f.price) ? '$' + Number(f.price).toFixed(2) : '—'));
       } else if (d.status === 'pending') { _selfMsg('pend', t('sd.queued')); }
       if (!tickerOverride) { var sh = E('sd-shares'); if (sh) sh.value = ''; }
-      else { var q = E('sd-qty-' + ticker); if (q) q.value = ''; }   // clear the quick-trade qty
-      return refreshSelf();
+      else { var q = E('sd-qty-' + ticker); if (q) q.value = ''; }
+      return refreshConfirmedSelf('sd.order_refresh_failed');
+    }, function(){
+      _selfOrderEffectUnknown = true;
+      _selfMsg('err', t('sd.order_unknown'));
     })
-    .catch(function(){ _selfMsg('err', t('sd.order_failed')); })
     .finally(function(){ _selfBusy = false; selfUpdateEst(); });
 };
+
+function refreshConfirmedSelf(failedMessage) {
+  return Promise.resolve().then(refreshSelf).catch(function(){ return false; }).then(function(fresh) {
+    if (fresh === false) _selfMsg('pend', t(failedMessage));
+  });
+}
 
 window.saveSelfThesis = function(ticker) {
   ticker = (ticker || '').toUpperCase();
@@ -7167,21 +7237,29 @@ window.saveSelfThesis = function(ticker) {
     .then(function(r){ return r.json(); })
     .then(function(d) {
       if (d && d.ok) {
-        // an empty textarea clears the note (backend returns thesis:null) — say "cleared", not "Saved"
         if (noteEl) noteEl.textContent = d.thesis
           ? (t('sd.thesis_saved') + (d.thesis.updated_at ? ' ' + fmtTs(d.thesis.updated_at) : ''))
           : t('sd.thesis_cleared');
-        refreshSelf();   // refresh the ◆ flag; the row stays open (_selfExpanded preserved)
-      } else if (noteEl) { noteEl.textContent = t('sd.order_failed'); }
+        refreshSelf();
+      } else if (noteEl) {
+        noteEl.textContent = (d && d.error === 'self_directed_busy_retry') ? t('sd.busy_retry') : t('sd.thesis_failed');
+      }
     })
-    .catch(function(){});
+    .catch(function(){ if (noteEl) noteEl.textContent = t('sd.thesis_failed'); });
 };
 
 window.cancelSelfOrder = function(orderId) {
   fetch('/api/self_directed/cancel?order_id=' + encodeURIComponent(orderId), { method: 'POST' })
     .then(function(r){ return r.json(); })
-    .then(function(){ refreshSelf(); })
-    .catch(function(){});
+    .then(function(d){
+      if (!d || !d.ok) {
+        var msg = (d && d.error === 'self_directed_cancel_not_found') ? t('sd.cancel_not_found')
+          : ((d && d.error === 'self_directed_busy_retry') ? t('sd.busy_retry') : t('sd.cancel_failed'));
+        _selfMsg('err', msg); return;
+      }
+      return refreshConfirmedSelf('sd.cancel_refresh_failed');
+    })
+    .catch(function(){ _selfMsg('err', t('sd.cancel_failed')); });
 };
 
 // close the search dropdown on an outside click

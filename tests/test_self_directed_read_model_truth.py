@@ -300,7 +300,7 @@ def test_actual_order_function_blocks_both_entry_points_until_book_is_ok():
     script = _ui_state_source() + r"""
 const assert = require('node:assert/strict');
 var window = globalThis, _self = null, _selfSettled = false, _selfBusy = false;
-var _selfSel = {ticker:'AAPL',price:100}, _selfUnit = 'shares', calls = [];
+var _selfOrderEffectUnknown = false, _selfSel = {ticker:'AAPL',price:100}, _selfUnit = 'shares', calls = [];
 function E() {return {value:'1',disabled:false};}
 function t(k) {return k;}
 function esc(v) {return String(v);}
@@ -311,7 +311,7 @@ function selfUpdateEst() {}
 function refreshSelf() {return Promise.resolve();}
 function fetch(url,options) {
   calls.push({url,options});
-  return Promise.resolve({json:()=>Promise.resolve({ok:false})});
+  return Promise.resolve({ok:true,json:()=>Promise.resolve({ok:false,error:'insufficient cash'})});
 }
 """ + order + r"""
 (async()=>{
