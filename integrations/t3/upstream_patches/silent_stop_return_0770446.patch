@@ -1,0 +1,760 @@
+diff --git a/apps/server/src/mcp/DelegatedChildStop.integration.test.ts b/apps/server/src/mcp/DelegatedChildStop.integration.test.ts
+new file mode 100644
+index 00000000..7e292492
+--- /dev/null
++++ b/apps/server/src/mcp/DelegatedChildStop.integration.test.ts
+@@ -0,0 +1,613 @@
++import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
++import * as NodeServices from "@effect/platform-node/NodeServices";
++import { assert, it } from "@effect/vitest";
++import {
++  CommandId,
++  MessageId,
++  ProjectId,
++  ProviderDriverKind,
++  ProviderInstanceId,
++  ProviderThreadId,
++  ProviderTurnId,
++  ThreadId,
++  type OrchestrationV2DomainEvent,
++  type OrchestrationV2ThreadProjection,
++} from "@t3tools/contracts";
++import * as Cause from "effect/Cause";
++import * as DateTime from "effect/DateTime";
++import * as Effect from "effect/Effect";
++import * as TestClock from "effect/testing/TestClock";
++import * as Fiber from "effect/Fiber";
++import * as FileSystem from "effect/FileSystem";
++import * as Layer from "effect/Layer";
++import * as Path from "effect/Path";
++import * as Queue from "effect/Queue";
++import * as SqlClient from "effect/sql/SqlClient";
++import * as Stream from "effect/Stream";
++
++import { ClaudeProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
++import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
++import * as EffectWorker from "../orchestration-v2/EffectWorker.ts";
++import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
++import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
++import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
++import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
++import * as ServerSettings from "../serverSettings.ts";
++import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
++import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
++import * as SqlitePersistence from "../persistence/Sqlite.ts";
++
++const driver = ProviderDriverKind.make("claudeAgent");
++const instanceId = ProviderInstanceId.make("claudeAgent");
++const modelSelection = { instanceId, model: "claude-test" };
++
++type Turn = {
++  readonly turn: ProviderAdapter.ProviderAdapterV2TurnInput;
++  readonly events: Queue.Queue<ProviderAdapter.ProviderAdapterV2Event, Cause.Done>;
++  readonly providerTurnId: ProviderTurnId;
++};
++
++type AdapterScript = {
++  /** Fails this many session opens before they succeed (a provider that is down at boot). */
++  readonly failOpens?: number;
++  /** Runs once a turn has started, so the provider can finish it on its own. */
++  readonly onTurn?: (turn: Turn) => Effect.Effect<void>;
++};
++
++const makeAdapter = (
++  cwd: string,
++  turns: Array<Turn>,
++  script: AdapterScript = {},
++): ProviderAdapter.ProviderAdapterV2["Service"] => {
++  let failedOpens = 0;
++  return {
++    instanceId,
++    driver,
++    getCapabilities: () => Effect.succeed(ClaudeProviderCapabilitiesV2),
++    planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
++    openSession: (input) =>
++      Effect.gen(function* () {
++        if (failedOpens < (script.failOpens ?? 0)) {
++          failedOpens += 1;
++          return yield* new ProviderAdapter.ProviderAdapterOpenSessionError({
++            driver,
++            providerSessionId: input.providerSessionId,
++            cause: "provider unavailable",
++          });
++        }
++        const now = yield* DateTime.now;
++        const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event, Cause.Done>();
++        return {
++          instanceId,
++          driver,
++          providerSessionId: input.providerSessionId,
++          providerSession: {
++            id: input.providerSessionId,
++            driver,
++            providerInstanceId: instanceId,
++            status: "ready",
++            cwd,
++            model: modelSelection.model,
++            capabilities: ClaudeProviderCapabilitiesV2,
++            createdAt: now,
++            updatedAt: now,
++            lastError: null,
++          },
++          events: Stream.fromQueue(events),
++          ensureThread: ({ threadId }) =>
++            Effect.succeed({
++              id: ProviderThreadId.make(`provider-thread:${threadId}`),
++              driver,
++              providerInstanceId: instanceId,
++              providerSessionId: input.providerSessionId,
++              appThreadId: threadId,
++              ownerNodeId: null,
++              nativeThreadRef: { driver, nativeId: `native:${threadId}`, strength: "strong" },
++              nativeConversationHeadRef: null,
++              status: "idle",
++              firstRunOrdinal: null,
++              lastRunOrdinal: null,
++              handoffIds: [],
++              forkedFrom: null,
++              createdAt: now,
++              updatedAt: now,
++            }),
++          resumeThread: ({ providerThread }) => Effect.succeed(providerThread),
++          startTurn: (turn) =>
++            Effect.gen(function* () {
++              const entry = {
++                turn,
++                events,
++                providerTurnId: ProviderTurnId.make(`provider-turn:${turn.attemptId}`),
++              };
++              turns.push(entry);
++              yield* Queue.offer(events, {
++                type: "provider_turn.updated",
++                driver,
++                providerTurn: {
++                  id: entry.providerTurnId,
++                  providerThreadId: turn.providerThread.id,
++                  nodeId: turn.rootNodeId,
++                  runAttemptId: turn.attemptId,
++                  nativeTurnRef: null,
++                  ordinal: turn.providerTurnOrdinal,
++                  status: "running",
++                  startedAt: now,
++                  completedAt: null,
++                },
++              });
++              if (script.onTurn !== undefined) yield* Effect.forkDetach(script.onTurn(entry));
++            }),
++          steerTurn: () => Effect.die("unused"),
++          interruptTurn: () => Effect.void,
++          respondToRuntimeRequest: () => Effect.die("unused"),
++          readThreadSnapshot: () => Effect.die("unused"),
++          rollbackThread: () => Effect.die("unused"),
++          forkThread: () => Effect.die("unused"),
++        };
++      }),
++  };
++};
++
++/** Ends a provider turn with a terminal, the way an adapter reports its result. */
++const finishTurn = (
++  entry: Turn,
++  terminal:
++    | { readonly status: "completed" }
++    | { readonly status: "failed"; readonly message: string; readonly code: string },
++) =>
++  Effect.gen(function* () {
++    const now = yield* DateTime.now;
++    const providerThreadId = entry.turn.providerThread.id;
++    const base = {
++      id: entry.providerTurnId,
++      providerThreadId,
++      nodeId: entry.turn.rootNodeId,
++      runAttemptId: entry.turn.attemptId,
++      nativeTurnRef: null,
++      ordinal: entry.turn.providerTurnOrdinal,
++      startedAt: now,
++    };
++    yield* Queue.offerAll(entry.events, [
++      {
++        type: "provider_turn.updated",
++        driver,
++        providerTurn: { ...base, status: terminal.status, completedAt: now },
++      },
++      terminal.status === "completed"
++        ? {
++            type: "turn.terminal",
++            driver,
++            providerThreadId,
++            providerTurnId: entry.providerTurnId,
++            runOrdinal: entry.turn.runOrdinal,
++            status: "completed",
++            failure: null,
++            threadDisposition: "reusable",
++          }
++        : {
++            type: "turn.terminal",
++            driver,
++            providerThreadId,
++            providerTurnId: entry.providerTurnId,
++            runOrdinal: entry.turn.runOrdinal,
++            failureItemOrdinal: 1,
++            status: "failed",
++            failure: {
++              class: "provider_error",
++              message: terminal.message,
++              code: terminal.code,
++              retryable: null,
++            },
++            threadDisposition: "reusable",
++          },
++    ] satisfies Array<ProviderAdapter.ProviderAdapterV2Event>);
++  });
++
++/** Messages in the parent that deliver this task's completion (each is one wake). */
++const completionMessages = (parent: OrchestrationV2ThreadProjection, taskId: string) =>
++  parent.messages.filter((message) =>
++    (message.delegatedCompletion?.taskIds as ReadonlyArray<string> | undefined)?.includes(taskId),
++  );
++
++/** The parent was woken exactly once: one completion message and one wake run after its own. */
++const assertWokenOnce = (parent: OrchestrationV2ThreadProjection, taskId: string) => {
++  assert.lengthOf(completionMessages(parent, taskId), 1);
++  assert.lengthOf(parent.runs, 2);
++};
++
++const makeLayer = (input: {
++  readonly name: string;
++  readonly adapter: ProviderAdapter.ProviderAdapterV2["Service"];
++  readonly databaseLayer?: NonNullable<
++    Parameters<typeof ProviderReplayHarness.layerWithRegistry>[2]
++  >["databaseLayer"];
++  readonly restarted?: boolean;
++  readonly continueThreadsAfterServerUpdate?: boolean;
++}) => {
++  const layerAdapters = ProviderAdapterRegistry.layerSingle(input.adapter);
++  const layerOrchestrator = ProviderReplayHarness.layerWithRegistry(
++    { name: input.name },
++    layerAdapters,
++    {
++      runContinuationWorker: true,
++      ...(input.databaseLayer === undefined ? {} : { databaseLayer: input.databaseLayer }),
++      ...(input.restarted === true ? { recoverOnStartup: true } : { runEffectWorker: false }),
++      ...(input.continueThreadsAfterServerUpdate === undefined
++        ? {}
++        : { continueThreadsAfterServerUpdate: input.continueThreadsAfterServerUpdate }),
++    },
++  );
++  return Layer.merge(
++    layerOrchestrator,
++    ThreadManagementService.layer.pipe(
++      Layer.provide(layerOrchestrator),
++      Layer.provide(ServerSettings.layerTest()),
++      Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
++    ),
++  ).pipe(
++    Layer.provide(
++      Layer.mergeAll(
++        layerAdapters,
++        ServerSettings.layerTest(),
++        NodeServices.layer,
++        NodeCrypto.layer,
++      ),
++    ),
++  );
++};
++
++const watch = (predicate: (event: OrchestrationV2DomainEvent) => boolean) =>
++  Effect.gen(function* () {
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    return yield* orchestrator.streamDomainEvents.pipe(
++      Stream.filter(predicate),
++      Stream.take(1),
++      Stream.runDrain,
++      Effect.forkScoped,
++    );
++  });
++
++/**
++ * Starts a parent run, delegates one child, lets the parent finish its own turn (so the child's
++ * completion has to wake it), and returns once the child's provider turn is running.
++ */
++const startParentAndChild = (name: string, cwd: string, turns: Array<Turn>) =>
++  Effect.gen(function* () {
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
++    const parentThreadId = ThreadId.make(`thread:${name}-parent`);
++    const turnRunning = () =>
++      watch(
++        (event) => event.type === "provider-turn.updated" && event.payload.status === "running",
++      );
++    yield* orchestrator.dispatch({
++      type: "thread.create",
++      commandId: CommandId.make(`create-${name}`),
++      threadId: parentThreadId,
++      projectId: ProjectId.make(`project:${name}`),
++      title: "Parent",
++      modelSelection,
++      runtimeMode: "full-access",
++      interactionMode: "default",
++      branch: null,
++      worktreePath: cwd,
++      createdBy: "user",
++      creationSource: "web",
++    });
++    const parentRunning = yield* turnRunning();
++    yield* orchestrator.dispatch({
++      type: "message.dispatch",
++      commandId: CommandId.make(`start-${name}`),
++      threadId: parentThreadId,
++      messageId: MessageId.make(`message:start-${name}`),
++      text: "Delegate a review",
++      attachments: [],
++      dispatchMode: { type: "start_immediately" },
++      createdBy: "user",
++      creationSource: "web",
++    });
++    yield* worker.drain();
++    yield* Fiber.join(parentRunning);
++    const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs[0]!;
++    const childRunning = yield* turnRunning();
++    yield* orchestrator.dispatch({
++      type: "delegated_task.request",
++      commandId: CommandId.make(`delegate-${name}`),
++      parentThreadId,
++      parentRunId: parentRun.id,
++      parentNodeId: parentRun.rootNodeId!,
++      task: "Review the change",
++      modelSelection,
++      runtimeMode: "full-access",
++      interactionMode: "default",
++      completionWake: "always",
++      createdBy: "agent",
++      creationSource: "mcp",
++    });
++    yield* worker.drain();
++    yield* Fiber.join(childRunning);
++    const task = (yield* orchestrator.getThreadProjection(parentThreadId)).subagents[0]!;
++    const childThreadId = task.childThreadId!;
++    const child = turns.find((entry) => entry.turn.threadId === childThreadId)!;
++    const parentTurn = turns.find((entry) => entry.turn.threadId === parentThreadId)!;
++    const parentSettled = yield* watch(
++      (event) =>
++        event.type === "run.updated" &&
++        event.payload.id === parentRun.id &&
++        event.payload.status !== "running",
++    );
++    yield* finishTurn(parentTurn, { status: "completed" });
++    yield* Fiber.join(parentSettled);
++    return { child, childThreadId, parentThreadId, taskId: task.id, drain: worker.drain() };
++  });
++
++/** Polls until the parent's task carries a result, draining effects when the worker is manual. */
++const awaitTaskSettled = (
++  parentThreadId: ThreadId,
++  taskId: string,
++  drain: Effect.Effect<unknown, EffectWorker.OrchestrationEffectWorkerError> = Effect.void,
++  pause: Effect.Effect<void> = Effect.sleep("50 millis"),
++) =>
++  Effect.gen(function* () {
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    for (let attempt = 0; attempt < 400; attempt++) {
++      yield* drain;
++      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++      if (parent.subagents.some((row) => row.id === taskId && row.result !== null)) return;
++      yield* pause;
++    }
++    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++    const row = parent.subagents.find((candidate) => candidate.id === taskId);
++    const child =
++      row?.childThreadId == null
++        ? undefined
++        : yield* orchestrator.getThreadProjection(row.childThreadId);
++    return yield* Effect.die(
++      `task ${taskId} never settled: ${JSON.stringify({
++        task: row === undefined ? null : { status: row.status, result: row.result },
++        childRuns: child?.runs.map((run) => ({ ordinal: run.ordinal, status: run.status })),
++      })}`,
++    );
++  });
++
++/** Waits until the parent's completion wake has started a second run. */
++const awaitParentWake = (
++  parentThreadId: ThreadId,
++  pause: Effect.Effect<void> = Effect.sleep("50 millis"),
++) =>
++  Effect.gen(function* () {
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    for (let attempt = 0; attempt < 200; attempt++) {
++      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++      if (parent.runs.length >= 2) return;
++      yield* pause;
++    }
++  });
++
++type Started = Effect.Success<ReturnType<typeof startParentAndChild>>;
++
++const runSingle = <A, E>(
++  name: string,
++  scenario: (input: Started) => Effect.Effect<A, E, Orchestrator.OrchestratorV2>,
++) =>
++  Effect.scoped(
++    Effect.gen(function* () {
++      const turns: Array<Turn> = [];
++      const cwd = yield* checkpointWorkspace(`delegated-child-stop-${name}`);
++      return yield* Effect.gen(function* () {
++        return yield* scenario(yield* startParentAndChild(name, cwd, turns));
++      }).pipe(Effect.provide(makeLayer({ name, adapter: makeAdapter(cwd, turns) })));
++    }),
++  );
++
++/**
++ * Runs the parent and a running child on a file database, copies the database while the child
++ * is mid-turn (a server killed at that moment), and boots a second runtime from the copy with
++ * startup recovery and the effect worker, as a restarted server does.
++ */
++const runRestarted = <A, E>(
++  name: string,
++  options: {
++    readonly continueThreadsAfterServerUpdate?: boolean;
++    readonly afterRestart: AdapterScript;
++  },
++  scenario: (input: {
++    readonly parentThreadId: ThreadId;
++    readonly childThreadId: ThreadId;
++    readonly taskId: string;
++    readonly turns: ReadonlyArray<Turn>;
++  }) => Effect.Effect<A, E, Orchestrator.OrchestratorV2>,
++) =>
++  Effect.scoped(
++    Effect.gen(function* () {
++      const fs = yield* FileSystem.FileSystem;
++      const path = yield* Path.Path;
++      const tempDir = yield* Effect.acquireRelease(
++        fs.makeTempDirectory({ prefix: "t3-delegated-child-restart-" }),
++        (directory) => fs.remove(directory, { recursive: true, force: true }).pipe(Effect.orDie),
++      );
++      const snapshotPath = path.join(tempDir, "restart-state.sqlite");
++      const fileDatabase = (file: string) =>
++        SqlitePersistence.layerFromPath(file).pipe(
++          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
++        );
++      const cwd = yield* checkpointWorkspace(`delegated-child-stop-${name}`);
++      const firstTurns: Array<Turn> = [];
++      // Build each database once so every service in a runtime shares one connection.
++      const built = (file: string) =>
++        Effect.map(Layer.build(fileDatabase(file)), (context) => Layer.succeedContext(context));
++      const started = yield* Effect.scoped(
++        Effect.gen(function* () {
++          const firstDatabase = yield* built(path.join(tempDir, "state.sqlite"));
++          return yield* Effect.gen(function* () {
++            const result = yield* startParentAndChild(name, cwd, firstTurns);
++            yield* result.drain;
++            // Keep the mid-turn state before teardown settles the provider work.
++            const sql = yield* SqlClient.SqlClient;
++            yield* sql`VACUUM INTO ${snapshotPath}`;
++            return result;
++          }).pipe(
++            Effect.provide(
++              Layer.merge(
++                makeLayer({
++                  name,
++                  adapter: makeAdapter(cwd, firstTurns),
++                  databaseLayer: firstDatabase,
++                }),
++                firstDatabase,
++              ),
++            ),
++          );
++        }),
++      );
++      const turns: Array<Turn> = [];
++      return yield* Effect.scoped(
++        Effect.flatMap(built(snapshotPath), (snapshotDatabase) =>
++          scenario({
++            parentThreadId: started.parentThreadId,
++            childThreadId: started.childThreadId,
++            taskId: started.taskId,
++            turns,
++          }).pipe(
++            Effect.provide(
++              makeLayer({
++                name,
++                adapter: makeAdapter(cwd, turns, options.afterRestart),
++                databaseLayer: snapshotDatabase,
++                restarted: true,
++                ...(options.continueThreadsAfterServerUpdate === undefined
++                  ? {}
++                  : { continueThreadsAfterServerUpdate: options.continueThreadsAfterServerUpdate }),
++              }),
++            ),
++          ),
++        ),
++      );
++    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
++  );
++
++const readParentTask = (parentThreadId: ThreadId, taskId: string) =>
++  Effect.gen(function* () {
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++    return { parent, task: parent.subagents.find((row) => row.id === taskId)! };
++  });
++
++it.live(
++  "a delegated child whose provider stream ends without a terminal reports to its parent once",
++  () =>
++    runSingle("stream-end", ({ child, parentThreadId, taskId, drain }) =>
++      Effect.gen(function* () {
++        yield* Queue.end(child.events);
++        yield* awaitTaskSettled(parentThreadId, taskId, drain);
++        yield* drain;
++        const { parent, task } = yield* readParentTask(parentThreadId, taskId);
++        assert.equal(task.status, "failed");
++        assert.include(task.result ?? "", "provider event stream closed unexpectedly");
++        assertWokenOnce(parent, taskId);
++      }),
++    ),
++);
++
++it.live(
++  "a delegated child whose model route answers HTTP 400 reports the cause to its parent once",
++  () =>
++    runSingle("http-400", ({ child, parentThreadId, taskId, drain }) =>
++      Effect.gen(function* () {
++        yield* finishTurn(child, {
++          status: "failed",
++          message: "API Error: 400 upstream refused; no cross-route replay",
++          code: "api_error_400",
++        });
++        yield* awaitTaskSettled(parentThreadId, taskId, drain);
++        yield* drain;
++        const { parent, task } = yield* readParentTask(parentThreadId, taskId);
++        assert.equal(task.status, "failed");
++        assert.include(task.result ?? "", "400 upstream refused");
++        assertWokenOnce(parent, taskId);
++      }),
++    ),
++);
++
++it.live("a normal delegated child completes and wakes its parent once", () =>
++  runSingle("normal", ({ child, parentThreadId, taskId, drain }) =>
++    Effect.gen(function* () {
++      yield* finishTurn(child, { status: "completed" });
++      yield* awaitTaskSettled(parentThreadId, taskId, drain);
++      yield* drain;
++      const { parent, task } = yield* readParentTask(parentThreadId, taskId);
++      assert.equal(task.status, "completed");
++      assertWokenOnce(parent, taskId);
++    }),
++  ),
++);
++
++it.live("a delegated child cut by a restart resumes, finishes and wakes its parent once", () =>
++  runRestarted(
++    "restart-resume",
++    { afterRestart: { onTurn: (turn) => finishTurn(turn, { status: "completed" }) } },
++    ({ parentThreadId, childThreadId, taskId, turns }) =>
++      Effect.gen(function* () {
++        yield* awaitTaskSettled(parentThreadId, taskId);
++        yield* awaitParentWake(parentThreadId);
++        const { parent, task } = yield* readParentTask(parentThreadId, taskId);
++        assert.equal(task.status, "completed");
++        assert.isTrue(turns.some((entry) => entry.turn.threadId === childThreadId));
++        assertWokenOnce(parent, taskId);
++      }),
++  ),
++);
++
++it.live(
++  "a delegated child cut by a restart that is not resumed is reported to its parent once",
++  () =>
++    runRestarted(
++      "restart-no-resume",
++      {
++        continueThreadsAfterServerUpdate: false,
++        afterRestart: { onTurn: (turn) => finishTurn(turn, { status: "completed" }) },
++      },
++      ({ parentThreadId, childThreadId, taskId, turns }) =>
++        Effect.gen(function* () {
++          yield* awaitTaskSettled(parentThreadId, taskId);
++          yield* awaitParentWake(parentThreadId);
++          const { parent, task } = yield* readParentTask(parentThreadId, taskId);
++          assert.equal(task.status, "cancelled");
++          assert.include(task.result ?? "", "server restarted");
++          assert.include(task.result ?? "", "not resumed");
++          assert.isFalse(turns.some((entry) => entry.turn.threadId === childThreadId));
++          assertWokenOnce(parent, taskId);
++        }),
++    ),
++);
++
++it.effect(
++  "a delegated child whose resume keeps failing after a restart is retried, then reported once",
++  () =>
++    runRestarted(
++      "restart-resume-fails",
++      { afterRestart: { failOpens: 1_000 } },
++      ({ parentThreadId, taskId, childThreadId }) =>
++        Effect.gen(function* () {
++          // The test clock carries the resume's backoff; the real pause lets storage keep up.
++          const pause = TestClock.adjust("5 seconds").pipe(
++            Effect.andThen(TestClock.withLive(Effect.sleep("20 millis"))),
++          );
++          yield* awaitTaskSettled(parentThreadId, taskId, Effect.void, pause);
++          const orchestrator = yield* Orchestrator.OrchestratorV2;
++          const child = yield* orchestrator.getThreadProjection(childThreadId);
++          // The cut run, then one resume and its two delayed retries.
++          assert.deepEqual(
++            child.runs.map((run) => run.status),
++            ["cancelled", "failed", "failed", "failed"],
++          );
++          yield* awaitParentWake(parentThreadId, pause);
++          const { parent, task } = yield* readParentTask(parentThreadId, taskId);
++          assert.equal(task.status, "cancelled");
++          assert.include(task.result ?? "", "resuming it failed");
++          assert.include(task.result ?? "", "Failed to open claudeAgent provider session");
++          assertWokenOnce(parent, taskId);
++        }),
++    ),
++);
+diff --git a/apps/server/src/orchestration-v2/Orchestrator.ts b/apps/server/src/orchestration-v2/Orchestrator.ts
+index 38bda698..dd997cd8 100644
+--- a/apps/server/src/orchestration-v2/Orchestrator.ts
++++ b/apps/server/src/orchestration-v2/Orchestrator.ts
+@@ -125,6 +125,7 @@ import {
+   continuationFailedBeforePrompt,
+   continuationStartRetryDelayMs,
+   isRestartContinuationSource,
++  latestRestartContinuation,
+   runOutcome,
+ } from "./RestartBackgroundNote.ts";
+ import {
+@@ -12887,6 +12888,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+       options: {
+         readonly settledContinuationOf?: RunId;
+         readonly syncRunId?: RunId;
++        readonly afterRestart?: boolean;
+         readonly task: OrchestrationV2Subagent;
+         readonly resultRun?: OrchestrationV2Run;
+       },
+@@ -12976,13 +12978,25 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+         return;
+       }
+ 
++      // A restart cancelled this started run and no resume finished it, so the parent hears that
++      // instead of a bare status. Providers can cancel turns too; only restart recovery or a
++      // resume chain marks a restart.
++      const restartChainHead =
++        outcome === "cancelled" && childRun.startedAt !== null
++          ? latestRestartContinuation(childRun, childControls.runs)
++          : undefined;
++      const restartResume =
++        restartChainHead !== undefined &&
++        (options.afterRestart === true || restartChainHead.id !== childRun.id)
++          ? restartChainHead
++          : undefined;
+       const childResult = yield* projectionStore.getThreadRecords(
+         childThreadId,
+         ["messages", "turnItems"],
+         {
+           messageRoles: ["assistant"],
+           messageRunIds: [childRun.id],
+-          turnItemRunId: childRun.id,
++          turnItemRunIds: [...new Set([childRun.id, restartResume?.id ?? childRun.id])],
+           turnItemTypes: ["assistant_message", "error"],
+         },
+       );
+@@ -13028,7 +13042,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+       }
+ 
+       const now = yield* DateTime.now;
+-      const result = subagentResultForRun(childProjection, { ...childRun, status: outcome });
++      const cutResult = subagentResultForRun(childProjection, { ...childRun, status: outcome });
++      const resumeFailure =
++        restartResume !== undefined &&
++        restartResume.id !== childRun.id &&
++        restartResume.status === "failed"
++          ? subagentResultForRun(childProjection, restartResume).text
++          : undefined;
++      const partialOutput =
++        cutResult.messageId === null && cutResult.turnItemId === null
++          ? ""
++          : `\n\nLast output before the restart:\n${cutResult.text}`;
++      const result =
++        restartResume === undefined
++          ? cutResult
++          : {
++              ...cutResult,
++              text:
++                resumeFailure === undefined
++                  ? `This task stopped before it finished: the server restarted before its result was reported, and it was not resumed. Its work may be incomplete; check the child thread before relying on it.${partialOutput}`
++                  : `The server restarted before this task finished, and resuming it failed: ${resumeFailure}${partialOutput}`,
++            };
+       const parentRun =
+         task.runId === null
+           ? undefined
+@@ -13152,7 +13186,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+ 
+   const finalizeAppOwnedSubagent = Effect.fn("Orchestrator.finalizeAppOwnedSubagent")(function* (
+     childThreadId: ThreadId,
+-    options?: { readonly settledContinuationOf?: RunId; readonly syncRunId?: RunId },
++    options?: {
++      readonly settledContinuationOf?: RunId;
++      readonly syncRunId?: RunId;
++      readonly afterRestart?: boolean;
++    },
+   ) {
+     const childControls = yield* projectionStore.getThreadRecords(
+       childThreadId,
+@@ -14388,7 +14426,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+               const thread = yield* projectionStore.getThreadShell(threadId);
+               const parentThreadId = thread?.lineage.parentThreadId;
+               if (parentThreadId === undefined || parentThreadId === null) return;
+-              yield* threadDispatch.withLock(parentThreadId, finalizeAppOwnedSubagent(threadId));
++              yield* threadDispatch.withLock(
++                parentThreadId,
++                finalizeAppOwnedSubagent(threadId, { afterRestart: true }),
++              );
+             }).pipe(
+               Effect.catchCause((cause) =>
+                 Effect.logWarning("Failed to recover terminal app-owned subagent", {
+@@ -14502,7 +14543,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+       if (parentThreadId === undefined) return;
+       yield* threadDispatch.withLock(
+         parentThreadId,
+-        finalizeAppOwnedSubagent(threadId, { settledContinuationOf: sourceRunId }),
++        finalizeAppOwnedSubagent(threadId, {
++          settledContinuationOf: sourceRunId,
++          afterRestart: true,
++        }),
+       );
+     },
+     (effect, threadId, _sourceRunId) =>
+diff --git a/apps/server/src/orchestration-v2/RestartBackgroundNote.ts b/apps/server/src/orchestration-v2/RestartBackgroundNote.ts
+index c495290a..00ccb82f 100644
+--- a/apps/server/src/orchestration-v2/RestartBackgroundNote.ts
++++ b/apps/server/src/orchestration-v2/RestartBackgroundNote.ts
+@@ -171,6 +171,23 @@ export function runOutcome(
+     : run.status;
+ }
+ 
++/**
++ * The newest run in the chain that resumed `source` after restarts, or `source` itself. A run
++ * the provider started and a restart then cancelled is that chain's head.
++ */
++export function latestRestartContinuation<
++  R extends Pick<OrchestrationV2Run, "id" | "restartContinuationOfRunId">,
++>(source: R, runs: ReadonlyArray<R>): R {
++  let current = source;
++  const visited = new Set([current.id]);
++  for (;;) {
++    const next = runs.find((candidate) => candidate.restartContinuationOfRunId === current.id);
++    if (next === undefined || visited.has(next.id)) return current;
++    visited.add(next.id);
++    current = next;
++  }
++}
++
+ /** Unstarted runs have no lost work to continue, except prepared continuations carrying a source run. */
+ export function neverStarted(
+   run: Pick<OrchestrationV2Run, "startedAt" | "restartContinuationOfRunId">,
