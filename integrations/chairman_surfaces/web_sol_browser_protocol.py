@@ -24,8 +24,8 @@ ADVANCED_READ = frozenset({"cdp_status", "frames", "accessibility", "dom", "loca
 ADVANCED_ACTIONS = ADVANCED_READ | {"cdp_attach", "cdp_detach", "cdp", "evaluate", "interact",
     "upload", "download", "dialog", "emulate", "route"}
 NO_SNAPSHOT = ADVANCED_READ | {"snapshot", "diagnostics", "cdp_detach", "dialog"}
-READ_ACTIONS = frozenset({"status", "tabs", "snapshot", "screenshot", "diagnostics"}) | ADVANCED_READ
-PAGE_ACTIONS = frozenset({"click", "fill", "select", "press", "scroll"})
+READ_ACTIONS = frozenset({"status", "tabs", "snapshot", "screenshot", "diagnostics", "read"}) | ADVANCED_READ
+PAGE_ACTIONS = frozenset({"click", "fill", "select", "press", "scroll", "read"})
 TAB_ACTIONS = PAGE_ACTIONS | {"snapshot", "screenshot", "diagnostics", "navigate",
                             "reload", "back", "forward", "close", "focus"} | ADVANCED_ACTIONS
 ACTIONS = READ_ACTIONS | TAB_ACTIONS | {"open"}
@@ -217,6 +217,11 @@ def validate_request(value):
                  and len(params["text"].encode("utf-16-le", "surrogatepass")) // 2 <= 30000
                  and "\x00" not in params["text"]
                  and len(re.sub(r"\r\n?", "\n", params["text"]).split("\n")) - 1 <= 2000)
+    elif action == "read":
+        # Paged whole-element text read: one observation ref plus the
+        # character offset of the page to return.
+        _require(set(params) == {"offset"} and type(params["offset"]) is int
+                 and 0 <= params["offset"] <= 2000000)
     elif action == "select":
         _require(set(params) == {"value"} and _text(params["value"], 0, 512))
     elif action == "press":

@@ -50,7 +50,7 @@ def request(action="click", **changes):
 def test_closed_actions_round_trip(action):
     params = {"open":{"url":"https://example.test/"}, "navigate":{"url":"http://localhost:8080/page"},
         "fill":{"text":"Hello\nworld"}, "select":{"value":"one"}, "press":{"key":"Enter"},
-        "scroll":{"x":0,"y":700},
+        "scroll":{"x":0,"y":700}, "read":{"offset":0},
         # Advanced actions carry their payload in params; each needs its own
         # minimal valid shape to round-trip validate_window.
         "cdp":{"method":"Page.enable"}, "evaluate":{"expression":"1+1"},
@@ -82,6 +82,17 @@ def test_invalid_stale_or_extended_messages_fail_closed(changes):
     "https://user:secret@example.test/", "https://example.test:0/", "https://example.test/ a"])
 def test_navigation_has_no_privileged_or_credential_urls(url):
     with pytest.raises(legacy.WebSolProtocolError):protocol.validate_request(request("navigate",params={"url":url}))
+
+
+def test_read_pages_one_elements_text_by_ref():
+    # read is a snapshot-ref read: it needs the observation's element ref and
+    # takes exactly one integer offset (character position for paging).
+    accepted = protocol.validate_window(request("read", params={"offset": 12345}))
+    assert accepted["params"] == {"offset": 12345}
+    assert accepted["ref"] == "e1"
+    for bad in ({"offset": -1}, {"offset": 2000001}, {"offset": "0"}, {"offset": 0, "extra": 1}, {}):
+        with pytest.raises(legacy.WebSolProtocolError):
+            protocol.validate_window(request("read", params=bad))
 
 
 def test_fill_cap_counts_utf16_units_not_code_points():
@@ -245,6 +256,30 @@ def test_unknown_argument_name_is_reported_without_its_value(tmp_path,monkeypatc
     assert refused["reason"]=="INVALID_ARGUMENTS"
     assert "bogus" in str(refused.get("detail"))
     assert "value-never-shown" not in str(refused.get("detail"))
+
+
+def test_read_takes_offset_with_ref_and_snapshot(tmp_path,monkeypatch):
+    monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
+    monkeypatch.setattr(bridge.routes,"load",lambda _: None)
+    seen=[]
+    def exchange(browser_id,session_id,operation_key,action,connection_id,tab_id,
+                 url_fingerprint,snapshot_id,ref,params,nonce):
+        seen.append({"browser_id":browser_id,"action":action,"connection_id":connection_id,
+            "tab_id":tab_id,"url_fingerprint":url_fingerprint,"snapshot_id":snapshot_id,
+            "ref":ref,"params":params})
+        return {"status":"OK","effect":"NOT_APPLIED","data":{"offset":params.get("offset")}}
+    out=bridge.execute({"action":"read","browser_id":"a"*64,"connection_id":"conn-1","tab_id":3,
+        "url_fingerprint":"c"*64,"snapshot_id":"snapshot-observation-001","ref":"e7","offset":4096},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings",exchange=exchange)
+    assert out["state"]=="RECEIPT", out
+    assert seen==[{"browser_id":"a"*64,"action":"read","connection_id":"conn-1","tab_id":3,
+        "url_fingerprint":"c"*64,"snapshot_id":"snapshot-observation-001","ref":"e7",
+        "params":{"offset":4096}}]
+    # Without offset the bridge names it missing instead of dispatching.
+    missing=bridge.execute({"action":"read","browser_id":"a"*64,"connection_id":"conn-1","tab_id":3,
+        "url_fingerprint":"c"*64,"snapshot_id":"snapshot-observation-001","ref":"e7"},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings")
+    assert missing["reason"]=="INVALID_ARGUMENTS" and "offset" in str(missing.get("detail"))
 
 
 def test_diagnostics_is_callable_without_a_snapshot_id(tmp_path,monkeypatch):

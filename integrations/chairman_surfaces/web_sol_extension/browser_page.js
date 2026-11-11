@@ -13,8 +13,15 @@
   // the tab on hostile or pathological input.
   const MAX_FILL_LINES = 2000;
   const FILL_TIME_BOUND_MS = 1500;
+  // Paged read: one element's full visible text, one page per call. The page
+  // content budget (UTF-8 bytes) leaves the 32,768-byte reply envelope room
+  // for the wrapper, and the extraction is node- and character-bounded so a
+  // pathological subtree cannot hang the read.
+  const READ_PAGE_BYTES = 30720;
+  const READ_MAX_NODES = 20000;
+  const READ_MAX_CHARACTERS = 1000000;
   const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
-    "select", "scroll", "diagnostics"]);
+    "select", "scroll", "read", "diagnostics"]);
   const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
   const SELECTOR = "a[href],button,input,textarea,select,[role],[contenteditable='true'],[tabindex]";
   const text = (v, n = 160) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
@@ -206,6 +213,59 @@
       }
       return result(true, "OK", {...common, snapshot_consumed: true, refresh_required: true}, "APPLIED");
     }
+    // One element's visible text for the paged read, with the snapshot's
+    // exclusions: no form fields, no contenteditable (an editor box is not
+    // page content), nothing hidden or sensitive, no script/style/template.
+    // Block elements break lines, <br> breaks a line, whitespace runs
+    // collapse outside <pre>, and <pre> keeps its code shape verbatim. The
+    // walk is node-bounded; truncation is reported, never silent.
+    function elementText(root) {
+      const BLOCK = /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DD|DETAILS|DIV|DL|DT|FIGCAPTION|FIGURE|FOOTER|H1|H2|H3|H4|H5|H6|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TD|TH|TR|UL)$/;
+      const SKIP = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|INPUT|TEXTAREA|SELECT|OPTION|BUTTON)$/;
+      const parts = [];
+      let examined = 0, truncated = false;
+      const walk = element => {
+        for (const child of element.childNodes) {
+          if (++examined > READ_MAX_NODES) {truncated = true; return;}
+          if (child.nodeType === 3) {
+            const parent = child.parentElement;
+            if (!parent || !visible(parent) ||
+                parent.closest("script,style,noscript,template,input,textarea,select,[contenteditable='true']")) continue;
+            const value = child.nodeValue || "";
+            if (!value.trim()) continue;
+            parts.push(parent.closest("pre") ? value : value.replace(/\s+/g, " "));
+          } else if (child.nodeType === 1) {
+            if (SKIP.test(child.tagName) || child.getAttribute("contenteditable") === "true" || !visible(child)) continue;
+            if (child.tagName === "BR") {parts.push("\n"); continue;}
+            if (BLOCK.test(child.tagName)) {parts.push("\n"); walk(child); parts.push("\n"); continue;}
+            walk(child);
+          }
+        }
+      };
+      walk(root);
+      const value = parts.join("").replace(/\n{3,}/g, "\n\n")
+        .replace(/[ \t]+\n/g, "\n").slice(0, READ_MAX_CHARACTERS)
+        .replace(/\n+$/, "").replace(/^\n+/, "");
+      return {value, truncated: truncated || value.length >= READ_MAX_CHARACTERS};
+    }
+    // Slice one page out of the text: accumulate whole code points until the
+    // UTF-8 byte budget is spent, so a surrogate pair is never split and each
+    // page makes progress. Offsets are UTF-16 code-unit positions on
+    // code-point boundaries.
+    function readPage(text, offset) {
+      const encoder = new TextEncoder();
+      const chunks = [];
+      let units = 0, bytes = 0, at = offset;
+      while (at < text.length) {
+        const point = text.codePointAt(at);
+        const size = point > 0xFFFF ? 2 : 1;
+        const cost = encoder.encode(String.fromCodePoint(point)).length;
+        if (bytes + cost > READ_PAGE_BYTES && chunks.length) break;
+        chunks.push(String.fromCodePoint(point));
+        units += size; bytes += cost; at += size;
+      }
+      return {content: chunks.join(""), end: offset + units};
+    }
     function diagnostics() {
       const entries = win.performance && typeof win.performance.getEntriesByType === "function"
         ? win.performance.getEntriesByType("resource").slice(-60) : [];
@@ -268,12 +328,33 @@
             !Array.from(node.options).some(o => o.value === params.value && !o.disabled))) return result(false, "INPUT_REFUSED");
         if (action === "scroll" && (fields !== "x,y" || ![params.x, params.y].every(n => Number.isInteger(n) && Math.abs(n) <= 3000))) return result(false, "INPUT_REFUSED");
         if (["click", "focus_ref"].includes(action) && fields) return result(false, "INPUT_REFUSED");
+        if (action === "read" && (fields !== "offset" || typeof params.offset !== "number")) return result(false, "INPUT_REFUSED");
         if (action === "click") {
           const b = node.getBoundingClientRect();
           const x = b.x + b.width / 2, y = b.y + b.height / 2;
           if (x < 0 || y < 0 || x >= win.innerWidth || y >= win.innerHeight) return result(false, "TARGET_OFFSCREEN");
           const top = doc.elementFromPoint(x, y);
           if (!top || !(top === node || node.contains(top))) return result(false, "TARGET_OBSCURED");
+        }
+        // Paged read of one element's visible text: it never consumes the
+        // observation and never mutates, scrolls or focuses — it returns
+        // before the one-mutation consumption below. Offset values that
+        // cannot name a page start (negative, non-integer, past the end, or
+        // inside a surrogate pair) are a typed READ_OFFSET_INVALID.
+        if (action === "read") {
+          const text = elementText(node);
+          const total = text.value.length;
+          const offset = params.offset;
+          const boundary = text.value.charCodeAt(offset);
+          if (!Number.isInteger(offset) || offset < 0 || offset > total ||
+              (offset > 0 && offset < total && boundary >= 0xDC00 && boundary <= 0xDFFF))
+            return result(false, "READ_OFFSET_INVALID", {total_characters: total, content_is_untrusted: true});
+          const page = readPage(text.value, offset);
+          return result(true, "OK", {offset, total_characters: total,
+            next_offset: page.end >= total ? null : page.end,
+            content: page.content, content_is_untrusted: true,
+            text_truncated: text.truncated,
+            exclusions: "script,style,noscript,template,form fields,contenteditable,hidden,sensitive"});
         }
         // One snapshot can authorize at most one mutation, including failed attempts.
         const snapshotId = current.id;
