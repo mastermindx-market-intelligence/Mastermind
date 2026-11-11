@@ -132,6 +132,20 @@ class InstalledClosureTests(unittest.TestCase):
         self.successor.mkdir(mode=0o700)
         (self.successor / "PLAN.json").write_text("{}\n")
         (self.successor / "PLAN.json").chmod(0o600)
+        # Positive installs own their source-custody fixture; runner checkout
+        # permissions are not the installation boundary under test.
+        self.source = self.home / "checkout/integrations/studio_direct_mcp"
+        for name in EXPECTED_FILES:
+            original = HERE.parents[1] / name if "/" in name else HERE / name
+            destination = self.source.parents[1] / name if "/" in name else self.source / name
+            directory = self.home
+            for part in destination.parent.relative_to(self.home).parts:
+                directory /= part
+                directory.mkdir(exist_ok=True, mode=0o700)
+            content = original.read_bytes()
+            destination.write_bytes(content)
+            destination.chmod(0o600)
+            self.assertEqual(destination.read_bytes(), content)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -141,8 +155,17 @@ class InstalledClosureTests(unittest.TestCase):
         # installed generation CAS on upgrades, never a generic force/retry.
         manifest = self.control / "manifest.json"
         prior = json.loads(manifest.read_text())["bundleDigest"] if manifest.exists() else None
-        return bundle.install(source=HERE, control_root=self.control,
+        return bundle.install(source=self.source, control_root=self.control,
                               launcher=self.launcher, expected_bundle_digest=prior)
+
+    def test_private_source_still_refuses_a_writable_ancestor(self):
+        self._install()
+        manifest = self.control / "manifest.json"
+        before = manifest.read_bytes()
+        self.source.parent.chmod(0o770)
+        with self.assertRaisesRegex(bundle.Refusal, "SOURCE_DIRECTORY_INVALID"):
+            self._install()
+        self.assertEqual(manifest.read_bytes(), before)
 
     def _child(self, code, *args, loader=LOAD, timeout=15, home=None, interpreter=None):
         env = {"HOME": str(home or self.home), "PATH": "/usr/bin:/bin", "LANG": "C"}
@@ -185,14 +208,14 @@ class InstalledClosureTests(unittest.TestCase):
         self.assertEqual(set(verified["files"]), set(bundle.REVIEW_CONTROL_FILES))
         before = self._snapshot()
         with self.assertRaises(bundle.Refusal):
-            bundle.install(source=HERE, control_root=self.control,
+            bundle.install(source=self.source, control_root=self.control,
                            launcher=self.launcher)
         self.assertEqual(self._snapshot(), before)
         with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CAS_MISMATCH"):
-            bundle.install(source=HERE, control_root=self.control,
+            bundle.install(source=self.source, control_root=self.control,
                            launcher=self.launcher, expected_bundle_digest="0" * 64)
         self.assertEqual(self._snapshot(), before)
-        result = bundle.install(source=HERE, control_root=self.control,
+        result = bundle.install(source=self.source, control_root=self.control,
                                 launcher=self.launcher,
                                 expected_bundle_digest=prior["bundleDigest"])
         self.assertEqual(set(result["files"]), EXPECTED_FILES)
@@ -222,14 +245,14 @@ class InstalledClosureTests(unittest.TestCase):
         self.assertEqual(set(verified["files"]), set(bundle.GO_REVIEW_CONTROL_FILES))
         before = self._snapshot()
         with self.assertRaises(bundle.Refusal):
-            bundle.install(source=HERE, control_root=self.control,
+            bundle.install(source=self.source, control_root=self.control,
                            launcher=self.launcher)
         self.assertEqual(self._snapshot(), before)
         with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CAS_MISMATCH"):
-            bundle.install(source=HERE, control_root=self.control,
+            bundle.install(source=self.source, control_root=self.control,
                            launcher=self.launcher, expected_bundle_digest="0" * 64)
         self.assertEqual(self._snapshot(), before)
-        result = bundle.install(source=HERE, control_root=self.control,
+        result = bundle.install(source=self.source, control_root=self.control,
                                 launcher=self.launcher,
                                 expected_bundle_digest=prior["bundleDigest"])
         self.assertEqual(set(result["files"]), EXPECTED_FILES)
@@ -256,10 +279,10 @@ class InstalledClosureTests(unittest.TestCase):
         self.assertEqual(set(verified["files"]), set(bundle.CAPTURED_CONTROL_FILES))
         before = self._snapshot()
         with self.assertRaisesRegex(bundle.Refusal, "CONTROL_BUNDLE_CAS_MISMATCH"):
-            bundle.install(source=HERE, control_root=self.control,
+            bundle.install(source=self.source, control_root=self.control,
                            launcher=self.launcher, expected_bundle_digest="0" * 64)
         self.assertEqual(self._snapshot(), before)
-        result = bundle.install(source=HERE, control_root=self.control,
+        result = bundle.install(source=self.source, control_root=self.control,
                                 launcher=self.launcher,
                                 expected_bundle_digest=prior["bundleDigest"])
         self.assertEqual(set(result["files"]), EXPECTED_FILES)
@@ -894,22 +917,14 @@ print(json.dumps(value))
                     capture_output=True, text=True, timeout=10,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-        # The existing frozen-Paper source resolver requires a checkout under
-        # the consumer HOME. Preserve that guard using a real-byte source copy.
-        source = self.home / "checkout/integrations/studio_direct_mcp"
-        for name in EXPECTED_FILES:
-            original = HERE.parents[1] / name if "/" in name else HERE / name
-            destination = source.parents[1] / name if "/" in name else source / name
-            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            destination.write_bytes(original.read_bytes())
-            destination.chmod(0o600)
+        # The frozen-Paper source resolver shares the owned, exact-byte checkout.
         loader = LOAD.replace('root/"private_service.py"', "Path(sys.argv[2])")
         result = self._child(
             'assert svc._INSTALLED_CONTROL_CONTEXT is None\n'
             'mods=[svc._pin_owner_module(),svc._pin_enrollment_owner_module(),'
             'svc._fleet_status_successor_owner_module(),svc._frozen_paper_fleet_module()]\n'
             'assert all(Path(m.__file__).parent==Path(sys.argv[2]).parent for m in mods)\n',
-            source / "private_service.py", loader=loader)
+            self.source / "private_service.py", loader=loader)
         self.assertEqual(result.returncode, 0, result.stderr)
 
 

@@ -88,11 +88,11 @@ CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
 WHY_PRO_MODE: <specific frontier-reasoning advantage required by this mission>
 WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
 PRO_MODE_TASK_CLASS: <one allowed class>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+EXPECTED_DURATION_MINUTES: <integer between 1 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ```
 
-Allowed classes: `LONG_HORIZON_FRONTIER_REASONING`, `CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING`, `ADVERSARIAL_JUDGMENT`. Integer duration is at least 80 minutes, between 80 and 1440 minutes inclusive. Refuse handoffs; ACK / PICKUP_ACK / START / CONTINUE / STOP packets; status checks; monitoring / watchers / polling; message relay; routing / placement / foregrounding; mechanical edits or tests; simple reviews and other short bounded work are categorically refused. Larger programs do not qualify short turns. Missing/stale/ineligible/out-of-range requests return `PRO_MODE_REFUSED / USE_NON_PRO_MODE`. Attended mode remains separately governed by ACTIVE_EXECUTION1B; fabricate no automated receipt.
+Allowed classes: `LONG_HORIZON_FRONTIER_REASONING`, `CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING`, `ADVERSARIAL_JUDGMENT`. Integer duration is between 1 and 1440 minutes inclusive. Duration is a planning estimate, not a minimum run time. Short substantive work is eligible under the same task-class and justification gates. Never inflate estimates or generate to fill time; existing completion/continuity gates still apply. Refuse handoffs; ACK / PICKUP_ACK / START / CONTINUE / STOP packets; status checks; monitoring / watchers / polling; message relay; routing / placement / foregrounding; mechanical edits or tests; simple reviews and other routine administrative work are categorically refused. Larger programs provide no exception. Missing/stale/ineligible/out-of-range receipts return `PRO_MODE_REFUSED / USE_NON_PRO_MODE`. This is automated receipt validation only; attended mode stays governed by ACTIVE_EXECUTION1B and fabricates no receipt.
 
 Workspace-Agent-front-end plus API-Meta-CEO default stack is REJECTED_BY_DESIGN: it adds two paid reasoning layers and per-turn scaling instead of fixed-cost Chat. Workspace Agents, Work, Business credits and API cognition require a separate complete bounded exception:
 
