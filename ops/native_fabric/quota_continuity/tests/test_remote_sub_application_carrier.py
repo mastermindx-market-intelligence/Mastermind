@@ -105,6 +105,18 @@ class ApplicationFixture:
         self.home = root / "remote-home"
         self.stable = self.home / "lanes" / "ext"
         self.stable.mkdir(parents=True)
+        # The lane's admission samples the machine-global load average, which
+        # sibling pytest workers on a shared CI runner inflate past the fixture
+        # ratio ceiling mid-run. Pin that one ambient telemetry sample for every
+        # subprocess this fixture launches; the admission code, policy and
+        # locking stay the real source (the same measurement convention as
+        # tests/test_provider_plan_local_return.py, whose sitecustomize note
+        # reads "admission code and policy remain the real source"). This dir
+        # sits outside the digested support release, so no digest moves.
+        self.telemetry_floor = root / "lane-telemetry-floor"
+        self.telemetry_floor.mkdir()
+        (self.telemetry_floor / "sitecustomize.py").write_text(
+            "import os\nos.getloadavg=lambda:(0.,0.,0.)\n")
         # Match the incumbent remote interpreter path with the test runtime.
         (self.home / "lanes" / "venv").symlink_to(
             Path(sys.executable).parent.parent, target_is_directory=True)
@@ -188,6 +200,12 @@ class ApplicationFixture:
     def env(self) -> dict:
         env = dict(os.environ)
         env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+        # Load-bearing ordering: the telemetry floor leads PYTHONPATH so its
+        # sitecustomize is the one a fresh interpreter imports, without adding
+        # an empty entry (an empty segment would put the cwd on sys.path).
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = str(self.telemetry_floor) + (
+            os.pathsep + existing if existing else "")
         env["LANE_REMOTE_HOST"] = self.host
         # The ambient lane floors belong to the live lane; this fixture is bounded.
         env.update(SUPPORT_DIGEST=self.support_digest, LANE_MAX_ACTIVE="2",
