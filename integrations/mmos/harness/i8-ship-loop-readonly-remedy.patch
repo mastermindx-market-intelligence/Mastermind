@@ -1,0 +1,14 @@
+--- a/.claude/hooks/ship_loop_guard.py
++++ b/.claude/hooks/ship_loop_guard.py
+@@ -628,7 +628,10 @@
+         "mint shape, read-only inspection, and git worktree/fetch/branch/rev-parse/"
+         "status; shell cd, change_directory, a hand branch rename, or repointing the "
+         "shared checkout are not repairs (an unpublished native .claude/worktrees/"
+-        "<name> tree on worktree-<name> is already adopted automatically). A fresh "
++        "<name> tree on worktree-<name> is already adopted automatically). For a "
++        "read-only task you may skip the mint entirely: Read/Grep/Glob and single "
++        "plain read-only commands are already allowed above -- complete the task "
++        "and return its results without moving this session. A fresh "
+         "worktree-backed Claude session (`claude --worktree <name>` or the Desktop "
+         "worktree flow) is the fallback only when EnterWorktree is unavailable."
+     )
