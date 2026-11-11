@@ -42,6 +42,14 @@ KNOWN_INSTALLED_V1_BLOCK_SHA256 = (
 KNOWN_INSTALLED_V2_BLOCK_SHA256 = (
     "ed05652cb4316438b48eeedf1957a62d96f96e24906dc9878d0275f04e87d82d"
 )
+# Exact guard block from protected merge PR #1647; also observed live on M2.
+KNOWN_INSTALLED_V3_BLOCK_SHA256 = (
+    "5f6dec8c7d95444410c3cde497f65cfa6985cada00ef1e0fd5366059d818aeea"
+)
+# Exact previous global-scope GUI block at PR #1653 commit 55175433.
+KNOWN_INSTALLED_V4_BLOCK_SHA256 = (
+    "01be9d86be6ab803fb68ded8b28f5f8f6f02a491f8aad4d8ce259e577e84ba80"
+)
 LEGACY_WORKSPACE_ROOT = '        "/Volumes/Mastermind/agent-workspaces",\n'
 NEW_WORKSPACE_ROOT = '        "/Volumes/Mastermind 2/agent-workspaces",\n'
 DOC_ANCHORS = {
@@ -49,6 +57,24 @@ DOC_ANCHORS = {
     "claude": "<!-- chris-proportionate-execution-20261015 -->",
 }
 DOC_MARKER = "<!-- claude-parall-launch-isolation-20261019 -->"
+
+# The incumbent guard historically returned before checking non-Mastermind
+# working directories. Account-safe Desktop launch denial must run first, but
+# the unrelated Fabric/CI routing policy must remain Mastermind-scoped.
+SCOPED_GUARD_START = (
+    'def guard_bash(payload, ti):\n'
+    '    if not is_mastermind_scope(payload):\n'
+    '        return\n'
+    '    cmd = str(ti.get("command") or "")\n'
+)
+GLOBAL_GUI_GUARD_START = (
+    'def guard_bash(payload, ti):\n'
+    '    cmd = str(ti.get("command") or "")\n'
+)
+REMAINING_SCOPE_GATE = (
+    '    if not is_mastermind_scope(payload):\n'
+    '        return\n\n'
+)
 
 
 def sha(data: bytes) -> str:
@@ -76,12 +102,27 @@ def render(kind: str, before: str) -> str:
             start = before.index(GUARD_START)
             end = before.index(GUARD_ANCHOR)
             installed_block = before[start:end]
-            if sha(installed_block.encode()) not in (
+            # After global GUI scope hardening, the original Mastermind-only
+            # return is deliberately *after* this fragment. Preserve that exact
+            # suffix when upgrading a known fragment; otherwise the migration
+            # would remove the guard of unrelated CI/Fabric rules.
+            scoped_tail = (
+                REMAINING_SCOPE_GATE
+                if installed_block.endswith(REMAINING_SCOPE_GATE)
+                else ""
+            )
+            normalized_block = (
+                installed_block[:-len(scoped_tail)] if scoped_tail
+                else installed_block
+            )
+            if sha(normalized_block.encode()) not in (
                 KNOWN_INSTALLED_V1_BLOCK_SHA256,
                 KNOWN_INSTALLED_V2_BLOCK_SHA256,
+                KNOWN_INSTALLED_V3_BLOCK_SHA256,
+                KNOWN_INSTALLED_V4_BLOCK_SHA256,
             ):
                 raise ValueError("unrecognized guard block: preserve existing owner edits")
-            after = before[:start] + block + before[end:]
+            after = before[:start] + block + scoped_tail + before[end:]
         elif sha(before.encode()) == KNOWN_PRE_ISOLATION_GUARD_SHA256:
             if before.count(GUARD_ANCHOR) != 1 or "unmanaged_desktop" in before:
                 raise ValueError("guard insertion location ambiguous")
@@ -105,6 +146,19 @@ def render(kind: str, before: str) -> str:
             )
         if after.count(NEW_WORKSPACE_ROOT) != 1:
             raise ValueError("duplicate workspace-root policy")
+        if after.count(SCOPED_GUARD_START) == 1:
+            # Move only this exact known early return. Preserve all other
+            # rules, even while expanding GUI safety to every covered shell.
+            if (after.count(GUARD_ANCHOR) != 1 or
+                    after.count(REMAINING_SCOPE_GATE + GUARD_ANCHOR)):
+                raise ValueError("unknown scoped guard layout")
+            after = after.replace(SCOPED_GUARD_START, GLOBAL_GUI_GUARD_START, 1)
+            after = after.replace(
+                GUARD_ANCHOR, REMAINING_SCOPE_GATE + GUARD_ANCHOR, 1
+            )
+        elif (after.count(GLOBAL_GUI_GUARD_START) != 1 or
+              after.count(REMAINING_SCOPE_GATE + GUARD_ANCHOR) != 1):
+            raise ValueError("unrecognized host guard scope layout")
         ast.parse(after)
     return after
 

@@ -57,7 +57,8 @@ Options shape: ``options`` maps option name -> route dict with keys
 ``name``, ``task_complexity`` (canonical long name; the plugin-era
 ``task_class`` key with ``C0``..``C3``/``reviewer`` shorthand is still
 read and normalized, so the Hermes plugin's config shape passes through
-with identical behaviour), ``description`` and optional
+with identical behaviour for the established well-formed WO-00 cases),
+``description`` and optional
 ``requires_witness``, ``downgrade_to``, ``fallback_providers``.  Only
 the classification keys (``task_complexity``/``task_class``,
 ``requires_witness``, ``downgrade_to``) are read; provider/model fields
@@ -169,9 +170,9 @@ def canonical_task_complexity(value: Any) -> str:
     return _LOOKUP_CANONICAL.get(text.upper(), text)
 
 
-#: --- the shared routing law (ported verbatim from the WO-00 extraction) -------
-#: Bumped only when the law itself changes (gates, word lists, join
-#: semantics).  Both sides of the share must agree on it before trusting
+#: --- the shared routing law (WO-00 port with configuration validation) --------
+#: Bumped only when the normative law changes (gates, word lists, join
+#: semantics); refusing configurations that violate those gates is a bug fix.  Both sides of the share must agree on it before trusting
 #: a decision.  (Plugin-era name: ``POLICY_VERSION``.)
 POLICY_REVISION = "1.0.0"
 
@@ -340,13 +341,20 @@ class ChildRoutingPolicy:
 
     Stateless apart from ``witness_min_chars``; safe to share, fork per call,
     or vendor.  ``evaluate`` performs no I/O and never mutates ``options``.
-    This is a faithful port of the Hermes ``mmx-router`` plugin's policy:
-    identical gate order, word lists, message strings and newline-join
-    semantics, with complexities reported in canonical long names.
+    The established well-formed WO-00 cases preserve the Hermes policy's
+    gate order, word lists, messages and newline join, with canonical long
+    complexity names. Invalid configurations cannot disable the C3 witness
+    gate, lower its 24-character floor, or supply an unlawful downgrade.
+    Enforcing those existing invariants does not change POLICY_REVISION.
     """
 
     def __init__(self, witness_min_chars: int = DEFAULT_WITNESS_MIN) -> None:
-        self.witness_min_chars = int(witness_min_chars)
+        if (isinstance(witness_min_chars, bool)
+                or not isinstance(witness_min_chars, int)
+                or witness_min_chars < DEFAULT_WITNESS_MIN):
+            raise ValueError(
+                f"witness_min_chars must be an integer >= {DEFAULT_WITNESS_MIN}")
+        self.witness_min_chars = witness_min_chars
 
     def evaluate(self, requested_option: str, goal: str, context: str,
                  options: Mapping[str, Any] | None = None) -> RoutingDecision:
@@ -371,7 +379,10 @@ class ChildRoutingPolicy:
                 witness="", policy_revision=POLICY_REVISION)
 
         entry = options[requested]
-        requires_witness = bool(entry.get("requires_witness"))
+        task_complexity = _entry_task_complexity(entry)
+        requires_witness = (
+            task_complexity == C3_FRONTIER_JUDGMENT
+            or bool(entry.get("requires_witness")))
         downgrade_to = entry.get("downgrade_to") or ""
         # newline-joined so a witness line stays a line (a space join would hide it from ^)
         text = "\n".join((str(goal or ""), str(context or "")))
@@ -383,13 +394,21 @@ class ChildRoutingPolicy:
             if witness_problem:
                 target = downgrade_to
                 if target and target in options:
-                    return RoutingDecision(
-                        requested=requested, resolved=target,
-                        task_complexity=_entry_task_complexity(options[target]),
-                        downgraded=target != requested,
-                        witness_problem=witness_problem,
-                        reason=f"downgraded {requested}->{target}: {witness_problem}",
-                        witness=witness, policy_revision=POLICY_REVISION)
+                    target_complexity = _entry_task_complexity(options[target])
+                    # A failed witness can never enter C3 through a fallback.
+                    # Failed C3 requests have one explicit lawful lane: C2.
+                    lawful_target = (
+                        target_complexity == FRONTIER_DOWNGRADE_COMPLEXITY
+                        if task_complexity == C3_FRONTIER_JUDGMENT
+                        else target_complexity != C3_FRONTIER_JUDGMENT)
+                    if lawful_target:
+                        return RoutingDecision(
+                            requested=requested, resolved=target,
+                            task_complexity=target_complexity,
+                            downgraded=target != requested,
+                            witness_problem=witness_problem,
+                            reason=f"downgraded {requested}->{target}: {witness_problem}",
+                            witness=witness, policy_revision=POLICY_REVISION)
                 return RoutingDecision(
                     requested=requested, resolved="", task_complexity="", downgraded=False,
                     witness_problem=witness_problem,
@@ -401,7 +420,7 @@ class ChildRoutingPolicy:
 
         return RoutingDecision(
             requested=requested, resolved=requested,
-            task_complexity=_entry_task_complexity(entry),
+            task_complexity=task_complexity,
             downgraded=False, witness_problem=witness_problem, reason="",
             witness=witness, policy_revision=POLICY_REVISION)
 
@@ -440,26 +459,29 @@ def _require_hex64(value: Any, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a 64-char lowercase hex sha256 digest")
 
 
-def _require_bounded_identifier(value: Any, field_name: str) -> None:
-    """Fence one idempotency-triple field: bounded, printable, unambiguous.
+def _require_identifier_length(value: Any, field_name: str) -> None:
+    """Bound one identifier so an unbounded field cannot inflate event rows."""
 
-    The triple ``(root_ref, immediate_parent_run_ref, logical_child_key)``
-    is joined with ``\\x1f`` to mint the durable command id, so a field
-    that may carry that separator — or any other control/non-printable
-    character — lets two DISTINCT triples hash to one command id, which
-    the Runtime then reports as a spurious ``CHILD_REQUEST_DIGEST_CONFLICT``
-    naming the wrong logical key.  Nothing about identity requires such a
-    character, so it is refused at the contract rather than tolerated at
-    the join.
-    """
-
-    _require_non_empty(value, field_name)
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be a string identifier")
     if len(value) > BOUNDED_IDENTIFIER_MAX_LENGTH:
         raise ValueError(
             f"{field_name} must be at most {BOUNDED_IDENTIFIER_MAX_LENGTH} "
             f"characters, got {len(value)}")
+
+
+def _require_bounded_identifier(value: Any, field_name: str) -> None:
+    """Fence one reference identifier: non-empty, bounded, printable.
+
+    Applied to the v1.2 ``original_requester`` reference fields.  The
+    idempotency triple keeps only the length bound: its ``\\x1f`` join
+    collision is closed by the admission's JSON-encoded command identity
+    (``child_request_admission.admission_command_id``), which admits such
+    triples as distinct operations.
+    """
+
+    _require_non_empty(value, field_name)
+    _require_identifier_length(value, field_name)
     for offset, char in enumerate(value):
         if not char.isprintable():
             raise ValueError(
@@ -889,10 +911,11 @@ class ChildExecutionRequest:
     original_requester: OriginalRequesterBinding | None = None
 
     def __post_init__(self) -> None:
-        _require_bounded_identifier(self.root_ref, "root_ref")
-        _require_bounded_identifier(
-            self.immediate_parent_run_ref, "immediate_parent_run_ref")
-        _require_bounded_identifier(self.logical_child_key, "logical_child_key")
+        _require_non_empty(self.root_ref, "root_ref")
+        _require_non_empty(self.immediate_parent_run_ref, "immediate_parent_run_ref")
+        _require_non_empty(self.logical_child_key, "logical_child_key")
+        for field_name in ("root_ref", "immediate_parent_run_ref", "logical_child_key"):
+            _require_identifier_length(getattr(self, field_name), field_name)
         complexity = canonical_task_complexity(self.requested_complexity)
         if complexity not in CANONICAL_TASK_COMPLEXITIES and complexity != REVIEW_LANE:
             raise ValueError(

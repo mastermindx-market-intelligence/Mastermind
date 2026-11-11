@@ -1,0 +1,431 @@
+.company-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  min-width: 0;
+  color: var(--text);
+}
+.company-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.company-header h1 {
+  margin: 8px 0 10px;
+  font: 600 32px/1.25 var(--font-display);
+  letter-spacing: -0.025em;
+}
+.company-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+.company-kicker {
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: 0.04em;
+}
+.company-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.company-tabs button {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+.company-tabs button[aria-current="page"],
+.company-work-toolbar button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--raised);
+  border-color: var(--control-border);
+}
+.company-workspace button,
+.company-workspace input,
+.company-workspace select,
+.company-workspace textarea {
+  font-family: var(--font-ui);
+}
+.company-workspace button {
+  min-height: 44px;
+  cursor: pointer;
+}
+.company-workspace button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.company-workspace button:focus-visible,
+.company-workspace a:focus-visible,
+.company-workspace input:focus-visible,
+.company-workspace select:focus-visible,
+.company-workspace textarea:focus-visible,
+.company-workspace summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+.company-workspace a {
+  color: var(--brass);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.company-inline-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.company-inline-actions a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.company-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.company-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px;
+  text-align: left;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+}
+.company-summary-card strong {
+  font: 600 34px/1.2 var(--font-display);
+}
+.company-summary-card small {
+  color: var(--faint);
+  font-size: 12px;
+}
+.company-two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.company-section {
+  min-width: 0;
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+}
+.company-section h2 {
+  margin: 0 0 16px;
+  font: 600 21px/1.4 var(--font-display);
+  overflow-wrap: anywhere;
+}
+.company-section h3 {
+  margin: 24px 0 14px;
+  font-size: 16px;
+}
+.company-section p {
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.company-section-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+.company-section-heading h2 {
+  margin-bottom: 0;
+}
+.company-section-heading button {
+  flex-shrink: 0;
+}
+.company-facts {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1fr);
+  gap: 12px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.company-facts dt {
+  color: var(--faint);
+}
+.company-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.company-workspace code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.company-muted {
+  color: var(--muted);
+}
+.company-inset {
+  padding: 20px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-card);
+  background: var(--raised);
+  margin: 20px 0;
+}
+.company-inset h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.company-inset p {
+  font-size: 14px;
+  line-height: 1.6;
+}
+.company-people-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px;
+}
+.company-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  width: 44px;
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--brass);
+  font-weight: 600;
+}
+.company-state {
+  display: inline-flex;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.company-state[data-state="paused"],
+.company-state[data-state="blocked"],
+.company-state[data-state="in_review"] {
+  color: var(--brass);
+}
+.company-state[data-state="error"],
+.company-state[data-state="failed"] {
+  color: var(--red);
+}
+.company-state[data-state="done"],
+.company-state[data-state="succeeded"] {
+  color: var(--green);
+}
+.company-work-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.company-work-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  color: var(--text);
+}
+.company-work-card:hover {
+  background: var(--raised);
+}
+.company-work-card strong {
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.company-row-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.company-row-meta strong {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.company-board {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+.company-board > section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 280px;
+  flex: 0 0 280px;
+}
+.company-board h3 {
+  font-size: 14px;
+  margin: 4px 0 8px;
+  text-transform: capitalize;
+}
+.company-work-toolbar,
+.company-list-foot,
+.company-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.company-work-toolbar {
+  margin-bottom: 18px;
+}
+.company-work-toolbar select {
+  margin-left: 10px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--control-border);
+  padding: 10px;
+  min-height: 44px;
+  border-radius: 8px;
+}
+.company-list-foot {
+  color: var(--faint);
+  font-size: 12px;
+  padding-top: 20px;
+}
+.company-context-bar {
+  font-size: 13px;
+  color: var(--faint);
+}
+.company-timeline {
+  display: flex;
+  flex-direction: column;
+}
+.company-timeline article {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+.company-timeline article:first-child {
+  padding-top: 4px;
+}
+.company-timeline article:last-child {
+  border-bottom: 0;
+}
+.company-preserve {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.company-empty {
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  background: var(--panel);
+}
+.company-empty h2 {
+  margin: 0 0 12px;
+  font-size: 21px;
+}
+.company-empty p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.company-command-notice {
+  padding: 16px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.company-compose {
+  max-width: 900px;
+}
+.company-compose label {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-bottom: 18px;
+  font-size: 14px;
+}
+.company-compose input,
+.company-compose textarea {
+  background: var(--bg);
+  color: var(--text);
+  padding: 14px;
+  width: 100%;
+  border: 1px solid var(--control-border);
+  border-radius: 9px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.company-source-details {
+  margin-top: 12px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.company-source-details summary,
+.company-section summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+@media (max-width: 1150px) {
+  .company-people-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-two-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 650px) {
+  .company-header {
+    flex-direction: column;
+    gap: 18px;
+  }
+  .company-header h1 {
+    font-size: 27px;
+  }
+  .company-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .company-summary-card {
+    padding: 18px;
+  }
+  .company-people-grid,
+  .company-work-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .company-section {
+    padding: 18px;
+  }
+  .company-tabs {
+    gap: 4px;
+  }
+  .company-tabs button {
+    padding: 10px;
+  }
+  .company-facts {
+    grid-template-columns: minmax(80px, 0.7fr) minmax(0, 1fr);
+  }
+  .company-board > section {
+    width: 260px;
+    flex-basis: 260px;
+  }
+}

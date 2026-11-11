@@ -57,7 +57,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': 'af0a97de9bfc503db756626d0eacf65876848473cfb2230d8fbe478c9bb5c1cc',
+                                    'source_sha256': '36fcecb190ff106fe79ee391aae8dd60027b260055a02883ab1391ea019162d5',
                                     'ast_sha256': '8ba83fc94d6ccbfe11eec5ed1b477a28e0ec92bd199f34c4123eb5be6803d912',
                                     'sites': ((('body',
                                                 3,
@@ -169,3 +169,12 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # unchanged; only the enclosing whole-source and ingress-method digests and
 # the mapped statement index (body 58 -> 59) move. No new literal site is
 # qualified.
+
+# WO13 admission repair: the complete Company listener and ingress ASTs,
+# all six original operands and their AST paths remain exact to accepted e4cd.
+# Only this qualified whole-source hash and mapped catalog positions change.
+# No new identity exemption or installed/runtime acceptance is granted.
+
+# 2026-11-11 WO-20 master merge (feat/mmos-v1-integration-merge): both parents'
+# reviewed tokens map byte-identically onto the merged source; only the whole-source
+# digest and line coordinates are requalified. No new literal site is qualified.

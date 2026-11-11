@@ -139,8 +139,10 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
         assert decision.principal_review_required is True
         assert {"critical_risk", "high_ambiguity"} & set(decision.reason_codes)
         assert "principal_review_required" in decision.reason_codes
-        constraints = decision.job_constraints()
-        assert constraints["task_kind"] == "implementation"
+        with pytest.raises(
+            RoutingPolicyError, match="principal review required before worker dispatch"
+        ):
+            decision.job_constraints()
 
 
 def test_sol61_project_executive_alias_is_exact_inert_and_not_worker_claimable():
@@ -1022,7 +1024,7 @@ def test_minimax_attended_resolution_refuses_the_unpromoted_provider():
 def test_wo06_c2_downgraded_critical_child_stays_worker_while_review_is_preserved():
     """Acceptance evidence (WO-06): a C2-downgraded child with risk=critical
     stays non-frontier for worker cognition while the principal review
-    requirement is preserved as a flag the caller reads."""
+    requirement remains visible and prevents premature worker dispatch."""
     router = ModelRouter.load()
 
     decision = router.route(
@@ -1045,7 +1047,10 @@ def test_wo06_c2_downgraded_critical_child_stays_worker_while_review_is_preserve
     persisted = decision.to_dict()
     assert persisted["principal_review_required"] is True
     assert persisted["effective_complexity"] == "C2_COMPLEX_BOUNDED"
-    assert decision.job_constraints()["task_kind"] == "research"
+    with pytest.raises(
+        RoutingPolicyError, match="principal review required before worker dispatch"
+    ):
+        decision.job_constraints()
 
     # C0..C3 shorthand normalizes to the canonical long name at the boundary.
     shorthand = router.route(WorkRequest("research", effective_complexity="C2"))
@@ -1108,3 +1113,54 @@ def test_wo06_required_capabilities_still_bind_downgraded_worker_cognition(
     assert ok.mode is RouteMode.WORKER
     assert ok.principal_review_required is False
     assert "effective_complexity_c1_routine_bounded" in ok.reason_codes
+
+
+@pytest.mark.parametrize("route_args", [
+    ("--risk", "critical"),
+    ("--ambiguity", "high"),
+])
+@pytest.mark.parametrize("sibling_review_required", [False, True])
+def test_wo06_cli_refuses_principal_review_before_creating_any_job(
+    tmp_path, capsys, route_args, sibling_review_required
+):
+    root = tmp_path / "runtime"
+    common = ["--root", str(root)]
+
+    # A bounded preview remains available and does not open runtime state.
+    assert phase1b_main([*common, "route", "implementation", *route_args]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["mode"] == "worker"
+    assert preview["principal_review_required"] is True
+    assert not (root / "data" / "control_plane" / "executive.sqlite3").exists()
+
+    submission = [
+        *common, "create-job", "Review-gated bounded work",
+        "--task-kind", "implementation", *route_args,
+    ]
+    if sibling_review_required:
+        submission.append("--review-required")
+    assert phase1b_main(submission) == 2
+    captured = capsys.readouterr()
+    assert "principal review required before worker dispatch" in captured.err
+
+    # Ordinary sibling review is not a principal disposition. The real CLI
+    # must refuse before a Job or JOB_CREATED receipt reaches the temp store.
+    runtime = Runtime.at(root)
+    assert runtime.jobs.list_jobs() == []
+    assert all(
+        event.event_type != "JOB_CREATED"
+        for event in runtime.events.list_events()
+    )
+
+
+@pytest.mark.parametrize("task_kind", ["research", "planning"])
+@pytest.mark.parametrize("complexity", ["", " \t\n"])
+def test_wo06_blank_complexity_normalizes_to_the_default(task_kind, complexity):
+    request = WorkRequest(task_kind, effective_complexity=complexity)
+    assert request.effective_complexity == ""
+    decision = ModelRouter.load().route(request)
+    assert decision.effective_complexity is None
+    assert decision.principal_review_required is False
+    assert decision.mode is (
+        RouteMode.WORKER if task_kind == "research" else RouteMode.FRONTIER_LEAD
+    )

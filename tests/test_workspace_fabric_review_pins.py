@@ -23,6 +23,9 @@ METHOD = next(node for node in OWNER.body
 BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_lineno])
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 # Model READ and selected-child composition move the same three status operands.
+# 2026-11-11 WO-20 master merge: master did not change the ingress method
+# (its AST equals the base); the merged method is byte-identical to this branch,
+# so these three operands keep this branch's coordinates.
 # 2026-11-09 MMOS composition pin move: the capacity fabric frame branch and
 # WO-13 selected_child_admit action (feat/mmos-v1-integration) shift the same
 # three reviewed operands to 6048/6061/6063; columns and values are unchanged.

@@ -1,0 +1,137 @@
+{
+  "verified_at_utc": "2026-11-10T02:04:55.106615+00:00",
+  "source_commit": "40749216284e4f1e4fdb0c05c4582a9517c0c83d",
+  "skill_sha256": "26efbc3aab71ef5960e73c1c9e29e5770b89c3d6d8ffc218f01425e6d3d10fa4",
+  "files_per_destination": 9,
+  "destinations": [
+    {
+      "path": "/Users/chriswong/.agents/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.claude/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.codex/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.t3/skills/mastermind/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.t3/providers/experiential-claude/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.t3/providers/fabric-anthropic-oauth/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.t3/providers/fabric-experiential/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.t3/providers/fabric-unified-router/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/assurance/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/autonomy-ceo/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/chief-of-staff/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/delivery/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/design-lead/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/engineering/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/intelligence/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/marketing/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/mastermind-ceo/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/meta-ceo-uncensored/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/product/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/reliability/skills/mastermind-graph-engineering",
+      "verified": true
+    },
+    {
+      "path": "/Users/chriswong/.hermes/profiles/secretary/skills/mastermind-graph-engineering",
+      "verified": true
+    }
+  ],
+  "skill_hash_failures": [],
+  "instruction_targets": 21,
+  "missing_instruction_triggers": [],
+  "hermes_loaders": {
+    "profiles": 14,
+    "all_available": true
+  },
+  "hermes_memory": {
+    "profiles": 14,
+    "all_fresh_snapshots": true,
+    "compacted_entries": 3
+  },
+  "paperclip_adapters": {
+    "agents": 13,
+    "all_installed_desired": true
+  },
+  "receipts": [
+    {
+      "path": "/Users/chriswong/.agents/skill-rollouts/graph-skills-m2-20261109-c4/install-receipt.json",
+      "sha256": "66df38b72a6d255176b31bdb3e86f868fa9166a0e5605b497121204bfc47370a"
+    },
+    {
+      "path": "/Users/chriswong/.agents/skill-rollouts/graph-skills-m2-20261109-c4/instruction-install-receipt.json",
+      "sha256": "b3e0e695e8902d986a4f638ed7bc98135f219636741def8ae03cfb6f311a2f89"
+    },
+    {
+      "path": "/Users/chriswong/.agents/skill-rollouts/graph-skills-m2-20261109-c4/hermes-loader-receipt.json",
+      "sha256": "8a631c14aa89ecf8a42d367c9691ff4370492536cd3512b672032ff845be71ad"
+    },
+    {
+      "path": "/Users/chriswong/.agents/skill-rollouts/graph-skills-m2-20261109-c4/hermes-memory-install-receipt.json",
+      "sha256": "d3bfafa8731e786ae335740bdd12399b6ce02e7f5747c716df8e5d686b7c5da7"
+    },
+    {
+      "path": "/Users/chriswong/.agents/skill-rollouts/graph-skills-m2-20261109-c4/paperclip-adapter-readback.json",
+      "sha256": "87e347456f925f09200ae6965285024fbd6b11268a5097b00c7f0f06100b43ac"
+    }
+  ],
+  "running_sessions_reloaded": false,
+  "recursive_runtime_execution_proven": false,
+  "measured_efficiency_gain": null
+}

@@ -29,6 +29,7 @@ it.each(['en','zh-CN'] as const)('distinguishes actual closed native expiry, unf
   ['NATIVE_TOKEN_EXPIRED','signed_out','Your app access has expired.','应用访问权限已过期。'],
   ['AUTH_TRANSACTION_EXPIRED','error','The authorization attempt timed out before it completed.','本次授权尚未完成便已超时。'],
   ['AUTHORIZATION_REFUSED','error','Authorization was not granted.','授权未获批准。'],
+  ['TOKEN_EXCHANGE_FAILED','error','Your browser returned to Mastermind OS, but the app could not complete the secure token exchange. Start a new sign-in from the app; the old browser form cannot finish this attempt.','浏览器已返回 Mastermind OS，但应用未能完成安全令牌交换。请从应用中重新开始登录；旧浏览器表单无法完成此授权。'],
  ] as const){
   await f.publish({status,reason,acquisition:false,content:false});
   expect(screen.getByRole('alert').textContent).toBe(locale==='en'?en:zh);

@@ -1,0 +1,167 @@
+{
+  "kind": "D24_Catalyst_local_condition_copy_correction",
+  "recorded_at_utc": "2026-11-08T20:51:55Z",
+  "governing_procedure": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "status": "NATIVE_COPY_CORRECTED_AND_VERIFIED_NOT_LOCAL_SAVE_OR_ALERT_RUNTIME_PROOF",
+  "paper": {
+    "file_id": "01M6Y2VTQBVC9NA39HNG1DYWFH",
+    "page_id": "p-1-0",
+    "board_id": "BU-0",
+    "url": "https://app.paper.design/file/01M6Y2VTQBVC9NA39HNG1DYWFH/p-1-0",
+    "copy_changes": [
+      {
+        "nodeId": "BX-0",
+        "html": "Save a research condition",
+        "board": "BU-0",
+        "before": "Watch a precise condition."
+      },
+      {
+        "nodeId": "C0-0",
+        "html": "Condition for manual review",
+        "board": "BU-0",
+        "before": "Bring this case back when"
+      },
+      {
+        "nodeId": "C6-0",
+        "html": "The condition is not met at the last example close. Review this case manually when new evidence is available. A saved level is not an execution order.",
+        "board": "BU-0",
+        "before": "The condition is not met at the last example close. A new valid crossing brings the case back. A saved level is not an execution order."
+      },
+      {
+        "nodeId": "C7-0",
+        "html": "Local-save design specimen. It does not monitor future closes, send notifications or bring the case back automatically.",
+        "board": "BU-0",
+        "before": "This prototype saves locally. It does not monitor prices or send alerts."
+      },
+      {
+        "nodeId": "CC-0",
+        "html": "Save locally",
+        "board": "BU-0",
+        "before": "Save condition"
+      }
+    ],
+    "operations": [
+      {
+        "key": "local-copy",
+        "id": "paper-catalyst-20261108-d24-local-copy-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "set_text_content"
+      },
+      {
+        "key": "finish",
+        "id": "paper-catalyst-20261108-d24-finish-01",
+        "state": "APPLIED_RESPONSE_OBSERVED",
+        "tool": "finish_working_on_nodes"
+      }
+    ],
+    "all_applied": true,
+    "unknown_effects": 0,
+    "finished_only": [
+      "BU-0"
+    ],
+    "prepare_state": "PAPER_READY"
+  },
+  "concurrent_writer_boundary": {
+    "observed_changed_boards": [
+      "1-0",
+      "3F-0",
+      "6F-0",
+      "9T-0",
+      "EV-0",
+      "AP-0"
+    ],
+    "observed_change": "Replacement node IDs and styling changes from an unassigned concurrent source; no edits had been sent by this phase.",
+    "resolution": "Narrow to unchanged BU-0 and five explicitly read leaf IDs. Other boards are not targeted and no file-wide preservation claim is made."
+  },
+  "verification": {
+    "exact_intended_text_only": true,
+    "changed_leaf_count": 5,
+    "fixture_identity_preserved": true,
+    "rule_preserved": true,
+    "currency_value_preserved": true,
+    "cancel_preserved": true,
+    "old_auto_return_promise_absent": true,
+    "chars": 4678
+  },
+  "source": [
+    {
+      "key": "catalyst_template",
+      "repo": "mastermindx-market-intelligence/macro",
+      "path": "templates/biocatalyst.html.j2",
+      "ref": "0242fc6a26d733160fc0e3d9fc710d32508cd030",
+      "blob_sha": "1aa725115a959f0de0f7f0ac288c976497c4e0ca"
+    },
+    {
+      "key": "catalyst_script",
+      "repo": "mastermindx-market-intelligence/macro",
+      "path": "templates/biocatalyst.js",
+      "ref": "0242fc6a26d733160fc0e3d9fc710d32508cd030",
+      "blob_sha": "ba5e4b2356012cc429cd3600ceff44b5b3d7ddea"
+    },
+    {
+      "key": "alert_form",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "path": "terminal/components/AlertsView.tsx",
+      "ref": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "b89ce3fa8bacc6aa9706bc7e4c3e4b6d4c61b9ef"
+    },
+    {
+      "key": "alert_route",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "path": "terminal/app/api/alerts/route.ts",
+      "ref": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "c1b9c801ff1605b233d5e81bd98f9b027da2fe40"
+    },
+    {
+      "key": "alert_view",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "path": "terminal/lib/alertsView.ts",
+      "ref": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "3fab363a38aeb25c1041149d06aaf13ef45e5187"
+    },
+    {
+      "key": "alert_engine",
+      "repo": "mastermindx-market-intelligence/mastermind-terminal",
+      "path": "ingest/alerts_engine.py",
+      "ref": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "b7fc3cb44110642c2c4ba641785039de9e9994c1"
+    }
+  ],
+  "findings": {
+    "scope": "The specimen previously disclosed local saving without monitoring while promising that a new crossing would bring the case back. The five corrected fields consistently describe a local research condition for manual review.",
+    "price_rule": "The ordinary Alerts form sends type=price, op=below, value. Data.last selects a live quote then a manifest EOD fallback. evaluate's price branch compares that last value to the level and returns no crossing state. This does not establish a new-final-daily-close crossing or a Catalyst-case return.",
+    "prototype_owner": "The inspected production biocatalyst template/script are clinical-trial investigation surfaces and did not bind this R1 local condition specimen. Bounded searches did not establish its actual local persistence owner; no claim that local saving was implemented, executed or runtime-tested.",
+    "preserved": "The exact observed BU-0 JSX equals the before export with only the five intended text replacements. EX-A/Aster Bio, daily-close predicate, USD, 39.60, Cancel, node IDs, layout and all remaining source are unchanged.",
+    "limits": "The initial broader edit plan was never dispatched after concurrent changes were observed on six other boards. Their changes were protected. This phase makes no full-file or other-board preservation claim."
+  },
+  "artifacts": {
+    "images": [
+      {
+        "path": "condition-before.jpg",
+        "sha": "e7328e0253d7990da71c4e620d2dc69fcf804234",
+        "bytes": 30084,
+        "mimeType": "image/jpeg",
+        "identity_basis": "Created from the exact original native tool base64; canonical path/blob readback required. No independent local hash or decoded binary body readback claimed."
+      },
+      {
+        "path": "condition-after.jpg",
+        "sha": "9188e5c4ddd22bbc33594fde0da610e50f374193",
+        "bytes": 33298,
+        "mimeType": "image/jpeg",
+        "identity_basis": "Created from the exact original native tool base64; canonical path/blob readback required. No independent local hash or decoded binary body readback claimed."
+      }
+    ],
+    "text": [
+      "condition-before.jsx",
+      "condition-after.jsx",
+      "local-condition-copy-evidence.json"
+    ]
+  },
+  "acceptance_limits": [
+    "No account alert, save, localStorage write, notification, price request or product-runtime effect was executed.",
+    "No EX-A synthetic identity was converted into a live listing; no threshold rule was silently substituted for the research predicate.",
+    "No new state store, evaluator, route, queue, source PR or release-control change.",
+    "Native screenshot and exact JSX proof do not establish real browser interaction, persistence, accessibility or delivery.",
+    "Local file execution remains unavailable. Canonical source evidence uses the same GitHub carrier; native operations are fully reconciled."
+  ]
+}

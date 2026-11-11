@@ -313,9 +313,7 @@ def _owner_preview_answer():
 
 def test_fabric_route_preview_merges_the_shared_law_composition(tmp_path,monkeypatch):
     bridge=_capacity_bridge()
-    # The owner-file guard is host state, not the composition under test: pin a
-    # synthetic owner so the preview is hermetic on clean CI runners.
-    owner=tmp_path/'fabric_task.py';owner.write_text('',encoding='utf-8')
+    owner=tmp_path/'fabric_task.py';owner.touch()
     monkeypatch.setattr(bridge,'FABRIC',owner)
     monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[dict(pool='canonical-pool')]))
     def run(*args,**kwargs):
@@ -338,16 +336,43 @@ def test_fabric_route_preview_merges_the_shared_law_composition(tmp_path,monkeyp
 
 def test_fabric_route_preview_frontier_is_downgraded_by_the_shared_law(tmp_path,monkeypatch):
     bridge=_capacity_bridge()
-    owner=tmp_path/'fabric_task.py';owner.write_text('',encoding='utf-8')
+    owner=tmp_path/'fabric_task.py';owner.touch()
     monkeypatch.setattr(bridge,'FABRIC',owner)
     monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[]))
-    monkeypatch.setattr(bridge.subprocess,'run',lambda *a,**k:SimpleNamespace(
-        returncode=0,stdout=json.dumps(_owner_preview_answer()).encode(),stderr=b''))
+    calls=[]
+    def run(args,**kwargs):
+        calls.append(args)
+        assert kwargs['timeout']==15 and kwargs['text'] is True
+        return SimpleNamespace(returncode=0,stdout=json.dumps(_owner_preview_answer()),stderr='')
+    monkeypatch.setattr(bridge.subprocess,'run',run)
     answer=bridge.preview(dict(task_class='architecture',complexity='C3_FRONTIER_JUDGMENT'))
     record=answer['route_preview']
     assert record['requested_complexity']=='C3_FRONTIER_JUDGMENT'
     assert record['effective_complexity']=='C2_COMPLEX_BOUNDED'
     assert record['witness_disposition']=='downgraded'
+    assert len(calls)==1
+    assert calls[0][2]=='preview'
+    assert calls[0][calls[0].index('--task-complexity')+1]=='C2_COMPLEX_BOUNDED'
+    assert record['suitability_tiers'][0]=='implementation.routine.primary'
+    assert not any(tier.startswith('frontier.') for tier in record['suitability_tiers'])
+
+
+@pytest.mark.parametrize('composition', [
+    {}, {'effective_complexity':None}, {'effective_complexity':'REVIEWER'},
+    {'effective_complexity':'C2'}, {'effective_complexity':[]}, [],
+])
+def test_fabric_route_preview_refuses_invalid_effective_class_before_owner(monkeypatch,composition):
+    bridge=_capacity_bridge()
+    monkeypatch.setattr(bridge,'shared_route_preview',lambda *args:composition)
+    calls=[]
+    def forbidden(*args,**kwargs):
+        calls.append((args,kwargs))
+        raise AssertionError('invalid effective class must not reach the owner')
+    monkeypatch.setattr(bridge,'catalog',forbidden)
+    monkeypatch.setattr(bridge.subprocess,'run',forbidden)
+    with pytest.raises(ValueError,match='^FABRIC_PREVIEW_EFFECTIVE_COMPLEXITY_INVALID$'):
+        bridge.preview(dict(task_class='execute',complexity='C1_ROUTINE_BOUNDED'))
+    assert calls==[]
 
 
 def test_fabric_route_preview_refuses_without_the_shared_law(tmp_path,monkeypatch):
