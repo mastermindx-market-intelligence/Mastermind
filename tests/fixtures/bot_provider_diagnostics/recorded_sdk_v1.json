@@ -1,0 +1,194 @@
+{
+  "provenance": {
+    "producer_head": "9526baea04d5079ea288c06297213157c289e86c",
+    "collector_sha256": "7174a0464d18bfee5bc2ebd020793d307477620e958a3124b56ca2e87e1cacc0",
+    "sdk_version": "0.2.168",
+    "method": "Actual SDK ResultMessage/ResultError through actual collector and runlog writer; synthetic data; no provider query"
+  },
+  "run_id": "2026-10-15T20-00-00-000Z00-00",
+  "rows": [
+    {
+      "_meta": {
+        "run_id": "2026-10-15T20-00-00-000Z00-00",
+        "ts": "2026-10-15T20:00:00.000+00:00",
+        "kind": "brain_deep_armed",
+        "title": "CANARY_PRIVATE_PROMPT",
+        "n_steps": 0,
+        "cost_usd": null,
+        "summary": ""
+      }
+    },
+    {
+      "ts": "2026-10-15T20:00:02.000+00:00",
+      "type": "provider_diagnostic",
+      "title": "SDK invocation diagnostics",
+      "detail": "CANARY_PRIVATE_LOG_DETAIL",
+      "provider_diagnostic": {
+        "schema": "mastermind.bot.sdk_diagnostic.v1",
+        "identity": {
+          "run_id": "2026-10-15T20-00-00-000Z00-00",
+          "book": "autonomous",
+          "role": "deep",
+          "candidate_ordinal": 0
+        },
+        "dependencies": {
+          "sdk_package_version": {
+            "declared_value": "0.2.168",
+            "status": "declared_only"
+          },
+          "bundled_cli_version": {
+            "declared_value": "2.1.0",
+            "status": "declared_only"
+          },
+          "redaction_sanitizer": "imported",
+          "redaction_projection_status": "limited_to_retained_fields",
+          "declaration_note": "versions_are_caller_declared_inputs_never_executed_version_proof"
+        },
+        "observation": {
+          "sdk_messages_observed": 1,
+          "terminal_messages_observed": 1,
+          "contradictory_terminals_observed": 1,
+          "tool_use_blocks_observed": 0,
+          "tool_result_blocks_observed": 0,
+          "unknown_messages_observed": 0,
+          "query_entered_observed": true,
+          "query_entry_is_not_provider_start_proof": true,
+          "failed_field_reads": 0,
+          "content_scans_truncated": 0,
+          "non_string_errors_omitted": 0,
+          "oversize_omissions": [],
+          "observation_limits": [
+            "counts_cover_observed_sdk_messages_only",
+            "counts_never_prove_absence_of_execution_effects",
+            "unknown_or_malformed_structures_are_omitted_not_coerced",
+            "oversize_sources_omitted_entirely_not_truncated_pre_redaction",
+            "query_entry_is_not_provider_start_proof"
+          ]
+        },
+        "terminals": {
+          "count": 1,
+          "omitted_middle_count": 0,
+          "first": {
+            "api_error_status_field_present": true,
+            "api_error_status_read_failed": false,
+            "api_error_status": 503,
+            "terminal_reason_field_present": true,
+            "terminal_reason_read_failed": false,
+            "terminal_reason": "api_error",
+            "stop_reason_field_present": true,
+            "stop_reason_read_failed": false,
+            "stop_reason": "error",
+            "ordinal": 1,
+            "is_error": true,
+            "is_error_field_present": true,
+            "subtype": "success",
+            "subtype_field_present": true,
+            "result_field_present": true,
+            "errors_field_present": true,
+            "unreadable_fields": [],
+            "has_nonempty_text": true,
+            "successful_text_retained": false,
+            "errors": [],
+            "errors_omitted": 0,
+            "retained_failure_text": "CANARY_PRIVATE_RESULT",
+            "failure_text_retained": true,
+            "failure_text_omitted": false,
+            "contradictory_success_with_is_error": true
+          },
+          "last": {
+            "api_error_status_field_present": true,
+            "api_error_status_read_failed": false,
+            "api_error_status": 503,
+            "terminal_reason_field_present": true,
+            "terminal_reason_read_failed": false,
+            "terminal_reason": "api_error",
+            "stop_reason_field_present": true,
+            "stop_reason_read_failed": false,
+            "stop_reason": "error",
+            "ordinal": 1,
+            "is_error": true,
+            "is_error_field_present": true,
+            "subtype": "success",
+            "subtype_field_present": true,
+            "result_field_present": true,
+            "errors_field_present": true,
+            "unreadable_fields": [],
+            "has_nonempty_text": true,
+            "successful_text_retained": false,
+            "errors": [],
+            "errors_omitted": 0,
+            "retained_failure_text": "CANARY_PRIVATE_RESULT",
+            "failure_text_retained": true,
+            "failure_text_omitted": false,
+            "contradictory_success_with_is_error": true
+          },
+          "terminal_presence": "single",
+          "successful_result_text_retained": false
+        },
+        "exception": {
+          "observed": true,
+          "exception_class": "ResultError",
+          "structured_projection_not_terminal_message": true,
+          "field_source": "sdk_result_error_data_allowlist",
+          "is_error": true,
+          "is_error_field_present": true,
+          "subtype": "success",
+          "subtype_field_present": true,
+          "errors": [
+            "CANARY_PRIVATE_ERROR"
+          ],
+          "errors_field_present": true,
+          "errors_omitted": 0,
+          "result_field_present": true,
+          "has_nonempty_result_text": true,
+          "retained_failure_text": "CANARY_PRIVATE_DIAGNOSTIC_TEXT",
+          "contradictory_success_with_is_error": true,
+          "api_error_status_field_present": true,
+          "api_error_status_read_failed": false,
+          "api_error_status": 503,
+          "terminal_reason_field_present": true,
+          "terminal_reason_read_failed": false,
+          "terminal_reason": "api_error",
+          "stop_reason_field_present": true,
+          "stop_reason_read_failed": false,
+          "stop_reason": "error"
+        },
+        "exit": {
+          "end_state": "raised",
+          "exception_class": "ResultError",
+          "exit_code": 1,
+          "exception_text": "CANARY_PRIVATE_PROVIDER_DETAIL (exit code: 1)",
+          "exception_text_source": "first_stored_string_argument",
+          "exception_text_omitted_reason": null
+        },
+        "qualifications": {
+          "effect_reconciliation": "not_performed",
+          "completeness": "partial_abnormal_end_state",
+          "terminal_presence": "single",
+          "no_invocation_wrapper": true,
+          "cancellation_propagation": "caller_owned_not_proven_by_collector",
+          "no_ok_error_text_verdict_fields": true,
+          "notes": [
+            "observational_only_no_retry_classification",
+            "accepted_submission_outside_collector_authority",
+            "effect_reconciliation_not_performed",
+            "exception_causes_and_groups_not_traversed",
+            "abnormal_end_state_stream_partial_even_if_terminal_seen",
+            "contradictory_terminal_success_with_is_error",
+            "contradictory_exception_success_with_is_error"
+          ],
+          "notes_dropped": 0
+        },
+        "limits": {
+          "serialized_json_cap_bytes": 16384,
+          "json_cap_applied": false,
+          "cap_reductions_applied": []
+        }
+      },
+      "provider_diagnostic_capture": {
+        "status": "available",
+        "reason": "collector_projection_available"
+      }
+    }
+  ]
+}

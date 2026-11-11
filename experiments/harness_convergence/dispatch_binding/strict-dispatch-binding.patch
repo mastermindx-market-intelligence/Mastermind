@@ -1,0 +1,47 @@
+--- a/packages/core/tools/src/index.ts
++++ b/packages/core/tools/src/index.ts
+@@ -693,0 +694,7 @@
++  /**
++   * Bind each call to its original definition and recheck live guards at the
++   * body boundary. Opt-in for immutable, host-admitted profiles; default false
++   * preserves existing dynamic-registration behavior. Guards in this mode must
++   * be synchronous and repeatable. This is not isolation from arbitrary plugin code.
++   */
++  strictDispatchBinding?: boolean
+@@ -812,0 +820 @@
++    strictDispatchBinding: z.boolean().default(false),
+@@ -832,0 +841,2 @@
++  /** Same definition as the captured content callbacks; never a second registry. */
++  private preparedDefinitions = new WeakMap<ToolExecution, ToolDefinition | undefined>()
+@@ -839,0 +850 @@
++  private readonly strictDispatchBinding: boolean
+@@ -852,0 +864 @@
++    this.strictDispatchBinding = config.strictDispatchBinding ?? false
+@@ -1446,0 +1459 @@
++      if (this.strictDispatchBinding) this.preparedDefinitions.set(execution, visible)
+@@ -1577,0 +1591,7 @@
++      // Around-wrappers and the scheduler may have awaited since preparation.
++      // Recheck live policy, then resolve and compare, with no await before invocation.
++      if (this.strictDispatchBinding) {
++        const reason = this.guardReason(exec)
++        if (reason !== undefined) return toolErrorResult(new Error(reason))
++        if (isAborted(signal)) return toolAbortedBeforeDispatchResult()
++      }
+@@ -1579,0 +1600,3 @@
++      if (this.strictDispatchBinding && tool !== this.preparedDefinitions.get(exec)) {
++        throw new Error('TOOL_DISPATCH_BINDING_CHANGED')
++      }
+@@ -1807 +1830 @@
+-      const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++      const tool = this.resultDefinition(exec)
+@@ -1863,0 +1887,7 @@
++  /** A started effect retains its original output owner even after registry movement. */
++  private resultDefinition(exec: ToolExecution): ToolDefinition | undefined {
++    return this.strictDispatchBinding
++      ? this.preparedDefinitions.get(exec)
++      : this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++  }
++
+@@ -1876 +1906 @@
+-    const tool = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)
++    const tool = this.resultDefinition(exec)

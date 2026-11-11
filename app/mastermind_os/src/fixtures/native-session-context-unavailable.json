@@ -1,0 +1,12 @@
+{
+  "schema": "mastermind.os.executive.session_result.v1",
+  "operation": "context",
+  "ok": false,
+  "effect": "NONE",
+  "operation_key": null,
+  "data": null,
+  "error": {
+    "code": "session_unavailable",
+    "message": "selected session is unavailable"
+  }
+}

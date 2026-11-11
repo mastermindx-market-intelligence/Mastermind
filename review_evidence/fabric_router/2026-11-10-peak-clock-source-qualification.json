@@ -1,0 +1,20 @@
+{
+  "candidate_controller_sha256": "05ba74d56c6be8832b0208d2a122dc7588a9e95ac3fe4b7aad5209100643635f",
+  "candidate_schedule_sha256": "90857a771782e2a0b203f954674a9ac2f89ea2288dd2e55bbb7c728464d2629e",
+  "combined_log_sha256": "c74469b359fff9f2f946a373ea1d2e3fb18f17dd11e722e6f809613c721cdeed",
+  "combined_pytest_failed": 0,
+  "combined_pytest_passed": 164,
+  "combined_pytest_skipped": 0,
+  "first_cutover_proof": "NOT_ESTABLISHED",
+  "native_controller_preimage_sha256": "128546de659e04cf77e758977d735bf8af3aa242603f19e792a5ca33d38286f0",
+  "native_mutated": false,
+  "native_schedule_preimage_sha256": "1a9c8857a680164fedf342aca70832c4b6b3f706d0dbb25f3fc1f26236433791",
+  "patch_sha256": "83443c21147826b0cdccaba79d757bc123e908aeeb6453968c2bac7d98d82b5c",
+  "preserved_original_service_identity": true,
+  "publication_admitted": false,
+  "qualification_date": "2026-11-10",
+  "runtime_activation": "NOT_PERFORMED",
+  "schema": "source_qualification_only",
+  "scope": "clock and schedule only; existing unsafe reload/custody gates remain; no new daemon or provider call",
+  "source_parent_head": "5551816ffe4290a24c6cb0b0161025cd53cca371"
+}

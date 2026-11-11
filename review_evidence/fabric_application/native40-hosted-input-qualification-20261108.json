@@ -1,0 +1,78 @@
+{
+  "limits": {
+    "acceptance": false,
+    "hermes_installation": false,
+    "native_publication": false,
+    "native_selection": false,
+    "protected_delivery": false,
+    "provider_turn": false,
+    "settlement": false,
+    "worker_execution": false
+  },
+  "observed_at": "2026-11-08T20:48:45.005605+00:00",
+  "preservation": {
+    "all_existing_source_hash_guards": true,
+    "builder_only_two_input_path_literals_changed": true,
+    "complete_stage_map_and_builder_equality": true,
+    "current_protected_inputs": {
+      "ops/native_fabric/provider_plans/maintenance_guard/profile.json": "211d244bc5b8f11556b517f8ae47ac9398bdb8e8a83f66d261b3d7a10b3aa653",
+      "ops/native_fabric/provider_plans/maintenance_guard/provenance.json": "3e7c7bcea0108fa9aaa6832adc35634df818bb2604687c30c7f1bd18f09d75ff"
+    },
+    "original_three_patch_hashes_authenticated": true,
+    "production_composer_unchanged": true,
+    "scoped_fixture_here_restored": true,
+    "shared_fixed_parent_unchanged": true,
+    "source_fault_baseline_authenticated_before_mutation": true
+  },
+  "problem": "The protected maintenance profile advanced independently. Historical native40 source commitments and fixtures must authenticate retained original inputs instead of the moving current plan.",
+  "qualification": {
+    "actual_hosted_merge": "1222b19fe9812309b4228656011013e4cf65f310",
+    "completed_at": "2026-11-08T20:38:42.297360+00:00",
+    "current_protected_profile_preserved": true,
+    "failure_cases": [],
+    "log_sha256": "93245128cc46d1d918c5e0af5f59f63f33014e5b3a44baf8d05407271ba38b2d",
+    "receipt_sha256": "8ba0e9011792bc8925825340c0d7d1c861ee9213729b2b47bafcb9d4058f0003",
+    "returncode": 0,
+    "schema": "h4-native40-hosted-merge-repair-qualification.v1",
+    "selection_changed": false,
+    "source_inputs_unchanged": true,
+    "source_projection_sha256": "7a674b959af142e08db7b470e53009cc85ab9a14cb83f9ddb44e80e0bc1edbb4",
+    "started_at": "2026-11-08T20:34:53.270522+00:00",
+    "summary": {
+      "errors": 0,
+      "failures": 0,
+      "skipped": 0,
+      "tests": 204
+    },
+    "test_modules": [
+      "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py",
+      "tests/test_glm_native_application_enrollment.py"
+    ],
+    "xml_sha256": "134da28e2655edd930d65a2c757323bdc6c3f2a8c36058833f4a6480f554b4b1"
+  },
+  "retained_inputs": {
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json": {
+      "sha256": "2d5fc0601e711def977fc2b5a32dcc2942ac10b98acfa25a2c797964f94af606",
+      "source_blob": "dabfec5279fc44dd397125227038295eb7a9a50c",
+      "source_commit": "efab46368e13e9553e489cb61a58ca28055df175",
+      "source_path": "ops/native_fabric/provider_plans/maintenance_guard/profile.json"
+    },
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json": {
+      "sha256": "419bd6764301890e062c9265db8e307b06527253c80c43b91793c552618f17d2",
+      "source_blob": "5596ac2f29437d3a110522280c8037eb34042f24",
+      "source_commit": "efab46368e13e9553e489cb61a58ca28055df175",
+      "source_path": "ops/native_fabric/provider_plans/maintenance_guard/provenance.json"
+    }
+  },
+  "schema": "mastermind.h4.native40-hosted-input-qualification.v1",
+  "source_base": "6c87b9f0ba04e05bd37e0555de5048dc2ff98f34",
+  "source_sha256": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "fd6bd28b40997fd1415a610249c5676ebe61733e081e8746570c6d270a87cb16",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/README.md": "4709c86ae5671b5c3bb740e8cfc84f72d67d4368433bf4da452ca14191b3a993",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-profile.json": "2d5fc0601e711def977fc2b5a32dcc2942ac10b98acfa25a2c797964f94af606",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/maintenance_guard/native40-provenance.json": "419bd6764301890e062c9265db8e307b06527253c80c43b91793c552618f17d2",
+    "ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py": "3731e01309d8a44823504a7f162276168ecfcc11db945815030fed3437352400"
+  },
+  "tested_hosted_merge": "1222b19fe9812309b4228656011013e4cf65f310",
+  "tested_protected_parent": "89c83b3a3172054b7dfce7d208d4cf0c209f4672"
+}

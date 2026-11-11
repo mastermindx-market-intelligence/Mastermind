@@ -1,0 +1,2134 @@
+{
+  "source_pin": "ed7991199ccf76027f7acccc283c539c175e7e16",
+  "capture_kind": "real GitHub API values, projected to verifier-consumed fields; no credentials",
+  "listing_provenance": "GitHub repository actions/runs query with event=merge_group and exact head_sha; all 4 results captured, then CI workflow selected by numeric workflow_id/path. Workflow-specific collection endpoint unsupported by connector.",
+  "group_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42548210214",
+  "push_url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42553501935",
+  "current": {
+    "id": 42553501935,
+    "run_attempt": 1,
+    "workflow_id": 324108847,
+    "event": "push",
+    "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+    "head_branch": "master",
+    "path": ".github/workflows/ci.yml",
+    "status": "in_progress",
+    "conclusion": null,
+    "created_at": "2026-11-09T02:55:00Z",
+    "updated_at": "2026-11-09T02:58:29Z",
+    "actor": {
+      "login": "github-merge-queue[bot]",
+      "type": "Bot"
+    },
+    "triggering_actor": {
+      "login": "github-merge-queue[bot]",
+      "type": "Bot"
+    },
+    "repository": {
+      "full_name": "mastermindx-market-intelligence/Mastermind"
+    },
+    "head_repository": {
+      "full_name": "mastermindx-market-intelligence/Mastermind"
+    }
+  },
+  "current_recheck": {
+    "id": 42553501935,
+    "run_attempt": 1,
+    "workflow_id": 324108847,
+    "event": "push",
+    "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+    "head_branch": "master",
+    "path": ".github/workflows/ci.yml",
+    "status": "in_progress",
+    "conclusion": null,
+    "created_at": "2026-11-09T02:55:00Z",
+    "updated_at": "2026-11-09T02:58:29Z",
+    "actor": {
+      "login": "github-merge-queue[bot]",
+      "type": "Bot"
+    },
+    "triggering_actor": {
+      "login": "github-merge-queue[bot]",
+      "type": "Bot"
+    },
+    "repository": {
+      "full_name": "mastermindx-market-intelligence/Mastermind"
+    },
+    "head_repository": {
+      "full_name": "mastermindx-market-intelligence/Mastermind"
+    }
+  },
+  "listing": {
+    "total_count": 1,
+    "workflow_runs": [
+      {
+        "id": 42548210214,
+        "run_attempt": 1,
+        "workflow_id": 324108847,
+        "event": "merge_group",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "head_branch": "gh-readonly-queue/master/pr-2305-6b67a92b44a19b600f83b1a7bb399b8ad5e7d82e",
+        "path": ".github/workflows/ci.yml",
+        "status": "completed",
+        "conclusion": "success",
+        "created_at": "2026-11-09T01:56:55Z",
+        "updated_at": "2026-11-09T02:54:53Z",
+        "actor": {
+          "login": "mastermindxryan",
+          "type": "User"
+        },
+        "triggering_actor": {
+          "login": "mastermindxryan",
+          "type": "User"
+        },
+        "repository": {
+          "full_name": "mastermindx-market-intelligence/Mastermind"
+        },
+        "head_repository": {
+          "full_name": "mastermindx-market-intelligence/Mastermind"
+        }
+      }
+    ]
+  },
+  "jobs": {
+    "total_count": 11,
+    "jobs": [
+      {
+        "id": 128937727632,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "PR test scope",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T01:57:46Z",
+        "completed_at": "2026-11-09T01:57:58Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937727632",
+        "runner_id": 1000542736,
+        "runner_name": "GitHub Actions 1000542736",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T01:57:47Z",
+            "completed_at": "2026-11-09T01:57:48Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T01:57:48Z",
+            "completed_at": "2026-11-09T01:57:55Z"
+          },
+          {
+            "name": "Classify integrated source diff using protected base code",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T01:57:55Z",
+            "completed_at": "2026-11-09T01:57:55Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T01:57:55Z",
+            "completed_at": "2026-11-09T01:57:56Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T01:57:56Z",
+            "completed_at": "2026-11-09T01:57:56Z"
+          }
+        ]
+      },
+      {
+        "id": 128937727700,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "Pin and identity guards",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T01:57:46Z",
+        "completed_at": "2026-11-09T02:04:12Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937727700",
+        "runner_id": 1000542739,
+        "runner_name": "GitHub Actions 1000542739",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T01:57:46Z",
+            "completed_at": "2026-11-09T01:57:47Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T01:57:47Z",
+            "completed_at": "2026-11-09T01:57:54Z"
+          },
+          {
+            "name": "Set up actions/setup-python",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T01:57:54Z",
+            "completed_at": "2026-11-09T01:58:03Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T01:58:03Z",
+            "completed_at": "2026-11-09T01:59:20Z"
+          },
+          {
+            "name": "Run pinned source-identity guard suite",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T01:59:20Z",
+            "completed_at": "2026-11-09T02:04:11Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:04:11Z",
+            "completed_at": "2026-11-09T02:04:12Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:04:12Z",
+            "completed_at": "2026-11-09T02:04:12Z"
+          }
+        ]
+      },
+      {
+        "id": 128937727701,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "Non-pytest qualification gates",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T01:57:46Z",
+        "completed_at": "2026-11-09T02:03:36Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937727701",
+        "runner_id": 1000542740,
+        "runner_name": "GitHub Actions 1000542740",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T01:57:46Z",
+            "completed_at": "2026-11-09T01:57:47Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T01:57:47Z",
+            "completed_at": "2026-11-09T01:57:54Z"
+          },
+          {
+            "name": "Set up actions/setup-node",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T01:57:54Z",
+            "completed_at": "2026-11-09T01:58:06Z"
+          },
+          {
+            "name": "Set up actions/setup-python",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T01:58:06Z",
+            "completed_at": "2026-11-09T01:58:15Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T01:58:15Z",
+            "completed_at": "2026-11-09T01:59:32Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T01:59:32Z",
+            "completed_at": "2026-11-09T01:59:58Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T01:59:58Z",
+            "completed_at": "2026-11-09T01:59:58Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T01:59:58Z",
+            "completed_at": "2026-11-09T02:03:30Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:03:30Z",
+            "completed_at": "2026-11-09T02:03:35Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:03:35Z",
+            "completed_at": "2026-11-09T02:03:35Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-11-09T02:03:35Z",
+            "completed_at": "2026-11-09T02:03:36Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12,
+            "started_at": "2026-11-09T02:03:36Z",
+            "completed_at": "2026-11-09T02:03:36Z"
+          }
+        ]
+      },
+      {
+        "id": 128937997583,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "pytest shard 0",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T01:59:29Z",
+        "completed_at": "2026-11-09T02:52:37Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937997583",
+        "runner_id": 1000542753,
+        "runner_name": "GitHub Actions 1000542753",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T01:59:30Z",
+            "completed_at": "2026-11-09T01:59:31Z"
+          },
+          {
+            "name": "Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T01:59:31Z",
+            "completed_at": "2026-11-09T01:59:34Z"
+          },
+          {
+            "name": "Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T01:59:34Z",
+            "completed_at": "2026-11-09T01:59:46Z"
+          },
+          {
+            "name": "Verify event source and immutable fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T01:59:46Z",
+            "completed_at": "2026-11-09T01:59:46Z"
+          },
+          {
+            "name": "Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T01:59:46Z",
+            "completed_at": "2026-11-09T01:59:51Z"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T01:59:51Z",
+            "completed_at": "2026-11-09T01:59:58Z"
+          },
+          {
+            "name": "Install Node dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T01:59:58Z",
+            "completed_at": "2026-11-09T02:00:00Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T02:00:00Z",
+            "completed_at": "2026-11-09T02:00:08Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:00:08Z",
+            "completed_at": "2026-11-09T02:00:39Z"
+          },
+          {
+            "name": "Fast source-bound release preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:00:39Z",
+            "completed_at": "2026-11-09T02:00:42Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-11-09T02:00:42Z",
+            "completed_at": "2026-11-09T02:01:18Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 12,
+            "started_at": "2026-11-09T02:01:18Z",
+            "completed_at": "2026-11-09T02:01:18Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 13,
+            "started_at": "2026-11-09T02:01:18Z",
+            "completed_at": "2026-11-09T02:05:07Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 14,
+            "started_at": "2026-11-09T02:05:07Z",
+            "completed_at": "2026-11-09T02:05:13Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 15,
+            "started_at": "2026-11-09T02:05:13Z",
+            "completed_at": "2026-11-09T02:05:13Z"
+          },
+          {
+            "name": "H1 initializer Linux fast preflight",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 16,
+            "started_at": "2026-11-09T02:05:13Z",
+            "completed_at": "2026-11-09T02:05:13Z"
+          },
+          {
+            "name": "H1 required real Linux no-ACL positive journey",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 17,
+            "started_at": "2026-11-09T02:05:13Z",
+            "completed_at": "2026-11-09T02:05:13Z"
+          },
+          {
+            "name": "Prepare fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-09T02:05:13Z",
+            "completed_at": "2026-11-09T02:05:13Z"
+          },
+          {
+            "name": "Verify native application admission and dispatch custody",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 19,
+            "started_at": "2026-11-09T02:05:13Z",
+            "completed_at": "2026-11-09T02:16:18Z"
+          },
+          {
+            "name": "Verify closed application transport in isolated root fixtures",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 20,
+            "started_at": "2026-11-09T02:16:18Z",
+            "completed_at": "2026-11-09T02:17:10Z"
+          },
+          {
+            "name": "Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 21,
+            "started_at": "2026-11-09T02:17:10Z",
+            "completed_at": "2026-11-09T02:17:26Z"
+          },
+          {
+            "name": "Verify exact scoped Fabric model and Metabolism composition",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 22,
+            "started_at": "2026-11-09T02:17:26Z",
+            "completed_at": "2026-11-09T02:18:05Z"
+          },
+          {
+            "name": "Verify actual Brain Fabric and production inference composition",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 23,
+            "started_at": "2026-11-09T02:18:05Z",
+            "completed_at": "2026-11-09T02:20:19Z"
+          },
+          {
+            "name": "Verify exact prior merge-group CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24,
+            "started_at": "2026-11-09T02:20:19Z",
+            "completed_at": "2026-11-09T02:20:19Z"
+          },
+          {
+            "name": "Run repository test shard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-09T02:20:19Z",
+            "completed_at": "2026-11-09T02:52:30Z"
+          },
+          {
+            "name": "Upload fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-09T02:52:30Z",
+            "completed_at": "2026-11-09T02:52:31Z"
+          },
+          {
+            "name": "Post Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 47,
+            "started_at": "2026-11-09T02:52:31Z",
+            "completed_at": "2026-11-09T02:52:31Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-11-09T02:52:31Z",
+            "completed_at": "2026-11-09T02:52:31Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-11-09T02:52:31Z",
+            "completed_at": "2026-11-09T02:52:31Z"
+          },
+          {
+            "name": "Post Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 50,
+            "started_at": "2026-11-09T02:52:31Z",
+            "completed_at": "2026-11-09T02:52:32Z"
+          },
+          {
+            "name": "Post Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 51,
+            "started_at": "2026-11-09T02:52:32Z",
+            "completed_at": "2026-11-09T02:52:32Z"
+          },
+          {
+            "name": "Post Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 52,
+            "started_at": "2026-11-09T02:52:32Z",
+            "completed_at": "2026-11-09T02:52:32Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 53,
+            "started_at": "2026-11-09T02:52:32Z",
+            "completed_at": "2026-11-09T02:52:32Z"
+          }
+        ]
+      },
+      {
+        "id": 128937997641,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "pytest shard 1",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T02:00:21Z",
+        "completed_at": "2026-11-09T02:23:21Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937997641",
+        "runner_id": 1000542762,
+        "runner_name": "GitHub Actions 1000542762",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T02:00:21Z",
+            "completed_at": "2026-11-09T02:00:22Z"
+          },
+          {
+            "name": "Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T02:00:22Z",
+            "completed_at": "2026-11-09T02:00:25Z"
+          },
+          {
+            "name": "Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T02:00:25Z",
+            "completed_at": "2026-11-09T02:00:37Z"
+          },
+          {
+            "name": "Verify event source and immutable fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T02:00:37Z",
+            "completed_at": "2026-11-09T02:00:37Z"
+          },
+          {
+            "name": "Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T02:00:37Z",
+            "completed_at": "2026-11-09T02:00:39Z"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:00:39Z",
+            "completed_at": "2026-11-09T02:00:45Z"
+          },
+          {
+            "name": "Install Node dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:00:45Z",
+            "completed_at": "2026-11-09T02:00:47Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T02:00:47Z",
+            "completed_at": "2026-11-09T02:00:53Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:00:53Z",
+            "completed_at": "2026-11-09T02:01:16Z"
+          },
+          {
+            "name": "Fast source-bound release preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:01:16Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 11,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 12,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 14,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "H1 initializer Linux fast preflight",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 16,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "H1 required real Linux no-ACL positive journey",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 17,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Prepare fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify native application admission and dispatch custody",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 19,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify closed application transport in isolated root fixtures",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 20,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 21,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify exact scoped Fabric model and Metabolism composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 22,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify actual Brain Fabric and production inference composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 23,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Verify exact prior merge-group CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:01:20Z"
+          },
+          {
+            "name": "Run repository test shard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-09T02:01:20Z",
+            "completed_at": "2026-11-09T02:23:16Z"
+          },
+          {
+            "name": "Upload fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-09T02:23:16Z",
+            "completed_at": "2026-11-09T02:23:17Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-11-09T02:23:17Z",
+            "completed_at": "2026-11-09T02:23:17Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-11-09T02:23:17Z",
+            "completed_at": "2026-11-09T02:23:17Z"
+          },
+          {
+            "name": "Post Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 50,
+            "started_at": "2026-11-09T02:23:17Z",
+            "completed_at": "2026-11-09T02:23:18Z"
+          },
+          {
+            "name": "Post Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 51,
+            "started_at": "2026-11-09T02:23:18Z",
+            "completed_at": "2026-11-09T02:23:18Z"
+          },
+          {
+            "name": "Post Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 52,
+            "started_at": "2026-11-09T02:23:18Z",
+            "completed_at": "2026-11-09T02:23:18Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 53,
+            "started_at": "2026-11-09T02:23:18Z",
+            "completed_at": "2026-11-09T02:23:18Z"
+          }
+        ]
+      },
+      {
+        "id": 128937997651,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "pytest shard 2",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T02:00:26Z",
+        "completed_at": "2026-11-09T02:34:05Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937997651",
+        "runner_id": 1000542764,
+        "runner_name": "GitHub Actions 1000542764",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T02:00:27Z",
+            "completed_at": "2026-11-09T02:00:28Z"
+          },
+          {
+            "name": "Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T02:00:28Z",
+            "completed_at": "2026-11-09T02:00:31Z"
+          },
+          {
+            "name": "Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T02:00:31Z",
+            "completed_at": "2026-11-09T02:00:47Z"
+          },
+          {
+            "name": "Verify event source and immutable fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T02:00:47Z",
+            "completed_at": "2026-11-09T02:00:47Z"
+          },
+          {
+            "name": "Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T02:00:47Z",
+            "completed_at": "2026-11-09T02:00:52Z"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:00:52Z",
+            "completed_at": "2026-11-09T02:00:59Z"
+          },
+          {
+            "name": "Install Node dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:00:59Z",
+            "completed_at": "2026-11-09T02:01:01Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T02:01:01Z",
+            "completed_at": "2026-11-09T02:01:10Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:01:10Z",
+            "completed_at": "2026-11-09T02:01:40Z"
+          },
+          {
+            "name": "Fast source-bound release preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:01:40Z",
+            "completed_at": "2026-11-09T02:01:43Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 11,
+            "started_at": "2026-11-09T02:01:43Z",
+            "completed_at": "2026-11-09T02:01:43Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 12,
+            "started_at": "2026-11-09T02:01:43Z",
+            "completed_at": "2026-11-09T02:01:43Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-11-09T02:01:43Z",
+            "completed_at": "2026-11-09T02:01:43Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 14,
+            "started_at": "2026-11-09T02:01:43Z",
+            "completed_at": "2026-11-09T02:01:43Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-11-09T02:01:43Z",
+            "completed_at": "2026-11-09T02:01:43Z"
+          },
+          {
+            "name": "H1 initializer Linux fast preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 16,
+            "started_at": "2026-11-09T02:01:43Z",
+            "completed_at": "2026-11-09T02:01:50Z"
+          },
+          {
+            "name": "H1 required real Linux no-ACL positive journey",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 17,
+            "started_at": "2026-11-09T02:01:50Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Prepare fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Verify native application admission and dispatch custody",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 19,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Verify closed application transport in isolated root fixtures",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 20,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 21,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Verify exact scoped Fabric model and Metabolism composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 22,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Verify actual Brain Fabric and production inference composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 23,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Verify exact prior merge-group CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:02:19Z"
+          },
+          {
+            "name": "Run repository test shard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-09T02:02:19Z",
+            "completed_at": "2026-11-09T02:33:59Z"
+          },
+          {
+            "name": "Upload fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-09T02:33:59Z",
+            "completed_at": "2026-11-09T02:34:00Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-11-09T02:34:00Z",
+            "completed_at": "2026-11-09T02:34:00Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-11-09T02:34:00Z",
+            "completed_at": "2026-11-09T02:34:01Z"
+          },
+          {
+            "name": "Post Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 50,
+            "started_at": "2026-11-09T02:34:01Z",
+            "completed_at": "2026-11-09T02:34:01Z"
+          },
+          {
+            "name": "Post Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 51,
+            "started_at": "2026-11-09T02:34:01Z",
+            "completed_at": "2026-11-09T02:34:01Z"
+          },
+          {
+            "name": "Post Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 52,
+            "started_at": "2026-11-09T02:34:01Z",
+            "completed_at": "2026-11-09T02:34:01Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 53,
+            "started_at": "2026-11-09T02:34:01Z",
+            "completed_at": "2026-11-09T02:34:01Z"
+          }
+        ]
+      },
+      {
+        "id": 128937997664,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "pytest shard 3",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T02:02:12Z",
+        "completed_at": "2026-11-09T02:30:19Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937997664",
+        "runner_id": 1000542789,
+        "runner_name": "GitHub Actions 1000542789",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T02:02:13Z",
+            "completed_at": "2026-11-09T02:02:14Z"
+          },
+          {
+            "name": "Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T02:02:14Z",
+            "completed_at": "2026-11-09T02:02:16Z"
+          },
+          {
+            "name": "Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T02:02:16Z",
+            "completed_at": "2026-11-09T02:02:28Z"
+          },
+          {
+            "name": "Verify event source and immutable fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T02:02:28Z",
+            "completed_at": "2026-11-09T02:02:28Z"
+          },
+          {
+            "name": "Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T02:02:28Z",
+            "completed_at": "2026-11-09T02:02:34Z"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:02:34Z",
+            "completed_at": "2026-11-09T02:02:39Z"
+          },
+          {
+            "name": "Install Node dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:02:39Z",
+            "completed_at": "2026-11-09T02:02:41Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T02:02:41Z",
+            "completed_at": "2026-11-09T02:02:48Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:02:48Z",
+            "completed_at": "2026-11-09T02:03:15Z"
+          },
+          {
+            "name": "Fast source-bound release preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:03:15Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 11,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 12,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 14,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "H1 initializer Linux fast preflight",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 16,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "H1 required real Linux no-ACL positive journey",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 17,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Prepare fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify native application admission and dispatch custody",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 19,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify closed application transport in isolated root fixtures",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 20,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 21,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify exact scoped Fabric model and Metabolism composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 22,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify actual Brain Fabric and production inference composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 23,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Verify exact prior merge-group CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:03:17Z"
+          },
+          {
+            "name": "Run repository test shard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-09T02:03:17Z",
+            "completed_at": "2026-11-09T02:30:14Z"
+          },
+          {
+            "name": "Upload fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-09T02:30:14Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-11-09T02:30:16Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-11-09T02:30:16Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          },
+          {
+            "name": "Post Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 50,
+            "started_at": "2026-11-09T02:30:16Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          },
+          {
+            "name": "Post Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 51,
+            "started_at": "2026-11-09T02:30:16Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          },
+          {
+            "name": "Post Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 52,
+            "started_at": "2026-11-09T02:30:16Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 53,
+            "started_at": "2026-11-09T02:30:16Z",
+            "completed_at": "2026-11-09T02:30:16Z"
+          }
+        ]
+      },
+      {
+        "id": 128937997683,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "pytest shard 4",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T02:03:54Z",
+        "completed_at": "2026-11-09T02:29:19Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937997683",
+        "runner_id": 1000542827,
+        "runner_name": "GitHub Actions 1000542827",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T02:03:55Z",
+            "completed_at": "2026-11-09T02:03:57Z"
+          },
+          {
+            "name": "Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T02:03:57Z",
+            "completed_at": "2026-11-09T02:03:59Z"
+          },
+          {
+            "name": "Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T02:03:59Z",
+            "completed_at": "2026-11-09T02:04:11Z"
+          },
+          {
+            "name": "Verify event source and immutable fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T02:04:11Z",
+            "completed_at": "2026-11-09T02:04:11Z"
+          },
+          {
+            "name": "Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T02:04:11Z",
+            "completed_at": "2026-11-09T02:04:16Z"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:04:16Z",
+            "completed_at": "2026-11-09T02:04:27Z"
+          },
+          {
+            "name": "Install Node dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:04:27Z",
+            "completed_at": "2026-11-09T02:04:28Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T02:04:28Z",
+            "completed_at": "2026-11-09T02:04:36Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:04:36Z",
+            "completed_at": "2026-11-09T02:05:06Z"
+          },
+          {
+            "name": "Fast source-bound release preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:05:06Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 11,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 12,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 14,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "H1 initializer Linux fast preflight",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 16,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "H1 required real Linux no-ACL positive journey",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 17,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Prepare fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify native application admission and dispatch custody",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 19,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify closed application transport in isolated root fixtures",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 20,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 21,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify exact scoped Fabric model and Metabolism composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 22,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify actual Brain Fabric and production inference composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 23,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Verify exact prior merge-group CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:05:09Z"
+          },
+          {
+            "name": "Run repository test shard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-09T02:05:09Z",
+            "completed_at": "2026-11-09T02:29:13Z"
+          },
+          {
+            "name": "Upload fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-09T02:29:13Z",
+            "completed_at": "2026-11-09T02:29:14Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-11-09T02:29:14Z",
+            "completed_at": "2026-11-09T02:29:14Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-11-09T02:29:14Z",
+            "completed_at": "2026-11-09T02:29:15Z"
+          },
+          {
+            "name": "Post Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 50,
+            "started_at": "2026-11-09T02:29:15Z",
+            "completed_at": "2026-11-09T02:29:15Z"
+          },
+          {
+            "name": "Post Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 51,
+            "started_at": "2026-11-09T02:29:15Z",
+            "completed_at": "2026-11-09T02:29:15Z"
+          },
+          {
+            "name": "Post Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 52,
+            "started_at": "2026-11-09T02:29:15Z",
+            "completed_at": "2026-11-09T02:29:15Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 53,
+            "started_at": "2026-11-09T02:29:15Z",
+            "completed_at": "2026-11-09T02:29:15Z"
+          }
+        ]
+      },
+      {
+        "id": 128937997705,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "pytest shard 5",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T02:03:33Z",
+        "completed_at": "2026-11-09T02:21:46Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937997705",
+        "runner_id": 1000542819,
+        "runner_name": "GitHub Actions 1000542819",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T02:03:34Z",
+            "completed_at": "2026-11-09T02:03:35Z"
+          },
+          {
+            "name": "Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T02:03:35Z",
+            "completed_at": "2026-11-09T02:03:37Z"
+          },
+          {
+            "name": "Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T02:03:37Z",
+            "completed_at": "2026-11-09T02:03:48Z"
+          },
+          {
+            "name": "Verify event source and immutable fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T02:03:48Z",
+            "completed_at": "2026-11-09T02:03:48Z"
+          },
+          {
+            "name": "Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T02:03:48Z",
+            "completed_at": "2026-11-09T02:03:54Z"
+          },
+          {
+            "name": "Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 6,
+            "started_at": "2026-11-09T02:03:54Z",
+            "completed_at": "2026-11-09T02:03:59Z"
+          },
+          {
+            "name": "Install Node dependencies",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 7,
+            "started_at": "2026-11-09T02:03:59Z",
+            "completed_at": "2026-11-09T02:04:01Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8,
+            "started_at": "2026-11-09T02:04:01Z",
+            "completed_at": "2026-11-09T02:04:07Z"
+          },
+          {
+            "name": "Install project",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:04:07Z",
+            "completed_at": "2026-11-09T02:04:29Z"
+          },
+          {
+            "name": "Fast source-bound release preflight",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:04:29Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify Paper direct pinned MCP SDK",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 11,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify Paper Studio prepare guard",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 12,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 13,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Compile source",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 14,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Validate shell scripts",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 15,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "H1 initializer Linux fast preflight",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 16,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "H1 required real Linux no-ACL positive journey",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 17,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Prepare fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 18,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify native application admission and dispatch custody",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 19,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify closed application transport in isolated root fixtures",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 20,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Checkout paired Brain production owner fixture",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 21,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify exact scoped Fabric model and Metabolism composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 22,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify actual Brain Fabric and production inference composition",
+            "status": "completed",
+            "conclusion": "skipped",
+            "number": 23,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Verify exact prior merge-group CI",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 24,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:04:32Z"
+          },
+          {
+            "name": "Run repository test shard",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 25,
+            "started_at": "2026-11-09T02:04:32Z",
+            "completed_at": "2026-11-09T02:21:41Z"
+          },
+          {
+            "name": "Upload fixed test diagnostics",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 26,
+            "started_at": "2026-11-09T02:21:41Z",
+            "completed_at": "2026-11-09T02:21:42Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 48,
+            "started_at": "2026-11-09T02:21:42Z",
+            "completed_at": "2026-11-09T02:21:42Z"
+          },
+          {
+            "name": "Post Run actions/setup-node@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 49,
+            "started_at": "2026-11-09T02:21:42Z",
+            "completed_at": "2026-11-09T02:21:42Z"
+          },
+          {
+            "name": "Post Checkout pinned Macro engine",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 50,
+            "started_at": "2026-11-09T02:21:42Z",
+            "completed_at": "2026-11-09T02:21:42Z"
+          },
+          {
+            "name": "Post Checkout event source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 51,
+            "started_at": "2026-11-09T02:21:42Z",
+            "completed_at": "2026-11-09T02:21:42Z"
+          },
+          {
+            "name": "Post Acquire immutable corpus fixture anchor",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 52,
+            "started_at": "2026-11-09T02:21:42Z",
+            "completed_at": "2026-11-09T02:21:43Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 53,
+            "started_at": "2026-11-09T02:21:43Z",
+            "completed_at": "2026-11-09T02:21:43Z"
+          }
+        ]
+      },
+      {
+        "id": 128937998584,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "PR fast checks",
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-11-09T01:57:58Z",
+        "completed_at": "2026-11-09T01:57:58Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128937998584",
+        "runner_id": null,
+        "runner_name": null,
+        "runner_group_id": null,
+        "runner_group_name": null,
+        "steps": []
+      },
+      {
+        "id": 128953411734,
+        "run_id": 42548210214,
+        "run_attempt": 1,
+        "workflow_name": "CI",
+        "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+        "name": "test",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-11-09T02:54:40Z",
+        "completed_at": "2026-11-09T02:54:52Z",
+        "check_run_url": "https://api.github.com/repos/mastermindx-market-intelligence/Mastermind/check-runs/128953411734",
+        "runner_id": 1000543538,
+        "runner_name": "GitHub Actions 1000543538",
+        "runner_group_id": 0,
+        "runner_group_name": "GitHub Actions",
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1,
+            "started_at": "2026-11-09T02:54:41Z",
+            "completed_at": "2026-11-09T02:54:42Z"
+          },
+          {
+            "name": "Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2,
+            "started_at": "2026-11-09T02:54:42Z",
+            "completed_at": "2026-11-09T02:54:48Z"
+          },
+          {
+            "name": "Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3,
+            "started_at": "2026-11-09T02:54:48Z",
+            "completed_at": "2026-11-09T02:54:48Z"
+          },
+          {
+            "name": "Install gate parser",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4,
+            "started_at": "2026-11-09T02:54:48Z",
+            "completed_at": "2026-11-09T02:54:50Z"
+          },
+          {
+            "name": "Run repository test gate",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 5,
+            "started_at": "2026-11-09T02:54:50Z",
+            "completed_at": "2026-11-09T02:54:50Z"
+          },
+          {
+            "name": "Post Run actions/setup-python@v5",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9,
+            "started_at": "2026-11-09T02:54:50Z",
+            "completed_at": "2026-11-09T02:54:50Z"
+          },
+          {
+            "name": "Post Run actions/checkout@v4",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 10,
+            "started_at": "2026-11-09T02:54:50Z",
+            "completed_at": "2026-11-09T02:54:50Z"
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 11,
+            "started_at": "2026-11-09T02:54:50Z",
+            "completed_at": "2026-11-09T02:54:50Z"
+          }
+        ]
+      }
+    ]
+  },
+  "recheck": {
+    "id": 42548210214,
+    "run_attempt": 1,
+    "workflow_id": 324108847,
+    "event": "merge_group",
+    "head_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+    "head_branch": "gh-readonly-queue/master/pr-2305-6b67a92b44a19b600f83b1a7bb399b8ad5e7d82e",
+    "path": ".github/workflows/ci.yml",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-11-09T01:56:55Z",
+    "updated_at": "2026-11-09T02:54:53Z",
+    "actor": {
+      "login": "mastermindxryan",
+      "type": "User"
+    },
+    "triggering_actor": {
+      "login": "mastermindxryan",
+      "type": "User"
+    },
+    "repository": {
+      "full_name": "mastermindx-market-intelligence/Mastermind"
+    },
+    "head_repository": {
+      "full_name": "mastermindx-market-intelligence/Mastermind"
+    }
+  },
+  "capture_note": "Guard and qualification job entries projected for the F2/F3 eleven-job schema contract; every other value captured from the real run."
+}

@@ -3,14 +3,32 @@
 Every ``tests/**/test_*.py`` module runs unless its exact path is listed in
 ``ci/pytest_exclusions.toml``. New tests are included automatically. Exclusions
 are fail-closed and cannot remove constitutional/security modules.
+
+``--jobs N`` splits the *already resolved* included set across N concurrent
+pytest processes inside this one gate invocation. It is a placement decision
+only: the discovery/exclusion policy above runs first and unchanged, and the
+partition is verified to be a total, disjoint cover of that exact set before
+any process starts. The gate therefore executes the same modules whatever
+``--jobs`` is, and a nonzero exit from any shard fails the whole gate.
+
+The default ``--jobs`` command runs concurrent subprocesses inside one job.
+A separately qualified workflow may instead dispatch the same verified
+partition to distinct hosted runners. In that arrangement a fail-closed fan-in
+job named ``test`` must require every matrix member to succeed and must
+reverify the canonical complete plan. The branch-protection context remains
+exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
+import threading
+import time
 import tomllib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -165,16 +183,354 @@ def coverage_plan(
     }
 
 
-def format_plan(plan: Mapping[str, int]) -> str:
-    return (
+def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | None = None) -> str:
+    rendered = (
         f"discovered={plan['discovered']} "
         f"excluded={plan['excluded']} "
         f"running={plan['running']}"
     )
+    if shards is not None:
+        sizes = ",".join(str(len(shard)) for shard in shards)
+        rendered += f" jobs={len(shards)} shard_modules={sizes}"
+    return rendered
 
 
-def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[str]:
-    return [python or sys.executable, "-m", "pytest", "-q", *included]
+def pytest_argv(
+    included: Sequence[str], *, python: str | None = None, progress: bool = False,
+) -> list[str]:
+    # Observability only: report bounded slowest setup/call/teardown durations
+    # without dropping a test, changing its order, or creating new CI contexts.
+    prefix = [python or sys.executable]
+    if progress:
+        prefix.append("-u")
+    prefix.extend(["-m", "pytest"])
+    if progress:
+        prefix.extend(["-p", "scripts.ci_pytest_timing"])
+    return [*prefix, "--durations=25", "-q", *included]
+
+
+_MEASURED_THREE_JOB_PLACEMENT = {
+    # Keep the protected-master hot-module pins. A previous two-module
+    # capacity-host/walkforward swap overloaded shard 1 with cold setup; do
+    # not repeat that uncompensated swap. In PR #1763 CI 41251754394, shard 0
+    # ended without a completed pytest step or cleanup after ~51 minutes.
+    # Its job log is unavailable, so this is a measured load mitigation, NOT
+    # an assertion that any individual test failed. Last successful CI
+    # 41243150199 measured capacity-host at ~846s in shard 0, while native
+    # Fabric quota (~258s), walkforward (~154s) and deploy provenance (~74s)
+    # ran in shard 1. Move the long capacity module to shard 1 only while
+    # moving ALL three other measured modules back to shard 0. This balances
+    # both runners without dropping tests or changing other SHA-256 placements.
+    "tests/test_capacity_host_artifacts.py": 1,
+    "tests/test_native_fabric_quota_continuity.py": 0,
+    "tests/test_trend_persistence_walkforward.py": 0,
+    "tests/test_deploy_provenance.py": 0,
+    "tests/test_executive_runtime_bounded_acquisition.py": 1,
+    "tests/test_mastermind_window_reader_static_fences.py": 1,
+    # The protected one-runner CI gate measured these further slow modules.
+    "tests/test_market_view.py": 1,
+    "tests/test_product_acceptance_original_selector.py": 1,
+    "tests/test_executive_os_phase1fc.py": 2,
+}
+
+
+_MEASURED_SIX_JOB_PLACEMENT = {
+    # Exact CI_MODULE hosted merge-group run 42708053350 (master 2614ecbae,
+    # 2026-11-09, all six shards green). CI Lightning F3 re-derivation: the
+    # 150 slowest measured included modules are placed longest-processing-
+    # time-first onto the least-loaded shard, where each shard's starting load
+    # is its measured non-runner overhead (native admission gate on shard 5),
+    # fixed runner overhead, the hash-placed remainder, and the hermes-forward
+    # keep-pin on shard 4. The five non-pytest qualification gates left shard
+    # zero for a parallel job (F3). Evidence: ci/shard_timings/42708053350.json.
+    # Changes require new timings and policy review. Hash placement for others.
+    'tests/test_capacity_host_artifacts.py': 2,  # 834.1s
+    'tests/test_hermes_primary_application_enrollment.py': 4,  # 224.2s keep-pin (hermes-forward)
+    'tests/test_native_fabric_quota_continuity_a_f.py': 1,  # 191.9s
+    'tests/test_trend_persistence_walkforward.py': 3,  # 189.0s
+    'tests/test_host_pull_publisher_lifecycle.py': 1,  # 166.0s
+    'tests/test_fabric_request_turn_budget.py': 4,  # 163.2s
+    'tests/test_native_fabric_quota_continuity_g_o.py': 0,  # 137.3s
+    'tests/test_glm_native_application_enrollment.py': 3,  # 128.0s
+    'tests/test_executive_persistent_origin_integration.py': 0,  # 124.7s
+    'tests/test_native_fabric_quota_continuity_p_z.py': 1,  # 120.8s
+    'tests/test_project_journey_canonical_create.py': 4,  # 98.2s
+    'tests/test_executive_acceptance_schema_transition.py': 3,  # 93.1s
+    'tests/test_project_execution_code_continuity.py': 4,  # 92.1s
+    'tests/test_web_ceo_offline_delivery_canary.py': 0,  # 89.5s
+    'tests/test_os_gateway_successor_publication.py': 1,  # 84.3s
+    'tests/test_deploy_provenance.py': 3,  # 81.9s
+    'tests/test_executive_os_sqlite.py': 0,  # 75.5s
+    'tests/test_executive_installed_migration_successor.py': 4,  # 74.6s
+    'tests/test_mastermind_plugin_packages.py': 1,  # 72.7s
+    'tests/test_executive_schema_upgrade_evidence.py': 3,  # 69.9s
+    'tests/test_executive_runtime_bounded_role_result.py': 1,  # 69.4s
+    'tests/test_product_acceptance_original_selector.py': 0,  # 68.5s
+    'tests/test_executive_acceptance_v5_to_v7.py': 4,  # 67.9s
+    'tests/test_executive_current_agentos_context.py': 3,  # 66.5s
+    'tests/test_fresh_conversation_created_project.py': 4,  # 61.9s
+    'tests/test_executive_prepared_migration_successor.py': 0,  # 58.7s
+    'tests/test_native_fabric_quota_continuity.py': 1,  # 56.7s
+    'tests/test_executive_installed_preparation_chain.py': 3,  # 56.5s
+    'tests/test_memory_evaluation_owner.py': 1,  # 55.3s
+    'tests/test_executive_service.py': 0,  # 53.4s
+    'tests/test_executive_supervisor.py': 4,  # 51.2s
+    'tests/test_fabric_job_view_hierarchy.py': 3,  # 48.8s
+    'tests/test_installed_current_agentos_context.py': 2,  # 48.5s
+    'tests/test_hermes_project_continuity.py': 0,  # 47.1s
+    'tests/test_hermes_native_agentos_memory.py': 1,  # 43.7s
+    'tests/test_mastermind_window_reader_static_fences.py': 4,  # 43.6s
+    'tests/test_company_inbox_iac1.py': 2,  # 43.2s
+    'tests/test_hermes_application_consumer_export.py': 3,  # 42.2s
+    'tests/test_chairman_coordination_parent.py': 4,  # 41.3s
+    'tests/test_workspace_admitted_plan_read.py': 1,  # 41.0s
+    'tests/test_executive_codex_sidecar_install.py': 3,  # 40.2s
+    'tests/test_claude_cli_protocol.py': 2,  # 39.1s
+    'tests/test_executive_repair_review_input.py': 0,  # 37.9s
+    'tests/test_project_plan_proposal_consumer_export.py': 2,  # 36.7s
+    'tests/test_fresh_conversation_root_validation.py': 3,  # 36.4s
+    'tests/test_fresh_conversation_turn.py': 0,  # 35.7s
+    'tests/test_native_company_answer_dispatch.py': 1,  # 35.6s
+    'tests/test_trend_persistence_group.py': 4,  # 34.8s
+    'tests/test_product_acceptance_acquisition_service.py': 4,  # 34.4s
+    'tests/test_os_gateway_publication_owner.py': 0,  # 34.4s
+    'tests/test_executive_mcp_web_ceo_v2.py': 1,  # 33.8s
+    'tests/test_executive_installed_macro_epochs.py': 3,  # 33.3s
+    'tests/test_hermes_primary_retained_enrollment.py': 2,  # 33.3s
+    'tests/test_workspace_fabric_produced_boundary.py': 2,  # 32.8s
+    'tests/test_executive_os_phase1fc.py': 3,  # 31.1s
+    'tests/test_executive_physical_schema_upgrade.py': 1,  # 31.0s
+    'tests/test_project_discovery_installed_plan.py': 4,  # 30.4s
+    'tests/test_product_acceptance_read_projection.py': 0,  # 30.3s
+    'tests/test_native_company_consumption.py': 4,  # 30.0s
+    'tests/test_executive_service_control.py': 0,  # 29.9s
+    'tests/test_h24_team_reader.py': 3,  # 29.0s
+    'tests/test_advisor_paper_selection.py': 1,  # 28.9s
+    'tests/test_h24_team_projection.py': 2,  # 28.4s
+    'tests/test_fresh_conversation_source_check.py': 3,  # 27.8s
+    'tests/test_product_acceptance_ruling_owner.py': 1,  # 27.2s
+    'tests/test_project_planning_compiler_source.py': 4,  # 26.5s
+    'tests/test_session_bridge_original_operation_read.py': 0,  # 26.3s
+    'tests/test_workspace_result_service.py': 2,  # 26.0s
+    'tests/test_project_execution_service.py': 0,  # 25.2s
+    'tests/test_company_consultation_host.py': 4,  # 25.1s
+    'tests/test_experiential_harness_endpoint.py': 2,  # 23.3s
+    'tests/test_executive_identity_review.py': 1,  # 23.2s
+    'tests/test_pfolio_pnl_display.py': 3,  # 22.8s
+    'tests/test_executive_runtime_bounded_acquisition.py': 2,  # 22.8s
+    'tests/test_hermes_primary_application_host.py': 1,  # 22.2s
+    'tests/test_project_execution_continuation.py': 3,  # 21.9s
+    'tests/test_project_discovery_factory_join.py': 0,  # 21.9s
+    'tests/test_host_pull_h1_mode_integration.py': 4,  # 21.7s
+    'tests/test_executive_inbox.py': 3,  # 21.5s
+    'tests/test_executive_fabric_release_identity_review.py': 1,  # 21.5s
+    'tests/test_fresh_conversation.py': 2,  # 21.4s
+    'tests/test_a2_agent_relay_host_prepare.py': 4,  # 21.1s
+    'tests/test_chairman_coordination_acquisition.py': 0,  # 21.1s
+    'tests/test_chairman_coordination_commission.py': 5,  # 21.1s
+    'tests/test_product_acceptance_request_owner.py': 3,  # 20.5s
+    'tests/test_chairman_coordination_host.py': 1,  # 20.1s
+    'tests/test_native_capacity_source_closure.py': 2,  # 19.9s
+    'tests/test_executive_coo_tick_liveness.py': 4,  # 19.6s
+    'tests/test_remote_wake_ack_conformance.py': 0,  # 19.2s
+    'tests/test_company_consultation_targeted_carrier.py': 5,  # 19.1s
+    'tests/test_executive_release_stage_only.py': 1,  # 19.0s
+    'tests/test_c1_installer_control_config.py': 0,  # 18.9s
+    'tests/test_workspace_project_git_publisher.py': 2,  # 18.6s
+    'tests/test_hermes_leadership_organization.py': 3,  # 18.6s
+    'tests/test_project_creation_source_owner.py': 4,  # 18.4s
+    'tests/test_executive_mcp_installed_fabric_composition.py': 5,  # 18.1s
+    'tests/test_finite_initial_physical_admission.py': 4,  # 18.1s
+    'tests/test_executive_coo_active_review_frontier.py': 2,  # 18.1s
+    'tests/test_executive_precensus_recovery.py': 3,  # 18.0s
+    'tests/test_w6c2_consultation_runtime.py': 0,  # 17.9s
+    'tests/test_chairman_coordination_review.py': 1,  # 17.7s
+    'tests/test_project_canonical_data.py': 5,  # 17.6s
+    'tests/test_executive_coo_hierarchy_service.py': 1,  # 17.4s
+    'tests/test_hermes_selected_child_target.py': 0,  # 17.4s
+    'tests/test_trend_persistence_null.py': 3,  # 17.3s
+    'tests/test_mastermind_workspace_repositories.py': 4,  # 17.3s
+    'tests/test_cap_s1_mastermind_operator_canary.py': 2,  # 17.3s
+    'tests/test_executive_release_actuator.py': 5,  # 17.2s
+    'tests/test_project_planning_issued_capture.py': 1,  # 17.2s
+    'tests/test_executive_repair_input.py': 0,  # 17.0s
+    'tests/test_project_data_continuity_reader.py': 3,  # 16.7s
+    'tests/test_rakazo_qualification.py': 4,  # 16.6s
+    'tests/test_workspace_retained_root_selection.py': 2,  # 16.5s
+    'tests/test_executive_backup.py': 5,  # 16.3s
+    'tests/test_native_launcher_successor_transition.py': 2,  # 16.0s
+    'tests/test_worker_execution_contract.py': 4,  # 16.0s
+    'tests/test_os_public_edge_publication.py': 3,  # 15.9s
+    'tests/test_executive_release_closure.py': 0,  # 15.9s
+    'tests/test_knowledge_memory_app_source.py': 1,  # 15.8s
+    'tests/test_finite_initial_transaction.py': 5,  # 15.6s
+    'tests/test_mastermind_steward_app_live_window.py': 2,  # 15.4s
+    'tests/test_ci_parallel_fanin.py': 3,  # 15.3s
+    'tests/test_mastermind_cortex_contracts.py': 4,  # 15.2s
+    'tests/test_support_policy_status.py': 0,  # 15.0s
+    'tests/test_trend_persistence_panel.py': 1,  # 15.0s
+    'tests/test_workspace_instruction_admission.py': 5,  # 14.9s
+    'tests/test_hermes_leadership.py': 1,  # 14.6s
+    'tests/test_plan_adoption_canonical_publication.py': 3,  # 14.2s
+    'tests/test_executive_release_publication.py': 0,  # 14.2s
+    'tests/test_response_cache.py': 4,  # 14.1s
+    'tests/test_workspace_resource_capacity_read.py': 2,  # 14.0s
+    'tests/test_executive_coo_ready_frontier.py': 5,  # 13.8s
+    'tests/test_fabric_remote_lane_root.py': 2,  # 13.6s
+    'tests/test_runtime_admitted_plan_read.py': 4,  # 13.4s
+    'tests/test_session_bridge_reply_event_host_integration.py': 0,  # 13.0s
+    'tests/test_executive_coo_hierarchy.py': 3,  # 12.9s
+    'tests/test_product_acceptance_phase_separation.py': 1,  # 12.9s
+    'tests/test_project_planning_factory.py': 5,  # 12.9s
+    'tests/test_executive_schema_upgrade_pre_census_evidence.py': 3,  # 12.8s
+    'tests/test_instruction_admission_runtime.py': 0,  # 12.8s
+    'tests/test_memory_v3_completed_service_read.py': 1,  # 12.5s
+    'tests/test_product_acceptance_installed_target.py': 4,  # 12.5s
+    'tests/test_executive_autonomy_control.py': 2,  # 12.4s
+    'tests/test_product_acceptance_relay_composition.py': 5,  # 12.3s
+    'tests/test_workspace_host_observation.py': 1,  # 12.3s
+    'tests/test_fabric_result_projection.py': 0,  # 12.1s
+    'tests/test_executive_release_root_start.py': 4,  # 11.9s
+    'tests/test_liquidity_transmission.py': 3,  # 11.8s
+    'tests/test_project_execution_conversation_read.py': 2,  # 11.8s
+    'tests/test_executive_dr.py': 5,  # 11.7s
+    'tests/test_os_release_assets.py': 3,  # 11.7s
+}
+
+
+def partition_modules(
+    included: Sequence[str], *, jobs: int
+) -> tuple[tuple[str, ...], ...]:
+    """Split ``included`` into ``jobs`` shards that exactly re-cover it.
+
+    A module's shard is a stable function of its own path, not of its position
+    in the list. Round-robin would be perfectly balanced, but adding a single
+    test file shifts every module after it into a different shard -- and since
+    sharding changes which modules share a pytest process, that reshuffle can
+    surface a latent cross-module ordering dependency in a completely unrelated
+    PR. (This is not hypothetical: `--jobs 4` exposed one on its first CI run,
+    where `tests/test_governance_ledger.py` was leaking `sys.modules` stubs.)
+    Hashing keeps that blast radius to the file actually being added or removed.
+
+    sha256 rather than ``hash()``: the builtin is salted per process, so the
+    same checkout would shard differently on every run and a failure would not
+    reproduce.
+
+    For the production three-job gate, the explicitly measured hot modules
+    are pinned to less-loaded shards. Every other path keeps stable hash
+    placement, including when a new test is added. Other job counts retain
+    unmodified hashes. This is placement, not exclusion: verify_partition
+    checks the exact complete test coverage.
+    Shard sizes remain visible in the plan line. (Do not introduce bare
+    three-digit constants outside tests/: the identity guard forbids them.)
+    """
+
+    if jobs < 1:
+        raise PolicyError("jobs must be at least 1")
+    if jobs > len(included):
+        raise PolicyError(
+            f"jobs ({jobs}) cannot exceed the number of included modules "
+            f"({len(included)})"
+        )
+    buckets: list[list[str]] = [[] for _ in range(jobs)]
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        hashed = int.from_bytes(digest[:8], "big") % jobs
+        target = (_MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3
+                  else _MEASURED_SIX_JOB_PLACEMENT.get(path, hashed) if jobs == 6
+                  else hashed)
+        buckets[target].append(path)
+    shards = tuple(tuple(bucket) for bucket in buckets)
+    verify_partition(included, shards)
+    return shards
+
+
+def verify_partition(
+    included: Sequence[str], shards: Sequence[Sequence[str]]
+) -> None:
+    """Fail closed unless the shards are a total, disjoint cover of ``included``.
+
+    This is the whole safety argument for ``--jobs``: a partition bug must
+    never be able to drop a module and still let the gate report success.
+    Checked against multiset equality, so a duplicated module (which would
+    hide a dropped one behind an equal total) is rejected too.
+    """
+
+    flattened = [path for shard in shards for path in shard]
+    if len(flattened) != len(included):
+        raise PolicyError(
+            f"shard plan runs {len(flattened)} modules but the gate resolved "
+            f"{len(included)}"
+        )
+    if sorted(flattened) != sorted(included):
+        raise PolicyError("shard plan is not an exact cover of the included set")
+    if any(not shard for shard in shards):
+        raise PolicyError("shard plan contains an empty shard")
+
+
+def run_shards(
+    shards: Sequence[Sequence[str]],
+    *,
+    root: Path,
+    python: str | None = None,
+) -> int:
+    """Run every shard and return the lowest-indexed nonzero exit code, else 0.
+
+    Every shard is always waited on, even after one fails: a partial result
+    would make the gate's own report unreliable, and the remaining shards'
+    failures are exactly what a reviewer needs in one pass.
+
+    Ordinary output stays grouped under its shard's final banner. Only the
+    timing plugin's module records stream immediately, under a shard label,
+    so a job timeout leaves the unfinished module and prior module timings.
+    These records are diagnostics only; every process exit still governs.
+    """
+
+    output_lock = threading.Lock()
+
+    def _run(index: int) -> tuple[int, int, str, float]:
+        started = time.monotonic()
+        captured: list[str] = []
+        with subprocess.Popen(
+            pytest_argv(shards[index], python=python, progress=True),
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        ) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                if line.startswith("CI_MODULE "):
+                    with output_lock:
+                        print(f"--- shard {index + 1}/{len(shards)} progress --- "
+                              + line.rstrip("\n"), flush=True)
+                else:
+                    captured.append(line)
+            returncode = process.wait()
+        elapsed = max(0.0, time.monotonic() - started)
+        return index, returncode, "".join(captured), elapsed
+
+    codes: dict[int, int] = {}
+    with ThreadPoolExecutor(max_workers=len(shards)) as pool:
+        futures = [pool.submit(_run, index) for index in range(len(shards))]
+        for future in as_completed(futures):
+            index, returncode, output, elapsed = future.result()
+            codes[index] = returncode
+            with output_lock:
+                print(
+                    f"--- shard {index + 1}/{len(shards)} "
+                    f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
+                    flush=True,
+                )
+                print(output, end="" if output.endswith("\n") else "\n", flush=True)
+
+    # Lowest shard index wins so the reported code is stable across runs
+    # rather than depending on which shard happened to finish first.
+    for index in sorted(codes):
+        if codes[index] != 0:
+            return codes[index]
+    return 0
 
 
 def workflow_contains_positive_allowlist(text: str) -> bool:
@@ -411,18 +767,43 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="repository root (defaults to the checkout that contains this script)",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help=(
+            "run the resolved module set as this many concurrent pytest "
+            "processes (default 1). Placement only: the same modules run "
+            "either way, and any shard failing fails the gate."
+        ),
+    )
+    parser.add_argument(
+        "--progress", action="store_true",
+        help="stream the existing module timing records for the serial gate",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else repo_root()
     try:
+        if args.jobs < 1:
+            raise PolicyError("jobs must be at least 1")
         gate = resolve_gate(root)
+        # jobs=1 keeps the historical module set/order and default argv.
+        # Progress is opt-in and changes observability only, never placement.
+        shards = (
+            partition_modules(gate["included"], jobs=args.jobs)
+            if args.jobs > 1
+            else None
+        )
     except PolicyError as exc:
         print(f"ci_pytest policy error: {exc}", file=sys.stderr)
         return 2
-    print(format_plan(gate["plan"]))
+    print(format_plan(gate["plan"], shards=shards), flush=True)
     if args.plan_only:
         return 0
+    if shards is not None:
+        return run_shards(shards, root=root)
     completed = subprocess.run(
-        pytest_argv(gate["included"]),
+        pytest_argv(gate["included"], progress=args.progress),
         cwd=root,
         check=False,
     )

@@ -1132,7 +1132,13 @@ def test_unexpected_or_ambiguous_read_paths_fail_before_cache(path, tmp_path):
     assert cache.snapshot_calls == 0
 
 
-def test_browser_credentials_and_forged_headers_change_no_decision_or_log(tmp_path):
+def test_browser_credentials_and_forged_headers_change_no_decision_or_log(tmp_path, monkeypatch):
+    # Keep the per-response HTTP date from varying across the two requests.
+    monkeypatch.setattr(
+        server.RemoteControlRoomHandler,
+        "date_time_string",
+        lambda _handler, timestamp=None: "Fri, 28 Aug 2026 20:00:00 GMT",
+    )
     document = {"schema": remote.REMOTE_SCHEMA}
     with _running_remote_server(tmp_path, document=document) as (httpd, sock, _cache):
         baseline = _unix_request(sock, "GET", "/api/state")

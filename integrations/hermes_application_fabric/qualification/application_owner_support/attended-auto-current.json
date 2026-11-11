@@ -1,0 +1,21 @@
+{
+  "historical_contract_sha256": "7952878b5662a83687982ad4d86bed72c774fc3362115572a9ff42424c4e7d66",
+  "operational_enrollment": false,
+  "owner_commit": "25ba92bb52120fae550b54c29f82929c0b77d37b",
+  "postimages": {
+    "engine/provider_production_modes.py": "56996272225840ff7adefb95d8949c871cb91b1a578bbbf981ee8b8480454df8",
+    "tests/test_hermes_application_source_support.py": "6e4a9b8b477cc29512b1ed5bc02d2dbbab290a0313a2f432bac6568c240cbdf0",
+    "tests/test_hermes_attended_fabric_identity.py": "69e7b4486924772d8d9b00e19b0a740fd16656c66a365e3777458ebf755019cd",
+    "tests/test_hermes_primary_fabric_identity.py": "d99109e8d8dc59e029d985dcc7cc17e5b6599717ae1877f70f865635772e4f21"
+  },
+  "previous_owner_commit": "12efe39a6b6e2f6d19f3a9893f978c55d4656681",
+  "schema": "mastermind.hermes_owner_committed_support.v1",
+  "source_only": true,
+  "unchanged_inputs": {
+    "config/capability_manifest.yml": "14cb9f81545de02f596f49f36f3f48e02d7851ce",
+    "config/provider_production_modes.v1.json": "1ec5bcf241f6a8e4838983348a7692bdb971c989",
+    "config/provider_workloads.v1.json": "f9f0bd26af3f543aaee8d05fb465a4ea53219660",
+    "engine/fabric_inference_client.py": "323953c2030ce45b3a889bbb6e7a6a6751c90702",
+    "tests/test_fabric_service_identity.py": "4978c965262b0f63da3e72ce3c06d07de898733c"
+  }
+}

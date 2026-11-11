@@ -29,6 +29,7 @@ degrades independently; the whole assembler NEVER raises.
 PUBLIC API
 ----------
 * ``view(region='us')``       -> the full market_view.v1 dict (deterministic, zero LLM).
+* ``serving_view(published)`` -> freshness-only response projection; no publication or new vote.
 * ``build(region='us', write=True)`` -> ``view()`` + atomic write of latest.json + a
                               dated copy under data/market_view/.
 * ``PLANE_ORDER`` / ``TOP_LEVEL_ORDER`` -> the golden key orders (the artifact feeds
@@ -53,9 +54,12 @@ walk-forward gate FAILED (hit-rate 0.354) — it is a plane of the view but neve
 """
 from __future__ import annotations
 
+import copy
 import json
+import math
 import os
 from datetime import date, datetime, timezone
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Optional
 
@@ -75,6 +79,8 @@ _RRG_PATH: Path = _ROOT / "vendor" / "macro" / "site" / "marketdata" / "subsecto
 _GROUP_FLOW_PATH: Path = _ROOT / "vendor" / "macro" / "site" / "basketdata" / "flow.json"
 
 _SCHEMA_VERSION = "market_view.v1"
+_SOURCE_UNSET = object()
+_ASSESSMENT_CLOCK: ContextVar[datetime | None] = ContextVar("market_view_clock", default=None)
 
 # ---- the golden key orders (load-bearing: the artifact is injected into LLM prompts) ----
 # The Tier-A embedded-key planes, in coverage-audit priority order, then cycles(), then the
@@ -107,6 +113,10 @@ PLANE_ORDER: tuple[str, ...] = (
     "intl_spillover",
     # W-NW.1 Neural Web bridge (ADVISORY-ONLY; dark-ship; validated=False per §3.3.1)
     "neural_web",
+    # W-LIQ.2 Global Liquidity Transmission (SHADOW/ADVISORY/INERT; validated=False; its
+    # direction is a LIQUIDITY vocabulary and is never mapped into the risk vocabulary, so
+    # this plane carries direction=None and can touch neither tilt nor disagreement)
+    "liquidity_transmission",
 )
 
 # The validated set — the ONLY planes that may sign net_posture_tilt (P3).
@@ -188,21 +198,33 @@ def _coverage_floor() -> float:
 # freshness — per-plane, from each block's OWN asof (never the file mtime)
 # ---------------------------------------------------------------------------
 
-def _freshness(asof: Any) -> dict[str, Any]:
+def _freshness(asof: Any, *, now: datetime | None = None) -> dict[str, Any]:
     """Build a freshness sub-record from a plane's OWN asof.
 
     ``age_sessions`` reuses regime_frame's trading-day arithmetic (the one calendar).
-    Unknown age (asof absent/unparseable) is fail-closed: ``stale=True`` (an unknown-age
-    plane can never sign the tilt).
+    That helper clamps future dates to age zero, so source-date admissibility must
+    be checked separately. Unknown or future source dates cannot sign the tilt.
     """
-    age = _rf._trading_days_since(str(asof) if asof is not None else None)
+    now = now if now is not None else _ASSESSMENT_CLOCK.get()
+    asof_text = str(asof) if asof is not None else None
+    checked_on = (now if now is not None else datetime.now(tz=timezone.utc)).date()
+    age = (_rf._trading_days_since(asof_text) if now is None else
+           _rf._trading_days_since(asof_text, today=checked_on))
+    future_dated = age is not None and age < 0
+    if asof_text is not None:
+        try:
+            future_dated = future_dated or (
+                date.fromisoformat(asof_text) > checked_on
+            )
+        except (ValueError, TypeError):
+            pass  # The existing age reader makes malformed dates unavailable.
     stale_after = _stale_after_td()
-    stale = age is None or age < 0 or age > stale_after
+    stale = age is None or future_dated or age > stale_after
     return {
-        "asof": str(asof) if asof is not None else None,
+        "asof": asof_text,
         "age_sessions": age,
         "stale": bool(stale),
-        "future_dated": age is not None and age < 0,
+        "future_dated": bool(future_dated),
         "stale_after_sessions": stale_after,
     }
 
@@ -585,7 +607,7 @@ def _adapt_macro_risk(raw: dict[str, Any]) -> dict[str, Any]:
 # cycles() plane — call the ONE reader, never re-read the json
 # ---------------------------------------------------------------------------
 
-def _adapt_cycles(raw: dict[str, Any]) -> dict[str, Any]:
+def _adapt_cycles(raw: dict[str, Any], *, snapshot: Any = _SOURCE_UNSET) -> dict[str, Any]:
     """The sector-cycle plane — VALIDATED (entry-tilt survives the walk-forward; veto refuted).
 
     Calls ``regime_frame.cycles()`` (the sole reader) — does NOT re-read sector_cycles.json.
@@ -594,7 +616,8 @@ def _adapt_cycles(raw: dict[str, Any]) -> dict[str, Any]:
     an entry-favored-dominated board reads risk_on.
     """
     try:
-        snapshot = _rf.cycles_with_meta()
+        if snapshot is _SOURCE_UNSET:
+            snapshot = _rf.cycles_with_meta()
         cyc = snapshot.get("sectors") if isinstance(snapshot, dict) else {}
         source_asof = snapshot.get("asof") if isinstance(snapshot, dict) else None
     except Exception:  # noqa: BLE001
@@ -742,7 +765,7 @@ def _adapt_regime_nowcast(nc_out: Any) -> dict[str, Any]:
 # Published Macro context planes — advisory/annotate-only
 # ---------------------------------------------------------------------------
 
-def _adapt_rrg() -> dict[str, Any]:
+def _adapt_rrg(raw: Any = _SOURCE_UNSET) -> dict[str, Any]:
     """Adapt Macro's published subsector-rotation/RRG contract.
 
     RRG quadrants describe relative rotation, not portfolio risk.  The plane therefore
@@ -751,7 +774,8 @@ def _adapt_rrg() -> dict[str, Any]:
     risk-on/off vote from sector labels.
     """
     try:
-        raw = json.loads(_RRG_PATH.read_text())
+        if raw is _SOURCE_UNSET:
+            raw = json.loads(_RRG_PATH.read_text())
     except FileNotFoundError:
         return _absent_record(
             "site/marketdata/subsector_rotation.json (RRG)",
@@ -823,7 +847,7 @@ def _adapt_rrg() -> dict[str, Any]:
     )
 
 
-def _adapt_group_flow() -> dict[str, Any]:
+def _adapt_group_flow(raw: Any = _SOURCE_UNSET) -> dict[str, Any]:
     """Adapt the display-only group concentration/flow context.
 
     The producer explicitly says the score is uncalibrated and non-directional.  Preserve
@@ -831,7 +855,8 @@ def _adapt_group_flow() -> dict[str, Any]:
     this concentration proxy into a risk vote or a sizing input.
     """
     try:
-        raw = json.loads(_GROUP_FLOW_PATH.read_text())
+        if raw is _SOURCE_UNSET:
+            raw = json.loads(_GROUP_FLOW_PATH.read_text())
     except FileNotFoundError:
         return _absent_record(
             "site/basketdata/flow.json (display-only concentration proxy)",
@@ -938,7 +963,12 @@ def _adapt_rotation_tensor() -> dict[str, Any]:
         confidence=t.get("confidence"),
         validated=False,
         source_contract="data/market_view/rotation_tensor.json",
-        raw={"headline_episode": ep, "advisory": t.get("advisory")},
+        # Capture the pair extract in the same publication as its episode/source clock.
+        # A serving read must never splice a newer tensor into an older Market View.
+        raw={"headline_episode": ep, "advisory": t.get("advisory"),
+             "top_pairs": (t.get("rs_velocity") or {}).get("top_pairs", [])
+             if isinstance(t.get("rs_velocity"), dict) else [],
+             "asof_by_plane": t.get("asof_by_plane")},
     )
 
 
@@ -1052,6 +1082,10 @@ def _adapt_neural_web(nw_out: Any) -> dict[str, Any]:
                 "verdict": verdict,
                 "regime": regime,
                 "contradiction_count": contr_count,
+                # Native descriptive context stays inside this existing advisory
+                # record; it supplies no direction, confidence or extra vote.
+                **{key: nw_out[key] for key in ("risk_envelope", "risk_envelope_status")
+                   if key in nw_out},
                 "advisory": True,
             },
         )
@@ -1060,6 +1094,120 @@ def _adapt_neural_web(nw_out: Any) -> dict[str, Any]:
             "vendor/macro/site/neuralwebdata/mastermind_context.json",
             "neural_web adapter error",
         )
+
+
+def _adapt_liquidity_transmission(lt_out: Any) -> dict[str, Any]:
+    """Adapt liquidity_transmission.market_plane() output to a PlaneRecord (W-LIQ.2).
+
+    SHADOW / ADVISORY / INERT.  Three structural refusals make this plane unable to move
+    anything, by construction rather than by policy:
+
+    * ``validated=False`` always -> the tilt guard is status-based, so it can never sign
+      ``net_posture_tilt``.
+    * ``direction=None`` always -> the GLT vocabulary (expanding/flat/contracting) is a
+      LIQUIDITY-state direction, not a risk tilt.  Translating it into risk_off/risk_on
+      would both break the producer's vocabulary law and inject a shadow plane into the
+      disagreement and coherence math, which count only planes with a risk direction.  The
+      liquidity direction stays intact under ``raw.direction_label`` with its own
+      vocabulary named beside it.
+    * ``magnitude=None`` always -> the producer publishes TWO magnitudes with different
+      units (raw ``weekly_change_in_expanding_z_score`` and the standardized
+      ``magnitude_z``).  A bare number in the view's generic magnitude field is exactly the
+      raw-mislabelled-as-z error; both stay in ``raw`` next to their own unit strings.
+
+    Freshness uses the plane's OWN evidence clock (``observed_at`` =
+    ``freshness.clocks.evidence_available_at``), never ``meta.generated_at`` and never the
+    file mtime.  Absent / invalid input -> ``_absent_record``.  A STALE artifact keeps its
+    provenance and is recorded present-but-stale: it exists, its identity validated, and
+    its evidence is simply too old to read -- which the view counts as stale rather than
+    missing, and which excludes it from the tilt, the disagreements and the coherence
+    exactly as an absent plane is excluded.
+    """
+    contract = "vendor/macro/site/liquiditydata/global_liquidity_transmission.json"
+    if not isinstance(lt_out, dict):
+        return _absent_record(contract, "liquidity_transmission reader unavailable")
+    status = lt_out.get("status")
+    # Three-way split, because the view's own bookkeeping distinguishes missing from stale:
+    #   absent/invalid -> _absent_record (no identity we are entitled to trust)
+    #   stale          -> a present-but-stale record that KEEPS its provenance
+    #   present        -> the full record
+    # A stale artifact is not a missing one, and reporting it as missing would erase the
+    # very provenance that lets a reader see WHY it cannot be used.
+    if status not in ("present", "stale") or not lt_out.get("observed_at"):
+        return _absent_record(
+            contract,
+            f"GLT {status or 'absent'}: {lt_out.get('reason') or 'no evidence clock'}",
+        )
+    try:
+        is_stale = status == "stale" or bool(lt_out.get("stale"))
+        direction_label = lt_out.get("direction_label")
+        quality = lt_out.get("quality")
+        if is_stale:
+            # The reader already withheld the state; say what was found and how old it is,
+            # never a last-known reading dressed as current.
+            reading = f"GLT stale: {lt_out.get('reason') or 'evidence beyond horizon'}"
+        else:
+            reading = (
+                f"GLT: liquidity {direction_label}; state-vs-US quality {quality}"
+                if direction_label else None
+            )
+        rec = _plane_record(
+            reading=reading,
+            direction=None,      # liquidity vocabulary never becomes a risk direction
+            magnitude=None,      # two units; never a bare number here
+            # The EVIDENCE clock, never generated_at -- as a DATE, because _freshness()
+            # counts trading days and cannot parse a full ISO timestamp (an unparsed asof
+            # is fail-closed stale, which would pin this plane stale forever).
+            asof=lt_out.get("observed_date") or lt_out.get("observed_at"),
+            confidence=lt_out.get("confidence"),
+            validated=False,     # SHADOW: never signs net_posture_tilt
+            source_contract=contract,
+            raw={
+                "direction_label": direction_label,
+                "direction_vocabulary": lt_out.get("direction_vocabulary"),
+                "quality": quality,
+                "quality_vocabulary": lt_out.get("quality_vocabulary"),
+                "magnitude": lt_out.get("magnitude"),
+                "magnitude_unit": lt_out.get("magnitude_unit"),
+                "magnitude_z": lt_out.get("magnitude_z"),
+                "magnitude_z_unit": lt_out.get("magnitude_z_unit"),
+                "coverage": lt_out.get("coverage"),
+                "breadth": lt_out.get("breadth"),
+                "credit_impulse_global": lt_out.get("credit_impulse_global"),
+                "confidence_kind": lt_out.get("confidence_kind"),
+                "state_asof": lt_out.get("state_asof"),
+                "observed_at": lt_out.get("observed_at"),
+                "observed_date": lt_out.get("observed_date"),
+                "known_at": lt_out.get("known_at"),
+                "age_days": lt_out.get("age_days"),
+                "mode": lt_out.get("mode"),
+                "authority": lt_out.get("authority"),
+                "provenance": lt_out.get("provenance"),
+                "advisory": True,
+                "signs_posture": False,
+                "decision_effect": "none",
+                # The artifact exists on disk; staleness is a freshness verdict, not absence.
+                # freshness.stale (computed from observed_at) is what excludes it downstream.
+                "artifact_present": True,
+                "reader_status": status,
+                "reader_reason": lt_out.get("reason"),
+                "signal_active": False,
+            },
+        )
+        # Staleness is the UNION of two independent verdicts, never the intersection:
+        # the reader owns the producer's clock law (future-dated evidence, an evidence
+        # clock postdating first-known, a producer declaring itself degraded), and
+        # _freshness() owns the view's own trading-day horizon.  Neither may RELEASE what
+        # the other condemned.  This is load-bearing rather than belt-and-braces:
+        # _freshness also rejects future source dates, but does not qualify the
+        # producer's evidence/first-known ordering or degradation. Preserve the
+        # producer's rejection even when the view's source-date and age checks pass.
+        if is_stale:
+            rec["freshness"]["stale"] = True
+            rec["freshness"]["stale_reason"] = lt_out.get("reason")
+        return rec
+    except Exception:  # noqa: BLE001
+        return _absent_record(contract, "liquidity_transmission adapter error")
 
 
 # ---------------------------------------------------------------------------
@@ -1383,8 +1531,10 @@ def view(
     liquidity_quality_out: Any = None,
     regime_nowcast_out: Any = None,
     neural_web_out: Any = None,
+    liquidity_transmission_out: Any = None,
     prev_view: Any = None,
     seq: int = 0,
+    _captured_sources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble THE market view for *region* (deterministic, zero LLM).
 
@@ -1396,7 +1546,8 @@ def view(
     Returns the market_view.v1 dict in golden key order (TOP_LEVEL_ORDER); the artifact feeds
     LLM prompts so key-order is load-bearing.
     """
-    raw = _rf._read_raw(region)
+    captured = _captured_sources
+    raw = _rf._read_raw(region) if captured is None else captured.get("regime")
     if not isinstance(raw, dict):
         raw = {}
 
@@ -1412,15 +1563,21 @@ def view(
     planes["market_drivers"] = _adapt_market_drivers(raw)
     planes["dislocation"] = _adapt_dislocation(raw)
     planes["macro_risk"] = _adapt_macro_risk(raw)
-    planes["cycles"] = _adapt_cycles(raw)
+    planes["cycles"] = (_adapt_cycles(raw) if captured is None else
+                         _adapt_cycles(raw, snapshot=_rf.cycles_with_meta(
+                             raw=captured.get("cycles"),
+                             today=_ASSESSMENT_CLOCK.get().date())))
     planes["distribution_tells"] = _adapt_distribution_tells(distribution_tells_out)
     planes["liquidity_quality"] = _adapt_liquidity_quality(liquidity_quality_out)
     planes["regime_nowcast"] = _adapt_regime_nowcast(regime_nowcast_out)
-    planes["rotation_tensor"] = _adapt_rotation_tensor()
-    planes["anticipation"] = _adapt_anticipation()
+    planes["rotation_tensor"] = (_adapt_rotation_tensor() if captured is None else
+        _absent_record("data/market_view/rotation_tensor.json", "not captured by market-wide publisher"))
+    planes["anticipation"] = (_adapt_anticipation() if captured is None else
+        _absent_record("data/anticipation", "not captured by market-wide publisher"))
     # Published, context-only Macro contracts.  Both remain advisory and non-directional.
-    planes["rrg"] = _adapt_rrg()
-    planes["group_flow"] = _adapt_group_flow()
+    planes["rrg"] = _adapt_rrg() if captured is None else _adapt_rrg(captured.get("rrg"))
+    planes["group_flow"] = (_adapt_group_flow() if captured is None else
+                            _adapt_group_flow(captured.get("group_flow")))
     # Remaining H4 handoffs stay explicit nulls until their point-in-time contracts exist.
     planes["event_calendar"] = _absent_record("engine.event_calendar",
                                               "H4 handoff — pending")
@@ -1428,6 +1585,7 @@ def view(
                                               "H4 handoff — pending")
     # W-NW.1 Neural Web advisory plane — dark-ship (always-on reader; flag gates prompt/sizing)
     planes["neural_web"] = _adapt_neural_web(neural_web_out)
+    planes["liquidity_transmission"] = _adapt_liquidity_transmission(liquidity_transmission_out)
 
     # keep planes in golden order (dict insertion order == PLANE_ORDER above)
     ordered_planes = {k: planes[k] for k in PLANE_ORDER}
@@ -1504,7 +1662,7 @@ def view(
         "schema_version": _SCHEMA_VERSION,
         "region": region,
         "asof": asof,
-        "built_at": datetime.now(tz=timezone.utc).isoformat(),
+        "built_at": (_ASSESSMENT_CLOCK.get() or datetime.now(tz=timezone.utc)).isoformat(),
         "seq": int(seq),
         "planes": ordered_planes,
         "net_posture_tilt": tilt,
@@ -1514,11 +1672,227 @@ def view(
         "label_vs_planes": lvp,
         "posture_floor_defense": posture_floor_defense,
         "assembly": assembly,
-        "budget_ref": _budget_ref(region),
+        "budget_ref": _budget_ref(region) if captured is None else {"lead_budget": None, "inputs": None},
         "brief": brief,
     }
     # enforce golden top-level order (defensive: build a fresh ordered dict)
     return {k: out[k] for k in TOP_LEVEL_ORDER}
+
+
+def captured_view(
+    sources: dict[str, Any], *, now: datetime, prev_view: Any = None, seq: int = 0
+) -> dict[str, Any]:
+    """Project one captured source set; no market, book, series or budget reads.
+
+    Optional independent organs remain explicitly absent. Configuration is read
+    through the existing doctrine owner; the publisher fences its bytes.
+    """
+    if now.tzinfo is None:
+        raise ValueError("captured view requires an aware clock")
+    token = _ASSESSMENT_CLOCK.set(now.astimezone(timezone.utc))
+    try:
+        raw = sources.get("regime") or {}
+        return view(
+            "us", prev_view=prev_view, seq=seq, _captured_sources=sources,
+            liquidity_quality_out=raw.get("liquidity_quality"),
+        )
+    finally:
+        _ASSESSMENT_CLOCK.reset(token)
+
+
+def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Reassess an existing publication without acquiring, building or writing evidence.
+
+    Eligibility can only decrease. Expiring dissent must never manufacture a new
+    consensus or higher coherence from the surviving subset. Publication clocks,
+    source readings and historical disagreements remain attributable to the producer.
+    Current display and reasoning readers share this projection. It is not a new
+    artifact, risk-policy decision, or authorization to release existing protection.
+    """
+    if published.get("schema_version") != _SCHEMA_VERSION:
+        raise ValueError("unsupported market view schema")
+    if not isinstance(published.get("planes"), dict):
+        raise ValueError("market view planes must be an object")
+    checked_at = now if now is not None else datetime.now(tz=timezone.utc)
+    if checked_at.tzinfo is None:
+        raise ValueError("freshness assessment requires an aware clock")
+    checked_at = checked_at.astimezone(timezone.utc)
+    out = copy.deepcopy(published)
+    original = published["planes"]
+    planes = out["planes"]
+
+    def present(rec: Any) -> bool:
+        if not isinstance(rec, dict) or not isinstance(rec.get("raw"), dict):
+            return False
+        raw = rec["raw"]
+        return raw.get("artifact_present", raw.get("present", True)) is not False
+
+    def originally_fresh(rec: Any) -> bool:
+        return (present(rec) and isinstance(rec.get("freshness"), dict)
+                and rec["freshness"].get("stale") is False)
+
+    original_eligible = {
+        name: original[name] for name in PLANE_ORDER
+        if name in _VALIDATED_PLANES and originally_fresh(original.get(name))
+        and original[name].get("status") == "validated"
+        and original[name].get("direction") in (_RISK_ON, _RISK_OFF, _NEUTRAL)
+    }
+    # Preserve unknown observations as advisory history; an older reader cannot
+    # validate an additional plane merely because its stored badge says so.
+    served_names = list(PLANE_ORDER) + [name for name in planes if name not in PLANE_ORDER]
+    for name in served_names:
+        rec = planes.get(name)
+        if not isinstance(rec, dict):
+            rec = planes[name] = _absent_record("unavailable published plane")
+        previous_fresh = originally_fresh(original.get(name))
+        fresh = rec.get("freshness")
+        source_date = fresh.get("asof") if isinstance(fresh, dict) else None
+        rec["freshness"] = _freshness(source_date, now=checked_at)
+        if not present(rec):
+            rec["raw"] = {**(rec.get("raw") if isinstance(rec.get("raw"), dict) else {}),
+                          "artifact_present": False}
+        if (name not in original_eligible or not previous_fresh
+                or rec["freshness"]["stale"] or not present(rec)):
+            rec["status"] = "advisory"
+    eligible = {name: planes[name] for name in original_eligible
+                if planes[name].get("status") == "validated"}
+    lost = [name for name in original_eligible if name not in eligible]
+
+    # Validate the stored membership; never silently reconstruct a missing aggregate.
+    published_tilt = published.get("net_posture_tilt")
+    expected = _net_posture_tilt(original_eligible)
+    consistent = (
+        isinstance(published_tilt, dict)
+        and type(published_tilt.get("tilt")) in (int, float)
+        and math.isfinite(published_tilt["tilt"])
+        and type(published_tilt.get("n_validated")) is int
+        and all(key in published_tilt and published_tilt[key] == value
+                for key, value in expected.items())
+    )
+    reason = ("published_consensus_inconsistent" if not consistent else
+              "published_consensus_inputs_expired" if lost else
+              "no_published_consensus" if not expected["n_validated"] else None)
+    tilt = (copy.deepcopy(published_tilt) if reason is None else
+            {"tilt": 0.0, "direction": None, "n_validated": 0, "contributors": []})
+    out["net_posture_tilt"] = tilt
+
+    directional = [name for name in PLANE_ORDER
+                   if originally_fresh(original.get(name))
+                   and original[name].get("direction") in (_RISK_ON, _RISK_OFF, _NEUTRAL)]
+    coherence_lost = [name for name in directional
+                      if planes[name]["freshness"]["stale"] or not present(planes[name])]
+    expected_coherence = _coherence({name: original[name] for name in directional})
+    published_coherence = published.get("coherence")
+    coherence_consistent = (
+        "coherence" in published
+        and ((expected_coherence is None and published_coherence is None)
+             or (type(published_coherence) in (int, float)
+                 and math.isfinite(published_coherence)
+                 and published_coherence == expected_coherence))
+    )
+    coherence_reason = (
+        "published_coherence_inconsistent" if not coherence_consistent else
+        "published_coherence_inputs_expired" if coherence_lost else
+        "no_published_coherence" if published_coherence is None else None
+    )
+    if coherence_reason is not None:
+        out["coherence"] = None
+    # Disagreements deliberately stay as published: expiry is not conflict resolution.
+    label_freshness = _freshness(published.get("asof"), now=checked_at)
+    published_lvp = published.get("label_vs_planes")
+    published_lvp = published_lvp if isinstance(published_lvp, dict) else {}
+    published_label = published_lvp.get("label_direction")
+    expected_lvp = _label_vs_planes(published_label, expected, original)
+    comparison_consistent = (
+        type(published_lvp.get("conflict")) is bool
+        and type(published_lvp.get("confirmed")) is bool
+        and type(published_lvp.get("magnitude")) in (int, float)
+        and math.isfinite(published_lvp["magnitude"])
+        and all(key in published_lvp and published_lvp[key] == value
+                for key, value in expected_lvp.items())
+    )
+    expected_floor = bool(
+        expected_lvp["conflict"] and expected_lvp["plane_consensus_direction"] == _RISK_OFF
+    )
+    floor_consistent = (
+        type(published.get("posture_floor_defense")) is bool
+        and published["posture_floor_defense"] == expected_floor
+    )
+    label_reason = (
+        "published_label_comparison_inconsistent" if not comparison_consistent else
+        "published_posture_floor_inconsistent" if not floor_consistent else
+        "published_label_expired" if label_freshness["stale"] else
+        "no_published_label" if published_label not in (_RISK_ON, _RISK_OFF, _NEUTRAL) else None
+    )
+    label = published_label if label_reason is None else None
+    lvp = _label_vs_planes(label, tilt, planes)
+    out["label_vs_planes"] = lvp
+    # Keep the historical boolean for compatibility. Expiry is not a release of
+    # protection; current assessment authority is explicit in serving_freshness.
+
+    total = len(PLANE_ORDER)
+    count_present = sum(present(planes[name]) for name in PLANE_ORDER)
+    count_fresh = sum(present(planes[name]) and not planes[name]["freshness"]["stale"]
+                      for name in PLANE_ORDER)
+    coverage = round(count_present / total, 4) if total else 0.0
+    decision_coverage = round(len(eligible) / len(_VALIDATED_PLANES), 4)
+    old_assembly = published.get("assembly")
+    old_assembly = old_assembly if isinstance(old_assembly, dict) else {}
+    reasons = old_assembly.get("degrade_reasons")
+    reasons = [r for r in reasons if isinstance(r, str)] if isinstance(reasons, list) else []
+    for condition, code in (
+        (coverage < _coverage_floor(), "availability_coverage_below_floor"),
+        (decision_coverage < 1.0, "validated_decision_plane_incomplete"),
+        (reason is not None, "serving_consensus_unavailable"),
+        (label is None, "serving_label_unavailable"),
+        (coherence_reason is not None, "serving_coherence_unavailable"),
+    ):
+        if condition and code not in reasons:
+            reasons.append(code)
+    out["coverage"] = coverage
+    out["assembly"] = {
+        **old_assembly, "total": total, "present": count_present, "fresh": count_fresh,
+        "stale": count_present - count_fresh, "missing": total - count_present,
+        "validated": len(eligible), "eligible_validated": len(eligible),
+        "decision_total": len(_VALIDATED_PLANES), "decision_coverage": decision_coverage,
+        "fresh_coverage": round(count_fresh / total, 4) if total else 0.0,
+        "aggregate_available": reason is None,
+        "degrade_reasons": reasons, "degraded": bool(reasons) or bool(old_assembly.get("degraded")),
+    }
+    confirmation_available = reason is None and label is not None
+    out["serving_freshness"] = {
+        "checked_at": checked_at.isoformat(), "label_freshness": label_freshness,
+        "current_confirmation_available": confirmation_available,
+        "current_posture_floor_available": confirmation_available,
+        "posture_floor_defense_scope": "as_published",
+        "label_reason": label_reason, "coherence_reason": coherence_reason,
+        "consensus_reason": reason, "expired_contributors": lost,
+        "expired_coherence_planes": coherence_lost,
+        "published_label_direction": published_label,
+        "published_posture_floor_defense": published.get("posture_floor_defense"),
+        "disagreements_scope": "as_published", "budget_ref_scope": "as_published",
+    }
+    # This is an assessment of one publication, not a new episode/lifecycle event.
+    brief = _brief(planes, lvp, tilt, None)
+    brief["what_changed"] = (
+        "Source-date freshness was checked for the existing publication; "
+        "no new market observation was issued."
+    )
+    brief["whats_rotating"] = (
+        "Inspect the dated rotation readings below; expired readings are historical."
+    )
+    if not confirmation_available:
+        brief["posture_implication"] = (
+            "Current confirmation is unavailable. Evidence expiry does not establish recovery "
+            "or release existing protection."
+        )
+    if not count_fresh:
+        brief["wheres_the_risk"] = (
+            "Current risk cannot be assessed from expired or unavailable readings; "
+            "historical observations remain visible below."
+        )
+    out["brief"] = brief
+    return out
 
 
 def _read_prev_latest() -> Optional[dict[str, Any]]:
@@ -1540,6 +1914,7 @@ def build(
     liquidity_quality_out: Any = None,
     regime_nowcast_out: Any = None,
     neural_web_out: Any = None,
+    liquidity_transmission_out: Any = None,
     seq: int | None = None,
 ) -> dict[str, Any]:
     """Build the view and (optionally) atomically publish latest.json + a dated copy.
@@ -1563,6 +1938,7 @@ def build(
         liquidity_quality_out=liquidity_quality_out,
         regime_nowcast_out=regime_nowcast_out,
         neural_web_out=neural_web_out,
+        liquidity_transmission_out=liquidity_transmission_out,
         prev_view=prev,
         seq=resolved_seq,
     )
