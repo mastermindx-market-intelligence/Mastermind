@@ -135,27 +135,44 @@ wait_http() {
   return 1
 }
 
-# Capture the LAST complete pairing banner (never print it) into
+# Emit the last complete pairing banner from stdin (never print it elsewhere).
+banner_filter() {
+  awk '/^(Connection string|Token|Pairing URL):/ {
+    blk = blk $0 "\n"
+    if ($0 ~ /^Pairing URL:/) { last = blk; blk = "" }
+  } END { printf "%s", last }'
+}
+
+# Capture the LIVE pairing banner (never print it) into
 # <root>/run/access.txt 0600. Each server start mints a fresh one-time token
-# and launchd APPENDS banners across restarts, so only bytes appended after
-# this call began may be captured: the previous banner in the log is a dead
-# token (attack finding 1). The banner is read from the byte offset the log
-# had when capture started.
+# and launchd APPENDS banners across restarts. After install/restart the live
+# banner is the first one appended AFTER this call begins — the previous one
+# in the log is a dead token (attack finding 1). But `start` on an
+# already-running server appends nothing (kickstart does not bounce a healthy
+# job): then the live token is the last complete banner in the whole log.
+# The existing access.txt is replaced only when a banner was actually found,
+# so a failed capture can never truncate the live credential away.
 capture_access() {
-  _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"
+  _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"; _tmp="$_acc.new"
   _off=$(stat -f%z "$_log" 2>/dev/null || echo 0)
+  rm -f "$_tmp"
   _i=0
   while [ "$_i" -lt 20 ]; do
-    tail -c +"$((_off + 1))" "$_log" 2>/dev/null | awk '/^(Connection string|Token|Pairing URL):/ {
-      blk = blk $0 "\n"
-      if ($0 ~ /^Pairing URL:/) { last = blk; blk = "" }
-    } END { printf "%s", last }' > "$_acc" 2>/dev/null || true
-    grep -q '^Pairing URL:' "$_acc" 2>/dev/null && break
+    tail -c +"$((_off + 1))" "$_log" 2>/dev/null | banner_filter > "$_tmp" 2>/dev/null || true
+    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null && break
     _i=$((_i + 1)); sleep 1
   done
-  # umask 077 made the redirect create it 0600; a chmod failure here is a
-  # live credential sitting world-readable — fatal, never swallowed.
-  chmod 600 "$_acc" 2>/dev/null || die "cannot secure $_acc"
+  if ! grep -q '^Pairing URL:' "$_tmp" 2>/dev/null; then
+    # nothing new was appended while waiting: the server was already up and
+    # its live token is the last complete banner in the whole log.
+    banner_filter < "$_log" > "$_tmp" 2>/dev/null || true
+    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null \
+      || { rm -f "$_tmp"; die "no complete pairing banner found in $_log"; }
+  fi
+  # umask 077 made the temp 0600; a chmod failure here is a live credential
+  # sitting world-readable — fatal, never swallowed (attack finding 9).
+  chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; die "cannot secure $_acc"; }
+  mv "$_tmp" "$_acc"
 }
 
 cmd_install() {
