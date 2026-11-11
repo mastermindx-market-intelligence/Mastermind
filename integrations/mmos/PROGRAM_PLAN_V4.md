@@ -867,6 +867,15 @@ rotation proof on a real teammate is still owed. Items 1 and 2 wait on T8. Item 
 the Chairman's linked-environment switch. Item 10's installed coding job is lane T4d, after
 T4c and an independent review.
 
-**Running now:** T8, T4c, TSHb. One slot is free.
+**The second critical review starts now, in the free slot, on what is already live.** Lane
+R2a (Opus, read-only, started 02:30 UTC) reads the carrier, the cut-over tool and the roster
+tool at `5459b33fa`. Three real teammates run on them, so this half does not wait for T8 and
+TSHb. It asks about the run token, whose words the carrier trusts, ask loops between three
+teammates, exactly-once writes, the cut-over's preimage, and the rename path's cookie
+profile. The other half (socket door, shell-URL loader, T8's pairing path, TSHb's installer)
+follows when those two lanes are merged. No more agents move onto the carrier before R2a
+returns.
+
+**Running now, at the width cap of four:** T8, T4c, TSHb, R2a.
 
 Evidence: `~/.mastermind/mmos_evidence/short-names-20261111/LEDGER.md`.
