@@ -23,7 +23,10 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.3.0"
+# Historical package-version fields are the exact wire compatibility identifier.
+# Artifact versions may change without weakening this handshake or its digest.
+WEB_SOL_PACKAGE_VERSION = "0.4.0"
+WEB_SOL_EXTENSION_VERSION = "0.4.1"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
 

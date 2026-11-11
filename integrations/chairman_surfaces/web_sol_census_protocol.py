@@ -239,3 +239,4 @@ def validate_census_receipt(value):
         raise legacy.WebSolProtocolError('invalid_census_value') from None
     _require(len(payload) <= MAX_PAYLOAD_BYTES)
     return copy.deepcopy(value)
+

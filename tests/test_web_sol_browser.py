@@ -176,3 +176,62 @@ def test_browser_controller_behavior_in_node():
     run=subprocess.run([node,str(ROOT/"tests/browser_control_contract.cjs")],cwd=ROOT,capture_output=True,text=True,timeout=15)
     assert run.returncode==0,run.stdout+run.stderr
     assert "browser controller contract passed" in run.stdout
+
+
+
+def test_invalid_arguments_names_missing_and_unexpected_arguments_only(tmp_path,monkeypatch):
+    monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
+    monkeypatch.setattr(bridge.routes,"load",lambda _: None)
+    refused=bridge.execute({"action":"fill","browser_id":"a"*64,"tab_id":3,"url_fingerprint":"c"*64,
+        "ref":"e1","text":"secret payload value","options":{}},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings")
+    assert refused["state"]=="REFUSED" and refused["reason"]=="INVALID_ARGUMENTS"
+    detail=str(refused.get("detail"))
+    # A missing connection_id is now distinguishable from a missing snapshot_id.
+    for name in ("connection_id","snapshot_id","options"):
+        assert name in detail, detail
+    assert "text" not in detail, "a correctly supplied name is never named"
+    assert "secret payload value" not in detail
+
+
+def test_unknown_argument_name_is_reported_without_its_value(tmp_path,monkeypatch):
+    monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
+    refused=bridge.execute({"action":"status","browser_id":"a"*64,"bogus":"value-never-shown"},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings")
+    assert refused["reason"]=="INVALID_ARGUMENTS"
+    assert "bogus" in str(refused.get("detail"))
+    assert "value-never-shown" not in str(refused.get("detail"))
+
+
+def test_diagnostics_is_callable_without_a_snapshot_id(tmp_path,monkeypatch):
+    monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
+    monkeypatch.setattr(bridge.routes,"load",lambda _: None)
+    seen=[]
+    def exchange(browser,**kwargs):
+        seen.append(kwargs);return {"status":"OK","effect":"NOT_APPLIED","data":{"page_world":"ok"}}
+    result=bridge.execute({"action":"diagnostics","browser_id":"a"*64,"connection_id":"c1",
+        "tab_id":3,"url_fingerprint":"c"*64},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings",exchange=exchange)
+    assert result["state"]=="RECEIPT", result
+    assert seen[-1]["snapshot_id"] is None
+    assert result["receipt"]["status"]=="OK"
+
+
+@pytest.mark.parametrize("snapshot_id",[None,"snapshot-observation-001"])
+def test_diagnostics_window_request_accepts_optional_snapshot_id(snapshot_id):
+    original=request("diagnostics",snapshot_id=snapshot_id)
+    assert protocol.validate_window(original)==original
+
+
+@pytest.mark.parametrize("extra",[{}, {"snapshot_id":None}, {"snapshot_id":"snapshot-observation-001"}])
+def test_bridge_diagnostics_accepts_optional_snapshot_id(extra,tmp_path,monkeypatch):
+    monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
+    monkeypatch.setattr(bridge.routes,"load",lambda _: None)
+    seen=[]
+    def exchange(browser,**kwargs):
+        seen.append(kwargs);return {"status":"OK","effect":"NOT_APPLIED","data":{"page_world":"ok"}}
+    result=bridge.execute({"action":"diagnostics","browser_id":"a"*64,"connection_id":"c1",
+        "tab_id":3,"url_fingerprint":"c"*64,**extra},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings",exchange=exchange)
+    assert result["state"]=="RECEIPT", result
+    assert seen[-1]["snapshot_id"] is None or type(seen[-1]["snapshot_id"]) is str

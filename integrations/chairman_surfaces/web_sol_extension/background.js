@@ -2,6 +2,7 @@
 
 importScripts("instance_config.js");
 importScripts("census_core.js");
+importScripts("browser_cdp.js");
 importScripts("browser_control.js");
 
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
@@ -13,8 +14,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.3.0";
-const EXPECTED_CAPABILITY_DIGEST = "c3cf6a8186d967b499e74432acc23f10a9a765138fd50e2c8e0cfa54e9a38309";
+const PACKAGE_VERSION = "0.4.0";
+const EXPECTED_CAPABILITY_DIGEST = "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -54,6 +55,7 @@ let transportHandshakeReady = false;
 let transportBootNonce = null;
 let transportChallengeNonce = null;
 let transportStage = "DISCONNECTED";
+let lastNativeError = null;
 let reconnectEpoch = null;
 let reconnectGenerationOpen = false;
 let nativePortEpoch = null;
@@ -577,6 +579,7 @@ function resetTransport(port) {
   transportBootNonce = null;
   transportChallengeNonce = null;
   transportStage = "DISCONNECTED";
+  if(browserControl)browserControl.transportDisconnected().catch(()=>undefined);
   nativePortEpoch = null;
   nativePortReconnectAttempt = null;
   nativePortToken = null;
@@ -625,6 +628,7 @@ function handleTransportAck(message, port, epoch, reconnectAttempt, token) {
   transportStage = "READY";
   transportChallengeNonce = null;
   transportHandshakeReady = true;
+  lastNativeError = null;
   reconnectGenerationOpen = false;
   clearReconnectAlarms(epoch).catch(() => undefined);
 }
@@ -650,6 +654,8 @@ function getNativePort(epoch, reconnectAttempt = -1) {
   transportChallengeNonce = randomChallengeNonce();
   transportStage = "AWAITING_FIRST_ACK";
   port.onDisconnect.addListener(() => {
+    const nativeError=chrome.runtime.lastError;
+    if(nativePort===port)lastNativeError=nativeError?String(nativeError.message||nativeError).slice(0,240):null;
     const wasReady = nativePort === port && nativePortEpoch === epoch && transportHandshakeReady;
     if (!resetTransport(port)) return;
     if (wasReady) {
@@ -678,6 +684,18 @@ function getNativePort(epoch, reconnectAttempt = -1) {
 }
 
 chrome.runtime.onMessage.addListener((event, sender, sendResponse) => {
+  if(event && ["MMX_BROWSER_UI_STATUS","MMX_BROWSER_UI_RELEASE"].includes(event.kind)){
+    if(sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL("browser.html"))return false;
+    if(event.kind==="MMX_BROWSER_UI_STATUS"){
+      sendResponse({version:chrome.runtime.getManifest().version,wire_compatibility:PACKAGE_VERSION,connection:transportStage,
+        ready:transportHandshakeReady,native_error:lastNativeError,cdp_diagnostics:browserControl?.diagnostics()||null,
+        browser_id:INSTANCE_CONFIG?.instanceId||null,sessions:browserControl?.uiStatus()||[]});
+    }else{
+      browserControl?.releaseAll().then(results=>sendResponse({results})).catch(()=>sendResponse({error:"Release needs reconciliation"}));
+      return true;
+    }
+    return false;
+  }
   if (validCensusPopup(event, sender)) {
     globalThis.MMXWebSolCensus.collect(chrome.tabs, INSTANCE_CONFIG.instanceId)
       .then(sendResponse, () => sendResponse(null));

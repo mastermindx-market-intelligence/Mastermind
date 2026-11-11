@@ -2,7 +2,8 @@
 
 PluginContext owns registration, profile scope and unload. The fixed subprocess
 imports an exact source closure without inheriting provider secrets or paths.
-No daemon, browser launcher, registry, queue, permission grant or retry is added.
+The bridge also selects enrolled hosts and explicitly launches an existing profile.
+No daemon, credential, queue, permission grant or action retry is added.
 """
 from __future__ import annotations
 
@@ -21,11 +22,14 @@ import subprocess
 TOOL_NAME = "mmx_browser"
 TOOLSET = "mastermind_browser"
 RUNTIME_SCHEMA = "mastermind.hermes_browser.local_runtime/v1"
-MAX_BYTES = 65536
-READ_ACTIONS = frozenset({"browsers", "status", "tabs", "snapshot", "screenshot", "diagnostics"})
+MAX_BYTES = 921600
+READ_ACTIONS = frozenset({"browsers", "hosts", "status", "tabs", "snapshot", "screenshot", "diagnostics",
+    "cdp_status", "frames", "accessibility", "dom", "locate", "wait", "events", "network",
+    "response_body", "result", "downloads", "capture", "pdf"})
 SOURCE_FILES = frozenset({
     "integrations/__init__.py", "integrations/hermes_harness/__init__.py",
     "integrations/hermes_harness/browser_bridge.py", "integrations/hermes_harness/browser_tool_schema.json",
+    "integrations/hermes_harness/browser_routes.py",
     "integrations/chairman_surfaces/__init__.py", "integrations/chairman_surfaces/web_sol_client.py",
     "integrations/chairman_surfaces/web_sol_instance.py", "integrations/chairman_surfaces/web_sol_protocol.py",
     "integrations/chairman_surfaces/web_sol_browser_protocol.py", "integrations/chairman_surfaces/web_sol_census_protocol.py",
@@ -51,6 +55,13 @@ class Runtime:
     source_files: tuple[tuple[str, str], ...]
     descriptor_path: str
     descriptor_sha256: str
+    upload_roots: tuple[str, ...] = ()
+    artifact_root: str | None = None
+    host_ref: str | None = None
+
+    @property
+    def session_scope(self):
+        return (self.host_ref + ":" if self.host_ref else "") + self.profile_home
 
 
 def _pairs(pairs):
@@ -106,7 +117,7 @@ def load_runtime():
         raw = _safe_bytes(path, MAX_BYTES)
         data = _decode(raw)
         fields = {"schema", "release_commit", "source_root", "python_executable", "profile_home", "bindings_path", "source_files"}
-        if type(data) is not dict or set(data) != fields or data["schema"] != RUNTIME_SCHEMA:
+        if type(data) is not dict or not fields <= set(data) or set(data) - fields - {"upload_roots", "artifact_root", "host_ref"} or data["schema"] != RUNTIME_SCHEMA:
             raise ValueError("descriptor")
         if type(data["release_commit"]) is not str or re.fullmatch(r"[0-9a-f]{40}", data["release_commit"]) is None:
             raise ValueError("revision")
@@ -120,8 +131,18 @@ def load_runtime():
             raise ValueError("digest")
         if not os.access(data["python_executable"], os.X_OK):
             raise ValueError("interpreter")
+        roots = data.get("upload_roots", [])
+        if type(roots) is not list or len(roots) > 16 or any(type(p) is not str or not Path(p).is_absolute() for p in roots):
+            raise ValueError("upload_roots")
+        artifact = data.get("artifact_root")
+        if artifact is not None and (type(artifact) is not str or not Path(artifact).is_absolute()):
+            raise ValueError("artifact_root")
+        host_ref = data.get("host_ref")
+        if host_ref is not None and (type(host_ref) is not str or re.fullmatch(r"[a-z][a-z0-9_-]{0,47}", host_ref) is None):
+            raise ValueError("host_ref")
         binding = Runtime(data["release_commit"], data["source_root"], data["python_executable"],
-            data["profile_home"], data["bindings_path"], tuple(sorted(files.items())), str(path), hashlib.sha256(raw).hexdigest())
+            data["profile_home"], data["bindings_path"], tuple(sorted(files.items())), str(path), hashlib.sha256(raw).hexdigest(),
+            tuple(roots), artifact, host_ref)
         if not verify_sources(binding):
             raise ValueError("source")
         return binding
@@ -134,21 +155,42 @@ def _failure(reason, request_ref=None, *, possible=False, read=False):
                        "reason": reason, "request_ref": request_ref, "retry_allowed": False}, separators=(",", ":"))
 
 
-def _present(out):
+def _present(out, binding=None):
     """Use the installed Hermes multimodal tool-result contract, without a file."""
     receipt = out.get("receipt")
-    if (type(receipt) is dict and receipt.get("action") == "screenshot" and receipt.get("status") == "OK"
+    if (type(receipt) is dict and receipt.get("action") in {"screenshot", "capture", "pdf"} and receipt.get("status") == "OK"
             and type(receipt.get("data")) is dict):
         data = receipt["data"]
         encoded = data.get("base64")
-        if (data.get("mime_type") != "image/jpeg" or type(encoded) is not str or len(encoded) > 45000
-                or not base64.b64decode(encoded, validate=True).startswith(b"\xff\xd8")):
+        mime = data.get("mime_type")
+        decoded = base64.b64decode(encoded, validate=True) if type(encoded) is str else b""
+        magic = {"image/jpeg": b"\xff\xd8", "image/png": b"\x89PNG\r\n\x1a\n", "application/pdf": b"%PDF-"}
+        if (mime not in magic or type(encoded) is not str or len(encoded) > 700000
+                or not decoded.startswith(magic[mime])):
             raise ValueError("image")
-        receipt["data"] = {"mime_type": "image/jpeg", "scope": "selected tab viewport", "image_attached": True}
+        if mime == "application/pdf":
+            if binding is None or not binding.artifact_root:
+                raise NativeBrowserError("ARTIFACT_ROOT_UNCONFIGURED")
+            directory = Path(binding.artifact_root)
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            info = directory.lstat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+                raise NativeBrowserError("ARTIFACT_ROOT_UNSAFE")
+            destination = directory / ("browser-" + receipt["nonce"][:24] + ".pdf")
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(decoded)
+            receipt["data"] = {"mime_type": mime, "artifact_path": str(destination),
+                "artifact_host_ref": binding.host_ref, "artifact_location": "Hermes caller host",
+                "browser_host_ref": (out.get("routing") or {}).get("host_ref"),
+                "bytes": len(decoded), "sha256": hashlib.sha256(decoded).hexdigest()}
+            return json.dumps(out, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        receipt["data"] = {"mime_type": mime, "scope": data.get("scope", "selected tab viewport"),
+            "image_attached": True, "width": data.get("width"), "height": data.get("height")}
         summary = json.dumps(out, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
         return {"_multimodal": True, "text_summary": summary,
                 "content": [{"type": "text", "text": summary},
-                            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + encoded}}]}
+                            {"type": "image_url", "image_url": {"url": "data:" + mime + ";base64," + encoded}}]}
     return json.dumps(out, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
 
 
@@ -182,22 +224,24 @@ def register(ctx):
                 return _failure("NATIVE_SESSION_UNBOUND")
             operation, nonce = "hermes-browser-" + secrets.token_hex(16), secrets.token_hex(24)
             request_ref = {"operation_key": operation, "nonce": nonce, "action": arguments["action"],
-                "browser_id": arguments.get("browser_id"), "connection_id": arguments.get("connection_id")}
+                "browser_id": arguments.get("browser_id"), "host_ref": arguments.get("host_ref"),
+                "connection_id": arguments.get("connection_id")}
             raw = json.dumps({"session_id": session_id, "arguments": arguments, "operation_key": operation,
                 "nonce": nonce}, allow_nan=False, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             if len(raw) > 32768:
                 return _failure("NATIVE_REQUEST_INVALID")
             if not current():
                 return _failure("NATIVE_REGISTRATION_STALE")
-        except (ValueError, TypeError, RecursionError, UnicodeError):
+        except (ValueError, TypeError, RecursionError, UnicodeError, OSError):
             return _failure("NATIVE_REQUEST_INVALID")
         read = arguments["action"] in READ_ACTIONS
         try:
             process = subprocess.run([binding.python_executable, "-I", "-B", "-c", _BOOT,
-                binding.source_root, binding.bindings_path, binding.profile_home],
-                input=raw, capture_output=True, timeout=28, cwd=binding.source_root,
+                binding.source_root, binding.bindings_path, binding.session_scope],
+                input=raw, capture_output=True, timeout=35, cwd=binding.source_root,
                 env={"PATH": "/usr/bin:/bin", "HOME": pwd.getpwuid(os.getuid()).pw_dir,
-                     "HERMES_HOME": binding.profile_home, "LANG": "C.UTF-8"}, check=False)
+                     "HERMES_HOME": binding.profile_home, "LANG": "C.UTF-8",
+                     "MMX_BROWSER_UPLOAD_ROOTS": json.dumps(binding.upload_roots)}, check=False)
         except subprocess.TimeoutExpired:
             return _failure("NATIVE_LOCAL_TIMEOUT", request_ref, possible=True, read=read)
         except OSError:
@@ -212,14 +256,16 @@ def register(ctx):
                 raise ValueError("output")
             if out["state"] == "RECEIPT":
                 receipt = out.get("receipt")
-                expected_session = hashlib.sha256((binding.profile_home + "\0" + session_id).encode()).hexdigest()
+                expected_session = hashlib.sha256((binding.session_scope + "\0" + session_id).encode()).hexdigest()
                 if (type(receipt) is not dict or receipt.get("schema") != "mastermind.web_sol_browser_receipt.v1"
                         or any(receipt.get(k) != v for k, v in (("operation_key", operation), ("nonce", nonce),
                             ("action", arguments["action"]), ("adapter_instance_id", arguments.get("browser_id")), ("session_id", expected_session)))):
                     raise ValueError("identity")
+                if arguments.get("host_ref") and (out.get("routing") or {}).get("host_ref") != arguments["host_ref"]:
+                    raise ValueError("host_identity")
             out["bridge_release_commit"] = binding.release_commit
-            return _present(out)
-        except (ValueError, TypeError, RecursionError, UnicodeError, KeyError):
+            return _present(out, binding)
+        except (ValueError, TypeError, RecursionError, UnicodeError, KeyError, OSError, NativeBrowserError):
             return _failure("NATIVE_LOCAL_OUTPUT_INVALID", request_ref, possible=True, read=read)
 
     with replacement_coordinator.transaction():
@@ -242,4 +288,17 @@ def register(ctx):
             except Exception:
                 raise NativeBrowserError("NATIVE_TOOL_ROLLBACK_UNKNOWN") from None
             raise NativeBrowserError("NATIVE_TOOL_READBACK_FAILED") from None
+        skill_handles = []
+        try:
+            for name, description in (
+                ("hermes-browser", "Use installed Chrome with semantic snapshots, native actions, frames, shadow DOM and scoped advanced CDP."),
+                ("hermes-browser-debug", "Diagnose browser errors with console, network, SSE, WebSocket, waits, dialogs and responsive emulation."),
+                ("hermes-browser-files", "Upload authorized host files, track real downloads, capture screenshots and export browser PDFs."),
+            ):
+                skill_handles.append(ctx.register_skill(name, Path(__file__).parent / "skills" / name / "SKILL.md", description))
+        except Exception:
+            for skill_handle in reversed(skill_handles):
+                skill_handle.dispose()
+            handle.dispose()
+            raise NativeBrowserError("NATIVE_SKILL_REGISTRATION_FAILED") from None
         return handle

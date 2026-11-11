@@ -1,15 +1,22 @@
 {
   "manifest_version": 3,
-  "name": "Mastermind Web Sol Surface Adapter",
-  "version": "0.3.0",
+  "name": "Mastermind Browser \u00b7 Hermes",
+  "version": "0.4.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqkgiJufJguxzvJmcJY2q1JeESU1vPa9u5sPQ6h++i113s5X9mZQM9VNGhj89jzuL7/QrCUTGTWf6iF9wFU2aoo6orTqqhpkdxwpp8cZKiMHe5pKwLi0fkKzuD3PTOpTedLcYY38z7aQTj5TJFTJb3qZH+wq5wGE+v5E2zYHbDHXtFa5MdGboE6AUHuIqqXsijHLd/6MmrzZOrWuUNw1wDwu07hTbRsT2o+ZzRx9YcTBkWcgZyCqiF8NPUQsDlfpRwBK1Ygqv2XnCFSZ973YOI+datCrwRQ3V/TnrJv1+ge/MPiz/qQhKsSjEJO/vxpX8eOTULxnEWUl10kAG2frdRQIDAQAB",
   "permissions": [
     "nativeMessaging",
     "alarms",
     "debugger"
   ],
-  "optional_permissions": ["tabs", "scripting"],
-  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "optional_permissions": [
+    "tabs",
+    "scripting",
+    "downloads"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "options_page": "browser.html",
   "host_permissions": [
     "https://chat.openai.com/*",
@@ -33,5 +40,7 @@
   "action": {
     "default_title": "Web Sol profile snapshot",
     "default_popup": "census.html"
-  }
+  },
+  "minimum_chrome_version": "125",
+  "description": "Hermes browser automation with profile isolation, semantic controls, persistent CDP, network diagnostics and visual evidence."
 }

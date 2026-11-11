@@ -1,8 +1,8 @@
 name: mastermind-browser
 kind: standalone
-version: "0.3.0"
+version: "0.5.0"
 requires_hermes: ">=0.23.0"
-description: "Use installed Mastermind Chrome and Orbita adapters through their existing native connection. Explicit browser selection and Chrome website permissions."
+description: "Select named Chrome profiles across enrolled fleet hosts, launch closed profiles explicitly, and use advanced CDP through the existing native connection and Chrome site permissions."
 author: Mastermind-X
 provides_tools:
   - mmx_browser

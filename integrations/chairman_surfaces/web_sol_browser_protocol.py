@@ -16,13 +16,18 @@ from .web_sol_protocol import WebSolProtocolError
 REQUEST_SCHEMA = "mastermind.web_sol_browser_request.v1"
 RECEIPT_SCHEMA = "mastermind.web_sol_browser_receipt.v1"
 TOTAL_SECONDS = 20
-MAX_BYTES = 61440
+MAX_BYTES = 819200
 IDENTITY_FIELDS = ("adapter_instance_id", "session_id", "operation_key", "nonce",
                    "transport_boot_nonce", "action")
-READ_ACTIONS = frozenset({"status", "tabs", "snapshot", "screenshot", "diagnostics"})
+ADVANCED_READ = frozenset({"cdp_status", "frames", "accessibility", "dom", "locate", "wait",
+    "events", "network", "response_body", "result", "downloads", "capture", "pdf"})
+ADVANCED_ACTIONS = ADVANCED_READ | {"cdp_attach", "cdp_detach", "cdp", "evaluate", "interact",
+    "upload", "download", "dialog", "emulate", "route"}
+NO_SNAPSHOT = ADVANCED_READ | {"snapshot", "diagnostics", "cdp_detach", "dialog"}
+READ_ACTIONS = frozenset({"status", "tabs", "snapshot", "screenshot", "diagnostics"}) | ADVANCED_READ
 PAGE_ACTIONS = frozenset({"click", "fill", "select", "press", "scroll"})
 TAB_ACTIONS = PAGE_ACTIONS | {"snapshot", "screenshot", "diagnostics", "navigate",
-                            "reload", "back", "forward", "close", "focus"}
+                            "reload", "back", "forward", "close", "focus"} | ADVANCED_ACTIONS
 ACTIONS = READ_ACTIONS | TAB_ACTIONS | {"open"}
 KEYS = frozenset({"Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft",
                   "ArrowRight", "Home", "End", "Backspace", "Delete", "Space"})
@@ -55,13 +60,13 @@ def _timestamp(value):
 
 
 def _plain(value, depth=0):
-    _require(depth <= 12)
+    _require(depth <= 24)
     if type(value) is dict:
         _require(len(value) <= 256 and all(type(k) is str for k in value))
         for child in value.values():
             _plain(child, depth + 1)
     elif type(value) is list:
-        _require(len(value) <= 256)
+        _require(len(value) <= 2048)
         for child in value:
             _plain(child, depth + 1)
     else:
@@ -99,6 +104,79 @@ def _identity(value):
              or _text(value["transport_boot_nonce"], 16, 128))
 
 
+ADVANCED_FIELDS = {
+    "cdp_attach": {"network", "capture_stream_data"}, "cdp_detach": set(), "cdp_status": set(),
+    "cdp": {"method", "params", "frame_id"}, "evaluate": {"expression", "frame_id", "await_promise", "world"},
+    "frames": set(), "accessibility": {"frame_id", "limit"}, "dom": {"frame_id", "depth", "pierce", "selector"},
+    "locate": {"frame_id", "locator", "limit", "include_hidden"},
+    "interact": {"ref", "kind", "text", "key", "value", "checked", "x", "y", "target_ref"},
+    "wait": {"frame_id", "locator", "state", "timeout_ms"}, "events": {"after", "limit", "method"},
+    "network": {"limit", "request_id"}, "response_body": {"request_id", "offset", "limit"},
+    "result": {"result_id", "offset", "limit"}, "upload": {"ref", "files"},
+    "download": {"url", "filename"}, "downloads": {"download_id"}, "dialog": {"accept", "prompt", "dialog_ref"},
+    "emulate": {"viewport", "user_agent", "media", "timezone", "reset"}, "route": {"rules"},
+    "capture": {"full_page", "format", "quality", "max_width", "max_height"},
+    "pdf": {"landscape", "print_background", "scale"},
+}
+
+
+def validate_advanced(action, params):
+    _require(type(params) is dict and not set(params) - ADVANCED_FIELDS[action])
+    _require(len(json.dumps(params, ensure_ascii=False, allow_nan=False)) <= 30000)
+    if "frame_id" in params:
+        _require(_text(params["frame_id"], 1, 256))
+    if "limit" in params:
+        maximum = 32000 if action in {"response_body", "result"} else 200
+        _require(type(params["limit"]) is int and 1 <= params["limit"] <= maximum)
+    for field in ("offset", "after"):
+        if field in params:
+            _require(type(params[field]) is int and 0 <= params[field] <= (2000000 if field == "offset" else 9007199254740991))
+    if action == "cdp":
+        _require(_text(params.get("method"), 3, 160) and re.fullmatch(r"[A-Z][A-Za-z]+\.[a-zA-Z][a-zA-Z0-9]+", params["method"]))
+        _require(type(params.get("params", {})) is dict)
+    if action == "evaluate":
+        _require(type(params.get("expression")) is str and 1 <= len(params["expression"]) <= 20000 and "\x00" not in params["expression"])
+        _require(params.get("world", "isolated") in {"isolated", "page"})
+    if action in {"locate", "wait"}:
+        locator = params.get("locator")
+        _require(type(locator) is dict and bool(locator) and not set(locator) - {"css", "role", "name", "text", "label", "testid", "exact", "index"})
+        for field, value in locator.items():
+            _require(type(value) is bool if field == "exact" else
+                     type(value) is int and 0 <= value <= 10000 if field == "index" else _text(value, 1, 1000))
+        _require(params.get("state", "visible") in {"visible", "hidden", "attached", "detached"})
+        _require(type(params.get("timeout_ms", 5000)) is int and 0 <= params.get("timeout_ms", 5000) <= 8000)
+    if action in {"interact", "upload"}:
+        _require(type(params.get("ref")) is str and re.fullmatch(r"n[0-9a-f]{24}", params["ref"]))
+    if action == "interact":
+        _require(params.get("kind") in {"click", "double_click", "hover", "fill", "type", "press", "select", "check", "scroll", "drag"})
+    if "text" in params:
+        _require(type(params["text"]) is str and len(params["text"]) <= 16000 and "\x00" not in params["text"])
+    if action == "upload":
+        files = params.get("files")
+        _require(type(files) is list and 1 <= len(files) <= 16 and all(
+            _text(f, 1, 4096) and f.startswith("/") and "\n" not in f and "\r" not in f for f in files))
+    if action == "download":
+        _require(valid_url(params.get("url")))
+        if "filename" in params:
+            _require(_text(params["filename"], 1, 120) and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9 ._-]{0,119}", params["filename"]) and ".." not in params["filename"])
+    if action == "route":
+        rules = params.get("rules")
+        _require(type(rules) is list and len(rules) <= 16)
+        for rule in rules:
+            _require(type(rule) is dict and set(rule) == {"url_pattern", "action"} and rule["action"] in {"continue", "block"}
+                     and _text(rule["url_pattern"], 1, 1000) and rule["url_pattern"].startswith(("http://", "https://")))
+    for field in ("network", "capture_stream_data", "await_promise", "pierce", "include_hidden", "accept", "checked", "full_page", "landscape", "print_background", "reset"):
+        if field in params:
+            _require(type(params[field]) is bool)
+    for field, lower, upper in (("quality", 10, 100), ("depth", 0, 8), ("max_width", 64, 4096), ("max_height", 64, 4096)):
+        if field in params:
+            _require(type(params[field]) is int and lower <= params[field] <= upper)
+    if "format" in params:
+        _require(params["format"] in {"png", "jpeg"})
+    if action in {"response_body", "result"}:
+        _require(_text(params.get("request_id" if action == "response_body" else "result_id"), 1, 256))
+
+
 def validate_request(value):
     bounded(value)
     _require(type(value) is dict and set(value) == REQUEST_KEYS)
@@ -111,15 +189,21 @@ def validate_request(value):
         _require(_hex(value["url_fingerprint"]))
     else:
         _require(value["tab_id"] is None and value["url_fingerprint"] is None)
-    if action in TAB_ACTIONS - {"snapshot"}:
+    if action in TAB_ACTIONS - NO_SNAPSHOT:
         _require(_text(value["snapshot_id"], 16, 128))
+    elif action == "diagnostics":
+        # diagnostics is the snapshot-free recovery read: it accepts the last
+        # observation's id when one exists, and None when none does.
+        _require(value["snapshot_id"] is None or _text(value["snapshot_id"], 16, 128))
     else:
         _require(value["snapshot_id"] is None)
     if action in PAGE_ACTIONS:
         _require(_text(value["ref"], 1, 32))
     else:
         _require(value["ref"] is None)
-    if action in {"open", "navigate"}:
+    if action in ADVANCED_ACTIONS:
+        validate_advanced(action, params)
+    elif action in {"open", "navigate"}:
         _require(set(params) == {"url"} and valid_url(params["url"]))
     elif action == "fill":
         _require(set(params) == {"text"} and type(params["text"]) is str

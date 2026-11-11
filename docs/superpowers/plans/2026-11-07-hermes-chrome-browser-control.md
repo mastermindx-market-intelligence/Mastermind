@@ -1,5 +1,24 @@
 # Hermes control of installed Mastermind browsers
 
+## Chairman-directed advanced delivery — 2026-11-08 UTC
+
+The current Chairman assignment to C4 explicitly supersedes this document's former GitHub/PR/CI release process for this delivery. Build, qualify locally, retain an immutable package, and install directly. Do not alter the original PR, its automatic merge request, its writer, or other running browser sessions. The recovered source is `5595c2d674610c2b849fb81d8f547647cb2068a9`; the source worktree at `ea248bc6da6852926756c9ece2089c2ec3f5ec82` was clean and is retained untouched. Procedure pin: `d8c89a44bf896a623467cb303a29e46dea19cf9a`. No uncertain modifying effect was inherited. Native architecture advice is read-only; C4 owns implementation. Secretary's bounded installation thread is https://mastermindxgroup.slack.com/archives/C0CBC6AEAQZ/p1794114893004269.
+
+### Advanced architecture and execution plan
+
+1. Extend the existing Native Messaging / private Unix-socket transport; no TCP debugging service, browser replacement, external scheduler or model pool.
+2. Add a persistent, selected-tab CDP controller with real Hermes session ownership, connection-generation fencing, related iframe targets, permission rechecks, detach cleanup, bounded event buffers and expiry. Preserve the old ChatGPT census and browser controls.
+3. Add evaluation and scoped raw CDP, frame/AX/DOM inspection, semantic locators through open shadow roots, native pointer/key/text input, explicit waits, screenshots, network/SSE/console inspection, response paging, and constrained uploads/downloads. Results distinguish observed, dispatched, failed and uncertain effects. Never replay page mutations automatically.
+4. Integrate the native Hermes plugin with exact source closure, multimodal screenshots, local artifact handling, clearer schemas and a progressive-disclosure browser skill. Reuse actual browser deployment configuration; never invent ChatGPT conversation bindings for an ordinary Chrome profile.
+5. Qualify meaningful protocol, ownership, race, permission, frame, actual browser and actual Hermes-registry journeys. These are focused functional checks, not a GitHub CI pack.
+6. Install the tested plugin and skills on the real Hermes profiles using the native installer. Stage the exact Chrome/Orbita extension package with rollback. Obtain live version/connection/action/readback proof where Chrome permissions are available; identify only the exact Chrome UI action requiring the Chairman if necessary.
+
+DONE_WHEN: a real Hermes invocation can select the intended installed browser, attach CDP, inspect/evaluate/interact, see network/console/SSE evidence, verify the resulting page and release its attachment; the native plugin and skill are installed; the extension/runtime versions match. Fixture-only, files-only and registry-only proof are named separately. Chrome's permission UI and actual tool security controls remain binding.
+
+### Direct-delivery frontier
+
+Audit complete. Existing v0.3 is source-qualified but installed C4 package is v0.2.0. Advanced implementation is in progress in an isolated source snapshot. No production extension, native wrapper, plugin, or permission has yet changed. The original source/PR has no new mutation from this operation.
+
 Operation: `hermes-chrome-browser-control-20261107-c3`
 Repository: mastermindx-market-intelligence/Mastermind
 Branch: `sol/web-hermes-chrome-browser-control-20261107-c3`

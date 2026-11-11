@@ -7,7 +7,7 @@
   const MAX_ELEMENTS = 120;
   const MAX_NODES = 2000;
   const MAX_TEXT = 10000;
-  const ACTIONS = new Set(["snapshot", "validate", "validate_focus", "focus_ref", "click", "fill",
+  const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
     "select", "scroll", "diagnostics"]);
   const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
   const SELECTOR = "a[href],button,input,textarea,select,[role],[contenteditable='true'],[tabindex]";
@@ -125,7 +125,8 @@
           duration_ms: Number.isFinite(e.duration) ? Math.round(e.duration) : null,
           transfer_bytes: Number.isFinite(e.transferSize) ? e.transferSize : null,
           status: Number.isFinite(e.responseStatus) ? e.responseStatus : null})),
-        resource_scope: "bounded browser performance entries; no headers or bodies"});
+        resource_scope: "bounded browser performance entries; no headers or bodies",
+        content_is_untrusted: true});
     }
     function validate(request) {
       if (!request || typeof request !== "object" || Array.isArray(request) || request.kind !== KIND ||
@@ -137,6 +138,9 @@
           Date.parse(request.expires_at)<=Date.now()) return "REQUEST_EXPIRED";
       if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) return "INVALID_REQUEST";
       if (request.action === "snapshot") return Object.keys(request.params).length ? "INVALID_REQUEST" : null;
+      // diagnostics is a read-only health probe; it never mutates and must
+      // stay callable when no snapshot exists — that is its whole purpose.
+      if (request.action === "diagnostics") return Object.keys(request.params).length ? "INVALID_REQUEST" : null;
       if (request.action === "validate_focus") {
         if (!prepared || Object.keys(request.params).join() !== "token" || request.params.token !== prepared.token ||
             request.session_id !== prepared.session || request.snapshot_id !== prepared.snapshot ||
@@ -157,6 +161,7 @@
         const {action, session_id: session, params} = request;
         if (action === "snapshot") return snapshot(session);
         if (action === "validate") return result(true, "OK", {snapshot_id: current.id});
+        if (action === "consume") {current=null;prepared=null;return result(true,"OK");}
         if (action === "validate_focus") return result(true, "OK");
         if (action === "diagnostics") return diagnostics();
         const target = current.refs.get(request.ref);
@@ -224,12 +229,23 @@
   }
   if (typeof module !== "undefined" && module.exports) module.exports = {createPage, KIND};
   root.MMXBrowserPageFactory = createPage;
-  if (typeof chrome !== "undefined" && chrome.runtime && !root.__MMX_BROWSER_PAGE_V1__) {
-    const page = createPage(root);
-    root.__MMX_BROWSER_PAGE_V1__ = page;
-    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-      if (!request || request.kind !== KIND || !sender || sender.id !== chrome.runtime.id) return;
-      sendResponse(page.dispatch(request));
-    });
+  // Registration must survive any later injection into the same document: a
+  // first pass whose factory threw (or whose listener was later lost) otherwise
+  // leaves the document permanently unreachable, because the old single guard
+  // made every later injection skip registration entirely.
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+    if (!root.__MMX_BROWSER_PAGE_V1__) {
+      try { root.__MMX_BROWSER_PAGE_V1__ = createPage(root); }
+      catch (e) { root.MMXBrowserPageError = String(e && e.message || e).slice(0, 180); }
+    }
+    if (!root.__MMX_BROWSER_PAGE_LISTENING__) {
+      root.__MMX_BROWSER_PAGE_LISTENING__ = true;
+      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (!request || request.kind !== KIND || !sender || sender.id !== chrome.runtime.id) return false;
+        if (!root.__MMX_BROWSER_PAGE_V1__) return false;
+        sendResponse(root.__MMX_BROWSER_PAGE_V1__.dispatch(request));
+        return true;
+      });
+    }
   }
 })(globalThis);

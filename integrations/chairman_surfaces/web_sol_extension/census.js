@@ -221,3 +221,4 @@
   renderAdapterContract();
   refresh();
 })();
+

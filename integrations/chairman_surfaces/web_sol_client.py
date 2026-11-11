@@ -629,3 +629,4 @@ def census_via_extension(
     if any(receipt[field] != request[field] for field in census.IDENTITY_FIELDS):
         raise WebSolExtensionError("receipt_identity_mismatch")
     return receipt
+
