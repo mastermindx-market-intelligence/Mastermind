@@ -235,6 +235,55 @@ Read-only attacker on the finding-2/3/4 fixes; 16 findings, all dispositioned:
   coerces once (non-numeric → 3, <1 → zero); ask reuse matches the ask itself
   (assignee + sanitized title).
 
+### Late second attack child (kimi-k3.1-pro, finished after the model-rule change)
+
+Started before attack rounds moved to deepseek-v4.1-flash; the Chairman let it
+finish. It analyzed the same pin and its list reduces to the round above plus
+one genuinely new residual and several sharpened notes:
+
+- **K1 forged return edge on a never-asked parent — RECORDED, needs one
+  server fact before fixing.** The blocker-set fix (A5/A9, `0bd918e68`)
+  filters children only when the parent HAS a recorded blocker set
+  (`wake_carrier.py` `if blocker_ids and ask_children`). Every carrier-asked
+  parent records one (`block_issue` since the ask feature was born, pre-R2a),
+  but a parent that never asked has none — so a board-side forger who creates
+  a child on the victim's issue with the computed marker, sets it done and
+  adds an agent comment fires `handle_return` on the victim: the task is
+  never sent, the attacker's text enters the victim's thread as
+  "Their answer", and the victim's reply is delivered as the issue's answer
+  with in_review. A forged **todo** child on a blocked parent additionally
+  skips the person-blocked probe branch (finding 15). Exploiter needs board
+  write rights (issue create with foreign parentId + status + comment) —
+  insider capability, same class the attack round assumed; a teammate agent
+  alone cannot (no board token; its only channel is its thread). Fix sketch,
+  one line + test: marker-matching ask children with no recorded blocker set
+  → leave the issue for a person. **Gated on a server fact the principal
+  owns:** does resuming a blocked parent clear `blockedByIssueIds`? If it
+  never clears, the tighten is safe; if it clears, the legit return edge
+  (children done → board resumes) runs with an empty set and the tighten
+  would strand every legit return — fix server-side or snapshot instead.
+- **K2 parent edit defeats depth one** — new consequence of recorded A4,
+  same root cause: edit the parent's title/description between ask and
+  return and the recomputed marker mismatches, so the asked child reads as a
+  plain task — its reply can carry an ask block (grandchild; depth one
+  bypassed) and the parent is stranded as "blocked, no ask child". Strengthens
+  the case for the persisted ask-op record; no new fix here.
+- **K3 marker message with no runId reads as absent** — `scan_marker` treats
+  a user message beginning `[op]\n` whose `run_id` is `None` as no marker
+  (possible duplicate send, bounded by first-wins on the next scan).
+  Defensive-only shape: the live server always sets run fields on messages
+  (the principal's recorded note covers this family). No change.
+- **K4 cap undercount** — a board edit that removes the marker from a child
+  description frees cap slots (A11 counted the overcount direction; this is
+  the undercount). Consequence: extra ask children on an issue whose
+  participants actively conspire; each still blocks and goes to another
+  teammate. Accepted with A11.
+- **K5 10-page children bound** — beyond ~10 pages of children the walk
+  truncates (finding 4's designed bound); not practical, recorded.
+- **K6 return op from `children[0]`** — mooted at HEAD by finding 19's
+  per-child ret ops (`828e37482`).
+- **K7 self-ask via roster alias** — verified caught (id equality).
+
 ## Gaps left open, deliberately
 
 - **Finding 20's hold is conservative**: a comment-list read failure during
@@ -245,8 +294,12 @@ Read-only attacker on the finding-2/3/4 fixes; 16 findings, all dispositioned:
   message (see above).
 - **`window_exhausted` on the return edge** raises CarrierError (release,
   exit 1) — an unreadable return marker is never guessed at.
+- **K1 forged return edge on a never-asked parent** (see the late-second-
+  attack subsection above): guarded only for parents that recorded a blocker
+  set; closing it needs one server fact (does resume clear
+  `blockedByIssueIds`?) — principal decision.
 - **ATK 4 / A7-A / A10** are recorded protocol migrations for the principal,
-  not silent omissions.
+  not silent omissions. K2 is a new consequence of the same A4 root.
 - **27's help-text gap** (above).
 - **WebFetch** stays denied; see finding 1.
 
