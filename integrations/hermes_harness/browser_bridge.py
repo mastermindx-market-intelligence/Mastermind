@@ -219,8 +219,12 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
             required.update({"tab_id", "url_fingerprint"})
         if action in protocol.TAB_ACTIONS - protocol.NO_SNAPSHOT:
             required.add("snapshot_id")
+        # diagnostics also accepts the last observation's id when held; an
+        # explicit snapshot_id: null is the protocol's spelling of omission,
+        # so for diagnostics that key is neither required nor unexpected.
+        tolerated = ({"snapshot_id"} if action == "diagnostics"
+                     and arguments.get("snapshot_id") is None else set())
         if action == "diagnostics" and type(arguments.get("snapshot_id")) is str:
-            # diagnostics also accepts the last observation's id when held.
             required.add("snapshot_id")
         if action in protocol.PAGE_ACTIONS:
             required.add("ref")
@@ -230,9 +234,9 @@ def execute(arguments, *, native_session_id: str, profile_ref: str, bindings_pat
         required.update(payload_fields)
         if action in protocol.ADVANCED_ACTIONS:
             required.add("options")
-        if set(arguments) != required:
-            return _argument_refusal(request_ref, missing=required - set(arguments),
-                unexpected=set(arguments) - required)
+        if set(arguments) - tolerated != required:
+            return _argument_refusal(request_ref, missing=required - (set(arguments) - tolerated),
+                unexpected=set(arguments) - required - tolerated)
         if action in protocol.ADVANCED_ACTIONS:
             if type(arguments["options"]) is not dict:
                 return _argument_refusal(request_ref, note="options must be an object")

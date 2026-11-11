@@ -125,7 +125,8 @@
           duration_ms: Number.isFinite(e.duration) ? Math.round(e.duration) : null,
           transfer_bytes: Number.isFinite(e.transferSize) ? e.transferSize : null,
           status: Number.isFinite(e.responseStatus) ? e.responseStatus : null})),
-        resource_scope: "bounded browser performance entries; no headers or bodies"});
+        resource_scope: "bounded browser performance entries; no headers or bodies",
+        content_is_untrusted: true});
     }
     function validate(request) {
       if (!request || typeof request !== "object" || Array.isArray(request) || request.kind !== KIND ||

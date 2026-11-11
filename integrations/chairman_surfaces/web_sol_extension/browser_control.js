@@ -17,10 +17,13 @@
   const hex = x => typeof x === "string" && /^[0-9a-f]{64}$/.test(x);
   const bounded = (x, low=1, high=128) => typeof x === "string" && x.length >= low && x.length <= high && !/[\x00-\x1f\x7f]/.test(x);
   // Receipt detail channel: error name plus the first characters of the native
-  // message, every URL cut to 48 characters, the whole string cut to 180.
+  // message, every URL kept as origin+path only (a query or fragment never
+  // travels), the whole string cut to 180.
   const URL_CUT = /(https?:\/\/[^\s"'<>\\]{1,300})/g;
   function boundedDetail(text, limit=180) {
-    const clipped = String(text || "").replace(URL_CUT, m => m.slice(0, 48)).replace(/\s+/g, " ").trim();
+    // A URL survives only as origin+path: a query or fragment can carry a
+    // ticket or fragment id, and a positional cut would let short ones through.
+    const clipped = String(text || "").replace(URL_CUT, m => publicUrl(m) || m.slice(0, 48)).replace(/\s+/g, " ").trim();
     return clipped ? clipped.slice(0, limit) : null;
   }
   const exact = (x, keys) => x && typeof x === "object" && !Array.isArray(x) && Object.keys(x).length === keys.length && keys.every(k => Object.hasOwn(x, k));
@@ -70,10 +73,14 @@
     // Ring buffer of the last 20 error receipts this worker produced, so a
     // person never has to open DevTools to read why actions failed.
     const errorRing = [];
-    function recordError(action, code, detail) {
-      errorRing.push({at:new Date().toISOString(), action, code, ...(detail ? {detail} : {})});
+    function recordError(sessionId, action, code, detail) {
+      errorRing.push({at:new Date().toISOString(), session_id:sessionId, action, code, ...(detail ? {detail} : {})});
       if (errorRing.length > 20) errorRing.splice(0, errorRing.length - 20);
     }
+    // Ring entries are page/native text: label them untrusted and serve a
+    // session only its own entries, never another session's or another boot's.
+    const recentErrors = sessionId => ({content_is_untrusted:true,
+      entries:errorRing.filter(entry => entry.session_id === sessionId)});
     const liveBoot = connection || (()=>observedBoot);
     function current(r) {
       if (liveBoot() !== r.transport_boot_nonce) throw new Error("CONNECTION_CHANGED");
@@ -103,13 +110,17 @@
       return tab;
     }
     const PAGE_READ_RETRY = new Set(["snapshot", "diagnostics"]);
-    async function pageWorld(tab) {
-      if (!documents.has(tab.id) && documents.size >= 128) throw new Error("TAB_LIMIT");
+    // persist=true (snapshot) tracks the document so later mutations may run.
+    // persist=false (diagnostics) installs the page world without touching the
+    // tracked map: a snapshot-free diagnostics must never re-arm the mutation
+    // gate after a reconnect, nor consume one of its 128 slots.
+    async function pageWorld(tab, persist=true) {
+      if (persist && !documents.has(tab.id) && documents.size >= 128) throw new Error("TAB_LIMIT");
       const installed = await chrome.scripting.executeScript({target:{tabId:tab.id,frameIds:[0]},
         files:["browser_page.js"],world:"ISOLATED"});
       const documentId = installed && installed[0] ? installed[0].documentId : null;
       if (!bounded(documentId,1,128)) throw new Error("DOCUMENT_ID_UNAVAILABLE");
-      documents.set(tab.id,documentId);
+      if (persist) documents.set(tab.id,documentId);
       return documentId;
     }
     // One executeScript(func) round trip instead of a cached documentId plus
@@ -127,11 +138,22 @@
             if (!p) return {ok:false,code:"PAGE_WORLD_UNAVAILABLE",data:null,effect:"NOT_APPLIED"};
             try { return p.dispatch(ds); }
             catch (e) {
+              // This func is serialized into the page world: only its own
+              // source travels, so every helper it needs must be inline —
+              // an outer-scope name here would be a dead reference and turn
+              // this net into the very ReferenceError it exists to report.
               // A dispatch that died mid-flight cannot prove NOT_APPLIED for a
               // mutation; report it as uncertain, reads as safely unapplied.
-              const read = /^(snapshot|validate|validate_focus|consume|diagnostics)$/.test(ds && ds.action || "");
+              const read = /^(snapshot|validate|validate_focus|consume|diagnostics)$/.test((ds && ds.action) || "");
+              const cut = /(https?:\/\/[^\s"'<>\\]{1,300})/g;
+              const bound = String((e && e.message) || e)
+                .replace(cut, m => {
+                  try { const u = new URL(m); return u.origin + u.pathname; }
+                  catch (_) { return m.split(/[?#]/)[0].slice(0, 48); }
+                })
+                .replace(/\s+/g, " ").trim().slice(0, 180);
               return {ok:false,code:"PAGE_DISPATCH_FAILED",
-                data:{detail:boundedDetail(String(e && e.message || e).slice(0,160))},
+                data:{detail: bound || null},
                 effect: read ? "NOT_APPLIED" : "EFFECT_UNKNOWN"};
             }
           }, args:[payload]});
@@ -149,13 +171,13 @@
         // Reads re-inject the page world; a mutation without a live world
         // entry (for example after a transport reconnect cleared it) must
         // stay STALE_SNAPSHOT, never silently re-arm against an old snapshot.
-        if (action === "snapshot" || action === "diagnostics") await pageWorld(tab);
+        if (action === "snapshot" || action === "diagnostics") await pageWorld(tab, action === "snapshot");
         else if (!documents.has(tab.id)) throw new Error("STALE_SNAPSHOT");
         await tabFor(r); current(r); if (beforeSend) beforeSend();
         sent = true;
         value = await call();
         if (PAGE_READ_RETRY.has(action) && (!value || value.code === "PAGE_WORLD_UNAVAILABLE")) {
-          await pageWorld(tab); await tabFor(r); current(r); value = await call();
+          await pageWorld(tab, action === "snapshot"); await tabFor(r); current(r); value = await call();
         }
       } catch (error) {
         const text = String(error && error.message || error);
@@ -165,8 +187,13 @@
         const wrapped = new Error(/Cannot access contents|cannot be scripted|Missing host permission|permission to access the respective host/i.test(text)
           ? "SITE_PERMISSION_REQUIRED" : "PAGE_INJECT_FAILED");
         wrapped.knownNotApplied = !(sent && !read);
+        // committed records that call() was entered: a read-classified call
+        // inside a mutation flow (validate_focus after an applied focus_ref)
+        // may still have consumed page state, so its loss is not provably
+        // NOT_APPLIED for the enclosing action.
+        wrapped.committed = sent;
         wrapped.detail = boundedDetail(`inject ${(error && error.name) || "Error"}: ${text}` +
-          ` tab=${String(tab.url || "").slice(0,48)} doc=${documents.get(tab.id) || "-"}`);
+          ` tab=${publicUrl(tab.url) || String(tab.url || "").slice(0,48)} doc=${documents.get(tab.id) || "-"}`);
         throw wrapped;
       }
       if (!value || typeof value.ok !== "boolean" || !bounded(value.code,1,64) ||
@@ -206,6 +233,7 @@
       if (!valid(r,instanceId,boot)) return null;
       if (observedBoot !== boot) {
         documents.clear();
+        errorRing.length = 0;
         busy=null;
         if(observedBoot && advanced)cleanupPromise=advanced.reset();
         observedBoot = boot;
@@ -230,7 +258,7 @@
           upload_file_access_allowed:chrome.extension?.isAllowedFileSchemeAccess?await chrome.extension.isAllowedFileSchemeAccess():null,
           actions:[...ACTIONS].sort(),permissions_url:chrome.runtime.getURL("browser.html"),
           scope:"this installed browser profile; permitted HTTP/S tabs only",exclusive_control:false,
-          recent_errors:errorRing.slice(),
+          recent_errors:recentErrors(r.session_id),
           cdp_diagnostics:advanced?advanced.diagnostics():null});
         if (r.action === "tabs") {
           if (!await chrome.permissions.contains({permissions:["tabs","scripting"]})) return receipt(r,"BROWSER_PERMISSION_REQUIRED");
@@ -278,14 +306,14 @@
             const response = await page(r);
             await tabFor(r);
             if (!response.ok) throw new Error(response.code);
-            return receipt(r,"OK",{...response.data,page_world:"ok",recent_errors:errorRing.slice()});
+            return receipt(r,"OK",{...response.data,page_world:"ok",recent_errors:recentErrors(r.session_id)});
           } catch (error) {
             const text = String(error && error.message || error);
             if (/^(TARGET_NOT_FOUND|TARGET_UNAVAILABLE|TARGET_CHANGED|CONNECTION_CHANGED|REQUEST_EXPIRED)$/.test(text)) throw error;
-            recordError("diagnostics", text.slice(0,64), boundedDetail(error && error.detail || text));
+            recordError(r.session_id,"diagnostics", text.slice(0,64), boundedDetail(error && error.detail || text));
             return receipt(r,"OK",{page_world:"unavailable",page_error:text.slice(0,64),
               worker:{documents_tracked:documents.size,debugger_uncertain:debuggerUncertain},
-              recent_errors:errorRing.slice()});
+              recent_errors:recentErrors(r.session_id)});
           }
         }
         const verified = await page(r,"validate",{});
@@ -359,11 +387,12 @@
           "PAGE_INJECT_FAILED","PAGE_DISPATCH_FAILED","PAGE_WORLD_UNAVAILABLE"]);
         const code = allowed.has(error && error.message) || /^(CDP_|FRAME_|STALE_NODE_|RESPONSE_|RESULT_|UPLOAD_|DOWNLOAD_|PAGE_|INPUT_|INVALID_|TARGET_OBSCURED|PDF_|EVALUATE_|NETWORK_|ROUTE_|EMULATE_)/.test(error?.message||"")
           ? error.message : "BROWSER_UNAVAILABLE";
-        const possible=attempted&&!error?.knownNotApplied;
+        const possible=attempted&&(!error?.knownNotApplied||error?.committed);
         // An unexpected error is never again reduced to a bare BROWSER_UNAVAILABLE:
         // the receipt carries a bounded detail and the ring keeps the last 20.
-        const detail = error?.detail || boundedDetail(`${(error && error.name) || "Error"}: ${(error && error.message) || error}`);
-        recordError(r.action, possible ? "ACTION_EFFECT_UNKNOWN" : code, detail);
+        // A carried detail (CDP can attach one) is bounded and URL-cut here too.
+        const detail = boundedDetail(error?.detail || `${(error && error.name) || "Error"}: ${(error && error.message) || error}`);
+        recordError(r.session_id, r.action, possible ? "ACTION_EFFECT_UNKNOWN" : code, detail);
         return receipt(r,possible ? "ACTION_EFFECT_UNKNOWN" : code,
           {reason:code,...(detail?{detail}:{})},possible ? "EFFECT_UNKNOWN" : "NOT_APPLIED");
       } finally {if(busy===running)busy=null;}

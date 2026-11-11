@@ -223,12 +223,15 @@ def test_diagnostics_window_request_accepts_optional_snapshot_id(snapshot_id):
     assert protocol.validate_window(original)==original
 
 
-@pytest.mark.parametrize("snapshot_id",[None,"snapshot-observation-001"])
-def test_bridge_diagnostics_accepts_optional_snapshot_id(snapshot_id,tmp_path,monkeypatch):
+@pytest.mark.parametrize("extra",[{}, {"snapshot_id":None}, {"snapshot_id":"snapshot-observation-001"}])
+def test_bridge_diagnostics_accepts_optional_snapshot_id(extra,tmp_path,monkeypatch):
     monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
     monkeypatch.setattr(bridge.routes,"load",lambda _: None)
-    def exchange(browser,**kwargs):return {"status":"OK","effect":"NOT_APPLIED","data":{"page_world":"ok"}}
+    seen=[]
+    def exchange(browser,**kwargs):
+        seen.append(kwargs);return {"status":"OK","effect":"NOT_APPLIED","data":{"page_world":"ok"}}
     result=bridge.execute({"action":"diagnostics","browser_id":"a"*64,"connection_id":"c1",
-        "tab_id":3,"url_fingerprint":"c"*64,**({"snapshot_id":snapshot_id} if snapshot_id is not None else {})},
+        "tab_id":3,"url_fingerprint":"c"*64,**extra},
         native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings",exchange=exchange)
     assert result["state"]=="RECEIPT", result
+    assert seen[-1]["snapshot_id"] is None or type(seen[-1]["snapshot_id"]) is str

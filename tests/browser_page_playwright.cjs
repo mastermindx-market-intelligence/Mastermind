@@ -63,6 +63,7 @@ const fixture = `<!doctype html><html><head><title>Browser control fixture</titl
     // diagnostics is a snapshot-independent read: with no snapshot observed yet,
     // with a live snapshot present, and with the matching id, it must answer.
     const d0=await send("diagnostics",null);assert.equal(d0.ok,true,`no-snapshot diagnostics: ${JSON.stringify(d0)}`);
+    assert.equal(d0.data.content_is_untrusted,true,"page-authored diagnostics labeled untrusted");
     s=await snapshot();
     const d1=await send("diagnostics",null);assert.equal(d1.ok,true,`live-snapshot null-id diagnostics: ${JSON.stringify(d1)}`);
     const d2=await send("diagnostics",s.snapshot_id);assert.equal(d2.ok,true);
