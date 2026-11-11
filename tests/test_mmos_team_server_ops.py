@@ -1204,6 +1204,55 @@ def test_f3b_provider_cli_resolving_into_a_team_writable_tree_refused(h):
     assert not (h.root / "config" / "provider-cli-dir").exists()
 
 
+def test_mfh1_group_writable_provider_binary_refused(h):
+    # F-HIGH-1: the executed FILE's own owner and write bits were never
+    # checked — the folder walks guard planting and swapping, but an
+    # in-place rewrite needs only the FILE's write bits (open(O_TRUNC)),
+    # no directory write at all. A group/other-writable claude in a
+    # walk-clean folder rode first-on-PATH and any local user could
+    # rewrite the executed bytes. The binary must carry no group/other
+    # write bits (the owner rule — root or this user, mirroring
+    # trusted_interpreter — cannot be cross-user-tested without root).
+    cli = h.bindir / "claude"
+    h.seed_root()
+    server = h.fake_server()
+    for bad_mode in (0o775, 0o777):
+        os.chmod(cli, bad_mode)
+        try:
+            proc = h.run_install("--server-bin", server, "--replace")
+            out = proc.stdout + proc.stderr
+            assert proc.returncode != 0, (bad_mode, out)
+            assert "writable by group or others" in out, (bad_mode, out)
+            assert str(cli) in out, (bad_mode, out)
+            assert not (h.root / "config" / "provider-cli-dir").exists()
+            assert not h.loaded()
+        finally:
+            os.chmod(cli, 0o755)
+    # the binary restored to 0755 in the same folder installs cleanly
+    assert h.run_install("--server-bin", server).returncode == 0
+
+
+def test_mfh1_write_bits_checked_through_a_symlink_too(h):
+    # Same check on the far side of a symlink: the named link sits in a
+    # clean folder, its resolved file is group-writable — rewriting the
+    # executed bytes needs no directory write anywhere on the chain.
+    target = h.base / "swaptree-file" / "v1"
+    target.mkdir(parents=True)
+    real_cli = target / "real-claude"
+    real_cli.write_text("#!/bin/sh\necho swapped\n")
+    os.chmod(real_cli, 0o775)   # group-writable FILE, clean folders everywhere
+    link = h.bindir / "claude-linked"
+    link.symlink_to(real_cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "writable by group or others" in out, out
+    assert str(link) in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
 def test_f4_runner_puts_the_recorded_folder_on_the_server_path(h):
     # The packed boot REBUILDS PATH in the exec handoff — the exact line the
     # defect lived in. The stub server records the environment it was exec'd

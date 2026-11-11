@@ -497,6 +497,28 @@ def validated_provider_cli(cli, root=None):
         raise InstallError(f"provider CLI is not a regular file: {path}")
     if not os.access(path, os.X_OK):
         raise InstallError(f"provider CLI is not executable: {path}")
+    # F-HIGH-1 (micro-fix round): the executed FILE itself, not only its
+    # folders. The folder walks stop a teammate PLANTING or SWAPPING a
+    # binary; they do not stop an in-place rewrite — open(O_TRUNC) needs the
+    # file's own write bits, no directory write at all. Both the named path
+    # and its resolution target must be owned by root or this user (the
+    # trusted_interpreter rule) and carry no group/other write bits.
+    for what, target in (("provider CLI", path),
+                         ("provider CLI resolution target",
+                          os.path.realpath(path))):
+        try:
+            finfo = os.stat(target)
+        except OSError as exc:
+            raise InstallError(f"provider CLI not found: {target}") from exc
+        if finfo.st_uid not in (0, os.getuid()):
+            raise InstallError(
+                f"{what} belongs to another user (a teammate could rewrite "
+                f"its executed bytes in place): {target}")
+        if finfo.st_mode & 0o022:
+            raise InstallError(
+                f"{what} is writable by group or others (any local user "
+                f"could rewrite the executed bytes in place — no directory "
+                f"write needed): {target} ({stat.filemode(finfo.st_mode)})")
     folder = os.path.dirname(path)
     _require_teammate_safe_dir(folder, "provider CLI folder")
     _require_teammate_safe_dir(os.path.dirname(os.path.realpath(path)),
