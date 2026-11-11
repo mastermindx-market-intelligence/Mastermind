@@ -1,0 +1,91 @@
+{
+  "application_proven": false,
+  "binary_sha256": "811362311f13ac4bdc42fe4e7650aca618a68e3a40f930de88536d18b14d2b52",
+  "both_home_forwards": true,
+  "denied_probe_backend_arrivals": 0,
+  "distinct_network_namespaces": 3,
+  "duplicate_accepted_probe_arrivals": 0,
+  "events": [
+    {
+      "action": "created",
+      "container_id": "9896b4a05ce081c48bdfca2a6f831fd15bee7b5ff1e3234d4ca8281efc73b3f6",
+      "mode": "server"
+    },
+    {
+      "action": "created",
+      "container_id": "e73d8c3fa10f166207404340fba05fe10583e11ce45b0bf5bf3a5cf8b5e54a4b",
+      "mode": "app"
+    },
+    {
+      "action": "created",
+      "container_id": "cd6c284a69439ae57db7fdb7b72abb2e6f2f764efb2421de336d629fd91ce909",
+      "mode": "home"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "home-127.0.0.2",
+      "token": "home-127.0.0.2-e5786a0af7f563e01e18279c"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "home-127.0.0.3",
+      "token": "home-127.0.0.3-1a322b1b65bcdec96f7e059a"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "ssh-before",
+      "token": "ssh-before-1f445c60da064f5edd2ed3f4"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "ssh-with-normal-revoked",
+      "token": "ssh-with-normal-revoked-4a8f2912fe018393fc2cf0b6"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "restored-127.0.0.2",
+      "token": "restored-127.0.0.2-51d75d120183face7522c875"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "restored-127.0.0.3",
+      "token": "restored-127.0.0.3-02b4b562790b967cf939cffd"
+    },
+    {
+      "action": "forwarded_once",
+      "label": "ssh-after",
+      "token": "ssh-after-16990b00ee05d8e55ca5b290"
+    }
+  ],
+  "fixture_root": "/tmp/mmx-hermes-home-protocol-20261109-r33b",
+  "harness_sha256": "c8f279dfd73e1f809e8dcb55fdc4287934bd52fb3380e83db360a7d8c68999b8",
+  "image": "sha256:ffee2f08b4c2cae70590b8cef22cd9d4232c014e199f34c5cbeec262501a487a",
+  "logs": {
+    "app.log": {
+      "bytes": 505,
+      "sha256": "a7d68c4bd8375330baa7dcf27cc0bc529cb2ae76424dadbf47627f8ed6b91b27"
+    },
+    "home.log": {
+      "bytes": 978,
+      "sha256": "e908a0415888a454afd84ac1244298c93ca12d89c9a73c45ecbecdd5dfaee400"
+    },
+    "server.log": {
+      "bytes": 1540,
+      "sha256": "65428ec92560f374c8808db5af83e6aca176ee077a91fe8695a88f59b8e6a9a3"
+    }
+  },
+  "normal_acl_reload_without_restart": true,
+  "operation": "h4-home-proof-48e592a4bb4f47e0",
+  "original_reverse_connections": 1,
+  "owned_containers_removed": true,
+  "owned_network_removed": true,
+  "passed": true,
+  "production_tunnel_proven": false,
+  "retained_home_authenticated_connections": 1,
+  "reverse_only_acl_refuses_normal_forward": true,
+  "schema": "hermes_application_home_protocol_fixture_v1",
+  "ssh_return_retained": true,
+  "synthetic_credentials_removed": true,
+  "uid": 1000,
+  "version": "1.12.0"
+}

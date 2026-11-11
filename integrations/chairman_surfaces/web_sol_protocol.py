@@ -23,7 +23,7 @@ HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1"
 INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1"
 TRANSPORT_CAPABILITY_SCHEMA = "mastermind.web_sol_transport_capabilities.v1"
 TRANSPORT_PROTOCOL_MAJOR = 1
-WEB_SOL_PACKAGE_VERSION = "0.2.0"
+WEB_SOL_PACKAGE_VERSION = "0.3.0"
 MAX_ACTION_TTL_SECONDS = 60
 ALLOWED_FUTURE_SKEW_SECONDS = 5
 
@@ -266,6 +266,7 @@ def _require_package_version(value: Any, path: str) -> None:
 
 def transport_capability_digest() -> str:
     """Return the deterministic closed F2 transport capability digest."""
+    from . import web_sol_browser_protocol as browser
 
     document = {
         "schema": TRANSPORT_CAPABILITY_SCHEMA,
@@ -273,11 +274,14 @@ def transport_capability_digest() -> str:
         "package_version": WEB_SOL_PACKAGE_VERSION,
         "roles": sorted(_TRANSPORT_ROLES),
         "actions": sorted(action.value for action in SurfaceAction),
+        "browser_actions": sorted(browser.ACTIONS),
         "schemas": sorted(
             [
                 "mastermind.web_sol_census_request.v1",
                 "mastermind.web_sol_census_receipt.v1",
                 "mastermind.web_sol_census_table.v1",
+                browser.REQUEST_SCHEMA,
+                browser.RECEIPT_SCHEMA,
                 ACTION_SCHEMA,
                 HELLO_ACK_SCHEMA,
                 HELLO_SCHEMA,

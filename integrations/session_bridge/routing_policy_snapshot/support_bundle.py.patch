@@ -1,0 +1,11 @@
+--- a/support_bundle.py
++++ b/support_bundle.py
+@@ -41 +41,3 @@
+-SOURCE_GENERATIONS = (SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
++OPERATOR_SOURCE_FILES = SOURCE_FILES
++SOURCE_FILES = OPERATOR_SOURCE_FILES | {"fabric_policy_snapshot.py", "pools.yaml"}
++SOURCE_GENERATIONS = (SOURCE_FILES, OPERATOR_SOURCE_FILES, PRE_OPERATOR_SOURCE_FILES, PREVIOUS_SOURCE_FILES, LEGACY_SOURCE_FILES)
+@@ -198,0 +201,3 @@
++    if "pools.yaml" in manifest:
++        from fabric_policy_snapshot import validate_publication
++        validate_publication(source_dir / "pools.yaml", stable_ext)

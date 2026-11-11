@@ -1,0 +1,804 @@
+diff --git a/apps/server/src/cli/thread.native.test.ts b/apps/server/src/cli/thread.native.test.ts
+new file mode 100644
+index 0000000000..9d2920adff
+--- /dev/null
++++ b/apps/server/src/cli/thread.native.test.ts
+@@ -0,0 +1,455 @@
++import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
++import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
++import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
++import * as NodePath from "@effect/platform-node/NodePath";
++import * as NodeTerminal from "@effect/platform-node/NodeTerminal";
++import { assert, it } from "@effect/vitest";
++import { AuthSessionId } from "@t3tools/contracts";
++import * as NetService from "@t3tools/shared/Net";
++import * as ConfigProvider from "effect/ConfigProvider";
++import * as DateTime from "effect/DateTime";
++import * as Deferred from "effect/Deferred";
++import * as Effect from "effect/Effect";
++import * as FileSystem from "effect/FileSystem";
++import * as Fiber from "effect/Fiber";
++import * as Layer from "effect/Layer";
++import * as Option from "effect/Option";
++import * as Path from "effect/Path";
++import * as Result from "effect/Result";
++import * as Stdio from "effect/Stdio";
++import * as Stream from "effect/Stream";
++import * as TestConsole from "effect/testing/TestConsole";
++import { Command } from "effect/cli";
++import { beforeEach, vi } from "vite-plus/test";
++
++import * as McpBridge from "../mcp/AcpMcpStdioBridge.ts";
++import type { McpToolSession } from "../mcp/AcpMcpStdioBridge.ts";
++import {
++  makePersistedServerRuntimeState,
++  persistServerRuntimeState,
++} from "../serverRuntimeState.ts";
++import { readNativeCatalog, threadCommand } from "./thread.ts";
++
++const auth = vi.hoisted(() => ({ issues: 0, revokes: 0 }));
++
++vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
++  const actual = await importOriginal<typeof import("../auth/EnvironmentAuth.ts")>();
++  return {
++    ...actual,
++    layerRuntime: Layer.mock(actual.EnvironmentAuth)({
++      issueMcpClientSession: () =>
++        Effect.map(DateTime.now, (expiresAt) => {
++          auth.issues += 1;
++          return {
++            sessionId: AuthSessionId.make("test-session"),
++            token: "synthetic-token",
++            expiresAt,
++          };
++        }),
++      revokeSession: () =>
++        Effect.sync(() => {
++          auth.revokes += 1;
++          return true;
++        }),
++    }),
++  };
++});
++
++beforeEach(() => {
++  auth.issues = 0;
++  auth.revokes = 0;
++});
++
++const encoder = new TextEncoder();
++
++// NodeServices.layer would pin Stdio to the real process stdin; these pieces leave Stdio free.
++const cliLayers = Layer.mergeAll(
++  NodeFileSystem.layer,
++  NodePath.layer,
++  NodeTerminal.layer,
++  NodeCrypto.layer,
++  NetService.layer,
++  ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_PORT: "3773" } })),
++);
++
++const makeBaseDir = Effect.fn("threadNativeTest.makeBaseDir")(function* () {
++  const fs = yield* FileSystem.FileSystem;
++  const path = yield* Path.Path;
++  const root = yield* fs
++    .makeTempDirectoryScoped({ prefix: "t3-thread-native-" })
++    .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
++  const baseDir = path.join(root, "state");
++  yield* persistServerRuntimeState({
++    path: path.join(baseDir, "userdata", "server-runtime.json"),
++    state: yield* makePersistedServerRuntimeState({
++      config: { host: "127.0.0.1", devUrl: undefined },
++      port: 3_773,
++    }),
++  });
++  return baseDir;
++});
++
++const runNative = (baseDir: string, tool: string) =>
++  Command.runWith(threadCommand, { version: "0.0.0" })([
++    "native",
++    tool,
++    "--json",
++    "--base-dir",
++    baseDir,
++  ]);
++
++const provideCli = <A, E, R>(effect: Effect.Effect<A, E, R>, stdin: string) =>
++  effect.pipe(
++    Effect.scoped,
++    Effect.provide(
++      Layer.provideMerge(
++        NodeChildProcessSpawner.layer,
++        Layer.mergeAll(cliLayers, Stdio.layerTest({ stdin: Stream.make(encoder.encode(stdin)) })),
++      ),
++    ),
++  );
++
++/** TestConsole.logLines entries are unknown; the CLI only ever logs JSON strings. */
++const lastLoggedLine = Effect.map(TestConsole.logLines, (lines) => String(lines.at(-1) ?? ""));
++
++/** Runs to a Result and hands back the failure, dying when the command succeeds. */
++const failWith = <A, E>(effect: Effect.Effect<A, E, never>) =>
++  Effect.flatMap(Effect.result(effect), (result) =>
++    Result.isSuccess(result)
++      ? Effect.die("expected this command to fail")
++      : Effect.succeed(Option.getOrThrow(Result.getFailure(result))),
++  );
++
++const failureTag = (failure: unknown) => (failure as { _tag: string })._tag;
++const failureDetail = (failure: unknown) => (failure as { detail: string }).detail;
++
++/** One session whose single call the test scripts; records what it was asked. */
++const scriptSession = (behavior: {
++  readonly result?: unknown;
++  readonly failure?: McpBridge.AcpMcpBridgeError;
++  readonly suspend?: Deferred.Deferred<void>;
++}) => {
++  const calls: Array<{ readonly tool: string; readonly args: unknown }> = [];
++  const session = {
++    call: (tool: string, args: Readonly<Record<string, unknown>>) => {
++      calls.push({ tool, args });
++      if (behavior.failure !== undefined) return Effect.fail(behavior.failure);
++      if (behavior.suspend !== undefined) {
++        return Effect.andThen(Deferred.succeed(behavior.suspend, void 0), Effect.never);
++      }
++      return Effect.succeed(behavior.result);
++    },
++    listTools: () => Effect.die("unexpected tools/list call"),
++  } satisfies McpToolSession;
++  return { session, calls };
++};
++
++it.effect("native rejects a known but non-allowlisted tool before any session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_project_create"), "{}"));
++    assert.strictEqual(failureTag(failure), "ThreadUsageError");
++    assert.isTrue(failureDetail(failure).includes("not allowlisted"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects an unknown tool name before any session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(provideCli(runNative(baseDir, "definitely_not_a_tool"), "{}"));
++    assert.isTrue(failureDetail(failure).includes("not allowlisted"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects malformed stdin JSON without contacting the server", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(runNative(baseDir, "t3_thread_read"), `{"threadId": `),
++    );
++    assert.strictEqual(failureTag(failure), "ThreadUsageError");
++    assert.isTrue(failureDetail(failure).includes("one JSON object"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects stdin past its byte cap without contacting the server", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(runNative(baseDir, "t3_thread_read"), `{"text": "${"x".repeat(300_000)}"}`),
++    );
++    assert.isTrue(failureDetail(failure).includes("262144-byte stdin limit"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native rejects a JSON array instead of an arguments object", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_queue"), "[1, 2]"));
++    assert.isTrue(failureDetail(failure).includes("one JSON object"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native prints the server's success envelope unchanged", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const envelope = {
++      structuredContent: { environmentId: "env-1", label: "Studio" },
++      content: [{ type: "text", text: '{"environmentId":"env-1"}' }],
++      extraField: { kept: true },
++    };
++    const { session, calls } = scriptSession({ result: envelope });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    yield* provideCli(runNative(baseDir, "t3_environment_read"), "{}");
++
++    assert.deepStrictEqual(calls, [{ tool: "t3_environment_read", args: {} }]);
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), envelope);
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native prints the server's error envelope for missing required args, unchanged", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const envelope = {
++      isError: true,
++      content: [{ type: "text", text: `{"message":"t3_thread_read requires threadId"}` }],
++    };
++    const { session, calls } = scriptSession({ result: envelope });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    yield* provideCli(runNative(baseDir, "t3_thread_read"), "{}");
++
++    assert.deepStrictEqual(calls, [{ tool: "t3_thread_read", args: {} }]);
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), envelope);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native makes exactly one call and fails plainly when transport fails", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const before = (yield* TestConsole.logLines).length;
++    const { session, calls } = scriptSession({
++      failure: new McpBridge.AcpMcpBridgeError({ message: "HTTP 500." }),
++    });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    const failure = yield* failWith(provideCli(runNative(baseDir, "t3_thread_list"), "{}"));
++
++    assert.strictEqual(failureTag(failure), "ThreadToolFailedError");
++    assert.lengthOf(calls, 1);
++    assert.lengthOf((yield* TestConsole.logLines).slice(before), 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native interrupts the one call and still revokes its session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const before = (yield* TestConsole.logLines).length;
++    const started = yield* Deferred.make<void>();
++    const { session } = scriptSession({ suspend: started });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    const fiber = yield* Effect.forkChild(provideCli(runNative(baseDir, "t3_thread_list"), "{}"));
++    yield* Deferred.await(started);
++    yield* Fiber.interrupt(fiber);
++
++    assert.strictEqual(auth.revokes, 1);
++    assert.lengthOf((yield* TestConsole.logLines).slice(before), 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native refuses t3_thread_launch that would inherit a provider default", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const failure = yield* failWith(
++      provideCli(
++        runNative(baseDir, "t3_thread_launch"),
++        `{"projectId": "p", "title": "T", "message": "m"}`,
++      ),
++    );
++    assert.isTrue(failureDetail(failure).includes("capacity_fabric"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native refuses a modelSelection naming any other provider instance", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using session = vi.spyOn(McpBridge, "mcpToolSession");
++    const args = JSON.stringify({
++      modelSelection: { instanceId: "glm2_direct", model: "glm-5.3" },
++    });
++
++    const launch = yield* failWith(provideCli(runNative(baseDir, "t3_thread_launch"), args));
++    assert.isTrue(failureDetail(launch).includes("capacity_fabric"));
++
++    const configure = yield* failWith(provideCli(runNative(baseDir, "t3_thread_configure"), args));
++    assert.isTrue(failureDetail(configure).includes("capacity_fabric"));
++    assert.lengthOf(session.mock.calls, 0);
++    assert.strictEqual(auth.issues, 0);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native forwards an explicit capacity_fabric selection and reads without one", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const { session, calls } = scriptSession({ result: { structuredContent: {} } });
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    const launchArgs = {
++      projectId: "p",
++      title: "T",
++      message: "m",
++      modelSelection: { instanceId: "capacity_fabric", model: "model-x" },
++    };
++    yield* provideCli(runNative(baseDir, "t3_thread_launch"), JSON.stringify(launchArgs));
++    yield* provideCli(runNative(baseDir, "t3_thread_configure"), `{"threadId": "t"}`);
++
++    assert.deepStrictEqual(calls, [
++      { tool: "t3_thread_launch", args: launchArgs },
++      { tool: "t3_thread_configure", args: { threadId: "t" } },
++    ]);
++    assert.strictEqual(auth.issues, 2);
++    assert.strictEqual(auth.revokes, 2);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++const allowlistedEntry = (name: string) => ({
++  name,
++  description: `${name} description`,
++  inputSchema: { type: "object" as const, properties: { threadId: { type: "string" } } },
++  annotations: { title: name, readOnlyHint: name === "t3_environment_read" },
++});
++
++const catalogSession = (pages: ReadonlyArray<unknown>) => {
++  const queue = [...pages];
++  const requests: Array<{ readonly cursor?: string }> = [];
++  const session = {
++    call: () => Effect.die("unexpected tools/call"),
++    listTools: (params: { readonly cursor?: string } = {}) => {
++      requests.push(params);
++      const page = queue.shift();
++      return page === undefined ? Effect.die("unscripted tools/list page") : Effect.succeed(page);
++    },
++  } satisfies McpToolSession;
++  return { session, requests };
++};
++
++it.effect("native-catalog follows pages and keeps only allowlisted schemas verbatim", () =>
++  Effect.gen(function* () {
++    const projectCreate = { name: "t3_project_create", inputSchema: { type: "object" } };
++    const nameless = { description: "no name" };
++    const secret = { name: "request_secret" };
++    const queue = allowlistedEntry("t3_queue");
++    const environment = allowlistedEntry("t3_environment_read");
++    const { session, requests } = catalogSession([
++      { tools: [queue, projectCreate, nameless], nextCursor: "page-2" },
++      { tools: [secret, environment] },
++    ]);
++
++    const catalog = yield* readNativeCatalog(session);
++
++    assert.deepStrictEqual(catalog, [queue, environment]);
++    assert.deepStrictEqual(requests, [{}, { cursor: "page-2" }]);
++  }),
++);
++
++it.effect("native-catalog stops at its page bound instead of looping forever", () =>
++  Effect.gen(function* () {
++    const { session, requests } = catalogSession(
++      Array.from({ length: 20 }, () => ({
++        tools: [allowlistedEntry("t3_queue")],
++        nextCursor: "next",
++      })),
++    );
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.strictEqual(failureTag(failure), "ThreadToolFailedError");
++    assert.isTrue(failureDetail(failure).includes("exceeded 8 pages"));
++    assert.lengthOf(requests, 8);
++  }),
++);
++
++it.effect("native-catalog stops at its tool-count bound on an oversized catalog", () =>
++  Effect.gen(function* () {
++    const filler = Array.from({ length: 201 }, (_, index) => ({ name: `filler-${index}` }));
++    const { session } = catalogSession([{ tools: filler }]);
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.isTrue(failureDetail(failure).includes("exceeded 200 tools"));
++  }),
++);
++
++it.effect("native-catalog stops at its byte bound when schemas are huge", () =>
++  Effect.gen(function* () {
++    const huge = {
++      name: "t3_queue",
++      inputSchema: { type: "object" as const, description: "x".repeat(1024 * 1024) },
++    };
++    const { session } = catalogSession([
++      { tools: [huge], nextCursor: "page-2" },
++      { tools: [{ ...huge }] },
++    ]);
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.isTrue(failureDetail(failure).includes("exceeded 2097152 bytes"));
++  }),
++);
++
++it.effect("native-catalog rejects a page that is not a tools/list result", () =>
++  Effect.gen(function* () {
++    const { session } = catalogSession([{ tools: "not an array" }]);
++
++    const failure = yield* failWith(readNativeCatalog(session));
++
++    assert.isTrue(failureDetail(failure).includes("not a tools/list result"));
++  }),
++);
++
++it.effect("native-catalog prints the filtered catalog from the running server", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const entry = allowlistedEntry("t3_environment_read");
++    const { session } = catalogSession([{ tools: [entry, { name: "t3_project_delete" }] }]);
++    using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(Effect.succeed(session));
++
++    yield* provideCli(
++      Command.runWith(threadCommand, { version: "0.0.0" })([
++        "native-catalog",
++        "--json",
++        "--base-dir",
++        baseDir,
++      ]),
++      "",
++    );
++
++    assert.deepStrictEqual(JSON.parse(yield* lastLoggedLine), {
++      tools: [entry],
++    });
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
+diff --git a/apps/server/src/cli/thread.test.ts b/apps/server/src/cli/thread.test.ts
+index f182f708c4..5ee86fcd68 100644
+--- a/apps/server/src/cli/thread.test.ts
++++ b/apps/server/src/cli/thread.test.ts
+@@ -90,6 +90,7 @@ it.effect(
+                 return Effect.die(`unexpected ${tool} call`);
+             }
+           },
++          listTools: () => Effect.die("unexpected tools/list call"),
+         }),
+       );
+
+diff --git a/apps/server/src/cli/thread.ts b/apps/server/src/cli/thread.ts
+index 80dfad018e..fa5d0cc504 100644
+--- a/apps/server/src/cli/thread.ts
++++ b/apps/server/src/cli/thread.ts
+@@ -139,6 +139,7 @@ const reportThreadErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+
+ const decodeFailureText = Schema.decodeUnknownOption(Schema.fromJsonString(OrchestratorMcpFailure));
+ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
++const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+ const printJson = (value: unknown) => Console.log(encodeJson(value));
+
+ const ToolResult = Schema.Struct({
+@@ -205,7 +206,7 @@ export type ThreadTools = ReturnType<typeof makeThreadTools>;
+  */
+ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E, R>(
+   flags: { readonly baseDir: Option.Option<string> },
+-  run: (tools: ThreadTools) => Effect.Effect<A, E, R>,
++  run: (tools: ThreadTools, session: McpToolSession) => Effect.Effect<A, E, R>,
+ ) {
+   const logLevel = yield* GlobalFlag.LogLevel;
+   const config = yield* resolveCliAuthConfig(flags, logLevel);
+@@ -233,7 +234,7 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
+       authorization: `Bearer ${issued.token}`,
+       clientName: "t3-thread-cli",
+     }).pipe(Effect.mapError((cause) => new ThreadServerUnreachableError({ origin, cause })));
+-    return yield* run(makeThreadTools(session, origin));
++    return yield* run(makeThreadTools(session, origin), session);
+   }).pipe(
+     Effect.scoped,
+     Effect.provide(
+@@ -765,6 +766,214 @@ const threadShowCommand = Command.make("show", {
+   ),
+ );
+
++/**
++ * `thread native` forwards one MCP tool call to the running server and prints
++ * its envelope verbatim. The allowlist is closed: secrets, auth, scheduling,
++ * projects, previews, and workspaces stay with their own owners.
++ */
++const NATIVE_TOOL_ALLOWLIST = [
++  "t3_environment_read",
++  "orchestrator_capabilities",
++  "t3_project_list",
++  "t3_thread_list",
++  "t3_thread_read",
++  "t3_thread_launch",
++  "t3_thread_send",
++  "t3_thread_wait",
++  "t3_thread_interrupt",
++  "t3_thread_configure",
++  "t3_thread_organize",
++  "t3_queue",
++  "t3_pending_request",
++] as const satisfies ReadonlyArray<string>;
++const nativeToolNames = new Set<string>(NATIVE_TOOL_ALLOWLIST);
++
++/** New runs through `native` name their provider explicitly; project defaults are never inherited. */
++const NATIVE_PROVIDER_INSTANCE = "capacity_fabric";
++const NATIVE_SELECTION_TOOLS = new Set(["t3_thread_launch", "t3_thread_configure"]);
++
++/** Room for the server's largest single argument (120 000 characters), and nothing more. */
++const NATIVE_ARGS_MAX_BYTES = 256 * 1024;
++
++const readNativeArguments = Effect.fn("cli.thread.readNativeArguments")(function* (tool: string) {
++  const stdio = yield* Stdio.Stdio;
++  const state = yield* stdio.stdin.pipe(
++    Stream.runFold(
++      () => ({ bytes: 0, chunks: [] as Array<Uint8Array>, overflow: false }),
++      (state, chunk) => {
++        if (state.overflow || state.bytes + chunk.byteLength > NATIVE_ARGS_MAX_BYTES) {
++          state.overflow = true;
++        } else {
++          state.chunks.push(chunk);
++          state.bytes += chunk.byteLength;
++        }
++        return state;
++      },
++    ),
++    Effect.mapError(
++      (cause) =>
++        new ThreadUsageError({
++          detail: `Could not read stdin: ${cause instanceof Error ? cause.message : String(cause)}`,
++        }),
++    ),
++  );
++  if (state.overflow) {
++    return yield* new ThreadUsageError({
++      detail: `'${tool}' arguments exceed the ${NATIVE_ARGS_MAX_BYTES}-byte stdin limit.`,
++    });
++  }
++  const parsed = Option.filter(
++    decodeJsonText(Buffer.concat(state.chunks).toString("utf8")),
++    (value): value is Record<string, unknown> =>
++      typeof value === "object" && value !== null && !Array.isArray(value),
++  );
++  if (Option.isNone(parsed)) {
++    return yield* new ThreadUsageError({
++      detail: `Pass '${tool}' arguments as one JSON object on stdin.`,
++    });
++  }
++  return parsed.value;
++});
++
++const guardNativeProviderSelection = Effect.fn("cli.thread.guardNativeProviderSelection")(
++  function* (tool: string, args: Record<string, unknown>) {
++    if (!NATIVE_SELECTION_TOOLS.has(tool)) return;
++    const selection = args.modelSelection;
++    if (selection === undefined) {
++      if (tool === "t3_thread_launch") {
++        return yield* new ThreadUsageError({
++          detail: `'t3_thread_launch' through 'thread native' needs modelSelection with instanceId '${NATIVE_PROVIDER_INSTANCE}'; a project default is never inherited here.`,
++        });
++      }
++      return;
++    }
++    const instanceId =
++      typeof selection === "object" &&
++      selection !== null &&
++      typeof (selection as { instanceId?: unknown }).instanceId === "string"
++        ? (selection as { instanceId: string }).instanceId
++        : undefined;
++    if (instanceId !== NATIVE_PROVIDER_INSTANCE) {
++      return yield* new ThreadUsageError({
++        detail: `'${tool}' through 'thread native' must select provider instance '${NATIVE_PROVIDER_INSTANCE}'.`,
++      });
++    }
++  },
++);
++
++const threadNativeCommand = Command.make("native", {
++  ...projectLocationFlags,
++  tool: Argument.String("tool").pipe(
++    Argument.withDescription(`Allowlisted tool name: one of ${NATIVE_TOOL_ALLOWLIST.join(", ")}.`),
++  ),
++  json: jsonFlag,
++}).pipe(
++  Command.withDescription(
++    "Call one allowlisted MCP tool with a JSON object from stdin, printing the server's original MCP envelope. One call, no retry.",
++  ),
++  Command.withHandler((flags) =>
++    Effect.gen(function* () {
++      if (!nativeToolNames.has(flags.tool)) {
++        return yield* new ThreadUsageError({
++          detail: `'${flags.tool}' is not allowlisted for 't3 thread native'. Allowed: ${NATIVE_TOOL_ALLOWLIST.join(", ")}.`,
++        });
++      }
++      const args = yield* readNativeArguments(flags.tool);
++      yield* guardNativeProviderSelection(flags.tool, args);
++      yield* withThreadTools(
++        flags,
++        Effect.fn("cli.thread.native")(function* (_tools, session) {
++          const envelope = yield* session
++            .call(flags.tool, args)
++            .pipe(
++              Effect.mapError(
++                (cause) => new ThreadToolFailedError({ tool: flags.tool, detail: cause.message }),
++              ),
++            );
++          yield* printJson(envelope);
++        }),
++      );
++    }).pipe(reportThreadErrors),
++  ),
++);
++
++/** A healthy server's catalog fits in one page far under these bounds. */
++const NATIVE_CATALOG_MAX_PAGES = 8;
++const NATIVE_CATALOG_MAX_TOOLS = 200;
++const NATIVE_CATALOG_MAX_BYTES = 2 * 1024 * 1024;
++
++const nativeCatalogEntry = (entry: unknown): Record<string, unknown> | null => {
++  if (typeof entry !== "object" || entry === null) return null;
++  const { name } = entry as { name?: unknown };
++  return typeof name === "string" && nativeToolNames.has(name)
++    ? (entry as Record<string, unknown>)
++    : null;
++};
++
++export const readNativeCatalog = Effect.fn("cli.thread.readNativeCatalog")(function* (
++  session: McpToolSession,
++) {
++  const catalogFailure = (detail: string) =>
++    new ThreadToolFailedError({ tool: "tools/list", detail });
++  const tools: Array<Record<string, unknown>> = [];
++  let seen = 0;
++  let bytes = 0;
++  let pages = 0;
++  let cursor: string | undefined;
++  while (true) {
++    if (pages >= NATIVE_CATALOG_MAX_PAGES) {
++      return yield* catalogFailure(`The catalog exceeded ${NATIVE_CATALOG_MAX_PAGES} pages.`);
++    }
++    const page = yield* session
++      .listTools(cursor === undefined ? {} : { cursor })
++      .pipe(
++        Effect.mapError(
++          (cause) => new ThreadToolFailedError({ tool: "tools/list", detail: cause.message }),
++        ),
++      );
++    if (
++      typeof page !== "object" ||
++      page === null ||
++      !Array.isArray((page as { tools?: unknown }).tools)
++    ) {
++      return yield* catalogFailure("The server sent a page that is not a tools/list result.");
++    }
++    pages += 1;
++    for (const entry of (page as { tools: ReadonlyArray<unknown> }).tools) {
++      seen += 1;
++      if (seen > NATIVE_CATALOG_MAX_TOOLS) {
++        return yield* catalogFailure(`The catalog exceeded ${NATIVE_CATALOG_MAX_TOOLS} tools.`);
++      }
++      const allowed = nativeCatalogEntry(entry);
++      if (allowed === null) continue;
++      bytes += encodeJson(allowed).length;
++      if (bytes > NATIVE_CATALOG_MAX_BYTES) {
++        return yield* catalogFailure(
++          `The allowlisted catalog exceeded ${NATIVE_CATALOG_MAX_BYTES} bytes.`,
++        );
++      }
++      tools.push(allowed);
++    }
++    const next = (page as { nextCursor?: unknown }).nextCursor;
++    if (typeof next !== "string") return tools;
++    cursor = next;
++  }
++});
++
++const threadNativeCatalogCommand = Command.make("native-catalog", {
++  ...projectLocationFlags,
++  json: jsonFlag,
++}).pipe(
++  Command.withDescription(
++    "Print the running server's tools/list schemas for the 't3 thread native' allowlist, verbatim. Read-only.",
++  ),
++  Command.withHandler((flags) =>
++    withThreadTools(flags, (_tools, session) =>
++      Effect.flatMap(readNativeCatalog(session), (tools) => printJson({ tools })),
++    ).pipe(reportThreadErrors),
++  ),
++);
++
+ export const threadCommand = Command.make("thread").pipe(
+   Command.withDescription("Start, message, and read threads on the running server."),
+   Command.withSubcommands([
+@@ -772,5 +981,7 @@ export const threadCommand = Command.make("thread").pipe(
+     threadStartCommand,
+     threadSendCommand,
+     threadShowCommand,
++    threadNativeCommand,
++    threadNativeCatalogCommand,
+   ]),
+ );
+diff --git a/apps/server/src/mcp/AcpMcpStdioBridge.test.ts b/apps/server/src/mcp/AcpMcpStdioBridge.test.ts
+index 3887a0368b..e207a3eb83 100644
+--- a/apps/server/src/mcp/AcpMcpStdioBridge.test.ts
++++ b/apps/server/src/mcp/AcpMcpStdioBridge.test.ts
+@@ -122,6 +122,49 @@ describe("AcpMcpStdioBridge", () => {
+     }),
+   );
+
++  it.effect("mcpToolSession exposes tools/list results and forwards the cursor", () =>
++    Effect.gen(function* () {
++      const requests: Array<string> = [];
++      const session = yield* mcpToolSession({
++        endpoint: "http://127.0.0.1:1/mcp",
++        authorization: "Bearer bridge-test",
++        clientName: "bridge-test",
++        fetchImplementation: async (_url, init) => {
++          const body = String(init?.body ?? "");
++          requests.push(body);
++          const message = JSON.parse(body) as { id?: string; method: string };
++          if (message.method === "notifications/initialized") {
++            return new Response(null, { status: 202 });
++          }
++          const result =
++            message.method === "initialize"
++              ? { protocolVersion: "2025-06-18" }
++              : {
++                  tools: [{ name: "t3_queue" }],
++                  nextCursor: message.id?.endsWith("2") ? undefined : "page-2",
++                };
++          return Response.json(
++            { jsonrpc: "2.0", id: message.id, result },
++            {
++              headers: { "mcp-session-id": "session-42" },
++            },
++          );
++        },
++      });
++
++      const first = yield* session.listTools();
++      const second = yield* session.listTools({ cursor: "page-2" });
++
++      expect(first).toEqual({ tools: [{ name: "t3_queue" }], nextCursor: "page-2" });
++      expect(second).toEqual({ tools: [{ name: "t3_queue" }] });
++      expect(JSON.parse(requests[2]!)).toMatchObject({ method: "tools/list", params: {} });
++      expect(JSON.parse(requests[3]!)).toMatchObject({
++        method: "tools/list",
++        params: { cursor: "page-2" },
++      });
++    }).pipe(Effect.scoped),
++  );
++
+   it.effect("acknowledges notifications silently and synthesizes errors for failed requests", () =>
+     Effect.gen(function* () {
+       let call = 0;
+diff --git a/apps/server/src/mcp/AcpMcpStdioBridge.ts b/apps/server/src/mcp/AcpMcpStdioBridge.ts
+index 485f85e183..719ab18920 100644
+--- a/apps/server/src/mcp/AcpMcpStdioBridge.ts
++++ b/apps/server/src/mcp/AcpMcpStdioBridge.ts
+@@ -71,6 +71,10 @@ export interface McpToolSession {
+     tool: string,
+     args: Readonly<Record<string, unknown>>,
+   ) => Effect.Effect<unknown, AcpMcpBridgeError>;
++  /** Resolves to the JSON-RPC `result` of `tools/list`, a `ListToolsResult`. */
++  readonly listTools: (params?: {
++    readonly cursor?: string;
++  }) => Effect.Effect<unknown, AcpMcpBridgeError>;
+ }
+
+ /**
+@@ -159,6 +163,8 @@ export const mcpToolSession = (
+         request("tools/call", { name: tool, arguments: args }).pipe(
+           Effect.map((envelope) => envelope.result),
+         ),
++      listTools: (params = {}) =>
++        request("tools/list", params).pipe(Effect.map((envelope) => envelope.result)),
+     } satisfies McpToolSession;
+   });
+ };

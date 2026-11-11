@@ -1,0 +1,36 @@
+name: Hermes vendor CONNECT proxy
+
+on:
+  push:
+    paths:
+      - 'ops/hermes_egress/**'
+      - '.github/workflows/hermes-egress-proxy.yml'
+  pull_request:
+    paths:
+      - 'ops/hermes_egress/**'
+      - '.github/workflows/hermes-egress-proxy.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-egress-proxy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proxy-static-and-squid-parse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify static role access matrix
+        run: python3 -m unittest discover -s ops/hermes_egress/tests -v
+      - name: Install distro Squid config parser (no proxy started)
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y squid
+      - name: Parse actual Squid ACL config without starting any listener
+        run: |
+          /usr/sbin/squid -k parse -f ops/hermes_egress/squid.conf

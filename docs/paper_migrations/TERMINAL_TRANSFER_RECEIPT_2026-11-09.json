@@ -1,0 +1,792 @@
+{
+  "schema": "mastermind.paper_transfer_receipt.v1",
+  "mission": "terminal-paper-reorganization-20261108-c4",
+  "status": "EXACT_HUMAN_GATE",
+  "source": {
+    "fileId": "01M3NSZGE8JWN2EZCSF0DT05RM",
+    "preserved": true,
+    "baselineCommit": "b116c6fb22091c989f80f420a013f5c81111c84f",
+    "baselinePath": "docs/paper_migrations/TERMINAL_BASELINE_2026-11-08.json",
+    "tokensHash": "55dd37b7",
+    "commentThreadsObserved": 0,
+    "untouchedDesignArtboards": true
+  },
+  "method": {
+    "carrier": "Signed-in Chrome native Paper copy/paste",
+    "order": [
+      "Copy all 83 native theme tokens to the empty destination first",
+      "Verify token name/type/value/description equality",
+      "Copy each complete source page's native canvas selection",
+      "Paste once into its exact empty destination page",
+      "Reconcile source/destination counts, artboard identity map, editable JSX structure/styles/tokens and visual render before ownership change"
+    ],
+    "rejectedPilot": "Theme-empty paste detached token bindings. All four owned pasted boards were undone; empty destination readback proved rollback before the corrected attempt.",
+    "normalizationRules": [
+      "Native node IDs and token IDs are mapped by preserved tree order and token names.",
+      "A uniform top-level canvas translation is permitted and separately checked; child geometry remains exact.",
+      "Legacy textValue -> exactly equivalent single-string native text block is permitted only when content and all other fields match. Personal Desk has 642 such conversions.",
+      "Explicit root height fit-content -> native default Fit is permitted only with preserved Fit intent and no other differences. Personal Desk has three such conversions; UI Fit and exported JSX root-only difference were verified.",
+      "All source and destination nodes must be reached by traversal; hierarchy/order, every remaining node field, used token definitions and image payloads must match. Unexplained differences block acceptance."
+    ]
+  },
+  "families": [
+    {
+      "key": "00",
+      "name": "Terminal · Start Here & Shared Shell",
+      "pageIds": [
+        "p-R-0",
+        "p-10-0",
+        "p-G-0",
+        "p-E-0",
+        "p-Z-0",
+        "p-1A-0",
+        "p-C-0"
+      ],
+      "destinationFileId": null,
+      "status": "PENDING"
+    },
+    {
+      "key": "01",
+      "name": "Terminal · Charts & Scripting",
+      "pageIds": [
+        "p-17-0",
+        "p-19-0",
+        "p-W-0",
+        "p-I-1",
+        "p-1E-0"
+      ],
+      "destinationFileId": null,
+      "status": "PENDING"
+    },
+    {
+      "key": "02",
+      "name": "Terminal · Company Research",
+      "pageIds": [
+        "p-11-0",
+        "p-S-0",
+        "p-1-0",
+        "p-9-1",
+        "p-A-1",
+        "p-B-1",
+        "p-F-0",
+        "p-1B-0",
+        "p-L-1",
+        "p-J-1",
+        "p-K-1",
+        "p-M-1"
+      ],
+      "destinationFileId": null,
+      "status": "PENDING"
+    },
+    {
+      "key": "03",
+      "name": "Terminal · Options Flow, Exposure & Volatility",
+      "pageIds": [
+        "p-16-0",
+        "p-14-0",
+        "p-12-0",
+        "p-V-0",
+        "p-U-0",
+        "p-D-0",
+        "p-H-0",
+        "p-T-0"
+      ],
+      "destinationFileId": null,
+      "status": "PENDING"
+    },
+    {
+      "key": "04",
+      "name": "Terminal · Options Planning & Review",
+      "pageIds": [
+        "p-15-0",
+        "p-13-0",
+        "p-3-1",
+        "p-4-1",
+        "p-5-1",
+        "p-6-1",
+        "p-7-1",
+        "p-2-0",
+        "p-P-1"
+      ],
+      "destinationFileId": null,
+      "status": "PENDING"
+    },
+    {
+      "key": "05",
+      "name": "Terminal · Heatmaps & Comparison",
+      "pageIds": [
+        "p-8-1",
+        "p-N-1",
+        "p-O-1",
+        "p-1D-0",
+        "p-1C-0"
+      ],
+      "destinationFileId": null,
+      "status": "PENDING"
+    },
+    {
+      "key": "06",
+      "name": "Terminal · Portfolio & Returns",
+      "pageIds": [
+        "p-X-0",
+        "p-Y-0",
+        "p-1F-0",
+        "p-Q-0"
+      ],
+      "destinationFileId": "01M6Z6PYK9BAV3ECXFC575JYT7",
+      "status": "TWO_OF_FOUR_PAGES_VERIFIED_OWNERSHIP_PENDING"
+    },
+    {
+      "key": "macro",
+      "name": "Existing Macro · Market Structure, Stages & Allocation",
+      "pageIds": [
+        "p-18-0"
+      ],
+      "existingFileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "destinationFileId": "01M6Y1NJ2SKGG89DZ13E4NVAE2",
+      "status": "PENDING"
+    }
+  ],
+  "pages": [
+    {
+      "sourcePageId": "p-R-0",
+      "sourcePageName": "00 · TERMINAL · Start Here · Product Directory",
+      "sourceNodeCount": 147,
+      "sourceArtboardCount": 2,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-1-0",
+      "sourcePageName": "Company Intelligence · 2026-09-20",
+      "sourceNodeCount": 5967,
+      "sourceArtboardCount": 35,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-1E-0",
+      "sourcePageName": "Proposed · Chart reader recovery",
+      "sourceNodeCount": 193,
+      "sourceArtboardCount": 1,
+      "familyKey": "01",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-1D-0",
+      "sourcePageName": "Proposed · Heatmap inspector refresh",
+      "sourceNodeCount": 326,
+      "sourceArtboardCount": 1,
+      "familyKey": "05",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-1C-0",
+      "sourcePageName": "Proposed · Historical benchmarks",
+      "sourceNodeCount": 225,
+      "sourceArtboardCount": 1,
+      "familyKey": "05",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-1B-0",
+      "sourcePageName": "Build · Clarity & company contracts",
+      "sourceNodeCount": 915,
+      "sourceArtboardCount": 1,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-1A-0",
+      "sourcePageName": "Archive · Original product geometry",
+      "sourceNodeCount": 913,
+      "sourceArtboardCount": 8,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-19-0",
+      "sourcePageName": "D06 · Build · Script interaction contracts",
+      "sourceNodeCount": 49,
+      "sourceArtboardCount": 1,
+      "familyKey": "01",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-18-0",
+      "sourcePageName": "D06 · Macro completion · Stages & S&P allocation",
+      "sourceNodeCount": 259,
+      "sourceArtboardCount": 3,
+      "familyKey": "macro",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-17-0",
+      "sourcePageName": "D06 · Terminal · Production workspace · R2",
+      "sourceNodeCount": 3719,
+      "sourceArtboardCount": 10,
+      "familyKey": "01",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-16-0",
+      "sourcePageName": "D08A · Options Overview & Flow · Candidate R1",
+      "sourceNodeCount": 1165,
+      "sourceArtboardCount": 10,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-15-0",
+      "sourcePageName": "00 · D08C · Read me & Build contract",
+      "sourceNodeCount": 247,
+      "sourceArtboardCount": 1,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-14-0",
+      "sourcePageName": "00 · Read me & Build contract · D08B",
+      "sourceNodeCount": 42,
+      "sourceArtboardCount": 1,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-13-0",
+      "sourcePageName": "10 · D08C · Plan, Compare & Review · Candidate R2",
+      "sourceNodeCount": 1262,
+      "sourceArtboardCount": 18,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-12-0",
+      "sourcePageName": "D08B · Exposure & Volatility · Candidate R1",
+      "sourceNodeCount": 2063,
+      "sourceArtboardCount": 17,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-11-0",
+      "sourcePageName": "00 · Read me & Build contract · D07 Company",
+      "sourceNodeCount": 689,
+      "sourceArtboardCount": 14,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-V-0",
+      "sourcePageName": "Options · Exposure Intelligence · R2 · 2026-10-20",
+      "sourceNodeCount": 5217,
+      "sourceArtboardCount": 15,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-U-0",
+      "sourcePageName": "Options · Rotation & Positioning · R1 · 2026-10-20",
+      "sourceNodeCount": 1212,
+      "sourceArtboardCount": 9,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-T-0",
+      "sourcePageName": "Options · Exposure Intelligence · TerraShade study · 2026-10-20",
+      "sourceNodeCount": 1753,
+      "sourceArtboardCount": 9,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-S-0",
+      "sourcePageName": "Company · Production Suite · R3",
+      "sourceNodeCount": 1652,
+      "sourceArtboardCount": 13,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-W-0",
+      "sourcePageName": "Terminal · Chart Context · R1 · 2026-10-18",
+      "sourceNodeCount": 1003,
+      "sourceArtboardCount": 2,
+      "familyKey": "01",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-X-0",
+      "sourcePageName": "Terminal Portfolio · Builder + Acceptance References",
+      "sourceNodeCount": 249,
+      "sourceArtboardCount": 4,
+      "familyKey": "06",
+      "destinationFileId": "01M6Z6PYK9BAV3ECXFC575JYT7",
+      "destinationPageId": "p-1-0",
+      "status": "TRANSFER_VERIFIED_OWNERSHIP_PENDING",
+      "proof": {
+        "sourcePageId": "p-X-0",
+        "destinationFileId": "01M6Z6PYK9BAV3ECXFC575JYT7",
+        "destinationPageId": "p-1-0",
+        "nodes": 249,
+        "artboards": 4,
+        "sourceTokensHash": "55dd37b7",
+        "destinationTokensHash": "42ded32c",
+        "tokenDefinitionCount": 83,
+        "tokenDefinitionsEqual": true,
+        "jsxAllFourIdenticalAfterNodeIdNormalization": true,
+        "worldTranslation": {
+          "x": -1520,
+          "y": 4
+        },
+        "artboardMap": [
+          {
+            "sourceId": "1L19-0",
+            "destinationId": "6X-1",
+            "name": "07 · Product blueprint · Source census & Market Ontology destination"
+          },
+          {
+            "sourceId": "1L4E-0",
+            "destinationId": "A2-1",
+            "name": "08 · States & interactions · Builder acceptance specimens"
+          },
+          {
+            "sourceId": "216F-0",
+            "destinationId": "CP-1",
+            "name": "09 · Current recovery references · 08 Nov 2026"
+          },
+          {
+            "sourceId": "26NL-0",
+            "destinationId": "DA-1",
+            "name": "10 · Portfolio object & comparison references"
+          }
+        ],
+        "method": "Native Paper Theme copy/paste, then native canvas copy/paste. Rejected theme-empty paste fully undone."
+      }
+    },
+    {
+      "sourcePageId": "p-Y-0",
+      "sourcePageName": "Terminal · Portfolio · Personal Desk · 2026-10-11",
+      "sourceNodeCount": 1615,
+      "sourceArtboardCount": 8,
+      "familyKey": "06",
+      "destinationFileId": "01M6Z6PYK9BAV3ECXFC575JYT7",
+      "destinationPageId": "p-2-0",
+      "status": "TRANSFER_VERIFIED_OWNERSHIP_PENDING",
+      "proof": {
+        "sourceNodeCount": 1615,
+        "destinationNodeCount": 1615,
+        "sourceArtboardCount": 8,
+        "destinationArtboardCount": 8,
+        "unexplainedNodeDifferences": 0,
+        "differenceSamples": [],
+        "plainTextSerializationUpgrades": 642,
+        "explicitFitToDefaultFit": 3,
+        "usedTokenDefinitionsEqual": true,
+        "imagePayloadsEqual": true,
+        "unreachedNodes": [
+          0,
+          0
+        ],
+        "uniformTranslation": [
+          -1520,
+          1
+        ],
+        "artboardMap": [
+          {
+            "sourceId": "1L71-0",
+            "destinationId": "DT-2",
+            "name": "01 · Portfolio Overview · Current-data redesign"
+          },
+          {
+            "sourceId": "1LE4-0",
+            "destinationId": "KW-2",
+            "name": "02 · Holdings · Record-level editing & coverage repair"
+          },
+          {
+            "sourceId": "1LLF-0",
+            "destinationId": "S7-2",
+            "name": "03 · Risk & exposure · Honest coverage, not empty widgets"
+          },
+          {
+            "sourceId": "1LQD-0",
+            "destinationId": "X5-2",
+            "name": "04 · Targets · Your allocation, never automated trade advice"
+          },
+          {
+            "sourceId": "1LVI-0",
+            "destinationId": "12A-2",
+            "name": "05 · Research · Market Ontology joined journey · FUTURE PREVIEW"
+          },
+          {
+            "sourceId": "1M0X-0",
+            "destinationId": "17P-2",
+            "name": "06 · Mobile · Portfolio overview · 390px"
+          },
+          {
+            "sourceId": "1ZET-0",
+            "destinationId": "1BM-2",
+            "name": "08 · Portfolio targets · Read, retention and removal · DESIGN"
+          },
+          {
+            "sourceId": "1Z0H-0",
+            "destinationId": "1EW-2",
+            "name": "07 · Portfolio · Record repair and recovery · DESIGN"
+          }
+        ],
+        "nodeMap": {
+          "1L71-0": "DT-2",
+          "1LE4-0": "KW-2",
+          "1LLF-0": "S7-2",
+          "1LQD-0": "X5-2",
+          "1LVI-0": "12A-2",
+          "1M0X-0": "17P-2",
+          "1ZET-0": "1BM-2",
+          "1Z0H-0": "1EW-2"
+        }
+      }
+    },
+    {
+      "sourcePageId": "p-1F-0",
+      "sourcePageName": "Proposed · Portfolio objects & comparison",
+      "sourceNodeCount": 459,
+      "sourceArtboardCount": 1,
+      "familyKey": "06",
+      "destinationFileId": "01M6Z6PYK9BAV3ECXFC575JYT7",
+      "destinationPageId": "p-3-0",
+      "status": "EMPTY_PAGE_CREATED"
+    },
+    {
+      "sourcePageId": "p-Z-0",
+      "sourcePageName": "Terminal · R3 Refraction · Top-edge only",
+      "sourceNodeCount": 386,
+      "sourceArtboardCount": 6,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-10-0",
+      "sourcePageName": "Terminal · Account & settings · 2026-10-11",
+      "sourceNodeCount": 288,
+      "sourceArtboardCount": 2,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-Q-0",
+      "sourcePageName": "Returns Calendar · Terminal + Stock Dossier",
+      "sourceNodeCount": 756,
+      "sourceArtboardCount": 11,
+      "familyKey": "06",
+      "destinationFileId": "01M6Z6PYK9BAV3ECXFC575JYT7",
+      "destinationPageId": "p-4-0",
+      "status": "EMPTY_PAGE_CREATED"
+    },
+    {
+      "sourcePageId": "p-P-1",
+      "sourcePageName": "Options · Build Contracts + Source Proof · Reference",
+      "sourceNodeCount": 987,
+      "sourceArtboardCount": 12,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-O-1",
+      "sourcePageName": "Market Heatmaps · Saved Views + Recovery · R7–R8",
+      "sourceNodeCount": 837,
+      "sourceArtboardCount": 14,
+      "familyKey": "05",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-N-1",
+      "sourcePageName": "Market Heatmaps · Mobile Atlas + Comparison · R6",
+      "sourceNodeCount": 712,
+      "sourceArtboardCount": 8,
+      "familyKey": "05",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-M-1",
+      "sourcePageName": "Company R2 · Chinese Mobile + 320px Variants",
+      "sourceNodeCount": 3433,
+      "sourceArtboardCount": 18,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-L-1",
+      "sourcePageName": "Company R2 · C01 Source, Lineage + Evidence States",
+      "sourceNodeCount": 3308,
+      "sourceArtboardCount": 14,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-K-1",
+      "sourcePageName": "Company R2 · Tablet Brief + Evidence Variants",
+      "sourceNodeCount": 1763,
+      "sourceArtboardCount": 10,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-J-1",
+      "sourcePageName": "Company R2 · Mobile + Narrow-Screen Variants",
+      "sourceNodeCount": 3835,
+      "sourceArtboardCount": 34,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-I-1",
+      "sourcePageName": "Terminal · Intelligence Workspace · 2026-10",
+      "sourceNodeCount": 2483,
+      "sourceArtboardCount": 15,
+      "familyKey": "01",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-H-0",
+      "sourcePageName": "13 · Options · 3D Research Lab",
+      "sourceNodeCount": 1049,
+      "sourceArtboardCount": 7,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-G-0",
+      "sourcePageName": "12 · SOURCE ONLY · Terminal Live Baselines",
+      "sourceNodeCount": 1658,
+      "sourceArtboardCount": 3,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-F-0",
+      "sourcePageName": "11 · Company · Earnings + Dossiers · North Star Study",
+      "sourceNodeCount": 698,
+      "sourceArtboardCount": 5,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-E-0",
+      "sourcePageName": "10 · Retained Shared Shell · Stocks + Setups",
+      "sourceNodeCount": 942,
+      "sourceArtboardCount": 8,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-D-0",
+      "sourcePageName": "09 · Options · Volatility Lab",
+      "sourceNodeCount": 573,
+      "sourceArtboardCount": 9,
+      "familyKey": "03",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-C-0",
+      "sourcePageName": "ARCHIVE · Company Intelligence · Superseded",
+      "sourceNodeCount": 577,
+      "sourceArtboardCount": 9,
+      "familyKey": "00",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-B-1",
+      "sourcePageName": "08 · Company · Financials, Market + Ownership",
+      "sourceNodeCount": 2407,
+      "sourceArtboardCount": 11,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-A-1",
+      "sourcePageName": "07 · Company · Research, Results + Sources",
+      "sourceNodeCount": 4715,
+      "sourceArtboardCount": 15,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-9-1",
+      "sourcePageName": "06 · Company · Navigation + Interaction",
+      "sourceNodeCount": 4641,
+      "sourceArtboardCount": 14,
+      "familyKey": "02",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-7-1",
+      "sourcePageName": "05 · Options · Compare",
+      "sourceNodeCount": 421,
+      "sourceArtboardCount": 4,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-6-1",
+      "sourcePageName": "04 · Options · Scenarios + Assumptions",
+      "sourceNodeCount": 1421,
+      "sourceArtboardCount": 20,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-5-1",
+      "sourcePageName": "03 · Options · Review",
+      "sourceNodeCount": 1894,
+      "sourceArtboardCount": 20,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-4-1",
+      "sourcePageName": "02 · Options · Save + Watch",
+      "sourceNodeCount": 1244,
+      "sourceArtboardCount": 15,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-3-1",
+      "sourcePageName": "01 · Options · Plan",
+      "sourceNodeCount": 2443,
+      "sourceArtboardCount": 12,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-2-0",
+      "sourcePageName": "Terminal · Options Structure Intelligence · R1 · 2026-09-27",
+      "sourceNodeCount": 4971,
+      "sourceArtboardCount": 24,
+      "familyKey": "04",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    },
+    {
+      "sourcePageId": "p-8-1",
+      "sourcePageName": "Market Heatmaps · Unified Workspace · 2026-09-29",
+      "sourceNodeCount": 4746,
+      "sourceArtboardCount": 16,
+      "familyKey": "05",
+      "destinationFileId": null,
+      "destinationPageId": null,
+      "status": "PENDING"
+    }
+  ],
+  "ownership": "Original source remains working location until each complete family is verified and existing directories switch its route.",
+  "holds": "Migration acceptance does not change design/release status. Original held targets and historical evidence remain on their original carrier.",
+  "nextAction": "After the user clears the Chrome extension UI, re-copy original p-1F-0 freshly and paste once into existing empty Portfolio p-3-0, then verify all native nodes and tokens. Continue p-Q-0 -> p-4-0 and complete Portfolio routing before other families. Do not assume the current clipboard or source tab identifies the next page.",
+  "verifiedAt": "2026-11-09 04:34:48 UTC",
+  "blocker": {
+    "kind": "BROWSER_EXTENSION_UI_INTERLOCK",
+    "surface": "Selected Chrome Browser session, Paper destination tab",
+    "observed": "Page-control calls report that another extension UI is open. Repeated bounded read-only diagnosis confirmed the interlock; browser metadata reads still work.",
+    "requiredUserAction": "Dismiss the other extension popup or side panel in Chrome and return control to the Paper page.",
+    "effectReconciliation": "Objects destination p-3-0 and Returns p-4-0 are empty (1 root, 0 artboards). No uncertain paste remains. Source original is preserved."
+  },
+  "currentOwnership": "All 51 pages still route to the original Terminal working source; destination copies remain staging until full-family proof and navigation cutover.",
+  "provenTotals": {
+    "verifiedSourcePages": 2,
+    "verifiedArtboards": 12,
+    "verifiedNodesIncludingPageRoots": 1864,
+    "emptyStagingPages": 2,
+    "completedFamilyCutovers": 0
+  }
+}

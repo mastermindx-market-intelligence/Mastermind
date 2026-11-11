@@ -1,0 +1,911 @@
+#!/usr/bin/env python3
+"""mmtask — pinned task list for a Codex continuity harness = LOCAL WRITE-AHEAD BUFFER over Agent OS.
+
+Canonical records are Agent OS (macro repo agentos/): the workstream objective, its waves[], decisions
+(DEC-*.md) and handoffs (agentos.handoff.v1). TASKS.json buffers fine-grained task state between Agent OS
+publications. `mmtask import` refreshes from Agent OS; `mmtask export` prepares a handoff + wave edits for a
+Macro PR. It never opens PRs or pushes.
+
+Harness dir: --dir DIR | --slug SLUG | $MM_CHARTER | ./.mm-charter
+Task ids: P<wave#>.T<task#>[.S<sub#>]. P# follows the order of the workstream's waves[] (locally proposed
+waves are appended). Statuses (#1700 labels): proposed ready blocked in_progress implementation_complete
+reviewed accepted superseded. Nothing is deleted; 'drop' = superseded with reason 'DROPPED: …'.
+
+Commands:
+  add "title" --wave <wave-id|P#> [--parent P1.T2] [--deps a,b] [--accept "check"]... [--ready] [--id X]
+  ready|start|unblock ID         start refuses a 2nd in_progress unless --parallel
+  done ID --evidence E           -> implementation_complete      review ID --evidence E -> reviewed
+  accept ID --evidence E         -> accepted                     block ID --reason R
+  supersede ID --by A[,B] --reason R      drop ID --reason R      edit ID [...]   note ID "text"
+  list [--all] [--json] | next [--explain] | show ID | render | waves
+                                          next is read-only; when no task is eligible, show recovery candidates.
+                                          --explain also shows gaps alongside eligible tasks; candidates grant no permission.
+  import [--mirror DIR] [--no-fetch] [--tasks FILE] [--allow-live]
+                                          MERGE refresh from Agent OS: never replaces/deletes local tasks or waves; a
+                                          missing record keeps live work; --tasks merges foreign rows (local wins,
+                                          superseded ids never recreated, new rows refused while another session wrote
+                                          in the last MM_LIVE_WRITER_WINDOW_S=900s unless --allow-live)
+  export [--dry-run] [--ended-because E] [--session S] [--mission M]
+                                          prepare export/ handoff + WS wave patch, validate; last_export advances ONLY on
+                                          validate rc=0; verified = all accepted/reviewed evidence not yet in a canonical
+                                          handoff. PREPARED ONLY, never published.
+  export-state [--recompute [--reason R]] show export history / reset last_export to the last validated export (or unset)
+  rebind [SLUG] --from WS:X --to WS:Y --reason R   move the binding to an EXISTING Agent OS record; preserves all
+                                          task ids/status/history/evidence; merge-imports the target; logs PROGRESS+DECISIONS
+  rebind [SLUG] --from null --to WS:Y --reason R
+                                          NULL-BINDING INITIALIZATION of a buffer whose TASKS.json has workstream:null.
+                                          Binds to an EXISTING record and qualifies only unbound (null) or same-canonical bare
+                                          (e.g. MARKET-OS for WS:MARKET-OS) task/wave associations, with appended history.
+                                          Tasks without a workstream key (legacy v1 rows) are left byte-for-byte untouched
+                                          and inherit the binding. Refuses without writing: already bound to another key,
+                                          any unrelated task/wave workstream, missing target. Re-running when already bound
+                                          to the same target is a no-op (rc 0).
+  rebind [SLUG] --from 'WS:<unknown>'|'WS:<KEY>' --to WS:Y --reason R
+                                          Explicit placeholder recovery for a pristine seed only: zero tasks/waves,
+                                          no related bindings/history/import/export. Retains the original seed in binding_history.
+"""
+import argparse, datetime, difflib, fcntl, glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
+
+SCHEMA_VERSION = "2.0.0"
+STATUSES = ["proposed", "ready", "blocked", "in_progress", "implementation_complete", "reviewed", "accepted", "superseded"]
+CLOSED = {"accepted", "superseded"}
+DEP_OK = {"implementation_complete", "reviewed", "accepted", "superseded"}
+# v1 'done' is retained historical completion, not a new acceptance verdict.
+DEPENDENCY_COMPLETE = DEP_OK | {"done"}
+PLACEHOLDER_BINDINGS = {"WS:<unknown>", "WS:<KEY>"}
+OPEN = {"proposed", "ready", "blocked", "in_progress"}
+MIRROR = os.path.expanduser(os.environ.get("MM_AGENTOS_MIRROR", "~/gwcap/agentos-mirror/macro"))
+WAVE_FROM_TASKS = {"accepted": "done", "superseded": "dropped"}
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def session():
+    t = os.environ.get("CODEX_THREAD_ID")
+    return f"codex:{t}" if t else os.environ.get("MM_SESSION", "manual")
+
+
+def resolve(a):
+    d = a.dir or (os.path.expanduser(f"~/gwcap/project-charters/{a.slug}") if a.slug else None) \
+        or os.environ.get("MM_CHARTER") or (os.path.realpath(".mm-charter") if os.path.exists(".mm-charter") else None)
+    if not d:
+        sys.exit("mmtask: no harness dir (use --dir/--slug, set MM_CHARTER, or run where .mm-charter exists)")
+    d = os.path.expanduser(d)
+    if not os.path.isdir(d):
+        sys.exit(f"mmtask: harness dir not found: {d}")
+    return d
+
+
+def read(p):
+    try:
+        return open(p, encoding="utf-8").read()
+    except OSError:
+        return ""
+
+
+def load(d):
+    p = os.path.join(d, "TASKS.json")
+    if os.path.exists(p):
+        db = json.load(open(p, encoding="utf-8"))
+    else:
+        db = {"tasks": []}
+    db.setdefault("schema", "mm.harness.tasks"); db.setdefault("schema_version", SCHEMA_VERSION)
+    db.setdefault("project", os.path.basename(d)); db.setdefault("waves", []); db.setdefault("agentos", {})
+    if "workstream" not in db:
+        m = re.search(r"^- workstream:\s*(WS:[A-Z0-9-]+)", read(os.path.join(d, "NORTH_STAR.md")), re.M)
+        db["workstream"] = m.group(1) if m else None
+    return db
+
+
+def atomic_write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp-", suffix=os.path.basename(path))
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text); fh.flush(); os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def ws_keys(db):
+    ks = [db.get("workstream")] + list(db.get("related_workstreams") or [])
+    return [k for k in ks if k]
+
+
+def wave_of(db, ref):
+    for w in db["waves"]:
+        if ref in (w["p"], w["id"], f"{w.get('workstream')}#{w['id']}"):
+            return w
+    return None
+
+
+def derived_wave_status(db, w):
+    ts = [t for t in db["tasks"] if t.get("wave") == w["id"] and t.get("workstream", db.get("workstream")) == w.get("workstream")]
+    if not ts:
+        return None
+    sts = {t["status"] for t in ts}
+    if sts <= {"superseded"}:
+        return "dropped"
+    if sts <= {"accepted", "superseded"}:
+        return "done"
+    if sts & {"in_progress", "implementation_complete", "reviewed", "blocked"} or "accepted" in sts:
+        return "in_progress"
+    return "todo"
+
+
+def dependency_satisfied(db, task, dependency):
+    if not dependency:
+        return False
+    if dependency.get("status") in DEP_OK:
+        return True
+    # The new v1 compatibility must not qualify a foreign completed row as our prerequisite.
+    return (dependency.get("status") == "done"
+            and dependency.get("workstream", db.get("workstream")) == task.get("workstream", db.get("workstream")))
+
+
+def next_tasks(db, exclude_ip=False):
+    by = {t["id"]: t for t in db["tasks"]}
+    ip = [] if exclude_ip else [t for t in db["tasks"] if t["status"] == "in_progress"]
+    ok0 = lambda t: all(dependency_satisfied(db, t, by.get(x)) for x in t.get("depends_on") or [])
+    has_open_kids = lambda t: any(c.get("parent") == t["id"] and not dependency_satisfied(db, t, c) for c in db["tasks"])
+    ok = lambda t: ok0(t) and not has_open_kids(t)
+    ready = [t for t in db["tasks"] if t["status"] == "ready" and ok(t)]
+    prop = [t for t in db["tasks"] if t["status"] == "proposed" and ok(t)]
+    return ip + ready + prop
+
+
+def compact(value, limit=180):
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def recovery_scope_issues(db, task):
+    issues = []
+    ws = task.get("workstream", db.get("workstream"))
+    if ws and ws not in ws_keys(db):
+        issues.append(f"FOREIGN_WORKSTREAM {compact(ws, 80)}: reconcile original scope; no automatic adoption")
+    matches = [w for w in db["waves"] if w.get("id") == task.get("wave") and w.get("workstream", db.get("workstream")) == ws]
+    if len(matches) != 1:
+        issues.append(f"UNMAPPED_WAVE {compact(task.get('wave') or '(missing)', 80)}: recover the original wave mapping")
+    return issues
+
+
+def next_recovery(db, directory):
+    """Explain existing evidence gaps without promoting candidates or changing the buffer."""
+    out = ["RECOVERY CANDIDATES — not execution permission; verify source, custody, holds and effects first."]
+    tasks, waves = db["tasks"], db["waves"]
+    by = {t["id"]: t for t in tasks}
+    if not tasks:
+        out.append("- EMPTY_BUFFER: recover the objective/current action from Agent OS and STATE.md; import the existing record, then pin the breakdown before executing.")
+    if not db.get("workstream"):
+        out.append("- UNBOUND_BUFFER: read NORTH_STAR.md, STATE.md and the existing Agent OS record; qualify its identity before using `mmtask rebind --from null --to WS:KEY --reason …`. Do not invent a binding.")
+    elif db.get("workstream") in PLACEHOLDER_BINDINGS:
+        out.append(f"- PLACEHOLDER_BINDING {db['workstream']}: recover the canonical Agent OS identity; only a pristine empty seed supports explicit `mmtask rebind --from '{db['workstream']}' --to WS:KEY --reason …`. Populated seeds require source reconciliation.")
+    if not read(os.path.join(directory, "HANDOFF.md")).strip():
+        out.append("- BLANK_HANDOFF: HANDOFF.md is missing or blank; recover the latest canonical handoff and STATE.md before restoring the local handoff. Absence is not completion.")
+
+    selected = {t["id"] for t in next_tasks(db)}
+    for t in [t for t in tasks if t["id"] in selected][:5]:
+        issues = recovery_scope_issues(db, t)
+        if issues:
+            out.append(f"- SELECTOR_WARNING {t['id']} ({t.get('status')}): " + "; ".join(issues) + ". Legacy selection is not qualified readiness or permission.")
+    closed = CLOSED | {"done"}
+    actions = {
+        "todo": "legacy todo: reconcile the original task/wave and dependencies before any explicit ready/start; do not auto-dispatch",
+        "implementation_complete": "consume existing evidence and finish the applicable verification/acceptance boundary; do not redo implementation",
+        "reviewed": "consume existing evidence and resolve remaining acceptance/release obligations; review alone is not mission completion",
+        "blocked": "preserve the exact blocker/refusal/unknown effect; resolve its permitted next step or continue an independent lane",
+    }
+    candidates = [t for t in tasks if t["id"] not in selected and t.get("status") not in closed]
+    for t in candidates[:8]:
+        issues = []
+        for dep in t.get("depends_on") or []:
+            status = by.get(dep, {}).get("status")
+            if not dependency_satisfied(db, t, by.get(dep)):
+                detail = ("done (FOREIGN_DEPENDENCY: reconcile original scope)" if status == "done" else status)
+                issues.append(f"dependency {dep}: {detail or 'UNMAPPED_DEPENDENCY (reconcile original source)'}")
+        issues.extend(recovery_scope_issues(db, t))
+        if t.get("reason"):
+            issues.append("recorded reason: " + compact(t["reason"]))
+        kids = [c["id"] for c in tasks if c.get("parent") == t["id"] and not dependency_satisfied(db, t, c)]
+        if kids:
+            issues.append("unfinished children: " + compact(", ".join(kids)))
+        action = actions.get(t.get("status"), "reconcile the recorded status/dependencies and existing source before selecting work")
+        out.append(f"- {t['id']} ({t.get('status')}): {compact(t.get('title'), 90)} — {action}" + ("; " + compact("; ".join(issues), 500) if issues else ""))
+    if len(candidates) > 8:
+        out.append(f"- {len(candidates) - 8} more unfinished rows; inspect `mmtask list --all --json` and `mmtask show ID`.")
+
+    # A canonical wave can carry the next action even when its local task mapping is absent.
+    wave_candidates = [w for w in waves if w.get("status") not in {"done", "dropped", "accepted", "superseded", "complete", "completed"}
+                       and not any(t.get("wave") == w.get("id") and t.get("workstream", db.get("workstream")) == w.get("workstream", db.get("workstream"))
+                                   and t.get("status") not in closed for t in tasks)]
+    for w in wave_candidates[:5]:
+        deps = compact(", ".join(str(x) for x in w.get("depends_on") or []) or "none recorded")
+        action = w.get("next_action") or "read the existing canonical wave/handoff and pin its remaining task breakdown"
+        out.append(f"- UNMAPPED_WAVE {w.get('p', '?')}={w.get('id')} ({w.get('status')}): {compact(action)}; wave dependencies: {deps}. Reconcile source scope and dependencies before execution.")
+    if len(wave_candidates) > 5:
+        out.append(f"- {len(wave_candidates) - 5} more unmapped unfinished waves; inspect `mmtask waves`.")
+    if not candidates and not wave_candidates and tasks and not selected:
+        out.append("- No eligible task and no unfinished buffered task/wave; verify the actual mission outcome against Agent OS/STATE.md. Preserve closed work; do not infer full completion or reopen accepted work.")
+    return out
+
+
+def render(db):
+    t = db["tasks"]
+    cnt = {s: sum(1 for x in t if x["status"] == s) for s in STATUSES}
+    ao = db.get("agentos") or {}
+    out = [f"<!-- schema: mm.harness.tasks_view v{db['schema_version']} (generated from TASKS.json; buffer over Agent OS) -->",
+           f"# Tasks — {db.get('project','')}  (VIEW of TASKS.json — edit with `mmtask`, never by hand)", "",
+           f"- canonical workstream: **{db.get('workstream') or '(pending record)'}**" +
+           (f"  related: {', '.join(db.get('related_workstreams') or [])}" if db.get("related_workstreams") else ""),
+           f"- Agent OS import: macro@{(ao.get('source_sha') or '-')[:10]} at {ao.get('imported_at') or 'never'}; last export: {ao.get('last_export') or 'never'}",
+           f"- updated: {db.get('updated')}  by: {db.get('updated_by','')}",
+           "- counts: " + ", ".join(f"{s} {cnt[s]}" for s in STATUSES if cnt[s]), ""]
+    out.append("## In progress (pinned)")
+    out += [f"- **{x['id']}** [{x.get('wave')}] {x['title']}" for x in t if x["status"] == "in_progress"] or ["- (none)"]
+    out += ["", "## Next up"]
+    out += [f"- {x['id']} ({x['status']}) [{x.get('wave')}] {x['title']}" for x in next_tasks(db, True)[:4]] or ["- (none ready)"]
+    out += ["", "## Waves (Agent OS waves[] + local proposals)", "| P# | workstream | wave | AO status | derived | title | next_action |", "|---|---|---|---|---|---|---|"]
+    cell = lambda s: str(s or "").replace("|", "\\|").replace("\n", " ")
+    for w in db["waves"]:
+        out.append(f"| {w['p']} | {w.get('workstream','')} | {w['id']}{' *(local proposal)*' if w.get('source') == 'local-proposed' else ''} | "
+                   f"{w.get('status','')} | {derived_wave_status(db, w) or '-'} | {cell(w.get('title'))} | {cell((w.get('next_action') or '')[:140])} |")
+    out += ["", "## All tasks", "| id | wave | status | title | deps | acceptance | evidence / reason |", "|---|---|---|---|---|---|---|"]
+    mark = {"accepted": "✅", "reviewed": "☑", "implementation_complete": "◑", "in_progress": "▶", "blocked": "⛔",
+            "superseded": "↪", "ready": "○", "proposed": "☐"}
+    for x in t:
+        ev = x.get("evidence") or ""
+        if x["status"] == "superseded":
+            ev = f"→ {', '.join(x.get('superseded_by') or []) or '-'}: {x.get('reason','')}"
+        elif x["status"] == "blocked":
+            ev = x.get("reason", "")
+        ind = "&nbsp;&nbsp;" * x["id"].count(".S")
+        out.append(f"| {ind}{x['id']} | {x.get('wave') or ''} | {mark.get(x['status'],'')} {x['status']} | {cell(x['title'])} | "
+                   f"{','.join(x.get('depends_on') or [])} | {cell('; '.join(x.get('acceptance') or []))} | {cell(ev)} |")
+    return "\n".join(out) + "\n"
+
+
+def progress(d, task, kind, note):
+    line = f"{now()} {session()} {task['id']} {kind} [{task.get('wave')}] {' '.join(str(note).split())}"
+    with open(os.path.join(d, "PROGRESS.log"), "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+
+
+def get(db, tid):
+    for x in db["tasks"]:
+        if x["id"] == tid or tid in (x.get("aliases") or []):
+            return x
+    sys.exit(f"mmtask: no task {tid}")
+
+
+def hist(x, ev, note=""):
+    x.setdefault("history", []).append({"at": now(), "by": session(), "event": ev, **({"note": note} if note else {})})
+    x["updated"] = now()
+
+
+def new_id(db, wave, parent):
+    if parent:
+        base = parent + ".S"; n = max([int(t["id"][len(base):]) for t in db["tasks"] if t["id"].startswith(base) and t["id"][len(base):].isdigit()] or [0])
+        return f"{base}{n + 1}"
+    base = wave["p"] + ".T"
+    n = max([int(t["id"][len(base):].split(".")[0]) for t in db["tasks"] if t["id"].startswith(base)] or [0])
+    return f"{base}{n + 1}"
+
+
+# ------------------------------------------------------------------ Agent OS bridge
+def agentos_mod(mirror):
+    sys.path.insert(0, os.path.join(mirror, "scripts"))
+    import agentos  # noqa
+    return agentos
+
+
+def mirror_refresh(mirror, fetch=True):
+    if fetch and os.path.isdir(os.path.join(mirror, ".git")):
+        subprocess.run(["git", "-C", mirror, "pull", "-q", "--ff-only", "--depth", "1"], capture_output=True, timeout=180)
+    r = subprocess.run(["git", "-C", mirror, "rev-parse", "HEAD"], capture_output=True, text=True)
+    return r.stdout.strip() or None
+
+
+LIVE_WINDOW_S = int(os.environ.get("MM_LIVE_WRITER_WINDOW_S", "900"))
+V1_STATUS = {"todo": "ready", "doing": "in_progress", "active": "in_progress", "done": "implementation_complete", "dropped": "superseded"}
+
+
+def _age_s(at):
+    try:
+        t = datetime.datetime.strptime(str(at)[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - t).total_seconds()
+
+
+def live_writer(db):
+    """Most recent write by a session other than this one, if within LIVE_WINDOW_S (current-writer protection)."""
+    me, best = session(), None
+    cands = [(db.get("updated"), db.get("updated_by"))] + [(h.get("at"), h.get("by")) for t in db["tasks"] for h in t.get("history") or []]
+    for at, by in cands:
+        if not at or not by or by == me:
+            continue
+        age = _age_s(at)
+        if age is not None and age < LIVE_WINDOW_S and (best is None or at > best["at"]):
+            best = {"by": by, "at": at, "age_s": int(age)}
+    return best
+
+
+def merge_tasks(db, incoming, src, live, allow_live):
+    """Merge foreign task rows into the local buffer. Local always wins: ids, statuses, evidence and history are never
+    replaced or removed. Unknown ids are appended; ids that are already superseded/aliased locally are never recreated."""
+    by = {t["id"]: t for t in db["tasks"]}
+    known = set(by)
+    for t in db["tasks"]:
+        known |= set(t.get("aliases") or []) | set(t.get("supersedes") or [])
+    rep = {"kept_local": [], "added": [], "skipped_known": [], "refused_live": []}
+    for it in incoming:
+        iid = it.get("id")
+        if not iid:
+            continue
+        if iid in by:
+            loc = by[iid]
+            seen = {(h.get("at"), h.get("event"), h.get("by")) for h in loc.get("history") or []}
+            extra = [h for h in it.get("history") or [] if (h.get("at"), h.get("event"), h.get("by")) not in seen]
+            if extra:
+                loc["history"] = sorted((loc.get("history") or []) + extra, key=lambda h: str(h.get("at") or ""))
+            for n in it.get("notes") or []:
+                if n not in (loc.get("notes") or []):
+                    loc.setdefault("notes", []).append(n)
+            for c in it.get("acceptance") or []:
+                if c not in (loc.get("acceptance") or []):
+                    loc["acceptance"] = (loc.get("acceptance") or []) + [c]
+            if not loc.get("evidence") and it.get("evidence"):
+                loc["evidence"] = it["evidence"]
+            rep["kept_local"].append(iid)
+        elif iid in known:
+            rep["skipped_known"].append(iid)
+        elif live and not allow_live:
+            rep["refused_live"].append(iid)
+        else:
+            x = json.loads(json.dumps(it))
+            st = V1_STATUS.get(x.get("status"), x.get("status"))
+            if st not in STATUSES:
+                st = "proposed"
+            x["status"] = st
+            w = wave_of(db, x.get("wave") or "") or wave_of(db, "codex-session-plan")
+            if not w:
+                p = f"P{max([int(w2['p'][1:]) for w2 in db['waves'] if w2['p'][1:].isdigit()] or [0]) + 1}"
+                w = {"p": p, "workstream": db.get("workstream"), "id": "codex-session-plan", "title": "Codex Meta-CEO session plan (merged by mmtask import)",
+                     "status": "todo", "pr": None, "depends_on": [], "next_action": None, "source": "local-proposed", "proposed_at": now(), "proposed_by": session()}
+                db["waves"].append(w)
+            x["wave"] = w["id"]; x["workstream"] = w.get("workstream")
+            for k, v in (("kind", "task"), ("depends_on", []), ("acceptance", []), ("superseded_by", []), ("notes", []), ("evidence", None), ("reason", None)):
+                x.setdefault(k, v)
+            hist(x, "import-merge", f"merged from {src}")
+            db["tasks"].append(x); by[x["id"]] = x; known.add(x["id"])
+            rep["added"].append(x["id"])
+    return rep
+
+
+def do_import(d, db, mirror, fetch, tasks_file=None, allow_live=False):
+    """MERGE import. Refreshes waves/objective from Agent OS without ever replacing or deleting local tasks or waves.
+    A missing (exists=false) source record keeps all local work and the last known canonical fields."""
+    sha = mirror_refresh(mirror, fetch)
+    ao = agentos_mod(mirror)
+    from pathlib import Path
+    imported, objectives = [], {}
+    existing = {(w.get("workstream"), w["id"]): w for w in db["waves"]}
+    used = {w["p"] for w in db["waves"]}
+    seen = set()
+
+    def free_p():
+        n = max([int(x[1:]) for x in used if x[1:].isdigit()] or [0]) + 1
+        used.add(f"P{n}"); return f"P{n}"
+    for key in ws_keys(db):
+        k = key.split(":", 1)[1]
+        rel = f"agentos/workstreams/WS-{k}.md"
+        p = Path(mirror) / rel
+        if not p.exists():
+            objectives[key] = None; imported.append({"workstream": key, "record": rel, "exists": False}); continue
+        fm, _ = ao.parse_record(p)
+        objectives[key] = fm
+        imported.append({"workstream": key, "record": rel, "exists": True, "status": fm.get("status"), "waves": len(fm.get("waves") or [])})
+        for w in fm.get("waves") or []:
+            seen.add((key, w["id"]))
+            canon = {"title": w.get("title"), "status": w.get("status"), "pr": w.get("pr"), "depends_on": w.get("depends_on") or [],
+                     "next_action": w.get("next_action"), "source": "agentos"}
+            old = existing.get((key, w["id"]))
+            if old is not None:
+                if old.get("source") == "local-proposed":
+                    old["adopted_at"] = now()  # local proposal now exists canonically
+                old.update(canon); old.pop("note", None)
+            else:
+                db["waves"].append({"p": free_p(), "workstream": key, "id": w["id"], **canon})
+    present = {r["workstream"] for r in imported if r["exists"]}
+    for (key, wid), w in existing.items():  # local proposals / vanished waves are retained, never deleted
+        if w.get("source") == "agentos" and (key, wid) not in seen and key in present:
+            w["source"] = "agentos-missing"; w["note"] = f"not in Agent OS record at {sha}"
+    rep = None
+    if tasks_file:
+        inc = json.load(open(os.path.expanduser(tasks_file), encoding="utf-8"))
+        inc = inc.get("tasks", []) if isinstance(inc, dict) else inc
+        rep = merge_tasks(db, inc, os.path.basename(tasks_file), live_writer(db), allow_live)
+    prim = objectives.get(db.get("workstream"))
+    hand = sorted(glob.glob(os.path.join(mirror, "agentos/handoffs", f"{(db.get('workstream') or 'X:NONE').split(':')[1]}-*.md")) +
+                  glob.glob(os.path.join(mirror, "agentos/handoffs", f"WS-{(db.get('workstream') or 'X:NONE').split(':')[1]}-*.md")))
+    db["agentos"].update({"mirror": mirror, "source_sha": sha, "imported_at": now(), "records": imported,
+                          "latest_handoff": os.path.relpath(hand[-1], mirror) if hand else db["agentos"].get("latest_handoff")})
+    if prim:
+        db["agentos"].update({"objective": prim.get("objective"), "ws_status": prim.get("status"), "next_action": prim.get("next_action"),
+                              "owner": prim.get("owner"), "program": prim.get("program"), "decisions": prim.get("decisions") or [],
+                              "do_not_redo": prim.get("do_not_redo") or [], "landmines": prim.get("landmines") or [],
+                              "primary_record_missing": False})
+    else:
+        db["agentos"]["primary_record_missing"] = True  # keep last known canonical fields; never erase live work
+    prim = prim or {}
+    ns_p = os.path.join(d, "NORTH_STAR.md"); ns = read(ns_p)
+    blk = ["<!-- agentos-import:begin (generated by `mmtask import`; canonical = Agent OS) -->",
+           f"## Canonical objective (Agent OS {db.get('workstream') or 'pending'} @ macro {(sha or '-')[:10]}, imported {now()})"]
+    for key in ws_keys(db):
+        fm = objectives.get(key)
+        blk.append(f"- **{key}**: " + (" ".join(str(fm.get('objective', '')).split()) + f"  (status: {fm.get('status')})" if fm else "NO RECORD YET — pending Agent OS workstream record (export proposes it); local tasks and waves retained"))
+    if prim.get("next_action"):
+        blk.append(f"- canonical next_action: {' '.join(str(prim['next_action']).split())[:600]}")
+    if db["agentos"].get("latest_handoff"):
+        blk.append(f"- latest canonical handoff: {db['agentos']['latest_handoff']}")
+    blk.append("<!-- agentos-import:end -->")
+    blk = "\n".join(blk)
+    if "<!-- agentos-import:begin" in ns:
+        ns = re.sub(r"<!-- agentos-import:begin.*?<!-- agentos-import:end -->", lambda m: blk, ns, flags=re.S)
+    else:
+        ns = ns.rstrip() + "\n\n" + blk + "\n"
+    atomic_write(ns_p, ns)
+    write_plan_block(d, db)
+    return imported, rep
+
+
+def log_line(d, mid, kind, note):
+    line = f"{now()} {session()} {mid} {kind} {' '.join(str(note).split())}"
+    with open(os.path.join(d, "PROGRESS.log"), "a", encoding="utf-8") as fh:
+        fh.write(line + "\n")
+    return line
+
+
+NULL_FROM = ("null", "none")
+
+
+def do_bind_init(d, db, a):
+    """Lossless null-binding initialization (explicit `--from null`). Returns (changed, message)."""
+    to = a.to_ws
+    if not re.fullmatch(r"WS:[A-Z0-9-]+", to or ""):
+        sys.exit(f"mmtask rebind: bad workstream key {to!r} (expected WS:KEY)")
+    mirror = a.mirror or db["agentos"].get("mirror") or MIRROR
+    rec = os.path.join(mirror, "agentos/workstreams", f"WS-{to.split(':', 1)[1]}.md")
+    if not os.path.exists(rec):
+        sys.exit(f"mmtask rebind: target record {os.path.relpath(rec, mirror)} does not exist in the mirror; refusing to bind to an invented workstream; nothing changed")
+    cur, bare = db.get("workstream"), to.split(":", 1)[1]
+    same = lambda v: v is None or v in (bare, to)
+    if cur == to:
+        left = [t["id"] for t in db["tasks"] if t.get("workstream") in (None, bare) and "workstream" in t] + \
+               [w["p"] for w in db["waves"] if w.get("workstream") in (None, bare)]
+        return False, f"mmtask rebind --from null: already bound to {to}; nothing changed" + (f" (unqualified associations remain: {', '.join(left)})" if left else "")
+    if cur is not None:
+        sys.exit(f"mmtask rebind --from null: refused, harness is already bound to {cur} (not null); use --from {cur} --to {to} for a real rebind; nothing changed")
+    bad = [f"task {t['id']}={t['workstream']!r}" for t in db["tasks"] if "workstream" in t and not same(t["workstream"])] + \
+          [f"wave {w['p']}={w.get('workstream')!r}" for w in db["waves"] if not same(w.get("workstream"))]
+    if bad:
+        sys.exit(f"mmtask rebind --from null: refused, unrelated workstream associations would be moved: {'; '.join(bad)}; nothing changed")
+    qt, qw, legacy = [], [], []
+    for t in db["tasks"]:
+        if "workstream" not in t:
+            legacy.append(t["id"]); continue  # legacy rows: untouched, inherit the top-level binding
+        if t["workstream"] != to:
+            old = t["workstream"]; t["workstream"] = to
+            hist(t, "bind-init", f"workstream {json.dumps(old)} -> {to} (null-binding initialization; same canonical record)"); qt.append(t["id"])
+    for w in db["waves"]:
+        if w.get("workstream") != to:
+            w.setdefault("qualified_from", w.get("workstream")); w["workstream"] = to; qw.append(w["p"])
+    db["related_workstreams"] = [x for x in (db.get("related_workstreams") or []) if x != to]
+    db["workstream"] = to
+    db.setdefault("binding_history", []).append({"at": now(), "by": session(), "from": None, "to": to, "kind": "null-init", "reason": a.reason,
+                                                 "qualified_tasks": qt, "qualified_waves": qw, "legacy_untouched": legacy,
+                                                 "previous_records": db["agentos"].get("records"), "previous_source_sha": db["agentos"].get("source_sha")})
+    imported, _ = do_import(d, db, mirror, False)
+    sha = (db["agentos"].get("source_sha") or "-")[:10]
+    nwaves = next((r.get("waves") for r in imported if r["workstream"] == to), 0)
+    note = (f"bind-init null -> {to} (macro {sha}): qualified tasks [{', '.join(qt) or '-'}] and waves [{', '.join(qw) or '-'}] to {to}; "
+            f"legacy rows [{', '.join(legacy) or '-'}] untouched; all task ids/aliases/status/history/evidence preserved; "
+            f"merged {nwaves} canonical waves from {os.path.relpath(rec, mirror)}. Reason: {a.reason}")
+    log_line(d, "-", "decision", note)
+    dec = (f"\n### MMTASK-BIND-INIT — {now()} — Workstream binding null → {to}\n- type: process\n- by: {session()}\n"
+           f"- decision: initialize this buffer's null binding to the existing canonical Agent OS record {to} (`{os.path.relpath(rec, mirror)}` @ macro {sha}).\n"
+           f"- rationale: {a.reason}\n- alternatives considered: a second workstream record (rejected: duplicate canonical workstream); hand-editing TASKS.json (rejected: tool-only writes).\n"
+           f"- impact: tasks {', '.join(qt) or '-'} and waves {', '.join(qw) or '-'} qualified (bare/null -> {to}, history appended, original value kept in waves[].qualified_from); "
+           f"legacy rows {', '.join(legacy) or '-'} unchanged; {nwaves} canonical waves merged (local waves keep their P#). Recorded in TASKS.json binding_history.\n")
+    with open(os.path.join(d, "DECISIONS.md"), "a", encoding="utf-8") as fh:
+        fh.write(dec)
+    return True, note
+
+
+def do_rebind(d, db, a):
+    frm, to = a.from_ws, a.to_ws
+    if str(frm).lower() in NULL_FROM:
+        return do_bind_init(d, db, a)
+    placeholder = frm in PLACEHOLDER_BINDINGS
+    for v in ((to,) if placeholder else (frm, to)):
+        if not re.fullmatch(r"WS:[A-Z0-9-]+", v or ""):
+            sys.exit(f"mmtask rebind: bad workstream key {v!r} (expected WS:KEY)")
+    if db.get("workstream") != frm:
+        sys.exit(f"mmtask rebind: harness is bound to {db.get('workstream')}, not {frm}; nothing changed")
+    if placeholder and (db["tasks"] or db["waves"] or db.get("binding_history") or db.get("related_workstreams")
+                        or any(db["agentos"].get(k) for k in ("records", "source_sha", "imported_at", "last_export", "last_export_attempt"))):
+        sys.exit("mmtask rebind: placeholder recovery requires a pristine empty seed (zero tasks/waves, no related bindings/history/import/export); reconcile populated evidence on its original source; nothing changed")
+    mirror = a.mirror or db["agentos"].get("mirror") or MIRROR
+    rec = os.path.join(mirror, "agentos/workstreams", f"WS-{to.split(':', 1)[1]}.md")
+    if not os.path.exists(rec):
+        sys.exit(f"mmtask rebind: target record {os.path.relpath(rec, mirror)} does not exist in the mirror; refusing to bind to an invented workstream")
+    nt = nw = 0
+    for t in db["tasks"]:
+        if t.get("workstream", frm) == frm:
+            t["workstream"] = to; hist(t, "rebind", f"{frm} -> {to}"); t["updated"] = t["history"][-1]["at"]; nt += 1
+    for w in db["waves"]:
+        if w.get("workstream") == frm:
+            w["workstream"] = to; w.setdefault("rebound_from", frm); nw += 1
+    db["related_workstreams"] = [x for x in (db.get("related_workstreams") or []) if x != to]
+    db["workstream"] = to
+    previous_seed = {}
+    if placeholder:
+        raw = open(os.path.join(d, "TASKS.json"), "rb").read()
+        previous_seed = {"kind": "placeholder-init", "previous_seed": json.loads(raw),
+                         "previous_seed_sha256": hashlib.sha256(raw).hexdigest()}
+    db.setdefault("binding_history", []).append({"at": now(), "by": session(), "from": frm, "to": to, "reason": a.reason,
+                                                 "previous_records": db["agentos"].get("records"), "previous_source_sha": db["agentos"].get("source_sha"), **previous_seed})
+    imported, _ = do_import(d, db, mirror, False)
+    sha = (db["agentos"].get("source_sha") or "-")[:10]
+    nwaves = next((r.get("waves") for r in imported if r["workstream"] == to), 0)
+    note = (f"rebind {frm} -> {to} (macro {sha}): {nt} tasks and {nw} waves rebound, all task ids/status/history/evidence preserved; "
+            f"merged {nwaves} canonical waves from {os.path.relpath(rec, mirror)}. Reason: {a.reason}")
+    log_line(d, "-", "decision", note)
+    dec = (f"\n### MMTASK-REBIND — {now()} — Workstream binding {frm} → {to}\n- type: process\n- by: {session()}\n"
+           f"- decision: bind this harness to the existing canonical Agent OS record {to} (`{os.path.relpath(rec, mirror)}` @ macro {sha}) instead of {frm}.\n"
+           f"- rationale: {a.reason}\n- alternatives considered: authoring a second workstream record for {frm} (rejected: duplicate canonical workstream); hand-editing TASKS.json (rejected: tool-only writes).\n"
+           f"- impact: {nt} tasks and {nw} waves moved to {to}; ids, statuses, history, acceptance and evidence unchanged; {nwaves} canonical waves merged (local waves keep their P#). Previous binding retained in TASKS.json binding_history.\n")
+    with open(os.path.join(d, "DECISIONS.md"), "a", encoding="utf-8") as fh:
+        fh.write(dec)
+    return True, note
+
+
+def write_plan_block(d, db):
+    pl_p = os.path.join(d, "PLAN.md"); pl = read(pl_p) or f"<!-- schema: mm.harness.plan v{SCHEMA_VERSION} -->\n# Plan — {db.get('project')}\n"
+    rows = ["<!-- agentos-waves:begin (generated by `mmtask import`/`render`; canonical = Agent OS waves[]) -->",
+            "## Waves (P# = wave order; canonical status from Agent OS, derived = from local tasks)",
+            "| P# | workstream | wave | AO status | derived | PR | depends_on | title | next_action |", "|---|---|---|---|---|---|---|---|---|"]
+    c = lambda v: str(v if v is not None else "").replace("|", "\\|").replace("\n", " ")
+    for w in db["waves"]:
+        rows.append(f"| {w['p']} | {w.get('workstream','')} | {w['id']}{' (local proposal)' if w.get('source') == 'local-proposed' else ''} | {w.get('status')} | "
+                    f"{derived_wave_status(db, w) or '-'} | {c(w.get('pr'))} | {c(','.join(w.get('depends_on') or []))} | {c(w.get('title'))} | {c((w.get('next_action') or '')[:160])} |")
+    rows.append("<!-- agentos-waves:end -->")
+    blk = "\n".join(rows)
+    if "<!-- agentos-waves:begin" in pl:
+        pl = re.sub(r"<!-- agentos-waves:begin.*?<!-- agentos-waves:end -->", lambda m: blk, pl, flags=re.S)
+    else:
+        pl = pl.rstrip() + "\n\n" + blk + "\n"
+    atomic_write(pl_p, pl)
+
+
+def durably_exported(mirror, k, db):
+    """Task ids from THIS harness that already appear in a canonical (merged, mirrored) Agent OS handoff."""
+    ids, tag = set(), f"project-charters/{db.get('project')}"
+    for p in glob.glob(os.path.join(mirror, "agentos/handoffs", f"*{k}-*.md")):
+        txt = read(p)
+        if tag in txt:
+            ids |= set(re.findall(r"task:([A-Za-z0-9.]+)", txt))
+    return ids
+
+
+def export_history(d):
+    rows = []
+    for p in sorted(glob.glob(os.path.join(d, "export", "*", "EXPORT.json"))):
+        try:
+            j = json.load(open(p, encoding="utf-8")); rows.append({"at": j.get("at"), "rc": (j.get("validate") or {}).get("rc"),
+                "ok": bool((j.get("validate") or {}).get("ran") and (j.get("validate") or {}).get("rc") == 0), "workstream": j.get("workstream"), "file": p})
+        except Exception:
+            pass
+    for ln in read(os.path.join(d, "export", "EXPORTS.jsonl")).splitlines():
+        try:
+            j = json.loads(ln); rows.append({**j, "file": "export/EXPORTS.jsonl"})
+        except ValueError:
+            pass
+    return sorted(rows, key=lambda r: str(r.get("at") or ""))
+
+
+def do_export(d, db, a):
+    mirror = db["agentos"].get("mirror") or MIRROR
+    key = db.get("workstream")
+    if not key:
+        sys.exit("mmtask export: no workstream binding")
+    k = key.split(":", 1)[1]
+    date = datetime.date.today().isoformat()
+    dry = getattr(a, "dry_run", False)
+    outdir = tempfile.mkdtemp(prefix="mmtask-export-dryrun-") if dry else os.path.join(d, "export", date)
+    st = read(os.path.join(d, "STATE.md"))
+    # 'since' = last SUCCESSFUL (validated) export; failed attempts never advance it.
+    since = db["agentos"].get("last_export") or "0000"
+    published = durably_exported(mirror, k, db)
+    closed = ("implementation_complete", "reviewed", "accepted", "superseded")
+    # verified = ALL accepted/reviewed evidence not yet in a canonical handoff (not just tasks touched since the last export)
+    vt = [t for t in db["tasks"] if t["status"] in ("accepted", "reviewed") and t.get("evidence") and t["id"] not in published]
+    vids = {t["id"] for t in vt}
+    changed_tasks = [t for t in db["tasks"] if t["id"] in vids or ((t.get("updated") or "") > since and t["status"] in closed and t["id"] not in published)]
+    verified = [{"claim": f"{t['id']} {t['title']} — {t['status']}", "command": f"evidence recorded with mmtask: {t.get('evidence')}",
+                 "result": t["status"]} for t in vt]
+    unverified = [{"claim": f"{t['id']} {t['title']} is implementation_complete", "what_would_verify": "independent review / acceptance per its acceptance checks: " + "; ".join(t.get("acceptance") or [])}
+                  for t in db["tasks"] if t["status"] == "implementation_complete"]
+    wave_edits, new_waves = [], []
+    for w in db["waves"]:
+        if w.get("workstream") != key:
+            continue
+        dv = derived_wave_status(db, w)
+        nxt = next((t for t in next_tasks(db) if t.get("wave") == w["id"]), None)
+        if w.get("source") == "local-proposed":
+            new_waves.append({"id": w["id"], "title": w.get("title"), "status": dv or "todo", **({"pr": w["pr"]} if w.get("pr") else {}),
+                              **({"next_action": f"{nxt['id']}: {nxt['title']}"} if nxt else {})})
+        elif dv and dv != w.get("status"):
+            wave_edits.append({"id": w["id"], "from": w.get("status"), "to": dv})
+    nxt_all = next_tasks(db)
+    next_actions = [f"{t['id']} ({t['status']}): {t['title']}" for t in nxt_all[:6]] or ["(no open tasks)"]
+    m = re.search(r"current task[^:]*:\s*(.+)", st)
+    handoff = {
+        "workstream": key,
+        "session": a.session or (session() if session() != "manual" else f"local-harness-{db.get('project')}"),
+        "model": "codex",
+        "ended_because": a.ended_because,
+        "mission": a.mission or " ".join(str(db["agentos"].get("objective") or "").split())[:400] or db.get("project"),
+        "state_before": f"Agent OS {key} at macro {(db['agentos'].get('source_sha') or '-')[:10]} (imported {db['agentos'].get('imported_at')}); local harness focus: {m.group(1).strip() if m else '-'}",
+        "changed": [{"path": f"agentos/workstreams/WS-{k}.md", "what": f"waves: {e['id']} {e['from']} -> {e['to']}"} for e in wave_edits] +
+                   [{"path": f"agentos/workstreams/WS-{k}.md", "what": f"adds wave {w['id']} ({w['title']})"} for w in new_waves] +
+                   [{"path": f"task:{t['id']}", "what": f"{t['status']}: {t.get('evidence') or t.get('reason')}"} for t in changed_tasks],
+        "verified": verified,
+        "unverified": unverified,
+        "unresolved": [f"{t['id']} blocked: {t.get('reason')}" for t in db["tasks"] if t["status"] == "blocked"] or ["none recorded in the local buffer"],
+        "next_actions": next_actions,
+        "do_not_redo": (db["agentos"].get("do_not_redo") or [])[:12] + [f"{t['id']} superseded: {t.get('reason')}" for t in db["tasks"] if t["status"] == "superseded"][:8] or ["none recorded"],
+        "danger_areas": (db["agentos"].get("landmines") or [])[:8] or ["none recorded"],
+    }
+    if not handoff["changed"]:
+        handoff["changed"] = [{"path": "(none)", "what": "no task state changed since the last successful export"}]
+    prs = sorted({int(x) for t in db["tasks"] for x in re.findall(r"(?:PR\s*#|pull/)(\d+)", str(t.get("evidence") or ""))})
+    if prs: handoff["prs"] = prs
+    import yaml
+    body = (f"\nExported from the local continuity harness `~/gwcap/project-charters/{db.get('project')}` (write-ahead buffer) by `mmtask export` at {now()}.\n"
+            f"PREPARED ONLY: not published or accepted until a normal Macro PR by the record owner lands it.\n"
+            f"Task-level detail (P#.T#.S# ids, evidence, supersession chains) lives in that harness's TASKS.json; this handoff carries the\n"
+            f"canonical summary. Proposed wave edits: export/{date}/WS-{k}.waves.patch.\n")
+    hf = os.path.join(outdir, f"{k}-{date}.md")
+    atomic_write(hf, "---\n" + yaml.safe_dump(handoff, sort_keys=False, allow_unicode=True, width=1000) + "---\n" + body)
+    rec = os.path.join(mirror, f"agentos/workstreams/WS-{k}.md")
+    patch_path = os.path.join(outdir, f"WS-{k}.waves.patch")
+    if os.path.exists(rec):
+        src = read(rec); new = src
+        mi = re.search(r"\nwaves:\n( *)- id:", src); ind = mi.group(1) if mi else "  "; fi = ind + "  "
+        for e in wave_edits:
+            new = re.sub(rf"(\n{ind}- id: {re.escape(e['id'])}\n(?:{fi}.*\n)*?{fi}status: ){re.escape(str(e['from']))}\b", rf"\g<1>{e['to']}", new, count=1)
+        if new_waves:
+            add = "".join(f"{ind}- id: {w['id']}\n{fi}title: {json.dumps(w['title'])}\n{fi}status: {w['status']}\n" +
+                          (f"{fi}pr: {w['pr']}\n" if w.get('pr') else "") + (f"{fi}next_action: {json.dumps(w['next_action'])}\n" if w.get('next_action') else "")
+                          for w in new_waves)
+            new = re.sub(rf"(\nwaves:\n(?:(?:{ind}- |{fi}).*\n)+)", lambda mm: mm.group(1) + add, new, count=1)
+        diff = "".join(difflib.unified_diff(src.splitlines(True), new.splitlines(True), f"a/agentos/workstreams/WS-{k}.md", f"b/agentos/workstreams/WS-{k}.md"))
+        atomic_write(patch_path, diff or "# no wave changes\n")
+        patched = new
+    else:
+        patched = None
+        atomic_write(patch_path, f"# Agent OS record WS-{k}.md does not exist yet: a new record must be authored\n# (agentos.py draft-ws-append / workstream.schema.yml). Proposed waves:\n" + yaml.safe_dump(new_waves or [{"id": w["id"], "title": w.get("title"), "status": derived_wave_status(db, w) or "todo"} for w in db["waves"]], sort_keys=False))
+    val = {"ran": False}
+    try:
+        tmp = tempfile.mkdtemp(prefix="mmtask-validate-")
+        shutil.copytree(os.path.join(mirror, "agentos"), os.path.join(tmp, "agentos"))
+        shutil.copy(hf, os.path.join(tmp, "agentos/handoffs", os.path.basename(hf)))
+        paths = [os.path.join(tmp, "agentos/handoffs", os.path.basename(hf))]
+        if patched:
+            open(os.path.join(tmp, f"agentos/workstreams/WS-{k}.md"), "w").write(patched); paths.append(os.path.join(tmp, f"agentos/workstreams/WS-{k}.md"))
+        r = subprocess.run([sys.executable, os.path.join(mirror, "scripts/agentos.py"), "validate", "--root", os.path.join(tmp, "agentos"), "--quiet", "--paths", *paths],
+                           capture_output=True, text=True, timeout=180, cwd=mirror)
+        val = {"ran": True, "rc": r.returncode, "output": (r.stdout + r.stderr).strip()[-1500:]}
+        shutil.rmtree(tmp, ignore_errors=True)
+    except Exception as ex:
+        val = {"ran": False, "error": str(ex)}
+    ok = bool(val.get("ran") and val.get("rc") == 0)
+    ts = now()
+    atomic_write(os.path.join(outdir, "EXPORT.json"), json.dumps({"schema": "mm.harness.export", "schema_version": SCHEMA_VERSION, "at": ts,
+        "workstream": key, "handoff": hf, "wave_patch": patch_path, "wave_edits": wave_edits, "new_waves": new_waves, "validate": val,
+        "validated": ok, "dry_run": dry, "verified_count": len(verified), "verified_ids": sorted(vids), "since_last_successful_export": None if since == "0000" else since,
+        "pending_record": patched is None, "published": False,
+        "note": "PREPARED ONLY — not published or accepted; publish through a normal Macro PR by the record owner; mmtask never pushes. "
+                + ("Validation passed; last_export advanced." if ok and not dry else "last_export NOT advanced (" + ("dry run" if dry else "validation failed") + ").")
+                + (" Workstream record does not exist yet: validate rc=1 (dangling WS ref) is EXPECTED until the WS record is authored in the same PR." if patched is None else "")}, indent=2) + "\n")
+    if not dry:
+        with open(os.path.join(d, "export", "EXPORTS.jsonl"), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"at": ts, "workstream": key, "rc": val.get("rc"), "ok": ok, "verified_ids": sorted(vids), "handoff": hf}) + "\n")
+        db["agentos"]["last_export_attempt"] = {"at": ts, "rc": val.get("rc"), "ok": ok}
+        if ok:
+            db["agentos"]["last_export"] = ts
+    return hf, patch_path, val, ok, dry, len(verified)
+
+
+def do_export_state(d, db, a):
+    h = export_history(d)
+    good = [r for r in h if r.get("ok")]
+    cur = db["agentos"].get("last_export")
+    if not a.recompute:
+        return False, json.dumps({"last_export": cur, "last_export_attempt": db["agentos"].get("last_export_attempt"),
+                                  "last_successful_export_on_disk": good[-1]["at"] if good else None, "history": h}, indent=2)
+    tgt = good[-1]["at"] if good else None
+    if tgt == cur:
+        return False, f"last_export already consistent: {cur}"
+    db["agentos"]["last_export"] = tgt
+    if tgt is None:
+        db["agentos"].pop("last_export", None)
+    db["agentos"].setdefault("last_export_repairs", []).append({"at": now(), "by": session(), "from": cur, "to": tgt,
+                                                                "reason": a.reason or "last_export had advanced on a failed validation"})
+    log_line(d, "-", "decision", f"export-state recompute: last_export {cur} -> {tgt or 'unset'} (last successful validated export on disk: {tgt or 'none'}; {len(h)} attempts). {a.reason or ''}")
+    return True, f"last_export {cur} -> {tgt or 'unset'}"
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="mmtask", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dir"); ap.add_argument("--slug")
+    sp = ap.add_subparsers(dest="cmd", required=True)
+    p = sp.add_parser("add"); p.add_argument("title"); p.add_argument("--wave"); p.add_argument("--milestone", help="v1 compatibility; recorded as v1_milestone"); p.add_argument("--parent"); p.add_argument("--deps", default="")
+    p.add_argument("--accept", action="append", default=[]); p.add_argument("--id"); p.add_argument("--note", default=""); p.add_argument("--ready", action="store_true")
+    p.add_argument("--owner")
+    for c in ("ready", "unblock"):
+        sp.add_parser(c).add_argument("id")
+    p = sp.add_parser("start"); p.add_argument("id"); p.add_argument("--parallel", action="store_true")
+    for c in ("done", "review", "accept"):
+        p = sp.add_parser(c); p.add_argument("id"); p.add_argument("--evidence", required=True)
+    p = sp.add_parser("block"); p.add_argument("id"); p.add_argument("--reason", required=True)
+    p = sp.add_parser("supersede"); p.add_argument("id"); p.add_argument("--by", required=True); p.add_argument("--reason", required=True)
+    p = sp.add_parser("drop"); p.add_argument("id"); p.add_argument("--reason", required=True)
+    p = sp.add_parser("edit"); p.add_argument("id"); p.add_argument("--title"); p.add_argument("--wave"); p.add_argument("--deps"); p.add_argument("--accept", action="append"); p.add_argument("--owner")
+    p = sp.add_parser("note"); p.add_argument("id"); p.add_argument("text")
+    p = sp.add_parser("list"); p.add_argument("--all", action="store_true"); p.add_argument("--json", action="store_true")
+    p = sp.add_parser("next"); p.add_argument("--explain", action="store_true", help="show read-only recovery gaps even when eligible tasks exist")
+    sp.add_parser("render"); sp.add_parser("waves"); p = sp.add_parser("show"); p.add_argument("id")
+    p = sp.add_parser("wave-propose"); p.add_argument("id"); p.add_argument("title"); p.add_argument("--workstream"); p.add_argument("--pr")
+    p = sp.add_parser("import"); p.add_argument("--mirror", default=MIRROR); p.add_argument("--no-fetch", action="store_true")
+    p.add_argument("--tasks", help="merge task rows from a TASKS.json (v1 or v2); local always wins"); p.add_argument("--allow-live", action="store_true")
+    p = sp.add_parser("export"); p.add_argument("--ended-because", default="ci_handoff", choices=["complete", "ci_handoff", "blocked", "context_budget", "crashed"])
+    p.add_argument("--session"); p.add_argument("--mission"); p.add_argument("--dry-run", action="store_true")
+    p = sp.add_parser("export-state"); p.add_argument("--recompute", action="store_true"); p.add_argument("--reason")
+    p = sp.add_parser("rebind"); p.add_argument("slug_pos", nargs="?", metavar="SLUG"); p.add_argument("--from", dest="from_ws", required=True, help="WS:KEY, 'null', or an exact quoted placeholder ('WS:<unknown>' / 'WS:<KEY>') for a pristine empty seed")
+    p.add_argument("--to", dest="to_ws", required=True); p.add_argument("--reason", required=True); p.add_argument("--mirror")
+    a = ap.parse_args()
+    if getattr(a, "slug_pos", None) and not (a.slug or a.dir):
+        a.slug = a.slug_pos
+    d = resolve(a)
+    # next reads an atomically published snapshot and never creates a lock or writes a charter.
+    if a.cmd != "next":
+        lockf = open(os.path.join(d, ".TASKS.lock"), "a+"); fcntl.flock(lockf, fcntl.LOCK_EX)
+    db = load(d); changed = False; msg = None
+    snap = {t["id"]: (t.get("status"), t.get("evidence"), len(t.get("history") or [])) for t in db["tasks"]}
+    snap_alias = {t["id"]: list(t.get("aliases") or []) for t in db["tasks"]}
+    snap_p = {w["id"]: w.get("p") for w in db["waves"]}
+    if a.cmd == "add":
+        if not a.wave:
+            a.wave = "codex-session-plan" if wave_of(db, "codex-session-plan") else (a.parent and get(db, a.parent).get("wave"))
+        w = wave_of(db, a.wave) if a.wave else None
+        if not w:
+            sys.exit(f"mmtask: unknown wave {a.wave}; known: {', '.join(x['p'] + '=' + x['id'] for x in db['waves'])} (use `mmtask wave-propose` for new work outside Agent OS waves)")
+        if a.parent: get(db, a.parent)
+        tid = a.id or new_id(db, w, a.parent)
+        if any(x["id"] == tid for x in db["tasks"]):
+            sys.exit(f"mmtask: id {tid} exists")
+        deps = [x for x in a.deps.split(",") if x]
+        for dep in deps: get(db, dep)
+        x = {"id": tid, "kind": "subtask" if a.parent else "task", "parent": a.parent, "title": a.title, "workstream": w.get("workstream"),
+             "wave": w["id"], "depends_on": deps, "status": "ready" if a.ready else "proposed", "owner": a.owner, "acceptance": a.accept,
+             "evidence": None, "superseded_by": [], "reason": None, "notes": [a.note] if a.note else [], "created": now(), "created_by": session(),
+             **({"v1_milestone": a.milestone} if a.milestone else {})}
+        hist(x, "add"); db["tasks"].append(x); changed = True; msg = f"added {tid} ({x['status']})"
+    elif a.cmd == "wave-propose":
+        ws = a.workstream or db.get("workstream")
+        if wave_of(db, a.id): sys.exit(f"mmtask: wave {a.id} exists")
+        p = f"P{max([int(w['p'][1:]) for w in db['waves']] or [0]) + 1}"
+        db["waves"].append({"p": p, "workstream": ws, "id": a.id, "title": a.title, "status": "todo", "pr": a.pr, "depends_on": [], "next_action": None,
+                            "source": "local-proposed", "proposed_at": now(), "proposed_by": session()})
+        changed = True; msg = f"proposed wave {p}={a.id} on {ws} (export carries it to Agent OS)"
+    elif a.cmd in ("ready", "unblock", "start", "done", "review", "accept", "block", "supersede", "drop", "edit", "note"):
+        x = get(db, a.id)
+        if x["status"] == "superseded" and a.cmd not in ("note",):
+            sys.exit(f"mmtask: {x['id']} is superseded; add a new task instead")
+        if a.cmd in ("ready", "unblock"):
+            x["status"] = "ready"; hist(x, a.cmd)
+        elif a.cmd == "start":
+            others = [y["id"] for y in db["tasks"] if y["status"] == "in_progress" and y["id"] != x["id"]]
+            if others and not a.parallel:
+                sys.exit(f"mmtask: already in_progress: {', '.join(others)} — finish/block them, or use --parallel for a small explicit set")
+            x["status"] = "in_progress"; hist(x, "start"); progress(d, x, "start", x["title"])
+        elif a.cmd in ("done", "review", "accept"):
+            x["status"] = {"done": "implementation_complete", "review": "reviewed", "accept": "accepted"}[a.cmd]
+            x["evidence"] = a.evidence if a.cmd == "done" or not x.get("evidence") else f"{x['evidence']} | {a.cmd}: {a.evidence}"
+            hist(x, a.cmd, a.evidence); progress(d, x, x["status"], a.evidence)
+        elif a.cmd == "block":
+            x["status"] = "blocked"; x["reason"] = a.reason; hist(x, "block", a.reason); progress(d, x, "blocked", a.reason)
+        elif a.cmd in ("supersede", "drop"):
+            by = [y for y in a.by.split(",") if y] if a.cmd == "supersede" else []
+            for y in by:
+                tgt = get(db, y)
+                if x["id"] not in (tgt.get("supersedes") or []): tgt["supersedes"] = (tgt.get("supersedes") or []) + [x["id"]]
+            x["status"] = "superseded"; x["superseded_by"] = by; x["reason"] = a.reason if a.cmd == "supersede" else f"DROPPED: {a.reason}"
+            hist(x, a.cmd, x["reason"]); progress(d, x, "replan", f"{a.cmd} {('by ' + ','.join(by)) if by else ''}: {a.reason}")
+        elif a.cmd == "edit":
+            if a.title is not None: x["title"] = a.title
+            if a.owner is not None: x["owner"] = a.owner
+            if a.wave is not None:
+                w = wave_of(db, a.wave) or sys.exit(f"mmtask: unknown wave {a.wave}"); x["wave"] = w["id"]; x["workstream"] = w.get("workstream")
+            if a.deps is not None: x["depends_on"] = [y for y in a.deps.split(",") if y]
+            if a.accept is not None: x["acceptance"] = a.accept
+            hist(x, "edit")
+        elif a.cmd == "note":
+            x.setdefault("notes", []).append(f"{now()} {a.text}"); hist(x, "note", a.text)
+        changed = True; msg = f"{a.cmd} {x['id']} -> {x['status']}"
+    elif a.cmd == "import":
+        live = live_writer(db)
+        rec, rep = do_import(d, db, a.mirror, not a.no_fetch, a.tasks, a.allow_live); changed = True
+        msg = "imported (merge) " + "; ".join(f"{r['workstream']}: {('status ' + str(r.get('status')) + ', ' + str(r.get('waves')) + ' waves') if r['exists'] else 'NO RECORD (pending; local tasks/waves kept)'}" for r in rec) + f" @ {(db['agentos'].get('source_sha') or '')[:10]}"
+        if live: msg += f"\nlive writer {live['by']} wrote {live['age_s']}s ago: merge-only (no local task touched)"
+        if rep: msg += "\ntask merge: " + json.dumps(rep)
+    elif a.cmd == "rebind":
+        changed, msg = do_rebind(d, db, a)
+        if not changed: print(msg)
+    elif a.cmd == "export-state":
+        changed, msg = do_export_state(d, db, a)
+        if not changed: print(msg)
+    elif a.cmd == "export":
+        hf, pp, val, ok, dry, nver = do_export(d, db, a); changed = not dry
+        msg = (f"handoff: {hf}\nwave patch: {pp}\nagentos validate: {('rc=' + str(val.get('rc'))) if val.get('ran') else 'not run: ' + str(val.get('error'))}"
+               f"{' (expected: WS record pending — author it in the same PR)' if not os.path.exists(os.path.join(db['agentos'].get('mirror') or MIRROR, 'agentos/workstreams/WS-' + db['workstream'].split(':',1)[1] + '.md')) else ''}"
+               f"\n{val.get('output','')}\nverified entries: {nver}\nlast_export: {db['agentos'].get('last_export') or 'unset'} "
+               f"({'advanced' if ok and not dry else 'NOT advanced: ' + ('dry run' if dry else 'validation failed')})\n(PREPARED ONLY — not published)")
+        if dry: print(msg + "\n(DRY RUN — TASKS.json and export/ untouched)")
+    if changed:
+        after = {t["id"]: t for t in db["tasks"]}
+        lost = sorted(set(snap) - set(after))
+        if lost:
+            sys.exit(f"mmtask: REFUSED write — {a.cmd} would remove tasks {', '.join(lost)} (the buffer never loses task ids)")
+        for tid, (st0, ev0, nh0) in snap.items():
+            t = after[tid]
+            if len(t.get("history") or []) < nh0:
+                sys.exit(f"mmtask: REFUSED write — {a.cmd} would truncate history of {tid}")
+            if a.cmd in ("import", "rebind", "export", "export-state") and (t.get("status") != st0 or (ev0 and t.get("evidence") != ev0)):
+                sys.exit(f"mmtask: REFUSED write — {a.cmd} would change status/evidence of {tid}")
+            if not set(snap_alias[tid]) <= set(t.get("aliases") or []):
+                sys.exit(f"mmtask: REFUSED write — {a.cmd} would drop aliases of {tid}")
+        wp = {w["id"]: w.get("p") for w in db["waves"]}
+        if any(wp.get(k) != v for k, v in snap_p.items()):
+            sys.exit(f"mmtask: REFUSED write — {a.cmd} would remove or renumber a wave (P#)")
+        db["schema_version"] = SCHEMA_VERSION; db["updated"] = now(); db["updated_by"] = session()
+        atomic_write(os.path.join(d, "TASKS.json"), json.dumps(db, indent=2, ensure_ascii=False, default=str) + "\n")
+        atomic_write(os.path.join(d, "TASKS.md"), render(db))
+        if a.cmd in ("wave-propose", "import", "rebind", "done", "review", "accept", "supersede", "drop", "start"):
+            write_plan_block(d, db)
+        print(msg)
+    elif a.cmd == "render":
+        atomic_write(os.path.join(d, "TASKS.md"), render(db)); print("rendered TASKS.md")
+    elif a.cmd == "list":
+        rows = db["tasks"] if a.all else [x for x in db["tasks"] if x["status"] not in CLOSED]
+        if a.json: print(json.dumps(rows, indent=2, ensure_ascii=False))
+        else:
+            for x in rows: print(f"{x['id']:10} {x['status']:23} {(x.get('wave') or '-')[:24]:24} {x['title']}")
+    elif a.cmd == "waves":
+        for w in db["waves"]: print(f"{w['p']:4} {w.get('workstream','')[:32]:32} {w['id'][:28]:28} AO={w.get('status')} derived={derived_wave_status(db, w)} {w.get('source')}")
+    elif a.cmd == "next":
+        nx = next_tasks(db)
+        for x in nx[:5]:
+            print(f"{x['id']:10} {x['status']:12} [{x.get('wave')}] {x['title']}")
+            for c in x.get("acceptance") or []: print(f"           accept: {c}")
+        if not nx or a.explain:
+            for line in next_recovery(db, d): print(line)
+    elif a.cmd == "show":
+        print(json.dumps(get(db, a.id), indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,11 @@
+{
+  "packagedSource": "486ec0275b74d8c508ca96dbe40173054b246978",
+  "publishedSource": "8c076e9eea99018810d9f5f5be910db43462aa9f",
+  "appChanges": [
+    "app/mastermind_os/src-tauri/src/hermes_native/bridge.py"
+  ],
+  "bridgeAstEqual": true,
+  "oldBridgeSha256": "d08c48057348c1edc63cd2a4458d7a957e86b911e023fa938f7ed4f3182c20c3",
+  "publishedBridgeSha256": "b0eb627ccc2f01b5a4b52539450d3f2172cc7b5d7daaeb8064e2c88d363bff90",
+  "equivalenceScope": "Python formatting only; candidate retains its actual source/build identity"
+}

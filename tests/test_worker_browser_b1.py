@@ -632,8 +632,11 @@ def test_package_manifest_and_lock_pin_exact_release():
     lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
 
     assert manifest["private"] is True
-    assert manifest["dependencies"] == {"@playwright/mcp": "0.0.79"}
-    assert lock["packages"][""]["dependencies"] == {"@playwright/mcp": "0.0.79"}
+    assert manifest["dependencies"] == {"@playwright/mcp": "0.0.79", "fernet": "0.3.3"}
+    assert lock["packages"][""]["dependencies"] == manifest["dependencies"]
+    assert lock["packages"]["node_modules/fernet"]["version"] == "0.3.3"
+    assert lock["packages"]["node_modules/fernet"]["integrity"] == (
+        "sha512-DvvqouVhv3VCor83wkQbSycekYUKDRQ1IKqcInaF5n5BSKgWBVfYLbSf7RRxojwQO0DZySiz5MlM2vO4MG3SUg==")
     assert lock["packages"]["node_modules/@playwright/mcp"]["version"] == "0.0.79"
     assert lock["packages"]["node_modules/@playwright/mcp"]["integrity"] == (
         "sha512-VpqD4a3vFyGQMY9sh3UJiO6wjcurggkljKfAyCHL0QWGY5m6Ehr3MNsAAHPDHO//"

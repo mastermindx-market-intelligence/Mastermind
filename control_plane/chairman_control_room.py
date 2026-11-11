@@ -170,6 +170,7 @@ executive_placement_selection = _optional_control_plane_module(
     "executive_placement_selection", requires=_SELECTOR_CONTROL_PLANE_REQUIRES
 )
 executive_steward = _optional_control_plane_module("executive_steward")
+sol_capability_status = _optional_control_plane_module("sol_capability_status")
 
 #: CR1A's autonomy consumer is loaded through the SAME protected mechanism as
 #: the selector above, and for the same reason.  A static
@@ -306,7 +307,7 @@ _BINDING_SUMMARY_KEYS = (
 OUTPUT_KEYS = frozenset({
     "schema", "generated_at", "sources", "degraded", "attention", "work",
     "unjoined_open_prs", "unbound_surfaces", "binding_conflicts",
-    "placement_selection", "autonomy",
+    "placement_selection", "autonomy", "runtime_capability_status",
 })
 
 
@@ -783,6 +784,24 @@ def _disagreements(
 # the pure compositor
 # ---------------------------------------------------------------------------
 
+def _source_collection_error(source: Any, field: str) -> str | None:
+    if not isinstance(source, Mapping) or field not in source:
+        return None  # Preserve the existing omitted-optional-collection contract.
+    rows = source[field]
+    if type(rows) is not list or any(type(row) is not dict for row in rows):
+        return f"{field} must be a list of objects"
+    if field == "workstreams":
+        if any(not isinstance(row.get("key"), str) or not row["key"].strip() for row in rows):
+            return "workstreams contain a missing or malformed key"
+    else:
+        for row in rows:
+            for name in ("open_prs", "recently_merged"):
+                if name in row and (type(row[name]) is not list
+                        or any(type(pr) is not dict for pr in row[name])):
+                    return f"repositories.{name} must be a list of objects"
+    return None
+
+
 def compose_control_room(
     *,
     inbox: dict[str, Any] | None,
@@ -794,6 +813,7 @@ def compose_control_room(
     binding_problems: Sequence[str] = (),
     placement_selection: dict[str, Any] | None = None,
     dispatch_evidence: Sequence[Mapping[str, Any]] | None = None,
+    runtime_capability_status: Any = None,
     generated_at: str,
 ) -> dict[str, Any]:
     """Pure, deterministic projection of every already-collected source.
@@ -807,6 +827,18 @@ def compose_control_room(
     document.
     """
     degraded: list[str] = []
+
+    # Reject malformed source collections before their projections can erase
+    # shape errors as an apparently healthy empty workstream list.
+    for source, label, field in ((agent_os_state, "agent_os_state", "workstreams"),
+                                  (active_builds, "active_builds", "repositories")):
+        issue = _source_collection_error(source, field)
+        if issue:
+            degraded.append(f"{label}: {issue}")
+            if label == "agent_os_state":
+                agent_os_state = None
+            else:
+                active_builds = None
 
     # --- boot packet / Agent OS brief --------------------------------------
     brief: Mapping[str, Any] | None = None
@@ -1049,6 +1081,20 @@ def compose_control_room(
             "disagreements": _disagreements(agent_os_entry, jobs, prs),
         })
 
+    # C1 runtime-capability evidence is injected owner output only. The
+    # compositor never acquires or refreshes Studio/Terminal evidence. Accept
+    # only the existing typed CAP1 envelope; absent evidence remains absent.
+    runtime_capability_status_out: dict[str, Any] | None = None
+    if runtime_capability_status is not None:
+        if sol_capability_status is None:
+            degraded.append("runtime_capability_status: owner module not shipped")
+        elif not isinstance(
+            runtime_capability_status, sol_capability_status.CapabilityStatusEnvelope
+        ):
+            degraded.append("runtime_capability_status: typed CAP1 envelope required")
+        else:
+            runtime_capability_status_out = runtime_capability_status.to_dict()
+
     # --- placement selection (CAP-C1) ---------------------------------------
     # Optional pure input: a wire dict already produced by
     # executive_placement_selection.select_placement().to_dict() (or `None`
@@ -1186,6 +1232,7 @@ def compose_control_room(
         "binding_conflicts": binding_conflicts,
         "placement_selection": placement_selection_out,
         "autonomy": autonomy,
+        "runtime_capability_status": runtime_capability_status_out,
     }
     assert set(doc.keys()) == OUTPUT_KEYS  # self-check: no "overall" field, closed set
     return doc
@@ -1195,7 +1242,57 @@ def compose_control_room(
 # the gather layer
 # ---------------------------------------------------------------------------
 
-def _read_active_builds(macro_root: str | None) -> tuple[dict[str, Any] | None, str | None]:
+INSTALLED_MACRO_ARTIFACT_BYTES = 2 * 1024 * 1024
+
+
+def _read_installed_artifact(path: Path, budget: int) -> tuple[dict[str, Any] | None, str | None]:
+    """Two bounded physical reads; refuse changed names, identities or content.
+
+    The surrounding sealed source owner authorizes this fixed artifact path.
+    These samples validate this acquisition only; they do not attest later
+    immutability of the source tree.
+    """
+    import stat
+    if type(budget) is not int or budget != INSTALLED_MACRO_ARTIFACT_BYTES:
+        return None, "installed Macro artifact byte budget refused"
+    path = path.absolute()
+    def names():
+        return tuple((str(parent), (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid))
+                     for parent in reversed(path.parents) for st in (parent.lstat(),))
+    def identity(st):
+        return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid,
+                st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+    def read_one():
+        visible = path.lstat()
+        if not stat.S_ISREG(visible.st_mode):
+            raise ValueError("artifact is not a regular file")
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or identity(visible) != identity(before):
+                raise ValueError("artifact identity changed before read")
+            raw = stream.read(budget + 1)
+            after = os.fstat(stream.fileno())
+            if len(raw) > budget:
+                raise ValueError("artifact byte budget exceeded")
+            if identity(before) != identity(after) or identity(after) != identity(path.lstat()):
+                raise ValueError("artifact identity changed during read")
+        return raw, identity(after)
+    try:
+        before_names = names()
+        raw, before_file = read_one()
+        confirmation, after_file = read_one()
+        if before_names != names() or before_file != after_file or raw != confirmation:
+            raise ValueError("artifact path or content changed during read")
+        loaded = json.loads(raw.decode("utf-8"))
+        if type(loaded) is not dict:
+            raise ValueError("artifact is not a JSON object")
+        return loaded, None
+    except (OSError, ValueError) as exc:
+        return None, f"{path}: installed artifact unavailable ({exc})"
+
+
+def _read_active_builds(macro_root: str | None, *, installed_byte_budget: int | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """Read the compiled active-build snapshot; never raises.
 
     No-write machine seam: this only reads a file Macro's own
@@ -1206,6 +1303,8 @@ def _read_active_builds(macro_root: str | None) -> tuple[dict[str, Any] | None, 
         return None, "no macro root resolved; active_builds not read"
 
     path = Path(macro_root) / ACTIVE_BUILDS_RELATIVE_PATH
+    if installed_byte_budget is not None:
+        return _read_installed_artifact(path, installed_byte_budget)
     try:
         if not path.is_file():
             return None, f"{path}: not found"
@@ -1223,7 +1322,7 @@ def _read_active_builds(macro_root: str | None) -> tuple[dict[str, Any] | None, 
     return loaded, None
 
 
-def _read_agent_os_state(macro_root: str | None) -> tuple[dict[str, Any] | None, str | None]:
+def _read_agent_os_state(macro_root: str | None, *, installed_byte_budget: int | None = None) -> tuple[dict[str, Any] | None, str | None]:
     """Read the compiled ``agent_os_state.v1`` artifact; never raises.
 
     Same no-write read pattern as :func:`_read_active_builds`: this only
@@ -1234,6 +1333,8 @@ def _read_agent_os_state(macro_root: str | None) -> tuple[dict[str, Any] | None,
         return None, "no macro root resolved; agent_os_state not read"
 
     path = Path(macro_root) / AGENT_OS_STATE_RELATIVE_PATH
+    if installed_byte_budget is not None:
+        return _read_installed_artifact(path, installed_byte_budget)
     try:
         if not path.is_file():
             return None, f"{path}: not found"
@@ -2030,6 +2131,7 @@ def build_control_room(
     bindings_path: str | Path | None = None,
     placement_selection_path: str | Path | None = None,
     active_builds_snapshot: Any = _ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+    runtime_capability_status: Any = None,
 ) -> dict[str, Any]:
     """Collect every source and hand them to :func:`compose_control_room`.
 
@@ -2132,6 +2234,7 @@ def build_control_room(
                 bindings=bindings,
                 binding_problems=binding_problems,
                 placement_selection=placement_selection,
+                runtime_capability_status=runtime_capability_status,
                 generated_at=generated_at,
             )
             precursor_autonomy = precursor.get("autonomy")
@@ -2156,6 +2259,7 @@ def build_control_room(
         binding_problems=binding_problems,
         placement_selection=placement_selection,
         dispatch_evidence=dispatch_evidence,
+        runtime_capability_status=runtime_capability_status,
         generated_at=generated_at,
     )
 
