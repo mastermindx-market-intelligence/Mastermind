@@ -53,7 +53,8 @@ def _ledger_lock():
     """Serialize KEEP-FIRST resolution across threads and processes."""
     with _LOCAL_LOCK:
         _PATH.parent.mkdir(parents=True, exist_ok=True)
-        with _lock_path().open("a+", encoding="utf-8") as lock:
+        lock = _lock_path().open("a+", encoding="utf-8")
+        try:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             try:
                 yield
@@ -61,12 +62,20 @@ def _ledger_lock():
                 try:
                     fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
                 except OSError:
-                    # A completed atomic replace already decided the data effect.
+                    # Atomic replacement already decided any canonical data effect.
                     pass
+        finally:
+            try:
+                lock.close()
+            except OSError:
+                # Cleanup cannot revoke a known result or mask the primary error.
+                pass
 
 
 def _read_unlocked() -> list[dict]:
-    if not _PATH.exists():
+    try:
+        _PATH.lstat()
+    except FileNotFoundError:
         return []
     out: list[dict] = []
     for line in _PATH.read_text(encoding="utf-8").splitlines():

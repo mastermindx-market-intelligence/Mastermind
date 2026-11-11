@@ -87,3 +87,15 @@ def test_recorded_outcome_skips_history_while_new_outcomes_remain_retryable(tmp_
 
     sh._PATH.write_text("")
     assert ol.resolve("2026-09-18", {"t3": 0.10}, theses=[new]) == 1
+
+
+def test_unavailable_history_link_cannot_publish_an_outcome(tmp_path, monkeypatch):
+    ol, sh = _wire(tmp_path, monkeypatch)
+    missing = tmp_path / "missing-signal-history"
+    sh._PATH.symlink_to(missing)
+
+    with pytest.raises(FileNotFoundError):
+        ol.resolve("2026-09-17", {"t1": 0.10}, theses=[_thesis()])
+    assert not ol._PATH.exists()
+    assert sh._PATH.is_symlink()
+    assert not missing.exists()

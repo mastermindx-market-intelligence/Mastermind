@@ -1,0 +1,1954 @@
+{
+  "active": {
+    "activity": {
+      "ok": true,
+      "result": {
+        "activity": {
+          "availability": "RETAINED",
+          "candidate_receipts_in_sample": 1,
+          "normalized_events_in_sample": 3,
+          "omitted_in_sample": 0,
+          "rows": [
+            {
+              "candidate_event_id": 31,
+              "candidate_recorded_at": "2026-11-05T22:54:55+00:00",
+              "category": "ITEM_ACTIVITY",
+              "ordinal_in_candidate": 0,
+              "turn_id": "ohf-turn-d129f6307f054970bdb3e8c9f0ded347"
+            },
+            {
+              "candidate_event_id": 31,
+              "candidate_recorded_at": "2026-11-05T22:54:55+00:00",
+              "category": "ITEM_ACTIVITY",
+              "ordinal_in_candidate": 1,
+              "turn_id": "ohf-turn-d129f6307f054970bdb3e8c9f0ded347"
+            },
+            {
+              "candidate_event_id": 31,
+              "candidate_recorded_at": "2026-11-05T22:54:55+00:00",
+              "category": "TURN_COMPLETED",
+              "ordinal_in_candidate": 2,
+              "turn_id": "ohf-turn-d129f6307f054970bdb3e8c9f0ded347"
+            }
+          ],
+          "schema": "mastermind.operator_retained_activity_metadata.v1",
+          "selection": {
+            "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+            "job_id": "JOB-003",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "source": {
+            "global_event_total": null,
+            "live_worker_count": null,
+            "scope": "RETAINED_CANDIDATES_ONLY",
+            "source_truncated": false,
+            "state": "SAME_AS_OF_READ"
+          }
+        },
+        "availability": "AVAILABLE",
+        "reason_codes": [],
+        "schema": "mastermind.workspace_retained_activity.v1",
+        "selection": {
+          "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+          "job_id": "JOB-003",
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "ce3936fe8a0597c707f321bf8b3bc67828041e19de30fe170bd2a3a14281a50b",
+            "document_digest": "0b99ed533b1f46349bfbd2ee2c03f8a998730c848e3998fd96177d8c2ba29e4e",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 2,
+            "publication_before": 2,
+            "source_validity_digest": "e465c43e25c074601cc4492779d58a489d89e06f74592602ae2a24b4ee368c2a"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "1711f373de1c9102c49b4b1345b82460",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_retained_activity_observation.v1",
+          "selection": {
+            "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+            "job_id": "JOB-003",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      }
+    },
+    "attempt_status": "RUNNING",
+    "job_status": "RUNNING",
+    "mission": {
+      "ok": true,
+      "result": {
+        "acceptance": {
+          "artifact_revision": null,
+          "evidence": [],
+          "owner": null,
+          "reason_codes": [
+            "ACCEPTANCE_OWNER_NOT_PROJECTED"
+          ],
+          "ruling": null,
+          "state": "NOT_PROJECTED"
+        },
+        "budget": {},
+        "children": {
+          "coverage": "COMPLETE",
+          "items": [
+            {
+              "attempt_count": 1,
+              "attempt_limit": 2,
+              "current_attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+              "depth": 1,
+              "job_id": "JOB-002",
+              "latest_attempt": {
+                "attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+                "attempt_number": 1,
+                "error_class": null,
+                "error_present": false,
+                "exit_code": null,
+                "finished_at": "2026-11-05T22:54:55Z",
+                "has_result": true,
+                "started_at": "2026-11-05T22:54:55Z",
+                "status": "COMPLETED"
+              },
+              "orchestration_role": "plan",
+              "parent_job_id": "JOB-001",
+              "plan_step_id": null,
+              "status": "COMPLETED",
+              "worker_id": null
+            },
+            {
+              "attempt_count": 1,
+              "attempt_limit": 1,
+              "current_attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+              "depth": 1,
+              "job_id": "JOB-003",
+              "latest_attempt": {
+                "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+                "attempt_number": 1,
+                "error_class": null,
+                "error_present": false,
+                "exit_code": null,
+                "finished_at": null,
+                "has_result": false,
+                "started_at": "2026-11-05T22:54:55Z",
+                "status": "RUNNING"
+              },
+              "orchestration_role": "work",
+              "parent_job_id": "JOB-001",
+              "plan_step_id": "step-1",
+              "status": "RUNNING",
+              "worker_id": null
+            }
+          ],
+          "overflow_count": 0,
+          "reason_codes": [],
+          "state": "AVAILABLE",
+          "total_count": 2,
+          "unjoined_job_count": 0,
+          "unjoined_job_ids": []
+        },
+        "conversation": {
+          "coverage": "NOT_PROJECTED",
+          "items": [],
+          "overflow_count": null,
+          "reason_codes": [
+            "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+          ],
+          "state": "UNAVAILABLE",
+          "total_count": null
+        },
+        "degraded": [
+          "active_builds: unavailable",
+          "agent_os_detail_redacted",
+          "executive_inbox: unavailable"
+        ],
+        "execution": {
+          "artifacts": [],
+          "errors_present": false,
+          "evidence": [],
+          "next_actions": [],
+          "state": "NOT_STARTED",
+          "summary_present": false
+        },
+        "feature_gates": {
+          "actions": "READ_ONLY",
+          "advanced": "AVAILABLE",
+          "conversation": "UNAVAILABLE"
+        },
+        "generated_at": "2026-11-05T22:54:55.860469Z",
+        "missingness": [
+          {
+            "missingness_class": "EXCLUDED",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "conversation"
+          },
+          {
+            "missingness_class": "EXCLUDED",
+            "producer_owner": "wake",
+            "reason": "source detail withheld",
+            "target_field": "return_path"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": null,
+            "reason": "source detail withheld",
+            "target_field": "acceptance"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": null,
+            "reason": "source detail withheld",
+            "target_field": "acceptance.state"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "children.worker_id"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "mission.title"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": null,
+            "reason": "source detail withheld",
+            "target_field": "review.reviews_job_id"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "slack",
+            "reason": "source detail withheld",
+            "target_field": "transport.continued"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "slack",
+            "reason": "source detail withheld",
+            "target_field": "transport.stopped"
+          },
+          {
+            "missingness_class": "NULL_BY_DESIGN",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "runtime.identity"
+          }
+        ],
+        "mission": {
+          "armed": {
+            "ceo_ingress_app_armed": null,
+            "ceo_submit_armed": null,
+            "coo_autonomy_armed": null,
+            "dialogue_bridge_armed": null,
+            "source": "absent",
+            "terminal_return_armed": null
+          },
+          "capability": {
+            "detail": "the executive runtime database was read; the requested root job was found",
+            "installed": true,
+            "state": "PROVEN",
+            "version": null
+          },
+          "depth": 0,
+          "evidence": [],
+          "orchestration_role": "aggregation",
+          "plan_step_id": null,
+          "root_job_ambiguous": false,
+          "root_job_candidates": [
+            "JOB-001"
+          ],
+          "root_job_id": "JOB-001",
+          "runtime_root_state": "RESOLVED",
+          "status": "QUEUED",
+          "submission_availability": "UNKNOWN",
+          "title": null
+        },
+        "posture": {
+          "evidence": [],
+          "rule": "H1",
+          "value": "NOT_STARTED"
+        },
+        "principal": {
+          "accountable_seat": "ceo",
+          "current_sol_target": null,
+          "current_worker": null,
+          "evidence": [],
+          "owed_turn": {
+            "reason": "no_owed_turn_signal",
+            "seat": "unknown",
+            "source_refs": []
+          }
+        },
+        "program": {
+          "attention_ids": [],
+          "disagreements": [],
+          "evidence": [],
+          "github_prs": [],
+          "next_action": "Clarify scope before execution admission.",
+          "state": "ready",
+          "title": "Mastermind OS delivery",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "read_state": {
+          "reason_codes": [
+            "SOURCE_OR_VALIDITY_INCOMPLETE"
+          ],
+          "state": "PARTIAL",
+          "usable_sections": [
+            "program",
+            "mission",
+            "review",
+            "execution",
+            "principal",
+            "transport",
+            "children"
+          ]
+        },
+        "result_refs": {
+          "absent_job_ids": [],
+          "availability": "UNAVAILABLE",
+          "generation": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "9e6d47e71eb8379bc98e1395339f45d6",
+            "state": "SAME"
+          },
+          "omitted_job_ids": [],
+          "refs": [],
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.fabric_result_reference_index.v1",
+          "snapshot_digest": "8451059a72ec4934520767cdd53396180649498bfce7867777e64935ede61e2b",
+          "truncated": false
+        },
+        "review": {
+          "evidence": [],
+          "required": false,
+          "reviews_job_id": null,
+          "verdict": "NOT_YET"
+        },
+        "schema": "mastermind.mission_workspace.v3",
+        "source": {
+          "control_room_generated_at": "2026-11-05T22:54:55.860469Z",
+          "control_room_schema": "mastermind.chairman_control_room.v1",
+          "fabric_view_generated_at": "2026-11-05T22:54:56Z",
+          "fabric_view_schema": "mastermind.fabric_job_view.v2",
+          "owner_observation": {
+            "control_room": {
+              "cache_currentness_digest": "ce3936fe8a0597c707f321bf8b3bc67828041e19de30fe170bd2a3a14281a50b",
+              "document_digest": "0b99ed533b1f46349bfbd2ee2c03f8a998730c848e3998fd96177d8c2ba29e4e",
+              "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+              "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+              "publication_after": 2,
+              "publication_before": 2,
+              "source_validity_digest": "75be32484b9cf9c1eead3c7d7ebd538cbac552e380f0ba3f7fd0d78702f53ace"
+            },
+            "runtime": {
+              "after": 2,
+              "before": 2,
+              "schema": "mastermind.runtime_read_observation.v1",
+              "snapshot_digest": "8451059a72ec4934520767cdd53396180649498bfce7867777e64935ede61e2b",
+              "source_identity": "9e6d47e71eb8379bc98e1395339f45d6",
+              "state": "SAME"
+            },
+            "schema": "mastermind.workspace_source_observation.v1",
+            "selection": {
+              "root_job_id": "JOB-001",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "state": "SAME"
+          },
+          "source_coverage": [
+            "control_room",
+            "fabric_view"
+          ],
+          "source_generation": {
+            "generation": null,
+            "state": "UNKNOWN",
+            "version": null
+          }
+        },
+        "transport": {
+          "actionable": false,
+          "carrier": null,
+          "dispatch_state": "UNKNOWN",
+          "evidence": [],
+          "historical": true,
+          "reason": "dispatch_evidence_not_supplied",
+          "w3c": null,
+          "watch_proven": false
+        }
+      }
+    },
+    "plan": {
+      "ok": true,
+      "result": {
+        "availability": "AVAILABLE",
+        "plan": {
+          "admission_schema_version": "mastermind.coo_plan_admission/v1",
+          "admission_state": "ADMITTED",
+          "plan_attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+          "plan_digest": "dea6c27fcbe378021482ac6a3d3e141f159ce2e89ff78a0fc6d2ef7198a7bf2d",
+          "plan_schema_version": "mastermind.execution_plan/v1",
+          "policy_sha": "6cc80806fb0aa48a10f45f8d6483c3718d70c841aef671f501374f8b4ac4ed60",
+          "reservation_digest": "0d3ac473538a5b2bb7a7092c5be673f1d4167b336ffe75fb85f9b4583cf9dabc",
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.admitted_execution_plan_view.v1",
+          "steps": [
+            {
+              "business_impact": "routine",
+              "objective": "Perform one bounded read-only task.",
+              "ordinal": 0,
+              "prerequisite_step_ids": [],
+              "review_required": true,
+              "step_id": "step-1"
+            }
+          ]
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_admitted_execution_plan.v1",
+        "selection": {
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "ce3936fe8a0597c707f321bf8b3bc67828041e19de30fe170bd2a3a14281a50b",
+            "document_digest": "0b99ed533b1f46349bfbd2ee2c03f8a998730c848e3998fd96177d8c2ba29e4e",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 2,
+            "publication_before": 2,
+            "source_validity_digest": "956929ff772b7ebe36170145a32bf47ec5acab34bedb0aa18808ac286c7b25c1"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "5e7d8f0f8f5c6ed792ff1c4282478aff",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_plan_observation.v1",
+          "selection": {
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      }
+    },
+    "programs": {
+      "ok": true,
+      "result": {
+        "availability": "AVAILABLE",
+        "control_room": {
+          "attention": {
+            "ceo": [],
+            "chairman": [],
+            "coo": []
+          },
+          "autonomy": {
+            "chairman_decisions": [],
+            "counts": {
+              "actionable": 0,
+              "blocked": 0,
+              "declared_blocked": 0,
+              "empty": false,
+              "stale": 0,
+              "total": 1
+            },
+            "generated_at": "2026-11-05T22:54:55.860469Z",
+            "issues": [],
+            "owed_by_seat": {
+              "ceo": 0,
+              "chairman": 0,
+              "coo": 0,
+              "unknown": 1,
+              "worker": 0
+            },
+            "responsibilities": [
+              {
+                "accountable_seat": "ceo",
+                "actionability_reason": "no_owed_turn_signal",
+                "blocker": null,
+                "chairman_decision_reason": null,
+                "chairman_decision_required": false,
+                "current_sol_target": null,
+                "current_worker": null,
+                "declared_blocker": null,
+                "disagreements": [],
+                "dispatch": {
+                  "actionable": false,
+                  "carrier": null,
+                  "dispatch_state": "UNKNOWN",
+                  "evidence": null,
+                  "historical": true,
+                  "reason": "dispatch_evidence_not_supplied",
+                  "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                  "root_job_id": "JOB-001",
+                  "w3c": null,
+                  "watch_proven": false
+                },
+                "freshness": "current",
+                "is_actionable": false,
+                "owed_turn": {
+                  "reason": "no_owed_turn_signal",
+                  "seat": "unknown",
+                  "source_refs": []
+                },
+                "placement_state": {
+                  "observable": false,
+                  "reason": "no_canonical_producer",
+                  "value": "not_observable"
+                },
+                "query_status": "ok",
+                "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                "root_job_ambiguous": false,
+                "root_job_candidates": [
+                  "JOB-001"
+                ],
+                "root_job_id": "JOB-001",
+                "runtime_root_state": "RESOLVED",
+                "source_receipts": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-05T22:54:55Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ],
+                "state": "proposed",
+                "title": "Mastermind OS delivery",
+                "validity": {
+                  "card": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "704e6469b6c95f5fe0b60f869ecb9fcb983054b9ea3adb11de092b0461d88842",
+                    "qualified_at": "2026-11-05T22:54:55.860469Z",
+                    "reason": "source_budget",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-05T22:54:55Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": 172799139
+                  },
+                  "decision_current": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "f5fe0ed5235cb9085d4568c2e2467379adaf6b5484a59c7980a655ec069c0c56",
+                    "qualified_at": "2026-11-05T22:54:55.860469Z",
+                    "reason": "source_budget",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-05T22:54:55Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": 172799139
+                  },
+                  "dispatch": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "1c61216cf2d64506befc7eb96e52ee4683b5e8c5d8308b9364d07e5ebabd1ed9",
+                    "qualified_at": "2026-11-05T22:54:55.860469Z",
+                    "reason": "unqualified_source_context",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [],
+                    "valid_for_ms": null
+                  },
+                  "owed_open_age": {
+                    "binding_fingerprint": null,
+                    "binding_id": null,
+                    "owed_seat": "unknown",
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "2174243e787f4c84806289aeb9ab8d780a30b33e657d3ebec3bfea0f00bec4d3",
+                    "qualified_at": "2026-11-05T22:54:55.860469Z",
+                    "reason": "unqualified_source_context",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-05T22:54:55Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": null
+                  }
+                },
+                "wake_outcome": "not_observable"
+              }
+            ],
+            "schema": "mastermind.autonomy_control_room.v1",
+            "source_failures": [],
+            "unmapped_responsibilities": []
+          },
+          "binding_conflicts": [],
+          "degraded": [
+            "active_builds: unavailable",
+            "boot_packet: no agentos/handoffs/ directory at /private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-9175/test_one_runtime_activity_and_0/canonical-macro/agentos/handoffs",
+            "executive_inbox: unavailable"
+          ],
+          "generated_at": "2026-11-05T22:54:55.860469Z",
+          "placement_selection": null,
+          "runtime_capability_status": null,
+          "schema": "mastermind.chairman_control_room.v1",
+          "sources": {
+            "active_builds_collected_at": null,
+            "active_builds_schema": null,
+            "agent_os_brief_schema": "ceo_brief.v1",
+            "agent_os_state_generated_at": "2026-11-05T22:54:55Z",
+            "agent_os_state_schema": "agent_os_state.v1",
+            "bindings_path_present": false,
+            "executive_inbox_schema": null,
+            "macro_root": "/private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-9175/test_one_runtime_activity_and_0/canonical-macro",
+            "macro_sha": "69206df50e394e2af97692101e0fe35dec0f8876",
+            "mastermind_branch": "source-qualified-fixture",
+            "mastermind_sha": "fd3fa53ad7a8b235b9e2509b63de65c1e1c3522f",
+            "runtime_db_present": null
+          },
+          "unbound_surfaces": [],
+          "unjoined_open_prs": [],
+          "work": [
+            {
+              "agent_os": {
+                "depends_on": [],
+                "next_action": "Clarify scope before execution admission.",
+                "program": "executive-os",
+                "reason": "All declared dependencies are done.",
+                "reason_code": "dependencies_satisfied",
+                "source": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                "state": "ready",
+                "status": "proposed",
+                "title": "Mastermind OS delivery",
+                "unmet_dependencies": [],
+                "workstream": "PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+              },
+              "attention_ids": [],
+              "bindings": [],
+              "disagreements": [],
+              "executive": {
+                "jobs": [
+                  {
+                    "job_id": "JOB-001",
+                    "status": "QUEUED",
+                    "workstream": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ],
+                "joined_by": "ceo_intent_provenance"
+              },
+              "github": {
+                "prs": []
+              },
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            }
+          ]
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_programs.v1",
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "ce3936fe8a0597c707f321bf8b3bc67828041e19de30fe170bd2a3a14281a50b",
+            "document_digest": "0b99ed533b1f46349bfbd2ee2c03f8a998730c848e3998fd96177d8c2ba29e4e",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 2,
+            "publication_before": 2,
+            "source_validity_digest": "194fd845ffa5df7fe56d79f10e0aec59402a78b73c946feb7871cd879d004d57"
+          },
+          "runtime": null,
+          "schema": "mastermind.workspace_source_observation.v1",
+          "selection": null,
+          "state": "SAME"
+        }
+      }
+    },
+    "result_references": {
+      "ok": true,
+      "result": {
+        "availability": "AVAILABLE",
+        "catalogue": {
+          "freshness": "CURRENT",
+          "generated_at": "2026-11-05T22:54:55Z"
+        },
+        "index": {
+          "absent_job_ids": [
+            "JOB-001",
+            "JOB-003"
+          ],
+          "availability": "AVAILABLE",
+          "generation": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "2777213857e7594927e0e9305e5a0549",
+            "state": "SAME"
+          },
+          "omitted_job_ids": [],
+          "refs": [
+            {
+              "attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+              "job_id": "JOB-002",
+              "orchestration_role": "plan",
+              "result_envelope_digest": "428ac95d55330d622c5b070712b7456b5a76963be796b3201cc2e469e4766dda",
+              "root_job_id": "JOB-001",
+              "validation": "UNVALIDATED"
+            }
+          ],
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.fabric_result_reference_index.v1",
+          "snapshot_digest": "8451059a72ec4934520767cdd53396180649498bfce7867777e64935ede61e2b",
+          "truncated": false
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_result_references.v1",
+        "selection": {
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "ce3936fe8a0597c707f321bf8b3bc67828041e19de30fe170bd2a3a14281a50b",
+            "document_digest": "0b99ed533b1f46349bfbd2ee2c03f8a998730c848e3998fd96177d8c2ba29e4e",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 2,
+            "publication_before": 2,
+            "source_validity_digest": "7e529c11da6d34afffb7cb21298625ced83346d4419eee09775398b8e257b7d8"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "2777213857e7594927e0e9305e5a0549",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_source_observation.v1",
+          "selection": {
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      }
+    },
+    "work": {
+      "ok": true,
+      "result": {
+        "availability": "AVAILABLE",
+        "coverage": {
+          "completeness": "PARTIAL",
+          "count": 1,
+          "total": 1,
+          "truncated": false
+        },
+        "effect_exception": {
+          "observable": false,
+          "reason": "no_exception_observed",
+          "scope": "RUNTIME_CURRENT_WORKER",
+          "value": "NONE"
+        },
+        "generated_at": "2026-11-05T22:54:56Z",
+        "groups": {
+          "COMPLETED_NOT_ACCEPTED": [],
+          "EFFECT_EXCEPTION": [],
+          "NEEDS_SOL": [],
+          "NEEDS_WORKER": [],
+          "QUEUED": [
+            {
+              "acceptance": {
+                "producer_owner": null,
+                "reason": "product acceptance has no producer in this projection",
+                "state": "NOT_PROJECTED"
+              },
+              "capacity": {
+                "evidence_ref": null,
+                "observed_at": null,
+                "reason": "no_producer",
+                "source": null,
+                "value": "UNKNOWN"
+              },
+              "effect": {
+                "evidence_ref": null,
+                "observed_at": null,
+                "reason": "no_producer",
+                "source": null,
+                "value": "UNKNOWN"
+              },
+              "group": "QUEUED",
+              "lifecycle": {
+                "depth": 0,
+                "orchestration_role": "aggregation",
+                "source": "EXECUTIVE_RUNTIME",
+                "status": "QUEUED"
+              },
+              "next_actor": {
+                "evidence_ref": null,
+                "observed_at": null,
+                "reason": "no_producer",
+                "source": null,
+                "value": "UNKNOWN"
+              },
+              "root_job_id": "JOB-001"
+            }
+          ],
+          "RUNNING": [],
+          "TERMINAL": [],
+          "UNKNOWN": [],
+          "WAITING_CAPACITY": []
+        },
+        "lifecycle_source": {
+          "degraded": [
+            "root enumeration provenance is unjoined; creation provenance requires exact-root acquisition"
+          ],
+          "runtime": {
+            "acquisition": {
+              "budgets": {
+                "attempts_per_job": 20,
+                "attempts_total": 340,
+                "creation_events_per_job": 1,
+                "jobs": 17,
+                "roots": 64
+              },
+              "generation": {
+                "after": 2,
+                "before": 2,
+                "schema": "mastermind.runtime_read_observation.v1",
+                "source_identity": "80d1bd9dd2a6b0f4eb8994a97faec5ba",
+                "state": "SAME"
+              },
+              "owner": "executive_runtime",
+              "provenance": {
+                "state": "PARTIAL",
+                "unjoined_job_ids": [
+                  "JOB-001"
+                ]
+              },
+              "query": {
+                "kind": "root_discovery",
+                "root_job_id": null
+              },
+              "schema": "mastermind.fabric_runtime_acquisition.v1",
+              "snapshot_digest": "df752954d5dec876983f69455b9c58e6d5c3eb1abdb24ff668e590c1e7ba0139",
+              "truncation": {
+                "attempt_job_ids": [],
+                "jobs": false,
+                "projection": false,
+                "roots": false
+              }
+            },
+            "db_present": true,
+            "identity": null,
+            "root": null
+          },
+          "schema": "mastermind.fabric_job_root_list.v2"
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_work_queue.v1",
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "ce3936fe8a0597c707f321bf8b3bc67828041e19de30fe170bd2a3a14281a50b",
+            "document_digest": "0b99ed533b1f46349bfbd2ee2c03f8a998730c848e3998fd96177d8c2ba29e4e",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 2,
+            "publication_before": 2,
+            "source_validity_digest": "d0d7ad3a83df513dc4692bb7ddb4ea4a1c5111d9b1c95525fd87d60d3715ce94"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "snapshot_digest": "df752954d5dec876983f69455b9c58e6d5c3eb1abdb24ff668e590c1e7ba0139",
+            "source_identity": "80d1bd9dd2a6b0f4eb8994a97faec5ba",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_source_observation.v1",
+          "selection": null,
+          "state": "SAME"
+        }
+      }
+    }
+  },
+  "activity_selection": {
+    "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+    "job_id": "JOB-003",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+  },
+  "canonical_source": {
+    "agentos_compiler_sha256": "acf3d970decb0b0c79b536bcc4e64cca93adace078321156fa72ff29c73f64a3",
+    "configured_macro_revision": "69206df50e394e2af97692101e0fe35dec0f8876",
+    "premises": [
+      "new configured fixture baseline is the retained previously-published Macro revision",
+      "actual pinned Store/build_state/build_brief and canonical compose_control_room",
+      "physical AgentOS brief child evaluated in-process over exact captured code",
+      "absent Inbox/active builds/bindings remain explicitly unavailable",
+      "fixture READ binding and private kernel/provider enrollment remain synthetic"
+    ],
+    "raw_workstream_sources": [
+      "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md"
+    ]
+  },
+  "clock": {
+    "verified_at": 1793919294,
+    "verified_expiry": 1793919594
+  },
+  "counts": {
+    "attempts": 3,
+    "events": 52,
+    "jobs": 4
+  },
+  "export_completed": true,
+  "final": {
+    "activity": {
+      "body": {
+        "activity": {
+          "availability": "RETAINED",
+          "candidate_receipts_in_sample": 1,
+          "normalized_events_in_sample": 3,
+          "omitted_in_sample": 0,
+          "rows": [
+            {
+              "candidate_event_id": 31,
+              "candidate_recorded_at": "2026-11-05T22:54:55+00:00",
+              "category": "ITEM_ACTIVITY",
+              "ordinal_in_candidate": 0,
+              "turn_id": "ohf-turn-d129f6307f054970bdb3e8c9f0ded347"
+            },
+            {
+              "candidate_event_id": 31,
+              "candidate_recorded_at": "2026-11-05T22:54:55+00:00",
+              "category": "ITEM_ACTIVITY",
+              "ordinal_in_candidate": 1,
+              "turn_id": "ohf-turn-d129f6307f054970bdb3e8c9f0ded347"
+            },
+            {
+              "candidate_event_id": 31,
+              "candidate_recorded_at": "2026-11-05T22:54:55+00:00",
+              "category": "TURN_COMPLETED",
+              "ordinal_in_candidate": 2,
+              "turn_id": "ohf-turn-d129f6307f054970bdb3e8c9f0ded347"
+            }
+          ],
+          "schema": "mastermind.operator_retained_activity_metadata.v1",
+          "selection": {
+            "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+            "job_id": "JOB-003",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "source": {
+            "global_event_total": null,
+            "live_worker_count": null,
+            "scope": "RETAINED_CANDIDATES_ONLY",
+            "source_truncated": false,
+            "state": "SAME_AS_OF_READ"
+          }
+        },
+        "availability": "AVAILABLE",
+        "reason_codes": [],
+        "schema": "mastermind.workspace_retained_activity.v1",
+        "selection": {
+          "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+          "job_id": "JOB-003",
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+            "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 3,
+            "publication_before": 3,
+            "source_validity_digest": "6de82ffa91993d9c5e2d10334067efe6dcd553b26f4685023d4c833aa83fcdc1"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "2b727ca8db533630514fd042492ba459",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_retained_activity_observation.v1",
+          "selection": {
+            "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+            "job_id": "JOB-003",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      },
+      "status": 200
+    },
+    "mission": {
+      "body": {
+        "acceptance": {
+          "artifact_revision": null,
+          "evidence": [],
+          "owner": null,
+          "reason_codes": [
+            "ACCEPTANCE_OWNER_NOT_PROJECTED"
+          ],
+          "ruling": null,
+          "state": "NOT_PROJECTED"
+        },
+        "budget": {},
+        "children": {
+          "coverage": "COMPLETE",
+          "items": [
+            {
+              "attempt_count": 1,
+              "attempt_limit": 2,
+              "current_attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+              "depth": 1,
+              "job_id": "JOB-002",
+              "latest_attempt": {
+                "attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+                "attempt_number": 1,
+                "error_class": null,
+                "error_present": false,
+                "exit_code": null,
+                "finished_at": "2026-11-05T22:54:55Z",
+                "has_result": true,
+                "started_at": "2026-11-05T22:54:55Z",
+                "status": "COMPLETED"
+              },
+              "orchestration_role": "plan",
+              "parent_job_id": "JOB-001",
+              "plan_step_id": null,
+              "status": "COMPLETED",
+              "worker_id": null
+            },
+            {
+              "attempt_count": 1,
+              "attempt_limit": 1,
+              "current_attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+              "depth": 1,
+              "job_id": "JOB-003",
+              "latest_attempt": {
+                "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+                "attempt_number": 1,
+                "error_class": null,
+                "error_present": false,
+                "exit_code": null,
+                "finished_at": "2026-11-05T22:54:56Z",
+                "has_result": true,
+                "started_at": "2026-11-05T22:54:55Z",
+                "status": "COMPLETED"
+              },
+              "orchestration_role": "work",
+              "parent_job_id": "JOB-001",
+              "plan_step_id": "step-1",
+              "status": "COMPLETED",
+              "worker_id": null
+            },
+            {
+              "attempt_count": 1,
+              "attempt_limit": 1,
+              "current_attempt_id": "ATT-db326f74c13d415cac1bb6bc08cf968f",
+              "depth": 1,
+              "job_id": "JOB-004",
+              "latest_attempt": {
+                "attempt_id": "ATT-db326f74c13d415cac1bb6bc08cf968f",
+                "attempt_number": 1,
+                "error_class": null,
+                "error_present": false,
+                "exit_code": null,
+                "finished_at": "2026-11-05T22:54:56Z",
+                "has_result": true,
+                "started_at": "2026-11-05T22:54:56Z",
+                "status": "COMPLETED"
+              },
+              "orchestration_role": "review",
+              "parent_job_id": "JOB-001",
+              "plan_step_id": "step-1",
+              "status": "COMPLETED",
+              "worker_id": null
+            }
+          ],
+          "overflow_count": 0,
+          "reason_codes": [],
+          "state": "AVAILABLE",
+          "total_count": 3,
+          "unjoined_job_count": 0,
+          "unjoined_job_ids": []
+        },
+        "conversation": {
+          "coverage": "NOT_PROJECTED",
+          "items": [],
+          "overflow_count": null,
+          "reason_codes": [
+            "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+          ],
+          "state": "UNAVAILABLE",
+          "total_count": null
+        },
+        "degraded": [
+          "active_builds: unavailable",
+          "agent_os_detail_redacted",
+          "executive_inbox: unavailable"
+        ],
+        "execution": {
+          "artifacts": [],
+          "errors_present": false,
+          "evidence": [],
+          "next_actions": [],
+          "state": "NOT_STARTED",
+          "summary_present": false
+        },
+        "feature_gates": {
+          "actions": "READ_ONLY",
+          "advanced": "AVAILABLE",
+          "conversation": "UNAVAILABLE"
+        },
+        "generated_at": "2026-11-05T22:54:56.767055Z",
+        "missingness": [
+          {
+            "missingness_class": "EXCLUDED",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "conversation"
+          },
+          {
+            "missingness_class": "EXCLUDED",
+            "producer_owner": "wake",
+            "reason": "source detail withheld",
+            "target_field": "return_path"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": null,
+            "reason": "source detail withheld",
+            "target_field": "acceptance"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": null,
+            "reason": "source detail withheld",
+            "target_field": "acceptance.state"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "children.worker_id"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "mission.title"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "JOB-004",
+            "reason": "source detail withheld",
+            "target_field": "review.verdict"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "slack",
+            "reason": "source detail withheld",
+            "target_field": "transport.continued"
+          },
+          {
+            "missingness_class": "MISSING_PRODUCER",
+            "producer_owner": "slack",
+            "reason": "source detail withheld",
+            "target_field": "transport.stopped"
+          },
+          {
+            "missingness_class": "NULL_BY_DESIGN",
+            "producer_owner": "executive_os",
+            "reason": "source detail withheld",
+            "target_field": "runtime.identity"
+          }
+        ],
+        "mission": {
+          "armed": {
+            "ceo_ingress_app_armed": null,
+            "ceo_submit_armed": null,
+            "coo_autonomy_armed": null,
+            "dialogue_bridge_armed": null,
+            "source": "absent",
+            "terminal_return_armed": null
+          },
+          "capability": {
+            "detail": "the executive runtime database was read; the requested root job was found",
+            "installed": true,
+            "state": "PROVEN",
+            "version": null
+          },
+          "depth": 0,
+          "evidence": [],
+          "orchestration_role": "aggregation",
+          "plan_step_id": null,
+          "root_job_ambiguous": false,
+          "root_job_candidates": [
+            "JOB-001"
+          ],
+          "root_job_id": "JOB-001",
+          "runtime_root_state": "RESOLVED",
+          "status": "QUEUED",
+          "submission_availability": "UNKNOWN",
+          "title": null
+        },
+        "posture": {
+          "evidence": [],
+          "rule": "H1",
+          "value": "NOT_STARTED"
+        },
+        "principal": {
+          "accountable_seat": "ceo",
+          "current_sol_target": null,
+          "current_worker": null,
+          "evidence": [],
+          "owed_turn": {
+            "reason": "no_owed_turn_signal",
+            "seat": "unknown",
+            "source_refs": []
+          }
+        },
+        "program": {
+          "attention_ids": [],
+          "disagreements": [],
+          "evidence": [],
+          "github_prs": [],
+          "next_action": "Clarify scope before execution admission.",
+          "state": "ready",
+          "title": "Mastermind OS delivery",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "read_state": {
+          "reason_codes": [
+            "SOURCE_OR_VALIDITY_INCOMPLETE"
+          ],
+          "state": "PARTIAL",
+          "usable_sections": [
+            "program",
+            "mission",
+            "review",
+            "execution",
+            "principal",
+            "transport",
+            "children"
+          ]
+        },
+        "result_refs": {
+          "absent_job_ids": [],
+          "availability": "UNAVAILABLE",
+          "generation": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "489e5c658a18680079d63fb43c296b44",
+            "state": "SAME"
+          },
+          "omitted_job_ids": [],
+          "refs": [],
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.fabric_result_reference_index.v1",
+          "snapshot_digest": "5a7bbe27e4c4154b2bc2244d6acee2c7ac9d5a98456f1000bbbed1a5897af909",
+          "truncated": false
+        },
+        "review": {
+          "evidence": [],
+          "required": false,
+          "reviews_job_id": null,
+          "verdict": "NOT_YET"
+        },
+        "schema": "mastermind.mission_workspace.v3",
+        "source": {
+          "control_room_generated_at": "2026-11-05T22:54:56.767055Z",
+          "control_room_schema": "mastermind.chairman_control_room.v1",
+          "fabric_view_generated_at": "2026-11-05T22:54:57Z",
+          "fabric_view_schema": "mastermind.fabric_job_view.v2",
+          "owner_observation": {
+            "control_room": {
+              "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+              "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+              "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+              "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+              "publication_after": 3,
+              "publication_before": 3,
+              "source_validity_digest": "81e5cbe50b835747c71e82a47cea7836cd1929813c094cad8848b8db6603f447"
+            },
+            "runtime": {
+              "after": 2,
+              "before": 2,
+              "schema": "mastermind.runtime_read_observation.v1",
+              "snapshot_digest": "5a7bbe27e4c4154b2bc2244d6acee2c7ac9d5a98456f1000bbbed1a5897af909",
+              "source_identity": "489e5c658a18680079d63fb43c296b44",
+              "state": "SAME"
+            },
+            "schema": "mastermind.workspace_source_observation.v1",
+            "selection": {
+              "root_job_id": "JOB-001",
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            },
+            "state": "SAME"
+          },
+          "source_coverage": [
+            "control_room",
+            "fabric_view"
+          ],
+          "source_generation": {
+            "generation": null,
+            "state": "UNKNOWN",
+            "version": null
+          }
+        },
+        "transport": {
+          "actionable": false,
+          "carrier": null,
+          "dispatch_state": "UNKNOWN",
+          "evidence": [],
+          "historical": true,
+          "reason": "dispatch_evidence_not_supplied",
+          "w3c": null,
+          "watch_proven": false
+        }
+      },
+      "status": 200
+    },
+    "plan": {
+      "body": {
+        "availability": "AVAILABLE",
+        "plan": {
+          "admission_schema_version": "mastermind.coo_plan_admission/v1",
+          "admission_state": "ADMITTED",
+          "plan_attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+          "plan_digest": "dea6c27fcbe378021482ac6a3d3e141f159ce2e89ff78a0fc6d2ef7198a7bf2d",
+          "plan_schema_version": "mastermind.execution_plan/v1",
+          "policy_sha": "6cc80806fb0aa48a10f45f8d6483c3718d70c841aef671f501374f8b4ac4ed60",
+          "reservation_digest": "0d3ac473538a5b2bb7a7092c5be673f1d4167b336ffe75fb85f9b4583cf9dabc",
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.admitted_execution_plan_view.v1",
+          "steps": [
+            {
+              "business_impact": "routine",
+              "objective": "Perform one bounded read-only task.",
+              "ordinal": 0,
+              "prerequisite_step_ids": [],
+              "review_required": true,
+              "step_id": "step-1"
+            }
+          ]
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_admitted_execution_plan.v1",
+        "selection": {
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+            "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 3,
+            "publication_before": 3,
+            "source_validity_digest": "97d9af9edc74e2d219ec8eb8308b083df737aceb161679ef20d52bcb64f91159"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "3f6f4f4c6c780dd269dbad1ac0411410",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_plan_observation.v1",
+          "selection": {
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      },
+      "status": 200
+    },
+    "programs": {
+      "body": {
+        "availability": "AVAILABLE",
+        "control_room": {
+          "attention": {
+            "ceo": [],
+            "chairman": [],
+            "coo": []
+          },
+          "autonomy": {
+            "chairman_decisions": [],
+            "counts": {
+              "actionable": 0,
+              "blocked": 0,
+              "declared_blocked": 0,
+              "empty": false,
+              "stale": 0,
+              "total": 1
+            },
+            "generated_at": "2026-11-05T22:54:56.767055Z",
+            "issues": [],
+            "owed_by_seat": {
+              "ceo": 0,
+              "chairman": 0,
+              "coo": 0,
+              "unknown": 1,
+              "worker": 0
+            },
+            "responsibilities": [
+              {
+                "accountable_seat": "ceo",
+                "actionability_reason": "no_owed_turn_signal",
+                "blocker": null,
+                "chairman_decision_reason": null,
+                "chairman_decision_required": false,
+                "current_sol_target": null,
+                "current_worker": null,
+                "declared_blocker": null,
+                "disagreements": [],
+                "dispatch": {
+                  "actionable": false,
+                  "carrier": null,
+                  "dispatch_state": "UNKNOWN",
+                  "evidence": null,
+                  "historical": true,
+                  "reason": "dispatch_evidence_not_supplied",
+                  "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                  "root_job_id": "JOB-001",
+                  "w3c": null,
+                  "watch_proven": false
+                },
+                "freshness": "current",
+                "is_actionable": false,
+                "owed_turn": {
+                  "reason": "no_owed_turn_signal",
+                  "seat": "unknown",
+                  "source_refs": []
+                },
+                "placement_state": {
+                  "observable": false,
+                  "reason": "no_canonical_producer",
+                  "value": "not_observable"
+                },
+                "query_status": "ok",
+                "responsibility_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+                "root_job_ambiguous": false,
+                "root_job_candidates": [
+                  "JOB-001"
+                ],
+                "root_job_id": "JOB-001",
+                "runtime_root_state": "RESOLVED",
+                "source_receipts": [
+                  {
+                    "freshness": "current",
+                    "observed_at": "2026-11-05T22:54:56Z",
+                    "owner": "agent_os",
+                    "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ],
+                "state": "proposed",
+                "title": "Mastermind OS delivery",
+                "validity": {
+                  "card": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "6e89f473d901f6c643bf19e7a9bdf3dd2cd21b6a0b6f6b951f00c362bfb5bd27",
+                    "qualified_at": "2026-11-05T22:54:56.767055Z",
+                    "reason": "source_budget",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-05T22:54:56Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": 172799232
+                  },
+                  "decision_current": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "2f55be68da8edd9abd563ab670c03d629f4d043dd37e5acbeabc92bfa0f10d36",
+                    "qualified_at": "2026-11-05T22:54:56.767055Z",
+                    "reason": "source_budget",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-05T22:54:56Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": 172799232
+                  },
+                  "dispatch": {
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "1c61216cf2d64506befc7eb96e52ee4683b5e8c5d8308b9364d07e5ebabd1ed9",
+                    "qualified_at": "2026-11-05T22:54:56.767055Z",
+                    "reason": "unqualified_source_context",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [],
+                    "valid_for_ms": null
+                  },
+                  "owed_open_age": {
+                    "binding_fingerprint": null,
+                    "binding_id": null,
+                    "owed_seat": "unknown",
+                    "policy": "mapper-inclusive-48h-future-1h.v1",
+                    "proof_ref": "c7bb6dae5673e2a368e35a559dd9f346ab90f01a000ca1122692b2f3ca1c2cf9",
+                    "qualified_at": "2026-11-05T22:54:56.767055Z",
+                    "reason": "unqualified_source_context",
+                    "schema": "mastermind.autonomy_validity.v1",
+                    "sources": [
+                      {
+                        "freshness": "current",
+                        "observed_at": "2026-11-05T22:54:56Z",
+                        "owner": "agent_os",
+                        "ref": "agent_os_state.workstreams:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                      }
+                    ],
+                    "valid_for_ms": null
+                  }
+                },
+                "wake_outcome": "not_observable"
+              }
+            ],
+            "schema": "mastermind.autonomy_control_room.v1",
+            "source_failures": [],
+            "unmapped_responsibilities": []
+          },
+          "binding_conflicts": [],
+          "degraded": [
+            "active_builds: unavailable",
+            "boot_packet: no agentos/handoffs/ directory at /private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-9175/test_one_runtime_activity_and_0/canonical-macro/agentos/handoffs",
+            "executive_inbox: unavailable"
+          ],
+          "generated_at": "2026-11-05T22:54:56.767055Z",
+          "placement_selection": null,
+          "runtime_capability_status": null,
+          "schema": "mastermind.chairman_control_room.v1",
+          "sources": {
+            "active_builds_collected_at": null,
+            "active_builds_schema": null,
+            "agent_os_brief_schema": "ceo_brief.v1",
+            "agent_os_state_generated_at": "2026-11-05T22:54:56Z",
+            "agent_os_state_schema": "agent_os_state.v1",
+            "bindings_path_present": false,
+            "executive_inbox_schema": null,
+            "macro_root": "/private/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/pytest-of-chriswong/pytest-9175/test_one_runtime_activity_and_0/canonical-macro",
+            "macro_sha": "69206df50e394e2af97692101e0fe35dec0f8876",
+            "mastermind_branch": "source-qualified-fixture",
+            "mastermind_sha": "fd3fa53ad7a8b235b9e2509b63de65c1e1c3522f",
+            "runtime_db_present": null
+          },
+          "unbound_surfaces": [],
+          "unjoined_open_prs": [],
+          "work": [
+            {
+              "agent_os": {
+                "depends_on": [],
+                "next_action": "Clarify scope before execution admission.",
+                "program": "executive-os",
+                "reason": "All declared dependencies are done.",
+                "reason_code": "dependencies_satisfied",
+                "source": "agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md",
+                "state": "ready",
+                "status": "proposed",
+                "title": "Mastermind OS delivery",
+                "unmet_dependencies": [],
+                "workstream": "PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+              },
+              "attention_ids": [],
+              "bindings": [],
+              "disagreements": [],
+              "executive": {
+                "jobs": [
+                  {
+                    "job_id": "JOB-001",
+                    "status": "QUEUED",
+                    "workstream": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+                  }
+                ],
+                "joined_by": "ceo_intent_provenance"
+              },
+              "github": {
+                "prs": []
+              },
+              "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+            }
+          ]
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_programs.v1",
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+            "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 3,
+            "publication_before": 3,
+            "source_validity_digest": "dc40381c3404126d6c5b0098c155f8ccdc3bf1d3005ced72a99639ca6209c4d8"
+          },
+          "runtime": null,
+          "schema": "mastermind.workspace_source_observation.v1",
+          "selection": null,
+          "state": "SAME"
+        }
+      },
+      "status": 200
+    },
+    "result": {
+      "body": {
+        "availability": "AVAILABLE",
+        "reason_codes": [],
+        "result": {
+          "acceptance": "NOT_PROJECTED",
+          "availability": "AVAILABLE",
+          "content": {
+            "next_actions": [],
+            "role_result": {
+              "artifacts": [],
+              "evidence_digests": [],
+              "plan_attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+              "plan_digest": "dea6c27fcbe378021482ac6a3d3e141f159ce2e89ff78a0fc6d2ef7198a7bf2d",
+              "plan_step_id": "step-1",
+              "repair_round": 0,
+              "root_job_id": "JOB-001",
+              "schema_version": "mastermind.work_result/v1"
+            },
+            "summary": "bounded typed fixture result"
+          },
+          "content_complete": true,
+          "counts": {
+            "findings": null,
+            "next_actions": 0
+          },
+          "execution_status": "COMPLETED",
+          "generation": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "61d84c108e3d0eb88505a5ac9bb13ff2",
+            "state": "SAME"
+          },
+          "omitted": [],
+          "review": null,
+          "role": "work",
+          "role_result_digest": "2f8e599441fdeeb068427cd1449ba4a354e446139a0718e524a969b2d53b2feb",
+          "schema": "mastermind.fabric_role_result_view.v1",
+          "selection": {
+            "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+            "job_id": "JOB-003",
+            "result_envelope_digest": "8264faa4fdef42afdddb79a85992929dddeeedb35424d990e0184d04432ff6cd",
+            "root_job_id": "JOB-001"
+          }
+        },
+        "schema": "mastermind.workspace_role_result.v1",
+        "selection": {
+          "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+          "job_id": "JOB-003",
+          "result_envelope_digest": "8264faa4fdef42afdddb79a85992929dddeeedb35424d990e0184d04432ff6cd",
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+            "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 3,
+            "publication_before": 3,
+            "source_validity_digest": "31dd8ad243f9743bf377faab33f2ed7903b24bed4a737b1d146a4ac5de58718b"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "61d84c108e3d0eb88505a5ac9bb13ff2",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_result_observation.v1",
+          "selection": {
+            "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+            "job_id": "JOB-003",
+            "result_envelope_digest": "8264faa4fdef42afdddb79a85992929dddeeedb35424d990e0184d04432ff6cd",
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      },
+      "status": 200
+    },
+    "result_references": {
+      "body": {
+        "availability": "AVAILABLE",
+        "catalogue": {
+          "freshness": "CURRENT",
+          "generated_at": "2026-11-05T22:54:56Z"
+        },
+        "index": {
+          "absent_job_ids": [
+            "JOB-001"
+          ],
+          "availability": "AVAILABLE",
+          "generation": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "a7aaa4ffc4bd9cfe451b3cb94cbbab15",
+            "state": "SAME"
+          },
+          "omitted_job_ids": [],
+          "refs": [
+            {
+              "attempt_id": "ATT-e92d256d68824aec9a969d5fea116cb2",
+              "job_id": "JOB-002",
+              "orchestration_role": "plan",
+              "result_envelope_digest": "428ac95d55330d622c5b070712b7456b5a76963be796b3201cc2e469e4766dda",
+              "root_job_id": "JOB-001",
+              "validation": "UNVALIDATED"
+            },
+            {
+              "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+              "job_id": "JOB-003",
+              "orchestration_role": "work",
+              "result_envelope_digest": "8264faa4fdef42afdddb79a85992929dddeeedb35424d990e0184d04432ff6cd",
+              "root_job_id": "JOB-001",
+              "validation": "UNVALIDATED"
+            },
+            {
+              "attempt_id": "ATT-db326f74c13d415cac1bb6bc08cf968f",
+              "job_id": "JOB-004",
+              "orchestration_role": "review",
+              "result_envelope_digest": "2c8bc7ca27dbfe443b22a2c05b881941589bb65eb1145012b91b67f6905a8e4b",
+              "root_job_id": "JOB-001",
+              "validation": "UNVALIDATED"
+            }
+          ],
+          "root_job_id": "JOB-001",
+          "schema": "mastermind.fabric_result_reference_index.v1",
+          "snapshot_digest": "5a7bbe27e4c4154b2bc2244d6acee2c7ac9d5a98456f1000bbbed1a5897af909",
+          "truncated": false
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_result_references.v1",
+        "selection": {
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+        },
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+            "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 3,
+            "publication_before": 3,
+            "source_validity_digest": "b315214feeac7dcbc406397d6c50d40105b3c517833350c66fad1f1d583c3967"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "source_identity": "a7aaa4ffc4bd9cfe451b3cb94cbbab15",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_source_observation.v1",
+          "selection": {
+            "root_job_id": "JOB-001",
+            "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+          },
+          "state": "SAME"
+        }
+      },
+      "status": 200
+    },
+    "work": {
+      "body": {
+        "availability": "AVAILABLE",
+        "coverage": {
+          "completeness": "PARTIAL",
+          "count": 1,
+          "total": 1,
+          "truncated": false
+        },
+        "effect_exception": {
+          "observable": false,
+          "reason": "no_exception_observed",
+          "scope": "RUNTIME_CURRENT_WORKER",
+          "value": "NONE"
+        },
+        "generated_at": "2026-11-05T22:54:57Z",
+        "groups": {
+          "COMPLETED_NOT_ACCEPTED": [],
+          "EFFECT_EXCEPTION": [],
+          "NEEDS_SOL": [],
+          "NEEDS_WORKER": [],
+          "QUEUED": [
+            {
+              "acceptance": {
+                "producer_owner": null,
+                "reason": "product acceptance has no producer in this projection",
+                "state": "NOT_PROJECTED"
+              },
+              "capacity": {
+                "evidence_ref": null,
+                "observed_at": null,
+                "reason": "no_producer",
+                "source": null,
+                "value": "UNKNOWN"
+              },
+              "effect": {
+                "evidence_ref": null,
+                "observed_at": null,
+                "reason": "no_producer",
+                "source": null,
+                "value": "UNKNOWN"
+              },
+              "group": "QUEUED",
+              "lifecycle": {
+                "depth": 0,
+                "orchestration_role": "aggregation",
+                "source": "EXECUTIVE_RUNTIME",
+                "status": "QUEUED"
+              },
+              "next_actor": {
+                "evidence_ref": null,
+                "observed_at": null,
+                "reason": "no_producer",
+                "source": null,
+                "value": "UNKNOWN"
+              },
+              "root_job_id": "JOB-001"
+            }
+          ],
+          "RUNNING": [],
+          "TERMINAL": [],
+          "UNKNOWN": [],
+          "WAITING_CAPACITY": []
+        },
+        "lifecycle_source": {
+          "degraded": [
+            "root enumeration provenance is unjoined; creation provenance requires exact-root acquisition"
+          ],
+          "runtime": {
+            "acquisition": {
+              "budgets": {
+                "attempts_per_job": 20,
+                "attempts_total": 340,
+                "creation_events_per_job": 1,
+                "jobs": 17,
+                "roots": 64
+              },
+              "generation": {
+                "after": 2,
+                "before": 2,
+                "schema": "mastermind.runtime_read_observation.v1",
+                "source_identity": "6139cd1735bec01c57361de7b4731bdf",
+                "state": "SAME"
+              },
+              "owner": "executive_runtime",
+              "provenance": {
+                "state": "PARTIAL",
+                "unjoined_job_ids": [
+                  "JOB-001"
+                ]
+              },
+              "query": {
+                "kind": "root_discovery",
+                "root_job_id": null
+              },
+              "schema": "mastermind.fabric_runtime_acquisition.v1",
+              "snapshot_digest": "df752954d5dec876983f69455b9c58e6d5c3eb1abdb24ff668e590c1e7ba0139",
+              "truncation": {
+                "attempt_job_ids": [],
+                "jobs": false,
+                "projection": false,
+                "roots": false
+              }
+            },
+            "db_present": true,
+            "identity": null,
+            "root": null
+          },
+          "schema": "mastermind.fabric_job_root_list.v2"
+        },
+        "reason_codes": [],
+        "schema": "mastermind.workspace_work_queue.v1",
+        "source_observation": {
+          "control_room": {
+            "cache_currentness_digest": "3f4d920367c3d9f6d92c89866e55120848518ffeabf79495a0894953f99a1c12",
+            "document_digest": "d167cae86c3bc6a4272712458f3fd2b77e977d3fd3266c6d9149aa1f218b604f",
+            "instance_after": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "instance_before": "4f19e5c2bcd21ad8ccf9802421122e8e95641ebbc6a4fa5295f41e7602aaffed",
+            "publication_after": 3,
+            "publication_before": 3,
+            "source_validity_digest": "ba8ab6df0fbee54bc890dcc01565cd38bee1affe6f20ab6498f2aa69cb9fda71"
+          },
+          "runtime": {
+            "after": 2,
+            "before": 2,
+            "schema": "mastermind.runtime_read_observation.v1",
+            "snapshot_digest": "df752954d5dec876983f69455b9c58e6d5c3eb1abdb24ff668e590c1e7ba0139",
+            "source_identity": "6139cd1735bec01c57361de7b4731bdf",
+            "state": "SAME"
+          },
+          "schema": "mastermind.workspace_source_observation.v1",
+          "selection": null,
+          "state": "SAME"
+        }
+      },
+      "status": 200
+    }
+  },
+  "fixture_scope": "DISPOSABLE_RUNTIME_ACTUAL_OHF_WORKSPACE_CANONICAL_COMPILER; SYNTHETIC_PROVIDER_KERNEL_NAMESPACE_AUTH; NOT_LIVE",
+  "readers_zero_new_events": true,
+  "result_selection": {
+    "attempt_id": "ATT-465b71b6b6e748e3bd85db149f6d70f1",
+    "job_id": "JOB-003",
+    "result_envelope_digest": "8264faa4fdef42afdddb79a85992929dddeeedb35424d990e0184d04432ff6cd",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+  },
+  "schema": "mastermind.project_activity_source_journey.v1",
+  "selection": {
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412"
+  },
+  "source_revision": "fd3fa53ad7a8b235b9e2509b63de65c1e1c3522f",
+  "workspace_context": {
+    "principal_scope": "68143e390b15871d0660af4dc62b8767e7a95371c174ab06841c20862e63894a",
+    "profile": {
+      "name": "web_ceo_v3",
+      "server_version": "1.5.0"
+    },
+    "schema": "mastermind.os.executive.owner_context.v1",
+    "verified_expiry": 1793919594
+  }
+}

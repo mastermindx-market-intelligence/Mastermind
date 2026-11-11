@@ -1,0 +1,67 @@
+--- a/agent/agent_init.py
++++ b/agent/agent_init.py
+@@ -730,13 +730,11 @@
+ 
+ 
+ def _print_key_banner(key, label: str, warn_missing: bool = False) -> None:
+-    """Masked credential line. A callable ``key`` (Entra ID, Vertex OAuth, key_cmd, ...) is labelled
+-    by its tagged source and never invoked. Keys ≤ 12 chars (incl. "dummy-key") are not shown."""
++    """Report credential presence without printing credentials or caller labels.
++    Tagged sources are never invoked. Keys ≤ 12 chars retain the existing warning behavior."""
+     from agent.credential_source import credential_label
+-    if source_label := credential_label(key):
+-        print(f"🔑 Using credentials: {source_label}")
+-    elif isinstance(key, str) and len(key) > 12:
+-        print(f"🔑 Using {label}: {key[:8]}...{key[-4:]}")
++    if credential_label(key) or (isinstance(key, str) and len(key) > 12):
++        print("🔑 Using credentials")
+     elif warn_missing:
+         print("⚠️  Warning: API key appears invalid or missing")
+ 
+--- a/agent/memory_caller_scope.py
++++ b/agent/memory_caller_scope.py
+@@ -11,8 +11,8 @@
+ - one provider instance serves one profile: a plugin that hands several agents the same instance is
+   refused for every profile after the first, instead of being rebound to it.
+ 
+-Refusals log the check's code and both homes (errors.log on every host, gateway.log on a gateway); the
+-model/chat only ever sees a generic refusal.
++Refusals log the check's code and reason without profile-home values (errors.log on every host,
++gateway.log on a gateway); the model/chat only ever sees a generic refusal.
+ """
+ 
+ from __future__ import annotations
+@@ -58,8 +58,8 @@
+ 
+ 
+ def _refuse(label: str, reason: str, caller_home: Any, bound_home: Any, multiplexed: bool) -> None:
+-    logger.warning("Memory %s refused (%s): %s; caller profile home %r, provider bound to %r, multiplexed=%s",
+-                   label, CALLER_PROFILE_REFUSAL, reason, caller_home, bound_home, multiplexed)
++    logger.warning("Memory %s refused (%s): %s; multiplexed=%s",
++                   label, CALLER_PROFILE_REFUSAL, reason, multiplexed)
+ 
+ 
+ def bound_scope(hermes_home: Any, agent_identity: Any = None) -> dict[str, Any]:
+@@ -120,17 +120,17 @@
+         entry = _claims.get(pid)
+         owner = entry[1] if entry is not None and entry[0]() is provider else None
+         if owner is not None and owner != key and multiplexed:
+-            logger.warning("Memory provider '%s' refused for profile home %r (%s): this same provider instance "
+-                           "is already bound to %r; a provider must give every agent its own instance",
+-                           getattr(provider, "name", "?"), str(home), SHARED_INSTANCE_REFUSAL, owner)
++            logger.warning("Memory provider '%s' refused (%s): this same provider instance "
++                           "is already bound to another profile; a provider must give every agent its own instance",
++                           getattr(provider, "name", "?"), SHARED_INSTANCE_REFUSAL)
+             return False
+         try:
+             ref = weakref.ref(provider, lambda dead, pid=pid: _forget(pid, dead))
+         except TypeError:
+             if multiplexed:
+-                logger.warning("Memory provider '%s' refused for profile home %r (%s): the instance can't be "
++                logger.warning("Memory provider '%s' refused (%s): the instance can't be "
+                                "tracked (no weak reference support), so sharing it can't be ruled out",
+-                               getattr(provider, "name", "?"), str(home), SHARED_INSTANCE_REFUSAL)
++                               getattr(provider, "name", "?"), SHARED_INSTANCE_REFUSAL)
+                 return False
+             return True
+         _claims[pid] = (ref, key)

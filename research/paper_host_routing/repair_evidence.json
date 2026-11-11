@@ -1,0 +1,70 @@
+{
+  "capability_state": "RESEARCH_PROTOTYPE_ONLY",
+  "live_runtime_changed": false,
+  "local_validation": [
+    {
+      "process_id": 2003,
+      "result": "PASS",
+      "suite": "validation_basic.py",
+      "tests": 7
+    },
+    {
+      "process_id": 2003,
+      "result": "PASS",
+      "suite": "validation_adversarial.py",
+      "tests": 11
+    },
+    {
+      "mcp_sdk": "1.30.0",
+      "process_id": 3268,
+      "result": "PASS",
+      "runtime_seconds": 6.267,
+      "suite": "validation_wire.py",
+      "tests": 14
+    },
+    {
+      "result": "PASS",
+      "runtime_proof": false,
+      "suite": "Python 3.10 ast syntax"
+    }
+  ],
+  "observed_at": "2026-09-29T06:11:26.592451+00:00",
+  "operation_id": "paper-direct-chatgpt-mcp-20260926-sol-001",
+  "paper_document_mutated": false,
+  "prior_prototype_commit": "c071d6cf9486ec02ebdc94185950db60521ac091",
+  "production_acceptance": false,
+  "production_integration": "PLATFORM_BLOCKED_NOT_RETRIED",
+  "production_source_baseline": "cf6e9c954fc34d3b7f3f0dfffef6a022652afab2",
+  "production_sources_unchanged": [
+    "integrations/paper_desktop/bridge.py",
+    "integrations/paper_desktop/direct_service.py",
+    "integrations/paper_desktop/mcp_server.py",
+    "integrations/paper_desktop/prepare.py"
+  ],
+  "protected_procedure_sha": "f91847688f8126511c854ab253cd5c3cb67baa4e",
+  "remaining": [
+    "platform production integration restriction",
+    "independent architecture/security review",
+    "accepted fleet transport binding",
+    "Ryan direct-app recovery",
+    "M1 connectivity",
+    "Mini 1 desktop readiness",
+    "per-host and per-account acceptance"
+  ],
+  "remote_host_contacted": false,
+  "resolved": [
+    "SDK postponed annotation registration failure",
+    "lost local edit misclassified as EFFECT_NONE",
+    "Python 3.11-only timeout primitive",
+    "operation/file receipt mismatch acceptance",
+    "known-host path quoting"
+  ],
+  "schema": "mastermind.paper_source_evidence.v1",
+  "source_sha256": {
+    "README.md": "df24a056dddf7912c0aea15ee6c4b2cd2187702a445c8d460495094c3798285d",
+    "host_routes.py": "67f17c453c59cbca7b7dc9f6ce993e80ad0c166f7a4e602babf45c30fa0b07aa",
+    "validation_adversarial.py": "7c58fced6d1b24f0c9f00486f184f07eee278baccdd15f7377af1a38099be8d1",
+    "validation_basic.py": "5cbc504c30d76372bcf98693f31e6e1877491e8294ff753d588fe2be496ac52b",
+    "validation_wire.py": "855208c11d20108123a3d80b388f2ecac5e02e843ed58187466a434f1c201544"
+  }
+}

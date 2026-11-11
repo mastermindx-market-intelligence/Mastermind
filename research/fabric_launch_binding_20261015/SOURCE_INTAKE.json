@@ -1,0 +1,10 @@
+{
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "protected_base": "a5ebced8f1129871bfe05066090de3328ce783b4",
+  "installed_preimages": {
+    "remote_sub.sh": "85e4502a0040089cd4e0d59e99bd2af4ab7b1db8881393ffe305057348e8f999",
+    "remote_sub_helpers.py": "eb72e8a6f396338c3a9f4effcb5f29316d757ec7c94e0cdc27bae967d7bd2758"
+  },
+  "scope": "prospective artifact ordinary launches only; append exact acquire-return binding to existing run log before launch; no ledger or lease mutation, no legacy reconstruction",
+  "installation": "NOT_AUTHORIZED_BY_THIS_RECEIPT_NOT_RUN"
+}

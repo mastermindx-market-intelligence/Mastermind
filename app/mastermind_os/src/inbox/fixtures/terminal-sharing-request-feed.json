@@ -1,0 +1,41 @@
+{
+  "schema": "mastermind.terminal_sharing_request_feed.v1",
+  "source": {
+    "owner": "TERMINAL_BRIEF_DELIVERY",
+    "scope": "OWNED_EXPLICIT_SHARING_REQUESTS",
+    "observed_at": "2026-11-04T13:09:54.104669Z"
+  },
+  "viewer": {
+    "session_scope": "84b7c38a3f9a683a668964001a96fbe2e8abf39a6f58fe4eb1764fd2c58b53e0",
+    "principal_scope": "44593c39194ff46952576242fca5e0067b0b71a8b4a4f97a660969acf057c823"
+  },
+  "coverage": {
+    "state": "COMPLETE_WITHIN_SCOPE",
+    "reason_codes": []
+  },
+  "requests": [
+    {
+      "review": {
+        "revision": 1,
+        "delivery_id": "40000000-0000-4000-8000-000000000001",
+        "request_ref": "60000000-0000-4000-8000-000000000001"
+      },
+      "audience": {
+        "name": "Research",
+        "team_id": "20000000-0000-4000-8000-000000000001",
+        "member_count": 3,
+        "membership_policy": "DYNAMIC_TEAM_MEMBERSHIP"
+      },
+      "delivery": {
+        "title": "Weekly research brief",
+        "slot_asof": "2026-11-04",
+        "delivery_id": "40000000-0000-4000-8000-000000000001",
+        "artifact_asof": "2026-11-04T00:00:00.000000Z",
+        "content_sha256": "6e26db048625db7c85c285ad925e6c9e0d8e7414a423949db58493f43e462af6"
+      },
+      "revision": 1,
+      "issued_at": "2026-11-04T13:09:54.044556Z",
+      "request_ref": "60000000-0000-4000-8000-000000000001"
+    }
+  ]
+}

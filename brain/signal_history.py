@@ -61,10 +61,23 @@ def _history_lock():
 
 
 def _read_unlocked() -> list[dict]:
-    if not _PATH.exists():
-        return []
+    try:
+        text = _PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # A missing leaf or directory is normal on first use. An existing entry
+        # whose target cannot be read must never be mistaken for empty history.
+        for component in (_PATH, *_PATH.parents):
+            try:
+                component.lstat()
+            except FileNotFoundError:
+                continue
+            if component == _PATH:
+                raise
+            component.stat()  # Propagate a dangling or inaccessible ancestor.
+            return []
+        raise
     rows: list[dict] = []
-    for line in _PATH.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue

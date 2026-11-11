@@ -1,0 +1,460 @@
+{
+  "schema": "mastermind.os.app_control.live_proof/v1",
+  "operation": "mastermind-os-agent-control-20261108-c3",
+  "recorded_date": "2026-11-09",
+  "capability_state": "PROVEN_LIVE",
+  "acceptance_scope": "Released React app-control bridge and direct standard MCP consumer through the original Studio C3/M2 host and an owned authenticated browser context.",
+  "application_wide_launch_readiness_claimed": false,
+  "source": {
+    "repository": "mastermindx-market-intelligence/Mastermind",
+    "pull_request": 2305,
+    "pull_request_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2305",
+    "feature_head": "e61ebbc78f94c0dc00d765b9d16c4ec38e2da167",
+    "release_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+    "release_tree": "a157a30dcee098e43a694836b70047db6328e689",
+    "merged_at": "2026-11-09T02:54:58Z",
+    "merge_group_ci": {
+      "run_id": 42548210214,
+      "conclusion": "success",
+      "aggregate_test_job_id": 128953411734
+    },
+    "app_ci": {
+      "run_id": 42548210279,
+      "conclusion": "success"
+    }
+  },
+  "build": {
+    "bundle_sha256": "3fd32f2af9315faddc5546ce2f34dc5c64877f730226cd059b7b2f10b84e8f43",
+    "build_receipt_sha256": "0fdbb206ed42d5a15b67dd5075d7fd388c051733b11db6a9a71bbe10537c6fad",
+    "release_manifest_sha256": "35869304b137de71a01788440af91df01dce8bfc28ef8fd1a3c7951135e0cde6",
+    "launch_manifest_sha256": "1997aa4d84f091146637394ca739040a826ced67f00b9e9c19022b2108f7fb5b",
+    "asset_profile": "private-entry",
+    "asset_count": 12
+  },
+  "runtime": {
+    "schema": "mastermind.os.app_control.runtime_install/v1",
+    "status": "INSTALLED_QUALIFIED",
+    "recorded_at": "2026-11-09T03:40:04.718120+00:00",
+    "source_sha": "ed7991199ccf76027f7acccc283c539c175e7e16",
+    "source_tree": "a157a30dcee098e43a694836b70047db6328e689",
+    "source_pr": 2305,
+    "source_archive_sha256": "7e0ac2009b0a6d9361c13cf93b7d2b9d6ea5df0c6e342d65a48dde111780bd39",
+    "runtime_root": "/Users/chriswong/.local/share/mastermind-runtime/app-control/ed7991199ccf76027f7acccc283c539c175e7e16",
+    "inventory_objects": 4562,
+    "inventory_sha256": "dc523e80837f051f86c7ff69c83eca0645d9a1804dc9141865f4e3a774c273ef",
+    "source_files": 14,
+    "tool_count": 18,
+    "tool_schema_digest": "8ec730ca88103dc180f431d6b3c85c4f3fdd4f8dac9e2688ab0350933a29fd0c",
+    "node": "/Users/chriswong/.local/share/mastermind-runtime/node/bin/node",
+    "browser_state_copied": false,
+    "service_created": false,
+    "workbench_enrolled": false,
+    "receipt_sha256": "9bf40fccfa9df2cdd01fbc720404ff6c22031d8ca65e00cc658aaa2329259acc",
+    "adapter_connection_sha256": "4f0fafef2c0ad0da843655f0729147c8b16f34621c19128bf46a4f0cce36439c",
+    "dependencies": {
+      "@playwright/mcp": "0.0.79",
+      "playwright": "1.63.0-alpha-2026-08-05",
+      "playwright-core": "1.63.0-alpha-2026-08-05",
+      "@modelcontextprotocol/sdk": "1.32.2"
+    },
+    "receipt_path": "/Users/chriswong/.local/share/mastermind-runtime/app-control/ed7991199ccf76027f7acccc283c539c175e7e16/installation-receipt.json"
+  },
+  "gateway": {
+    "outcome": "COMPLETE",
+    "plan_sha256": "179591efc1267f38e43a11a9313f10a285ff31e525f83ec9540a182e2de6ca2f",
+    "recorded_at": "2026-11-09T03:16:11Z",
+    "receipt_path": "/Library/Application Support/MastermindExecutive/installation-receipts/mcp-component-ed7991199ccf-179591efc126-20261109031541-v1.json",
+    "receipt_sha256": "064724444545d557eeb0f588a3ccfc23ee691449cf418b3d27246698dff11fe1",
+    "config_sha256": "fb85285daee8ef9fa201c7b92112c018e3103a057c207b941b87df15942f1b1a",
+    "plist_sha256": "0b6313a7cfc18eeaec676a715b8450e407cc71f9696f4d0d11ed811e8e72aa91",
+    "observed_pid": 56245,
+    "listener": "127.0.0.1:8443",
+    "transaction_marker_absent": true,
+    "network_closure_sha256": "e799725fd46fd7746d5ad6f1e17243517945ed26c2d421a8710ae31871bc0cdb",
+    "scope": "MCP gateway component; not a whole Control or worker upgrade"
+  },
+  "edge": {
+    "outcome": "FINAL",
+    "stage_root": "/root/mmos-os-edge-ed7991199ccf76027f7acccc283c539c175e7e16/stage-v2",
+    "stage_sha256": "de667dd3afc5e4f9d75bc452fddf17153030b9739f184004fabfec37c857b835",
+    "source_archive_sha256": "14f718b174d208ff2b0f2509614b5961523939747e37118c488699760bf97516",
+    "prepare_receipt_sha256": "24fc33556547e534c7626d9e6b50a073ded7a293480dd373b4a233e06d3c9230",
+    "finalize_receipt_sha256": "2273a5436db0af60ba6a65604036704faa91ee28b6ae2ff99aa63f8be0936d67",
+    "final_config_sha256": "b1db0c52a1cdb5086ecdaec61e6816d2902b5498b914f0d4cc9b03709b362073",
+    "live_config_equals_final_and_autosave": true,
+    "startup_autosave_path": "/var/lib/caddy/.config/caddy/autosave.json",
+    "observed_caddy_pid": 2712483,
+    "observed_relay_pid": 278367,
+    "relay_pid_unchanged": true,
+    "public_html_callback_assets_verified": true,
+    "public_mcp_family_added": false,
+    "original_stage_refusal": {
+      "stage_sha256": "2a8ded5136de832cad721fb6b8ceb83288e859b23dfb3f2ff95934c3df34fe4c",
+      "classification": "PRE_INTENT_LIVE_FULL_CONFIG_DRIFT",
+      "intent_absent": true,
+      "observed_drift": "Another application's outer HTTP and HTTPS route handlers changed; fresh stage preserved both."
+    }
+  },
+  "prior_component_reconciliation": {
+    "operation_plan_sha256": "f6955e4b23ad7d0b0cb62baa05300878a52061f1d5ea0ea434c606985a79386e",
+    "original_release_sha": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+    "outcome": "ABORTED_UNCHANGED",
+    "owner_code": "STOP_DID_NOT_TAKE_EFFECT",
+    "exit_code": 3,
+    "recorded_at": "2026-11-09T03:06:07Z",
+    "receipt_path": "/Library/Application Support/MastermindExecutive/installation-receipts/mcp-component-5c3d38852343-f6955e4b23ad-20261108133158-aborted-v1.json",
+    "receipt_sha256": "8bb8df2b2b6dbbd24f2673320529b66cdbf0915390493d052f660ef34d6cc564",
+    "preserved_dispatch_history": [
+      "stop",
+      "start",
+      "recover_enable",
+      "recover_enable_done"
+    ],
+    "meaning": "Original owner closed the transaction after both installed before-images were restored and b4 was still serving. This does not establish that no historical stop/start occurred."
+  },
+  "live_consumer": {
+    "url": "https://mcp.mastermind-x.com/os/",
+    "browser": "Chrome 157.0.8103.39",
+    "path": "Original Studio C3/M2 host, normal Auth0 login in a new owned isolated browser, accepted createAppControlConnection with that same context and MCP SDK transport.",
+    "catalogue_tool_count": 18,
+    "catalogue_schema_digest": "8ec730ca88103dc180f431d6b3c85c4f3fdd4f8dac9e2688ab0350933a29fd0c",
+    "driver_sha256": "8032fa529db41da055d7675340c7904bfc6919fb66e9f800b762b550c1f85f74",
+    "safe_trace_sha256": "2761c58cbd97f41bb1643569f1355d8211083b5f2591644544c8d0083460fd30",
+    "source_root_used": "/Users/chriswong/Library/Caches/Mastermind/app-control/mmos-app-control-20261109-c3/queued-runtime-ed799119/source",
+    "loaded_scripts": [
+      "/os/assets/index-E9veO33T.js"
+    ],
+    "loaded_stylesheets": [
+      "/os/assets/index-DgUOEzDj.css"
+    ],
+    "total_mcp_calls": 26,
+    "app_tool_calls": 18,
+    "expected_refusals": 1,
+    "unexpected_tool_errors": 0,
+    "checks": [
+      {
+        "name": "Normal authentication",
+        "result": "PASS",
+        "auth": "signed_in",
+        "access": "AVAILABLE"
+      },
+      {
+        "name": "Primary and advanced navigation",
+        "result": "PASS",
+        "routes": [
+          "Today",
+          "Search",
+          "Programs"
+        ]
+      },
+      {
+        "name": "Source-status disclosure and existing source control",
+        "result": "PASS"
+      },
+      {
+        "name": "React-controlled search fill/readback/restoration",
+        "result": "PASS",
+        "test_value": "MMOS-agent-control-live-20261109",
+        "restored_value": ""
+      },
+      {
+        "name": "Consumed observation",
+        "result": "PASS",
+        "status": "REFUSED",
+        "code": "STALE_OBSERVATION",
+        "field_unchanged": true
+      },
+      {
+        "name": "Theme select/readback/restoration",
+        "result": "PASS",
+        "transition": [
+          "dark",
+          "light",
+          "dark"
+        ]
+      },
+      {
+        "name": "Desktop check",
+        "result": "PASS",
+        "viewport": {
+          "width": 1440,
+          "height": 1000,
+          "horizontalOverflow": 0
+        },
+        "checks": [
+          {
+            "name": "route",
+            "pass": true,
+            "actual": "Search"
+          },
+          {
+            "name": "horizontalOverflowAtMost",
+            "pass": true,
+            "actual": 0
+          }
+        ]
+      },
+      {
+        "name": "Mobile check",
+        "result": "PASS",
+        "viewport": {
+          "width": 390,
+          "height": 844,
+          "horizontalOverflow": 0
+        },
+        "checks": [
+          {
+            "name": "route",
+            "pass": true,
+            "actual": "Programs"
+          },
+          {
+            "name": "horizontalOverflowAtMost",
+            "pass": true,
+            "actual": 0
+          }
+        ]
+      },
+      {
+        "name": "Restored desktop",
+        "result": "PASS",
+        "viewport": {
+          "width": 1440,
+          "height": 1000,
+          "horizontalOverflow": 0
+        }
+      },
+      {
+        "name": "Immediate sign-out privacy and independent inspect",
+        "result": "PASS",
+        "auth": "signed_out",
+        "access": "AUTH_REQUIRED",
+        "text_length": 0,
+        "control_count": 0,
+        "route_count": 0,
+        "heading_count": 0
+      }
+    ],
+    "trace": [
+      {
+        "tool": "browser_navigate",
+        "isError": false,
+        "at": "2026-11-09T03:19:07.042Z"
+      },
+      {
+        "tool": "browser_snapshot",
+        "isError": false,
+        "at": "2026-11-09T03:19:20.008Z"
+      },
+      {
+        "tool": "browser_click",
+        "isError": false,
+        "at": "2026-11-09T03:19:43.326Z"
+      },
+      {
+        "tool": "browser_tabs",
+        "isError": false,
+        "at": "2026-11-09T03:19:54.524Z"
+      },
+      {
+        "tool": "browser_tabs",
+        "isError": false,
+        "at": "2026-11-09T03:19:54.535Z"
+      },
+      {
+        "tool": "browser_snapshot",
+        "isError": false,
+        "at": "2026-11-09T03:19:54.553Z"
+      },
+      {
+        "tool": "browser_fill_form",
+        "isError": false,
+        "at": "2026-11-09T03:19:54.654Z"
+      },
+      {
+        "tool": "browser_click",
+        "isError": false,
+        "at": "2026-11-09T03:20:01.448Z"
+      },
+      {
+        "tool": "mastermind_os_inspect",
+        "isError": false,
+        "status": "AVAILABLE",
+        "at": "2026-11-09T03:20:29.699Z"
+      },
+      {
+        "tool": "mastermind_os_navigate",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:21:18.010Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:21:56.495Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:22:08.330Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:22:33.417Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": true,
+        "status": "REFUSED",
+        "at": "2026-11-09T03:23:03.076Z"
+      },
+      {
+        "tool": "mastermind_os_check",
+        "isError": false,
+        "status": "PASS",
+        "at": "2026-11-09T03:23:05.292Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:23:22.036Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:23:24.088Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:24:05.586Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:24:07.856Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:24:09.798Z"
+      },
+      {
+        "tool": "mastermind_os_navigate",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:24:21.344Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:24:29.873Z"
+      },
+      {
+        "tool": "mastermind_os_check",
+        "isError": false,
+        "status": "PASS",
+        "at": "2026-11-09T03:24:50.339Z"
+      },
+      {
+        "tool": "mastermind_os_inspect",
+        "isError": false,
+        "status": "AVAILABLE",
+        "at": "2026-11-09T03:25:58.861Z"
+      },
+      {
+        "tool": "mastermind_os_act",
+        "isError": false,
+        "status": "DISPATCHED",
+        "at": "2026-11-09T03:26:38.161Z"
+      },
+      {
+        "tool": "mastermind_os_inspect",
+        "isError": false,
+        "status": "AUTH_REQUIRED",
+        "at": "2026-11-09T03:26:48.252Z"
+      }
+    ],
+    "browser_closed": true,
+    "driver_cleanup": "After browser_close and zero browser descendants, only original closed proof-driver PID 67818 was terminated; its readline loop had remained alive.",
+    "synthetic_auth": false,
+    "copied_cookies": false,
+    "personal_browser_attachment": false,
+    "business_launch_or_send_exercised": false,
+    "driver_process_absent_readback": true
+  },
+  "limitations": [
+    {
+      "id": "workspace_reads",
+      "state": "SOURCE_UNAVAILABLE",
+      "observed": [
+        "HTTP 503 /workspace/programs/current",
+        "HTTP 503 /workspace/work/current"
+      ],
+      "meaning": "Backend cause is not established by the status and generic frontend copy. No new mission, producer, permission or provider workflow is claimed.",
+      "original_owner_diagnosis": {
+        "scope": "Read-only original C3/M2 owner; no service/configuration/admission/arming changes.",
+        "control_release_sha": "b4a5a8925c6c1412dac67ba296cf65ee81c4d4c8",
+        "status_client_git_blob": "8c820364adc9568fe9606d1983cf620bc6b5801e",
+        "status_process_receipt": 39364,
+        "command_exit": 0,
+        "ok": true,
+        "service_state": "AWAITING_CANARY",
+        "control_pid": 96546,
+        "instance_id": "executive-service-6ad6781189c64b6c8bcd9fe51552d5dd",
+        "active_dispatch_count": 0,
+        "dispatch_error_count": 0,
+        "coo_autonomy_armed": false,
+        "source_allows_workspace_reads_in_observed_state": true,
+        "stopped_control_ruled_out": true,
+        "remaining_unqualified": [
+          "Actual App-peer CeoIngress path and startup latch",
+          "Installed Workspace provider/envelope",
+          "Hosted CCR publication, freshness, source validity and refresh error",
+          "Work's additional Runtime observation"
+        ],
+        "next_evidence": "Original App-peer response classification or an already-authorized CCR-owner publication/currentness diagnostic; no guessed arming/restart/producer."
+      }
+    },
+    {
+      "id": "legacy_workbench",
+      "state": "NOT_INSTALLED",
+      "optional_outer_tool_count": 23,
+      "outer_schema_digest": "352c48fe37caef8a84a71004e0460644f5d0b63023bb5b84450640a79fc5e6b9",
+      "meaning": "Dormant C3 F0 channel and its original workspace/profile were not migrated; current fleet CLI has no supported migration action. Direct standard MCP acceptance is independently proven."
+    },
+    {
+      "id": "other_accounts",
+      "state": "UNPROVEN",
+      "meaning": "Installation and live proof concern the observed original C3/M2 owner, not automatic catalogue publication to every ChatGPT account."
+    },
+    {
+      "id": "provider_business_workflows",
+      "state": "NOT_EXERCISED",
+      "meaning": "No backend mission admission, provider launch, business SEND or application-wide launch acceptance is asserted."
+    }
+  ],
+  "preserved_fences": [
+    "Original paid Fabric diagnostic reservation is not replayed or classified execution-absent.",
+    "Personal Chrome AppleScript JavaScript denial remains fenced; no CDP/cookie route used.",
+    "Historical F2/issuer unknown effects and separate release holds remain unchanged.",
+    "Read-only diagnosis encountered PermissionError on application-tunnel/current; that exact path was not retried or accessed through another identity."
+  ],
+  "canonical_evidence_owners": {
+    "implementation_and_report": "GitHub",
+    "installed_gateway": "Existing Executive MCP component receipt",
+    "public_edge": "Existing Caddy publication journal",
+    "runtime_copy": "Owner-local installation receipt"
+  },
+  "source_fixture_evidence": "browser-proof.json and source-manifest.json remain historical source qualification, not production receipts."
+}

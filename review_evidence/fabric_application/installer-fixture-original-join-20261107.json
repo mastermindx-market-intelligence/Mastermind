@@ -1,0 +1,124 @@
+{
+  "effects": {
+    "original_j_accessed": false,
+    "provider_called": false,
+    "runtime_changed": false,
+    "selected_release_changed": false
+  },
+  "files": {
+    "tests/test_ceo_submit_armed_composition.py": {
+      "actual": "67346addf389873f67e9b50d57fb200cba24482ab15ea4e4331fd0aa3c85fe79",
+      "equal": true,
+      "upstream": "67346addf389873f67e9b50d57fb200cba24482ab15ea4e4331fd0aa3c85fe79"
+    },
+    "tests/test_executive_launchd_config.py": {
+      "actual": "b6ffbdd94bc9cce1b65f90ea40fed7ee3db19dc34167cedbf189518b33a2dd3d",
+      "equal": true,
+      "upstream": "b6ffbdd94bc9cce1b65f90ea40fed7ee3db19dc34167cedbf189518b33a2dd3d"
+    },
+    "tests/test_executive_privileged_control_composition.py": {
+      "actual": "25b17d1f9262c0b64cefcab3367152369a8b3cdcea6bb41a3aa6c4940a249176",
+      "equal": true,
+      "upstream": "25b17d1f9262c0b64cefcab3367152369a8b3cdcea6bb41a3aa6c4940a249176"
+    },
+    "tests/test_executive_python_runtime_provisioner.py": {
+      "actual": "fb065a98dbf9d1593cb9dfd07ca2ec485d56549d328d4e485571166704416519",
+      "equal": true,
+      "upstream": "fb065a98dbf9d1593cb9dfd07ca2ec485d56549d328d4e485571166704416519"
+    },
+    "tests/test_executive_release_publication.py": {
+      "actual": "2ef6d489aa63c29e2f6fc6971fa15a17670fe5e42648e48a78b264244bf375c5",
+      "equal": true,
+      "upstream": "2ef6d489aa63c29e2f6fc6971fa15a17670fe5e42648e48a78b264244bf375c5"
+    },
+    "tests/test_executive_release_stage_only.py": {
+      "actual": "3e612f2808fcacee6bf7f1788296fac96afe9435201c67a1fd70a611a23281c9",
+      "equal": true,
+      "upstream": "3e612f2808fcacee6bf7f1788296fac96afe9435201c67a1fd70a611a23281c9"
+    },
+    "tests/test_os_release_assets.py": {
+      "actual": "531098ff59a6ca35fdea5b7e104fbffe891c5f1972917dc14f87766fbea9e5f5",
+      "equal": true,
+      "upstream": "531098ff59a6ca35fdea5b7e104fbffe891c5f1972917dc14f87766fbea9e5f5"
+    }
+  },
+  "prior_upstream_proof_reused": {
+    "focused": 25,
+    "not_newly_executed": true,
+    "publication_stage": 45
+  },
+  "production": {
+    "hermes_runtime_changed": false,
+    "install_sha256": "6f19581f58b1f7009093150d0446823c0f1f19f1eab6ec3a5923d736b77836e2",
+    "macro_projection_changed": false,
+    "native_quota_tree": "e231e8ab2b171861620c49553e658a820fdb9d7d",
+    "phase1c_sha256": "2216eecd0b53534f0b211c5bd408ce23cfc3d4108be220144b87db27a92de17e"
+  },
+  "qualification": {
+    "all_31_original_failed_cases_included": true,
+    "command": [
+      "/private/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/venv/bin/python",
+      "-B",
+      "-m",
+      "pytest",
+      "-q",
+      "--tb=short",
+      "--noconftest",
+      "-o",
+      "addopts=",
+      "--junitxml=/private/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/installer-fixture-current-failures-v15.xml",
+      "tests/test_ceo_submit_armed_composition.py::test_d7_exact_event_loop_only_and_foreign_scope_refused",
+      "tests/test_executive_launchd_config.py::test_control_config_template_tracks_strict_service_schema",
+      "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[0]",
+      "tests/test_executive_privileged_control_composition.py::test_installer_derives_arm_and_refuses_source_override[1]",
+      "tests/test_executive_python_runtime_provisioner.py::test_installer_projects_exact_validated_python_runtime_provenance",
+      "tests/test_executive_release_publication.py::test_archive_padding_is_fully_consumed_before_publication",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-directory]",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-file]",
+      "tests/test_executive_release_publication.py::test_competing_destination_is_preserved_without_nested_stage[race-symlink]",
+      "tests/test_executive_release_publication.py::test_postpublication_interruption_leaves_verified_release",
+      "tests/test_executive_release_publication.py::test_seal_survives_relocation_and_existing_release_is_only_verified",
+      "tests/test_executive_release_stage_only.py::test_changed_existing_assets_or_seal_never_repaired",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[archive]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[chown]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[os_release_assets.py:import]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[race]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:create]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[release_manifest.py:verify]",
+      "tests/test_executive_release_stage_only.py::test_failure_retains_stage_without_other_effects[rename]",
+      "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-dir]",
+      "tests/test_executive_release_stage_only.py::test_occupied_destination_never_adopted_or_overwritten[stage-symlink]",
+      "tests/test_executive_release_stage_only.py::test_ordinary_path_reuses_shared_stage",
+      "tests/test_executive_release_stage_only.py::test_packed_source_still_fails_archive_and_retains_stage",
+      "tests/test_executive_release_stage_only.py::test_preflight_refuses_before_staging[updates5]",
+      "tests/test_executive_release_stage_only.py::test_real_stage_seal_and_existing_destination_are_read_only",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[acl]",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[mode]",
+      "tests/test_executive_release_stage_only.py::test_source_and_ancestry_guards[symlink]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[absent]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[sealed_identical]",
+      "tests/test_os_release_assets.py::test_installer_optional_preflight_refuses_before_service_stop[valid]",
+      "tests/test_ceo_submit_armed_composition.py::test_d7_diff_and_module_have_no_dispatch_or_provider_import",
+      "tests/test_ceo_submit_armed_composition.py::test_d7_reviewed_event_loop_never_adopts_modified_source"
+    ],
+    "d7_additional_cases": 11,
+    "errors": 0,
+    "failed": 0,
+    "junit_sha256": "25e8920e60c71798c7a6258fab7485d717bf5bcfdc99c036ca352408c1264c7c",
+    "log_sha256": "4c6c8f8739b32c12013c00dbb56f837395e75cc63aa33e0bb0cc9da0b55775cf",
+    "passed": 42,
+    "seconds": 58.553,
+    "skipped": 0
+  },
+  "remaining": [
+    "protected native source composition with f57b085",
+    "current-head required CI",
+    "protected delivery and original C3/J recovery",
+    "production APPLICATION binding and grants",
+    "all named consumer real-path proof"
+  ],
+  "schema": "mastermind.fabric_application.installer_fixture_join.v1",
+  "source_base": "d0c543124b47372becd8ee632a1c29b32ffc3ef0",
+  "upstream_parent": "024bc08b63072a03ca3af296cf3e52d9ab3388ad",
+  "upstream_repair": "220712db228f8376f88422523199e4a93ca7b564"
+}

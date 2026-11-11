@@ -1,0 +1,17 @@
+--- a/ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py
++++ b/ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py
+@@ -248,6 +248,14 @@
+                 p = self.here / "state/remote_sub" / (rid + suffix)
+                 if p.exists() or p.is_symlink():
+                     refuse("RUN_EXISTS")
++            # Prospective policy ruling: Network has no additional paid
++            # authority while its allowance is unproved. This is not a token
++            # balance calculation. Bind the denial to the authenticated stored
++            # grant, never the caller's root label. Existing reservations and
++            # retained outputs above keep their original reconciliation path.
++            # macro#10483, comment 6579445312
++            if grant["root"] == "01a12a2a-d7e1-77b1-9262-ab593179dd13":
++                refuse("network_paid_dispatch_budget_unqualified")
+             con.execute("INSERT INTO operator_child_authorizations VALUES (?,?,?,?,?,?,NULL,NULL)",
+                         (rid, grant["operator_run"], grant["root"], digest(canonical(request).encode()), self.clock(), canonical(request)))
+         return grant

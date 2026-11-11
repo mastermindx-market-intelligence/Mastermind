@@ -1,0 +1,19 @@
+{
+  "keyboard_selection": true,
+  "retained_real_status_rendered": true,
+  "mobile_overflow": false,
+  "light_computed_style": {
+    "color": "rgb(28, 36, 48)",
+    "background": "color(srgb 0.109804 0.141176 0.188235 / 0.04)"
+  },
+  "desktop_overflow": false,
+  "page_errors": [],
+  "proof_kind": "Actual MetaCeoOffice consumer with synthetic Mission and retained real M2 status. Not live authenticated access or deployment.",
+  "observed_at": "2026-10-13T11:26:48.294750+00:00",
+  "screenshots": {
+    "fabric-desktop-dark.png": "0e9edf2f46bf2b84bc2744062499c3bd27b34bb938be7ccacfd91eb9a5a81140",
+    "fabric-direct-status.png": "cc5e86f47c9f7a271737946aa21c2f971abdaa39a589af3b4d581f818b6b25de",
+    "fabric-mobile-dark.png": "b102bd30b4aba190438e11516dcba9f4e3e9bba761cb3dd948bbdb38133427dc",
+    "fabric-desktop-light.png": "8bc1e3c00b9cd1dba57476323470b9fbcb9811e7d7fd5d763f1525df340600b6"
+  }
+}

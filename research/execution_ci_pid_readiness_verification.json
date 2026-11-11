@@ -1,0 +1,17 @@
+{
+  "schema": "mastermind.ci_pid_readiness_verification.v1",
+  "base_sha": "a5ebced8f1129871bfe05066090de3328ce783b4",
+  "source_sha256": {
+    "tests/test_workbench_browser_resource_port.py": "d9e95b120607843ddaa58024368ef6e770bbfac6dfcf572084522be38462fcb0"
+  },
+  "tests": 9,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "junit_sha256": "db100d57b8c6ab2e363e724f683a6643501453126cd8da8c1bf37b7e43c753a3",
+  "regression_red_observed": "empty PID ValueError under delayed child publication",
+  "production_changes": false,
+  "existing_ci_discovery_verified": true,
+  "review_run": "throughput-pid-fixture-review-20261015-c3-004",
+  "review_state": "submitted_not_yet_consumed"
+}

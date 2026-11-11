@@ -1,0 +1,240 @@
+{
+  "schema": "market_memory.native_v3_source_kit.v1",
+  "root": "01a1333c-a475-7052-95a8-72c623fb12e1",
+  "source_head": "9fb08c079c0048f3f9fe9549208b2afc1316119b",
+  "source_tree": "bdd7d20520f827d4a8f768a8a9dbf39982d95a35",
+  "carrier": "https://github.com/mastermindx-market-intelligence/macro/pull/10768",
+  "held_source_only": true,
+  "archive": "/Volumes/Mastermind/evidence/market-memory-20261012-01a1333c/integration/prospective-memory-view-20261105-6488/s6-native-case-composition-6488/NATIVE_V3_FROZEN_SOURCE_9FB08.tar",
+  "archive_sha256": "f56814dee2d810c99e34878e9ed3eac2457c3a8cec44eff0ef8e9745fe7d3079",
+  "archive_bytes": 1034240,
+  "paths": {
+    "config/market_memory_retained_use.v1.json": {
+      "bytes": 2030,
+      "sha256": "a276a643469d5feaf6584e540d451621c68913f73b96643871262d5243810a8e"
+    },
+    "contracts/market_memory/e0_access_state.v1.schema.json": {
+      "bytes": 4984,
+      "sha256": "3999cbef00b920c344f8caa8757a7470f95ea5a996829ee4458ee856f1517ffd"
+    },
+    "contracts/market_memory/e0_installed_binding.v1.schema.json": {
+      "bytes": 4186,
+      "sha256": "50a5eb582c253eb0cf5133cf59d30f44e5ba083bac93907301d7a959f2786f27"
+    },
+    "contracts/market_memory/e0_native_bindings.v3.schema.json": {
+      "bytes": 16992,
+      "sha256": "d93bcf4dd7ab6b2aebbcdee0ec93c4922dddf3ae92fe3f115ea841ad4e1baf59"
+    },
+    "contracts/market_memory/e0_native_issuer.v3.schema.json": {
+      "bytes": 97922,
+      "sha256": "d5338180324fedfd106a4f980cd8d3e82b6b57ec1734a84c51a20e02915c2215"
+    },
+    "contracts/market_memory/e0_prelabel_closure.v1.schema.json": {
+      "bytes": 3133,
+      "sha256": "eb6d531528e77daaae19b76f31d14958e4c58e922c71296bd26f7d72766970f5"
+    },
+    "contracts/market_memory/e0_publication.v1.schema.json": {
+      "bytes": 3221,
+      "sha256": "38fbab0fcf65449fcc7049c71ff05cb25266418e2f39bd65531ad8dd87fac7bc"
+    },
+    "contracts/market_memory/e0_registration.v1.schema.json": {
+      "bytes": 5527,
+      "sha256": "095fef9e7f6b083b34694c9acadbef8a93161fc70866d424b3ae8bebc2c84952"
+    },
+    "contracts/market_memory/e0_tasks.v1.schema.json": {
+      "bytes": 4950,
+      "sha256": "d61e812b7652a11927b403182654387b0fc471c3cfa919a5c3832ad9807a87bd"
+    },
+    "engine/__init__.py": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "engine/neuralweb/__init__.py": {
+      "bytes": 1832,
+      "sha256": "b4bb1e4f8374b687034d1d6ff6f303915bc0228ebaae463e12c1b0303284ad8d"
+    },
+    "engine/neuralweb/market_memory.py": {
+      "bytes": 110777,
+      "sha256": "e29cd85fb0a9e14ef6d35073c2b4296e50742f62396a3227c91a0c9b8ef7d7a0"
+    },
+    "engine/neuralweb/market_memory_episode_comparison.py": {
+      "bytes": 7846,
+      "sha256": "b8f210124ecc0a6f8a8a4f222fb3053d7a6cf88f5c73210b7b5be34285b81a95"
+    },
+    "engine/neuralweb/market_memory_episode_features.py": {
+      "bytes": 18219,
+      "sha256": "c80ba0a39e42b62e3bd687301fdc974d18f935b584b7f0b462b753ccf044530a"
+    },
+    "engine/neuralweb/market_memory_episode_retrieval.py": {
+      "bytes": 11050,
+      "sha256": "bcadfe8587eb5892dea6c48aea38fc4612399ffcc3eb701ef3ad3513e37968cd"
+    },
+    "engine/neuralweb/market_memory_identity.py": {
+      "bytes": 31220,
+      "sha256": "8d9ffe00c0c464773946fd84b7f91afb43cee77f6b4aba785af6bd2b8a30b2a7"
+    },
+    "engine/neuralweb/market_memory_operating_cortex_service.py": {
+      "bytes": 18216,
+      "sha256": "3e1167fa6098c4407497fd1fa91b3744fca0c86c018917d76727540d9bbcbde1"
+    },
+    "engine/neuralweb/market_memory_pit.py": {
+      "bytes": 80616,
+      "sha256": "fe9c053680f2b8769f1466d1d8c800278ba231b627a3daf602fd559eda06c013"
+    },
+    "engine/neuralweb/market_memory_projection.py": {
+      "bytes": 29204,
+      "sha256": "5a447be4eb00af9117d3183280206133902e3caf3cfa7799232a9d851cf18ebc"
+    },
+    "engine/neuralweb/market_memory_retained_context_cohort.py": {
+      "bytes": 15967,
+      "sha256": "1e8ab60c8ffed3b9c69bd5940269245efb6e9a57fb6153e18b8b2f92c8a5d74d"
+    },
+    "engine/neuralweb/market_memory_retained_use.py": {
+      "bytes": 17166,
+      "sha256": "efa6b7d841aaa0b8a2520f3b65f45c3cae085b33ea745b442ac0f57b59dc7fef"
+    },
+    "engine/neuralweb/market_memory_trusted.py": {
+      "bytes": 83388,
+      "sha256": "b5df1cef2f4ecf3811800776a20dafe0c6eb38f6cfc9fb597e3098dfd802c669"
+    },
+    "engine/research_factory/__init__.py": {
+      "bytes": 1798,
+      "sha256": "4c563998069a978e2d8ff5ee48d185328681d74d94fefaed8ba7c464f0928e50"
+    },
+    "engine/research_factory/codegen_boundary.py": {
+      "bytes": 2738,
+      "sha256": "4a3e1320c930c7dd8fb414eab9ebb0c3a982925b2707992fdc4e14678ad46855"
+    },
+    "engine/research_factory/ledger.py": {
+      "bytes": 12665,
+      "sha256": "93602eb9e0478a404872e40b9e92aca13e88ec11ae862adfcaf2c71ab200a888"
+    },
+    "engine/research_factory/market_memory_contextual_registration.py": {
+      "bytes": 39826,
+      "sha256": "79f72e672d5836a3ae1cb57cf47ef2e350c31ed86e32bea9cbd1cb01f4a54456"
+    },
+    "engine/research_factory/market_memory_e0_access_history.py": {
+      "bytes": 5490,
+      "sha256": "85ad86a9bd3cc19257e170242ab4627f246495c32276a230f8f92e1068113fea"
+    },
+    "engine/research_factory/market_memory_e0_allocation.py": {
+      "bytes": 11411,
+      "sha256": "8423c5dc80fe48a8ced66ecf17b7c17a1d9e2ffb4e40fdedc11bfb19cb514a4c"
+    },
+    "engine/research_factory/market_memory_e0_allocation_binding.py": {
+      "bytes": 3549,
+      "sha256": "c0a52568c4f09601c24ec1ea13a1ca6cbaf22a0578610e3eaabb59f0bd184cf8"
+    },
+    "engine/research_factory/market_memory_e0_baselines.py": {
+      "bytes": 5936,
+      "sha256": "5968aa0c7718a1a44f4e6dc134c703fe7ddf95bf0ce173dddf95b995392186b0"
+    },
+    "engine/research_factory/market_memory_e0_condition_evidence.py": {
+      "bytes": 9479,
+      "sha256": "87e97de1894deab4e58fdc752d13e4482b954e3bed46cf16bcfd75bff3a17889"
+    },
+    "engine/research_factory/market_memory_e0_installed_control.py": {
+      "bytes": 21269,
+      "sha256": "5b5de1426a28ec6829b87912f115b413d6275996d0a4c6d86a7b600392535b78"
+    },
+    "engine/research_factory/market_memory_e0_native_case.py": {
+      "bytes": 24149,
+      "sha256": "86544c28a6a858a6f388f678c4156690f530d8c5fb9f6ce7fe5e0e76258e64df"
+    },
+    "engine/research_factory/market_memory_e0_native_issuer.py": {
+      "bytes": 20176,
+      "sha256": "b0070ee025345cfaf97c11102e55345bd9661a3127f9f3deebfce7f50827ef86"
+    },
+    "engine/research_factory/market_memory_e0_native_peer.py": {
+      "bytes": 16245,
+      "sha256": "da28fc8104027e0c0705fb2eb4b96ab9e04f92ced8c64227d1b1896d0544da05"
+    },
+    "engine/research_factory/market_memory_e0_original_case.py": {
+      "bytes": 4119,
+      "sha256": "5ff0731c852cafbe0a2eb83c0bb8acb9fdecd00d562ed008f211040f8f331e2d"
+    },
+    "engine/research_factory/market_memory_e0_participant_packet.py": {
+      "bytes": 14164,
+      "sha256": "0016d273bed0e3b52dbe3fb72cd58e3360582fa2dd5d640fe32daed1cfb085bb"
+    },
+    "engine/research_factory/market_memory_e0_reservations.py": {
+      "bytes": 16944,
+      "sha256": "9fc7ccf0c016417d30446cb906065b13183b1c06c3f88c89853ee05f1cc5f9b2"
+    },
+    "engine/research_factory/market_memory_e0_reserved_read.py": {
+      "bytes": 3519,
+      "sha256": "021fe0869cdb98f700faecde836ed61b5c35c769b3410fcf1ccd35bc0775e814"
+    },
+    "engine/research_factory/market_memory_e0_selected_condition.py": {
+      "bytes": 6785,
+      "sha256": "79977a87b5daa7816703f1854488fa59dbb919537f022ed6984a2a2a53d330bd"
+    },
+    "engine/research_factory/market_memory_e0_task_evidence.py": {
+      "bytes": 12128,
+      "sha256": "dac7dae44ee515a45f8819548b422592603f22e319a8931fcea836a7dccaf4d4"
+    },
+    "engine/research_factory/schema.py": {
+      "bytes": 43429,
+      "sha256": "45234f5123fd8d4111ded404b923a5697d2e282e31f456b19e8b2a1933458c54"
+    },
+    "engine/research_factory/state.py": {
+      "bytes": 16038,
+      "sha256": "b3c5cf57c0f8b70139da27118b0d6c3339d8c861db098ff05a534a0dfef734a5"
+    },
+    "research/licenses/MARKET_MEMORY_HOUSE_MACRO_REUSE_2026-10-13.md": {
+      "bytes": 1948,
+      "sha256": "ee228ed7da3eeca375f15ea4091e33a30cde4f45c3a3f7a3014f94c5ca162bce"
+    },
+    "research/market_memory/e2e_20261012/NATIVE_ISSUER_WIRE_V3.md": {
+      "bytes": 11041,
+      "sha256": "d5d13250147470c36692bc1c913702eef9bd2e4c4c7f5a2f9e0d3a124cc9357e"
+    },
+    "scripts/inspect_market_memory_e0_control.py": {
+      "bytes": 2853,
+      "sha256": "23a9e6bea3cb60ed0f25e1f708dcb436f9246bb9518d2aae92d84fd679a82d16"
+    },
+    "scripts/market_memory_e0_native_issuer.py": {
+      "bytes": 572,
+      "sha256": "c678ac3d06b52b5f55d0225fc639c5b6171f808d871584b758f4fe989837be78"
+    },
+    "tests/__init__.py": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "tests/market_memory_e0_fixtures.py": {
+      "bytes": 4310,
+      "sha256": "3da2a2d47faab44c22dab22e2fb9606f2c12366a7486f3dbb3e269d5a5752f8f"
+    },
+    "tests/market_memory_native_peer_fixtures.py": {
+      "bytes": 5739,
+      "sha256": "af640648a2df1d3c1832143aa431346621cfafcb111f67366d581a1a80e01851"
+    },
+    "tests/test_market_memory_e0_control_records.py": {
+      "bytes": 41482,
+      "sha256": "460816418b17e47eb076c225dd3ab3a60e4dc93267142140ecb34335cc1f7a33"
+    },
+    "tests/test_market_memory_e0_native_case.py": {
+      "bytes": 33861,
+      "sha256": "41d8d2e3e82b8ea6e1a54e16549ba56dc5ac6b8d25b12e9d32558b2100dae2e4"
+    },
+    "tests/test_market_memory_e0_native_issuer.py": {
+      "bytes": 13683,
+      "sha256": "943507dd72a8ed64f128e6eecd508313709015a9d2bf735b5114f45e7c901016"
+    },
+    "tests/test_market_memory_e0_native_peer.py": {
+      "bytes": 4598,
+      "sha256": "55991d6ab95f473964ce3145e0eb0b3f6110d0437fa219347f740a4297189bf7"
+    }
+  },
+  "source_review": "Distinct Astra5production+peerda28 SOURCE_PASS; root isolation/integration5PASS3.74s; actual18affected author cases plus priorunchangedproof reused",
+  "fixture_import_repair": "Root explicit genuine native peer fixtures imported in both testmodules; unchanged5production postimages",
+  "vector_manifest": "/Volumes/Mastermind/evidence/market-memory-20261012-01a1333c/integration/prospective-memory-view-20261105-6488/s6-native-case-composition-6488/S6_V3_ISOLATED_VECTORS_01/MANIFEST.json",
+  "vector_manifest_sha256": "899cca958901757b7d7d736c195f022abe769c6d656a025055c8dbf3123ac6f5",
+  "vector_provenance": "Actual unchanged production exchange over honest synthetic native primitives/control/corpus owners. Eightphases/32payloads checked. Fixtures substitute three genuine synthetic captures and declared sourcepins; no actual original109 corpus qualification.",
+  "acceptance_requested": "Current M2c2b frozen actual parser/owner consumes these actual V3 frames+typed original service audience, checks changed current access with immutable original binding, refuses corruption and allclaimsfalse. Source/component join only.",
+  "limits": [
+    "All actual installed Control/service/key/grant/source/twohost/runtime/science/retry claims false",
+    "Single synthetic prepare105.584wall44.687CPU under120 transportcap is not productionqualification; no newtimerloop/budgetincrease",
+    "Original wire1/2 and E0/P2/v2/87676/other sourceholds untouched"
+  ]
+}
