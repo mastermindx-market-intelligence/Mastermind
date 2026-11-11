@@ -1046,3 +1046,59 @@ Kimi is started only for a problem a GLM child has already failed at twice, or b
 principal for one attacker's pass on a surface that decides what program runs or who holds a
 credential when the DeepSeek answers disagree. The panel's attacker brief goes to DeepSeek.
 `LANE_RULES_V4.md` and `REVIEW_PANEL.md` carry the rule. Running lanes were told at 03:55 UTC.
+
+## 27. Amendment, 2026-11-11 04:10 UTC: one thread, workers in several projects (lane XP)
+
+**Request.** From the Sector Intelligence programme (thread `2f136a11-91f9-4bca-bf10-8a1d8b7f4e5d`,
+Macro Dashboard project), routed by the Chairman on 2026-11-11 about 03:50 UTC: "For the T3
+problem, communicate to the T3 Hermes Engineering program so they engineer some kind of fix
+for this into Mastermind OS, our own harness that is built with T3 integrated in, this way we
+have a solution for this. Note that Claude Code already has a solution for this so the owner
+for the mastermind OS project can evaluate and get that implemented into Mastermind OS
+harness."
+
+**The problem, as they tested it.** A thread can start workers only in its own project. Their
+programme spans two repositories (`macro` and `mastermind-terminal`), so every worker for the
+second repository is a separate top-level thread:
+
+1. `delegate_task` with `target.projectId` of another local project is refused ("A local task
+   runs in this thread's project…"), also when `target.environmentId` names the same machine.
+2. `t3_thread_update` cannot move a thread to another workspace.
+3. `t3_thread_launch` into the other project works, but the new thread has no parent link, its
+   finish does not wake the launcher, and it shows as a separate thread.
+4. A new worktree with `baseRef: "master"` was cut from the machine's local `master` (a commit
+   of 2026-10-23) and not from `origin/master`; files merged since were missing.
+   `workspaceStrategy.startFromOrigin` exists and was not tested.
+
+**Decision: adopted, as a cross-project child in our T3 build.** I read the pinned source
+(`apps/server/src/mcp/OrchestratorMcpService.ts`, `delegateTask`). The refusal is one check on
+`target.projectId`. Just above it, the same function already handles a child in a linked
+environment: "The task's child runs as an ordinary thread there; this thread keeps the task."
+So the server already knows how to keep a task on the parent while its child is an ordinary
+thread somewhere else, and how to bring the result back. The local other-project case is that
+mechanism without the network hop.
+
+Claude Code's multi-directory session (`--add-dir`, `permissions.additionalDirectories`) is
+not the answer by itself. It lets one session read and edit a second folder. It gives the
+worker no isolated checkout, our worktree-isolation hook refuses git commands aimed at another
+tree, and the second repository's instructions and hooks are not the session's own. It stays
+useful for a parent that only needs to read the second repository; the lane says whether our
+build should pass the other project's root as an extra read-only folder to the parent.
+
+**Done when** (theirs, kept): from a thread in project A one call starts a worker in project
+B; the worker has an isolated checkout at the remote default head; B's instructions and hooks
+apply to it; the parent is woken with the result; the worker's permissions are no broader
+than the parent's.
+
+**Lane XP.** A GLM driver, own clone of the pinned T3 source, own dev T3 server with two test
+projects. Output: a patch under `integrations/t3/upstream_patches/` with its entry in
+`MANIFEST.md`, tests in the T3 tree's own test files, and a live proof. It decides who may be
+a target (a registered project on this server, with the provider enabled there), so it is a
+critical surface and gets a panel review before it is installed on the team server.
+
+**What this does not do.** The Sector Intelligence thread runs in the Chairman's T3 Code app,
+which this programme does not patch. They get the fix when their programme runs on a
+Mastermind OS server, or if the patch is sent upstream, which is a public act and waits for
+the Chairman's word. Until then: launch the other-project thread with
+`workspaceStrategy.startFromOrigin`, and put in its brief that it ends by sending its result
+to the parent thread with `t3_thread_send`.
