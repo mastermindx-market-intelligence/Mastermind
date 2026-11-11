@@ -610,3 +610,92 @@ is an A4-class protocol change for the principal.
 - **atk-6** — `control_plane/paperclip_result_delivery.py` follows
   redirects; outside this lane's delta, not changed here.
 - **R8** — as recorded above (principal decision).
+
+## Round 4 (delta-3, 2026-11-11) — ruling 9: one more round for the late-seen HIGHs
+
+Base 42b0ffe1d. Six items repaired red-first, one commit each
+(`rf: repair 4 item <id>`); head c8b75419c. Evidence:
+`~/.mastermind/mmos_evidence/rf-20261111/round4/` (red logs under
+`red/`, per-file suite counts in `suite_after.txt`). Suite 274 -> 282
+across the six files, all green, run one file at a time.
+
+The serving-order fact underneath three of the items (N1, N2, N3): the
+children list serves **newest-activity-first** (captured
+`children_query_dev.json` — the done, oldest row is served LAST), while
+the return-edge walk and every oldest-first comment consumer assumed
+position was the timeline.
+
+- **N1 (HIGH)** — with two or more finished asks the walk processed the
+  served order, so turns went out newest-child-first and the asker's
+  delivered answer was the OLDER child's — both fresh (the last send
+  belonged to the wrong child) and reconciled (the last stale overwrite
+  belonged to the wrong child). The done family is now ordered
+  oldest-first by `createdAt` before the walk; the required fixtures
+  cover two and three finished children in the captured newest-first
+  served order (each answer oldest-first, exactly once) and a family row
+  with `createdAt` missing (refused). Tests:
+  `test_three_finished_children_served_newest_first_return_oldest_first`,
+  `test_reconciled_children_served_newest_first_deliver_the_newest_answer`,
+  `test_a_family_row_without_createdAt_refuses_the_return_order`.
+- **N2 (HIGH)** — the legacy unsuffixed return op (the single-child
+  era's turn) was adopted positionally (`idx == 0`), i.e. by the newest
+  child in served order; it is now adopted by the earliest `createdAt`,
+  which is the child that actually owns that turn.
+  Test: `test_the_legacy_return_op_is_adopted_by_the_oldest_child`.
+- **N3** — `ordered_oldest_first` skipped sorting whenever any row
+  lacked `createdAt`, silently handing every oldest-first consumer the
+  NEWEST-first served order. With >= 2 rows where any lacks the
+  timestamp the read is now refused (`CarrierError`); fewer than two
+  rows pass through. The test fake now stamps a monotonic `createdAt`
+  on rows built without one (the real board always serves one), cached
+  on the row so slices and appends keep their timeline. Test:
+  `test_rows_without_a_timestamp_are_refused_not_left_newest_first`.
+- **N5** — a failed full re-read of a truncated child row kept the
+  markerless list row: the family looked empty and the run ended 0
+  having delivered nothing, a silent strand every wake. The failed full
+  read now fails the walk (`CarrierError`); the reuse scans share the
+  law (a skipped marker row can no longer mint a duplicate child).
+  Test: `test_a_failed_full_read_of_a_truncated_child_fails_loudly`.
+- **N9** — the ask marker is derivable from public issue text, so
+  anyone who can create an issue can plant a marker-matching child
+  under an assigned task, and the old gate (a family it did not create,
+  no recorded relation, exit 0) let that bystander freeze the task every
+  wake. Family membership is now decided by author identity
+  (`createdByAgentId == me`) at every family-selection site: the gate,
+  the return-edge walk, and the ask reuse scan. The panel-2 M2
+  no-relation branch simplifies to the recovery it always was (every
+  child in it is one this carrier created); the dead foreign-freeze
+  branch is gone. Fixtures model the author: `served_child` rows are
+  carrier-issued by default, `create_issue` stamps the agent id, tests
+  that plant a foreign child say so. Red:
+  `test_a_foreign_marker_child_cannot_freeze_the_task`; the
+  forged-beside-own shape now asserts the own child's return runs and
+  the planted row never gates it
+  (`test_a_forged_child_beside_the_carriers_own_never_gates_the_return`).
+- **N10** — the blocked-issue review hold unlocked on BODY TEXT alone:
+  anyone who can comment pastes the carrier's visible waiting line
+  verbatim. The line now counts only from this carrier's own notes
+  (`carrier_note_bodies`, the H2 law: prefix + `authorType` agent +
+  `authorAgentId == me`). The two tests that modeled the carrier's own
+  line as a user-authored row are re-authored to the carrier, which is
+  what production writes. Test:
+  `test_a_person_pasting_the_waiting_line_does_not_lift_the_hold`.
+
+### Round 4 — written notes, deliberately not repaired
+
+Per the round's scope, recorded and left:
+
+- **N4** (messages clamp, `wake_carrier.py:754-770`/`1108-1139` at
+  42b0ffe1d) — depends on a served shape that was never captured; a
+  clamp change cannot be tested against real evidence this round.
+- **N6/N7** (setup/cutover file modes and the no-change refresh path,
+  `setup_teammate.py`/`cutover_installed.py`) — `carrier.json` holds no
+  credential, so a 0644 mode is not in ruling 1's first group; not
+  repaired this round.
+- **N8** (legacy-move rollback drift, `setup_teammate.py:365-402` at
+  42b0ffe1d) — recorded as a note; the drift window is a two-call
+  sequence around an irreversible mint, and the repair needs its own
+  red test against the real rollback path.
+- **N11** (unbounded re-parse, `wake_carrier.py:191-276`/`2633-2638` at
+  42b0ffe1d) — recorded as a note; bounding it is a behavior change to
+  the wake loop that no round-4 finding forced.
