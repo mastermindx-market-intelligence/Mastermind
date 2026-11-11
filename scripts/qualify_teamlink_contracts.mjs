@@ -1,5 +1,5 @@
 /** Actual TypeScript consumer qualification, using the shared Python vectors.
- * Run: node --experimental-transform-types scripts/qualify_teamlink_contracts.mjs
+ * Run: node scripts/qualify_teamlink_contracts.mjs
  * No installed transport, credentials, dispatch or consumption is exercised.
  */
 import assert from "node:assert/strict";
@@ -18,6 +18,12 @@ function changed(message, path, value) {
   for (const key of keys.slice(0, -1)) target = target[key];
   target[keys.at(-1)] = value;
   return result;
+}
+
+for (const detail of ["", "recipient"]) {
+  const error = new TeamLinkContractError("INVALID", detail);
+  check(() => assert.deepEqual([error.code, error.detail, error.message],
+    ["INVALID", detail, detail ? "INVALID: recipient" : "INVALID"]));
 }
 
 for (const item of cases.immutableChanges) {

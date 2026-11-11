@@ -10,8 +10,13 @@
  * field names; UI adaptation happens in views, not in this contract.
  */
 export class TeamLinkContractError extends Error {
-  constructor(public code: string, public detail: string = "") {
+  code: string;
+  detail: string;
+
+  constructor(code: string, detail = "") {
     super(detail ? `${code}: ${detail}` : code);
+    this.code = code;
+    this.detail = detail;
   }
 }
 function invalid(code: string, detail = ""): never { throw new TeamLinkContractError(code, detail); }
