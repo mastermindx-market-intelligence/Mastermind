@@ -1,0 +1,43 @@
+{
+  "_note": "Dev-only roster spec for lane TSR (prove short-name rename + recovery on a throwaway server). Same shape as team_roster.json; no credentials, no Paperclip agent ids, no ~/.hermes reads.",
+  "server": {
+    "root": "~/.mastermind/mmos_dev/tsr",
+    "home": "~/.mastermind/mmos_dev/tsr/home",
+    "t3_bin": "~/.mastermind/t3-team-server/bin/t3",
+    "port": 50819,
+    "provider_source_instance": "capacity_fabric"
+  },
+  "project": {
+    "title": "Team",
+    "workspace_root": "~/.mastermind/mmos_dev/tsr/team-project"
+  },
+  "model": "glm-5.3",
+  "state_file": "~/.mastermind/mmos_dev/tsr/run/team_roster_state.json",
+  "urls_file": "~/.mastermind/mmos_dev/tsr/run/team_urls.json",
+  "browser_profile": "~/.mastermind/mmos_dev/tsr/browser-profile",
+  "deny_write_roots": [
+    "/tmp",
+    "/private/tmp",
+    "/private/var/folders"
+  ],
+  "teammates": [
+    {
+      "name": "Assurance",
+      "slug": "assurance",
+      "role": "qa",
+      "role_line": "quality",
+      "accent_color": "#e0b64d",
+      "instance": "assurance",
+      "charter": "# Assurance — dev test teammate for lane TSR; answer in one short line.\n"
+    },
+    {
+      "name": "Design Lead",
+      "slug": "design-lead",
+      "role": "designer",
+      "role_line": "product",
+      "accent_color": "#3fb6a8",
+      "instance": "design-lead",
+      "charter": "# Design Lead — dev test teammate for lane TSR; answer in one short line.\n"
+    }
+  ]
+}
