@@ -212,7 +212,8 @@ def handle_coding_job(pc, issue, reply, block, opts):
     if status == 200 and state in ("ADMITTED", "REPLAY"):
         job_id = (result or {}).get("job_id")
         pc.add_comment(issue["id"], (
-            f"coding job {block['key']} {state} — job `{job_id}`\n\n"
+            f"[t2-carrier] coding job {block['key']} {state} — "
+            f"job `{job_id}`\n\n"
             "The Executive admitted this task's governed coding job; its "
             "verified result (with branch evidence) returns to this task "
             "when the attempt seals.\n\n"
@@ -776,12 +777,14 @@ def question_waiting(t3):
 
 def thread_url(template, thread_id):
     """The conversation URL for the waiting line, or None. Same law as
-    issue_url_template: carrier config only, a loopback http address only,
-    never anything from issue text. `{thread}` becomes the thread id with
-    `:` written as %3A."""
+    issue_url_template: carrier config only, a loopback http address only —
+    the port followed by a "/", so a userinfo trick
+    (`http://127.0.0.1:80@example.com/…`) cannot smuggle a foreign host
+    through — never anything from issue text. `{thread}` becomes the thread
+    id with `:` written as %3A."""
     if not template or not thread_id:
         return None
-    if not re.match(r"http://(127\.0\.0\.1|localhost):[0-9]{2,5}", template):
+    if not re.match(r"http://(127\.0\.0\.1|localhost):[0-9]{2,5}/", template):
         return None
     if template.count("{thread}") != 1:
         return None
@@ -789,11 +792,12 @@ def thread_url(template, thread_id):
 
 
 def waiting_note(opts, thread_id):
-    """The line that tells the reader exactly what to do (rule D; it replaced
-    a fixed line that said nothing actionable). <Name> is the roster entry
-    whose agent id is PAPERCLIP_AGENT_ID ("The teammate" without one), <N>
-    minutes is question_wait_sec // 60, and the link comes from
-    thread_url_template only when it is configured and loopback."""
+    """The line that tells the reader exactly what to do (rule D; reworded
+    2026-11-11 to say who waits, where to answer, for how long, and how the
+    work resumes after that). <Name> is the roster entry whose agent id is
+    PAPERCLIP_AGENT_ID ("The teammate" without one), <N> minutes is
+    question_wait_sec // 60, and the link comes from thread_url_template only
+    when it is configured and loopback."""
     name = "The teammate"
     my_id = os.environ.get("PAPERCLIP_AGENT_ID")
     for display, agent_id in (opts.get("roster") or {}).items():
@@ -801,15 +805,13 @@ def waiting_note(opts, thread_id):
             name = display
             break
     minutes = int(opts.get("question_wait_sec", 900) or 0) // 60
-    head = (f"[t2-carrier] {name} asked a question in its conversation and "
-            f"is waiting for your answer")
-    tail = (f". Answer it there. This task continues by itself if the answer "
-            f"arrives within {minutes} minutes. After that, add a comment "
-            f"here to wake it.")
     url = thread_url(opts.get("thread_url_template"), thread_id)
-    if url:
-        return f"{head}: {url}{tail}"
-    return f"{head} in its team conversation{tail}"
+    where = (f"Open its chat: {url} and reply there." if url
+             else "Open its chat in the Team list and reply there.")
+    return (f"[t2-carrier] {name}, an AI teammate, needs your answer to "
+            f"continue this task. {where} If you answer within {minutes} "
+            f"minutes the task continues by itself. Later than that, add "
+            f"any comment here and {name} picks the work up again.")
 
 
 def post_waiting_note_once(pc, issue, opts, thread_id):
@@ -1040,7 +1042,8 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
 
 def last_result_comment(pc, issue_id):
     """The teammate's answer on a child issue: the last comment that is not a
-    carrier release note. Falls back to a pointer when there is none."""
+    machine comment (carrier notes, coding-job results — R4b finding 5).
+    Falls back to a pointer when there is none."""
     try:
         rows = pc.comments(issue_id)
     except CarrierError:
@@ -1049,7 +1052,7 @@ def last_result_comment(pc, issue_id):
         rows = rows.get("comments") or rows.get("rows") or []
     for row in reversed(rows):
         body = (row.get("body") or "").strip()
-        if body and not body.startswith("[t2-carrier]"):
+        if body and not is_machine_comment(body):
             return body
     return "(no answer comment on the child issue)"
 
@@ -1177,6 +1180,20 @@ def comment_rows(pc, issue):
     return rows
 
 
+# The lane line with T4c (R4b findings 4/5): every comment the door or the
+# result transport writes starts with `[coding-job]`, every note this carrier
+# writes with `[t2-carrier]`. The installed Paperclip records loopback writes
+# as authorType "user", so the prefix — not authorType — marks machine words.
+MACHINE_COMMENT_PREFIXES = ("[coding-job]", "[t2-carrier]")
+
+
+def is_machine_comment(body):
+    """True when a comment body was written by a machine, not a person: after
+    leading whitespace it starts with a lane prefix. Applied whatever
+    authorType the row carries (R4b 4/5: machine writes come back as "user")."""
+    return (body or "").lstrip().startswith(MACHINE_COMMENT_PREFIXES)
+
+
 def board_feedback(pc, issue):
     """Unaddressed board feedback on an in_review issue: (reason, comment).
 
@@ -1218,6 +1235,8 @@ def board_feedback(pc, issue):
     last_agent = -1
     newest_user = None
     for idx, row in enumerate(comment_rows(pc, issue)):
+        if is_machine_comment(row.get("body")):
+            continue  # a machine comment is neither the answer nor the board
         kind = row.get("authorType", "agent")
         if kind == "agent":
             last_agent = idx
@@ -1234,10 +1253,13 @@ def board_feedback(pc, issue):
 def board_notes(pc, issue, limit=5, max_chars=2000):
     """What the board wrote on an issue that has no answer yet: the bodies of
     its user comments, oldest first, newest `limit` kept. They go into the
-    first task message so a note left while assigning is not lost."""
+    first task message so a note left while assigning is not lost. Machine
+    comments (is_machine_comment) are never board notes, whatever their
+    authorType: the installed Paperclip records loopback writes as "user"."""
     mine = [row for row in comment_rows(pc, issue)
             if row.get("authorType") == "user"
-            and (row.get("body") or "").strip()]
+            and (row.get("body") or "").strip()
+            and not is_machine_comment(row.get("body"))]
     return [row["body"].strip()[:max_chars] for row in mine[-limit:]]
 
 
@@ -1388,9 +1410,29 @@ def run_carrier(pc, t3_factory, opts):
         ask_children = [row for row in pc.children(issue["id"])
                         if ask_child_op(row.get("description") or "")]
         if issue.get("status") == "blocked" and not ask_children:
-            log(f"blocked issue {issue.get('identifier')} has no ask child; "
-                "leaving it for a person")
-            return 0
+            # A blocked task with no ask child was blocked while the
+            # teammate's turn may still have been in flight (a person or the
+            # board blocked it). When this task's marker is in the thread the
+            # normal path below finishes it — an ended run is delivered, a
+            # question wait stays with it, a slow run is waited on — and
+            # board feedback on it is handled there too. With no marker there
+            # is nothing this run can do for it.
+            content = ((issue.get("title") or "") + "\n"
+                       + (issue.get("description") or ""))
+            probe_op = op_id(issue["id"], content)
+            try:
+                probe_thread, probe_msgs = t3.messages()
+            except CarrierError as exc:
+                log(f"blocked issue {issue.get('identifier')} unreadable "
+                    f"thread ({exc}); leaving it for a person")
+                return 0
+            if scan_marker(probe_msgs, probe_op, probe_thread)[0] is None:
+                log(f"blocked issue {issue.get('identifier')} has no ask "
+                    "child and no marker in the thread; leaving it for a "
+                    "person")
+                return 0
+            log(f"blocked issue {issue.get('identifier')} has its marker in "
+                "the thread; continuing the normal path")
         if ask_children and all(row.get("status") == "done"
                                 for row in ask_children):
             # The return edge: every ask child reached done, so this build
@@ -1419,16 +1461,20 @@ def run_carrier(pc, t3_factory, opts):
         thread, msgs = t3.messages()
         state, existing = scan_marker(msgs, op, thread)
         if state is None:
+            asked_child = bool(ask_child_op(issue.get("description") or ""))
             message = build_message(
                 issue.get("identifier"), issue.get("title"),
                 issue.get("description"), op,
                 link=issue_link(opts.get("issue_url_template"),
                                 issue.get("identifier")),
-                # An asked teammate answers; it does not pass the ask on.
-                asking=None if ask_child_op(issue.get("description") or "")
+                # An asked teammate answers; it does not pass the ask on...
+                asking=None if asked_child
                 else ask_help(opts.get("roster"),
                               os.environ.get("PAPERCLIP_AGENT_ID")),
-                job_help=coding_job_help(opts.get("coding_job_door")),
+                # ...and it is not offered the coding-job block either (R4b
+                # finding 5): the asker owns the job decision.
+                job_help=None if asked_child
+                else coding_job_help(opts.get("coding_job_door")),
                 notes=board_notes(pc, issue))
             log(f"sending {op} to thread {thread_id}")
             reply = send_and_stay(pc, t3, issue, message, op, opts)
@@ -1526,6 +1572,40 @@ def load_config(path):
         return json.load(fh)
 
 
+def build_opts(cfg, environ, now):
+    """One place that turns the carrier config file and the process
+    environment into the run opts `run_carrier` takes.
+
+    The coding-job door socket comes from the CONFIG FILE only
+    (`coding_job_door`): absent means dormant — no block taught, no door
+    call — exactly as before this key existed. `now` is the process start,
+    recorded once by main(); the run budget is measured from it. Tests may
+    override the clock, sleep and start time through these opts."""
+    return {
+        "crash_after": environ.get("MMOS_T2_CARRIER_CRASH_AFTER"),
+        "pending_timeout_sec": cfg.get("pending_timeout_sec", 600),
+        "poll_interval_sec": cfg.get("poll_interval_sec", 5),
+        # The question wait (rule C): how long one carrier run stays with a
+        # waiting question, the carrier's own budget from process start (the
+        # process adapter allows 1500s; no wait may outlive it), and the poll
+        # interval.
+        "question_wait_sec": cfg.get("question_wait_sec", 900),
+        "run_budget_sec": cfg.get("run_budget_sec", 1320),
+        "question_poll_interval_sec": cfg.get("question_poll_interval_sec", 10),
+        # Same-company teammate roster: display name -> agent id. An ask block
+        # naming anyone else resolves to nothing (plain reply, no child issue).
+        "roster": cfg.get("teammates") or {},
+        # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
+        "issue_url_template": cfg.get("issue_url_template"),
+        # Optional, same law: "http://127.0.0.1:<port>/<PREFIX>/{thread}".
+        "thread_url_template": cfg.get("thread_url_template"),
+        # The coding-job door (T4c owns the door itself); config only.
+        "coding_job_door": cfg.get("coding_job_door"),
+        # The budget clock starts once, at process start.
+        "run_start": now,
+    }
+
+
 def main() -> int:
     required = ["PAPERCLIP_API_URL", "PAPERCLIP_API_KEY", "PAPERCLIP_RUN_ID",
                 "PAPERCLIP_AGENT_ID"]
@@ -1538,27 +1618,7 @@ def main() -> int:
         log("usage: wake_carrier.py <config.json>")
         return 2
     cfg = load_config(argv_config[0])
-    opts = {
-        "crash_after": os.environ.get("MMOS_T2_CARRIER_CRASH_AFTER"),
-        "pending_timeout_sec": cfg.get("pending_timeout_sec", 600),
-        "poll_interval_sec": cfg.get("poll_interval_sec", 5),
-        # The question wait (rule C): how long one carrier run stays with a
-        # waiting question, the carrier's own budget from process start (the
-        # process adapter allows 1500s; no wait may outlive it), and the poll
-        # interval. Tests may inject a clock, a sleep and a start time.
-        "question_wait_sec": cfg.get("question_wait_sec", 900),
-        "run_budget_sec": cfg.get("run_budget_sec", 1320),
-        "question_poll_interval_sec": cfg.get("question_poll_interval_sec", 10),
-        # Same-company teammate roster: display name -> agent id. An ask block
-        # naming anyone else resolves to nothing (plain reply, no child issue).
-        "roster": cfg.get("teammates") or {},
-        # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
-        "issue_url_template": cfg.get("issue_url_template"),
-        # Optional, same law: "http://127.0.0.1:<port>/<PREFIX>/{thread}".
-        "thread_url_template": cfg.get("thread_url_template"),
-        # The budget clock starts once, at process start.
-        "run_start": time.time(),
-    }
+    opts = build_opts(cfg, os.environ, time.time())
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],
                          os.environ["PAPERCLIP_RUN_ID"])
